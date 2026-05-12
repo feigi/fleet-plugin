@@ -30,3 +30,18 @@ security_warnings_state_*.json
 plugins/
 ide/
 package.json
+
+# Transient plan files
+plans/
+
+# Skills (symlinks to local skill repos — not portable config)
+skills/
+
+# Local state flags
+.caveman-active
+.caveman-statusline-suffix
+.last-cleanup
+
+# Auto-generated backups
+backups/
+*.original.md
