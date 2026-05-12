@@ -177,6 +177,14 @@ if [ -n "$TOTAL_COST" ] && [ "$TOTAL_COST" != "0" ] && [ "$TOTAL_COST" != "null"
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. Caveman mode badge (from caveman plugin)
+# ---------------------------------------------------------------------------
+CAVEMAN_BADGE=""
+if [ -x "$HOME/.claude/hooks/caveman-statusline.sh" ]; then
+  CAVEMAN_BADGE=$(bash "$HOME/.claude/hooks/caveman-statusline.sh" 2>/dev/null || true)
+fi
+
+# ---------------------------------------------------------------------------
 # 6. GitHub repo link
 # ---------------------------------------------------------------------------
 SECTION6=""
@@ -197,6 +205,7 @@ fi
 LINE1_PARTS=()
 [ -n "$SECTION1" ] && LINE1_PARTS+=("$SECTION1")
 [ -n "$SECTION2" ] && LINE1_PARTS+=("$SECTION2")
+[ -n "$CAVEMAN_BADGE" ] && LINE1_PARTS+=("$CAVEMAN_BADGE")
 
 LINE2_PARTS=()
 [ -n "$SECTION3" ] && LINE2_PARTS+=("$SECTION3")
