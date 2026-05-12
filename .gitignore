@@ -1,0 +1,32 @@
+# Runtime / cache
+history.jsonl
+cache/
+image-cache/
+paste-cache/
+mcp-needs-auth-cache.json
+stats-cache.json
+session-env/
+shell-snapshots/
+sessions/
+debug/
+file-history/
+telemetry/
+
+# Project-specific state
+projects/
+tasks/
+teams/
+todos/
+scheduled-tasks/
+
+# Security warning state files
+security_warnings_state_*.json
+
+# Backups (auto-generated)
+*.bak
+*.bak.*
+
+# Auto-managed by Claude Code
+plugins/
+ide/
+package.json
