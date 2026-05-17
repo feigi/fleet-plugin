@@ -12,7 +12,6 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -112,6 +111,10 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh"
+  },
   "enabledPlugins": {
     "typescript-lsp@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
@@ -134,18 +137,11 @@
     "caveman@caveman": true
   },
   "extraKnownMarketplaces": {
-    "prompts.chat": {
-      "source": {
-        "source": "github",
-        "repo": "f/prompts.chat"
-      }
-    },
     "caveman": {
       "source": {
         "source": "github",
         "repo": "JuliusBrussee/caveman"
-      },
-      "autoUpdate": true
+      }
     }
   },
   "effortLevel": "xhigh",
@@ -159,9 +155,5 @@
     "agent-brain": {
       "url": "http://localhost:19898/mcp"
     }
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
   }
 }

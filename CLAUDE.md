@@ -96,36 +96,46 @@ Always **number** memories, include **author**, **date**, **title**. User may re
 
 ### Memory Flags
 
-At session start, response may include `flags` array — issues detected by consolidation engine. Handle as:
+Session start `flags` array = consolidation engine issues. Handle:
 
-**Trigger:** surface on first response of session even if user message is greeting/idle ping. Don't wait for explicit task. Auto-resolve happens silently; everything else gets recommended to user before any other work.
+**Trigger:** surface on first response of session even if user message is greeting/idle. Don't wait for explicit task.
 
-**Auto-resolve when certainty high:**
+**Primary path (≥2 actionable items): dispatch `memory-housekeeper` subagent (two-stage).**
 
-- `verify` flags: check claim against codebase (read files, grep code, check config). If confirm accuracy high confidence, silently call `memory_verify` and `memory_resolve_flag` with `accepted`. No need mention to user.
-- `duplicate` / `superseded` flags: redundancy obvious and unambiguous, silently archive and resolve.
+- Stage 1: pass flag IDs + pending relationship IDs from preview. Wait for housekeeper's rec table + agentId. Main session sees table only — not underlying reads or MCP responses.
+- Stage 2: after user confirms/overrides per item, SendMessage to same housekeeper `agentId` (the UUID returned by Stage 1, NOT the dispatch name — agent goes idle after Stage 1; name addressing fails with "not addressable", only the agentId resolves) with SINGLE `apply:` payload listing ALL user-confirmed actions (flags + relationships combined), one per line:
+  - `relationship_accept <id>` / `relationship_reject <id>` for relationships
+  - `memory_resolve_flag <flag_id> <dismiss|archive>` for flags
+    Do NOT split into two SendMessages — combine into one payload. Housekeeper executes off-thread, returns count summary.
+- Stage-2 fallback (retry inline): see "Stage-2 fallback triggers" below.
 
-**Recommend course of action for rest:**
+**Fallback (single item or no subagent support): inline.**
 
-- Flags you cannot auto-resolve (low certainty, judgment calls, contradictions, overrides), present to user with specific recommendation (archive, merge, update, dismiss) and reasoning. Don't just list options — say what you'd do and why.
-- Call `memory_resolve_flag` after user confirms or overrides.
+- `verify` flags: check claim against codebase. High confidence → silently call `memory_verify`. Flag auto-resolves. No mention to user.
+- `duplicate` / `superseded` flags: obvious + unambiguous → silently archive + resolve.
+- Cannot auto-resolve (low certainty, judgment, contradictions, overrides) → present to user with specific recommendation (archive/merge/update/dismiss) + reasoning. Don't list options blindly; say what you'd do, why.
+- Call `memory_resolve_flag` after user confirms/overrides.
 
-**During normal work:**
-
-- Encounter flagged memory, mention flag and recommend resolution in context.
+**During normal work:** flagged memory encountered → mention flag, recommend resolution in context.
 
 ### Pending Relationships
 
-SessionStart preview surfaces a count of proposed relationships; full list lives in `.agent-brain/index.md` under `## Proposed relationships (pending your review)`. Each is a judgment call — no silent auto-resolution.
+SessionStart preview surfaces count; full list in `.agent-brain/index.md` under `## Proposed relationships (pending your review)`. Each = judgment call. **No silent auto-resolution by main session or `memory-housekeeper` subagent.**
 
-On first response of session (same trigger as Memory Flags, even on greeting/idle):
+First response of session (same trigger as Memory Flags, even greeting/idle):
 
-- Read both endpoints via `memory_get(id)` to compare content.
-- Recommend `accept` or `reject` per proposal with one-line reasoning (e.g. "accept: B explicitly supersedes A's claim about X" or "reject: different scopes, no real link").
-- Call `relationship_accept(id)` or `relationship_reject(id)` after user confirms.
+- **Primary (≥2 items):** Stage 1 — dispatch housekeeper; fetches both endpoints, compares, returns rec table + agentId. Stage 2 — present table; after confirm, include user-confirmed `relationship_accept <id>` / `relationship_reject <id>` lines in SAME combined `apply:` payload as any flag decisions (one SendMessage, not two). Housekeeper executes; returns count summary.
+- **Fallback (single item or no subagent support):** Read both endpoints via `memory_get(id)`. Recommend accept/reject + one-line reasoning (e.g. "accept: B supersedes A's claim about X" or "reject: different scopes, no link"). Call `relationship_accept(id)` / `relationship_reject(id)` after user confirms.
+
+### Stage-2 fallback triggers
+
+Retry inline — call `relationship_accept` / `relationship_reject` / `memory_resolve_flag` from main session per user-confirmed table — when ANY of:
+
+- SendMessage fails, no response, or Stage 1 returned no `agentId`.
+- Stage-2 reply starts with `error:` (e.g. `error: MCP transport unavailable`, `error: internal accounting mismatch`, `error: <reason> on line <n>`). Surface verbatim to user. Atomicity-on-parse guarantees nothing was written → retry inline applies to ALL items in the original payload, no skip-list needed.
+- Stage-2 reply reports `permission denied` / `tool not available` for `relationship_accept` / `relationship_reject` → installed agent file pre-dates self-apply. Retry inline ONLY items appearing as `failed <id>: permission denied`; SKIP items already counted in `Applied:` (double-apply guard — flag side may have succeeded). Tell user: run `npm run install:agent` + restart session for future Stage 2.
+- Stage-2 reply contains `incomplete:` line → retry inline ONLY items in `not_attempted`; SKIP items in `applied` (re-applying succeeded ids returns "already resolved", pollutes failure list).
+- Stage-2 reply = `Applied: accept 0, reject 0, flags resolved 0.` while ≥1 action sent → treat as Stage-2 failure, retry inline.
+
+Verb-to-tool mapping = 1:1. No "stage 2 failed" message required for SendMessage/agentId case; DO surface `error:` replies + double-apply-skip behavior so user sees what happened.
 <!-- agent-brain:end -->
-
-# Ruflo Integration (auto-generated by ruflo init)
-When working on multi-file tasks or complex features, use ToolSearch to find and invoke ruflo MCP tools.
-Key tools: memory_store, memory_search, hooks_route, swarm_init, agent_spawn.
-Check system-reminder tags for [INTELLIGENCE] pattern suggestions before starting work.
