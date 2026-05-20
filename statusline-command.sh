@@ -46,17 +46,10 @@ MODEL_DISPLAY=$(printf '%s' "$INPUT" | jq -r '.model.display_name // .model.id /
 CTX_SIZE=$(printf '%s' "$INPUT" | jq -r '.context_window.context_window_size // 0' 2>/dev/null)
 EFFORT=$(printf '%s' "$INPUT" | jq -r '.effort.level // empty' 2>/dev/null)
 
-# Shorten model display name: strip "Claude" prefix, shorten common names
+# Shorten model display name: strip "Claude" prefix and any trailing
+# parenthetical (e.g. " (1M context)") — CTX_LABEL is re-appended below.
 MODEL_SHORT=$(printf '%s' "$MODEL_DISPLAY" \
-  | sed 's/Claude //' \
-  | sed 's/claude-//' \
-  | sed 's/3\.5 Sonnet/Sonnet 3.5/' \
-  | sed 's/3\.7 Sonnet/Sonnet 3.7/' \
-  | sed 's/[0-9]\+\(\.[0-9]*\)\? Opus/Opus/' \
-  | sed 's/[0-9]\+\(\.[0-9]*\)\? Sonnet/Sonnet/' \
-  | sed 's/Opus [0-9]\+\(\.[0-9]*\)\?/Opus/' \
-  | sed 's/Sonnet [0-9]\+\(\.[0-9]*\)\?/Sonnet/' \
-  | sed 's/Haiku [0-9]\+\(\.[0-9]*\)\?/Haiku/')
+  | sed -E 's/^Claude //; s/^claude-//; s/ *\([^)]*\)$//')
 
 # Format context window size
 if [ "$CTX_SIZE" -ge 1000000 ] 2>/dev/null; then
@@ -68,7 +61,7 @@ else
 fi
 
 if [ -n "$CTX_LABEL" ]; then
-  MODEL_PART="${MODEL_SHORT}(${CTX_LABEL})"
+  MODEL_PART="${MODEL_SHORT} (${CTX_LABEL})"
 else
   MODEL_PART="$MODEL_SHORT"
 fi
