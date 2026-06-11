@@ -12,7 +12,7 @@ Work the steps in order. Stop and report if any step fails — do not skip ahead
 
 ## 1. Plan + apply recommended PR review changes
 
-- Pull the PR's review comments (`gh pr view`, `gh api` review threads). "Recommended actions" = the recommended changes from the PR review.
+- "Recommended actions" = the recommended PR review changes already in this session's context (not on GitHub). Use the review suggestions discussed earlier in the conversation.
 - Write a short plan listing each review change you intend to apply.
 - Apply them. Run local checks (format, lint, typecheck, tests); confirm pass before moving on.
 
