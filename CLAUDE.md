@@ -5,7 +5,7 @@ User use [agent-brain](https://github.com/feigi/agent-brain) (MCP server) as sol
 
 ### Session Start
 
-SessionStart hook writes memory index to `.agent-brain/index.md`. User topic overlaps entry title/tag → read file, fetch bodies via `memory_get(id)`. Row format: `<id> [<type>] [{tags}] — <title>` (`[{tags}]` omitted when memory has no tags; scope implied by section header). Each row ends ` → .agent-brain/cache/<id>.md` — a clickable path to the cached memory body. No manual `memory_session_start` needed.
+SessionStart hook writes memory index to `.agent-brain/index.md`. User topic overlaps entry title/tag → read file, fetch bodies via `memory_get(id)`. Row format: `<id> [<type>] [{tags}] — <title>` (`[{tags}]` omitted when memory has no tags; scope implied by section header). Each row ends ` → <abs-project-dir>/.agent-brain/cache/<id>.md` — an absolute clickable path to the cached memory body (absolute so the click resolves regardless of the open cwd). No manual `memory_session_start` needed.
 
 ### Working with Loaded Memories
 
@@ -15,7 +15,7 @@ Fuzzy/semantic matches index does not surface, use `memory_search`.
 
 ### Auto-Recall Hook
 
-UserPromptSubmit hook auto-runs `memory_search` on substantive prompts (length > 20, multi-token, not slash). Top 5 matches above 0.5 similarity injected as `additionalContext` — one line per memory: `<id> [<scope>] <type>{ {tags}} — <title>: <snippet> → .agent-brain/cache/<id>.md`. Treat injected matches as high-priority signal even if SessionStart index missed. Fetch full body via `memory_get(id)` before acting on match.
+UserPromptSubmit hook auto-runs `memory_search` on substantive prompts (length > 20, multi-token, not slash). Top 5 matches above 0.5 similarity injected as `additionalContext` — one line per memory: `<id> [<scope>] <type>{ {tags}} — <title>: <snippet> → <abs-project-dir>/.agent-brain/cache/<id>.md` (absolute path). Treat injected matches as high-priority signal even if SessionStart index missed. Fetch full body via `memory_get(id)` before acting on match.
 
 No `additionalContext` line for substantive prompt → hook unreachable (server down, port wrong) — fall back to manual `memory_search`.
 
@@ -92,7 +92,7 @@ Stop hook prompts review session for important memories before termination. Foll
 
 ### Presenting Memories
 
-Always **number** memories, include **author**, **date**, **title**. User may refer by number (e.g. "archive memory 2", "comment on 1"). When referencing a memory in a reply, render it as a markdown link whose **visible text is the bare id** and whose **target is the cache path**: `[<id>](.agent-brain/cache/<id>.md)`. The user sees only the id and clicks to open the full memory in their editor (the cache hooks materialize the file). Do NOT print the raw path as the visible text, and do NOT print a bare id without the link.
+Always **number** memories, include **author**, **date**, **title**. User may refer by number (e.g. "archive memory 2", "comment on 1"). When referencing a memory in a reply, render it as a markdown link — bare id as the visible text, an **absolute `file://` URL** as the target: `[<id>](file://<abs-workspace-path>/.agent-brain/cache/<id>.md)` (substitute the absolute workspace path, e.g. `file:///Users/you/project/.agent-brain/cache/<id>.md`). User sees the id, clicks to open the full memory in their editor (the cache hooks materialize the file). NEVER use a relative path or a bare scheme-less path as the link target — a relative OSC 8 hyperlink target makes macOS throw a `-50` paramErr popup on click. The `file://` scheme + absolute path is mandatory.
 
 ### Memory Flags
 
