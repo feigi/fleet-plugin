@@ -8,6 +8,28 @@
 
 set -uo pipefail
 
+# Resolve workspace_id = canonical git repo name (stable across worktrees).
+# Falls back to the directory basename outside a git repo. Lowercased.
+# Empty/nonexistent dir → "unknown-workspace" (never "/" or a plausible wrong
+# path; git -C "" would otherwise resolve against the hook process cwd).
+derive_workspace_id() {
+  local dir="$1" common repo
+  if [ -z "$dir" ] || [ ! -d "$dir" ]; then
+    echo "unknown-workspace"
+    return
+  fi
+  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)
+  if [ -n "$common" ]; then
+    case "$common" in /*) ;; *) common="$dir/$common" ;; esac   # absolutize relative .git
+    repo=$(cd "$(dirname "$common")" 2>/dev/null && pwd)
+    if [ -n "$repo" ]; then
+      basename "$repo" | tr '[:upper:]' '[:lower:]'
+      return
+    fi
+  fi
+  basename "$dir" | tr '[:upper:]' '[:lower:]'
+}
+
 AGENT_BRAIN_URL="${AGENT_BRAIN_URL:-http://localhost:19898}"
 
 FALLBACK_MSG="Agent Brain session_start did not succeed — memories were not loaded this session. Call memory_search explicitly when team knowledge or prior context is relevant."
@@ -35,7 +57,7 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // ""') \
 CLIENT_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // .sessionId // ""')
 
 USER_ID=$(whoami | tr '[:upper:]' '[:lower:]')
-WORKSPACE_ID=$(basename "$CWD")
+WORKSPACE_ID=$(derive_workspace_id "$CWD")
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   emit_fallback "missing or invalid cwd"
@@ -48,10 +70,16 @@ fi
 
 RESPONSE_BODY=$(mktemp -t agent-brain-resp.XXXXXX) || emit_fallback "could not create temp file for response"
 trap 'rm -f "$RESPONSE_BODY"' EXIT
+REQUEST_BODY=$(jq -cn \
+  --arg w "$WORKSPACE_ID" \
+  --arg u "$USER_ID" \
+  --arg s "$CLIENT_SESSION_ID" \
+  '{workspace_id: $w, user_id: $u, limit: 10}
+   + (if $s != "" then {session_id: $s} else {} end)')
 HTTP_CODE=$(curl -s -o "$RESPONSE_BODY" -w '%{http_code}' \
   -X POST "${AGENT_BRAIN_URL}/api/tools/memory_session_start" \
   -H 'Content-Type: application/json' \
-  -d "{\"workspace_id\":\"${WORKSPACE_ID}\",\"user_id\":\"${USER_ID}\",\"limit\":10}" \
+  -d "$REQUEST_BODY" \
   || echo "000")
 
 if [ "$HTTP_CODE" != "200" ]; then
@@ -80,6 +108,29 @@ if ! jq -e 'has("full")' "$RESPONSE_BODY" >/dev/null 2>&1; then
 fi
 FULL=$(jq -r '.full // ""' "$RESPONSE_BODY")
 
+# Absolutize the clickable cache paths the server renders. The server can't know
+# the client path, so it emits a relative `.agent-brain/cache/<id>.md`; that only
+# resolves when the open cwd == project root, and a terminal/editor that wraps it
+# as an OSC 8 hyperlink makes macOS throw a "-50" paramErr popup on a relative,
+# scheme-less target. Root it at $CWD here (the same base used for INDEX_DIR
+# below), where the client path is known. Only the backticked row suffix is
+# touched; the `^- <id> [` prefix the cache pre-warm regex parses below is
+# unaffected. The escape covers the chars special in sed *replacement* text
+# (delimiter |, back-ref &, escape \) — it does NOT defend against a newline or
+# control char in $CWD, which would make sed abort. So guard the result: only
+# adopt the rewrite when sed succeeds and yields non-empty output, else keep the
+# un-absolutized index (degraded relative links beat overwriting it with sed's
+# empty error output and silently blanking the index).
+CWD_SED=$(printf '%s' "$CWD" | sed -e 's/[&|\\]/\\&/g')
+if ABS_FULL=$(printf '%s' "$FULL" | sed -e "s|\`.agent-brain/cache/|\`${CWD_SED}/.agent-brain/cache/|g") \
+  && { [ -n "$ABS_FULL" ] || [ -z "$FULL" ]; }; then
+  # sed succeeded (exit 0 under pipefail) and did not blank a non-empty index
+  # (an empty result is only legitimate when $FULL was already empty: 0 memories).
+  FULL="$ABS_FULL"
+else
+  echo "agent-brain SessionStart: cache-path absolutization failed; keeping relative links" >&2
+fi
+
 # Write the full index to a workspace-local file. Atomic write via tmp + mv.
 INDEX_DIR="${CWD}/.agent-brain"
 INDEX_FILE="${INDEX_DIR}/index.md"
@@ -91,6 +142,27 @@ if ! printf '%s' "$FULL" > "${INDEX_FILE}.tmp" 2>/dev/null; then
 fi
 if ! mv -f "${INDEX_FILE}.tmp" "$INDEX_FILE" 2>/dev/null; then
   emit_fallback "could not finalize index file"
+fi
+
+# Pre-warm the clickable memory cache for indexed memories (best-effort).
+WRITER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cache-write.sh"
+if [ -f "$WRITER" ]; then
+  CACHE_IDS=$(grep -oE '^- [A-Za-z0-9_-]+ \[' "$INDEX_FILE" 2>/dev/null \
+    | sed -E 's/^- ([A-Za-z0-9_-]+) \[$/\1/' | head -n 100)
+  if [ -n "$CACHE_IDS" ]; then
+    IDS_JSON=$(printf '%s\n' "$CACHE_IDS" | jq -R . | jq -sc .)
+    GET_BODY=$(jq -nc --argjson ids "$IDS_JSON" --arg u "$USER_ID" '{ids: $ids, user_id: $u}')
+    GET_RESP=$(curl -s --max-time 5 -X POST "${AGENT_BRAIN_URL}/api/tools/memory_get" \
+      -H 'Content-Type: application/json' -d "$GET_BODY" 2>/dev/null) || GET_RESP=""
+    if [ -n "$GET_RESP" ]; then
+      ITEMS=$(printf '%s' "$GET_RESP" | jq -c \
+        '[ (.data // [])[] | {id, source_path, content, title, type, scope, version, updated_at} ]' \
+        2>/dev/null) || ITEMS=""
+      if [ -n "$ITEMS" ]; then
+        printf '%s' "$ITEMS" | bash "$WRITER" "$INDEX_DIR/cache" || true
+      fi
+    fi
+  fi
 fi
 
 # Self-install .gitignore entry — best effort, non-fatal on failure.

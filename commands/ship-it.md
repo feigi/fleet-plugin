@@ -10,11 +10,11 @@ Drive the current change from recommendations to a merged PR. Extra context: $AR
 
 Work the steps in order. Stop and report if any step fails — do not skip ahead.
 
-## 1. Plan + apply recommended actions
+## 1. Plan + apply recommended PR review changes
 
-- Gather the recommended actions: code-review findings, failing tests, lint/typecheck output, or outstanding TODOs in the current diff. If $ARGUMENTS names a PR, pull its review comments and failing checks too.
-- Write a short plan listing each action you intend to apply.
-- Apply them. After editing, run the project's local checks (format, lint, typecheck, tests) and confirm they pass before moving on.
+- Pull the PR's review comments (`gh pr view`, `gh api` review threads). "Recommended actions" = the recommended changes from the PR review.
+- Write a short plan listing each review change you intend to apply.
+- Apply them. Run local checks (format, lint, typecheck, tests); confirm pass before moving on.
 
 ## 2. Push
 

@@ -1,17 +1,17 @@
 <!-- agent-brain:start -->
 ## Memory System
 
-User use [agent-brain](https://github.com/feigi/agent-brain) (MCP server) as sole memory system all projects. Do NOT use Claude Code built-in file-based auto-memory (`~/.claude/projects/**/memory/`). All memory ops through agent-brain MCP tools (`memory_create`, `memory_search`, `memory_update`, etc.). Never write MEMORY.md or create files in memory/ directory.
+User use [agent-brain](https://github.com/feigi/agent-brain) (MCP server) as sole memory system, all projects. Do NOT use Claude Code built-in file auto-memory (`~/.claude/projects/**/memory/`). All memory ops via agent-brain MCP tools (`memory_create`, `memory_search`, `memory_update`, etc.). Never write MEMORY.md or create files in memory/ dir.
 
 ### Session Start
 
-SessionStart hook writes memory index to `.agent-brain/index.md`. User topic overlaps entry title/tag → read file, fetch bodies via `memory_get(id)`. Row format: `<id> [<type>] [{tags}] — <title>` (`[{tags}]` omitted when memory has no tags; scope implied by section header). Each row ends ` → <abs-project-dir>/.agent-brain/cache/<id>.md` — an absolute clickable path to the cached memory body (absolute so the click resolves regardless of the open cwd). No manual `memory_session_start` needed.
+SessionStart hook writes memory index to `.agent-brain/index.md`. User topic overlaps entry title/tag → read file, fetch bodies via `memory_get(id)`. Row format: `<id> [<type>] [{tags}] — <title>` (`[{tags}]` omitted when no tags; scope from section header). Each row ends ` → <abs-project-dir>/.agent-brain/cache/<id>.md` — absolute clickable path to cached body (resolves regardless of open cwd). No manual `memory_session_start` needed.
 
 ### Working with Loaded Memories
 
-Index = lazy lookup table, not memory bodies. User topic overlaps entry title/tags → fetch body via `memory_get(id)` BEFORE answering — even on weak overlap. Prefer false positives (fetch one irrelevant) over misses (skip load-bearing memory). Cache fetched bodies in conversation context rest of session.
+Index = lazy lookup table, not bodies. User topic overlaps entry title/tags → fetch body via `memory_get(id)` BEFORE answering — even weak overlap. Prefer false positives (fetch one irrelevant) over misses (skip load-bearing memory). Cache fetched bodies in context rest of session.
 
-Fuzzy/semantic matches index does not surface, use `memory_search`.
+Fuzzy/semantic matches index miss → use `memory_search`.
 
 ### Auto-Recall Hook
 
@@ -22,7 +22,7 @@ No `additionalContext` line for substantive prompt → hook unreachable (server 
 ### Identity Parameters
 
 - **`user_id`**: OS username, output of `whoami`. User identity across all memory tools.
-- **`workspace_id`**: Canonical git repo directory name (e.g., `agent-brain`), lowercased. Worktree-stable — a worktree session resolves the same value as the main checkout.
+- **`workspace_id`**: Canonical git repo dir name (e.g., `agent-brain`), lowercased. Worktree-stable — worktree session resolves same value as main checkout.
 
 ### When to Call `memory_search`
 
@@ -47,11 +47,11 @@ Goal: nothing valuable lost when conversation ends. Includes team knowledge, use
 Save memory (or suggest) when encounter:
 
 - Decision + rationale (architecture, tooling, approach)
-- User preference about how want you to work
+- User preference how want you work
 - Gotcha, workaround, non-obvious constraint
-- Important project context useful in future session
+- Important project context useful future session
 
-No need ask permission every memory — use judgment. Clearly worth keeping, save direct. Uncertain, suggest briefly, let user confirm.
+No need ask permission every memory — use judgment. Clearly worth keeping → save direct. Uncertain → suggest briefly, let user confirm.
 
 ### Writing Style
 
@@ -66,11 +66,11 @@ No hard length cap — complex memories get space needed.
 
 Every save pick exactly one of three values:
 
-- `manual` — user explicitly told you save this, in most recent message ("remember X", "save that", "note that Y"). Bypasses write budget + project-scope guard. Do **not** use `manual` for things you decided save yourself, even if feel important.
-- `agent-auto` — you decided autonomously save during live conversation. Default for anything initiated mid-session.
+- `manual` — user explicitly told you save this, most recent message ("remember X", "save that", "note that Y"). Bypasses write budget + project-scope guard. Do **not** use `manual` for things you decided to save yourself, even if feel important.
+- `agent-auto` — you decided autonomously during live conversation. Default for anything initiated mid-session.
 - `session-review` — **only** when Stop-hook end-of-session review triggering context. Never mid-session, never because user asked.
 
-Quick test: "did user tell me save this, right now, in most recent message?" Yes → `manual`. No, Stop hook running → `session-review`. Otherwise → `agent-auto`.
+Quick test: "did user tell me save this, right now, in most recent message?" Yes → `manual`. No, Stop hook running → `session-review`. Else → `agent-auto`.
 
 ### Choosing Scope
 
@@ -80,11 +80,11 @@ Default **narrowest applicable scope** to reduce blast radius:
 - `user` — private to user within current workspace
 - `project` — cross-workspace, visible everywhere
 
-Memory looks like global preference (e.g. uses "always", "never", "everywhere", or workflow rule not tied to specific repo), **ask user** whether apply globally (`project` scope) or current workspace only. Do not assume global.
+Memory looks like global preference (e.g. uses "always", "never", "everywhere", or workflow rule not tied to specific repo) → **ask user** whether apply globally (`project` scope) or current workspace only. Do not assume global.
 
 ### Verifying Memories
 
-Encounter memory during work + confirm still accurate, call `memory_verify`. Boosts older memories still relevant, informs future cleanup/consolidation, builds user confidence in knowledge base.
+Encounter memory during work + confirm still accurate → call `memory_verify`. Boosts older memories still relevant, informs future cleanup/consolidation, builds user confidence in knowledge base.
 
 ### Session End
 
@@ -92,25 +92,25 @@ Stop hook prompts review session for important memories before termination. Foll
 
 ### Presenting Memories
 
-Always **number** memories, include **author**, **date**, **title**. User may refer by number (e.g. "archive memory 2", "comment on 1"). When referencing a memory in a reply, render it as a markdown link — bare id as the visible text, an **absolute `file://` URL** as the target: `[<id>](file://<abs-workspace-path>/.agent-brain/cache/<id>.md)` (substitute the absolute workspace path, e.g. `file:///Users/you/project/.agent-brain/cache/<id>.md`). User sees the id, clicks to open the full memory in their editor (the cache hooks materialize the file). NEVER use a relative path or a bare scheme-less path as the link target — a relative OSC 8 hyperlink target makes macOS throw a `-50` paramErr popup on click. The `file://` scheme + absolute path is mandatory.
+Always **number** memories, include **author**, **date**, **title**. User may refer by number (e.g. "archive memory 2", "comment on 1"). When you cite a memory id in your own reply prose (not when reproducing an index/auto-recall row) → render as markdown link whose **visible text is bare id**, **target is absolute `file://` URL**: `[<id>](file://<abs-workspace-path>/.agent-brain/cache/<id>.md)` (e.g. `file:///Users/you/project/.agent-brain/cache/<id>.md`). User sees only id, clicks to open full memory in editor (cache hooks materialize file). Do NOT print raw path as visible text. Do NOT print bare id without link. NEVER relative or scheme-less target — relative OSC 8 hyperlink target makes macOS throw `-50` paramErr popup on click; `file://` scheme + absolute path mandatory. (Index/recall lines use _bare_ absolute path, no scheme: injected as plain text terminal auto-linkifies; authored markdown link becomes OSC 8 hyperlink → needs explicit `file://` scheme.)
 
 ### Memory Flags
 
 Session start `flags` array = consolidation engine issues.
 
-**Trigger:** first response of session (even a greeting/idle ping). Don't wait for an explicit task.
+**Trigger:** first response of session (even greeting/idle ping). Don't wait for explicit task.
 
-**Autonomous background resolution.** When actionable items exist (any count — one or many), spawn ONE `memory-housekeeper` subagent with `run_in_background: true`, passing flag IDs + types + attached memory IDs and proposed relationship IDs + endpoint memory IDs. Do NOT wait for it and do NOT ask the user to confirm — answer the user's actual request immediately. The housekeeper investigates + applies every item autonomously and returns a compact receipt as a task-notification. Relay a one-line ack when it lands; show the full decision list only if asked.
+**Autonomous background resolution.** Actionable items exist (any count — one or many) → spawn ONE `memory-housekeeper` subagent with `run_in_background: true`, passing flag IDs + types + attached memory IDs and proposed relationship IDs + endpoint memory IDs. Do NOT wait, Do NOT ask user confirm — answer user's actual request immediately. Housekeeper investigates + applies every item autonomously, returns compact receipt as task-notification. Relay one-line ack when lands; show full decision list only if asked.
 
-**Conservative bias (the housekeeper applies this):** `verify` only when the claim is confirmed from codebase/endpoints, else `dismiss`; `duplicate`/`superseded` → `archive` when clearly redundant, else `dismiss`. Accept a relationship only when its type matches the endpoints, else reject. Zero items pending after a run.
+**Conservative bias (housekeeper applies this):** `verify` only when claim confirmed from codebase/endpoints, else `dismiss`; `duplicate`/`superseded` → `archive` when clearly redundant, else `dismiss`. Accept relationship only when type matches endpoints, else reject. Zero items pending after run.
 
-**Undo (safety model):** every call is reversible — `flag_reopen` re-opens a resolved flag; `relationship_repropose` returns an accepted/rejected relationship to `proposed`. Catch a wrong call by reopening/reproposing.
+**Undo (safety model):** every call reversible — `flag_reopen` re-opens resolved flag; `relationship_repropose` returns accepted/rejected relationship to `proposed`. Catch wrong call by reopening/reproposing.
 
-**No-subagent fallback:** if the client cannot spawn subagents, perform the SAME investigate-and-apply pass inline, autonomously, with the same conservative rules. No confirmation step.
+**No-subagent fallback:** client cannot spawn subagents → perform SAME investigate-and-apply pass inline, autonomously, same conservative rules. No confirmation step.
 
 **During normal work:** flagged memory encountered → mention flag, recommend resolution in context.
 
 ### Pending Relationships
 
-SessionStart preview surfaces a count; the full list is in `.agent-brain/index.md` under `## Proposed relationships (pending your review)`. They are resolved by the SAME autonomous background `memory-housekeeper` dispatch as Memory Flags above — included in that one dispatch and applied without confirmation. Conservative bias: accept when the relationship type matches the endpoints, else reject. Reversible via `relationship_repropose`.
+SessionStart preview surfaces count; full list in `.agent-brain/index.md` under `## Proposed relationships (pending your review)`. Resolved by SAME autonomous background `memory-housekeeper` dispatch as Memory Flags above — included in that one dispatch, applied without confirmation. Conservative bias: accept when relationship type matches endpoints, else reject. Reversible via `relationship_repropose`.
 <!-- agent-brain:end -->

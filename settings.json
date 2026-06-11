@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/opt/homebrew/Cellar/node/25.9.0_2/bin/node\" \"/Users/chris/.claude/hooks/caveman-activate.js\"",
+            "command": "\"/opt/homebrew/bin/node\" \"/Users/chris/.claude/hooks/caveman-activate.js\"",
             "timeout": 5,
             "statusMessage": "Loading caveman mode..."
           }
@@ -75,6 +75,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "mcp__agent-brain__memory_get|mcp__agent-brain__memory_create",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/memory-cache.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
@@ -103,7 +113,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/opt/homebrew/Cellar/node/25.9.0_2/bin/node\" \"/Users/chris/.claude/hooks/caveman-mode-tracker.js\"",
+            "command": "\"/opt/homebrew/bin/node\" \"/Users/chris/.claude/hooks/caveman-mode-tracker.js\"",
             "timeout": 5,
             "statusMessage": "Tracking caveman mode..."
           }
