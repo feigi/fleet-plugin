@@ -61,14 +61,7 @@ Remove `in-progress` if the work is abandoned before a PR opens.
 
 ## 6. Size the ticket, then pick a path
 
-Judge the ticket as written, not as you hope it is. When torn between two rows, take the heavier one.
-
-| Signal | Path |
-|---|---|
-| Body states exactly what to change, one or two files, no design choice left open | `superpowers:test-driven-development` |
-| Any ambiguity in *what* to build, more than ~3 files, new API/schema/UX, or several viable approaches | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` |
-
-Bug reports: `superpowers:systematic-debugging` first, either way.
+Run the `sizing-a-ticket` skill and follow the path it returns. Both rows are workable in a solo session — a heavy row means more process, not a blocked ticket.
 
 ## 7. When the superpowers path reports done — open the PR
 
@@ -95,8 +88,7 @@ Closes #N"
 - "Label says ready-for-agent, so it's free" → run step 3.
 - "Only one candidate, I'll just start" → still ask.
 - "Blocker is nearly done" → still blocked.
-- "Ticket body is short, so it's simple" → short bodies hide the most design ambiguity. Size by unknowns, not word count.
-- "Brainstorming is overkill here" → that thought is step 6's heavier row.
+- "I can size this myself, it's obvious" → run `sizing-a-ticket`; its red flags are the ones you'd skip.
 - "Rebase conflicts are messy, I'll merge main in" → rebase; the PR must sit on `origin/main`.
 - "Tests passed before the rebase" → re-run after.
 - "The implementation skill said done, so I'm done" → no. Step 7 always runs; the PR is the deliverable.

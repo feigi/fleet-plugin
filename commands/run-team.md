@@ -41,13 +41,13 @@ Run at start, and again whenever the approved pool empties.
 3. In-flight check, `next-ticket` step 3, all three probes per candidate:
    `gh pr list --state all --search "<N>"`, `git ls-remote --heads origin`,
    `git worktree list` + `git branch -vv`. Any hit means taken.
-4. `gh issue view <N> --comments` per survivor. The `## Agent Brief` is
-   authoritative over the body. Record its `Out of scope` sequencing constraints.
-5. **Size each survivor and admit light-row only** (`next-ticket` step 6's table).
-   Light row — states exactly what to change, one or two files, no open design
-   choice — is admissible. Heavy row — ambiguity in *what* to build, more than ~3
-   files, new API/schema/UX, several viable approaches — is not, even with a
-   complete Agent Brief. Torn between rows → take the heavier one and exclude.
+4. Size each survivor with the `sizing-a-ticket` skill. It reads the issue with
+   `gh issue view <N> --comments`, so record the Agent Brief's `Out of scope`
+   sequencing constraints while you are there.
+5. **Admit light-row only.** Heavy row is not admissible here even with a complete
+   Agent Brief — the fleet runs unattended and the heavy path opens with
+   brainstorming, which needs the maintainer. Excluding is this command's policy;
+   the skill only reports the row.
 6. Present the admissible survivors, best first, as a multi-select. The maintainer
    ticks the approved pool. List excluded heavy-row tickets separately as "needs a
    solo session with you" — excluded, not dropped.
@@ -85,11 +85,12 @@ both of these verbatim:
 > is authoritative over the issue body. Honor its `Respec` block — it may
 > explicitly rule out hypotheses the body raises.
 
-Enter `next-ticket` at **step 6** — steps 1–5 are already done. The member sizes
-the ticket, implements, runs step 7 (rebase onto `origin/main`, re-run tests,
-push, `gh pr create` with `Closes #N` and exactly one release label), then reports
-its PR number and head SHA and exits. It never adds `ready-to-merge` and never
-merges.
+Tell the member to run `sizing-a-ticket` first and follow the path it returns —
+selection and claiming are already done, so it starts there. A heavy row means
+phase 0 mis-sized it: stop and report rather than implement it unattended. Then
+`next-ticket` **step 7** (rebase onto `origin/main`, re-run tests, push,
+`gh pr create` with `Closes #N` and exactly one release label), report its PR
+number and head SHA, exit. It never adds `ready-to-merge` and never merges.
 
 ## Phase 3 — event loop
 

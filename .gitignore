@@ -38,6 +38,7 @@ plans/
 # Trailing-slash ignore blocks re-inclusion, so exclude contents and negate.
 skills/*
 !skills/next-ticket/
+!skills/sizing-a-ticket/
 # Vendored skills stay ignored whether installed as symlink or copy — list them:
 #   jq -r '.skills|to_entries[]|"\(.key)\t\(.value.source)"' ~/.agents/.skill-lock.json
 
