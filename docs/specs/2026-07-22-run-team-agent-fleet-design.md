@@ -75,6 +75,44 @@ with it and silently stop the queue.
 availability inside a subagent is not guaranteed the way skill availability is.
 Handing the subagent an absolute file path to read is robust regardless.
 
+### Every fleet agent MUST be spawned with a `name`
+
+Non-negotiable, and silent if violated. Under
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (set in `~/.claude/settings.json:3`), a
+`name` makes the agent a member of the session's implicit team, and team
+membership is what carries the `Agent` tool. Probed 2026-07-22 on Claude Code
+2.1.217, all four cells:
+
+| shape | `Agent` tool | nested spawn |
+|---|---|---|
+| `general-purpose`, unnamed | not-resolved | — |
+| `claude`, unnamed | not-resolved | — |
+| `claude`, named | resolved | succeeded |
+| `general-purpose`, named | resolved | succeeded |
+
+`subagent_type` is irrelevant to delegation. Omit the name and the agent loses
+the ability to delegate with **no error** — the tool is simply absent, and the
+agent improvises something worse instead.
+
+This is what makes the reviewer's inner fan-out legal: a reviewer can run
+`/pr-review-toolkit:review-pr` with its full specialist set (`code-reviewer`,
+`silent-failure-hunter`, `pr-test-analyzer`, `type-design-analyzer`,
+`comment-analyzer`) without the controller owning the dispatch.
+
+Implementers inherit the same capability but the fleet does not rely on it —
+see the admission rules, which keep heavy-row work out of the fleet entirely.
+
+Two consequences for the controller:
+
+- **Concurrency accounting.** Nested grandchildren consume harness agent slots
+  the controller never dispatched. The ≤5/≤5/≤1 caps bound *fleet members*, not
+  total live agents; a fleet at cap with every member fanning out is many more
+  processes than eleven.
+- **Stray notifications.** A grandchild surfaces to the main thread as its own
+  task-notification, not only to its parent. The controller will see completions
+  for agents it did not spawn and must not treat an unrecognized task-id as a
+  fleet member reporting done.
+
 ## Command interface
 
 ```
@@ -91,17 +129,41 @@ always at most one.
 
 Runs at start, and again whenever the approved pool empties.
 
-1. Candidate scan — `next-ticket` step 1 verbatim, including the server-side
-   label exclusion and the `--jq` body reduction. Never fetch raw bodies for the
-   whole list; they are ~97% of the payload.
+1. Candidate scan — `next-ticket` step 1, including the server-side label
+   exclusion and the `--jq` body reduction. Never fetch raw bodies for the whole
+   list; they are ~97% of the payload. **`--label ready-for-agent` is mandatory
+   here, and there is no fallback.** `next-ticket` drops the label filter and
+   retries against `ready-for-human` when the first query returns nothing; the
+   fleet must NOT. Empty result means the fleet has no work, not that it should
+   widen the net.
 2. Dependency scan — `next-ticket` step 2, on the `d` array.
 3. In-flight check — `next-ticket` step 3, all three probes per candidate
    (`gh pr list --state all --search`, `git ls-remote --heads origin`,
    `git worktree list` + `git branch -vv`). Any hit means the ticket is taken.
 4. For each survivor, `gh issue view <N> --comments` and read the `## Agent
    Brief`. Record its `Out of scope` sequencing constraints.
-5. Present ~10 survivors, best first, as a multi-select. The maintainer ticks the
-   approved pool.
+5. **Row sizing — admit light-row only.** Judge each survivor against
+   `next-ticket` step 6's table. Light row (states exactly what to change, one or
+   two files, no open design choice → TDD path) is admissible. Heavy row (any
+   ambiguity in *what* to build, more than ~3 files, new API/schema/UX, or
+   several viable approaches) is NOT, even with a complete Agent Brief. When torn
+   between rows, take the heavier one and exclude.
+6. Present ~10 admissible survivors, best first, as a multi-select. The
+   maintainer ticks the approved pool. List excluded heavy-row tickets
+   separately, as "needs a solo session with you" — excluded, not dropped.
+
+### Why the label boundary is hard
+
+`ready-for-agent` means triage has already specified the ticket for an unattended
+agent. `ready-for-human` means the opposite: it needs a human to brainstorm the
+design first. The fleet has no channel to that human mid-flight, so it never
+touches `ready-for-human` — those tickets reach the fleet only after a human
+brainstorms them and triage re-labels.
+
+Heavy-row exclusion is a second, independent filter on top of that. A ticket can
+be correctly labeled `ready-for-agent` and still be too open-ended to hand a
+background implementer; the Agent Brief raises the floor but does not make
+`brainstorming` unnecessary. Both filters must pass.
 
 Two sequenced tickets never go into the same wave. That constraint lives in the
 Agent Brief's `Out of scope` section and is invisible to the `depends on #N`
@@ -159,7 +221,8 @@ The controller reacts to events and never blocks on any single one:
 The controller tracks two numbers:
 
 - **pool** — approved tickets not yet dispatched
-- **supply** — open `ready-for-agent` issues surviving the in-flight scan
+- **supply** — open `ready-for-agent` issues that survive BOTH the in-flight scan
+  and light-row sizing. A queue full of heavy-row tickets counts as zero supply
 
 Low-water mark is the implementer cap. On a freed slot:
 
