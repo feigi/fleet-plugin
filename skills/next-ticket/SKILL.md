@@ -5,13 +5,13 @@ description: Use when the user wants to pick up new work — "what's next", "nex
 
 # Next Ticket
 
-Suggest ready tickets, let the maintainer pick, mark in-progress, implement at the right depth for the ticket's complexity, and end with a PR rebased on `origin/main`.
+Suggest ready tickets, maintainer picks, mark in-progress, implement at the depth the ticket needs, end with PR rebased on `origin/main`.
 
-**Never grab a ticket unilaterally.** Labels and git state do not record every claim — some claims live only in the maintainer's head or another agent session.
+**Never grab a ticket unilaterally.** Labels and git state record only some claims; others live in the maintainer's head or another agent session.
 
 ## 1. Candidates
 
-Never fetch raw `body` for the whole list — it is ~97% of the payload. Exclude labels server-side, and reduce each body to its dependency references:
+Never fetch raw `body` for the whole list — ~97% of payload. Exclude labels server-side, reduce body to dependency refs:
 
 ```bash
 gh issue list --state open --limit 100 \
@@ -21,14 +21,13 @@ gh issue list --state open --limit 100 \
              d:[(.body//""|scan("(?i)(?:depends on|blocked by|requires|after)\\s+#\\d+"))]}]'
 ```
 
-Add `--label ready-for-agent` first; drop it and re-run only if that returns nothing (`ready-for-human` / untriaged fallback).
+Add `--label ready-for-agent` first; drop it and re-run only on empty result (`ready-for-human` / untriaged fallback).
 
 ## 2. Dependencies
 
-Use the `d` array from step 1. Blocker still open → drop the ticket (or surface the blocker instead).
-Note reverse edges: a ticket that unblocks others ranks higher.
+Use the `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket unblocking others ranks higher.
 
-Read a full body only for the 3–5 that survive: `gh issue view <N> --json body`.
+Full body only for the 3–5 survivors: `gh issue view <N> --json body`.
 
 ## 3. In-flight check (all three, per candidate)
 
@@ -38,15 +37,15 @@ git ls-remote --heads origin | grep -E "[/-]<N>[-/]"
 git worktree list; git branch -vv
 ```
 
-Any hit → ticket is taken. A "shipped" memory is not proof; an open PR means unmerged.
+Any hit → taken. "Shipped" memory is not proof; open PR means unmerged.
 
 ## 4. Suggest — then stop
 
-Present 3–5 survivors, best first. One line each:
+3–5 survivors, best first, one line each:
 
 `#N — <title> — <why now: unblocks #X, small, adjacent to current branch>`
 
-Then ask which one. **Wait for the answer.** If the maintainer says a ticket is taken, drop it and re-suggest.
+Ask which. **Wait for answer.** Maintainer says taken → drop, re-suggest.
 
 ## 5. Claim it
 
@@ -55,17 +54,17 @@ gh label create in-progress --color FBCA04 --force   # first time only
 gh issue edit <N> --add-label in-progress
 ```
 
-Match the repo's existing branch/worktree convention (read `git worktree list` / `git branch -r` to infer it — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`), branch off a fresh `origin/main`, install deps, run the test baseline.
+Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, install deps, run test baseline.
 
-Remove `in-progress` if the work is abandoned before a PR opens.
+Abandoned before a PR opens → remove `in-progress`.
 
 ## 6. Size the ticket, then pick a path
 
-Run the `sizing-a-ticket` skill and follow the path it returns. Both rows are workable in a solo session — a heavy row means more process, not a blocked ticket.
+Run `sizing-a-ticket`, follow the path it returns. Both rows work solo — heavy row means more process, not a blocked ticket.
 
 ## 7. When the superpowers path reports done — open the PR
 
-Come back here. The chosen skill hands off implementation; this step always follows it.
+Come back here. Implementation skill hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in
@@ -76,21 +75,21 @@ gh pr create --base main --body "…
 Closes #N"
 ```
 
-`Closes #N` so the merge closes the issue. If the repo gates on a release label, add exactly one of `patch`/`minor`/`major` now — `validate-release-label` fails without it.
+`Closes #N` closes the issue on merge. Repo gating on a release label → add exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
-**The session ends here.** Merging happens later, elsewhere: review (`/review-and-fix`) → maintainer adds `ready-to-merge` → `/run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off only), and don't sit watching CI for a merge that won't happen this session.
+**Session ends here.** Merge happens later, elsewhere: `/review-and-fix` → maintainer adds `ready-to-merge` → `/run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for a merge that won't happen this session.
 
-`in-progress` stays on the issue until that out-of-session merge closes it — harmless, step 1 only lists open issues. Report the PR URL and stop.
+`in-progress` stays until that out-of-session merge closes the issue — harmless, step 1 lists open issues only. Report PR URL, stop.
 
 ## Red flags
 
-- "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies only for the shortlist.
+- "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only.
 - "Label says ready-for-agent, so it's free" → run step 3.
 - "Only one candidate, I'll just start" → still ask.
 - "Blocker is nearly done" → still blocked.
 - "I can size this myself, it's obvious" → run `sizing-a-ticket`; its red flags are the ones you'd skip.
-- "Rebase conflicts are messy, I'll merge main in" → rebase; the PR must sit on `origin/main`.
+- "Rebase conflicts are messy, I'll merge main in" → rebase; PR sits on `origin/main`.
 - "Tests passed before the rebase" → re-run after.
-- "The implementation skill said done, so I'm done" → no. Step 7 always runs; the PR is the deliverable.
+- "The implementation skill said done, so I'm done" → step 7 always runs; PR is the deliverable.
 - "I'll wait for CI, then merge it myself" → merge is another session's job. Open PR = done.
-- "It's green and obviously fine, I'll add `ready-to-merge`" → that label is the maintainer's sign-off. Never yours.
+- "It's green and obviously fine, I'll add `ready-to-merge`" → maintainer's sign-off, never yours.
