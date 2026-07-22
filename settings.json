@@ -63,6 +63,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Agent|mcp__agent-brain__memory_update|mcp__agent-brain__memory_create",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/memory-recall-on-action.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -83,6 +93,26 @@
             "type": "command",
             "command": "~/.claude/hooks/memory-cache.sh",
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/memory-recall-on-failure.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__agent-brain__(memory_resolve_flag|memory_verify|memory_archive|relationship_accept|relationship_reject|flag_reopen|relationship_repropose)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/memory-refresh-index.sh",
+            "timeout": 8
           }
         ]
       }
@@ -157,6 +187,7 @@
   "effortLevel": "xhigh",
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "verbose": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
