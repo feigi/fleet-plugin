@@ -20,6 +20,14 @@ simply absent and it improvises something worse. `subagent_type` is irrelevant t
 this. Names follow the unit of work: `impl-<issue#>`, `review-pr-<pr#>`,
 `merge-bot-<wave#>`.
 
+**The rule inverts one level down: members must name their children `undefined`.**
+A named member passing a `name` to its own spawn fails with `teammates cannot
+spawn teammates`. So a reviewer's specialists are dispatched **unnamed** — they
+still run, they just are not team members. Say this in the reviewer prompt.
+Without it the reviewer hits the error, concludes the fan-out is unavailable, and
+silently downgrades to a solo review — the exact outcome "authorize the fan-out"
+exists to prevent.
+
 **Give every member a fresh context.** One agent, one unit of work, then gone.
 Never `subagent_type: "fork"` — a fork inherits your entire conversation. Never
 re-task a finished agent: `SendMessage` resumes it from its transcript and drags
@@ -48,9 +56,17 @@ Run at start, and again whenever the approved pool empties.
    Agent Brief — the fleet runs unattended and the heavy path opens with
    brainstorming, which needs the maintainer. Excluding is this command's policy;
    the skill only reports the row.
-6. Present the admissible survivors, best first, as a multi-select. The maintainer
+6. **Collision scan against PRs still in review.** Step 3 catches a ticket already
+   taken. It does not catch a ticket that *edits a file an open PR is editing*.
+   For each survivor, diff its likely file set against every open PR's
+   (`gh pr diff <M> --name-only`) and against the other survivors. Any overlap →
+   admit at most one, defer the rest with the reason. This is the constraint the
+   tracker cannot express: no `depends on #N`, no Agent Brief entry, invisible to
+   every automated probe, and it is what actually stalls a wave.
+7. Present the admissible survivors, best first, as a multi-select. The maintainer
    ticks the approved pool. List excluded heavy-row tickets separately as "needs a
-   solo session with you" — excluded, not dropped.
+   solo session with you" — excluded, not dropped. List collision-deferred ones
+   with what they collide with.
 
 Never put two sequenced tickets in the same wave. That constraint lives in the
 Agent Brief's `Out of scope`, is invisible to step 2's `depends on #N` scan, and
@@ -64,12 +80,24 @@ member — concurrent `worktree add` and label writes race.
 ```bash
 gh issue edit <N> --add-label in-progress
 git worktree add .worktrees/<N>-slug -b <type>/<N>-slug origin/main
-(cd .worktrees/<N>-slug && npm install)
+(cd .worktrees/<N>-slug && <install>)
 ```
 
 Infer the branch/worktree convention from `git worktree list` and `git branch -r`
 rather than assuming; in agent-brain it is `feat|fix|refactor/<N>-slug` and
 `.worktrees/<N>-slug`.
+
+**Infer `<install>` too — do not default to `npm install`.** A lockfile-mutating
+install in a throwaway worktree corrupts the lockfile for everyone: in agent-brain
+`npm install` on npm@11 prunes cross-platform `@esbuild` optional deps and breaks
+CI and the Docker build. Prefer the frozen-lockfile form (`npm ci`, `pnpm i
+--frozen-lockfile`, `yarn --immutable`). After the first worktree, confirm:
+
+```bash
+git -C .worktrees/<N>-slug status --porcelain package-lock.json   # must be empty
+```
+
+Non-empty → wrong install command. Fix it before creating the rest.
 
 ## Phase 2 — dispatch implementers
 
@@ -95,6 +123,15 @@ number and head SHA, exit. It never adds `ready-to-merge` and never merges.
 ## Phase 3 — event loop
 
 React to events; never block on one.
+
+**Do not ask permission to run the loop.** Dispatching a reviewer, spawning a
+merge bot for a labelled PR, refilling a slot, re-verifying a SHA, filing a
+follow-up — all proceed unconfirmed. Invoking the command was the opt-in.
+
+Two exceptions, nothing else: **Phase 0's multi-select**, and **a judgement the
+evidence cannot settle** (proceeding either way risks discarding work, or a
+finding changes what the ticket *is*). Asking beyond that costs a round-trip per
+event in a loop designed to have many.
 
 - **Implementer completes** → verify the reported SHA is reachable on the expected
   branch → enqueue the PR for review → refill the slot from the approved pool
@@ -132,6 +169,20 @@ take the watcher with it and the queue would stop silently. Arm one Monitor
 yourself, `persistent: true`, seeded before the loop so PRs already handled do not
 re-fire.
 
+**Every merge invalidates every other open PR, silently.** `rebase-check` fails
+fast when behind and gates the slow jobs, so the rest of the queue shows a *stale
+green* until something re-triggers, then flips to `rebase-check: FAILURE` with
+`integration`/`mutation` **skipped**. Green does not decay visibly, and
+`rebase-check` can itself be stale-**green**. Behind-count is the only honest
+signal.
+
+Controller consequences: at 6+ open PRs, batch a merge wave rather than merging
+singles as they land — each merge costs a rebase pass across the whole set. Any
+behind-count you hand a bot at dispatch is expired on arrival; say so.
+
+`run-merge-bot.md` carries the mechanics — intra-wave re-checks, SHA-binding, the
+post-merge ancestry proof. Do not restate them here.
+
 ## Queue depth
 
 Track two numbers:
@@ -139,6 +190,17 @@ Track two numbers:
 - **pool** — approved tickets not yet dispatched
 - **supply** — open `ready-for-agent` issues surviving both the in-flight scan and
   light-row sizing. A queue full of heavy-row tickets is zero supply.
+
+**Reviews are the bottleneck, not tickets.** An implementation runs 4-15 minutes;
+a review runs 20-40, because each fans out 4-5 specialists. So 5 implementers
+saturate 5 reviewers inside the first hour and every later PR queues. If the
+maintainer does not specify, default to **2 implementers and 5 reviewers** rather
+than 5/5, and say why. Track a third number:
+
+- **review backlog** — PRs verified and queued with no reviewer slot.
+
+Backlog ≥ 2 → stop refilling implementer slots even with pool remaining. More PRs
+into a full review pipeline buys nothing and costs rebases (see merge bot).
 
 Low-water mark is the implementer cap. On a freed slot:
 
@@ -169,6 +231,13 @@ starved implementer queue never stalls the review or merge side.
 - The merge bot only touches PRs whose implementer has reported done. Rebasing a
   worktree someone is still working in destroys uncommitted work.
 - `ready-to-merge` is added by a reviewer only — never an implementer, never you.
+- **Every member acts through the maintainer's `gh` credentials, so no write is
+  attributable.** Label events, comments, merges — the API shows the maintainer
+  for all of them, agent and human alike. Any invariant about *who* did something
+  is unenforceable and unauditable after the fact. When a label moves unexpectedly,
+  the trail cannot answer it: ask the members directly, and rule out repo
+  automation with `grep -rn '<label>' .github/workflows/`. Do not re-add a label
+  yourself to "fix" it.
 - Phase 1 is serial. Everything else may run concurrently.
 
 ## Guards
@@ -188,9 +257,37 @@ branch anyway.
 `git reset --hard`. A worktree's uncommitted changes may exist nowhere else.
 Non-empty `git status --porcelain` → stop and report.
 
-**Cross-check what members report about their own environment.** They are wrong
-often enough to matter, and a confident wrong report from a reviewer flips a
-verdict.
+**Cross-check what members report about their own environment.** Wrong often
+enough to matter, and a confident wrong report from a reviewer flips a verdict.
+
+**Distrust negative claims hardest.** "Nothing else references this", "the sweep
+is clean" — most likely false, least likely checked: a grep that found nothing
+looks like a grep never run. Make members state their search scope. Negative claim
+vs specific finding with paths → paths win.
+
+**Members share one filesystem and one docker stack.** Concurrent processes on one
+machine, and the failures arrive as *wrong findings*, not errors:
+
+- Wrong test config tears down a shared container mid-run for everyone else. Hand
+  members the isolated invocation (agent-brain:
+  `npx vitest run -c vitest.ci.config.ts <file>` — the default config's
+  `global-setup` removes the shared postgres container on exit).
+- **Mutators get an isolated `git archive HEAD` copy, never a shared worktree.**
+  "Revert every probe" leaves the end state clean and still leaves a window where
+  concurrent readers observe a lie. Serializing does not help — readers are
+  concurrent with the mutator.
+- **Nobody edits a worktree while others read it.** A reviewer applying fixes
+  mid-review is the same defect as probing.
+- **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
+  (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's working copy
+  including its `package.json`.
+
+Observed: three specialists read two *different* in-flight mutations, one seeing
+the PR's own bug as still present; on another PR three watched the file go clean →
+`M` under them. Tell every reader `git show HEAD:<path>` is the source of truth.
+
+Suspect a neighbour before a member's own diff — for unexplained failures, and
+equally for any **finding** that came from reading source.
 
 ## Failure handling
 
@@ -202,8 +299,31 @@ verdict.
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
 | Member silent or truncated | `SendMessage` to ping or resume — same unit of work |
+| Member **killed** (spend limit, API error, crash) | Spawn a **new** member, new name, prompt carries the inherited state |
 
 A red PR never silently becomes `ready-to-merge`.
+
+**A killed member cannot be resumed — this is the row most likely to be got
+wrong.** `SendMessage` works on a member that is idle or truncated; it does
+nothing for one that died, and a spend limit kills every member at once, so the
+temptation to re-task is at its strongest exactly when it cannot work. Recovery is
+a fresh agent under a fresh name (`impl-<N>-b`, `review-pr-<M>-b`) whose prompt
+states precisely what it inherits:
+
+- what is committed and pushed vs committed-only vs **uncommitted in the worktree**
+- that uncommitted work exists nowhere else and must not be discarded — no
+  `git clean`, `git checkout .`, `git reset --hard`, `git stash drop`
+- for a half-finished review: which specialists already reported, so it does not
+  re-run a 40-minute fan-out
+
+Before dispatching the replacements, audit every worktree and record the state:
+
+```bash
+for w in .worktrees/*/; do
+  echo "$w  $(git -C "$w" log --oneline origin/main..HEAD | wc -l) commits"
+  git -C "$w" status --porcelain
+done
+```
 
 ## Report
 
@@ -229,5 +349,17 @@ Plus a queue-depth line: pool, supply, and whether triage was suggested.
 - "The Agent Brief is thorough, this heavy ticket is fine" → both filters must
   pass. Brief quality does not promote a heavy row.
 - "The reviewer has the Agent tool, it'll fan out" → not unless you authorize it.
+- "Name the specialists too, for consistency" → members cannot name children.
+  Grandchildren are unnamed or the spawn errors.
 - "The member reported the SHA, so the commit is on the branch" → verify it.
 - "I'll let the merge bot arm its own monitor" → it dies, the queue stops.
+- "The member died, I'll SendMessage it the state" → dead agents do not read mail.
+  New agent, new name.
+- "Its CI is green, ship it" → check how far behind `origin/main` first. Green
+  decays invisibly; only `rebase-check` tells you.
+- "The specialist says nothing else references it" → a clean sweep is the claim
+  most often wrong. Ask what scope it searched.
+- "Five implementers means five times the throughput" → reviews are 3-5x longer.
+  It means a review backlog.
+- "`npm install` to set the worktree up" → infer the install command; the wrong
+  one mutates the lockfile for the whole repo.

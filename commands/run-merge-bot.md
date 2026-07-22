@@ -49,6 +49,10 @@ Shared files are the mechanical signal, not the only one. Also treat as **relate
 
 When the call is genuinely unclear, **hold**. Waiting costs a label; merging out of order costs a conflict resolution on someone else's branch, and the loser is the PR that was already reviewed.
 
+**A fired signal is not a verdict — disprove it.** Soft signals fire on deliberately-partitioned PRs. Observed: two PRs sharing two issue refs and all of `reset_hint=` / `resetHint` / `terminalFailure`, provably unrelated — one handed the other a specific emit site in its own body, their exact-string pins were punctuation-distinct so neither could match the other's site, and **both were test-only**. That last generalizes: **a test-only PR cannot invalidate what another PR asserts.**
+
+Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one is sloppy. Do the work, report which evidence settled it.
+
 ## Per-PR sequence
 
 For each labeled PR that clears the hold rule, lowest number first:
@@ -56,7 +60,29 @@ For each labeled PR that clears the hold rule, lowest number first:
 1. Rebase its branch onto `origin/main`; push with `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not in the main checkout. Run the **no-undo audit** below first.
 2. Watch the checks until they settle. Fix failures and repeat from step 1. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching the change. A stale `rebase-check` failure usually means step 1 has not landed yet; `integration` and `mutation` skip behind it and only run for real once it passes.
 3. Green → re-check right before merging (`gh pr view <pr> --json labels,reviewDecision`): the `ready-to-merge` label must still be there (it may have been pulled while CI ran) and `reviewDecision` must not be `CHANGES_REQUESTED`. Either fails → skip it, say so, move on.
-4. Labeled → `gh pr merge <pr> --merge` (no-ff). `gh pr merge` can exit silently; confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. Then re-fetch and **re-evaluate the whole queue from scratch** on the new `main` — labels and PR numbers may have changed while CI ran, and a merge can newly unblock or newly block others.
+
+   **Bind the green to the code by SHA.** Branch head, passing run's `head_sha`, PR's `headRefOid` — all one string:
+
+   ```bash
+   git rev-parse origin/<branch>
+   gh run list --branch <branch> --limit 1 --json headSha,status,conclusion
+   gh pr view <pr> --json headRefOid
+   ```
+
+   Check conclusions alone can be a stale pass on an older SHA.
+4. Labeled → `gh pr merge <pr> --merge` (no-ff). `gh pr merge` can exit silently; confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged.
+
+   **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
+
+   ```bash
+   git merge-base --is-ancestor <pre-rebase-head> origin/main   # expect FAILURE
+   git merge-base --is-ancestor <rebased-head>    origin/main   # expect SUCCESS
+   git rev-parse <merge-commit>^2                               # expect <rebased-head>
+   ```
+
+   Then re-fetch and **re-evaluate the queue from scratch** on the new `main` — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
+
+**Staleness fires *within* a wave.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Observed: 0 behind → 4 the moment the first landed. A behind-count handed to you at dispatch is already expired.
 
 Report merged / skipped-unlabeled / held-behind-#X / blocked after the pass.
 
