@@ -99,6 +99,20 @@ This is what makes the reviewer's inner fan-out legal: a reviewer can run
 `silent-failure-hunter`, `pr-test-analyzer`, `type-design-analyzer`,
 `comment-analyzer`) without the controller owning the dispatch.
 
+**Capability is not permission — the reviewer prompt must say so explicitly.**
+Fleet members inherit the session's standing policy lines, observed verbatim in a
+probed agent's own system prompt: *"Do not call the AgentTool unless the user
+requested it"*. A reviewer holding the `Agent` tool may still decline to fan out,
+correctly, because nothing in its prompt authorized it. So the reviewer prompt
+must state that dispatching `review-pr`'s specialists IS the requested work. A
+reviewer that silently reviews solo produces a thinner review with no error and
+no signal that anything was skipped.
+
+Two tools fleet members do NOT have, confirmed by probe: `Workflow` and
+`TaskOutput`. A member cannot run a workflow, and cannot read another agent's
+output — it only sees its own children's completion notifications. Any
+cross-agent result routing goes through the controller.
+
 Implementers inherit the same capability but the fleet does not rely on it —
 see the admission rules, which keep heavy-row work out of the fleet entirely.
 
