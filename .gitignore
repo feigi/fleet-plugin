@@ -34,8 +34,12 @@ package.json
 # Transient plan files
 plans/
 
-# Skills (symlinks to local skill repos — not portable config)
-skills/
+# Skills: symlinks to local skill repos aren't portable config; own skills are.
+# Trailing-slash ignore blocks re-inclusion, so exclude contents and negate.
+skills/*
+!skills/next-ticket/
+# Vendored skills stay ignored whether installed as symlink or copy — list them:
+#   jq -r '.skills|to_entries[]|"\(.key)\t\(.value.source)"' ~/.agents/.skill-lock.json
 
 # Local state flags
 .caveman-active
