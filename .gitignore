@@ -22,6 +22,16 @@ scheduled-tasks/
 # Security warning state files
 security_warnings_state_*.json
 
+# Runtime state, logs and secrets — never portable config
+security/
+# daemon/ holds control.key
+daemon/
+jobs/
+chrome/
+daemon.log
+gh-pr-status-cache.json
+.last-update-result.json
+
 # Backups (auto-generated)
 *.bak
 *.bak.*
