@@ -102,6 +102,32 @@ This is what makes the reviewer's inner fan-out legal: a reviewer can run
 Implementers inherit the same capability but the fleet does not rely on it —
 see the admission rules, which keep heavy-row work out of the fleet entirely.
 
+### Every implementer and reviewer gets a FRESH context
+
+One agent, one unit of work, then gone. Two things this forbids:
+
+- **Never `subagent_type: "fork"`.** A fork inherits the controller's full
+  conversation — every other ticket's shortlist, every prior review, the whole
+  design discussion. Fleet members get `general-purpose` or `claude`, never a
+  fork.
+- **Never reuse a finished agent for new work.** `SendMessage` to a completed
+  agent resumes it *from its transcript*, carrying the previous ticket's context
+  into the next one. Refilling a slot means spawning a NEW agent, not messaging
+  the one that just freed it.
+
+Naming follows the unit of work, which keeps freshness structural rather than a
+thing to remember: `impl-<issue#>`, `review-pr-<pr#>`, `merge-bot-<wave#>`. A
+name is never reused, so a stale agent can never be addressed by accident.
+(Names are latest-wins — reusing one silently rebinds it to the newer agent.)
+
+`SendMessage` to a fleet member remains correct for one purpose: pinging for a
+report it owes, or resuming a reply truncated mid-task. That continues the SAME
+unit of work and does not violate this rule.
+
+The cost is real and accepted: every implementer re-reads its Agent Brief and
+re-derives repo conventions from scratch. That is the price of no cross-ticket
+contamination.
+
 Two consequences for the controller:
 
 - **Concurrency accounting.** Nested grandchildren consume harness agent slots
@@ -208,7 +234,8 @@ The controller reacts to events and never blocks on any single one:
 
 - **Implementer completes** → verify the reported SHA is reachable on the
   expected branch → enqueue the PR for review → refill the slot from the
-  approved pool (phase 1, then phase 2 for that ticket).
+  approved pool (phase 1, then phase 2 for that ticket) by spawning a **new**
+  agent under a new name. Never re-task the agent that just freed the slot.
 - **Review slot free and a PR is queued** → dispatch a reviewer.
 - **Reviewer completes having added the label** → merge-bot wave.
 - **Monitor fires** on `ready-to-merge` appearing on any open PR → merge-bot
