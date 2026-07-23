@@ -20,6 +20,10 @@ post=$2
 merge=$3
 base=${BASE_REF:-origin/main}
 
+echo "\$ git fetch --quiet origin" >&2
+git fetch --quiet origin || die "fetch failed — refusing to prove a merge on stale refs"
+git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+
 for obj in "$pre" "$post" "$merge"; do
   git cat-file -e "${obj}^{commit}" 2>/dev/null || die "$obj is not a commit in this repository"
 done
