@@ -49,12 +49,16 @@ plans/
 skills/*
 !skills/next-ticket/
 !skills/sizing-a-ticket/
+# Kept after uninstalling the caveman plugin — now our own copy, not vendored.
+!skills/caveman-compress/
 # Vendored skills stay ignored whether installed as symlink or copy — list them:
 #   jq -r '.skills|to_entries[]|"\(.key)\t\(.value.source)"' ~/.agents/.skill-lock.json
 
+# Python bytecode (skills/*/scripts run as modules)
+__pycache__/
+*.pyc
+
 # Local state flags
-.caveman-active
-.caveman-statusline-suffix
 .last-cleanup
 
 # Auto-generated backups

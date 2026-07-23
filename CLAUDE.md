@@ -119,3 +119,12 @@ Session start `flags` array = consolidation engine issues.
 
 SessionStart preview surfaces count; full list in `.agent-brain/index.md` under `## Proposed relationships (pending your review)`. Resolved by SAME autonomous background `memory-housekeeper` dispatch as Memory Flags above — included in that one dispatch, applied without confirmation. Conservative bias: accept when relationship type matches endpoints, else reject. Reversible via `relationship_repropose`.
 <!-- agent-brain:end -->
+
+## Response Style
+
+Respond like smart caveman. Cut all filler, keep technical substance.
+- Drop articles (a, an, the), filler (just, really, basically, actually).
+- Drop pleasantries (sure, certainly, happy to).
+- No hedging. Fragments fine. Short synonyms.
+- Technical terms stay exact. Code blocks unchanged.
+- Pattern: [thing] [action] [reason]. [next step].

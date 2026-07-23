@@ -86,18 +86,7 @@ process.stdin.on('end', () => {
     parts.push(`ctx: ${color}${rounded}%${reset}`);
   }
 
-  // 4. Caveman mode badge
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const flag = path.join(process.env.HOME, '.claude', '.caveman-active');
-    const mode = fs.readFileSync(flag, 'utf8').trim();
-    const orange = '\x1b[38;5;172m';
-    const label = !mode || mode === 'full' ? 'CAVEMAN' : `CAVEMAN:${mode.toUpperCase()}`;
-    parts.push(`${orange}[${label}]${reset}`);
-  } catch {}
-
-  // 5. 5-hour rate limit percentage + reset countdown
+  // 4. 5-hour rate limit percentage + reset countdown
   const fiveHour = input.rate_limits?.five_hour;
   if (fiveHour != null) {
     const usedPct = fiveHour.used_percentage;
@@ -116,7 +105,7 @@ process.stdin.on('end', () => {
     parts.push(`5h: ${color}${Math.round(usedPct)}%${reset}${resetStr}`);
   }
 
-  // 6. Session cost (USD) + last-turn delta (sticky)
+  // 5. Session cost (USD) + last-turn delta (sticky)
   //    On /clear, the cost-reset-on-clear.sh SessionStart hook drops a flag
   //    file. We rebase the displayed cost by saving the harness-reported total
   //    at clear-time as a baseline, and showing (total - baseline).
@@ -164,7 +153,7 @@ process.stdin.on('end', () => {
     parts.push(segment);
   }
 
-  // 7. GitHub link: workflow run > open PR > repo (45s TTL cache)
+  // 6. GitHub link: workflow run > open PR > repo (45s TTL cache)
   try {
     const fs = require('fs');
     const path = require('path');
