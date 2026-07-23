@@ -73,23 +73,31 @@ function query(label) {
   }
 }
 
+// Hitting the limit exactly means the answer may be incomplete, and there is
+// no way to tell from the result itself. Refuse rather than hand back a
+// shortlist that silently omits work — "no silent caps" is the rule this
+// enforces. Applied verbatim to BOTH the labeled query and the fallback
+// query below — the fallback result was previously never re-checked, so
+// --require-label <nonexistent> --allow-fallback could ship a silently
+// truncated unfiltered list.
+function refuseIfCapped(rows, description) {
+  if (rows.length === limit) {
+    die(
+      `exactly ${limit} results${description} — the list is capped and may be truncated. ` +
+        `Re-run with a higher --limit; a shortlist that silently drops tickets is not an answer.`,
+    );
+  }
+}
+
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
-
-// Hitting the limit exactly means the answer may be incomplete, and there is no
-// way to tell from the result itself. Refuse rather than hand back a shortlist
-// that silently omits work — "no silent caps" is the rule this enforces.
-if (rows.length === limit) {
-  die(
-    `exactly ${limit} results — the list is capped and may be truncated. ` +
-      `Re-run with a higher --limit; a shortlist that silently drops tickets is not an answer.`,
-  );
-}
+refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
   rows = query(null);
   console.error(`    ${rows.length} candidate(s) unfiltered`);
+  refuseIfCapped(rows, " unfiltered (fallback)");
 }
 
 for (const r of rows) {
