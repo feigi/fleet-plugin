@@ -158,6 +158,12 @@ Monitor over open PRs' latest runs, keyed `<run-id>:<conclusion>` so each termin
 state fires once, and emit the behind-count with it: a `success` on a branch 8
 behind is not actionable, and that distinction is most of the traffic.
 
+Take run id, head and conclusion from **one** `gh run list --json` row. A watcher
+that reads them separately stitches an event from two moments and can stream
+`RUN COMPLETE: success` under a run id whose real job list is a failure. Tell
+members a monitor event is a wake-up, never a verdict — they re-query
+`gh run view <rid> --json jobs` at labelling time.
+
 ### Reviewers
 
 One named member per PR, never its implementer. Give the PR number and tell it to

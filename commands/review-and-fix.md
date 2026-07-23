@@ -21,6 +21,8 @@ git rev-parse origin/<branch>; gh pr view <n> --json headRefOid
 
 Require three: run `headSha` == branch head == `headRefOid`; run `status` **completed**; **every expected job present in that run**. A force-push cancels the run under it, but finished jobs keep their conclusions and keep being reported. Absent jobs read as `pending`, inherited ones as `pass`.
 
+**Query at labelling time; never label off a watcher's summary.** A monitor stitches its event from reads taken at different moments, so it can stream `RUN COMPLETE: success` under a run id whose authoritative job list is a failure — observed: streamed all-five-green for run `165158547`, while `gh run view 165158547 --json jobs` reported `rebase-check failure` with three jobs **skipped**; the green belonged to the previous run on an earlier head. Head-SHA binding does not catch this, because the *run id* is wrong rather than the head. Watchers are for waking you up, never for deciding.
+
 **Do NOT rebase to label, and do not require a zero behind-count.** Your green proves the diff is sound *against the base it was tested on* — that is what the label attests, and it does not expire. Requiring currency forces a full CI cycle every time any sibling lands (six wasted cycles in one run) and re-establishes nothing the merge bot will not. Rebase only when pushing a change, or when the bot bounces it back.
 
 Three claims, none substituting for another: **run-binding** (this green belongs to this SHA) · **your green** (correct against its base) · **the bot's post-rebase green** (still correct against current `main`). Only the third catches a sibling renaming a symbol you use — a rebase can apply cleanly and still break the build, which is why it is the bot's job and not yours.
