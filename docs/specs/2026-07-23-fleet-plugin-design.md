@@ -296,9 +296,33 @@ Stage 2 lands only after that run.
 is needed at all, `claude plugin init` puts the plugin under `~/.claude/skills/`
 where it auto-loads as `<name>@skills-dir`. Removed from this list.
 
-**Remaining, and who owns each:** the namespacing question is Plan 1's last
-acceptance step and needs a human at a session prompt. The other two are Plan 2's
-— neither can be settled without writing a script.
+**Resolved by Plan 1, empirically:** namespacing is **mandatory**. After
+`/reload-plugins`, only `/fleet:review-and-fix` resolves — no bare alias. The
+reloaded skill listing shows `fleet:review-and-fix`, `fleet:run-merge-bot`,
+`fleet:next-ticket`, `fleet:sizing-a-ticket`, every one namespaced. The earlier
+"leaning bare-works" reading of `manifest-reference.md` was wrong.
+
+**Remaining:** the two `${CLAUDE_PLUGIN_ROOT}` and expected-job-list items are
+Plan 2's — neither can be settled without writing a script.
+
+### Stale-reference work list for Plan 3
+
+Packaging invalidated references inside the moved documents. Swept
+systematically once namespacing was settled, because that answer widened the
+defect class from dead file paths to dead invocation names.
+
+| Site | Currently | Should be | Severity |
+|---|---|---|---|
+| `run-team` SKILL.md:183 | `~/.claude/commands/review-and-fix.md` | plugin-relative path | **broken** |
+| `run-team` SKILL.md:227 | `~/.claude/commands/run-merge-bot.md` | plugin-relative path | **broken** |
+| `next-ticket` SKILL.md:80 | "`/review-and-fix` → maintainer adds…" | `/fleet:review-and-fix` | **broken** — instructs the reader to run a command that does not exist |
+| `run-merge-bot.md:156` | "(`/run-team`, or any caller…)" | `/fleet:run-team` | minor — identifies a caller, does not invoke |
+| `run-team` SKILL.md:257, :531 | `/clean_gone` | `commit-commands:clean_gone` | minor — both are prohibitions ("do not invoke") |
+
+Verified as **not** needing change: `review-and-fix.md:6` already calls
+`/pr-review-toolkit:review-pr` in namespaced form; `run-team` SKILL.md:330-337
+references `/triage`, which stays bare because `triage` is a personal skill in
+`~/.claude/skills/`, not plugin-packaged.
 
 - Whether bare aliases (`/review-and-fix`) still resolve alongside namespaced
   ones (`/fleet:review-and-fix`), or whether the namespaced form is mandatory.
