@@ -257,9 +257,11 @@ shrinks as the run goes on.
 
 **Do not invoke `commit-commands:clean_gone`.** Two independent disqualifiers:
 
-- Its detection greps `git branch -v` for `\[gone\]`. `-v` prints no tracking
-  info at all, and `-vv` renders `[origin/<branch>: gone]`, so the pattern never
-  matches. It prints nothing and exits 0 — identical to a clean tree. Silent.
+- It deletes with `git branch -D` and no merged check at all. Its `[gone]`
+  detection itself works fine — with an upstream configured, `git branch -v`
+  does print `[gone]` and its grep matches (verified, git 2.50.1) — the
+  problem is what happens after a match: nothing stops it deleting a branch
+  whose commits exist nowhere else.
 - It removes worktrees with `git worktree remove --force`. Fatal here: members
   hold worktrees, and `--force` discards uncommitted work that exists nowhere
   else. Same class as `git reset --hard` to start a rebase.
@@ -529,8 +531,9 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "`npm install` to set up the worktree" → the wrong install mutates the lockfile
   for the whole repo.
 - "I'm on my own copy, so I'm isolated" → not from the docker stack.
-- "`commit-commands:clean_gone` printed nothing, the tree is clean" → its grep cannot match; a
-  silent pass is its failure mode, not its success case.
+- "`commit-commands:clean_gone` printed nothing, the tree is clean" → its
+  `[gone]` detection works fine; it just runs `-D`/`--force` with no merged
+  check, so "printed nothing" only means nothing was gone yet, not that it's safe.
 - "`--force` the worktree removal, the PR merged anyway" → merged says nothing
   about uncommitted files, and the reviewer may still be in there.
 - "Reap once at the end of the run" → stale worktrees make phase 0 read merged

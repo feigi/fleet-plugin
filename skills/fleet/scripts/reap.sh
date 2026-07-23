@@ -6,10 +6,12 @@
 # one observed run listed 28 gone branches and two calls later 27 had been
 # reaped by a concurrent session.
 #
-# Deliberately NOT `/clean_gone`: its detection greps `git branch -v` for
-# `[gone]`, but -v prints no tracking info at all and -vv renders
-# `[origin/<branch>: gone]`, so the pattern never matches. It prints nothing and
-# exits 0 — indistinguishable from a clean tree.
+# Deliberately NOT `/clean_gone`: its `[gone]` detection actually works —
+# with an upstream configured, `git branch -v` does print `[gone]` and its
+# grep matches (verified, git 2.50.1). It is disqualified because it then
+# runs `git worktree remove --force` and `git branch -D` with no merged
+# check at all: nothing there stops it deleting a branch whose commits exist
+# nowhere else.
 set -eu
 
 NAME=reap
