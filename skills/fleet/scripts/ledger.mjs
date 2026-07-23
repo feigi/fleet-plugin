@@ -31,6 +31,19 @@ const ROWS = "## Rows";
 const FILED = "## Filed";
 const RULED = "## Ruled";
 
+// One entry is always exactly one physical line on disk. Escape backslash
+// first, then newline, so a `\` in entry text can never be mistaken for the
+// start of an escape sequence introduced by this encoding. Without this, an
+// entry containing a real newline — or a line that happens to look like
+// `## Filed` or `- #999 ...` — gets misparsed on reload: real records
+// silently drop, or phantom ones get injected.
+function escapeText(s) {
+  return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+}
+function unescapeText(s) {
+  return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
+}
+
 function load() {
   if (!existsSync(file)) return { rows: [], filed: [], ruled: [] };
   let text;
@@ -40,22 +53,29 @@ function load() {
     die(`cannot read ${file}: ${e.message}`);
   }
   const section = (name) => {
-    const start = text.indexOf(name);
-    if (start === -1) return [];
-    const after = text.slice(start + name.length);
+    // Anchored to a real line start (or string start), not a bare substring
+    // search — otherwise an escaped entry that merely CONTAINS the text
+    // "## Filed" (never a physical line, just a run of characters inside a
+    // one-line entry) is found by indexOf() before the genuine header and
+    // the whole section is sliced from the wrong offset.
+    const headerRe = new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`);
+    const m = headerRe.exec(text);
+    if (!m) return [];
+    const start = m.index + m[1].length + name.length;
+    const after = text.slice(start);
     const end = after.search(/\n## /);
     return (end === -1 ? after : after.slice(0, end))
       .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
-      .map((l) => l.slice(2));
+      .map((l) => unescapeText(l.slice(2)));
   };
   return { rows: section(ROWS), filed: section(FILED), ruled: section(RULED) };
 }
 
 function save(d) {
   const out =
-    `# Fleet run ledger\n\n${ROWS}\n\n` + d.rows.map((r) => `- ${r}`).join("\n") +
-    `\n\n${FILED}\n\n` + d.filed.map((r) => `- ${r}`).join("\n") +
-    `\n\n${RULED}\n\n` + d.ruled.map((r) => `- ${r}`).join("\n") + "\n";
+    `# Fleet run ledger\n\n${ROWS}\n\n` + d.rows.map((r) => `- ${escapeText(r)}`).join("\n") +
+    `\n\n${FILED}\n\n` + d.filed.map((r) => `- ${escapeText(r)}`).join("\n") +
+    `\n\n${RULED}\n\n` + d.ruled.map((r) => `- ${escapeText(r)}`).join("\n") + "\n";
   try {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, out);
