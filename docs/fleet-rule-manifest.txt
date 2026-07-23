@@ -1,0 +1,33 @@
+name carries the `Agent` tool
+teammates cannot spawn teammates
+`subagent_type: "fork"` (inherits your whole conversation)
+Fresh context per member
+`--label ready-for-agent` mandatory
+**Light row only.**
+Never put two sequenced tickets in one wave
+never default to `npm install`
+Materialize the isolation envelope as a file
+React to artifacts, not agents
+Own the CI waits
+A conclusion is not stable
+newest run on a branch is frequently
+Authorize the fan-out explicitly
+Say the specialist count
+Correction tickets ship new wrong claims
+You own the watcher, not the bot
+Every merge invalidates every other open PR
+One rebase per PR, at merge time
+Do not invoke `commit-commands:clean_gone`
+git cherry origin/main
+Never reap a branch a live member is on
+Reviews are the bottleneck
+Distrust negative claims hardest
+Filesystem isolation is not stack isolation
+Per-member scratchpad subdirectory
+IDE/harness diagnostics attribute by bare filename
+Verify every reported SHA
+Never `--delete-branch`
+Never force a rebase to start
+Two members failing the same way is the instruction
+Write the ledger line before dispatching
+`ready-to-merge` is added by a reviewer only
