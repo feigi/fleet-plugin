@@ -61,15 +61,16 @@ For each labeled PR that clears the hold rule, lowest number first:
 2. Watch the checks until they settle. Fix failures and repeat from step 1. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching the change. A stale `rebase-check` failure usually means step 1 has not landed yet; `integration` and `mutation` skip behind it and only run for real once it passes.
 3. Green → re-check right before merging (`gh pr view <pr> --json labels,reviewDecision`): the `ready-to-merge` label must still be there (it may have been pulled while CI ran) and `reviewDecision` must not be `CHANGES_REQUESTED`. Either fails → skip it, say so, move on.
 
-   **Bind the green to the code by SHA.** Branch head, passing run's `head_sha`, PR's `headRefOid` — all one string:
+   **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates job results across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
 
    ```bash
-   git rev-parse origin/<branch>
-   gh run list --branch <branch> --limit 1 --json headSha,status,conclusion
-   gh pr view <pr> --json headRefOid
+   rid=$(gh run list --branch <branch> --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
+   gh run view "$rid" --json headSha,status,conclusion
+   gh run view "$rid" --json jobs --jq '.jobs[] | "\(.name) \(.status)/\(.conclusion // "-")"'
+   git rev-parse origin/<branch>; gh pr view <pr> --json headRefOid
    ```
 
-   Check conclusions alone can be a stale pass on an older SHA.
+   Require all four: run `headSha` == branch head == `headRefOid`, run `status` **completed**, and **every expected job present in that run**. A force-push cancels the run under it; jobs that already finished keep their conclusions and keep being reported.
 4. Labeled → `gh pr merge <pr> --merge` (no-ff). `gh pr merge` can exit silently; confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged.
 
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:

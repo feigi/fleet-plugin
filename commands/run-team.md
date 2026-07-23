@@ -157,6 +157,18 @@ review with no error and no signal anything was skipped. State in the prompt tha
 running `/pr-review-toolkit:review-pr` with its full specialist set IS the
 requested work.
 
+**Name the source when you relay a finding.** A specialist's report surfaces to
+*you*, not to the reviewer that dispatched it — grandchildren are unaddressable.
+Ruling on it as "your finding" makes the reviewer either verify a report it never
+sent or act on one it cannot check. Say which specialist said what.
+
+**Completion is not delivery.** Specialists finish without their reports reaching
+the reviewer that dispatched them — so a reviewer can be mid-apply on a ruling
+summarising a report it has never seen. Send the finding *text*, not a reference
+to it, and tell reviewers to ping each specialist rather than assume. Do not hold
+rulings pending confirmation; that stalls the queue for a guarantee the reviewer's
+own verify-before-apply already provides.
+
 ### Merge bot
 
 Spawn per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
@@ -281,6 +293,10 @@ machine, and the failures arrive as *wrong findings*, not errors:
 - **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
   (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's working copy
   including its `package.json`.
+- **The envelope must reach grandchildren.** Members do not pass it down on their
+  own, and a specialist running the default config tears the shared stack down
+  mid-run for everyone. Tell members to hand every specialist the isolated test
+  invocation and its own scratch dir, verbatim.
 
 Observed: three specialists read two *different* in-flight mutations, one seeing
 the PR's own bug as still present; on another PR three watched the file go clean →
@@ -299,9 +315,17 @@ equally for any **finding** that came from reading source.
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
 | Member silent or truncated | `SendMessage` to ping or resume — same unit of work |
+| Member idle with work outstanding | Check the PR yourself, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Spawn a **new** member, new name, prompt carries the inherited state |
 
 A red PR never silently becomes `ready-to-merge`.
+
+**Reviewers go idle waiting on CI instead of watching it, and will not resume
+alone.** The common shape: it rebased, pushed, and stopped with the run
+`in_progress`. Read the PR before asking — head SHA, behind-count, run status,
+worktree — because the answer is usually visible and a member that ignored one
+ping tends to ignore a second. Then ping with the specific next action, not "what
+is your status".
 
 **A killed member cannot be resumed — this is the row most likely to be got
 wrong.** `SendMessage` works on a member that is idle or truncated; it does
