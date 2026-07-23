@@ -205,11 +205,20 @@ otherwise you send "your red is staleness, do not rebase" once per reviewer per
 merge (four times in one run). `review-and-fix.md` states them; the prompt only has
 to say they apply.
 
-**Correction tickets need an explicit re-verify-the-correction step.** A ticket
-whose deliverable is *fixing a wrong claim* reliably ships a new wrong claim: four
-for four in one run — misattributed package, a list at inverted polarity, a commit
-body citing the wrong line, a banner refuting a currently-true fact. Nobody hunts
-it unprompted because the diff "obviously" improves accuracy.
+**Correction tickets ship new wrong claims, and they inherit them from the ticket.**
+Four for four in one run — misattributed package, a list at inverted polarity, a
+commit body citing the wrong line, a banner refuting a currently-true fact. The
+mechanism is not implementer sloppiness: the fix text **paraphrases the issue
+body's framing** instead of being checked clause-by-clause against the tree, so a
+wrong premise in the ticket becomes a wrong claim in the repo. Two of the four came
+verbatim from their issue's wording, and that issue is still wrong on two counts —
+so every ticket split from the same source inherits them.
+
+So put the check on the **implementer**, not only the reviewer: every factual claim
+you restate must have a settling command run against the tree first. The issue body
+is a lead, never a citation. Tell reviewers the same, and to read each corrected
+sentence literally asking whether every clause is true under that reading — nobody
+hunts this unprompted, because the diff "obviously" improves accuracy.
 
 ### Merge bot
 
