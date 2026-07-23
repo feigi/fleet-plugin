@@ -11,50 +11,52 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 `$ARGUMENTS` = `[implementers] [reviewers]`, both optional, default 5, cap 5.
 Merge bot is at most one, not configurable.
 
-Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`.
+Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
+war story behind each rule lives in `references/`; load one only when a member
+needs the *why*.
 
 ## Two rules that fail silently
 
 **Name every member.** The name makes it a team member, and membership is what
-carries the `Agent` tool. Omit it → member loses delegation with no error and
-improvises something worse. `subagent_type` is irrelevant. Names follow the unit
-of work: `impl-<issue#>`, `review-pr-<pr#>`, `merge-bot-<wave#>`.
+carries the `Agent` tool. Omit it → the member loses delegation with no error.
+Names follow the unit of work: `impl-<issue#>`, `review-pr-<pr#>`,
+`merge-bot-<wave#>`. See references/member-lifecycle.md.
 
 **Inverts one level down: members must name their children `undefined`.** A named
 member passing a `name` fails with `teammates cannot spawn teammates`, so
-specialists are dispatched **unnamed**. Say so in the reviewer prompt — otherwise
-it hits the error, concludes fan-out is unavailable, and silently downgrades to a
-solo review.
+specialists are dispatched **unnamed**. Say so in the reviewer prompt, or it
+silently downgrades to a solo review. See references/member-lifecycle.md.
 
 **Fresh context per member.** One agent, one unit of work, gone. Never
 `subagent_type: "fork"` (inherits your whole conversation). Never re-task a
-finished agent — `SendMessage` resumes its transcript and drags the old ticket
-in. Refill = **new** agent, **new** name. `SendMessage` is still right for
-pinging a member for a report it owes, or resuming a truncated reply.
+finished agent — `SendMessage` resumes its transcript and drags the old ticket in.
+Refill = **new** agent, **new** name. `SendMessage` is still right for pinging a
+member for a report it owes, or resuming a truncated reply.
+See references/member-lifecycle.md.
 
 ## Phase 0 — shortlist
 
 At start, and whenever the pool empties.
 
-1. Candidate scan, `next-ticket` step 1. **`--label ready-for-agent` mandatory, no
-   fallback.** `next-ticket` retries against `ready-for-human` when empty; you
-   must not. Empty means no work — `ready-for-human` needs a human to brainstorm
-   first and you have no channel to one mid-flight.
-2. Dependency scan, step 2, on the `d` array. Open blocker → drop.
-3. In-flight check, step 3, all three probes: `gh pr list --state all --search
-   "<N>"`, `git ls-remote --heads origin`, `git worktree list` + `git branch -vv`.
-   Any hit = taken.
+1. **Candidate scan** — `~/.claude/skills/fleet/scripts/candidates.mjs
+   --require-label ready-for-agent`. **`--label ready-for-agent` mandatory, no
+   fallback** — do NOT pass `--allow-fallback`. Empty means no work;
+   `ready-for-human` needs a human to brainstorm first and you have no channel to
+   one mid-flight.
+2. Dependency scan, `next-ticket` step 2, on the `d` array. Open blocker → drop.
+3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
+   candidate; any hit = taken. It runs all three probes (open/closed PRs, remote
+   heads, local worktrees + branches) so a partial one cannot read as free.
 4. Size each survivor with `sizing-a-ticket`. It reads `gh issue view <N>
    --comments`, so record the Agent Brief's `Out of scope` sequencing while there.
 5. **Light row only.** Heavy is inadmissible even with a complete brief — the
    fleet runs unattended and the heavy path opens with brainstorming, which needs
    the maintainer. Excluding is this command's policy; the skill only reports.
-6. **Collision scan against open PRs.** Step 3 catches a ticket already taken, not
-   one that *edits a file an open PR edits*. Diff each survivor's likely file set
-   against every open PR (`gh pr diff <M> --name-only`) and against the other
-   survivors. Overlap → admit one, defer the rest with the reason. The tracker
-   cannot express this: no `depends on #N`, no brief entry, invisible to every
-   probe — and it is what actually stalls a wave.
+6. **Collision scan against open PRs** — `~/.claude/skills/fleet/scripts/pr-overlap.mjs
+   --a <N> --b <M>` for each survivor against every open PR and against the other
+   survivors. Step 3 catches a ticket already taken, not one that *edits a file an
+   open PR edits*. Overlap → admit one, defer the rest with the reason. The tracker
+   cannot express this, and it is what actually stalls a wave.
 7. Present admissible survivors, best first, as a multi-select. Maintainer ticks
    the pool. List heavy-row exclusions as "needs a solo session with you", and
    collision-deferred ones with what they collide with. Excluded, not dropped.
@@ -67,44 +69,20 @@ scope`, is invisible to step 2, and bites hardest at five wide.
 Serial, main checkout, per ticket. Never parallel, never inside a member —
 concurrent `worktree add` and label writes race.
 
-```bash
-gh issue edit <N> --add-label in-progress
-git worktree add .worktrees/<N>-slug -b <type>/<N>-slug origin/main
-(cd .worktrees/<N>-slug && <install>)
-```
+`~/.claude/skills/fleet/scripts/claim-ticket.sh <N> <slug> <type> --apply` does
+the label, worktree, branch, frozen install, lockfile-clean assertion, and the
+isolation runner in one serial pass. Infer branch/worktree convention from
+`git worktree list` and `git branch -r` for the `<slug>`/`<type>` arguments.
 
-Infer branch/worktree convention from `git worktree list` and `git branch -r`.
+**Infer `<install>` — never default to `npm install`.** A lockfile-mutating
+install in a throwaway worktree corrupts it for everyone; the script derives the
+frozen form from the lockfile and refuses to guess. See references/isolation.md.
 
-**Infer `<install>` too — never default to `npm install`.** A lockfile-mutating
-install in a throwaway worktree corrupts it for everyone: npm@11 prunes
-cross-platform `@esbuild` optional deps and breaks CI and the Docker build. Use
-the frozen form (`npm ci`, `pnpm i --frozen-lockfile`, `yarn --immutable`), then
-confirm once:
-
-```bash
-git -C .worktrees/<N>-slug status --porcelain package-lock.json   # must be empty
-```
-
-Non-empty → wrong command. Fix before creating the rest.
-
-**Materialize the isolation envelope as a file, not a briefing.** Env vars in a
-prompt were missed five times in one run — including by a briefed member, and by
-a specialist whose parent was briefed but did not pass them down.
-
-```bash
-cat > .worktrees/<N>-slug/agent-test <<SH
-#!/bin/sh
-export TEST_COMPOSE_PROJECT=ab-<N> TEST_POSTGRES_PORT=\$((16000+<N>)) TEST_OLLAMA_PORT=\$((22000+<N>))
-exec <isolated-test-cmd> "\$@"
-SH
-chmod +x .worktrees/<N>-slug/agent-test
-```
-
-Brief members with `./agent-test <file>` and nothing else. Anyone who finds the
-worktree finds the runner — including grandchildren you never dispatched.
-`.git/info/exclude` it so it never reaches a diff. Ports derive from `<N>`, so
-collisions are impossible rather than discouraged — the difference between a
-safeguard and a rule.
+**Materialize the isolation envelope as a file, not a briefing.** The script
+writes `.worktrees/<N>-slug/agent-test` (ports derived from `<N>`, so collisions
+are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
+<file>` and nothing else — anyone who finds the worktree finds the runner,
+including grandchildren you never dispatched. See references/isolation.md.
 
 ## Phase 2 — dispatch implementers
 
@@ -129,21 +107,16 @@ number and head SHA, exit. Never labels `ready-to-merge`, never merges.
 
 React to events; never block on one.
 
-**React to artifacts, not agents.** Liveness says nothing: `idle` means "not
-currently executing", not "done"; a finished member's finding may never arrive,
-since a grandchild's report routes to *you* and a completed agent's final text is
-a return value lost if unconsumed. In one run every member that looked dead had
-its work in git or on the PR — pushed commits, a self-removed label, an applied
-ruling. Read `gh pr view`, `gh run view`, `git -C <worktree> status` **before**
-messaging. One command settles what a round-trip usually does not, and a member
-that ignored one ping tends to ignore a second. When you message, send the
-specific next action, never "what is your status".
+**React to artifacts, not agents.** `idle` means "not currently executing", not
+"done", and a finished member's finding may never arrive. Read `gh pr view`,
+`gh run view`, `git -C <worktree> status` **before** messaging; when you message,
+send the specific next action, never "what is your status".
+See references/member-lifecycle.md.
 
 **Do not ask permission to run the loop.** Dispatching a reviewer, spawning a
 merge bot, refilling a slot, re-verifying a SHA, filing a follow-up — all proceed
 unconfirmed. Invoking the command was the opt-in. Two exceptions: **Phase 0's
-multi-select**, and **a judgement the evidence cannot settle**. Asking beyond that
-costs a round-trip per event in a loop designed to have many.
+multi-select**, and **a judgement the evidence cannot settle**.
 
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
@@ -155,28 +128,21 @@ costs a round-trip per event in a loop designed to have many.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
-run — they rebase, push, stop. One went idle three times in two minutes doing
-this, and every re-ping told me nothing I could not read. Arm a second persistent
-Monitor over open PRs' latest runs, keyed `<run-id>:<conclusion>` so each terminal
-state fires once, and emit the behind-count with it: a `success` on a branch 8
-behind is not actionable, and that distinction is most of the traffic.
+run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
+latest runs, keyed `<run-id>:<conclusion>` so each terminal state fires once, and
+emit the behind-count with it: a `success` on a branch 8 behind is not actionable.
+See references/ci-and-staleness.md.
 
-Take run id, head and conclusion from **one** `gh run list --json` row. A watcher
-that reads them separately stitches an event from two moments and can stream
-`RUN COMPLETE: success` under a run id whose real job list is a failure. Tell
-members a monitor event is a wake-up, never a verdict — they re-query
-`gh run view <rid> --json jobs` at labelling time.
+Read a run's true state with `~/.claude/skills/fleet/scripts/ci-state.mjs --pr
+<N>` — it binds run id, head and conclusion from one row (branch derived from the
+PR) and reports whether the green is genuine. A monitor event is a wake-up, never
+a verdict; members re-query at labelling time. See references/ci-and-staleness.md.
 
 **A conclusion is not stable, even for a fixed run id on an unchanged head.** A
-rerun rewrites the run **in place** — `attempt` increments, dependents are re-marked
-`skipped` in zero seconds, and their prior conclusions are gone. Verified: three
-jobs went `success` → `skipped` with nothing pushed, after a refresh workflow re-ran
-the currency check. So never cache a conclusion; key watchers on
-`<run-id>:<conclusion>`, and check `attempt` before trusting one. `started_at ==
-completed_at` on a job means re-marked, not re-run.
-
-Also: the newest run on a branch is frequently *not* CI — a label or policy workflow
-often lands later, so `--limit 1` can hide the CI result entirely.
+rerun rewrites the run in place, so never cache a conclusion; key watchers on
+`<run-id>:<conclusion>` and check `attempt` before trusting one. Also: the newest
+run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
+entirely. See references/ci-and-staleness.md.
 
 ### Reviewers
 
@@ -185,17 +151,16 @@ read `~/.claude/skills/fleet/commands/review-and-fix.md` — the file path, not 
 invocation; command availability inside a member is not guaranteed the way skill
 availability is.
 
-**Authorize the fan-out explicitly.** Members inherit the standing *"Do not call
-the AgentTool unless the user requested it."* A reviewer will otherwise decline to
-dispatch specialists — correctly — and you get a thinner solo review with no error
-and no signal. State that the full specialist set IS the requested work.
+**Authorize the fan-out explicitly.** State that the full specialist set IS the
+requested work — otherwise the reviewer inherits the standing "do not call the
+AgentTool unless requested" and silently downgrades to a thinner solo review.
+See references/member-lifecycle.md.
 
 **Name the source when relaying a finding, and send its *text*.** Specialist
-reports surface to *you*; grandchildren are unaddressable. Ruling on one as "your
-finding" makes the reviewer verify a report it never sent or act on one it cannot
-check. Tell reviewers to ping each specialist rather than assume delivery. Do not
-hold rulings pending confirmation — that stalls the queue for a guarantee the
-reviewer's own verify-before-apply already provides.
+reports surface to *you*; grandchildren are unaddressable. Tell reviewers to ping
+each specialist rather than assume delivery, and do not hold rulings pending
+confirmation — the reviewer's own verify-before-apply already covers it.
+See references/member-lifecycle.md.
 
 **Say the specialist count in the prompt.** Absent a number members dispatch the
 full set every time, so an 8-line docs banner costs the same wall clock as a
@@ -204,23 +169,13 @@ code.
 
 **Put the standing CI facts in the reviewer prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per reviewer per
-merge (four times in one run). `review-and-fix.md` states them; the prompt only has
-to say they apply.
+merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 
-**Correction tickets ship new wrong claims, and they inherit them from the ticket.**
-Four for four in one run — misattributed package, a list at inverted polarity, a
-commit body citing the wrong line, a banner refuting a currently-true fact. The
-mechanism is not implementer sloppiness: the fix text **paraphrases the issue
-body's framing** instead of being checked clause-by-clause against the tree, so a
-wrong premise in the ticket becomes a wrong claim in the repo. Two of the four came
-verbatim from their issue's wording, and that issue is still wrong on two counts —
-so every ticket split from the same source inherits them.
-
-So put the check on the **implementer**, not only the reviewer: every factual claim
-you restate must have a settling command run against the tree first. The issue body
-is a lead, never a citation. Tell reviewers the same, and to read each corrected
-sentence literally asking whether every clause is true under that reading — nobody
-hunts this unprompted, because the diff "obviously" improves accuracy.
+**Correction tickets ship new wrong claims, and they inherit them from the
+ticket.** Put the check on the **implementer**, not only the reviewer: every
+factual claim it restates must have a settling command run against the tree first
+— the issue body is a lead, never a citation. Tell reviewers to read each
+corrected sentence literally, clause by clause. See references/correction-tickets.md.
 
 ### Merge bot
 
@@ -232,17 +187,15 @@ you dispatched it, which is what makes it skip its own watcher step.
 and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
 the loop so handled PRs do not re-fire.
 
-**Every merge invalidates every other open PR, silently.** `rebase-check` fails
-fast when behind and gates the slow jobs, so the rest show *stale green* until
-something re-triggers, then flip to `rebase-check: FAILURE` with
-`integration`/`mutation` **skipped**. `rebase-check` can itself be stale-**green**.
-Behind-count is the only honest signal.
+**Every merge invalidates every other open PR, silently.** The rest show *stale
+green* until something re-triggers, then flip to `rebase-check: FAILURE` with the
+slow jobs skipped. Behind-count is the only honest signal.
+See references/ci-and-staleness.md.
 
-**One rebase per PR, at merge time.** Reviewers label on their own green without
-requiring currency (see `review-and-fix.md`); the bot establishes currency once,
-when the PR is the merge candidate. Requiring it earlier costs a full CI cycle per
-sibling merge — six wasted cycles in one run. At 6+ open PRs batch a wave rather
-than merging singles. Any behind-count you hand a bot is expired on arrival; say so.
+**One rebase per PR, at merge time.** The bot establishes currency once, when the
+PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling
+merge. At 6+ open PRs batch a wave rather than merging singles. Any behind-count
+you hand a bot is expired on arrival; say so. See references/ci-and-staleness.md.
 
 `run-merge-bot.md` carries the mechanics — intra-wave re-checks, run-binding, the
 ancestry proof, post-rebase red triage. Do not restate them here.
@@ -251,66 +204,26 @@ ancestry proof, post-rebase red triage. Do not restate them here.
 
 A merge deletes the remote branch and leaves the local branch `[gone]` with its
 worktree — and its `node_modules` — still on disk. Reap after **each** wave, not
-once at the end. A stale worktree still answers `git worktree list`, so phase 0's
+once at the end: a stale worktree still answers `git worktree list`, so phase 0's
 in-flight probe reads an already-merged ticket as taken and the queue quietly
-shrinks as the run goes on.
+shrinks. See references/reaping.md.
 
-**Do not invoke `commit-commands:clean_gone`.** Two independent disqualifiers:
+`~/.claude/skills/fleet/scripts/reap.sh --apply` recomputes every precondition
+inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
+cherry origin/main` to authorize `-D`, worktree removal without `--force` — and
+reports reaped and kept-with-reason counts. Update the reaped tickets' ledger rows
+in the same step. See references/reaping.md.
 
-- It deletes with `git branch -D` and no merged check at all. Its `[gone]`
-  detection itself works fine — with an upstream configured, `git branch -v`
-  does print `[gone]` and its grep matches (verified, git 2.50.1) — the
-  problem is what happens after a match: nothing stops it deleting a branch
-  whose commits exist nowhere else.
-- It removes worktrees with `git worktree remove --force`. Fatal here: members
-  hold worktrees, and `--force` discards uncommitted work that exists nowhere
-  else. Same class as `git reset --hard` to start a rebase.
+**Do not invoke `commit-commands:clean_gone`.** It runs `git branch -D` and
+`git worktree remove --force` with no merged check at all — nothing there stops it
+deleting a branch, or discarding a member's uncommitted work, that exists nowhere
+else. The skill is the maintainer's to fix; do the reap yourself.
+See references/reaping.md.
 
-The skill is the maintainer's to fix. Do not patch it; do the reap yourself.
-
-Recompute every precondition **inside** the same command as the delete:
-
-```bash
-git fetch --prune origin
-git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
-awk '$2=="[gone]"{print $1}' | while read -r b; do
-  wt=$(git worktree list --porcelain |
-       awk -v b="refs/heads/$b" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
-  git cherry origin/main "$b" | grep -q '^+' && { echo "KEEP $b — unmerged commits"; continue; }
-  if [ -n "$wt" ]; then
-    [ -n "$(git -C "$wt" status --porcelain)" ] && { echo "KEEP $b — dirty $wt"; continue; }
-    git worktree remove "$wt" || { echo "KEEP $b — remove refused"; continue; }
-  fi
-  git branch -D "$b" && echo "REAPED $b"
-done
-git worktree prune
-```
-
-Each line earns its place:
-
-- **`for-each-ref`, not `git branch | grep`.** `%(upstream:track)` emits exactly
-  `[gone]` as its own field. Nothing to pattern-match, no `-v`/`-vv` trap.
-- **Recompute per branch, in this command.** A branch list from an earlier tool
-  call is already false: one observed run listed 28 gone branches, and two calls
-  later 27 had been reaped by a concurrent session. The benign direction is a
-  no-op; the dangerous one is a worktree that gained work *after* the check.
-- **`git cherry origin/main`, not `git diff main..`.** Against `origin/main` —
-  a local `main` you never fast-forwarded reads every merged branch as unmerged.
-  Any `+` line is a commit that exists nowhere else.
-- **`-D` is authorized by that cherry check, and only by it.** `git branch -d`
-  would refuse everything here: upstream is gone, so it falls back to comparing
-  against `HEAD`, which is a possibly-behind local `main`. Never `-D` a branch
-  whose cherry output you did not just read.
-- **`worktree remove` without `--force`.** It refuses on modifications *and*
-  untracked files, so it double-covers the dirty check above. A refusal is a
-  finding to report, never something to force past.
-- **Never reap a branch a live member is on.** Cross-check `.fleet/ledger.md`
-  before running: a row without a terminal state means someone may still be in
-  that worktree — a merged PR can still have a reviewer filing follow-ups. The
-  dirty check does not see a member that committed but has not pushed.
-
-Update the reaped tickets' ledger rows in the same step, and report reaped and
-kept counts. Kept-with-reason is the half worth reading.
+**Never reap a branch a live member is on.** Cross-check `.fleet/ledger.md` first:
+a row without a terminal state means someone may still be in that worktree, and
+the dirty check does not see a member that committed but has not pushed.
+See references/reaping.md.
 
 ## Queue depth
 
@@ -334,13 +247,8 @@ and costs rebases.
 | 0 | 0 | suggest `/triage`, hold implementer slots idle |
 
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
-not a blocking prompt:
-
-> ready-for-agent down to 2 workable. 14 in needs-triage, 3 in needs-info. Run
-> `/triage`?
-
-Counts come from cheap `gh issue list --search`, no bodies. A starved implementer
-queue never stalls the review or merge side.
+not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
+A starved implementer queue never stalls the review or merge side.
 
 ## Invariants
 
@@ -353,19 +261,18 @@ queue never stalls the review or merge side.
   worktree someone is working in destroys uncommitted work.
 - `ready-to-merge` is added by a reviewer only — never an implementer, never you.
 - **Every member acts through the maintainer's `gh` credentials, so no write is
-  attributable.** Labels, comments, merges all show the maintainer, agent and
-  human alike. Any invariant about *who* did something is unenforceable and
-  unauditable after the fact. When a label moves unexpectedly the trail cannot
-  answer it: ask members directly, rule out automation with
-  `grep -rn '<label>' .github/workflows/`, and do not re-add it to "fix" it.
+  attributable.** Any invariant about *who* did something is unenforceable after
+  the fact: when a label moves unexpectedly, ask members directly, rule out
+  automation with `grep -rn '<label>' .github/workflows/`, and do not re-add it.
 - Phase 1 is serial. Everything else may run concurrently.
 
 ## Guards
 
-**Verify every reported SHA.** A member can create a nested worktree and commit
-there, leaving the SHA on a stray branch while its report reads normally. Check
-`git log --oneline origin/<branch>` before enqueueing. Not reachable → flag, do
-not enqueue, do not return the ticket to the pool until the maintainer rules.
+**Verify every reported SHA.** `~/.claude/skills/fleet/scripts/verify-sha.sh
+<branch> <sha>` before enqueueing — a member can commit in a nested worktree,
+leaving the SHA on a stray branch while its report reads normally. Not reachable →
+flag, do not enqueue, do not return the ticket to the pool until the maintainer
+rules.
 
 **Never `--delete-branch`.** It errors on a `main` held by another worktree, or
 strands the feature worktree on `main`. `gh pr merge <n> --merge` alone; GitHub
@@ -387,25 +294,21 @@ vs specific finding with paths → paths win.
 *wrong findings*, not errors:
 
 - **Specialist tree isolation is `review-and-fix.md`'s job — do not restate it.**
-  It owns the object-store rule, the two-tree split (readers vs mutators), snapshot
-  provisioning, and which suites a snapshot cannot validly run. Reviewers read that
-  file; you do not cut snapshots. Your only duty is to *not* contradict it.
+  It owns the object-store rule, the two-tree split, snapshot provisioning, and
+  which suites a snapshot cannot validly run. Your only duty is to *not*
+  contradict it.
 - **Filesystem isolation is not stack isolation.** The snapshot and `./agent-test`
-  solve different problems, and conflating them is how the second gets skipped:
-  the compose project name comes from the environment, not the working directory,
-  so three agents on three snapshots still collide on one postgres. Symlinking
-  `node_modules` does not help. "I'm on my own copy" is exactly the intuition that
-  skips the runner — say both, every time.
-- **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
-  (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's `package.json`.
-- **IDE/harness diagnostics attribute by bare filename, with no path.** Probe
-  copies carry the same filenames as the real tree, so a specialist's throwaway
-  mutation surfaces as errors that read exactly like a live worktree's — and the
-  line numbers can plausibly line up with real in-flight edits. **Never relay a
-  diagnostic without reproducing it in that member's specific worktree**
-  (`npx tsc --noEmit` from there). Ran twice in one session: clean the first time
-  (a sibling's probe), genuinely broken the second. Telling an implementer to chase
-  a phantom in a file it is mid-rewrite on is the expensive failure.
+  solve different problems; the compose project name comes from the environment,
+  not the working directory, so three agents on three snapshots still collide on
+  one postgres. "I'm on my own copy" is exactly the intuition that skips the
+  runner — say both, every time. See references/isolation.md.
+- **Per-member scratchpad subdirectory.** One flat namespace, generic filenames —
+  one agent overwrote a sibling's `package.json`. See references/isolation.md.
+- **IDE/harness diagnostics attribute by bare filename, with no path.** **Never
+  relay a diagnostic without reproducing it in that member's specific worktree**
+  (`npx tsc --noEmit` from there): probe copies carry the real tree's filenames,
+  so a sibling's throwaway mutation reads exactly like a live worktree's error.
+  See references/isolation.md.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.
@@ -448,39 +351,26 @@ members hold the old text — re-brief only if it changes what they do *now*.
 
 A red PR never silently becomes `ready-to-merge`.
 
-**Reviewers go idle waiting on CI and will not resume alone** — rebased, pushed,
-stopped with the run `in_progress`. Three of five in one run. Recovery is a
-**finisher, not a re-review**, whenever the commits are already pushed.
+**A killed member cannot be resumed** — `SendMessage` does nothing for dead, and a
+spend limit kills every member at once. Recovery is a fresh agent, fresh name
+(`impl-<N>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
+reviewers that went idle on CI recover as a **finisher, not a re-review** once
+commits are pushed. See references/member-lifecycle.md.
 
-**A killed member cannot be resumed — the row most often got wrong.**
-`SendMessage` works on idle or truncated; it does nothing for dead, and a spend
-limit kills every member at once, so the temptation to re-task peaks exactly when
-it cannot work. Recovery is a fresh agent, fresh name (`impl-<N>-b`,
-`review-pr-<M>-b`), whose prompt states what it inherits:
-
-- committed-and-pushed vs committed-only vs **uncommitted in the worktree**
-- that uncommitted work exists nowhere else — no `git clean`, `git checkout .`,
-  `git reset --hard`, `git stash drop`
-- for a half-finished review: which specialists already reported, so it does not
-  re-run a 40-minute fan-out
-
-Audit every worktree before dispatching replacements:
-
-```bash
-for w in .worktrees/*/; do
-  echo "$w  $(git -C "$w" log --oneline origin/main..HEAD | wc -l) commits"
-  git -C "$w" status --porcelain
-done
-```
+Audit every worktree before dispatching replacements with
+`~/.claude/skills/fleet/scripts/worktree-audit.sh` — it reports each worktree's
+ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
+decides whether a replacement redoes or destroys work.
 
 ## Run ledger
 
-One git-ignored `.fleet/ledger.md`, updated at **every** state change. Your
-context is the least durable thing in the run: it compacts, and a controller that
-loses the pool, the dispatch map or the filed list redoes finished work. Two
-duplicate tickets shipped in one run from exactly that.
+One git-ignored `.fleet/ledger.md`, updated at **every** state change via
+`~/.claude/skills/fleet/scripts/ledger.mjs` subcommands (`row`, `filed`, `ruled`,
+`check`, `read`). Your context is the least durable thing in the run: it compacts,
+and a controller that loses the pool, the dispatch map or the filed list redoes
+finished work. Two duplicate tickets shipped in one run from exactly that.
 
-One line per ticket, rewritten in place:
+One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
 ```
 #332 impl-332 → PR#344 → MERGED 73b356de
@@ -489,11 +379,10 @@ One line per ticket, rewritten in place:
 
 Plus two append-only lists:
 
-- **filed** — issue number + subject, checked before every `gh issue create`, so
-  no finding is filed twice.
-- **ruled** — PR + decision + one-line reason, so a replacement controller does
-  not re-litigate a settled call. Reasons matter: a ruling outlives the condition
-  that justified it.
+- **filed** (`ledger.mjs filed <issue> <subject>`, checked with `ledger.mjs check
+  <subject>` before every `gh issue create`) — so no finding is filed twice.
+- **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
+  so a replacement controller does not re-litigate a settled call.
 
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.
