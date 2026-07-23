@@ -104,7 +104,10 @@ for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
 }
 
-console.log(JSON.stringify(rows, null, 2));
+// Compact: the pretty per-candidate view already went to stderr above; this
+// payload is parsed by a machine, and indenting up to `--limit` issues is pure
+// token cost in the controller's context.
+console.log(JSON.stringify(rows));
 
 // Exit 1 for a successful query with no survivors. The caller must be able to
 // tell "the queue is empty" from "the query broke" (2) without reading stderr.

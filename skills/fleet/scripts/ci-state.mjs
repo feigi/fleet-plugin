@@ -26,8 +26,20 @@ function arg(name) {
   return i === -1 ? null : process.argv[i + 1];
 }
 
+// --quiet suppresses the diagnostic stream (command echoes, per-job/per-field
+// lines) and drops the raw job list from the payload. The controller's CI
+// monitors and every reviewer's label-time check call this on a hot loop, and
+// none of that stream is acted on — `reasons` already names every failing job,
+// and the exit code already encodes green/not-green. die() and the one-line
+// verdict summary still print, so a caller loses nothing it decides on.
+const has = (name) => process.argv.includes(`--${name}`);
+const quiet = has("quiet");
+const vlog = (...a) => {
+  if (!quiet) console.error(...a);
+};
+
 function run(cmd, args) {
-  console.error(`$ ${cmd} ${args.join(" ")}`);
+  vlog(`$ ${cmd} ${args.join(" ")}`);
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
@@ -36,7 +48,7 @@ function run(cmd, args) {
 }
 
 const pr = arg("pr");
-if (!pr) die("usage: ci-state.mjs --pr <number> [--base main] [--workflow CI] [--workflow-file <path>]");
+if (!pr) die("usage: ci-state.mjs --pr <number> [--base main] [--workflow CI] [--workflow-file <path>] [--quiet]");
 const base = arg("base") || "main";
 const workflow = arg("workflow") || "CI";
 const workflowFile = arg("workflow-file") || ".github/workflows/ci.yml";
@@ -47,7 +59,7 @@ const prInfo = JSON.parse(
 );
 const branch = prInfo.headRefName;
 const prHead = prInfo.headRefOid;
-console.error(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
+vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
 
 // --- Expected jobs, derived from the workflow file ------------------------
 // Never hardcoded. The fleet's prose names four jobs; the workflow defines five.
@@ -85,7 +97,7 @@ function expectedJobs(file) {
 }
 
 const expected = expectedJobs(workflowFile);
-console.error(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
+vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
 
 // --- Find the run bound to this head --------------------------------------
 // `--limit 1` is wrong: the newest run on a branch is frequently a label or
@@ -132,8 +144,8 @@ if (matching.length === 0) {
     status: j.status,
     conclusion: j.conclusion ?? null,
   }));
-  for (const j of jobs) console.error(`    ${j.name}: ${j.status}/${j.conclusion ?? "-"}`);
-  console.error(`    attempt=${attempt} runHeadSha=${runHeadSha} status=${status} conclusion=${conclusion}`);
+  for (const j of jobs) vlog(`    ${j.name}: ${j.status}/${j.conclusion ?? "-"}`);
+  vlog(`    attempt=${attempt} runHeadSha=${runHeadSha} status=${status} conclusion=${conclusion}`);
 
   if (runHeadSha !== prHead) reasons.push(`run headSha ${runHeadSha} != PR head ${prHead}`);
   if (status !== "completed") reasons.push(`run status is ${status}, not completed`);
@@ -164,11 +176,11 @@ if (matching.length === 0) {
 // that returns null instead, so the behind-count can be unknown without costing
 // the caller the answer it actually asked for.
 function tryRun(cmd, args) {
-  console.error(`$ ${cmd} ${args.join(" ")}`);
+  vlog(`$ ${cmd} ${args.join(" ")}`);
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
-    console.error(`    ${NAME}: ${cmd} failed: ${String(e.stderr || e.message).trim()}`);
+    vlog(`    ${NAME}: ${cmd} failed: ${String(e.stderr || e.message).trim()}`);
     return null;
   }
 }
@@ -184,13 +196,13 @@ try {
     if (cmpJson !== null) {
       const cmp = JSON.parse(cmpJson);
       behind = cmp.behind_by;
-      console.error(`    behind_by=${behind} (status=${cmp.status})`);
+      vlog(`    behind_by=${behind} (status=${cmp.status})`);
     }
   }
 } catch (e) {
   // JSON.parse of a malformed payload lands here; the subprocess failures are
   // already handled by tryRun returning null.
-  console.error(`    ${NAME}: behind-count unusable: ${e.message}`);
+  vlog(`    ${NAME}: behind-count unusable: ${e.message}`);
 }
 
 // `behind` stays null when unknown, and null NEVER enters `reasons`. The
@@ -203,18 +215,18 @@ try {
 // null is deliberately not 0 — 0 would read as "current", which is the one
 // wrong answer that matters here.
 if (behind === null) {
-  console.error(`    ${NAME}: behind-count unknown (reported as null; verdict unaffected)`);
+  vlog(`    ${NAME}: behind-count unknown (reported as null; verdict unaffected)`);
 }
 
 const verdict = reasons.length === 0 ? "green" : "not-green";
 console.error(`\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}`);
 
-console.log(
-  JSON.stringify(
-    { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, status, conclusion, jobs, missing, behind, verdict, reasons },
-    null,
-    2,
-  ),
-);
+// Compact, single-line: the consumer is an agent/script parsing JSON, and the
+// pretty view already went to stderr. On the quiet hot path drop `jobs` and
+// `missing` too — `reasons` already states every failing/absent job, so they
+// are pure duplication in the two longest-lived contexts that poll this.
+const payload = { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
+if (!quiet) Object.assign(payload, { jobs, missing });
+console.log(JSON.stringify(payload));
 
 process.exit(verdict === "green" ? 0 : 1);

@@ -106,10 +106,44 @@ const branch = args && args.branch;
 const worktree = args && args.worktree;
 const testCmd = (args && args.testCmd) || "./agent-test";
 const scratch = args && args.scratch;
-const dimensions = (args && args.dimensions) || DEFAULT_DIMENSIONS;
+const explicitDimensions = args && args.dimensions; // caller override; else derived from the diff below
 const verifiers = (args && args.verifiers) || 2;
+const snapshotModel = (args && args.snapshotModel) || "haiku";
+const verifierEffort = (args && args.verifierEffort) || "low";
+
+// Verification budget follows apply-probability. A critical/important finding
+// gets applied, so a plausible-but-wrong one is expensive: 2 adversarial
+// refuters each. A `suggestion` is deferred by review-and-fix, never
+// auto-applied — paying the most expensive check on the lowest-stakes finding
+// is pure waste, so 0 by default. Override with args.verifiersBySeverity.
+const verifiersBySeverity = (args && args.verifiersBySeverity) || {
+  critical: verifiers,
+  important: verifiers,
+  suggestion: 0,
+};
+const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
+
+// Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
+// for annotation-only or single-file; the full set for production") but nothing
+// computed it, so the full set ran on every PR. Facts come from diff-stats.mjs
+// via the snapshot agent; unknown → full set, the safe direction. A caller
+// passing args.dimensions overrides entirely.
+function selectDimensions(all, snap) {
+  if (!snap || !snap.profile) return all;
+  if (snap.docsOnly) {
+    // Prose/correction PRs: the failure mode is wrong CLAIMS, not logic or
+    // types — four correction tickets each shipped a fresh wrong claim. Keep
+    // correctness (scope) + comments (every asserted fact vs the tree); drop
+    // tests/types/silent-failure, which have nothing to run or type-check.
+    return all.filter((d) => d.key === "correctness" || d.key === "comments");
+  }
+  let dims = all;
+  if (snap.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
+  if (snap.hasSrc === false) dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure");
+  return dims.length ? dims : all;
+}
 
 // --- Snapshot -------------------------------------------------------------
 // One immutable copy, cut once, read by every specialist. A snapshot cannot
@@ -119,23 +153,47 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // coordination between agents is required, which is why it beats any rule.
 phase("Snapshot");
 const snap = await agent(
-  `In ${worktree}, cut an immutable review snapshot and report ONLY its absolute path.
+  `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
 
-Then verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
+Verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
 diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
-Report the path and the HEAD sha. Do not modify ${worktree}.`,
-  { label: "snapshot", phase: "Snapshot", schema: {
+
+Then size the diff:
+
+    ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
+
+Report the snapshot's absolute path, the HEAD sha, and the fields
+profile/docsOnly/hasSrc/hasTests/files/loc EXACTLY as diff-stats.mjs prints them
+— copy them, do not infer them yourself. If diff-stats.mjs errors, omit those
+fields (path and head are the only required ones). Do not modify ${worktree}.`,
+  { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
       type: "object",
       additionalProperties: false,
       required: ["path", "head"],
-      properties: { path: { type: "string" }, head: { type: "string" } },
+      properties: {
+        path: { type: "string" },
+        head: { type: "string" },
+        profile: { type: "string" },
+        docsOnly: { type: "boolean" },
+        hasSrc: { type: "boolean" },
+        hasTests: { type: "boolean" },
+        files: { type: "integer" },
+        loc: { type: "integer" },
+      },
     } },
 );
 
 log(`snapshot ${snap.head} at ${snap.path}`);
+
+// Selection happens now, from the diff facts the snapshot agent carried back.
+const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, snap);
+log(
+  `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
+    (snap.profile ? ` — profile=${snap.profile}` : " — profile unknown, full set"),
+);
 
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
@@ -164,9 +222,14 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
   // missed one: it gets applied. Majority-refuted kills it.
   (review, d) =>
     parallel(
-      (review && review.findings ? review.findings : []).map((f) => () =>
-        parallel(
-          Array.from({ length: verifiers }, (_, i) => () =>
+      (review && review.findings ? review.findings : []).map((f) => () => {
+        const n = verifiersFor(f.severity);
+        // 0 verifiers → unverified, NOT dropped. A deferred suggestion still
+        // reaches the controller; it just skips an adversarial pass its
+        // apply-probability does not warrant.
+        if (n === 0) return Promise.resolve({ ...f, dimension: d.key, verdict: "unverified", votes: [] });
+        return parallel(
+          Array.from({ length: n }, (_, i) => () =>
             agent(
               `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
 
@@ -178,7 +241,7 @@ Verify against the snapshot ${snap.path} by RUNNING something — compile it, ru
 the test, apply the mutation. Do not reason your way to agreement.
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
 Scratch: ${scratch}/verify-${d.key}/`,
-              { label: `verify:${d.key}`, phase: "Verify", schema: VERDICT_SCHEMA },
+              { label: `verify:${d.key}`, phase: "Verify", effort: verifierEffort, schema: VERDICT_SCHEMA },
             ),
           ),
         ).then((votes) => {
@@ -190,26 +253,33 @@ Scratch: ${scratch}/verify-${d.key}/`,
             verdict: refuted * 2 >= live.length && live.length > 0 ? "refuted" : "survived",
             votes: live,
           };
-        }),
-      ),
+        });
+      }),
     ),
 );
 
 const all = reviewed.flat().filter(Boolean);
 const survived = all.filter((f) => f.verdict === "survived");
 const refuted = all.filter((f) => f.verdict === "refuted");
+const unverified = all.filter((f) => f.verdict === "unverified");
 
-log(`${survived.length} survived, ${refuted.length} refuted, of ${all.length}`);
+log(`${survived.length} survived, ${refuted.length} refuted, ${unverified.length} unverified, of ${all.length}`);
+
+const rank = { critical: 0, important: 1, suggestion: 2 };
+const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 
 // Refuted findings are RETURNED, not dropped. A refutation is itself a claim,
 // and the controller has reversed a refutation on new evidence before.
+// `unverified` are suggestions that skipped the adversarial pass by policy —
+// surfaced separately so the caller never mistakes "not checked" for "survived".
+// `dimensionsRun` names what actually ran: a trimmed fan-out must say so, never
+// read as full coverage.
 return {
   pr,
   head: snap.head,
   snapshot: snap.path,
-  survived: survived.sort((a, b) => {
-    const rank = { critical: 0, important: 1, suggestion: 2 };
-    return (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
-  }),
+  dimensionsRun: dimensions.map((d) => d.key),
+  survived: survived.sort(bySeverity),
   refuted,
+  unverified: unverified.sort(bySeverity),
 };
