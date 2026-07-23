@@ -99,6 +99,28 @@ git -C .worktrees/<N>-slug status --porcelain package-lock.json   # must be empt
 
 Non-empty → wrong install command. Fix it before creating the rest.
 
+**Materialize the isolation envelope as a file, not a briefing.** Env vars in a
+prompt get forgotten — five times in one run, including by a member I had briefed
+and by a specialist whose parent was briefed but did not pass them down. Write a
+runner into the worktree instead:
+
+```bash
+cat > .worktrees/<N>-slug/agent-test <<SH
+#!/bin/sh
+export TEST_COMPOSE_PROJECT=ab-<N> TEST_POSTGRES_PORT=\$((16000+<N>)) TEST_OLLAMA_PORT=\$((22000+<N>))
+exec <isolated-test-cmd> "\$@"
+SH
+chmod +x .worktrees/<N>-slug/agent-test
+```
+
+Brief every member with `./agent-test <file>` and nothing else. Anyone who finds
+the worktree finds the runner, so the envelope stops depending on who read which
+prompt — including grandchildren you never dispatched. `.gitignore` it or add it
+to `.git/info/exclude` so it never reaches a diff.
+
+Derive the ports from `<N>`. Colliding ports are then impossible rather than
+merely discouraged, which is the difference between a safeguard and a rule.
+
 ## Phase 2 — dispatch implementers
 
 One named member per approved ticket, up to the cap, in the background. Each
@@ -123,6 +145,17 @@ number and head SHA, exit. It never adds `ready-to-merge` and never merges.
 ## Phase 3 — event loop
 
 React to events; never block on one.
+
+**React to artifacts, not to agents.** Liveness tells you nothing: `idle` means
+"not currently executing", not "done"; a finished member's finding may never
+arrive, because a grandchild's report routes to *you* and a completed agent's
+final text is a return value that is gone if unconsumed. In one run every member
+that looked dead had its work sitting in git or on the PR — pushed commits, a
+self-removed label, an applied ruling. So read `gh pr view`, `gh run view`, and
+`git -C <worktree> status` **before** messaging anyone. One command settles what a
+round-trip usually does not, and a member that ignored one ping tends to ignore a
+second. When you do message, send the specific next action, never "what is your
+status".
 
 **Do not ask permission to run the loop.** Dispatching a reviewer, spawning a
 merge bot for a labelled PR, refilling a slot, re-verifying a SHA, filing a
@@ -284,23 +317,23 @@ machine, and the failures arrive as *wrong findings*, not errors:
   members the isolated invocation (agent-brain:
   `npx vitest run -c vitest.ci.config.ts <file>` — the default config's
   `global-setup` removes the shared postgres container on exit).
-- **Mutators get an isolated `git archive HEAD` copy, never a shared worktree.**
-  "Revert every probe" leaves the end state clean and still leaves a window where
-  concurrent readers observe a lie. Serializing does not help — readers are
-  concurrent with the mutator.
-- **Nobody edits a worktree while others read it.** A reviewer applying fixes
-  mid-review is the same defect as probing.
+- **Specialists never touch the worktree — reading or writing.** One immutable
+  snapshot per review, `git archive HEAD | tar -x -C <dir>`, and every specialist
+  works there. This is the single highest-value rule in the file: it kills
+  mutation-probe cross-contamination, reviewer-edits-mid-review, and grandchild
+  contention in one move, and it needs no cooperation between siblings because the
+  snapshot cannot change under them. Cheaper than the incidents — one `tar` per
+  review.
 - **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
   (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's working copy
   including its `package.json`.
-- **The envelope must reach grandchildren.** Members do not pass it down on their
-  own, and a specialist running the default config tears the shared stack down
-  mid-run for everyone. Tell members to hand every specialist the isolated test
-  invocation and its own scratch dir, verbatim.
 
-Observed: three specialists read two *different* in-flight mutations, one seeing
-the PR's own bug as still present; on another PR three watched the file go clean →
-`M` under them. Tell every reader `git show HEAD:<path>` is the source of truth.
+Observed without the snapshot rule: three specialists read two *different*
+in-flight mutations, one seeing the PR's own bug as still present; on another PR
+three watched their file go clean → `M` under them mid-analysis. Reverting probes
+does not help — it leaves the end state clean while leaving a window in which
+every concurrent reader observes a lie, and serializing does not close it because
+the readers are concurrent with the mutator, not with each other.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.
@@ -320,12 +353,10 @@ equally for any **finding** that came from reading source.
 
 A red PR never silently becomes `ready-to-merge`.
 
-**Reviewers go idle waiting on CI instead of watching it, and will not resume
-alone.** The common shape: it rebased, pushed, and stopped with the run
-`in_progress`. Read the PR before asking — head SHA, behind-count, run status,
-worktree — because the answer is usually visible and a member that ignored one
-ping tends to ignore a second. Then ping with the specific next action, not "what
-is your status".
+**Reviewers go idle waiting on CI and will not resume alone** — rebased, pushed,
+stopped with the run `in_progress`. Three of five in one run. See *react to
+artifacts* above; the recovery is a finisher, not a re-review, whenever the
+commits are already pushed.
 
 **A killed member cannot be resumed — this is the row most likely to be got
 wrong.** `SendMessage` works on a member that is idle or truncated; it does
