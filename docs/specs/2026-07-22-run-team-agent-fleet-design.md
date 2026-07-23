@@ -1,8 +1,15 @@
-# `/run-team` — implement / review / merge agent fleet
+# `/fleet:run-team` — implement / review / merge agent fleet
 
 Date: 2026-07-22
 Status: approved design, not yet implemented
-Artifact: `~/.claude/commands/run-team.md` (repo `feigi/claude-config`)
+
+> **Superseded in part.** Packaging (2026-07-23) moved every artifact named
+> here into the `fleet` plugin and made namespaced invocation mandatory. Paths
+> and command names below have been updated in place. The design reasoning, and
+> the probe results for agent naming and tool availability, remain valid — see
+> `docs/specs/2026-07-23-fleet-plugin-design.md`.
+
+Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem
 
@@ -16,7 +23,7 @@ human-driven session:
 | `run-merge-bot` (command) | merge labeled PRs in numeric order | queue drained |
 
 Running them one ticket at a time wastes the parallelism the repo supports —
-tickets are mostly independent and each lives in its own worktree. `/run-team`
+tickets are mostly independent and each lives in its own worktree. `/fleet:run-team`
 runs many at once under a single controller.
 
 ## Central conflict, and how it resolves
@@ -54,14 +61,14 @@ Never adds `ready-to-merge`. Never merges.
 
 Input: one PR number. Never a PR the same agent implemented.
 
-Reads `~/.claude/commands/review-and-fix.md` and follows it: review, split
+Reads `~/.claude/skills/fleet/commands/review-and-fix.md` and follows it: review, split
 findings into apply-now and defer, fix, push, watch to green, file deferred
 findings as issues, add `ready-to-merge`. Reports the label state and the
 deferred issue numbers.
 
 ### Merge-bot — at most 1 at any moment
 
-Spawned per wave, not kept alive. Reads `~/.claude/commands/run-merge-bot.md`
+Spawned per wave, not kept alive. Reads `~/.claude/skills/fleet/commands/run-merge-bot.md`
 and runs **one** pass: hold rule, no-undo audit, rebase, wait green, re-check the
 label, merge, re-evaluate the queue. Exits when nothing is actionable.
 
@@ -71,7 +78,7 @@ with it and silently stop the queue.
 
 ### Why subagents read files instead of invoking slash commands
 
-`review-and-fix` and `run-merge-bot` live in `~/.claude/commands/`. Command
+`review-and-fix` and `run-merge-bot` live in `~/.claude/skills/fleet/commands/`. Command
 availability inside a subagent is not guaranteed the way skill availability is.
 Handing the subagent an absolute file path to read is robust regardless.
 
@@ -156,10 +163,10 @@ Two consequences for the controller:
 ## Command interface
 
 ```
-/run-team [implementers] [reviewers]
+/fleet:run-team [implementers] [reviewers]
 ```
 
-Both optional, both default to 5, both capped at 5. `/run-team 3 2` runs three
+Both optional, both default to 5, both capped at 5. `/fleet:run-team 3 2` runs three
 implementers and two reviewers. The merge-bot is not configurable — it is
 always at most one.
 
@@ -345,10 +352,10 @@ Plus a queue-depth line: pool, supply, and whether triage was suggested.
 
 ## Out of scope
 
-- Modifying `next-ticket`, `review-and-fix`, or `run-merge-bot`. `/run-team`
+- Modifying `next-ticket`, `review-and-fix`, or `run-merge-bot`. `/fleet:run-team`
   orchestrates them as they are.
 - Triage itself. The controller suggests; the maintainer runs it.
 - Cross-repo operation. One repo per invocation.
 - Resuming a fleet after the session ends. Worktrees, branches, `in-progress`
-  labels, and open PRs all survive; the fleet does not. A fresh `/run-team`
+  labels, and open PRs all survive; the fleet does not. A fresh `/fleet:run-team`
   re-derives state from the in-flight scan.

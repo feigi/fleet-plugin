@@ -3,7 +3,7 @@ export const meta = {
   description:
     "Fan specialists over one PR from a single immutable snapshot, adversarially verify every finding, return ruling-ready data",
   whenToUse:
-    "Called per-PR by /run-team, or standalone when a PR needs a multi-specialist review whose findings must not be lost in delivery",
+    "Called per-PR by /fleet:run-team, or standalone when a PR needs a multi-specialist review whose findings must not be lost in delivery",
   phases: [
     { title: "Snapshot", detail: "cut one immutable copy every specialist reads" },
     { title: "Review", detail: "one specialist per dimension, structured findings" },

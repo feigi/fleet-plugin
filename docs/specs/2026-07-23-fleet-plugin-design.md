@@ -39,7 +39,7 @@ Grep-confirmed across the three commands:
 | "Distrust negative claims hardest" | 2 | verbatim |
 | correction-ticket hunting | 2 | |
 
-`run-team.md:424-427` already forbids this ("a duplicated rule becomes a
+`run-team` SKILL.md:426-429 already forbids this ("a duplicated rule becomes a
 contradiction"). The file violates its own rule because there was nowhere else
 to put the shared text.
 
@@ -175,7 +175,7 @@ All eleven obey the three rules above.
 **`claim-ticket.sh`** selects the install command from the lockfile —
 `package-lock.json` → `npm ci`, `pnpm-lock.yaml` → `pnpm i --frozen-lockfile`,
 `yarn.lock` → `yarn --immutable`. No match → refuse. This converts
-`run-team.md:76-86`'s "infer `<install>`, never default to `npm install`" from a
+`run-team` SKILL.md:78-88's "infer `<install>`, never default to `npm install`" from a
 rule the model can forget into a case statement it cannot. It also emits the
 `agent-test` runner with ports derived from `<N>` and adds it to
 `.git/info/exclude`, so the isolation envelope stops being a step the controller
@@ -183,7 +183,7 @@ might skip.
 
 **`reap.sh`** defaults to dry-run; `--apply` deletes. Every precondition is
 recomputed inside the same invocation, because a branch list from an earlier
-call is already false — `run-team.md:290-292` records 28 gone branches of which
+call is already false — `run-team` SKILL.md:292-294 records 28 gone branches of which
 27 had been reaped by a concurrent session two calls later.
 
 **`no-undo-audit.sh`** refuses rather than repairs. It runs steps 1/2/3/5 of the
@@ -258,7 +258,7 @@ failure being replaced is *delivery, not analysis*.
 **`claim-wave.js` was considered and cut.** Once `claim-ticket.sh` exists, a
 workflow wrapping it buys nothing — its only purpose was serialization, and one
 script invocation per ticket in a shell loop already serializes. Adding it would
-be appending where `run-team.md:427` says cut.
+be appending where `run-team` SKILL.md:429 says cut.
 
 Parse `args` defensively at the top: the `Workflow` tool can deliver `args` as a
 JSON string rather than a value.
@@ -282,7 +282,7 @@ written: `ci-state` against a green PR *and* one with a missing job;
 dry-run against the real gone-branch set; `no-undo-audit` against a live
 worktree. Proving ground is `/Users/chris/dev/agent-brain`. Ends with the
 `settings.json` Bash allowlist for the resolved script prefix — a maintainer
-edit, since `run-team.md:421` bars members from touching `settings.json`.
+edit, since `run-team` SKILL.md:423 bars members from touching `settings.json`.
 
 **Plan 3 — restructure.** `SKILL.md` slimmed, five references extracted, dedup
 applied, commands pointed at scripts. Acceptance is `claude plugin details
@@ -353,7 +353,7 @@ defect class:
 | `next-ticket` SKILL.md:80 | names **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ends `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written repairs half a line. |
 | `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references. **Not a dead document** — `run-team` SKILL.md:13 sends the reader to it as "Rationale", so it is reachable and wrong. The migration-debt note saying it gets "a pointer rather than an edit" was written before anyone knew its paths would die. |
 | `workflows/review-pr.js:6` | its `whenToUse` string reads "Called per-PR by `/run-team`" — user- and model-facing, renders in the skill listing, and names a command that no longer exists in any form. The spec's "Out of scope — rewriting `review-pr.js`" must not shelter this: a one-string description fix is not a rewrite. |
-| Every `run-team.md:NNN` citation in **this** spec (6 sites) | all were accurate when written against the then-dirty working tree, and are now stale twice over: wrong path, and **+2 lines** off. The command's 4-line frontmatter became a 6-line skill frontmatter, so a body line at N is now at N+2. The one that bites is the Plan 2 instruction citing `run-team.md:421` for the settings.json prohibition — it resolves to nothing. |
+| Every `run-team.md:NNN` citation in **this** spec (6 sites) | all were accurate when written against the then-dirty working tree, and are now stale twice over: wrong path, and **+2 lines** off. The command's 4-line frontmatter became a 6-line skill frontmatter, so a body line at N is now at N+2. The one that bites is the Plan 2 instruction citing `run-team` SKILL.md:423 for the settings.json prohibition — it resolves to nothing. |
 
 **Also decided here:** every cross-reference to a sibling fleet component inside
 these documents is a **bare backticked name in running prose**, never a slash
