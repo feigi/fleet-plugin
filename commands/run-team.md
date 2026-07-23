@@ -337,6 +337,13 @@ machine, and the failures arrive as *wrong findings*, not errors:
 - **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
   (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's working copy
   including its `package.json`.
+- **Filesystem isolation is not stack isolation.** The snapshot and the
+  `./agent-test` runner solve *different* problems, and conflating them is how the
+  second gets skipped: the compose project name comes from the environment, not
+  the working directory, so three agents on three separate `git archive` copies
+  still collide on one postgres. Symlinking `node_modules` does not help either.
+  "I'm on my own copy" is exactly the intuition that skips the runner — say both,
+  every time.
 
 Observed without the snapshot rule: three specialists read two *different*
 in-flight mutations, one seeing the PR's own bug as still present; on another PR
