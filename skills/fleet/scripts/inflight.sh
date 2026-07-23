@@ -64,10 +64,13 @@ by_branch=$(printf '%s' "$pr_json" | NUM="$n" python3 -c '
 import json, os, re, sys
 n = os.environ["NUM"]
 seg = re.compile(r"(^|[/-])" + re.escape(n) + r"([-/]|$)")
+# Only an OPEN PR is in-flight. A merged PR means the work is done; a closed,
+# unmerged PR means it was abandoned. Either would otherwise make a finished
+# or dead ticket read as taken forever.
 print(", ".join(
     "#%s %s (branch)" % (p["number"], p["state"])
     for p in json.load(sys.stdin)
-    if seg.search(p.get("headRefName") or "")
+    if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"
 ))') || die "could not filter PR search results for #$n"
 
 raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
