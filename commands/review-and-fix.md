@@ -20,7 +20,11 @@ gh run view "$rid" --json jobs --jq '.jobs[] | "\(.name) \(.status)/\(.conclusio
 git rev-parse origin/<branch>; gh pr view <n> --json headRefOid
 ```
 
-Require all four: run `headSha` == branch head == `headRefOid`; run `status` **completed**; and **every expected job present in that run**. A force-push cancels the run under it, but jobs that already finished keep their conclusions and keep being reported. Missing jobs read as `pending` in the summary and as `pass` once inherited — absent, not pending.
+Require three: run `headSha` == branch head == `headRefOid`; run `status` **completed**; and **every expected job present in that run**. A force-push cancels the run under it, but jobs that already finished keep their conclusions and keep being reported. Missing jobs read as `pending` in the summary and as `pass` once inherited — absent, not pending.
+
+**Do NOT require a zero behind-count to label.** Your green proves the diff is sound *against the base it was tested on* — that is what the label attests, and it does not expire. Whether it is still sound against a moved `main` is a different claim, provable only by a run after the rebase, and the merge bot does exactly that before merging. Requiring currency here forces a full CI cycle every time any sibling lands — six wasted cycles in one run — and re-establishes nothing the bot will not re-establish anyway. Rebase only when pushing a change, or when the bot bounces it back.
+
+Three separate claims, none substituting for another: **run-binding** (this green belongs to this SHA), **your green** (the diff is correct against its base), **the bot's post-rebase green** (it is still correct against current `main`). The third is the one that catches a sibling renaming a symbol you use — a rebase can apply cleanly and still break the build.
 
 ## Specialists
 

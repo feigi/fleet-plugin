@@ -58,7 +58,11 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 For each labeled PR that clears the hold rule, lowest number first:
 
 1. Rebase its branch onto `origin/main`; push with `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not in the main checkout. Run the **no-undo audit** below first.
-2. Watch the checks until they settle. Fix failures and repeat from step 1. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching the change. A stale `rebase-check` failure usually means step 1 has not landed yet; `integration` and `mutation` skip behind it and only run for real once it passes.
+2. Watch the checks until they settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching the change. A stale `rebase-check` failure usually means step 1 has not landed yet; `integration` and `mutation` skip behind it and only run for real once it passes.
+
+   **You are the only place currency is proven, so never merge on a green from before your rebase.** The reviewer's green attests the diff was correct against *its* base; that claim does not expire and does not cover yours. Only a run on the rebased head shows the diff is still correct against current `main`.
+
+   **Triage a post-rebase red by whether the pre-rebase run passed.** Green before, red after, with no change of your own in between, means a sibling merge broke this PR semantically — a rebase applies cleanly and still breaks the build when someone renamed a symbol it uses. That is a **finding, not a chore**: report it and hand it back to the reviewer with the failing job, do not quietly fix it. Red both before and after is the PR's own problem and belongs to the reviewer too. The only failures you fix yourself are the mechanical ones you caused: conflict resolution and the missing release label.
 3. Green → re-check right before merging (`gh pr view <pr> --json labels,reviewDecision`): the `ready-to-merge` label must still be there (it may have been pulled while CI ran) and `reviewDecision` must not be `CHANGES_REQUESTED`. Either fails → skip it, say so, move on.
 
    **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates job results across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
