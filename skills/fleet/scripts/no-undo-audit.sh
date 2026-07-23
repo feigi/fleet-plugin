@@ -20,6 +20,12 @@ base=${BASE_REF:-origin/main}
 [ -d "$wt" ] || die "worktree $wt does not exist"
 git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || die "$wt is not a git worktree"
 git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+# A branch never pushed, a stale remote-tracking ref, or a caller who already
+# passed a name prefixed "origin/" all make this not resolve. Left unchecked,
+# merge-tree below fails silently and "no conflicting files" is printed for a
+# question that was never actually answered.
+git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null \
+  || die "origin/$branch does not resolve — fetch it, or it was never pushed"
 
 # 1. Uncommitted work. This may exist nowhere else on disk.
 echo "\$ git -C $wt status --porcelain" >&2
@@ -37,9 +43,27 @@ fi
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
 echo "    stash entries (repo-global): $stash" >&2
 
-# 2. Which files would conflict.
+# 2. Which files would conflict. merge-tree exits 0 clean, 1 conflicts found,
+#    >=1 other on real failure (bad refs, corrupt tree, etc — treat >=2 as an
+#    error; exit 1 is the only "ran fine, found conflicts" outcome). Losing
+#    that distinction is how a branch that never resolved gets reported safe.
 echo "\$ git merge-tree --write-tree --name-only $base origin/$branch" >&2
-conflicts=$(git -C "$wt" merge-tree --write-tree --name-only "$base" "origin/$branch" 2>/dev/null | tail -n +2 || true)
+if merge_tree_out=$(git -C "$wt" merge-tree --write-tree --name-only "$base" "origin/$branch"); then
+  mt_rc=0
+else
+  mt_rc=$?
+fi
+case "$mt_rc" in
+  0|1) : ;;
+  *) die "git merge-tree failed (exit $mt_rc) against origin/$branch — cannot determine conflicts" ;;
+esac
+
+# --name-only output is: tree OID, then (if conflicted) the conflicted-file
+# list, then a BLANK LINE, then prose ("Auto-merging ...", "CONFLICT ...").
+# Only the section before that first blank line is filenames — the old
+# `tail -n +2` grabbed the prose section too and word-split it into the
+# `git log -- $conflicts` pathspec below.
+conflicts=$(printf '%s\n' "$merge_tree_out" | awk 'NR==1{next} /^$/{exit} {print}')
 if [ -n "$conflicts" ]; then
   echo "$conflicts" | sed 's/^/    conflict: /' >&2
 else
