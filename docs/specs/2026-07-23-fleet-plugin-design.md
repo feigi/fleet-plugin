@@ -385,6 +385,48 @@ details` reports plugin **commands** under `Skills (N)`. There is no `Commands`
 line. `commit-commands` ships only a `commands/` directory and reports
 `Skills (3)`.
 
+## Final measurement (Plan 3, 2026-07-23)
+
+Captured with `claude plugin details fleet` after the restructure — war stories
+moved to `references/`, every deterministic block wired to its script.
+
+```
+                before (Plan 1)   after (Plan 3)   references (on-demand only)
+run-team              ~10.3k           ~8.3k        5 files, ~13.4k chars off the on-invoke path
+run-merge-bot          ~5.1k           ~4.7k
+review-and-fix         ~3.9k           ~3.8k
+always-on              ~302            ~302
+```
+
+**The spec's ~3k target for `run-team` was wrong, and this is the honest number.**
+The target was a byte-estimate guess, never an analysis of the document. Of
+`run-team`'s ~22.8k body chars, only ~110 lines were pure movable war-story;
+those went to `references/`. The rest is the 33 pinned assertions plus
+operational procedure — the phases, the event-loop and queue-depth tables, the
+verbatim dispatch-prompt blocks members receive, the invariants. None of that is
+deletable without losing a rule (forbidden by the manifest) or changing
+behaviour (forbidden outright). **~8.3k is close to the floor**, and the real
+structural win is that ~13.4k chars of rationale now load only when a member
+opens a reference, not on every invocation.
+
+`run-merge-bot` and `review-and-fix` shrank little because they are mostly
+judgment — the reasoning that must stay prose. Wiring replaced their command
+blocks with script calls; it did not and could not remove the judgment those
+documents exist to carry.
+
+**A correction to this spec's own dedup plan, made on implementation.** The
+earlier "Dedup resolution" table assumed one reader and proposed collapsing
+rules like "Distrust negative claims" to a single document. That is wrong: the
+three documents have **three reader-isolated audiences** — the controller reads
+`run-team` SKILL.md, a merge-bot member reads `run-merge-bot.md`, a reviewer
+reads `review-and-fix.md`, and no member ever sees the others. A rule a reader
+needs must live in that reader's document; collapsing it away blinds that reader.
+So cross-document rule copies were **kept** — they are necessary redundancy
+across audiences, not the contradiction risk the "move don't duplicate" rule
+targets. That rule applies within one reader's document (assertion in SKILL,
+story in its own `references/`), which is the split that was applied. No rule was
+lost: verified against `docs/fleet-rule-manifest.txt`, all 33 patterns resolve.
+
 ## Baseline measurement (Plan 1, 2026-07-23)
 
 Captured with `claude plugin details fleet` at commit `eacc5cf` — after
