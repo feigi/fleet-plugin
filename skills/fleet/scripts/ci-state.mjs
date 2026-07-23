@@ -155,20 +155,55 @@ if (matching.length === 0) {
 // --- Behind-count ---------------------------------------------------------
 // `gh api` does NOT infer the host from the local remote the way `gh pr` and
 // `gh run` do — on a GitHub Enterprise repo it silently 404s against github.com.
+//
+// This block MUST NOT use run(): run()'s failure path calls die(), which calls
+// process.exit(2) and terminates before any surrounding catch can see it. An
+// earlier version wrapped run() in a try/catch here, which made the catch
+// unreachable — a transient failure on this purely informational side channel
+// hard-exited the tool and discarded a fully computed CI verdict. Use a helper
+// that returns null instead, so the behind-count can be unknown without costing
+// the caller the answer it actually asked for.
+function tryRun(cmd, args) {
+  console.error(`$ ${cmd} ${args.join(" ")}`);
+  try {
+    return execFileSync(cmd, args, { encoding: "utf8" });
+  } catch (e) {
+    console.error(`    ${NAME}: ${cmd} failed: ${String(e.stderr || e.message).trim()}`);
+    return null;
+  }
+}
+
 let behind = null;
 try {
-  const remote = run("git", ["remote", "get-url", "origin"]).trim();
-  const host = remote.replace(/^(git@|https:\/\/|ssh:\/\/git@)/, "").replace(/[:/].*$/, "");
-  const repo = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"])).nameWithOwner;
-  const cmp = JSON.parse(run("gh", ["api", "--hostname", host, `repos/${repo}/compare/${base}...${prHead}`]));
-  behind = cmp.behind_by;
-  console.error(`    behind_by=${behind} (status=${cmp.status})`);
-} catch {
-  // Deliberately non-fatal: the behind-count is context for the caller, not part
-  // of the green verdict. Reviewers label without requiring currency; only the
-  // merge bot establishes it. Record that it is unknown rather than guessing 0,
-  // because 0 would read as "current".
-  reasons.push("behind-count unavailable");
+  const remote = tryRun("git", ["remote", "get-url", "origin"]);
+  const repoJson = remote === null ? null : tryRun("gh", ["repo", "view", "--json", "nameWithOwner"]);
+  if (remote !== null && repoJson !== null) {
+    const host = remote.trim().replace(/^(git@|https:\/\/|ssh:\/\/git@)/, "").replace(/[:/].*$/, "");
+    const repo = JSON.parse(repoJson).nameWithOwner;
+    const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repo}/compare/${base}...${prHead}`]);
+    if (cmpJson !== null) {
+      const cmp = JSON.parse(cmpJson);
+      behind = cmp.behind_by;
+      console.error(`    behind_by=${behind} (status=${cmp.status})`);
+    }
+  }
+} catch (e) {
+  // JSON.parse of a malformed payload lands here; the subprocess failures are
+  // already handled by tryRun returning null.
+  console.error(`    ${NAME}: behind-count unusable: ${e.message}`);
+}
+
+// `behind` stays null when unknown, and null NEVER enters `reasons`. The
+// behind-count is context for the caller, not part of the green verdict:
+// reviewers label without requiring currency, and only the merge bot
+// establishes it. An earlier version pushed "behind-count unavailable" into
+// reasons, which silently turned a fully green board into not-green over a
+// number the verdict is not supposed to depend on.
+//
+// null is deliberately not 0 — 0 would read as "current", which is the one
+// wrong answer that matters here.
+if (behind === null) {
+  console.error(`    ${NAME}: behind-count unknown (reported as null; verdict unaffected)`);
 }
 
 const verdict = reasons.length === 0 ? "green" : "not-green";
