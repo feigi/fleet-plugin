@@ -9,7 +9,10 @@
       "Bash(npx vitest:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(/Users/chris/.claude/skills/fleet/scripts/:*)"
+      "Bash(/Users/chris/.claude/skills/fleet/scripts/:*)",
+      "EnterWorktree",
+      "ExitWorktree",
+      "Bash(git worktree:*)"
     ],
     "defaultMode": "auto"
   },
@@ -131,6 +134,10 @@
         ]
       }
     ]
+  },
+  "worktree": {
+    "baseRef": "head",
+    "symlinkDirectories": ["node_modules"]
   },
   "statusLine": {
     "type": "command",
