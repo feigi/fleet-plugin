@@ -153,7 +153,7 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 ## Then stay armed
 
-**Skip this whole section if a controller dispatched you** (`/run-team`, or any
+**Skip this whole section if a controller dispatched you** (`/fleet:run-team`, or any
 caller that says it owns the watcher) — report your pass and exit instead. A
 monitor armed by a member dies with that member and the queue stops silently, so
 the watcher belongs to whoever outlives the pass. Only arm one when you are the

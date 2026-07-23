@@ -181,7 +181,7 @@ often lands later, so `--limit 1` can hide the CI result entirely.
 ### Reviewers
 
 One named member per PR, never its implementer. Give the PR number and tell it to
-read `~/.claude/commands/review-and-fix.md` — the file path, not a slash
+read `~/.claude/skills/fleet/commands/review-and-fix.md` — the file path, not a slash
 invocation; command availability inside a member is not guaranteed the way skill
 availability is.
 
@@ -225,7 +225,7 @@ hunts this unprompted, because the diff "obviously" improves accuracy.
 ### Merge bot
 
 Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
-`~/.claude/commands/run-merge-bot.md`, run **one** pass, then exit — and say that
+`~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step.
 
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
@@ -255,7 +255,7 @@ once at the end. A stale worktree still answers `git worktree list`, so phase 0'
 in-flight probe reads an already-merged ticket as taken and the queue quietly
 shrinks as the run goes on.
 
-**Do not invoke `/clean_gone`.** Two independent disqualifiers:
+**Do not invoke `commit-commands:clean_gone`.** Two independent disqualifiers:
 
 - Its detection greps `git branch -v` for `\[gone\]`. `-v` prints no tracking
   info at all, and `-vv` renders `[origin/<branch>: gone]`, so the pattern never
@@ -529,7 +529,7 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "`npm install` to set up the worktree" → the wrong install mutates the lockfile
   for the whole repo.
 - "I'm on my own copy, so I'm isolated" → not from the docker stack.
-- "`/clean_gone` printed nothing, the tree is clean" → its grep cannot match; a
+- "`commit-commands:clean_gone` printed nothing, the tree is clean" → its grep cannot match; a
   silent pass is its failure mode, not its success case.
 - "`--force` the worktree removal, the PR merged anyway" → merged says nothing
   about uncommitted files, and the reviewer may still be in there.

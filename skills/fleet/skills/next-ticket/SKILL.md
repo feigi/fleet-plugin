@@ -77,7 +77,7 @@ Closes #N"
 
 `Closes #N` closes the issue on merge. Repo gating on a release label → add exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
-**Session ends here.** Merge happens later, elsewhere: `/review-and-fix` → maintainer adds `ready-to-merge` → `/run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for a merge that won't happen this session.
+**Session ends here.** Merge happens later, elsewhere: `/fleet:review-and-fix` → maintainer adds `ready-to-merge` → `/fleet:run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for a merge that won't happen this session.
 
 `in-progress` stays until that out-of-session merge closes the issue — harmless, step 1 lists open issues only. Report PR URL, stop.
 
