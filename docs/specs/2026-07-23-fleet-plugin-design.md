@@ -228,7 +228,9 @@ arbitrary on its own — which is how rules get deleted.
 though `pr-overlap.mjs` computes the three signals, because "a fired signal is
 not a verdict — disprove it" is the load-bearing part and it is pure judgement.
 
-Expected always-loaded cost for `/fleet:run-team`: 28KB → roughly 6KB.
+Target for `run-team`: **~10.3k → ~3k tokens on-invoke**, with references pulled
+only when a member needs the why. Measured, not estimated — see the baseline
+below. Plan 3's acceptance is a re-run of `claude plugin details fleet`.
 
 ## Stage 2 — `merge-wave.js`
 
@@ -290,6 +292,14 @@ Stage 2 lands only after that run.
 
 ## Open items — verify at implementation time, do not assume
 
+**Resolved by Plan 1:** the marketplace directory-source schema — no marketplace
+is needed at all, `claude plugin init` puts the plugin under `~/.claude/skills/`
+where it auto-loads as `<name>@skills-dir`. Removed from this list.
+
+**Remaining, and who owns each:** the namespacing question is Plan 1's last
+acceptance step and needs a human at a session prompt. The other two are Plan 2's
+— neither can be settled without writing a script.
+
 - Whether bare aliases (`/review-and-fix`) still resolve alongside namespaced
   ones (`/fleet:review-and-fix`), or whether the namespaced form is mandatory.
   **Still open after Plan 1 Task 3.** Evidence so far, none of it conclusive:
@@ -313,6 +323,37 @@ Stage 2 lands only after that run.
   allowlist targets either way.
 - The expected-job list `ci-state.mjs` checks for absence against. Derive it
   from the workflow definition rather than hardcoding.
+
+## Baseline measurement (Plan 1, 2026-07-23)
+
+Captured with `claude plugin details fleet` at commit `eacc5cf` — after
+packaging, before any restructuring — so Plan 3's acceptance compares like with
+like. Content is byte-identical to the pre-plugin originals, so these numbers
+are the true cost of today's prose.
+
+```
+Always-on:   ~302 tok   added to every session
+
+component        always-on  on-invoke
+next-ticket            ~70      ~1.5k
+sizing-a-ticket        ~70       ~450
+run-team               ~70     ~10.3k
+run-merge-bot          ~50      ~5.1k
+review-and-fix         ~30      ~3.9k
+```
+
+Three things this measurement changes:
+
+1. **The byte estimate was low.** 28KB was reasoned to ~7k tokens; the
+   instrument says **~10.3k**. Every later claim uses the instrument.
+2. **The real number is the member's, not the controller's.** A reviewer reads
+   `run-team` *and* `review-and-fix`; a merge bot reads `run-team` *and*
+   `run-merge-bot`. The fleet's three core documents total **~19.3k on-invoke**,
+   which is the figure the restructure has to move.
+3. **Always-on is already cheap (~302 tok) and is not the problem.** Plan 3
+   should not spend effort shrinking it. The win is entirely in on-invoke, which
+   is exactly what the `references/` split targets — a reference costs nothing
+   until something reads it.
 
 ## Migration debt
 
