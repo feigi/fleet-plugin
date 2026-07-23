@@ -380,6 +380,30 @@ for w in .worktrees/*/; do
 done
 ```
 
+## Run ledger
+
+Keep one git-ignored file — `.fleet/ledger.md` — and update it at **every** state
+change. Your context is the least durable thing in the run: it compacts, and a
+controller that loses the pool, the dispatch map or the filed list redoes work
+that is already done. Two duplicate tickets shipped in one run from exactly that.
+
+One line per ticket, rewritten in place:
+
+```
+#332 impl-332 → PR#344 → MERGED 73b356de
+#324 impl-324 → PR#346 · review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313
+```
+
+Plus two append-only lists:
+
+- **filed** — issue number + one-line subject, so the same finding is never filed
+  twice. Check it before every `gh issue create`.
+- **ruled** — PR + the decision and its one-line reason, so a replacement
+  controller does not re-litigate a call the evidence already settled.
+
+**Write the ledger line before dispatching, not after.** A member that dies
+between spawn and ledger write is invisible — and members do die in batches.
+
 ## Report
 
 One running table, updated as events land:
