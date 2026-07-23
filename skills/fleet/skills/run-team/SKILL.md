@@ -1,6 +1,7 @@
 ---
-description: run an agent fleet — up to 5 implementers, up to 5 reviewers, one merge bot — over the ready-for-agent queue
-argument-hint: [implementers] [reviewers]
+name: run-team
+description: Run an agent fleet — up to 5 implementers, up to 5 reviewers, one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
+disable-model-invocation: true
 ---
 
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
