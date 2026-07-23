@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+// The run ledger. A controller's context is the least durable thing in a fleet
+// run: it compacts, and a controller that has lost the pool or the dispatch map
+// redoes finished work. Two duplicate tickets shipped in one run from exactly
+// that.
+//
+// Rows are rewritten in place, one per ticket. `filed` and `ruled` are
+// append-only, because their whole purpose is to outlive the reasoning that
+// produced them.
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { dirname } from "node:path";
+
+const NAME = "ledger";
+
+function die(msg) {
+  console.error(`${NAME}: ${msg}`);
+  process.exit(2);
+}
+
+const argv = process.argv.slice(2);
+const fileIdx = argv.indexOf("--file");
+const file = fileIdx === -1 ? ".fleet/ledger.md" : argv[fileIdx + 1];
+if (fileIdx !== -1) argv.splice(fileIdx, 2);
+if (!file) die("--file given with no path");
+
+const [cmd, ...rest] = argv;
+if (!cmd) die("usage: ledger.mjs [--file <path>] row|filed|check|read [args]");
+
+const ROWS = "## Rows";
+const FILED = "## Filed";
+const RULED = "## Ruled";
+
+function load() {
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [] };
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    die(`cannot read ${file}: ${e.message}`);
+  }
+  const section = (name) => {
+    const start = text.indexOf(name);
+    if (start === -1) return [];
+    const after = text.slice(start + name.length);
+    const end = after.search(/\n## /);
+    return (end === -1 ? after : after.slice(0, end))
+      .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
+      .map((l) => l.slice(2));
+  };
+  return { rows: section(ROWS), filed: section(FILED), ruled: section(RULED) };
+}
+
+function save(d) {
+  const out =
+    `# Fleet run ledger\n\n${ROWS}\n\n` + d.rows.map((r) => `- ${r}`).join("\n") +
+    `\n\n${FILED}\n\n` + d.filed.map((r) => `- ${r}`).join("\n") +
+    `\n\n${RULED}\n\n` + d.ruled.map((r) => `- ${r}`).join("\n") + "\n";
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, out);
+  } catch (e) {
+    die(`cannot write ${file}: ${e.message}`);
+  }
+  console.error(`    wrote ${file}`);
+}
+
+const data = load();
+
+if (cmd === "read") {
+  console.log(JSON.stringify(data, null, 2));
+  process.exit(0);
+}
+
+if (cmd === "row") {
+  const [ticket, ...textParts] = rest;
+  if (!ticket || textParts.length === 0) die("usage: ledger.mjs row <ticket> <text>");
+  const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
+  const line = `${key} ${textParts.join(" ")}`;
+  const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
+  if (i === -1) {
+    data.rows.push(line);
+    console.error(`    new row ${key}`);
+  } else {
+    data.rows[i] = line;
+    console.error(`    rewrote row ${key}`);
+  }
+  save(data);
+  console.log(JSON.stringify({ ticket: key, line, created: i === -1 }, null, 2));
+  process.exit(0);
+}
+
+if (cmd === "filed") {
+  const [issue, ...subjectParts] = rest;
+  if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
+  const subject = subjectParts.join(" ");
+  data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
+  save(data);
+  console.log(JSON.stringify({ issue, subject, total: data.filed.length }, null, 2));
+  process.exit(0);
+}
+
+if (cmd === "check") {
+  const subject = rest.join(" ");
+  if (!subject) die("usage: ledger.mjs check <subject>");
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const target = norm(subject);
+  const match = data.filed.find((f) => norm(f).includes(target));
+  if (match) {
+    console.error(`${NAME}: ALREADY FILED — ${match}`);
+    console.log(JSON.stringify({ subject, found: true, match }, null, 2));
+    // Exit 1 means "do not file this again". Non-zero is the stop signal, so a
+    // caller that checks only the exit status still cannot duplicate.
+    process.exit(1);
+  }
+  console.error(`${NAME}: not previously filed`);
+  console.log(JSON.stringify({ subject, found: false, match: null }, null, 2));
+  process.exit(0);
+}
+
+die(`unknown subcommand '${cmd}' — expected row, filed, check or read`);
