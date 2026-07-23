@@ -64,3 +64,6 @@ __pycache__/
 # Auto-generated backups
 backups/
 *.original.md
+
+# caveman-compress runtime state
+.caveman-active
