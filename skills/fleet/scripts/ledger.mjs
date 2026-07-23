@@ -124,8 +124,23 @@ if (cmd === "check") {
   const subject = rest.join(" ");
   if (!subject) die("usage: ledger.mjs check <subject>");
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const target = norm(subject);
-  const match = data.filed.find((f) => norm(f).includes(target));
+  const tokenSet = (s) => new Set(norm(s).split(/\s+/).filter(Boolean));
+  const target = tokenSet(subject);
+  if (target.size === 0) die(`normalised subject is empty — '${subject}' has no alphanumeric tokens to check`);
+  // Substring matching collides both ways: a short generic subject ("line")
+  // matches everything (false "already filed" silently loses a finding),
+  // while an all-punctuation subject normalises to "" and matches anything
+  // too. Token-set matching fixes both, with a deliberate asymmetric bias —
+  // a false "already filed" is invisible and bad, a false "not filed" just
+  // creates a duplicate someone closes — so equal sets OR a >=4-token subset
+  // both count as a match, catching real near-duplicate rewordings without
+  // matching short generic overlaps.
+  const isMatch = (filedTokens) => {
+    if (filedTokens.size === target.size && [...filedTokens].every((t) => target.has(t))) return true;
+    const [small, big] = filedTokens.size <= target.size ? [filedTokens, target] : [target, filedTokens];
+    return small.size >= 4 && [...small].every((t) => big.has(t));
+  };
+  const match = data.filed.find((f) => isMatch(tokenSet(f)));
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
     console.log(JSON.stringify({ subject, found: true, match }, null, 2));
