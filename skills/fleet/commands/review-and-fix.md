@@ -13,13 +13,10 @@ argument-hint: [pr-number]
 **Bind green to the *run*, not to check conclusions.** `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA. Head-SHA binding misses it — the head is genuinely right; only the conclusions belong to another commit.
 
 ```bash
-rid=$(gh run list --branch <branch> --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run view "$rid" --json headSha,status,conclusion
-gh run view "$rid" --json jobs --jq '.jobs[] | "\(.name) \(.status)/\(.conclusion // "-")"'
-git rev-parse origin/<branch>; gh pr view <n> --json headRefOid
+~/.claude/skills/fleet/scripts/ci-state.mjs --pr <n>
 ```
 
-Require three: run `headSha` == branch head == `headRefOid`; run `status` **completed**; **every expected job present in that run**. A force-push cancels the run under it, but finished jobs keep their conclusions and keep being reported. Absent jobs read as `pending`, inherited ones as `pass`.
+`ci-state.mjs` does the whole run-binding check and prints a `verdict` with reasons: it binds the run to the PR head, requires run `status` **completed** and **every expected job present** (the list derived from the workflow file, not hardcoded), and treats `skipped` as not-green. Exit 0 only when genuinely green. A force-push cancels the run under it, but finished jobs keep their conclusions and keep being reported — absent jobs read as `pending`, inherited ones as `pass`, and the script's job-presence check is what catches both.
 
 **Query at labelling time; never label off a watcher's summary.** A monitor stitches its event from reads taken at different moments, so it can stream `RUN COMPLETE: success` under a run id whose authoritative job list is a failure — observed: streamed all-five-green for run `165158547`, while `gh run view 165158547 --json jobs` reported `rebase-check failure` with three jobs **skipped**; the green belonged to the previous run on an earlier head. Head-SHA binding does not catch this, because the *run id* is wrong rather than the head. Watchers are for waking you up, never for deciding.
 
