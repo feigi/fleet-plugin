@@ -173,6 +173,16 @@ event in a loop designed to have many.
 - **Reviewer completes having labeled the PR** → merge-bot wave.
 - **Monitor fires** on `ready-to-merge` appearing → merge-bot wave. This catches
   labels you add by hand.
+- **Monitor fires** on a CI run completing → ping the one member that was waiting
+  on it, with the outcome.
+
+**Own the CI waits yourself.** Members are turn-based: they cannot hold across a
+ten-minute run, so they rebase, push, and stop — one went idle three times in two
+minutes doing exactly this, and each re-ping cost a round-trip that told me
+nothing I could not read. Arm a second persistent Monitor over the open PRs'
+latest runs, keyed on `<run-id>:<conclusion>` so each terminal state fires once,
+and report the behind-count alongside: a `success` on a branch that is 8 behind is
+not actionable, and that distinction is most of the traffic.
 - **Approved pool empty** → phase 0 again, subject to queue depth below.
 
 ### Reviewers
