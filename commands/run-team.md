@@ -165,6 +165,17 @@ that reads them separately stitches an event from two moments and can stream
 members a monitor event is a wake-up, never a verdict — they re-query
 `gh run view <rid> --json jobs` at labelling time.
 
+**A conclusion is not stable, even for a fixed run id on an unchanged head.** A
+rerun rewrites the existing run in place rather than creating a new one, so a run
+you read as `success` can later read `failure` with nothing pushed. Observed twice
+in one run: a refresh workflow re-ran the currency check after `main` advanced and
+flipped the same id on the same SHA. Consequence: **never cache a conclusion.**
+Re-query at the moment of decision, and key any watcher on `<run-id>:<conclusion>`
+rather than run id alone, or the second state never fires.
+
+Also: the newest run on a branch is frequently *not* the CI workflow — a label or
+policy workflow often lands later. `--limit 1` can hide the CI result entirely.
+
 ### Reviewers
 
 One named member per PR, never its implementer. Give the PR number and tell it to
@@ -183,6 +194,30 @@ finding" makes the reviewer verify a report it never sent or act on one it canno
 check. Tell reviewers to ping each specialist rather than assume delivery. Do not
 hold rulings pending confirmation — that stalls the queue for a guarantee the
 reviewer's own verify-before-apply already provides.
+
+**Scale the fan-out to the diff, not to the word "review".** Six specialists on an
+8-line docs-banner PR costs the same wall clock as six on a vault refactor, and the
+queue pays it. Say the number in the prompt: two or three for annotation-only or
+single-file changes, the full set for production code. Absent a number, members
+default to the full set every time.
+
+**Put the standing CI facts in the prompt, not in per-event messages.** Otherwise
+you send the same "your red is staleness, do not rebase" message once per reviewer
+per merge — four times in one run here. The reviewer prompt should already carry:
+`skipped` means the job did **not** execute ("not verified", never "nearly green");
+a red currency check is not grounds to withhold a label and not something to rebase
+for; and if labelling under those conditions, say the label rests on the checks that
+*did* run rather than calling it "CI green".
+
+**For correction tickets, make "re-verify the correction" an explicit step.** Any
+ticket whose deliverable is *fixing a wrong claim* — stale docs, wrong comments,
+bad citations — is unusually likely to ship a new wrong claim in the fix. Four for
+four in one run: a misattributed package, a three-item list at inverted polarity
+(two items were the *negations* of the claims being marked stale), a commit body
+citing a line that held something else, and a banner refuting a currently-true
+fact whose own supporting sentence confirmed it. Reviewers do not hunt this
+unprompted, because the diff "obviously" improves accuracy. Tell them to read every
+corrected sentence literally and ask whether each clause is true under that reading.
 
 ### Merge bot
 
@@ -346,16 +381,34 @@ vs specific finding with paths → paths win.
 **Members share one filesystem and one docker stack**, and the failures arrive as
 *wrong findings*, not errors:
 
-- **Specialists never touch the worktree, reading or writing.** One immutable
-  snapshot per review — `git archive HEAD | tar -x -C <dir>` — and every
-  specialist works there. Highest-value rule here: it kills mutation-probe
-  contamination, reviewer-edits-mid-review, and grandchild contention at once, and
-  needs no cooperation between siblings because the snapshot cannot change under
-  them. Observed without it: three specialists read two *different* in-flight
-  mutations, one seeing the PR's own bug as still present; on another PR three
-  watched their file go clean → `M` mid-analysis. Reverting probes does not help —
-  it leaves a window where every concurrent reader sees a lie, and serializing
-  does not close it because readers are concurrent with the *mutator*.
+- **Ground truth is the git object store, not any working tree.**
+  `git -C <repo> show <sha>:<path>` cannot be contaminated by any agent, needs no
+  copy, and touches nothing. Make it the default for settling *what the PR
+  contains*; the trees below are only for specialists that must **run** something.
+- **Specialists never touch the worktree, reading or writing** — and **one
+  snapshot is not enough.** Mutation probing is a *write*, so a mutating
+  specialist and read-only specialists cannot share a tree: the readers then
+  observe the mutant exactly as if it were the real code. Two trees:
+  - `snap-ro` — pristine, **never written**, all read-only specialists.
+  - one private copy **per mutating specialist**.
+
+  Observed with a single shared snapshot: three specialists read two *different*
+  in-flight mutations, one seeing the PR's own bug as still present; two reviewers
+  came one step from filing a false finding. **And the obvious detection does not
+  work** — `diff -rq` and `md5` both came back *clean* because the probe was
+  reverted between the two reads. A clean diff against a live tree is not evidence
+  in either direction. Only `snap-ro` and the object store settle it.
+- **`git archive` carries tracked files only** — no `node_modules`, no test runner,
+  no gitignored config. Provision the tree in the same breath or specialists
+  silently have no runnable suite and quietly reason from source instead of
+  measuring. Symlink `node_modules` from the worktree and copy in whatever the
+  runner needs.
+- **Some suites cannot be validly run from a snapshot at all.** If anything derives
+  identity from the checkout — agent-brain's `derive_workspace_id` shells out to
+  `git rev-parse`, and a `git archive` copy is not a git repo — it falls back to
+  the directory basename and the suite fails on the *name*. Naming the directory
+  after the repo makes it pass **by coincidence, not correctness**. Run those
+  suites in a real worktree or not at all; a green from a snapshot is an artifact.
 - **Filesystem isolation is not stack isolation.** The snapshot and `./agent-test`
   solve different problems, and conflating them is how the second gets skipped:
   the compose project name comes from the environment, not the working directory,
@@ -364,6 +417,14 @@ vs specific finding with paths → paths win.
   skips the runner — say both, every time.
 - **Per-member scratchpad subdirectory.** One flat namespace, generic filenames
   (`b.min.js`, `probe.mjs`) — one agent overwrote a sibling's `package.json`.
+- **IDE/harness diagnostics attribute by bare filename, with no path.** Probe
+  copies carry the same filenames as the real tree, so a specialist's throwaway
+  mutation surfaces as errors that read exactly like a live worktree's — and the
+  line numbers can plausibly line up with real in-flight edits. **Never relay a
+  diagnostic without reproducing it in that member's specific worktree**
+  (`npx tsc --noEmit` from there). Ran twice in one session: clean the first time
+  (a sibling's probe), genuinely broken the second. Telling an implementer to chase
+  a phantom in a file it is mid-rewrite on is the expensive failure.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.

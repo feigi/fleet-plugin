@@ -78,6 +78,10 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Require all four: run `headSha` == branch head == `headRefOid`, run `status` **completed**, **every expected job present in that run**. A force-push cancels the run under it; finished jobs keep their conclusions and keep being reported. Absent jobs read as `pending`, inherited ones as `pass`.
 
+   **Re-query at the moment you merge — a conclusion can invert under a fixed run id.** A rerun rewrites the *existing* run rather than creating a new one, so a run id you read as `success` can later read `failure` with nothing pushed to the branch. Observed twice in one fleet run, on two PRs: a refresh workflow re-ran the currency check after `main` advanced and flipped the same id on the same SHA. This cuts both ways — a red you cached may since have gone green on re-run, and a green you cached may be red. Never carry a conclusion across a wait.
+
+   Also: `--workflow CI` above matters. The newest run on a branch is frequently a label or policy workflow, so a bare `--limit 1` can return something that is not CI at all.
+
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
@@ -90,7 +94,11 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
 
-**Staleness fires *within* a wave.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Observed: 0 behind → 4 the moment the first landed. Any behind-count handed to you at dispatch is already expired.
+**Staleness fires *within* a wave, and it compounds.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Any behind-count handed to you at dispatch is already expired.
+
+Measured over one three-merge wave: the next queue member went 0 → 2 → 7 → **10 behind** without ever changing, because each merge adds its own commits plus a merge commit. So the *last* PR in a wave pays the largest rebase and the longest CI cycle, and a PR rebased early pays again for every sibling that lands after it. This is the argument for batching a wave rather than merging singles — and for never rebasing a PR before it is the actual merge candidate.
+
+**A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
 Report merged / skipped-unlabeled / held-behind-#X / blocked after the pass.
 
