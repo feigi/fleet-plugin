@@ -1,0 +1,10 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "fleet",
+  "version": "0.1.0",
+  "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
+  "author": {
+    "name": "Christian Ziegler",
+    "email": "christian.ziegler@core-concepts.de"
+  }
+}
