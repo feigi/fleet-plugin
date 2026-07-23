@@ -52,9 +52,23 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       keep "$b" "dirty worktree $wt"
       continue
     fi
+    # `git worktree remove` refuses on modified and untracked files, but NOT on
+    # ignored ones — it deletes those silently. claim-ticket.sh writes exactly
+    # this kind of file (its agent-test runner, appended to info/exclude), and
+    # any .env or scratch file a fleet script ignores is equally invisible to
+    # the plain --porcelain check above. Check --ignored explicitly and keep.
+    if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
+      keep "$b" "worktree $wt unreadable (git status --ignored failed)"
+      continue
+    fi
+    ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
+    if [ -n "$ignored" ]; then
+      keep "$b" "ignored files present in $wt: $ignored"
+      continue
+    fi
     if [ "$apply" = true ]; then
-      # No --force, ever. It refuses on modifications AND untracked files, which
-      # double-covers the check above; a refusal is a finding, not an obstacle.
+      # No --force, ever. It refuses on modified and untracked files; the
+      # ignored-file gap it does NOT cover is handled by the check above.
       git worktree remove "$wt" 2>/dev/null || { keep "$b" "worktree remove refused"; continue; }
     else
       echo "    would remove worktree $wt" >&2
