@@ -23,9 +23,12 @@ const fileIdx = argv.indexOf("--file");
 const file = fileIdx === -1 ? ".fleet/ledger.md" : argv[fileIdx + 1];
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
+const requireFileIdx = argv.indexOf("--require-file");
+const requireFile = requireFileIdx !== -1;
+if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] row|filed|check|read [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|check|read [args]");
 
 const ROWS = "## Rows";
 const FILED = "## Filed";
@@ -121,6 +124,17 @@ if (cmd === "filed") {
 }
 
 if (cmd === "check") {
+  // The first check of a run legitimately has no file yet, so absence alone
+  // cannot be an error — but a silent "safe to file" for every check when
+  // the path is simply wrong (typo'd --file) is a fail-open that no caller
+  // would notice. Warn loudly by default; --require-file makes absence a
+  // hard failure for callers that know the file must already exist.
+  if (!existsSync(file)) {
+    if (requireFile) die(`--require-file given but ledger file does not exist: ${file}`);
+    console.error(
+      `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
+    );
+  }
   const subject = rest.join(" ");
   if (!subject) die("usage: ledger.mjs check <subject>");
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
