@@ -292,10 +292,21 @@ Stage 2 lands only after that run.
 
 - Whether bare aliases (`/review-and-fix`) still resolve alongside namespaced
   ones (`/fleet:review-and-fix`), or whether the namespaced form is mandatory.
-  Leaning bare-works: `manifest-reference.md` calls command namespacing
-  "optional", and `command-development/SKILL.md:378` shows a namespaced command
-  invoked as `/build` with `(project:ci)` as a display label. Not conclusive —
-  that example is project commands, not plugin ones. Settle it empirically.
+  **Still open after Plan 1 Task 3.** Evidence so far, none of it conclusive:
+  `manifest-reference.md` calls command namespacing "optional";
+  `command-development/SKILL.md:378` shows a namespaced command invoked as
+  `/build` with `(project:ci)` as a display label, but that example is project
+  commands, not plugin ones; and `claude plugin details` lists bare component
+  names for both `fleet` (`review-and-fix, run-merge-bot`) and `commit-commands`
+  (`clean_gone, commit, commit-push-pr`) — which reflects how the inventory
+  *names* components, not how they are *invoked*. Settled only by inspecting
+  slash-command completion in a session after `/reload-plugins`, which is Plan 1
+  Task 6's acceptance step.
+
+  Also learned in Task 3, and worth recording because it misleads: `claude
+  plugin details` reports plugin **commands** under `Skills (N)`. There is no
+  `Commands` line. `commit-commands` ships only a `commands/` directory and
+  reports `Skills (3)`.
 - Whether `${CLAUDE_PLUGIN_ROOT}` is interpolated only in plugin component files
   or is also available to a Bash call an agent constructs. The fallback is that
   agents invoke scripts by resolved absolute path, which is what the permission
@@ -305,9 +316,15 @@ Stage 2 lands only after that run.
 
 ## Migration debt
 
-- Invocation names change: `/fleet:run-merge-bot`, `/fleet:review-and-fix`,
-  `fleet:next-ticket`. Internal cross-references need updating —
-  `next-ticket:80` names `/review-and-fix`.
+- Invocation names **may** change to `/fleet:run-merge-bot`,
+  `/fleet:review-and-fix`, `fleet:next-ticket` — conditional on the open
+  namespacing question above, not yet settled. Internal cross-references need
+  updating either way if bare names do not survive: `next-ticket:80` names
+  `/review-and-fix`, and `run-team`'s body points members at
+  `~/.claude/commands/run-merge-bot.md` and `~/.claude/commands/review-and-fix.md`
+  — **paths that no longer exist** as of Plan 1 Task 3. Those pointers are stale
+  now regardless of how namespacing resolves, and Plan 3 must repoint them at
+  `${CLAUDE_PLUGIN_ROOT}`.
 - Two memories reference the old command paths (the `/ship-it` → `/review-and-fix`
   replacement record, and the `/run-merge-bot` creation record). Update at the
   end, not before.
