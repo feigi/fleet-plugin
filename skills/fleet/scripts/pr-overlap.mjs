@@ -55,15 +55,29 @@ const intersect = (xs, ys) => {
 };
 
 // A repo mid-migration has src/…/foo.test.ts in one PR and
-// tests/unit/…/foo.test.ts in the other: same module, zero shared paths.
-const moduleOf = (f) => basename(f).replace(/\.test\.ts$/, "").replace(/\.ts$/, "");
+// tests/unit/…/foo.test.ts in the other: same module, zero shared paths. That
+// migration case is what this signal exists for, and it is a TypeScript-module
+// notion — so only files whose extension is actually stripped participate.
+//
+// Matching on bare basenames instead produces confident nonsense: two PRs each
+// touching their own README.md, or their own hooks.json, reported as sharing a
+// "module". Measured in the proving ground: README.md ×8, SKILL.md ×6,
+// mcp-snippet.json ×9, hooks.json ×5 across unrelated directories. Returning
+// null for those drops them from the signal entirely rather than caveating them.
+const moduleOf = (f) => {
+  const b = basename(f);
+  if (b.endsWith(".test.ts")) return b.slice(0, -".test.ts".length);
+  if (b.endsWith(".ts")) return b.slice(0, -".ts".length);
+  return null;
+};
+const modulesOf = (fs) => fs.map(moduleOf).filter((m) => m !== null);
 
 // Repo root is excluded: every top-level file shares it, so it fires on PRs
 // with nothing whatsoever in common.
 const dirsOf = (fs) => fs.map(dirname).filter((d) => d !== ".");
 
 const files = intersect(filesA, filesB);
-const modules = intersect(filesA.map(moduleOf), filesB.map(moduleOf));
+const modules = intersect(modulesOf(filesA), modulesOf(filesB));
 const dirs = intersect(dirsOf(filesA), dirsOf(filesB));
 
 const signal = files.length ? "files" : modules.length ? "modules" : dirs.length ? "dirs" : "none";
@@ -73,6 +87,17 @@ if (signal === "dirs") {
   console.error(
     `${NAME}: directory-only hit — weak evidence. A bare top-level directory\n` +
       `  (docs, tests, src) fires on PRs with different subjects. Read the files.`,
+  );
+}
+if (signal === "modules") {
+  // The hold rule this mechanises calls a module match a verdict, on a par with
+  // a shared file. It is not one: `types.ts` ×13 and `index.ts` ×10 live in
+  // unrelated subtrees of the proving ground, so two PRs can share a "module"
+  // name and nothing else. Say so, because the caller's rule will not.
+  console.error(
+    `${NAME}: module-only hit — confirm before treating as a verdict. Common\n` +
+      `  TypeScript basenames (types.ts, index.ts) recur across unrelated\n` +
+      `  subtrees, so a shared name is not yet a shared module: ${modules.join(", ")}`,
   );
 }
 
