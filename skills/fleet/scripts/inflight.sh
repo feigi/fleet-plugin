@@ -96,8 +96,14 @@ fi
 # Probe 3 — a local worktree or branch.
 local_b=$(git for-each-ref --format='%(refname:short)' refs/heads |
           grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
+# Match on the worktree's basename, not its full path — grepping the whole
+# absolute path would false-hit on any checkout whose directory happens to
+# contain the ticket number as an earlier path segment (e.g. a home dir or
+# a sibling directory named with digits), matching every ticket.
 wt=$(git worktree list --porcelain | awk '/^worktree /{print $2}' |
-     grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
+     while IFS= read -r p; do printf '%s\t%s\n' "$(basename "$p")" "$p"; done |
+     awk -F'\t' -v n="$n" '$1 ~ "(^|[/-])" n "([-/]|$)" {print $2}' |
+     paste -sd, - || true)
 if [ -n "$local_b" ] || [ -n "$wt" ]; then
   [ -n "$local_b" ] && echo "    local branches: $local_b" >&2
   [ -n "$wt" ] && echo "    worktrees: $wt" >&2

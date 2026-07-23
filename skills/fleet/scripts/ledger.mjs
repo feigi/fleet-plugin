@@ -8,7 +8,7 @@
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 const NAME = "ledger";
@@ -28,7 +28,7 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|check|read [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read [args]");
 
 const ROWS = "## Rows";
 const FILED = "## Filed";
@@ -81,7 +81,12 @@ function save(d) {
     `\n\n${RULED}\n\n` + d.ruled.map((r) => `- ${escapeText(r)}`).join("\n") + "\n";
   try {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, out);
+    // Write to a sibling temp file and rename over the target. rename is
+    // atomic on a POSIX filesystem — a crash mid-write leaves the temp file
+    // corrupt but never truncates the durability file itself.
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, out);
+    renameSync(tmp, file);
   } catch (e) {
     die(`cannot write ${file}: ${e.message}`);
   }
@@ -101,15 +106,17 @@ if (cmd === "row") {
   const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
   const line = `${key} ${textParts.join(" ")}`;
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
-  if (i === -1) {
+  const created = i === -1;
+  if (created) {
     data.rows.push(line);
-    console.error(`    new row ${key}`);
   } else {
     data.rows[i] = line;
-    console.error(`    rewrote row ${key}`);
   }
+  // Logged only after save() returns — a failed write must not claim a row
+  // was recorded when it never made it to disk.
   save(data);
-  console.log(JSON.stringify({ ticket: key, line, created: i === -1 }, null, 2));
+  console.error(created ? `    new row ${key}` : `    rewrote row ${key}`);
+  console.log(JSON.stringify({ ticket: key, line, created }, null, 2));
   process.exit(0);
 }
 
@@ -120,6 +127,16 @@ if (cmd === "filed") {
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
   save(data);
   console.log(JSON.stringify({ issue, subject, total: data.filed.length }, null, 2));
+  process.exit(0);
+}
+
+if (cmd === "ruled") {
+  const [pr, ...decisionParts] = rest;
+  if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
+  const decision = decisionParts.join(" ");
+  data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
+  save(data);
+  console.log(JSON.stringify({ pr, decision, total: data.ruled.length }, null, 2));
   process.exit(0);
 }
 
@@ -167,4 +184,4 @@ if (cmd === "check") {
   process.exit(0);
 }
 
-die(`unknown subcommand '${cmd}' — expected row, filed, check or read`);
+die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
