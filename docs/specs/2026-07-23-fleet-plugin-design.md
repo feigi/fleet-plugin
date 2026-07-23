@@ -302,8 +302,27 @@ reloaded skill listing shows `fleet:review-and-fix`, `fleet:run-merge-bot`,
 `fleet:next-ticket`, `fleet:sizing-a-ticket`, every one namespaced. The earlier
 "leaning bare-works" reading of `manifest-reference.md` was wrong.
 
-**Remaining:** the two `${CLAUDE_PLUGIN_ROOT}` and expected-job-list items are
-Plan 2's — neither can be settled without writing a script.
+**Resolved by Plan 1, as prep for Plan 2:**
+
+- **`${CLAUDE_PLUGIN_ROOT}` does NOT reach an agent-constructed Bash call.** It is
+  unset in the environment (this session exposes ten other `CLAUDE_*` vars, not
+  that one), so it is template interpolation inside plugin component files, not
+  an exported variable. **Consequence for Plan 2: scripts are invoked by resolved
+  absolute path**, and the `settings.json` Bash allowlist targets that path.
+  `${CLAUDE_PLUGIN_ROOT}` remains correct *inside* command and skill markdown.
+  Residual doubt: the test was run outside a plugin component context; the
+  airtight version is a subagent dispatched by a plugin skill. The documented
+  usage shape agrees, so Plan 2 proceeds on resolved paths.
+
+- **The expected-job list is five, not four.** `agent-brain`'s `.github/workflows/ci.yml`
+  defines `rebase-check`, `check`, `integration`, `integration-docker`, `mutation`,
+  no `name:` overrides, so job ids equal the names `gh run view --json jobs`
+  reports — verified against real run `166001777`. **`integration-docker` appears
+  nowhere in the fleet's prose**, which only ever discusses the other four; an
+  expected-job list built from the documents would have silently missed it. This
+  is the argument for `ci-state.mjs` deriving the list from the workflow file
+  rather than hardcoding it. Run `166001777` is also a live `skipped ≠ passed`
+  fixture: `check: success` with the other four `skipped`.
 
 ### Stale-reference work list for Plan 3
 
