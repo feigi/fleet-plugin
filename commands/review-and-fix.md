@@ -24,6 +24,10 @@ Require all four: run `headSha` == branch head == `headRefOid`; run `status` **c
 
 ## Specialists
 
+**Prefer the workflow.** `Workflow({name: "review-pr", args: {pr, branch, worktree, testCmd, scratch}})` runs the fan-out with `agent()` returning **into the script**, so no report can go undelivered — the failure that cost this fleet five reports on one PR and four on another. It also cuts the snapshot itself and adversarially verifies every finding before returning. It needs the caller's explicit opt-in to multi-agent orchestration; without that, dispatch manually and apply the rules below, which are the same rules the workflow encodes.
+
+The workflow cannot ask the user anything and cannot wait on CI — rebasing, watching checks, binding and labelling stay here.
+
 - **Spawn unnamed.** Named agents cannot name children — `teammates cannot spawn teammates`. On that error drop the name; do not downgrade to a solo review.
 - **Say read-only.** `pr-review-toolkit` agents hold write tools; one has committed and pushed during a report-only dispatch. No commits, no pushes, no worktree edits.
 - **Cut one snapshot; every specialist works there, reading or writing.** `git archive HEAD | tar -x -C <dir>` once, hand all of them that path, and keep every one out of the worktree. It cannot change under them, so mutation probes, your own mid-review edits and sibling contention all stop mattering — no coordination needed. Observed without it: three specialists read two *different* in-flight mutations, one reporting the PR's own bug as still present; on another PR three watched their file go clean → `M` mid-analysis. Reverting probes does not help — it leaves a window where every concurrent reader sees a lie, and serializing does not close it because readers are concurrent with the *mutator*.
