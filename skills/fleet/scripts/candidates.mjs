@@ -29,6 +29,14 @@ const has = (name) => process.argv.includes(`--${name}`);
 const requireLabel = arg("require-label");
 const allowFallback = has("allow-fallback");
 
+// Default well above the proving ground's real volume. Measured 2026-07-23:
+// 106 issues survive the exclusions, so the previous hardcoded 100 dropped six
+// of them — silently, because a truncated list is indistinguishable from a
+// complete one. A high-priority ticket sitting at position 101 was invisible to
+// the fleet and nothing said so.
+const limit = Number(arg("limit") ?? 500);
+if (!Number.isInteger(limit) || limit < 1) die(`--limit must be a positive integer, got '${arg("limit")}'`);
+
 if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without --require-label");
 
 const EXCLUDE =
@@ -42,7 +50,7 @@ function query(label) {
   const args = [
     "issue", "list",
     "--state", "open",
-    "--limit", "100",
+    "--limit", String(limit),
     "--search", search,
     "--json", "number,title,labels,body",
     "--jq", JQ,
@@ -67,6 +75,16 @@ function query(label) {
 
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
+
+// Hitting the limit exactly means the answer may be incomplete, and there is no
+// way to tell from the result itself. Refuse rather than hand back a shortlist
+// that silently omits work — "no silent caps" is the rule this enforces.
+if (rows.length === limit) {
+  die(
+    `exactly ${limit} results — the list is capped and may be truncated. ` +
+      `Re-run with a higher --limit; a shortlist that silently drops tickets is not an answer.`,
+  );
+}
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
