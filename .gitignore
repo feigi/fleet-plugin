@@ -47,8 +47,6 @@ plans/
 # Skills: symlinks to local skill repos aren't portable config; own skills are.
 # Trailing-slash ignore blocks re-inclusion, so exclude contents and negate.
 skills/*
-!skills/next-ticket/
-!skills/sizing-a-ticket/
 # Kept after uninstalling the caveman plugin — now our own copy, not vendored.
 !skills/caveman-compress/
 !skills/fleet/
