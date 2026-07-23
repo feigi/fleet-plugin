@@ -171,7 +171,12 @@ if (cmd === "check") {
     const [small, big] = filedTokens.size <= target.size ? [filedTokens, target] : [target, filedTokens];
     return small.size >= 4 && [...small].every((t) => big.has(t));
   };
-  const match = data.filed.find((f) => isMatch(tokenSet(f)));
+  // Strip the leading `#NNN ` issue number: it is metadata, not part of the
+  // finding's subject. Left in, it becomes a stray token the checked subject
+  // never carries, so a filed row can never be a subset of a longer check
+  // subject — the >=4-token rule silently never fires and duplicates get filed.
+  const subjectOf = (filedRow) => filedRow.replace(/^#\d+\s+/, "");
+  const match = data.filed.find((f) => isMatch(tokenSet(subjectOf(f))));
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
     console.log(JSON.stringify({ subject, found: true, match }, null, 2));
