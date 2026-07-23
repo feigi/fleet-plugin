@@ -343,29 +343,36 @@ Verified as **not** needing change: `review-and-fix.md:6` already calls
 references `/triage`, which stays bare because `triage` is a personal skill in
 `~/.claude/skills/`, not plugin-packaged.
 
-- Whether bare aliases (`/review-and-fix`) still resolve alongside namespaced
-  ones (`/fleet:review-and-fix`), or whether the namespaced form is mandatory.
-  **Still open after Plan 1 Task 3.** Evidence so far, none of it conclusive:
-  `manifest-reference.md` calls command namespacing "optional";
-  `command-development/SKILL.md:378` shows a namespaced command invoked as
-  `/build` with `(project:ci)` as a display label, but that example is project
-  commands, not plugin ones; and `claude plugin details` lists bare component
-  names for both `fleet` (`review-and-fix, run-merge-bot`) and `commit-commands`
-  (`clean_gone, commit, commit-push-pr`) — which reflects how the inventory
-  *names* components, not how they are *invoked*. Settled only by inspecting
-  slash-command completion in a session after `/reload-plugins`, which is Plan 1
-  Task 6's acceptance step.
+### Sites the first sweep missed — found by the Plan 1 final review
 
-  Also learned in Task 3, and worth recording because it misleads: `claude
-  plugin details` reports plugin **commands** under `Skills (N)`. There is no
-  `Commands` line. `commit-commands` ships only a `commands/` directory and
-  reports `Skills (3)`.
-- Whether `${CLAUDE_PLUGIN_ROOT}` is interpolated only in plugin component files
-  or is also available to a Bash call an agent constructs. The fallback is that
-  agents invoke scripts by resolved absolute path, which is what the permission
-  allowlist targets either way.
-- The expected-job list `ci-state.mjs` checks for absence against. Derive it
-  from the workflow definition rather than hardcoding.
+The sweep above was run against the plugin only. Four more sites exist, same
+defect class:
+
+| Site | Problem |
+|---|---|
+| `next-ticket` SKILL.md:80 | names **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ends `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written repairs half a line. |
+| `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references. **Not a dead document** — `run-team` SKILL.md:13 sends the reader to it as "Rationale", so it is reachable and wrong. The migration-debt note saying it gets "a pointer rather than an edit" was written before anyone knew its paths would die. |
+| `workflows/review-pr.js:6` | its `whenToUse` string reads "Called per-PR by `/run-team`" — user- and model-facing, renders in the skill listing, and names a command that no longer exists in any form. The spec's "Out of scope — rewriting `review-pr.js`" must not shelter this: a one-string description fix is not a rewrite. |
+| Every `run-team.md:NNN` citation in **this** spec (6 sites) | all were accurate when written against the then-dirty working tree, and are now stale twice over: wrong path, and **+2 lines** off. The command's 4-line frontmatter became a 6-line skill frontmatter, so a body line at N is now at N+2. The one that bites is the Plan 2 instruction citing `run-team.md:421` for the settings.json prohibition — it resolves to nothing. |
+
+**Also decided here:** every cross-reference to a sibling fleet component inside
+these documents is a **bare backticked name in running prose**, never a slash
+invocation — `run-team` SKILL.md:7, :38, :39, :46, :121, :123 and `next-ticket`
+SKILL.md:63, :90. That is *why* namespacing broke nothing: the model resolves
+them by description, not by literal name. It is luck rather than design, and
+Plan 3 decides deliberately whether to keep depending on it.
+
+**Nothing is open.** All four items this section opened with are answered above.
+The superseded bullets that used to sit here — restating namespacing,
+`${CLAUDE_PLUGIN_ROOT}` and the expected-job list as unresolved — were deleted
+rather than annotated, because a rule stated twice at two confidence levels is
+the contradiction `run-team`'s own text warns about, and a reader who jumps to
+"Open items" would have taken three wrong answers away.
+
+Worth keeping from that material, because it misleads on sight: `claude plugin
+details` reports plugin **commands** under `Skills (N)`. There is no `Commands`
+line. `commit-commands` ships only a `commands/` directory and reports
+`Skills (3)`.
 
 ## Baseline measurement (Plan 1, 2026-07-23)
 
@@ -387,12 +394,29 @@ review-and-fix         ~30      ~3.9k
 
 Three things this measurement changes:
 
-1. **The byte estimate was low.** 28KB was reasoned to ~7k tokens; the
-   instrument says **~10.3k**. Every later claim uses the instrument.
-2. **The real number is the member's, not the controller's.** A reviewer reads
-   `run-team` *and* `review-and-fix`; a merge bot reads `run-team` *and*
-   `run-merge-bot`. The fleet's three core documents total **~19.3k on-invoke**,
-   which is the figure the restructure has to move.
+1. **The pre-measurement claim was a size target, not a token estimate.** What
+   was on record was "28KB → roughly 6KB". The instrument reports **~10.3k
+   tokens on-invoke**, so the target is now stated in the same unit the
+   acceptance check reads. (An earlier draft of this section claimed 28KB "was
+   reasoned to ~7k tokens" — no such estimate was ever written down; it was
+   retrofitted to make the correction look sharper. Deleted.)
+2. **The controller pays the on-invoke cost, and no one else does.** Members do
+   not invoke `run-team` — SKILL.md dispatches a reviewer with the PR number and
+   tells it to *read* `review-and-fix.md` as a file path, explicitly "not a slash
+   invocation", and does the same for the merge bot. So the per-actor costs are:
+   controller ~10.3k, reviewer ~3.9k, merge bot ~5.1k. Their sum, ~19.3k, is a
+   figure **no actor pays**; an earlier draft of this section headlined it as
+   "the real number", which was wrong.
+
+   The corrected framing is the stronger one: the controller carries ~10.3k of
+   that total single-handed, and the controller is exactly what `references/`
+   splits.
+
+   **Consequence Plan 3 must not get wrong:** because members `Read` these files
+   rather than invoking them, `claude plugin details`' `on-invoke` column does
+   not measure member cost. Moving text into `references/` cuts on-invoke but
+   does not cut a `Read` of the whole file. Plan 3 may claim a controller-side
+   win from a `details` delta; it may **not** claim a member-side win from one.
 3. **Always-on is already cheap (~302 tok) and is not the problem.** Plan 3
    should not spend effort shrinking it. The win is entirely in on-invoke, which
    is exactly what the `references/` split targets — a reference costs nothing
