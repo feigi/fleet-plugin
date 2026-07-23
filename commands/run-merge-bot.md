@@ -61,6 +61,16 @@ For each labeled PR clearing the hold rule, lowest first:
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
 
+   **Hold the wait inside one blocking command — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead:
+
+   ```bash
+   gh run watch <run-id> --exit-status    # returns only when the run reaches a terminal state
+   ```
+
+   Take `<run-id>` from the same `gh run list --json` row you took the head from. A CI cycle here runs ~5-6 minutes; if `gh run watch` outlives your shell timeout, re-issue it — that is still one blocking call per turn, not an idle turn. Never `sleep`-poll in a loop you exit early.
+
+   **`gh run watch` returning is permission to look, not a verdict.** It tells you the run reached a terminal state; it does not tell you which one, and a rerun can rewrite that state in place afterwards. Re-query `gh run view <run-id> --json jobs,attempt` for the decision — see step 3 and the re-query rule below.
+
    **You are the only place currency is proven, so never merge on a green from before your rebase.** The reviewer's green attests the diff was correct against *its* base — that claim does not expire and does not cover yours. Only a run on the rebased head shows it is still correct against current `main`.
 
    **Triage a post-rebase red by what the pre-rebase run did.** Green before, red after, with no change of your own between, means a sibling merge broke this PR semantically — a rebase applies cleanly and still breaks the build when someone renamed a symbol it uses. That is a **finding, not a chore**: report it and hand it back to the reviewer with the failing job. Red both before and after is also the reviewer's. You fix only the mechanical failures you caused: conflict resolution and the release label.
@@ -143,6 +153,12 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 ## Then stay armed
 
+**Skip this whole section if a controller dispatched you** (`/run-team`, or any
+caller that says it owns the watcher) — report your pass and exit instead. A
+monitor armed by a member dies with that member and the queue stops silently, so
+the watcher belongs to whoever outlives the pass. Only arm one when you are the
+top-level invocation.
+
 The pass ends, the queue does not. Once no labeled PR is actionable, arm a persistent Monitor so a later sign-off restarts the loop without re-running this command:
 
 ```bash
@@ -167,5 +183,3 @@ Arm with `persistent: true`, description `ready-to-merge label on agent-brain PR
 - A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.
 
 On an event, do not merge that PR on sight — **re-run selection from the top**, hold rule included. Report each outcome and leave the monitor armed. One watch per session; stop with TaskStop.
-
-**When a controller runs you** (`/run-team`), skip this section entirely — the controller owns the watcher, because a dying member takes it down with it.

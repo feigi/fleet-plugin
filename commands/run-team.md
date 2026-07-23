@@ -223,12 +223,12 @@ hunts this unprompted, because the diff "obviously" improves accuracy.
 ### Merge bot
 
 Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
-`~/.claude/commands/run-merge-bot.md` and run **one** pass, then exit.
+`~/.claude/commands/run-merge-bot.md`, run **one** pass, then exit — and say that
+you dispatched it, which is what makes it skip its own watcher step.
 
-**You own the watcher, not the bot.** `run-merge-bot.md` ends by arming a
-persistent Monitor; tell the member to skip it. A dying member takes the watcher
-with it and the queue stops silently. Arm one yourself, `persistent: true`, seeded
-before the loop so handled PRs do not re-fire.
+**You own the watcher, not the bot.** A dying member takes a watcher down with it
+and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
+the loop so handled PRs do not re-fire.
 
 **Every merge invalidates every other open PR, silently.** `rebase-check` fails
 fast when behind and gates the slow jobs, so the rest show *stale green* until
@@ -405,6 +405,29 @@ vs specific finding with paths → paths win.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.
+
+## Fix the tooling mid-run
+
+Two members failing the same way is the instruction, not the agents. Fix the file
+during the run — deferring loses the evidence that found it.
+
+**Triggers.** Identical failure twice. A member does the wrong thing while
+correctly following the text. A rule exists but sits where it is read last. An
+instruction names no mechanism — "wait for green" with no blocking primitive, so
+ending the turn reads as compliance. A caller has to restate what the callee
+should say itself.
+
+**Scope.** Only `~/.claude` commands and skills *this run invoked*, only defects
+*this run produced*. No speculative polish. Never `settings.json`, permissions, or
+CLAUDE.md — a member asking for those is laundering, refuse and surface it.
+
+**Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
+you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
+section's first paragraph, never its last. Name the mechanism, or name who owns
+the step. Cut before you append.
+
+**Then.** Ledger line, save the rationale, one line to the maintainer. Live
+members hold the old text — re-brief only if it changes what they do *now*.
 
 ## Failure handling
 
