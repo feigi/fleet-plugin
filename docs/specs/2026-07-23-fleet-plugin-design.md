@@ -90,11 +90,30 @@ Three design properties compensate, and they are requirements, not style:
 - One versioned unit holds commands *and* skills, so `run-merge-bot` and
   `review-and-fix` are not forced into skill shape to be packaged.
 
-**Constraint accepted:** `plugins/` is gitignored in `claude-config`
-(`.gitignore:40`; `git ls-files plugins` returns 0). Plugin source therefore
-lives at a **tracked** path — `~/.claude/fleet/` — installed via a local
-marketplace manifest, not at `~/.claude/plugins/fleet/`, which would sit outside
-the repo that is the backup and distribution mechanism.
+**Constraint, and the mechanism that resolves it:** `plugins/` is gitignored in
+`claude-config` (`.gitignore:40`; `git ls-files plugins` returns 0), so plugin
+source cannot live at `~/.claude/plugins/fleet/` without falling outside the
+repo that is the backup and distribution mechanism.
+
+`claude plugin init <name>` scaffolds a plugin at **`~/.claude/skills/<name>/`**,
+which auto-loads the next session as `<name>@skills-dir`. This needs no
+marketplace manifest, no `--plugin-dir` flag, and no install step. Plugin root
+is therefore `~/.claude/skills/fleet/`.
+
+**One gitignore edit is mandatory.** `skills/` is not wholesale tracked either:
+`.gitignore:49` ignores `skills/*` and re-includes individual directories by
+negation (`!skills/next-ticket/`, `!skills/sizing-a-ticket/`,
+`!skills/caveman-compress/`). Without adding `!skills/fleet/`, `git add
+skills/fleet` stages nothing and every packaging commit is silently empty — the
+same class of failure as `/clean_gone` exiting 0. Verify with `git check-ignore
+-v skills/fleet` before and after. The two negations for the moved skills are
+retired once `!skills/fleet/` covers them.
+
+**Measurement instrument:** `claude plugin details fleet` reports a component
+inventory plus projected token cost, split always-on vs on-invoke. The context
+driver is therefore measurable rather than estimated — which is why packaging
+lands before restructuring: install the content unchanged, measure, restructure,
+measure again with the same instrument.
 
 **Constraint accepted:** workflows are not a plugin component. Recognized dirs
 are `commands/ agents/ skills/ hooks/ scripts/`, and the `Workflow` tool
@@ -104,10 +123,9 @@ lives outside the plugin and carries one resolved path.
 ## Layout
 
 ```
-~/.claude/fleet/                     ← tracked in claude-config
+~/.claude/skills/fleet/              ← tracked; auto-loads as fleet@skills-dir
 ├── .claude-plugin/
-│   ├── plugin.json
-│   └── marketplace.json             ← single-plugin local marketplace
+│   └── plugin.json
 ├── commands/
 │   ├── run-merge-bot.md             ← stays a command, slimmed 185 → ~70
 │   └── review-and-fix.md            ← stays a command, slimmed 61 → ~30
@@ -245,30 +263,39 @@ JSON string rather than a value.
 
 ## Rollout
 
-Stage 1, in order:
+Stage 1 splits into three plans, each producing working software on its own.
+Plans 2 and 3 are written only after plan 1 lands, because plan 1 resolves the
+open items their tasks would otherwise assume.
 
-1. Plugin skeleton + marketplace manifest. Install. **Verify namespacing and
-   that all five components resolve before writing anything else.**
-2. Scripts, each proven live before the next is written: `ci-state` against a
-   green PR *and* one with a missing job; `pr-overlap` against a known-related
-   and a known-unrelated pair; `reap.sh` dry-run against the real gone-branch
-   set; `no-undo-audit` against a live worktree.
-3. Documentation restructure and dedup.
-4. Delete the originals **in the same commit** that adds the plugin. Rollback is
-   `git revert`, not two live copies of `/run-team` racing each other.
-5. Settings.json Bash allowlist for the resolved script prefix, once paths are
-   final. This is a maintainer edit — `run-team.md:421` bars members from
-   touching `settings.json`.
-6. One live fleet run as acceptance.
+**Plan 1 — packaging.** Commit the pending working-tree changes first. Scaffold
+`fleet` via `claude plugin init`. Move all five artifacts in **unchanged**,
+deleting each original in the same commit — rollback is `git revert`, never two
+live copies of `/run-team` racing each other. Verify all five resolve and settle
+the namespacing question. Record `claude plugin details fleet` as the **baseline
+token measurement**.
+
+**Plan 2 — scripts.** Eleven scripts, each proven live before the next is
+written: `ci-state` against a green PR *and* one with a missing job;
+`pr-overlap` against a known-related and a known-unrelated pair; `reap.sh`
+dry-run against the real gone-branch set; `no-undo-audit` against a live
+worktree. Proving ground is `/Users/chris/dev/agent-brain`. Ends with the
+`settings.json` Bash allowlist for the resolved script prefix — a maintainer
+edit, since `run-team.md:421` bars members from touching `settings.json`.
+
+**Plan 3 — restructure.** `SKILL.md` slimmed, five references extracted, dedup
+applied, commands pointed at scripts. Acceptance is `claude plugin details
+fleet` against plan 1's baseline, plus one live fleet run.
 
 Stage 2 lands only after that run.
 
 ## Open items — verify at implementation time, do not assume
 
-- The exact `extraKnownMarketplaces` schema for a directory source. Check
-  `plugin-dev/skills/plugin-structure/references/manifest-reference.md`.
 - Whether bare aliases (`/review-and-fix`) still resolve alongside namespaced
   ones (`/fleet:review-and-fix`), or whether the namespaced form is mandatory.
+  Leaning bare-works: `manifest-reference.md` calls command namespacing
+  "optional", and `command-development/SKILL.md:378` shows a namespaced command
+  invoked as `/build` with `(project:ci)` as a display label. Not conclusive —
+  that example is project commands, not plugin ones. Settle it empirically.
 - Whether `${CLAUDE_PLUGIN_ROOT}` is interpolated only in plugin component files
   or is also available to a Bash call an agent constructs. The fallback is that
   agents invoke scripts by resolved absolute path, which is what the permission
