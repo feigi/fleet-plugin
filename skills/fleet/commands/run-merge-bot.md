@@ -15,21 +15,10 @@ Lowest number first. But the label alone does not authorize a merge: **a labeled
 Before touching labeled PR `N`, list every open PR below `N` lacking the label. For each, decide related or not:
 
 ```bash
-lower=$(mktemp); this=$(mktemp)
-gh pr diff <lower-pr> --name-only | sort -u > "$lower"
-gh pr diff <N> --name-only | sort -u > "$this"
-
-echo "--- shared files ---"
-comm -12 "$lower" "$this"
-echo "--- shared module names (same file moved/split across dirs) ---"
-comm -12 <(xargs -n1 basename < "$lower" | sed 's/\.test\.ts$//;s/\.ts$//' | sort -u) \
-         <(xargs -n1 basename < "$this" | sed 's/\.test\.ts$//;s/\.ts$//' | sort -u)
-echo "--- shared directories ---"
-comm -12 <(xargs -n1 dirname < "$lower" | grep -vx '\.' | sort -u) \
-         <(xargs -n1 dirname < "$this" | grep -vx '\.' | sort -u)
+~/.claude/skills/fleet/scripts/pr-overlap.mjs --a <lower-pr> --b <N>
 ```
 
-**Any** of the three producing output means related. Path equality alone is too weak: a repo mid-migration has `src/…/foo.test.ts` in one PR and `tests/unit/…/foo.test.ts` in the other — same module, zero shared paths.
+**Any** of its three signals (`files`, `modules`, `dirs`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/foo.test.ts` in one PR and `tests/unit/…/foo.test.ts` in the other — same module, zero shared paths.
 
 Two false positives in signal 3:
 
@@ -80,26 +69,21 @@ For each labeled PR clearing the hold rule, lowest first:
    **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
 
    ```bash
-   rid=$(gh run list --branch <branch> --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
-   gh run view "$rid" --json headSha,status,conclusion
-   gh run view "$rid" --json jobs --jq '.jobs[] | "\(.name) \(.status)/\(.conclusion // "-")"'
-   git rev-parse origin/<branch>; gh pr view <pr> --json headRefOid
+   ~/.claude/skills/fleet/scripts/ci-state.mjs --pr <pr>
    ```
 
-   Require all four: run `headSha` == branch head == `headRefOid`, run `status` **completed**, **every expected job present in that run**. A force-push cancels the run under it; finished jobs keep their conclusions and keep being reported. Absent jobs read as `pending`, inherited ones as `pass`.
+   No `--branch` flag — it derives the branch from the PR. It binds run head, `status`, and every expected job from one query, and reports non-green unless the run's head matches the PR head, `status` is **completed**, and every expected job is present and succeeded. A force-push cancels the run under it; finished jobs keep their conclusions and keep being reported, so an absent job reads as `pending` and an inherited one as `pass` if you aggregate instead of binding to this one run.
 
    **Re-query at the moment you merge — a conclusion can invert under a fixed run id.** A rerun rewrites the *existing* run rather than creating a new one, so a run id you read as `success` can later read `failure` with nothing pushed to the branch. Observed twice in one fleet run, on two PRs: a refresh workflow re-ran the currency check after `main` advanced and flipped the same id on the same SHA. This cuts both ways — a red you cached may since have gone green on re-run, and a green you cached may be red. Never carry a conclusion across a wait.
 
-   Also: `--workflow CI` above matters. The newest run on a branch is frequently a label or policy workflow, so a bare `--limit 1` can return something that is not CI at all.
+   Also: the newest run on a branch is frequently a label or policy workflow, not CI — `ci-state.mjs` filters by `--workflow CI` by default.
 
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
 
    ```bash
-   git merge-base --is-ancestor <pre-rebase-head> origin/main   # expect FAILURE
-   git merge-base --is-ancestor <rebased-head>    origin/main   # expect SUCCESS
-   git rev-parse <merge-commit>^2                               # expect <rebased-head>
+   ~/.claude/skills/fleet/scripts/prove-merge.sh <pre-rebase-head> <rebased-head> <merge-commit>
    ```
 
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
@@ -116,30 +100,13 @@ Report merged / skipped-unlabeled / held-behind-#X / blocked after the pass.
 
 A rebase resolved the wrong way silently reverts work already in `main`. It looks like an ordinary conflict resolution and passes CI, because the branch's own tests never covered what it undid. Never resolve blind.
 
-**1. Do not destroy unpushed work.** The worktree may hold changes existing nowhere else:
+**1-3. Do not destroy unpushed work, preview conflicts, and name the work at risk** — what `main` gained in the conflicting files since the branch forked:
 
 ```bash
-git -C <worktree> status --porcelain     # must be empty before rebasing
-git -C <worktree> stash list
+~/.claude/skills/fleet/scripts/no-undo-audit.sh <worktree> <branch>
 ```
 
-Non-empty → stop and report. **Never** `git clean`, `git checkout .`, or `git reset --hard` to make a rebase start. That work is unrecoverable and is not on the remote. The stash stack is repo-global across worktrees — never pop, drop or apply an entry you did not create.
-
-**2. Preview conflicts:**
-
-```bash
-git merge-tree --write-tree --name-only origin/main origin/<branch>
-```
-
-**3. Name the work at risk** — what `main` gained since the branch forked:
-
-```bash
-base=$(git merge-base origin/main origin/<branch>)
-git log --oneline "$base"..origin/main -- <conflicting files>
-git diff --stat "$base"..origin/main -- <conflicting files>
-```
-
-Those commits are what a careless resolution deletes. Read them first.
+It refuses (exit 1) on a dirty worktree or any existing stash entry rather than reporting one. **Never** `git clean`, `git checkout .`, `git reset --hard`, or `git stash drop` to make it pass — that work is unrecoverable and is not on the remote. The stash stack is repo-global across worktrees — never pop, drop or apply an entry you did not create. Read the at-risk commits it lists first; those are what a careless resolution deletes.
 
 **4. Take `main`'s side wholesale, then re-apply the branch's delta on top.** Never blanket `-X ours` / `-X theirs`. The branch's side is by definition *pre-merge* text — on a docs or comment hunk it carries claims a later PR already corrected, and keeping it reintroduces them silently.
 
