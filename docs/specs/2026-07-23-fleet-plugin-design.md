@@ -1,8 +1,9 @@
 # `fleet` plugin — extracting the deterministic spine of `/run-team`
 
 Date: 2026-07-23
-Status: approved design, not yet implemented
-Artifact: `~/.claude/fleet/` (repo `feigi/claude-config`)
+Status: Plan 1 (packaging) and Plan 2 (ci-state, pr-overlap) implemented and
+pushed; stale references repointed. Plans 2b, 2c and 3 outstanding.
+Artifact: `~/.claude/skills/fleet/` (repo `feigi/claude-config`)
 Partly supersedes: `docs/specs/2026-07-22-run-team-agent-fleet-design.md`
 
 ## Problem
@@ -324,19 +325,27 @@ reloaded skill listing shows `fleet:review-and-fix`, `fleet:run-merge-bot`,
   rather than hardcoding it. Run `166001777` is also a live `skipped ≠ passed`
   fixture: `check: success` with the other four `skipped`.
 
-### Stale-reference work list for Plan 3
+### Stale-reference work list — RESOLVED, not Plan 3's
 
 Packaging invalidated references inside the moved documents. Swept
 systematically once namespacing was settled, because that answer widened the
 defect class from dead file paths to dead invocation names.
 
-| Site | Currently | Should be | Severity |
+**All of it is done.** It was pulled out of Plan 3 into its own plan
+(`docs/plans/2026-07-23-fleet-repoint-stale-references.md`) and landed in
+`a03258e` and `d739b0b`, because it depended on no scripts and the two top rows
+were why `/fleet:run-team` did not work at all. Plan 3 inherits none of it.
+
+Line numbers below are the **pre-fix** ones and no longer resolve — they are kept
+as the record of what was wrong, not as pointers.
+
+| Site (pre-fix lines) | Was | Became | Severity |
 |---|---|---|---|
-| `run-team` SKILL.md:183 | `~/.claude/commands/review-and-fix.md` | plugin-relative path | **broken** |
-| `run-team` SKILL.md:227 | `~/.claude/commands/run-merge-bot.md` | plugin-relative path | **broken** |
-| `next-ticket` SKILL.md:80 | "`/review-and-fix` → maintainer adds…" | `/fleet:review-and-fix` | **broken** — instructs the reader to run a command that does not exist |
-| `run-merge-bot.md:156` | "(`/run-team`, or any caller…)" | `/fleet:run-team` | minor — identifies a caller, does not invoke |
-| `run-team` SKILL.md:257, :531 | `/clean_gone` | `commit-commands:clean_gone` | minor — both are prohibitions ("do not invoke") |
+| `run-team` SKILL.md:183 | `~/.claude/commands/review-and-fix.md` | `~/.claude/skills/fleet/commands/review-and-fix.md` | **was broken** — fixed |
+| `run-team` SKILL.md:227 | `~/.claude/commands/run-merge-bot.md` | `~/.claude/skills/fleet/commands/run-merge-bot.md` | **was broken** — fixed |
+| `next-ticket` SKILL.md:80 | `/review-and-fix` **and** `/run-merge-bot` | `/fleet:review-and-fix`, `/fleet:run-merge-bot` | **was broken** — named two dead commands, both fixed |
+| `run-merge-bot.md:156` | "(`/run-team`, or any caller…)" | `/fleet:run-team` | minor — fixed |
+| `run-team` SKILL.md:257, :531 | `/clean_gone` | `commit-commands:clean_gone` | minor — fixed |
 
 Verified as **not** needing change: `review-and-fix.md:6` already calls
 `/pr-review-toolkit:review-pr` in namespaced form; `run-team` SKILL.md:330-337
@@ -345,10 +354,12 @@ references `/triage`, which stays bare because `triage` is a personal skill in
 
 ### Sites the first sweep missed — found by the Plan 1 final review
 
-The sweep above was run against the plugin only. Four more sites exist, same
-defect class:
+The sweep above was run against the plugin only. Four more sites existed, same
+defect class. **All four are also fixed**, in the same two commits. Kept as the
+record of how an incomplete sweep looks — the first pass found five sites and
+was confidently reported as complete.
 
-| Site | Problem |
+| Site | Problem (all now resolved) |
 |---|---|
 | `next-ticket` SKILL.md:80 | names **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ends `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written repairs half a line. |
 | `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references. **Not a dead document** — `run-team` SKILL.md:13 sends the reader to it as "Rationale", so it is reachable and wrong. The migration-debt note saying it gets "a pointer rather than an edit" was written before anyone knew its paths would die. |
@@ -424,15 +435,19 @@ Three things this measurement changes:
 
 ## Migration debt
 
-- Invocation names **may** change to `/fleet:run-merge-bot`,
-  `/fleet:review-and-fix`, `fleet:next-ticket` — conditional on the open
-  namespacing question above, not yet settled. Internal cross-references need
-  updating either way if bare names do not survive: `next-ticket:80` names
-  `/review-and-fix`, and `run-team`'s body points members at
-  `~/.claude/commands/run-merge-bot.md` and `~/.claude/commands/review-and-fix.md`
-  — **paths that no longer exist** as of Plan 1 Task 3. Those pointers are stale
-  now regardless of how namespacing resolves, and Plan 3 must repoint them at
-  `${CLAUDE_PLUGIN_ROOT}`.
+- **Settled and paid.** Invocation names *did* change — namespacing is
+  mandatory, so every fleet component is now reached as `/fleet:run-merge-bot`,
+  `/fleet:review-and-fix`, `fleet:next-ticket`. Independently, `run-team`'s body
+  had pointed members at `~/.claude/commands/run-merge-bot.md` and
+  `~/.claude/commands/review-and-fix.md`, paths Plan 1 Task 3 emptied — which is
+  why the fleet did not run at all between packaging and the repoint. Both
+  classes were fixed in `a03258e` and `d739b0b`.
+
+  Repointed at **resolved absolute paths, not `${CLAUDE_PLUGIN_ROOT}`** as this
+  section originally proposed. That variable is confirmed unset in a Bash call,
+  and whether it interpolates inside a skill body a member reads as text is
+  still untested — repairing a broken path with an unproven one is not a repair.
+  Plan 3 may switch after testing it.
 - Two memories reference the old command paths (the `/ship-it` → `/review-and-fix`
   replacement record, and the `/run-merge-bot` creation record). Update at the
   end, not before.
