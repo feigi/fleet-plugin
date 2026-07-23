@@ -148,6 +148,7 @@ costs a round-trip per event in a loop designed to have many.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
+- **Merge-bot wave reports done** → reap merged branches and worktrees (below).
 - **Monitor: CI run completes** → ping the one member waiting on it, with the outcome.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
@@ -207,6 +208,69 @@ than merging singles. Any behind-count you hand a bot is expired on arrival; say
 
 `run-merge-bot.md` carries the mechanics — intra-wave re-checks, run-binding, the
 ancestry proof, post-rebase red triage. Do not restate them here.
+
+### Reap after every wave
+
+A merge deletes the remote branch and leaves the local branch `[gone]` with its
+worktree — and its `node_modules` — still on disk. Reap after **each** wave, not
+once at the end. A stale worktree still answers `git worktree list`, so phase 0's
+in-flight probe reads an already-merged ticket as taken and the queue quietly
+shrinks as the run goes on.
+
+**Do not invoke `/clean_gone`.** Two independent disqualifiers:
+
+- Its detection greps `git branch -v` for `\[gone\]`. `-v` prints no tracking
+  info at all, and `-vv` renders `[origin/<branch>: gone]`, so the pattern never
+  matches. It prints nothing and exits 0 — identical to a clean tree. Silent.
+- It removes worktrees with `git worktree remove --force`. Fatal here: members
+  hold worktrees, and `--force` discards uncommitted work that exists nowhere
+  else. Same class as `git reset --hard` to start a rebase.
+
+The skill is the maintainer's to fix. Do not patch it; do the reap yourself.
+
+Recompute every precondition **inside** the same command as the delete:
+
+```bash
+git fetch --prune origin
+git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
+awk '$2=="[gone]"{print $1}' | while read -r b; do
+  wt=$(git worktree list --porcelain |
+       awk -v b="refs/heads/$b" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
+  git cherry origin/main "$b" | grep -q '^+' && { echo "KEEP $b — unmerged commits"; continue; }
+  if [ -n "$wt" ]; then
+    [ -n "$(git -C "$wt" status --porcelain)" ] && { echo "KEEP $b — dirty $wt"; continue; }
+    git worktree remove "$wt" || { echo "KEEP $b — remove refused"; continue; }
+  fi
+  git branch -D "$b" && echo "REAPED $b"
+done
+git worktree prune
+```
+
+Each line earns its place:
+
+- **`for-each-ref`, not `git branch | grep`.** `%(upstream:track)` emits exactly
+  `[gone]` as its own field. Nothing to pattern-match, no `-v`/`-vv` trap.
+- **Recompute per branch, in this command.** A branch list from an earlier tool
+  call is already false: one observed run listed 28 gone branches, and two calls
+  later 27 had been reaped by a concurrent session. The benign direction is a
+  no-op; the dangerous one is a worktree that gained work *after* the check.
+- **`git cherry origin/main`, not `git diff main..`.** Against `origin/main` —
+  a local `main` you never fast-forwarded reads every merged branch as unmerged.
+  Any `+` line is a commit that exists nowhere else.
+- **`-D` is authorized by that cherry check, and only by it.** `git branch -d`
+  would refuse everything here: upstream is gone, so it falls back to comparing
+  against `HEAD`, which is a possibly-behind local `main`. Never `-D` a branch
+  whose cherry output you did not just read.
+- **`worktree remove` without `--force`.** It refuses on modifications *and*
+  untracked files, so it double-covers the dirty check above. A refusal is a
+  finding to report, never something to force past.
+- **Never reap a branch a live member is on.** Cross-check `.fleet/ledger.md`
+  before running: a row without a terminal state means someone may still be in
+  that worktree — a merged PR can still have a reviewer filing follow-ups. The
+  dirty check does not see a member that committed but has not pushed.
+
+Update the reaped tickets' ledger rows in the same step, and report reaped and
+kept counts. Kept-with-reason is the half worth reading.
 
 ## Queue depth
 
@@ -402,3 +466,9 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "`npm install` to set up the worktree" → the wrong install mutates the lockfile
   for the whole repo.
 - "I'm on my own copy, so I'm isolated" → not from the docker stack.
+- "`/clean_gone` printed nothing, the tree is clean" → its grep cannot match; a
+  silent pass is its failure mode, not its success case.
+- "`--force` the worktree removal, the PR merged anyway" → merged says nothing
+  about uncommitted files, and the reviewer may still be in there.
+- "Reap once at the end of the run" → stale worktrees make phase 0 read merged
+  tickets as taken, so the starvation compounds every wave.
