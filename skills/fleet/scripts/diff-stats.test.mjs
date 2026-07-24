@@ -72,3 +72,33 @@ test("computeStats: docsOnly is strict — docs+src keeps the fuller review", ()
   assert.equal(docsPlusCi.docsOnly, false);
   assert.equal(docsPlusCi.hasConfig, true);
 });
+
+test("computeStats: the four routing booleans are pinned together on a production PR", () => {
+  // review-pr.js selectDimensions routes on exactly hasSrc/hasTests/hasConfig/
+  // docsOnly. Assert all four at once so any single one flipping is caught here,
+  // not only transitively via the profile-ladder test.
+  const prod = computeStats([
+    { path: "src/a.ts", additions: 5, deletions: 0 },
+    { path: "a.test.ts", additions: 5, deletions: 0 },
+    { path: "package.json", additions: 1, deletions: 0 },
+  ]);
+  assert.deepEqual(
+    { hasSrc: prod.hasSrc, hasTests: prod.hasTests, hasConfig: prod.hasConfig, docsOnly: prod.docsOnly },
+    { hasSrc: true, hasTests: true, hasConfig: true, docsOnly: false },
+  );
+});
+
+test("classify: extensionless files fall to src (fail-open residue)", () => {
+  // The residue default keeps the src-gated dimensions (types/silent-failure/
+  // simplify) running on unknown files — the safe direction. Pin it so a future
+  // "tidy the residue" edit can't silently reroute unknowns to docs/config.
+  assert.equal(classify("Dockerfile"), "src");
+  assert.equal(classify("Makefile"), "src");
+  assert.equal(classify("bin/deploy"), "src");
+  assert.equal(classify("foo.config.mjs"), "config"); // config-by-name still wins
+});
+
+test("computeStats: loc tolerates a file missing additions/deletions", () => {
+  assert.equal(computeStats([{ path: "a.ts" }]).loc, 0);
+  assert.equal(computeStats([{ path: "a.ts", additions: 3 }]).loc, 3);
+});

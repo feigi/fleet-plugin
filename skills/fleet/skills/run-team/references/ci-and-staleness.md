@@ -17,7 +17,7 @@ distinction most of traffic.
 
 Take run id, head, conclusion from **one** `gh run list --json` row. Watcher
 reading them separately stitches event from two moments, can stream
-`RUN COMPLETE: success` under run id whose real job list is failure. This the
+`RUN COMPLETE: success` under run id whose real job list is failure. This is the
 four-way binding `ci-state.mjs` performs — `gh pr checks` aggregates conclusions
 ACROSS runs, can report `pass` inherited from cancelled run on superseded SHA;
 head-SHA binding alone misses it, because head right and only conclusions belong

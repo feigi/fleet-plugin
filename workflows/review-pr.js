@@ -143,7 +143,10 @@ function selectDimensions(all, stats) {
   // "nothing to review" would silently drop three dimensions on production code.
   // Only an affirmatively-reported profile over real files narrows the fan-out.
   if (!stats || !stats.profile || stats.profile === "empty") return all;
-  if (stats.docsOnly) {
+  // Strict `=== true`, matching the `hasSrc`/`hasTests` guards below: only an
+  // affirmative boolean trims. A corrupt-but-parseable blob with a truthy
+  // non-boolean docsOnly must not be the one value that narrows coverage.
+  if (stats.docsOnly === true) {
     // Prose/correction PRs: the failure mode is wrong CLAIMS, not logic or
     // types — four correction tickets each shipped a fresh wrong claim. Keep
     // correctness (scope) + comments (every asserted fact vs the tree); drop
