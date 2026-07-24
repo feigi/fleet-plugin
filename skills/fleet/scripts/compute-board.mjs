@@ -30,3 +30,12 @@ export function parseRow(row) {
     causes,
   };
 }
+
+// A parsed row is IMPLEMENTING or later. MERGED is durable (ledger-only); READY
+// needs the live PR label; a PR with no ready-to-merge label is in REVIEW.
+export function deriveColumn(parsed, prState) {
+  if (parsed.merged) return "MERGED";
+  if (parsed.pr && prState && prState.labels.includes("ready-to-merge")) return "READY";
+  if (parsed.pr) return "REVIEW";
+  return "IMPLEMENTING";
+}
