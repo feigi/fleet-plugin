@@ -134,6 +134,16 @@ multi-select**, and **a judgement the evidence cannot settle**.
 
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
+- **Implementer reports the row is heavy** (`sizing-a-ticket` returned heavy and the
+  member bailed without implementing) → the ticket is mis-scoped for the unattended
+  fleet, so take it out of the agent pool rather than leave it for the next scan:
+  move it `ready-for-agent` → `ready-for-human` — `gh issue edit <N> --remove-label
+  ready-for-agent --remove-label in-progress --add-label ready-for-human` — and
+  comment the heavy reason (what is design-open, needs a brainstorm, or needs a
+  re-scope) so the human has the context. Then discard the worktree and branch and
+  refill the slot with a *different* ticket. Leaving it `ready-for-agent` guarantees
+  a later Phase-0 scan re-grabs it for another claim-size-heavy-and-bail cycle; the
+  relabel is the only thing that stops the loop.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
