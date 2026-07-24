@@ -275,6 +275,21 @@ reviewers within the hour and every later PR queues. Absent instruction, default
 implementer slots even with pool left; more PRs into a full pipeline buys nothing
 and costs rebases.
 
+**The refill gate is the *review* backlog — never the merge-queue depth.** A deep
+ready-to-merge queue is not a reason to stop implementing: the merge cascade is
+serial and slow, but each PR rebases exactly once when it becomes the candidate, so
+producing more PRs adds no rebases-per-PR and does not slow the cascade — it only
+changes *when* a given PR is ready. Throttling implementers because "the pipeline is
+merge-bound" is a mistake; hold refills **only** when the review backlog ≥ 2, and
+never gate a refill on how many PRs are waiting to merge. Reconcile proactively:
+treat "a slot is free and pool-or-supply exists" as a *level* condition to act on
+**every** time it holds — a member finishing, a member sizing-heavy and bailing, a
+merge landing — not an event to wait for. An edge-triggered loop that only refills
+on completion silently stalls the moment the queue empties (0 implementers emit no
+completion event), so re-derive the deficit on every tick. An idle implementer queue
+with work available is a defect, not a throttle — the maintainer should never have
+to ask you to refill.
+
 | pool | supply | action |
 |---|---|---|
 | ≥ 1 | — | dispatch from pool, silent |

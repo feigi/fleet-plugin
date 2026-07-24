@@ -48,6 +48,8 @@ For each labeled PR clearing the hold rule, lowest first:
 
 1. Rebase onto `origin/main`; push `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout. Run the **no-undo audit** first.
 
+   **First confirm the worktree head *is* the reviewed remote PR head** — `git -C <worktree> rev-parse HEAD` must equal `gh pr view <pr> --json headRefOid`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves the worktree *ahead of* the remote head; the no-undo audit passes (clean tree, no stash) yet rebasing from there carries an unpushed, unreviewed commit into the merge. Mismatch → STOP and report `worktree-diverged-#<pr>` instead of rebasing: the reviewed head lives on the remote, not this worktree, so either the reviewer must push its fix or the stray local commit must be discarded — that call is not the merge bot's to make silently.
+
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
 
    **Hold the wait inside one blocking command — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead:
