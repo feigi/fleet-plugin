@@ -101,4 +101,4 @@ if (signal === "modules") {
   );
 }
 
-console.log(JSON.stringify({ a: Number(a), b: Number(b), files, modules, dirs, signal }, null, 2));
+console.log(JSON.stringify({ a: Number(a), b: Number(b), files, modules, dirs, signal }));

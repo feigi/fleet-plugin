@@ -4,7 +4,7 @@ description: merge every ready-to-merge open PR in numeric order — rebase, wai
 
 Set the goal, then work it until no open PR is left:
 
-`/goal Merge all agent-brain PRs in numeric order if labeled ready-to-merge. Rebase -> Wait for checks green -> check for the ready-to-merge label -> merge if labeled. Never merge past a lower-numbered PR whose work is related — wait for its label instead.`
+`/goal Merge all of this repo's open PRs in numeric order if labeled ready-to-merge. Rebase -> Wait for checks green -> check for the ready-to-merge label -> merge if labeled. Never merge past a lower-numbered PR whose work is related — wait for its label instead.`
 
 Only `ready-to-merge` PRs are in scope — it is the author's sign-off. Never add the label yourself.
 
@@ -142,7 +142,7 @@ while true; do
 done
 ```
 
-Arm with `persistent: true`, description `ready-to-merge label on agent-brain PRs`. Details that matter:
+Arm with `persistent: true`, description `ready-to-merge label on this repo's PRs`. Details that matter:
 
 - Seed `seen` **before** the loop so PRs already handled — including ones skipped for `CHANGES_REQUESTED` or left on red CI — do not re-fire every minute. Only a label appearing after arming is an event.
 - The `if cur=$(poll)` guard keeps `seen` intact when a `gh` call fails transiently; without it one failed poll replays the whole labeled set.

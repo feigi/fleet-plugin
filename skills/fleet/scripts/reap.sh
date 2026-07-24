@@ -55,19 +55,29 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       continue
     fi
     # `git worktree remove` refuses on modified and untracked files, but NOT on
-    # ignored ones — it deletes those silently. claim-ticket.sh writes exactly
-    # this kind of file (its agent-test runner, appended to info/exclude), and
-    # any .env or scratch file a fleet script ignores is equally invisible to
-    # the plain --porcelain check above. Check --ignored explicitly and keep.
-    if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
-      keep "$b" "worktree $wt unreadable (git status --ignored failed)"
-      continue
-    fi
-    ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
-    if [ -n "$ignored" ]; then
-      keep "$b" "ignored files present in $wt: $ignored"
-      continue
-    fi
+    # ignored ones — it deletes those silently. In a NON-fleet worktree a precious
+    # ignored file (.env, scratch) must not vanish, so check --ignored and keep.
+    # A fleet worktree is different: claim-ticket.sh creates it under .worktrees/
+    # fresh from origin/main. Merged (cherry-clean above) + tracked-clean
+    # (--porcelain above), its ONLY ignored files are machine-generated
+    # (agent-test, node_modules, build output) — nothing precious. Since every
+    # fleet worktree carries them, keeping on ignored files would strand them all
+    # and defeat reap. Run the ignored-keep for non-fleet trees only, keyed on the
+    # .worktrees/ home (robust to an older tree that predates the agent-test marker).
+    case "$wt" in
+      */.worktrees/*) : ;;
+      *)
+        if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
+          keep "$b" "worktree $wt unreadable (git status --ignored failed)"
+          continue
+        fi
+        ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
+        if [ -n "$ignored" ]; then
+          keep "$b" "ignored files present in $wt: $ignored"
+          continue
+        fi
+        ;;
+    esac
     if [ "$apply" = true ]; then
       # No --force, ever. It refuses on modified and untracked files; the
       # ignored-file gap it does NOT cover is handled by the check above.

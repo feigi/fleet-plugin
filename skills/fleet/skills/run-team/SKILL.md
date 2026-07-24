@@ -52,11 +52,15 @@ At start, and whenever the pool empties.
 5. **Light row only.** Heavy is inadmissible even with a complete brief — the
    fleet runs unattended and the heavy path opens with brainstorming, which needs
    the maintainer. Excluding is this command's policy; the skill only reports.
-6. **Collision scan against open PRs** — `~/.claude/skills/fleet/scripts/pr-overlap.mjs
-   --a <N> --b <M>` for each survivor against every open PR and against the other
-   survivors. Step 3 catches a ticket already taken, not one that *edits a file an
-   open PR edits*. Overlap → admit one, defer the rest with the reason. The tracker
-   cannot express this, and it is what actually stalls a wave.
+6. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
+   with no diff, so infer its target files from the issue body (the paths it
+   names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
+   and against the other survivors' inferred files. `pr-overlap.mjs` is **PR-vs-PR
+   only** — it runs `gh pr diff` on *both* args and errors on an issue number, so
+   use it the way the merge bot does (PR vs PR), never on a candidate issue here.
+   Step 3 catches a ticket already taken, not one that *edits a file an open PR
+   edits*. Overlap → admit one, defer the rest with the reason. The tracker cannot
+   express this, and it is what actually stalls a wave.
 7. Present admissible survivors, best first, as a multi-select. Maintainer ticks
    the pool. List heavy-row exclusions as "needs a solo session with you", and
    collision-deferred ones with what they collide with. Excluded, not dropped.
@@ -84,6 +88,16 @@ are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
 <file>` and nothing else — anyone who finds the worktree finds the runner,
 including grandchildren you never dispatched. See references/isolation.md.
 
+**A reused worktree may lack the runner.** `claim-ticket.sh` writes `agent-test`
+only when it claims a *fresh* worktree. A worktree carried over from a prior run,
+or an already-open PR's worktree you send a rebaser/resolver into, predates the
+marker and has no `./agent-test` — a member told to use it stalls on a missing
+script (observed with a rebase-resolver in a prior-run worktree). When you
+dispatch into a NOT-freshly-claimed worktree, either re-materialize the runner
+first or tell the member the runner is absent and to run docker-free suites
+directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
+config has no `globalSetup`, so there is no stack to collide on).
+
 ## Phase 2 — dispatch implementers
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
@@ -100,7 +114,7 @@ number, worktree abs path, branch, and both of these verbatim:
 Member runs `sizing-a-ticket` first and follows the path returned — selection and
 claiming are done, so it starts there. Heavy row = phase 0 mis-sized it: stop and
 report, do not implement unattended. Then `next-ticket` **step 7** (rebase, re-run
-tests, push, `gh pr create` with `Closes #N` and one release label), report PR
+tests, push, `gh pr create` with `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the branch *type*), report PR
 number and head SHA, exit. Never labels `ready-to-merge`, never merges.
 
 ## Phase 3 — event loop
@@ -124,7 +138,14 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
-- **Monitor: CI run completes** → ping the one member waiting on it, with the outcome.
+- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`); the
+  diff-validating `check` job green with no heavy job (the diff-validating suites,
+  not the `rebase-check` currency gate) in `failure` → dispatch a finisher to
+  label, a `check` **failure** → a fixer. A `check`-green board whose
+  heavy jobs are merely `skipped` (behind-count staleness, the normal wave case)
+  still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
+  reaches. Reviewers push-and-exit, so a member is rarely still waiting — ping one
+  only if it genuinely is.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
@@ -162,14 +183,29 @@ each specialist rather than assume delivery, and do not hold rulings pending
 confirmation — the reviewer's own verify-before-apply already covers it.
 See references/member-lifecycle.md.
 
-**Say the specialist count in the prompt.** Absent a number members dispatch the
-full set every time, so an 8-line docs banner costs the same wall clock as a
-refactor. Two or three for annotation-only or single-file; full set for production
-code.
+**The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
+`diff-stats.mjs` and drops dead dimensions — a docs-only change runs
+correctness+comments, not the full five — and skips the adversarial pass on
+`suggestion`s, which are deferred and never applied. So you need not compute a
+count. Manual fallback (no workflow): two or three specialists for annotation-only
+or single-file, the full set for production code.
 
 **Put the standing CI facts in the reviewer prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per reviewer per
 merge. `review-and-fix.md` states them; the prompt only has to say they apply.
+
+**The reviewer pushes and exits — it does not hold the CI wait.** You own the
+persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
+rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
+push, report the SHA, stop. When the diff-validating `check` job is green **and no
+heavy job is in `failure`** (the heavy diff-validating suites — not the
+`rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
+fine) dispatch a **finisher** — a fresh small agent that confirms deferrals filed
+and adds `ready-to-merge`, not the reviewer resumed. Gate on the `check` job,
+**not** on `ci-state --quiet` exit 0: a behind PR never reaches full green, so an
+exit-0 gate strands it unlabelled. The finisher reads per-job state (`ci-state.mjs`
+without `--quiet`, or its `jobs`), since `--quiet` drops `jobs`. Normal path, not
+only kill-recovery. See references/ci-and-staleness.md.
 
 **Correction tickets ship new wrong claims, and they inherit them from the
 ticket.** Put the check on the **implementer**, not only the reviewer: every

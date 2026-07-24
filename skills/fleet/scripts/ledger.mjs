@@ -96,7 +96,7 @@ function save(d) {
 const data = load();
 
 if (cmd === "read") {
-  console.log(JSON.stringify(data, null, 2));
+  console.log(JSON.stringify(data));
   process.exit(0);
 }
 
@@ -116,7 +116,7 @@ if (cmd === "row") {
   // was recorded when it never made it to disk.
   save(data);
   console.error(created ? `    new row ${key}` : `    rewrote row ${key}`);
-  console.log(JSON.stringify({ ticket: key, line, created }, null, 2));
+  console.log(JSON.stringify({ ticket: key, line, created }));
   process.exit(0);
 }
 
@@ -126,7 +126,7 @@ if (cmd === "filed") {
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
   save(data);
-  console.log(JSON.stringify({ issue, subject, total: data.filed.length }, null, 2));
+  console.log(JSON.stringify({ issue, subject, total: data.filed.length }));
   process.exit(0);
 }
 
@@ -136,7 +136,7 @@ if (cmd === "ruled") {
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
   save(data);
-  console.log(JSON.stringify({ pr, decision, total: data.ruled.length }, null, 2));
+  console.log(JSON.stringify({ pr, decision, total: data.ruled.length }));
   process.exit(0);
 }
 
@@ -179,13 +179,13 @@ if (cmd === "check") {
   const match = data.filed.find((f) => isMatch(tokenSet(subjectOf(f))));
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
-    console.log(JSON.stringify({ subject, found: true, match }, null, 2));
+    console.log(JSON.stringify({ subject, found: true, match }));
     // Exit 1 means "do not file this again". Non-zero is the stop signal, so a
     // caller that checks only the exit status still cannot duplicate.
     process.exit(1);
   }
   console.error(`${NAME}: not previously filed`);
-  console.log(JSON.stringify({ subject, found: false, match: null }, null, 2));
+  console.log(JSON.stringify({ subject, found: false, match: null }));
   process.exit(0);
 }
 

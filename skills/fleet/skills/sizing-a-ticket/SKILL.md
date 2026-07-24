@@ -1,25 +1,25 @@
 ---
 name: sizing-a-ticket
-description: Use before implementing a ticket, or when admitting tickets into a queue by complexity — decides how much process the work needs and returns light or heavy plus the path to follow.
+description: Use before implementing ticket, or admitting tickets into queue by complexity — decides how much process work needs, returns light or heavy plus path to follow.
 ---
 
 # Sizing a Ticket
 
-Judge the ticket **as written**, not as you hope. Torn between rows → take the heavier.
+Judge ticket **as written**, not as hoped. Torn between rows → take heavier.
 
-Read it first: `gh issue view <N> --comments`. An `## Agent Brief` comment outranks the body; honor its `Respec` block — it can rule out hypotheses the body raises.
+Read first: `gh issue view <N> --comments`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises.
 
 | Row | Signal | Path |
 |---|---|---|
-| **light** | States exactly what to change, one or two files, no design choice left open | `superpowers:test-driven-development` |
-| **heavy** | Ambiguity in *what* to build, more than ~3 files, new API/schema/UX, or several viable approaches | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` |
+| **light** | States exactly what to change, one-two files, no design choice open | `superpowers:test-driven-development` |
+| **heavy** | Ambiguity in *what* to build, >~3 files, new API/schema/UX, or several viable approaches | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` |
 
 Bug reports: `superpowers:systematic-debugging` first, either row.
 
-Report row, path, one line of why. Admissibility is the caller's policy — solo session follows the heavy path, unattended fleet excludes the ticket.
+Report row, path, one line why. Admissibility is caller's policy — solo session follows heavy path, unattended fleet excludes ticket.
 
 ## Red flags
 
-- "Body is short, so it's simple" → short bodies hide the most design ambiguity. Size by unknowns, not word count.
-- "Brainstorming is overkill here" → that thought is the heavy row.
-- "The Agent Brief is thorough, so it's light now" → brief quality never promotes a heavy row. Unknowns live in the work, not the write-up.
+- "Body is short, so it's simple" → short bodies hide most design ambiguity. Size by unknowns, not word count.
+- "Brainstorming is overkill here" → that thought is heavy row.
+- "The Agent Brief is thorough, so it's light now" → brief quality never promotes heavy row. Unknowns live in work, not write-up.
