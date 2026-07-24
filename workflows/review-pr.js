@@ -136,20 +136,26 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // computed it, so the full set ran on every PR. Facts come from diff-stats.mjs
 // via the snapshot agent; unknown → full set, the safe direction. A caller
 // passing args.dimensions overrides entirely.
-function selectDimensions(all, snap) {
-  if (!snap || !snap.profile) return all;
-  if (snap.docsOnly) {
+function selectDimensions(all, stats) {
+  // Unknown, unparseable, or empty diff → the full set, the safe direction. An
+  // empty `files` array is NOT a signal to trim: `gh` can report no files for a
+  // real PR (async diff computation, a transient hiccup), and treating that as
+  // "nothing to review" would silently drop three dimensions on production code.
+  // Only an affirmatively-reported profile over real files narrows the fan-out.
+  if (!stats || !stats.profile || stats.profile === "empty") return all;
+  if (stats.docsOnly) {
     // Prose/correction PRs: the failure mode is wrong CLAIMS, not logic or
     // types — four correction tickets each shipped a fresh wrong claim. Keep
     // correctness (scope) + comments (every asserted fact vs the tree); drop
     // tests/types/silent-failure/simplify, which have nothing to run, type-check,
     // or simplify.
-    return all.filter((d) => d.key === "correctness" || d.key === "comments");
+    const docsDims = all.filter((d) => d.key === "correctness" || d.key === "comments");
+    return docsDims.length ? docsDims : all;
   }
   let dims = all;
-  if (snap.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
+  if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
   // No source → nothing to type-check, hunt for swallowed errors in, or simplify.
-  if (snap.hasSrc === false)
+  if (stats.hasSrc === false)
     dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure" && d.key !== "simplify");
   return dims.length ? dims : all;
 }
@@ -174,10 +180,11 @@ Then size the diff:
 
     ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
 
-Report the snapshot's absolute path, the HEAD sha, and the fields
-profile/docsOnly/hasSrc/hasTests/files/loc EXACTLY as diff-stats.mjs prints them
-— copy them, do not infer them yourself. If diff-stats.mjs errors, omit those
-fields (path and head are the only required ones). Do not modify ${worktree}.`,
+Report the snapshot's absolute path, the HEAD sha, and — in \`diffStats\` — the
+SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
+string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
+omit diffStats entirely (path and head are the only required fields). Do not
+modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
       type: "object",
       additionalProperties: false,
@@ -185,23 +192,34 @@ fields (path and head are the only required ones). Do not modify ${worktree}.`,
       properties: {
         path: { type: "string" },
         head: { type: "string" },
-        profile: { type: "string" },
-        docsOnly: { type: "boolean" },
-        hasSrc: { type: "boolean" },
-        hasTests: { type: "boolean" },
-        files: { type: "integer" },
-        loc: { type: "integer" },
+        // The verbatim single-line JSON from diff-stats.mjs stdout. Parsed by the
+        // caller: routing the deterministic classifier's output through the agent
+        // as one opaque blob — not six re-typed booleans — means a mangled copy
+        // fails JSON.parse and widens to the full set, instead of silently
+        // flipping one field and trimming real coverage.
+        diffStats: { type: "string" },
       },
     } },
 );
 
 log(`snapshot ${snap.head} at ${snap.path}`);
 
-// Selection happens now, from the diff facts the snapshot agent carried back.
-const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, snap);
+// Parse the diff-stats blob the snapshot agent carried back. A parse failure —
+// diff-stats errored, or the agent mangled the copy — leaves stats null, and
+// selectDimensions widens to the full set. The classifier stays deterministic
+// end to end; the agent only transported an opaque string.
+let stats = null;
+if (snap.diffStats) {
+  try {
+    stats = JSON.parse(snap.diffStats);
+  } catch (e) {
+    log(`diff-stats unparseable (${e.message}) — full set`);
+  }
+}
+const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, stats);
 log(
   `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
-    (snap.profile ? ` — profile=${snap.profile}` : " — profile unknown, full set"),
+    (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set"),
 );
 
 // --- Review → Verify ------------------------------------------------------
@@ -256,12 +274,14 @@ Scratch: ${scratch}/verify-${d.key}/`,
         ).then((votes) => {
           const live = votes.filter(Boolean);
           const refuted = live.filter((v) => v.refuted).length;
-          return {
-            ...f,
-            dimension: d.key,
-            verdict: refuted * 2 >= live.length && live.length > 0 ? "refuted" : "survived",
-            votes: live,
-          };
+          // Every refuter crashed (spend limit, timeout, terminal error): the
+          // finding was NOT verified, so it is `unverified`, not `survived`. It is
+          // still returned — surfaced, never dropped — but a consumer keying on
+          // "survived" must not read a verification that never ran as one passed.
+          let verdict;
+          if (live.length === 0) verdict = "unverified";
+          else verdict = refuted * 2 >= live.length ? "refuted" : "survived";
+          return { ...f, dimension: d.key, verdict, votes: live };
         });
       }),
     ),
@@ -279,8 +299,9 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 
 // Refuted findings are RETURNED, not dropped. A refutation is itself a claim,
 // and the controller has reversed a refutation on new evidence before.
-// `unverified` are suggestions that skipped the adversarial pass by policy —
-// surfaced separately so the caller never mistakes "not checked" for "survived".
+// `unverified` are findings the adversarial pass did not settle — a suggestion
+// that skipped it by policy, or one whose refuters all crashed — surfaced
+// separately so the caller never mistakes "not checked" for "survived".
 // `dimensionsRun` names what actually ran: a trimmed fan-out must say so, never
 // read as full coverage.
 return {

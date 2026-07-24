@@ -28,7 +28,7 @@ function arg(name) {
 
 // --quiet suppresses the diagnostic stream (command echoes, per-job/per-field
 // lines) and drops the raw job list from the payload. The controller's CI
-// monitors and every reviewer's label-time check call this on a hot loop, and
+// Monitor (and, standalone, the reviewer's own watch loop) polls this hot, and
 // none of that stream is acted on — `reasons` already names every failing job,
 // and the exit code already encodes green/not-green. die() and the one-line
 // verdict summary still print, so a caller loses nothing it decides on.
