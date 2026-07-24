@@ -138,9 +138,13 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
-- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N> --quiet`); green
-  → dispatch a finisher to label, red → a fixer. Reviewers push-and-exit, so a
-  member is rarely still waiting — ping one only if it genuinely is.
+- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`); the
+  diff-validating `check` job green with no heavy job in `failure` → dispatch a
+  finisher to label, a `check` **failure** → a fixer. A `check`-green board whose
+  heavy jobs are merely `skipped` (behind-count staleness, the normal wave case)
+  still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
+  reaches. Reviewers push-and-exit, so a member is rarely still waiting — ping one
+  only if it genuinely is.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
@@ -192,10 +196,14 @@ merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 **The reviewer pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
 rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
-push, report the SHA, stop. On the Monitor's genuine green (`ci-state.mjs --pr <N>
---quiet`, exit 0) dispatch a **finisher** — a fresh small agent that confirms
-deferrals filed and adds `ready-to-merge`, not the reviewer resumed. Normal path,
-not only kill-recovery. See references/ci-and-staleness.md.
+push, report the SHA, stop. When the diff-validating `check` job is green **and no
+heavy job is in `failure`** (a `skipped` heavy job is behind-count staleness and
+fine) dispatch a **finisher** — a fresh small agent that confirms deferrals filed
+and adds `ready-to-merge`, not the reviewer resumed. Gate on the `check` job,
+**not** on `ci-state --quiet` exit 0: a behind PR never reaches full green, so an
+exit-0 gate strands it unlabelled. The finisher reads per-job state (`ci-state.mjs`
+without `--quiet`, or its `jobs`), since `--quiet` drops `jobs`. Normal path, not
+only kill-recovery. See references/ci-and-staleness.md.
 
 **Correction tickets ship new wrong claims, and they inherit them from the
 ticket.** Put the check on the **implementer**, not only the reviewer: every
