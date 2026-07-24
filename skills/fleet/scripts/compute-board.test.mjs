@@ -4,7 +4,7 @@
 // logic — against a "simplification" silently breaking it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRow, deriveColumn } from "./compute-board.mjs";
+import { parseRow, deriveColumn, deriveFlags, STALE_MS } from "./compute-board.mjs";
 
 test("parseRow: a merged row", () => {
   const r = parseRow("#332 impl-332 → PR#344 → MERGED 73b356de");
@@ -61,4 +61,44 @@ test("deriveColumn: REVIEW when a PR exists without the label", () => {
 test("deriveColumn: IMPLEMENTING when there is no PR yet", () => {
   const p = parseRow("#340 impl-340");
   assert.equal(deriveColumn(p, null), "IMPLEMENTING");
+});
+
+const MIN = 60 * 1000;
+
+test("deriveFlags: red CI flags red-ci", () => {
+  const p = parseRow("#324 impl-324 → PR#346");
+  const f = deriveFlags(p, { ci: "red", column: "REVIEW", sinceEnteredStage: null, now: 0 });
+  assert.ok(f.includes("red-ci"));
+});
+
+test("deriveFlags: unknown CI never flags red", () => {
+  const p = parseRow("#324 impl-324 → PR#346");
+  const f = deriveFlags(p, { ci: "unknown", column: "REVIEW", sinceEnteredStage: null, now: 0 });
+  assert.ok(!f.includes("red-ci"));
+});
+
+test("deriveFlags: held-behind carries the blocker number", () => {
+  const p = parseRow("#324 impl-324 → PR#346 · held-behind:#313");
+  const f = deriveFlags(p, { ci: "green", column: "REVIEW", sinceEnteredStage: null, now: 0 });
+  assert.ok(f.includes("held-behind:#313"));
+});
+
+test("deriveFlags: stale when dwell exceeds the column threshold", () => {
+  const p = parseRow("#340 impl-340");
+  const now = 100 * MIN;
+  const f = deriveFlags(p, { ci: null, column: "IMPLEMENTING", sinceEnteredStage: now - (STALE_MS.IMPLEMENTING + MIN), now });
+  assert.ok(f.includes("stale"));
+});
+
+test("deriveFlags: fresh dwell is not stale", () => {
+  const p = parseRow("#340 impl-340");
+  const now = 100 * MIN;
+  const f = deriveFlags(p, { ci: null, column: "IMPLEMENTING", sinceEnteredStage: now - MIN, now });
+  assert.ok(!f.includes("stale"));
+});
+
+test("deriveFlags: cause tokens surface as flags", () => {
+  const p = parseRow("#319 impl-319 KILLED");
+  const f = deriveFlags(p, { ci: null, column: "IMPLEMENTING", sinceEnteredStage: 0, now: 0 });
+  assert.ok(f.includes("killed"));
 });

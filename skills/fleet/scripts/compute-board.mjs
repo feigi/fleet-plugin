@@ -39,3 +39,23 @@ export function deriveColumn(parsed, prState) {
   if (parsed.pr) return "REVIEW";
   return "IMPLEMENTING";
 }
+
+// Dwell thresholds per column, ms. A ticket sitting longer than this in a
+// non-terminal column earns `stale`. POOL and MERGED are absent → never stale.
+export const STALE_MS = {
+  IMPLEMENTING: 20 * 60 * 1000,
+  REVIEW: 45 * 60 * 1000,
+  READY: 15 * 60 * 1000,
+};
+
+export function deriveFlags(parsed, ctx) {
+  const flags = [];
+  if (ctx.ci === "red") flags.push("red-ci");
+  if (parsed.heldBehind != null) flags.push(`held-behind:#${parsed.heldBehind}`);
+  for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
+  const limit = STALE_MS[ctx.column];
+  if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
+    flags.push("stale");
+  }
+  return flags;
+}
