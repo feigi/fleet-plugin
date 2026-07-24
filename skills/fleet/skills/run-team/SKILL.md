@@ -88,6 +88,16 @@ are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
 <file>` and nothing else — anyone who finds the worktree finds the runner,
 including grandchildren you never dispatched. See references/isolation.md.
 
+**A reused worktree may lack the runner.** `claim-ticket.sh` writes `agent-test`
+only when it claims a *fresh* worktree. A worktree carried over from a prior run,
+or an already-open PR's worktree you send a rebaser/resolver into, predates the
+marker and has no `./agent-test` — a member told to use it stalls on a missing
+script (observed with a rebase-resolver in a prior-run worktree). When you
+dispatch into a NOT-freshly-claimed worktree, either re-materialize the runner
+first or tell the member the runner is absent and to run docker-free suites
+directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
+config has no `globalSetup`, so there is no stack to collide on).
+
 ## Phase 2 — dispatch implementers
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
@@ -104,7 +114,7 @@ number, worktree abs path, branch, and both of these verbatim:
 Member runs `sizing-a-ticket` first and follows the path returned — selection and
 claiming are done, so it starts there. Heavy row = phase 0 mis-sized it: stop and
 report, do not implement unattended. Then `next-ticket` **step 7** (rebase, re-run
-tests, push, `gh pr create` with `Closes #N` and one release label), report PR
+tests, push, `gh pr create` with `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the branch *type*), report PR
 number and head SHA, exit. Never labels `ready-to-merge`, never merges.
 
 ## Phase 3 — event loop
