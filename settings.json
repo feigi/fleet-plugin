@@ -1,180 +1,218 @@
 {
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
-  "permissions": {
-    "allow": [
-      "Bash(xargs cat:*)",
-      "WebFetch(domain:code.visualstudio.com)",
-      "Bash(npx vitest:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(/Users/chris/.claude/skills/fleet/scripts/:*)",
-      "EnterWorktree",
-      "ExitWorktree",
-      "Bash(git worktree:*)"
-    ],
-    "defaultMode": "auto"
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-session-start.sh",
-            "statusMessage": "Loading memories..."
-          }
+    "env":
+    {
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    },
+    "permissions":
+    {
+        "allow":
+        [
+            "Bash(xargs cat:*)",
+            "WebFetch(domain:code.visualstudio.com)",
+            "Bash(npx vitest:*)",
+            "Bash(git add:*)",
+            "Bash(git commit:*)",
+            "Bash(/Users/chris/.claude/skills/fleet/scripts/:*)",
+            "EnterWorktree",
+            "ExitWorktree",
+            "Bash(git worktree:*)"
+        ],
+        "defaultMode": "auto"
+    },
+    "autoMode":
+    {
+        "allow":
+        [
+            "$defaults",
+            "Bash commands invoking the fleet scripts under ~/.claude/skills/fleet/scripts/ (reap.sh, claim-ticket.sh) with any args — /fleet:run-team authorizes them; each recomputes its own safety preconditions...",
+            "Bash commands running `gh pr merge <n> --merge` (never with --delete-branch) — /fleet:run-team's merge step; a merge bot re-binds ci-state green and proves ancestry before each merge, and only reviewer-labeled ready-to-merge PRs qualify."
         ]
-      },
-      {
-        "matcher": "startup|clear",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/cost-reset-on-clear.sh"
-          }
+    },
+    "hooks":
+    {
+        "SessionStart":
+        [
+            {
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-session-start.sh",
+                        "statusMessage": "Loading memories..."
+                    }
+                ]
+            },
+            {
+                "matcher": "startup|clear",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "bash ~/.claude/hooks/cost-reset-on-clear.sh"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse":
+        [
+            {
+                "matcher": "Write|Edit|MultiEdit",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-guard.sh",
+                        "timeout": 5
+                    }
+                ]
+            },
+            {
+                "matcher": "mcp__agent-brain__.*",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-autofill.sh",
+                        "timeout": 5
+                    }
+                ]
+            },
+            {
+                "matcher": "Agent|mcp__agent-brain__memory_update|mcp__agent-brain__memory_create",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-recall-on-action.sh",
+                        "timeout": 5
+                    }
+                ]
+            }
+        ],
+        "PostToolUse":
+        [
+            {
+                "matcher": "Bash|Edit|Write|MultiEdit|Agent",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-nudge.sh",
+                        "timeout": 5
+                    }
+                ]
+            },
+            {
+                "matcher": "mcp__agent-brain__memory_get|mcp__agent-brain__memory_create",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-cache.sh",
+                        "timeout": 5
+                    }
+                ]
+            },
+            {
+                "matcher": "Bash",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-recall-on-failure.sh",
+                        "timeout": 5
+                    }
+                ]
+            },
+            {
+                "matcher": "mcp__agent-brain__(memory_resolve_flag|memory_verify|memory_archive|relationship_accept|relationship_reject|flag_reopen|relationship_repropose)",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-refresh-index.sh",
+                        "timeout": 8
+                    }
+                ]
+            }
+        ],
+        "Stop":
+        [
+            {
+                "matcher": "",
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-session-review.sh",
+                        "timeout": 10
+                    }
+                ]
+            }
+        ],
+        "UserPromptSubmit":
+        [
+            {
+                "hooks":
+                [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/memory-recall-on-prompt.sh",
+                        "timeout": 5
+                    }
+                ]
+            }
         ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-guard.sh",
-            "timeout": 5
-          }
+    },
+    "worktree":
+    {
+        "baseRef": "head",
+        "symlinkDirectories":
+        [
+            "node_modules"
         ]
-      },
-      {
-        "matcher": "mcp__agent-brain__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-autofill.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Agent|mcp__agent-brain__memory_update|mcp__agent-brain__memory_create",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-recall-on-action.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Edit|Write|MultiEdit|Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-nudge.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__agent-brain__memory_get|mcp__agent-brain__memory_create",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-cache.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-recall-on-failure.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__agent-brain__(memory_resolve_flag|memory_verify|memory_archive|relationship_accept|relationship_reject|flag_reopen|relationship_repropose)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-refresh-index.sh",
-            "timeout": 8
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-session-review.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/memory-recall-on-prompt.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  },
-  "worktree": {
-    "baseRef": "head",
-    "symlinkDirectories": ["node_modules"]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
-  },
-  "enabledPlugins": {
-    "typescript-lsp@claude-plugins-official": true,
-    "commit-commands@claude-plugins-official": true,
-    "figma@claude-plugins-official": false,
-    "security-guidance@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": false,
-    "frontend-design@claude-plugins-official": false,
-    "claude-code-setup@claude-plugins-official": false,
-    "superpowers@claude-plugins-official": true,
-    "playwright@claude-plugins-official": false,
-    "playground@claude-plugins-official": false,
-    "code-simplifier@claude-plugins-official": false,
-    "pyright-lsp@claude-plugins-official": true,
-    "context7@claude-plugins-official": true,
-    "code-review@claude-plugins-official": false,
-    "feature-dev@claude-plugins-official": false,
-    "pr-review-toolkit@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": false,
-    "gopls-lsp@claude-plugins-official": true
-  },
-  "extraKnownMarketplaces": {},
-  "effortLevel": "xhigh",
-  "autoDreamEnabled": true,
-  "skipDangerousModePermissionPrompt": true,
-  "skipWorkflowUsageWarning": true,
-  "verbose": true,
-  "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true,
-  "voiceEnabled": false,
-  "mcpServers": {
-    "agent-brain": {
-      "url": "http://localhost:19898/mcp"
+    },
+    "statusLine":
+    {
+        "type": "command",
+        "command": "bash ~/.claude/statusline-command.sh"
+    },
+    "enabledPlugins":
+    {
+        "typescript-lsp@claude-plugins-official": true,
+        "commit-commands@claude-plugins-official": true,
+        "figma@claude-plugins-official": false,
+        "security-guidance@claude-plugins-official": true,
+        "skill-creator@claude-plugins-official": false,
+        "frontend-design@claude-plugins-official": false,
+        "claude-code-setup@claude-plugins-official": false,
+        "superpowers@claude-plugins-official": true,
+        "playwright@claude-plugins-official": false,
+        "playground@claude-plugins-official": false,
+        "code-simplifier@claude-plugins-official": false,
+        "pyright-lsp@claude-plugins-official": true,
+        "context7@claude-plugins-official": true,
+        "code-review@claude-plugins-official": false,
+        "feature-dev@claude-plugins-official": false,
+        "pr-review-toolkit@claude-plugins-official": true,
+        "claude-md-management@claude-plugins-official": false,
+        "gopls-lsp@claude-plugins-official": true
+    },
+    "extraKnownMarketplaces":
+    {},
+    "effortLevel": "xhigh",
+    "autoDreamEnabled": true,
+    "skipDangerousModePermissionPrompt": true,
+    "skipWorkflowUsageWarning": true,
+    "verbose": true,
+    "agentPushNotifEnabled": true,
+    "skipAutoPermissionPrompt": true,
+    "voiceEnabled": false,
+    "mcpServers":
+    {
+        "agent-brain":
+        {
+            "url": "http://localhost:19898/mcp"
+        }
     }
-  }
 }
