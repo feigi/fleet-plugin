@@ -99,6 +99,12 @@ const DEFAULT_DIMENSIONS = [
     agentType: "pr-review-toolkit:type-design-analyzer",
     prompt: "invariants expressed vs merely documented; casts that erase conformance",
   },
+  {
+    key: "simplify",
+    agentType: "pr-review-toolkit:code-simplifier",
+    prompt:
+      "simplification opportunities — dead branches, redundant state, needless indirection. REPORT ONLY, read-only: a finding's claim is what to simplify, suggested_fix is the simpler form, severity 'suggestion'. Never edit a file. A simplification that changes observable behavior is a defect, not a suggestion",
+  },
 ];
 
 const pr = args && args.pr;
@@ -136,12 +142,15 @@ function selectDimensions(all, snap) {
     // Prose/correction PRs: the failure mode is wrong CLAIMS, not logic or
     // types — four correction tickets each shipped a fresh wrong claim. Keep
     // correctness (scope) + comments (every asserted fact vs the tree); drop
-    // tests/types/silent-failure, which have nothing to run or type-check.
+    // tests/types/silent-failure/simplify, which have nothing to run, type-check,
+    // or simplify.
     return all.filter((d) => d.key === "correctness" || d.key === "comments");
   }
   let dims = all;
   if (snap.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
-  if (snap.hasSrc === false) dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure");
+  // No source → nothing to type-check, hunt for swallowed errors in, or simplify.
+  if (snap.hasSrc === false)
+    dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure" && d.key !== "simplify");
   return dims.length ? dims : all;
 }
 
