@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,15 @@ const SCRIPT = fileURLToPath(new URL("./prove-merge.sh", import.meta.url));
 // local `pull.rebase` or hook cannot change what these repos look like.
 const ENV = {
   ...process.env,
+  // The script reads BASE_REF, and the fleet harness is exactly the caller that
+  // would have it set — inheriting it points every fixture at local `main` and
+  // the suite stays green while measuring the wrong ref. Same for the GIT_* vars,
+  // which redirect the fixtures out of their own temp dirs.
+  BASE_REF: undefined,
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_TEMPLATE_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
   GIT_AUTHOR_NAME: "t",
   GIT_AUTHOR_EMAIL: "t@example.com",
   GIT_COMMITTER_NAME: "t",
@@ -80,12 +89,13 @@ test("already-current merge (pre == post, behind_by=0) proves true", (t) => {
   assert.equal(json.headWasCurrent, true);
   assert.equal(json.secondParent, head);
   assert.equal(code, 0);
-  // The old leg-1 gate is still reported, and is still unsatisfiable here —
-  // which is precisely why it can no longer be required on this path.
+  // Leg 1 wants this false, and here it cannot be: the merge landed, so leg 2
+  // makes pre — the same commit — an ancestor too. Legs 1 and 2 are jointly
+  // unsatisfiable when pre == post, which is why leg 1 is dropped on this path.
   assert.equal(json.preIsAncestor, true);
 });
 
-test("rebase-then-merge (pre != post) proves true and keeps all three legs", (t) => {
+test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
   const w = repo(t);
   const branchPoint = git(w, "rev-parse", "main");
   git(w, "checkout", "-q", "main");
@@ -182,31 +192,133 @@ test("ATTACK: wrong head — merge second parent is not the verified-green head"
   assert.equal(code, 1);
 });
 
-test("leg 2 still bites: a head that never landed cannot be proved", (t) => {
-  // The merge is real but lives on a side branch that was never pushed, so the
-  // head is not an ancestor of the base ref. Every other gate passes, which is
-  // what makes this a test of leg 2 rather than of whatever fires first.
+test("ATTACK: a merge commit the caller fabricated is an error, not a proof", (t) => {
+  // Every gate that reads structure reads it off <merge>. Hand over an object
+  // built to satisfy them — first parent an ancestor of the head, second parent
+  // the head itself — and without the reachability anchor it proves true.
   const w = repo(t);
-  const base = git(w, "rev-parse", "main");
-  git(w, "checkout", "-q", "-b", "feat", base);
-  const head = commit(w, "work that never reached main");
-  git(w, "checkout", "-q", "-b", "side", base);
-  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into a branch that is not main", head);
-  const merge = git(w, "rev-parse", "HEAD");
-
-  git(w, "checkout", "-q", "main");
-  commit(w, "main moves on without either of them");
+  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  mergeNoFf(w, head, "the real merge");
   git(w, "push", "-q", "origin", "main");
 
-  const { code, json } = prove(w, head, head, merge);
-  assert.deepEqual(
-    { second: json.secondParent, current: json.headWasCurrent, parents: json.parentCount },
-    { second: head, current: true, parents: 2 },
-    "every other gate must pass, so only leg 2 can explain the disproof",
+  const tree = git(w, "rev-parse", `${head}^{tree}`);
+  const fake = git(w, "commit-tree", tree, "-p", branchPoint, "-p", head, "-m", "fabricated");
+  assert.equal(
+    spawnSync("git", ["merge-base", "--is-ancestor", fake, "origin/main"], { cwd: w, env: ENV }).status,
+    1,
+    "fixture: the fabricated merge really is unreachable from the base ref",
   );
-  assert.equal(json.postIsAncestor, false);
-  assert.equal(json.proved, false, "a merge that never reached the base ref proves nothing");
+
+  const { code, json, stderr } = prove(w, head, head, fake);
+  assert.equal(json, null, "an unreachable merge must not emit a proof at all");
+  assert.equal(code, 2, "that merge did not land — an error, not a disproof");
+  assert.match(stderr, /is not reachable from/);
+});
+
+test("currency is required on the rebase path too, not just the no-rebase one", (t) => {
+  // Rebased early onto B, then a sibling landed C, then merged without re-rebasing.
+  // Leg 1 is satisfied — the pre head really was orphaned — so only headWasCurrent
+  // can catch that the merged head was stale at merge time.
+  const w = repo(t);
+  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "main");
+  commit(w, "main -> B");
+  git(w, "push", "-q", "origin", "main");
+
+  git(w, "checkout", "-q", "-b", "feat", branchPoint);
+  const pre = commit(w, "feature work");
+  git(w, "rebase", "-q", "main");
+  const post = git(w, "rev-parse", "HEAD");
+
+  git(w, "checkout", "-q", "main");
+  commit(w, "a sibling lands -> C");
+  const merge = mergeNoFf(w, post, "merge feat WITHOUT re-rebasing onto C");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.deepEqual(
+    { path: json.proofPath, pre: json.preIsAncestor, second: json.secondParent },
+    { path: "rebase", pre: false, second: post },
+    "leg 1 passes here, so only headWasCurrent can explain the disproof",
+  );
+  assert.equal(json.headWasCurrent, false);
+  assert.equal(json.proved, false, "a head that went stale between rebase and merge is not proved");
   assert.equal(code, 1);
+});
+
+test("ATTACK: a dishonest `pre` cannot downgrade the proof to the weaker path", (t) => {
+  // Same stale un-rebased merge the ATTACK case above pins at false. The caller
+  // claims a rebase happened by passing any commit that never landed as `pre`,
+  // which routes to the rebase path and satisfies leg 1. headWasCurrent is the
+  // only gate left that is derived from history rather than from the arguments.
+  const w = repo(t);
+  const stalePoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "stale", stalePoint);
+  const head = commit(w, "stale feature work");
+  git(w, "checkout", "-q", "-b", "junk", stalePoint);
+  const junk = commit(w, "an abandoned attempt that never landed");
+
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moved on without the branch");
+  const merge = mergeNoFf(w, head, "merge stale branch WITHOUT rebasing");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, junk, head, merge);
+  assert.equal(json.proofPath, "rebase", "fixture: the lie really does route to the rebase path");
+  assert.equal(json.preIsAncestor, false, "fixture: leg 1 really is satisfied by the lie");
+  assert.equal(json.proved, false, "the same merge must not prove true just because `pre` changed");
+  assert.equal(code, 1);
+});
+
+test("a <merge-commit> that also names a file is read as a revision", (t) => {
+  // `git rev-list --parents -n 1 mrg` is fatal when `mrg` is both a ref and a
+  // path. The old code read `${merge}^2`, where the suffix disambiguated for free.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "branch", "mrg", merge);
+  writeFileSync(join(w, "mrg"), "a file with the same name as the branch\n");
+  git(w, "add", "mrg");
+  commit(w, "add a file named mrg");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, head, head, "mrg");
+  assert.equal(json?.proved, true, "an ambiguous name must resolve as a revision, not error out");
+  assert.equal(code, 0);
+});
+
+test("a non-merge commit as <merge-commit> is a usage error, not a disproof", (t) => {
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json, stderr } = prove(w, head, head, head);
+  assert.equal(json, null);
+  assert.equal(code, 2);
+  assert.match(stderr, /has no second parent/);
+});
+
+test("pre and post are compared as commits, not as the strings the caller typed", (t) => {
+  // `feat` and its sha are the same commit, so this is the already-current case
+  // and must take the no-rebase path. Comparing raw arguments would read it as a
+  // rebase and reintroduce exactly the false negative this script was fixed for.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  for (const spelling of ["feat", head.slice(0, 8)]) {
+    const { code, json } = prove(w, spelling, head, merge);
+    assert.equal(json.proofPath, "no-rebase", `\`${spelling}\` names the same commit as its sha`);
+    assert.equal(json.proved, true);
+    assert.equal(code, 0);
+  }
 });
 
 test("ATTACK: octopus merge dragging in an unreviewed third parent proves false", (t) => {

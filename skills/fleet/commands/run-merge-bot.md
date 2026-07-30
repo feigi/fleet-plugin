@@ -97,6 +97,10 @@ For each labeled PR clearing the hold rule, lowest first:
    ~/.claude/skills/fleet/scripts/prove-merge.sh <pre-rebase-head> <rebased-head> <merge-commit>
    ```
 
+   **No rebase happened because the PR was already current? Pass the head twice.** That is the normal case in a wave, not an edge case, and `pre == post` selects a proof path built for it. Never invent a plausible-looking `pre` to make the arguments differ — a `pre` that never landed satisfies the pre-rebase leg by construction, and passing one is the single easiest way to turn a stale merge into `proved=true`.
+
+   Exit **0** proved, **1** disproved, **2** the script could not evaluate the claim at all — the merge is unreachable from `origin/main`, is not a merge commit, or an argument does not resolve. Treat 2 as "ask a human", not as a disproof.
+
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
 
 **Staleness fires *within* a wave, and it compounds.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Any behind-count handed to you at dispatch is already expired.
