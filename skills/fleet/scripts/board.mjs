@@ -23,21 +23,44 @@ function tryRun(cmd, args) {
   catch (e) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${e.message}`); return null; }
 }
 
+// ci-state.mjs exits 0 for green, 1 for not-green, 2 for a hard failure — and on
+// exit 1 it has ALREADY printed its verdict JSON to stdout before exiting. So a
+// thrown non-zero exit whose stdout is non-empty is a real verdict (feed it to
+// mapCi); only an empty stdout (the exit-2 die() path) is a genuine read failure.
+// Discarding e.stdout — as a plain tryRun would — makes red/still-running CI
+// unreachable: every non-green PR reads as "unknown" and the red-ci flag, the
+// top of the attention strip, never fires.
+function runCiState(scriptDir, pr) {
+  try {
+    return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], { encoding: "utf8" });
+  } catch (e) {
+    const out = e.stdout ? e.stdout.toString() : "";
+    if (out.trim()) return out;
+    console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
+    return null;
+  }
+}
+
 // ci-state's verdict already excludes behind-count staleness. Map it, and treat
 // anything not cleanly green-or-completed-red as unknown — never a false red.
 export function mapCi(ciJson) {
   if (!ciJson) return "unknown";
   let d;
   try { d = JSON.parse(ciJson); } catch { return "unknown"; }
-  if (d.status && d.status !== "completed") return "unknown"; // still running
+  if (d.status !== "completed") return "unknown"; // still running, or no run yet (status null)
   if (d.verdict === "green") return "green";
   if (d.verdict === "not-green") return "red";
   return "unknown";
 }
 
 export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
-  const prev = prevFile && existsSync(prevFile)
-    ? JSON.parse(readFileSync(prevFile, "utf8")) : null;
+  // The one read that must not crash the gather: a corrupt/partial board.json
+  // (the fallback safety net itself) is ignored, not fatal.
+  let prev = null;
+  if (prevFile && existsSync(prevFile)) {
+    try { prev = JSON.parse(readFileSync(prevFile, "utf8")); }
+    catch (e) { console.error(`${NAME}: ignoring unreadable prev board ${prevFile}: ${e.message}`); }
+  }
 
   const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "read"]);
   const ledger = ledgerJson ? JSON.parse(ledgerJson) : { rows: [], filed: [], ruled: [] };
@@ -58,7 +81,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));
   const ci = {};
   for (const p of prs) {
-    const out = tryRun("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(p.number), "--quiet"]);
+    const out = runCiState(scriptDir, p.number);
     ci[p.number] = out === null ? (prevCi.get(p.number) ?? "unknown") : mapCi(out);
   }
 
