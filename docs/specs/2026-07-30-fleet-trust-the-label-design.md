@@ -165,7 +165,25 @@ with a different ticket. Dropping `in-progress` remains the load-bearing half
 leaving it makes the ticket invisible to every scan.
 
 Otherwise the member runs `sizing-a-ticket` for the **process path** and proceeds
-on **either row**. Heavy now means brainstorm-then-plan, not stop.
+on **either row**. Heavy is never a bail reason.
+
+**On the heavy row a fleet member enters at `superpowers:writing-plans` and skips
+`superpowers:brainstorming`.** Brainstorming's `<HARD-GATE>` forbids writing any
+code until a design has been presented and the user has approved it, and its
+checklist requires approval per section. A fleet member has no channel to the
+maintainer (`run-team:51-52`), so running that step leaves it two bad options:
+stall waiting for an approval that cannot arrive — which the controller reads as
+idle, burning the slot — or answer its own questions and approve its own design,
+which is the fleet deciding *what* to build, forbidden by the invariants below.
+
+A decided ticket has already been brainstormed. The `## Agent Brief` is that
+output, produced by `/triage` with the maintainer in the loop, and admissibility
+has already established that it decides what to build. If the brief will not
+support a plan, that is the undecided case above — bail and demote, do not
+brainstorm.
+
+`next-ticket`'s solo flow is unaffected: a user is present there, so it runs the
+full heavy path including brainstorming.
 
 `run-team:479` is untouched: ambiguity discovered *mid-implementation* frees the
 slot, leaves `in-progress`, and reports. Early bail has no diff; mid-implementation
@@ -214,11 +232,13 @@ upstream.
 | `run-team:57-58` | step 4 reads for sequencing **and** decided?; no sizing subagent |
 | `run-team:59-61` | step 5 deleted |
 | `run-team:71-73` | multi-select gains the **unsure** group; "best first" → FIFO among survivors; sequenced survivors annotated |
-| `run-team:133-135` | member: read → bail+demote if undecided; else size for path, proceed on either row |
+| `run-team:133-135` | member: read → bail+demote if undecided; else size for path, proceed on either row, heavy entering at `writing-plans` |
 | `run-team:157-162` | demotion split by cause |
 | `run-team:352-353` | supply = open `ready-for-agent` surviving in-flight scan |
 | `run-team:478` | failure row: trigger becomes "what to build is not decided" |
 | `run-team:547` | red flag deleted; replaced by the size-is-not-the-axis flags |
+| `sizing-a-ticket:8` | scope the tie-break to process depth, not admissibility |
+| `sizing-a-ticket:15` | note that the fleet enters the heavy path at `writing-plans`; row table unchanged |
 | `sizing-a-ticket:19` | drop "unattended fleet excludes ticket" |
 | `sizing-a-ticket:25` | scope the flag to process depth |
 | `candidates.mjs:44-46` | `spec:` predicate in the jq; drop and log matches |

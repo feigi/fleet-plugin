@@ -5,7 +5,8 @@ description: Use before implementing ticket — decides how much process work ne
 
 # Sizing a Ticket
 
-Judge ticket **as written**, not as hoped. Torn between rows → take heavier.
+Judge ticket **as written**, not as hoped. Torn between rows → take heavier —
+process depth, not admissibility.
 
 Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises.
 
@@ -13,6 +14,12 @@ Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (
 |---|---|---|
 | **light** | States exactly what to change, one-two files, no design choice open | `superpowers:test-driven-development` |
 | **heavy** | Ambiguity in *what* to build, >~3 files, new API/schema/UX, or several viable approaches | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` |
+
+**Fleet member on heavy: enter at `superpowers:writing-plans`.**
+`superpowers:brainstorming` is the maintainer-present step — its `<HARD-GATE>`
+waits on user approval no unattended member can get, and a `ready-for-agent`
+ticket's `## Agent Brief` already is that output. Solo session has a user: run the
+full path.
 
 Bug reports: `superpowers:systematic-debugging` first, either row.
 

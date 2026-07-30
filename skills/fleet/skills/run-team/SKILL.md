@@ -70,7 +70,7 @@ At start, and whenever the pool empties.
 
    Any undecided item → not decided. Name it; that name is the exclusion line.
    **Torn → surface, never guess** (step 6's `unsure` group). Opposite of
-   `sizing-a-ticket`'s tie-break, deliberately — see that skill.
+   `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
@@ -159,9 +159,14 @@ whether a replacement redoes or destroys work. Observed twice in one run.
 
 Member reads the issue **before touching code**. Still undecided, or needs human
 hands the member doesn't have, with the repo in front of it → bail, name the
-cause, demote, do not implement. Otherwise run
-`sizing-a-ticket` for the process path and proceed on **either row** — heavy means
-brainstorm-then-plan here, not stop. Selection and claiming are done; start there.
+cause, demote, do not implement. Otherwise run `sizing-a-ticket` for the process
+path and proceed on **either row** — heavy is never a bail reason. Heavy row here
+enters at `superpowers:writing-plans` and **skips `superpowers:brainstorming`**:
+that step's `<HARD-GATE>` waits on maintainer approval no member can reach, and a
+decided ticket is already brainstormed — the `## Agent Brief` is that output, from
+`/triage` with the maintainer in the loop. Brief won't support a plan → that is
+the undecided case; bail and demote per the rule above. Selection and claiming are
+done; start there.
 
 Then `next-ticket` **step 7** (rebase, re-run tests, push, `gh pr create` with
 `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the
