@@ -78,6 +78,10 @@ function repo(t, dir = "w") {
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
 [ "\${GH_RC:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit "\$GH_RC"; }
+[ -z "\${GH_STDERR:-}" ] || echo "\$GH_STDERR" >&2
+# The check-then-act window: this call sits between the last precondition and
+# the first delete, so writing here is a member committing during the round trip.
+[ -z "\${GH_DIRTY:-}" ] || echo late > "\$GH_DIRTY"
 case "$*" in
   *closedByPullRequestsReferences*) ;;
   *"--json labels"*) printf '%s\\n' "\${GH_LABELS-in-progress}" ;;
@@ -400,7 +404,127 @@ test("the script carries no escape hatch", () => {
 
 test("usage errors exit 2", (t) => {
   const r = repo(t);
-  const bad = (...a) => spawnSync("sh", [SCRIPT, ...a], { cwd: r.w, env: r.env(), encoding: "utf8" }).status;
-  assert.equal(bad("9"), 2, "too few arguments");
-  assert.equal(bad("nine", "slug", "fix"), 2, "issue must be a number");
+  // Assert the message, not just the code: a non-numeric issue falls through to
+  // the mistyped-slug guard, which also exits 2, so deleting the numeric check
+  // left this case green.
+  const bad = (...a) => spawnSync("sh", [SCRIPT, ...a], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  assert.equal(bad("9").status, 2, "too few arguments");
+  const nine = bad("nine", "slug", "fix");
+  assert.equal(nine.status, 2);
+  assert.match(nine.stderr, /issue must be a number/);
+});
+
+test("a chatty but successful gh does not fake an already-dropped label", (t) => {
+  // The label was read with 2>&1 and substring-matched, so gh's own upgrade
+  // notice on a SUCCESSFUL call broke the match: the script deleted the worktree
+  // and branch and left in-progress on the ticket — invisible to candidates.mjs
+  // with no artefact left to explain it, and exit 0 identical to a real release.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+
+  const { code, json } = release(r, c, {
+    env: { GH_STDERR: "A new release of gh is available: 2.62.0 → 2.63.2" },
+  });
+  assert.equal(json.label, true, "the label is there and must be reported as there");
+  assert.equal(code, 0);
+  assert.ok(
+    r.calls().includes("issue edit 9 --remove-label in-progress"),
+    `the label must actually be dropped: ${r.calls()}`,
+  );
+});
+
+test("a refused worktree removal leaves the label on the issue", (t) => {
+  // The two local deletes run before the label edit, so a refusal — which is the
+  // dirty check recomputed by git at delete time — leaves the claim exactly as
+  // it was. Dropping the label first made every such refusal leave the ticket
+  // reading free while re-claiming failed on the branch that was still there.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  // Clean at check time, dirty by delete time: the stub runs in between.
+  const { code, json, stderr } = release(r, c, { env: { GH_DIRTY: join(c.wt, "late.txt") } });
+
+  assert.equal(code, 2);
+  assert.match(stderr, /PARTIALLY RELEASED|contains modified or untracked/);
+  assert.equal(json.released, false, "a receipt is still printed — die used to exit before any printf");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+  assert.ok(
+    !r.calls().some((l) => l.startsWith("issue edit")),
+    `in-progress must survive so the ticket keeps reading as taken: ${r.calls()}`,
+  );
+});
+
+test("a successful release survives a failing `git worktree prune`", (t) => {
+  // prune ran unchecked as the last statement under `set -e`, so its failure
+  // exited 1 — this script's code for "NOT released, nothing was touched" — out
+  // of a release that had already dropped the label and deleted both artefacts.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  // A `git` shim on PATH that fails only on prune, and defers everything else.
+  const shim = join(r.w, "..", "bin", "git");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(shim, `#!/bin/sh\n[ "$1" = worktree ] && [ "$2" = prune ] && exit 3\nexec ${real} "$@"\n`, { mode: 0o755 });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0, "the release succeeded; prune is housekeeping");
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("BASE_REF must be a remote-tracking ref", (t) => {
+  // The fleet harness is exactly the caller that sets it. Pointed at the claim's
+  // own branch, ahead is 0 and cherry is empty on a branch carrying unpushed
+  // work, so both commit guards pass and the release proceeds.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "unpushed work", "work\n");
+
+  const { code, json, stderr } = release(r, c, { env: { BASE_REF: `refs/heads/${c.branch}` } });
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /BASE_REF must be a remote-tracking ref/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a mistyped --apply is refused, never silently downgraded to a dry run", (t) => {
+  // `--aply` matched nothing, so the run reported "released":true having deleted
+  // nothing. A caller keying on that field marks the claim released while every
+  // artefact survives: the silent queue shrink this script exists to undo.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+
+  for (const arg of ["--aply", "--apply=true", "-n"]) {
+    const res = spawnSync("sh", [SCRIPT, ...c.args, arg], { cwd: r.w, env: r.env(), encoding: "utf8" });
+    assert.equal(res.status, 2, `${arg} must be refused`);
+    assert.match(res.stderr, /unknown argument/);
+    assert.equal(res.stdout.trim(), "", `${arg} must not report a release: ${res.stdout}`);
+  }
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true });
+});
+
+test("an unreadable worktree is an unknown answer, never a clean one", (t) => {
+  // Reachable whenever the worktree directory is gone but still registered.
+  // Swallowed, it reads as no uncommitted changes and the release proceeds.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /whether it holds uncommitted work is unknown/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a quote in the slug cannot produce a payload the caller fails to parse", (t) => {
+  // <slug> and <type> reach the JSON, as does git's own stderr, so a single `"`
+  // used to emit output that JSON.parse rejects — after the delete, with the
+  // exit code still reporting success.
+  // A backslash is not a legal ref character, so the quote is the reachable half.
+  const r = repo(t);
+  const slug = 'a"b';
+  git(r.w, "worktree", "add", "-q", join(r.w, ".worktrees", `9-${slug}`), "-b", `fix/9-${slug}`, "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.branch, `fix/9-${slug}`, "and it round-trips, rather than being stripped");
 });
