@@ -103,6 +103,39 @@ a read that is already paid for.
 No relabelling at phase 0, preserving `run-team:164-165`. An unticked ticket
 keeps `ready-for-agent` and re-surfaces next wave.
 
+## Candidate ordering — FIFO
+
+Nothing sorts today. `gh issue list` defaults to created-desc, so the list
+arrives newest-first and "best first" (`run-team:71`, `next-ticket:44-46`) is a
+model re-rank on every wave against *unblocks #X, small, adjacent to current
+branch*.
+
+`candidates.mjs` sorts ascending by issue number — monotonic in creation order,
+already in the payload, no extra field or query semantics. The ranking prose
+reduces to two lines:
+
+1. tickets that unblock others, oldest first;
+2. everything else, oldest first.
+
+Unblocking is the one criterion that pays for itself: clearing a blocker widens
+future supply. The other two go. **"Small"** is the same size axis this spec
+removes from the gate — keeping it as a ranking input would leave two rules about
+size pointing opposite ways in one skill. **"Adjacent to current branch"** is
+meaningless to the fleet, whose members each get a fresh worktree; it stays
+relevant only to `next-ticket`'s solo flow, where it is retained.
+
+Ordering moves from the model to the script, so a wave costs one deterministic
+sort instead of a ranking judgment.
+
+**Known interaction.** `to-tickets:63` publishes chains blockers-first, so a
+sequenced pair gets consecutive numbers and FIFO renders them adjacent — while
+`run-team:75-76` forbids putting both in one wave. Step 2 should drop the blocked
+one, but that is the scan the *Out of scope* section records as broken for
+`to-tickets` output. FIFO does not cause this and is not blocked by it; it does
+make the pairing more visible, which raises the dependency-scan fix's priority.
+Until it lands, the `Out of scope` sequencing note read at step 4 is the only
+guard, and phase 0 flags a sequenced pair rather than presenting both as free.
+
 ## Phase 2
 
 The member reads the issue before touching code. If what to build is still
@@ -168,7 +201,7 @@ upstream.
 | --- | --- |
 | `run-team:57-58` | step 4 reads for sequencing **and** decided?; no sizing subagent |
 | `run-team:59-61` | step 5 deleted |
-| `run-team:71-73` | multi-select gains the **unsure** group |
+| `run-team:71-73` | multi-select gains the **unsure** group; "best first" → FIFO, unblockers first |
 | `run-team:133-135` | member: read → bail+demote if undecided; else size for path, proceed on either row |
 | `run-team:157-162` | demotion split by cause |
 | `run-team:352-353` | supply = open `ready-for-agent` surviving in-flight scan |
@@ -177,6 +210,8 @@ upstream.
 | `sizing-a-ticket:19` | drop "unattended fleet excludes ticket" |
 | `sizing-a-ticket:25` | scope the flag to process depth |
 | `candidates.mjs:44-46` | `spec:` predicate in the jq; drop and log matches |
+| `candidates.mjs` (after parse) | sort ascending by `n` |
+| `next-ticket:44-46` | FIFO, unblockers first; drop "small"; keep "adjacent to current branch" for the solo flow |
 
 ## Testing
 
@@ -185,12 +220,28 @@ upstream.
 1. spec-shaped body (`## User Stories`) → dropped;
 2. ticket-shaped body → kept;
 3. `## User Stories` inside a fenced code block → **not** matched;
-4. a drop emits the issue number.
+4. a drop emits the issue number;
+5. results ascending by number whatever order `gh` returned them in.
 
 Everything else is skill prose, which has no test coverage. The existing 76 tests
 stay green as a regression gate on the script, not as evidence about the prose —
 the check on the prose is that the two opposite tie-breaks are stated in both
 files.
+
+## Acceptance criteria
+
+1. All five test cases above pass; the existing 76 stay green.
+2. `sizing-a-ticket` is not invoked anywhere in phase 0.
+3. Both tie-breaks — *torn → surface* for admissibility, *torn → heavier* for
+   process depth — appear in **both** `run-team` and `sizing-a-ticket`.
+4. No file-count or ticket-size wording survives in any admissibility rule.
+5. **Caveman compression applies to every edited line of LLM-consumed prose** —
+   `run-team/SKILL.md`, `sizing-a-ticket/SKILL.md`, `next-ticket/SKILL.md`,
+   and any `references/*.md` touched. Drop articles and filler; fragments are
+   fine; keep code, paths, commands, and line references verbatim. It is a
+   standing rule, not specific to this change: skill prose is re-read into
+   context on every invocation, so wording is billed per read, not per write.
+   This document is not LLM-consumed and stays normal prose.
 
 ## Invariants
 
