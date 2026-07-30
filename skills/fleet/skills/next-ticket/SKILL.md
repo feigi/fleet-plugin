@@ -27,7 +27,7 @@ Add `--label ready-for-agent` first; drop it and re-run only on empty result (`r
 
 Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket unblocking others ranks higher.
 
-Full body only for 3–5 survivors: `gh issue view <N> --json body`.
+Title + body + comments, only for 3–5 survivors: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
 ## 3. In-flight check (all three, per candidate)
 
