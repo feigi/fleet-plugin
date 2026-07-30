@@ -25,7 +25,7 @@ Add `--label ready-for-agent` first; drop it and re-run only on empty result (`r
 
 ## 2. Dependencies
 
-Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket unblocking others ranks higher. Cut to 3–5 here — step 3 runs per candidate. Count is next-ticket's own; fleet Phase 0 sets its own.
+Use `d` array. Blocker open → drop ticket, or surface blocker instead. Cut to oldest 3–5 here — step 3 runs per candidate. Count is next-ticket's own; fleet Phase 0 sets its own.
 
 ## 3. In-flight check (all three, per candidate) — then fetch
 
