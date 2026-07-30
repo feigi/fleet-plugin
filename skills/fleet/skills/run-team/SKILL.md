@@ -261,11 +261,14 @@ exit-0 gate strands it unlabelled. The finisher reads per-job state (`ci-state.m
 without `--quiet`, or its `jobs`), since `--quiet` drops `jobs`. Normal path, not
 only kill-recovery. See references/ci-and-staleness.md.
 
-**Correction tickets ship new wrong claims, and they inherit them from the
-ticket.** Put the check on the **implementer**, not only the reviewer: every
-factual claim it restates must have a settling command run against the tree first
-— the issue body is a lead, never a citation. Tell reviewers to read each
-corrected sentence literally, clause by clause. See references/correction-tickets.md.
+**Correction tickets ship new wrong claims — inherited from the ticket, and
+minted in prose the ticket never asked for.** Put the check on the
+**implementer**, not only the reviewer: every factual claim it restates must have
+a settling command run against the tree first — the issue body is a lead, never a
+citation — and it must **match the ticket's stated size**, since added prose is
+where minted claims enter. No positional references (`the closing/second/last X`);
+name the thing semantically. Tell reviewers to read each corrected sentence
+literally, clause by clause. See references/correction-tickets.md.
 
 ### Merge bot
 
