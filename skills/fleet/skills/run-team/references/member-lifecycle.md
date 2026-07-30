@@ -1,6 +1,6 @@
 # Member lifecycle: naming, fresh context, recovery
 
-Why member name load-bearing, why every member single-use, how killed/idle/truncated member recovered. Assertions these justify live in SKILL.md's "Two rules that fail silently", Phase 3, Reviewers, Failure handling sections; evidence here.
+Why member name load-bearing, why every member single-use, how killed/idle/truncated member recovered. Assertions these justify live in SKILL.md's "Rules that fail silently", Phase 3, Reviewers, Failure handling sections; evidence here.
 
 ## The name is what carries the `Agent` tool
 
