@@ -54,8 +54,8 @@ At start, and whenever the pool empties.
 3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
    candidate; any hit = taken. It runs all three probes (open/closed PRs, remote
    heads, local worktrees + branches) so a partial one cannot read as free.
-4. Size each survivor with `sizing-a-ticket`. It reads `gh issue view <N>
-   --comments`, so record the Agent Brief's `Out of scope` sequencing while there.
+4. Size each survivor with `sizing-a-ticket`. It reads the full issue, so record
+   the Agent Brief's `Out of scope` sequencing while there.
 5. **Light row only.** Heavy is inadmissible even with a complete brief — the
    fleet runs unattended and the heavy path opens with brainstorming, which needs
    the maintainer. Excluding is this command's policy; the skill only reports.
@@ -114,9 +114,12 @@ number, worktree abs path, branch, and both of these verbatim:
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
 
-> Read the issue with `gh issue view <N> --comments`. The `## Agent Brief` comment
-> is authoritative over the issue body. Honor its `Respec` block — it may
-> explicitly rule out hypotheses the body raises.
+> Read the issue with `gh issue view <N> --json title,body,comments --jq
+> '.title, .body, (.comments[]|.author.login + ": " + .body)'`. Not bare `gh
+> issue view <N> --comments` — non-interactively that prints the comments alone
+> and drops the title and body, exit 0, so the loss is silent. The `## Agent
+> Brief` comment is authoritative over the issue body. Honor its `Respec` block
+> — it may explicitly rule out hypotheses the body raises.
 
 > Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 > you stop for any reason, uncommitted work is invisible to the controller and
