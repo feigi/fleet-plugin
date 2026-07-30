@@ -25,11 +25,9 @@ Add `--label ready-for-agent` first; drop it and re-run only on empty result (`r
 
 ## 2. Dependencies
 
-Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket unblocking others ranks higher.
+Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket unblocking others ranks higher. Cut to 3–5 here — step 3 runs per candidate. Count is next-ticket's own; fleet Phase 0 sets its own.
 
-Title + body + comments, only for 3–5 survivors: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
-
-## 3. In-flight check (all three, per candidate)
+## 3. In-flight check (all three, per candidate) — then fetch
 
 ```bash
 gh pr list --state all --search "<N>"
@@ -38,6 +36,10 @@ git worktree list; git branch -vv
 ```
 
 Any hit → taken. "Shipped" memory not proof; open PR means unmerged.
+
+Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
+
+Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on #7) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: two of the three probes hit the network — three round-trips if you run `~/.claude/skills/fleet/scripts/inflight.sh <N>` — so they stay behind step 2's cut and never run over the whole step 1 list.
 
 ## 4. Suggest — then stop
 
@@ -85,6 +87,7 @@ Closes #N"
 
 - "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only.
 - "Label says ready-for-agent, so it's free" → run step 3.
+- "Read the issues first, then check what's taken" → probes first; a dropped candidate's full read is pure waste. Probes still stay behind step 2's cut — two of the three hit the network.
 - "Only one candidate, I'll just start" → still ask.
 - "Blocker is nearly done" → still blocked.
 - "I can size this myself, it's obvious" → run `sizing-a-ticket`; its red flags are ones you'd skip.

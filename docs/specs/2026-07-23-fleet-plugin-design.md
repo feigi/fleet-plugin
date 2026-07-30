@@ -369,7 +369,7 @@ was confidently reported as complete.
 **Also decided here:** every cross-reference to a sibling fleet component inside
 these documents is a **bare backticked name in running prose**, never a slash
 invocation — `run-team` SKILL.md:7, :38, :39, :46, :121, :123 and `next-ticket`
-SKILL.md:63, :90. That is *why* namespacing broke nothing: the model resolves
+SKILL.md:65, :93. That is *why* namespacing broke nothing: the model resolves
 them by description, not by literal name. It is luck rather than design, and
 Plan 3 decides deliberately whether to keep depending on it.
 
