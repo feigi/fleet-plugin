@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -558,15 +558,15 @@ test("a worktree directory deleted by hand releases instead of blocking forever"
   assert.equal(json.released, true);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "including the stale entry");
   assert.ok(
-    r.calls().some((l) => l.includes("issue edit") && l.includes("--remove-label in-progress")),
+    r.calls().includes("issue edit 9 --remove-label in-progress"),
     `the label is what had to come off: ${r.calls()}`,
   );
 });
 
 test("a worktree deleted by hand while its branch carries work still blocks", (t) => {
   // The gone directory is the only thing the case above makes answerable. Every
-  // other refusal is measured on the branch ref, not the worktree, and none of
-  // them may weaken because the directory went missing.
+  // other refusal is measured on the branch ref or on the worktree LIST, never
+  // on the directory, and none of them may weaken because it went missing.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "work", "work that exists nowhere else\n");
@@ -575,11 +575,54 @@ test("a worktree deleted by hand while its branch carries work still blocks", (t
   const { code, json } = release(r, c);
   assert.equal(code, 1);
   assert.match(json.blockers.join(" "), /1 commit\(s\) ahead/);
-  assert.equal(
-    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
-    true,
+  assert.deepEqual(
+    artefacts(r, c),
+    { dir: false, worktree: true, branch: true },
     "the branch, and the commit on it, survive",
   );
+});
+
+test("a worktree the script may not look at is unknown, never a release", (t) => {
+  // -d is false for a directory we are not permitted to stat as surely as for
+  // one that is gone, and git cannot separate them either: it marks both
+  // `prunable` and `worktree remove` ACCEPTS a prunable entry, so the delete
+  // cannot recompute what this guard gets wrong. Read as "gone", this released
+  // the claim outright — branch deleted, label dropped, exit 0 — with the
+  // member's uncommitted work still sitting on disk, unregistered and with no
+  // branch left pointing at it.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  const parent = join(r.w, ".worktrees");
+
+  chmodSync(parent, 0o000);
+  const { code } = release(r, c);
+  // Restored before the first assert, or a failure here leaves a fixture the
+  // suite's own cleanup cannot remove.
+  chmodSync(parent, 0o755);
+
+  // The property, not this script's wording for it: the pre-fix code refused
+  // here too, by a different route, and a case that pins the message would
+  // call that safe version broken.
+  assert.equal(code, 2);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("the whole .worktrees directory deleted by hand still releases", (t) => {
+  // `rm -rf .worktrees` is how this usually happens, and it takes the parent
+  // along with the child. Establishing absence one level up finds no parent
+  // either and calls that unknown — which puts the case above straight back on
+  // the permanent exit 2 this script was fixed to stop producing.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(join(r.w, ".worktrees"), { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0, "the parent going too does not make the child unanswerable");
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
 });
 
 test("a quote in the slug cannot produce a payload the caller fails to parse", (t) => {

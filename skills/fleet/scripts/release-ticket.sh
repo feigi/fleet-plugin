@@ -17,7 +17,12 @@
 # direction is a worktree that gained work after it was checked. Only the dirty
 # check is also recomputed at the moment of the delete, by git itself — that is
 # what `worktree remove` without --force and `branch -d` are for, and it is why
-# both run before the label is dropped rather than after.
+# both run before the label is dropped rather than after. That second opinion
+# covers the live-directory case ONLY: `worktree remove` gates its own clean
+# check on the same stat this script does, so wherever the path cannot be
+# stat'ed git reaches the same conclusion rather than an independent one, and
+# the guard at the dirty check below is left as sole arbiter — which is why it
+# establishes absence instead of inferring it.
 set -eu
 
 NAME=release-ticket
@@ -177,14 +182,39 @@ fi
 # then never be released — label, branch and worktree entry all surviving every
 # run while the in-flight probe kept reading the ticket as taken. git agrees at
 # the delete: `worktree remove` accepts the gone entry and clears the admin
-# files, and the `prune` below is the backstop (verified, git 2.50.1).
+# files outright, so the `prune` below finds nothing left to do (verified, git
+# 2.50.1) — and it is only reachable at all once that remove has succeeded.
 #
 # Not git's own `prunable` annotation, which marks this entry but is not the
 # same question: removing only a LIVE worktree's .git file marks it `prunable`
 # too, with the directory and every uncommitted change still sitting in it.
-# Keying on the annotation would skip the check on that one and let the remove
-# take the work with it. A gone directory is the only new answer here; a
-# directory that exists and cannot be read is still unknown, and still dies.
+# Keying on the annotation would skip the check on that one, and `worktree
+# remove` then refuses it (rc 128) — so instead of the plain "has N uncommitted
+# change(s)" this reports today, the run reaches `halt` and exits 2 announcing a
+# partial release that never happened, on a worktree still holding the work.
+#
+# Absence is ESTABLISHED here, never inferred from a failed -d, because -d is
+# also false for a directory we are not permitted to stat. git cannot separate
+# those two either: it marks both `prunable`, and `worktree remove` ACCEPTS a
+# prunable entry (rc 0), so the delete-time recomputation the header leans on
+# is the one thing absent on this path and this test is the only check left
+# standing. Read as "gone", an unsearchable prefix released the claim — branch
+# deleted, label dropped, exit 0, `"blockers":[]` — with the member's
+# uncommitted work still on disk and now orphaned. So walk up to the nearest
+# ancestor that does exist and require THAT to be searchable: only then is "not
+# there" a measurement rather than a guess. The walk is what keeps `rm -rf
+# .worktrees` answerable — the parent goes with the child, and testing the
+# immediate parent alone reads its absence as unknown and puts that case back
+# on the permanent exit 2 this fix exists to end.
+look=$wt
+# `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
+# slash, so the emptiness form spins forever on one. git emits absolute paths
+# here, but a delete script may not hang on the input that proves otherwise.
+while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+if [ -n "$wt" ] && [ ! -e "$wt" ] && [ ! -x "$look" ]; then
+  die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
+fi
+
 if [ -n "$wt" ] && [ -d "$wt" ]; then
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
