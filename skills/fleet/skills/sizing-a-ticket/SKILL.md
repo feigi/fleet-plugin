@@ -7,7 +7,7 @@ description: Use before implementing ticket, or admitting tickets into queue by 
 
 Judge ticket **as written**, not as hoped. Torn between rows → take heavier.
 
-Read first: `gh issue view <N> --comments`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises.
+Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises.
 
 | Row | Signal | Path |
 |---|---|---|
