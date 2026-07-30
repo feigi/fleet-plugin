@@ -222,6 +222,21 @@ test("a pushed branch blocks on its own", (t) => {
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+test("a blocked claim reports its blocker without asking GitHub", (t) => {
+  // Measured in a fresh clone whose origin is not a GitHub remote: reaching for
+  // the tracker first turns every offline blocked claim into an unanswerable
+  // one and buries the finding. The blockers already decided the answer.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const { code, json } = release(r, c, { env: { GH_RC: "1" } });
+  assert.equal(code, 1, "blocked, not unanswerable");
+  assert.equal(json.blockers.length, 1);
+  assert.equal(json.label, null, "the label was never read, and must not be reported as if it were");
+  assert.deepEqual(r.calls(), [], "no tracker call is needed to know this claim is blocked");
+});
+
 test("an unreachable remote is an unknown answer, never a 'not pushed'", (t) => {
   // Swallowing this failure reads as "no remote branch" and releases a claim
   // whose work is already on the server.

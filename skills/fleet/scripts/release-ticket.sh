@@ -93,6 +93,17 @@ if [ -n "$wt" ]; then
   [ "$n" -eq 0 ] || block "worktree $wt has $n uncommitted change(s)"
 fi
 
+# Report the blockers before asking GitHub anything. The answer cannot change —
+# every artefact stays put either way — and reaching for the tracker first turns
+# an offline blocked claim into an unanswerable one, burying the finding the
+# caller actually needs. "label":null says it was never read.
+if [ -n "$blockers" ]; then
+  echo "$NAME: #$issue NOT released — nothing was touched" >&2
+  printf '{"issue":%s,"branch":"%s","worktree":"%s","label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
+    "$issue" "$branch" "$wt" "$apply" "${blockers%,}"
+  exit 1
+fi
+
 # Read the label before touching anything: a release that removes the worktree
 # and branch but leaves in-progress hides the ticket from candidates.mjs, which
 # is worse than not releasing at all. All three artefacts or none.
@@ -101,13 +112,6 @@ if ! labels=$(gh issue view "$issue" --json labels --jq '[.labels[].name]|join("
   die "gh issue view $issue failed, so the in-progress label cannot be released: $(printf '%s' "$labels" | tr '\n' ' ')"
 fi
 case ",$labels," in *,in-progress,*) has_label=true;; *) has_label=false;; esac
-
-if [ -n "$blockers" ]; then
-  echo "$NAME: #$issue NOT released — nothing was touched" >&2
-  printf '{"issue":%s,"branch":"%s","worktree":"%s","label":%s,"released":false,"applied":%s,"blockers":[%s]}\n' \
-    "$issue" "$branch" "$wt" "$has_label" "$apply" "${blockers%,}"
-  exit 1
-fi
 
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2
