@@ -71,3 +71,5 @@ backups/
 
 # caveman-compress runtime marker — writer unidentified, but it reappears
 .caveman-active
+# ponytail runtime marker — same kind of transient *-active flag
+.ponytail-active
