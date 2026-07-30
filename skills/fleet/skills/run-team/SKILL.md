@@ -156,7 +156,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Implementer reports the row is heavy** (sized heavy, bailed without
   implementing) → `gh issue edit <N> --remove-label ready-for-agent --remove-label
   in-progress --add-label ready-for-human`, comment the reason (row, path, one line
-  why), reap the worktree and branch, refill with a *different* ticket.
+  why), release the worktree and branch with `release-ticket.sh` (below — `reap.sh`
+  declines a claim that never became a PR), refill with a *different* ticket.
   **Dropping `in-progress` is the load-bearing half** — phase 1 already applied it
   and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
   scans *and* the maintainer's (`next-ticket` excludes it too). It does not loop; it
@@ -178,6 +179,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
+- **The run ends, or the maintainer says drain** → release every claim that never
+  became a PR (below). Nothing else in the loop fires for those.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`); the
   diff-validating `check` job green with no heavy job (the diff-validating suites,
   not the `rebase-check` currency gate) in `failure` → dispatch a finisher to
@@ -318,6 +321,31 @@ a row without a terminal state means someone may still be in that worktree, and
 the dirty check does not see a member that committed but has not pushed.
 See references/reaping.md.
 
+### Release the claims that never became PRs — at end of run, and on drain
+
+Phase 1 is serial and runs ahead of dispatch, so a ticket can be legitimately
+claimed and then never sent: a collision surfaces after the claim, the maintainer
+says drain, the pool is re-prioritised. The claim still holds the `in-progress`
+label, a worktree and a branch, and **`reap.sh` will not take them** — the branch
+is not `[gone]` and has no unique commits, so it is correctly not reapable. Reaping
+fires per merge wave and nothing fires at end of run, so the claim survives it and
+phase 0's in-flight probe reads a free ticket as taken next run. Same silent queue
+shrink as a stale merged worktree, from the opposite end.
+
+`~/.claude/skills/fleet/scripts/release-ticket.sh <N> <slug> <type> --apply` is the
+inverse of the claim, and recomputes all four preconditions inside the same
+invocation as the delete: 0 commits ahead of `origin/main`, clean worktree, no
+unique commits (`git cherry`), no branch on `origin`. All clear → drops the label,
+removes the worktree without `--force`, deletes the branch with `-d`. Any one of
+them failing → it touches nothing and names the blocker. **That refusal is the
+finding, never an obstacle**: a claim carrying commits or a pushed branch is not
+auto-released, ever — audit it with `worktree-audit.sh` and decide by hand.
+
+Run it over every pool ticket with no PR when the run ends or the maintainer
+drains, and on the spot for a claim abandoned mid-run (a heavy-row bail, a
+collision found after the claim). Update the released tickets' ledger rows in the
+same step. See references/reaping.md.
+
 ## Queue depth
 
 - **pool** — approved, not yet dispatched
@@ -447,7 +475,7 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer sizes the row **heavy** and bails | → `ready-for-human`, drop `in-progress`, comment why, reap, refill (phase 3) |
+| Implementer sizes the row **heavy** and bails | → `ready-for-human`, drop `in-progress`, comment why, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — heavy is the row above, not this one |
 | Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
@@ -514,6 +542,8 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "The name is cosmetic" → the name carries the `Agent` tool.
 - "Name the specialists too" → members cannot name children.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
+- "The reap at the end will pick up the claim I never dispatched" → it declines:
+  not `[gone]`, no unique commits. Release it, or it reads as taken next run.
 - "The brief is thorough, this heavy ticket is fine" → brief quality never
   promotes a heavy row.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
