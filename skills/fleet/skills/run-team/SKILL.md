@@ -54,12 +54,27 @@ At start, and whenever the pool empties.
 3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
    candidate; any hit = taken. It runs all three probes (open/closed PRs, remote
    heads, local worktrees + branches) so a partial one cannot read as free.
-4. Size each survivor with `sizing-a-ticket`. It reads the full issue, so record
-   the Agent Brief's `Out of scope` sequencing while there.
-5. **Light row only.** Heavy is inadmissible even with a complete brief — the
-   fleet runs unattended and the heavy path opens with brainstorming, which needs
-   the maintainer. Excluding is this command's policy; the skill only reports.
-6. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
+4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
+   --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
+   answers both questions. Record the Agent Brief's `Out of scope` sequencing.
+   Then judge **decided?** — never size.
+
+   **Decided?** Would two competent implementers, reading only this ticket, build
+   materially different things? "Material" by inventory, not feel:
+
+   | Left open | Verdict |
+   |---|---|
+   | architecture, API shape, schema, UX | **undecided** |
+   | new dependency, new seam | **undecided** |
+   | naming, file layout, ordering, test arrangement | decided — ignore |
+
+   Any undecided item → not decided. Name it; that name is the exclusion line.
+   **Torn → surface, never guess** (step 6's `unsure` group). Opposite of
+   `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
+
+   No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
+   phase 2's call, after the ticket is claimed.
+5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
    with no diff, so infer its target files from the issue body (the paths it
    names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
    and against the other survivors' inferred files. `pr-overlap.mjs` is **PR-vs-PR
@@ -68,9 +83,26 @@ At start, and whenever the pool empties.
    Step 3 catches a ticket already taken, not one that *edits a file an open PR
    edits*. Overlap → admit one, defer the rest with the reason. The tracker cannot
    express this, and it is what actually stalls a wave.
-7. Present admissible survivors, best first, as a multi-select. Maintainer ticks
-   the pool. List heavy-row exclusions as "needs a solo session with you", and
-   collision-deferred ones with what they collide with. Excluded, not dropped.
+6. Present survivors as a multi-select, **oldest first** (`candidates.mjs` already
+   sorted; do not re-rank). Three groups:
+
+   - **admitted** — decided;
+   - **unsure** — torn, each flagged with the open decision;
+   - **excluded** — undecided, each with the decision that is missing.
+
+   Annotate any survivor the `Out of scope` read sequences after another survivor
+   in the same list. Without that, FIFO puts a chain's members next to each other
+   and two consecutive numbers read as two independent tickets — which is exactly
+   how both land in one wave.
+
+   Maintainer ticks what to **stage this wave** — how many, what order, what
+   collides. Staging, never vetting: `ready-for-agent` already carries triage's
+   verdict that an agent may take the ticket, reached with the maintainer present.
+   Phase 0 does not re-litigate it, and an unticked ticket is deferred, not judged
+   unfit. **unsure** is the only group asking a judgment.
+
+   Excluded, not dropped: phase 0 never relabels an unclaimed ticket, and an
+   unticked ticket keeps `ready-for-agent` and returns next wave.
 
 Never put two sequenced tickets in one wave. That lives in the brief's `Out of
 scope`, is invisible to step 2, and bites hardest at five wide.
@@ -130,11 +162,21 @@ diff only in the worktree, and the controller cannot reap, replace, or even see
 it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly what decides
 whether a replacement redoes or destroys work. Observed twice in one run.
 
-Member runs `sizing-a-ticket` first and follows the path returned — selection and
-claiming are done, so it starts there. Heavy row = phase 0 mis-sized it: stop and
-report, do not implement unattended. Then `next-ticket` **step 7** (rebase, re-run
-tests, push, `gh pr create` with `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the branch *type*), report PR
-number and head SHA, exit. Never labels `ready-to-merge`, never merges.
+Member reads the issue **before touching code**. Still undecided, or needs human
+hands the member doesn't have, with the repo in front of it → bail, name the
+cause, demote, do not implement. Otherwise run `sizing-a-ticket` for the process
+path and proceed on **either row** — heavy is never a bail reason. Heavy row here
+enters at `superpowers:writing-plans` and **skips `superpowers:brainstorming`**:
+that step's `<HARD-GATE>` waits on maintainer approval no member can reach, and a
+decided ticket is already brainstormed — the `## Agent Brief` is that output, from
+`/triage` with the maintainer in the loop. Brief won't support a plan → that is
+the undecided case; bail and demote per the rule above. Selection and claiming are
+done; start there.
+
+Then `next-ticket` **step 7** (rebase, re-run tests, push, `gh pr create` with
+`Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the
+branch *type*), report PR number and head SHA, exit. Never labels
+`ready-to-merge`, never merges.
 
 ## Phase 3 — event loop
 
@@ -153,16 +195,25 @@ multi-select**, and **a judgement the evidence cannot settle**.
 
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
-- **Implementer reports the row is heavy** (sized heavy, bailed without
-  implementing) → `gh issue edit <N> --remove-label ready-for-agent --remove-label
-  in-progress --add-label ready-for-human`, comment the reason (row, path, one line
-  why), release the worktree and branch with `release-ticket.sh` (below — `reap.sh`
-  declines a claim that never became a PR), refill with a *different* ticket.
-  **Dropping `in-progress` is the load-bearing half** — phase 1 already applied it
-  and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
-  scans *and* the maintainer's (`next-ticket` excludes it too). It does not loop; it
-  disappears. Phase 0 excludes heavies without relabelling — an unclaimed ticket is
-  not yours to reclassify, and it surfaces its exclusions to the maintainer anyway.
+- **Implementer bails before implementing** → demote by cause:
+
+  | Cause | Label |
+  |---|---|
+  | brief does not decide *what* to build | `needs-triage` |
+  | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
+
+  `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
+  --add-label <label>`, comment the cause, release the worktree and branch with
+  `release-ticket.sh` (below — `reap.sh` declines a claim that never became a
+  PR), refill with a *different* ticket. `needs-triage` routes back to
+  `/triage`, which can return it as `ready-for-agent`; `ready-for-human` is the
+  dead end, so use it only for hands, never for vagueness.
+
+  **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
+  `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
+  scans *and* the maintainer's. It does not loop; it disappears. Phase 0 excludes
+  without relabelling — an unclaimed ticket is not yours to reclassify, and it
+  surfaces its exclusions to the maintainer anyway.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **A specialist report lands** (a task-notification from a grandchild you never
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
@@ -342,15 +393,15 @@ finding, never an obstacle**: a claim carrying commits or a pushed branch is not
 auto-released, ever — audit it with `worktree-audit.sh` and decide by hand.
 
 Run it over every pool ticket with no PR when the run ends or the maintainer
-drains, and on the spot for a claim abandoned mid-run (a heavy-row bail, a
-collision found after the claim). Update the released tickets' ledger rows in the
-same step. See references/reaping.md.
+drains, and on the spot for a claim abandoned mid-run (a bail before
+implementing, a collision found after the claim). Update the released tickets'
+ledger rows in the same step. See references/reaping.md.
 
 ## Queue depth
 
 - **pool** — approved, not yet dispatched
-- **supply** — open `ready-for-agent` surviving in-flight scan and light-row
-  sizing. A queue of heavy tickets is zero supply.
+- **supply** — open `ready-for-agent` surviving in-flight scan and the decided?
+  check. A queue of undecided tickets is zero supply.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
@@ -368,7 +419,7 @@ cycle. That is an argument for batching a wave, never for idling an implementer.
 
 **Reconcile, do not wait for an event.** "A slot is free and the pool is non-empty"
 is a *level* condition — re-derive the deficit on **every** tick, whatever woke you:
-a member finishing, a member sizing-heavy and bailing, a merge landing. An
+a member finishing, a member bailing before implementing, a merge landing. An
 edge-triggered loop that only refills on completion stalls silently the moment the
 queue empties, because 0 implementers emit no completion event. With pool 0 the
 table below governs — re-shortlist and ask, do not dispatch un-ticked supply.
@@ -475,8 +526,8 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer sizes the row **heavy** and bails | → `ready-for-human`, drop `in-progress`, comment why, release the claim, refill (phase 3) |
-| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — heavy is the row above, not this one |
+| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
+| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
 | Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
@@ -544,8 +595,11 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.
-- "The brief is thorough, this heavy ticket is fine" → brief quality never
-  promotes a heavy row.
+- "Touches eight files, too big for the fleet" → size is not the axis. Decided is.
+- "Body is three lines, so it's simple" → short bodies hide open design choices.
+- "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
+  choice it leaves open.
+- "I'd have to pick an approach myself" → that IS undecided.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
 - "Tell the reviewer to ping its specialists" → the ping returns `had no active
   task; resumed from transcript` and delivers nothing; on the hand-dispatch path

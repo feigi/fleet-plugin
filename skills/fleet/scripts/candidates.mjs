@@ -43,6 +43,7 @@ const EXCLUDE =
   "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info";
 const JQ =
   '[.[]|{n:.number,t:.title,l:[.labels[].name],' +
+  'spec:((.body//"")|test("(?m)^##\\\\s+User Stories\\\\s*$")),' +
   'd:[(.body//""|scan("(?i)(?:depends on|blocked by|requires|after)\\\\s+#\\\\d+"))]}]';
 
 function query(label) {
@@ -89,6 +90,30 @@ function refuseIfCapped(rows, description) {
   }
 }
 
+// `## User Stories` is to-spec's signature — mandatory in its template, absent
+// from every ticket template. to-spec stamps a whole spec `ready-for-agent`
+// with "no need for additional triage", so it arrives looking admissible; it is
+// to-tickets' INPUT, not a ticket, however well decided it is.
+//
+// ponytail: shape-match on to-spec's template, and no markdown awareness — a
+// ticket quoting `## User Stories` inside a fenced block is dropped too. Not
+// worth a fence parser: every drop is logged by number, so a false positive is
+// loud rather than silent. An upstream template change re-leaks a spec into the
+// queue, where the phase 2 bail catches it.
+function dropSpecs(rows) {
+  const kept = [];
+  for (const { spec, ...rest } of rows) {
+    if (spec) {
+      // "no silent caps" covers drops too — a filtered list that does not say
+      // what it filtered is indistinguishable from a complete one.
+      console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (## User Stories)`);
+    } else {
+      kept.push(rest);
+    }
+  }
+  return kept;
+}
+
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
 refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
@@ -99,6 +124,16 @@ if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`    ${rows.length} candidate(s) unfiltered`);
   refuseIfCapped(rows, " unfiltered (fallback)");
 }
+
+// After refuseIfCapped, never before: filtering first shrinks the array below
+// `limit` and the cap check would stop seeing a truncated list.
+rows = dropSpecs(rows);
+
+// FIFO among survivors. Issue number is monotonic in creation order, so this
+// needs no extra field and no query semantics. Dependencies do not rank: the
+// dependency scan already drops anything with an open blocker, and to-tickets
+// publishes chains blockers-first, so lower numbers are the blockers anyway.
+rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
