@@ -40,8 +40,19 @@ either way, exit 0, so the loss is silent.
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
 
-- **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
-- **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
+No `wayfinder:*` label exists in this repo.
+`gh api repos/feigi/claude-config/labels --jq '.[].name'` lists neither
+`wayfinder:map` nor any `wayfinder:<type>`. Pass no `--label` for these two roles
+rather than inventing a string: `gh` resolves label names to ids *before* the write
+and fails the whole command with `could not add label: '<name>' not found`, so an
+unknown name aborts the create instead of being created on demand. Little is lost —
+a map reaches `/wayfinder` as a URL or number rather than by label query, and its
+children are found as sub-issues. `/wayfinder`'s own `SKILL.md` still says to label
+the map (`:21`, `:113`) and each ticket (`:65`) — this file overrides it; skip the
+label step.
+
+- **Map**: a single issue holding the Notes / Decisions-so-far / Fog body. `gh issue create` — no label, per above.
+- **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Record the type (`research`/`prototype`/`grilling`/`task`) in the child body — there is no `wayfinder:<type>` label to carry it. Once claimed, the ticket is assigned to the driving dev.
 - **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
