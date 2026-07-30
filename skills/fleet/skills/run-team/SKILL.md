@@ -114,12 +114,11 @@ number, worktree abs path, branch, and both of these verbatim:
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
 
-> Read the issue with `gh issue view <N> --json title,body,comments --jq
-> '.title, .body, (.comments[]|.author.login + ": " + .body)'`. Not bare `gh
-> issue view <N> --comments` — non-interactively that prints the comments alone
-> and drops the title and body, exit 0, so the loss is silent. The `## Agent
-> Brief` comment is authoritative over the issue body. Honor its `Respec` block
-> — it may explicitly rule out hypotheses the body raises.
+> Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
+> Not bare `gh issue view <N> --comments` — non-interactively that prints the
+> comments alone and drops the title and body, exit 0, so the loss is silent.
+> The `## Agent Brief` comment is authoritative over the issue body. Honor its
+> `Respec` block — it may explicitly rule out hypotheses the body raises.
 
 > Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 > you stop for any reason, uncommitted work is invisible to the controller and
