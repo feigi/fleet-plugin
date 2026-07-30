@@ -53,6 +53,12 @@ else die "origin/main declares $ndeps dependencies but has no lockfile — refus
 fi
 echo "    lockfile → install: $install" >&2
 
+# One shape for "is a test file", shared by the emit guard below and by the
+# directory expansion in the runner it writes. Separate copies would drift,
+# and the two disagreeing means a directory the guard counted as a suite
+# expands to nothing at run time.
+testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
+
 # The runner runs the repo's own test entrypoint. Both guesses are unsafe when
 # wrong: `npm test` with no `test` script fails with an npm error that reads
 # like a broken worktree, and `node --test` with no test files exits 0 — a
@@ -60,7 +66,7 @@ echo "    lockfile → install: $install" >&2
 # review fan-out consumes it as a green suite. Refuse rather than guess.
 if printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit((p.scripts||{}).test?0:1)' 2>/dev/null; then
   testcmd="npm test --"
-elif git ls-tree -r --name-only origin/main | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'; then
+elif git ls-tree -r --name-only origin/main | grep -qE "$testfile_re"; then
   testcmd="node --test"
 else
   die "origin/main has no scripts.test and no test files — refusing to emit a runner that would pass vacuously"
@@ -104,6 +110,38 @@ else
   cat > "$runner" <<SH
 #!/bin/sh
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
+SH
+
+  # Only `node --test` gets the directory shim. Every other entrypoint is
+  # somebody else's runner — vitest and jest already take a directory, as a
+  # filter against naming conventions that need not be $testfile_re — and
+  # rewriting their arguments would refuse suites that are perfectly fine.
+  if [ "$testcmd" = "node --test" ]; then
+    cat >> "$runner" <<SH
+# A directory is the ergonomic way to say "run this suite", but node resolves
+# it as a module specifier and dies with MODULE_NOT_FOUND before a test runs.
+# Expand it to the test files underneath instead. IFS and -f make the split
+# safe for paths holding spaces or glob characters.
+IFS='
+'
+set -f
+for arg do
+  shift
+  if [ -d "\$arg" ]; then
+    # Zero matches must refuse. \`node --test\` with nothing to run exits 0,
+    # and a green that ran no tests is the one failure this script exists to
+    # refuse — do not let the expansion walk it back in past that guard.
+    files=\$(find "\$arg" -type f | grep -E '$testfile_re')
+    [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
+    set -- "\$@" \$files
+  else
+    set -- "\$@" "\$arg"
+  fi
+done
+SH
+  fi
+
+  cat >> "$runner" <<SH
 exec $testcmd "\$@"
 SH
   chmod +x "$runner"
