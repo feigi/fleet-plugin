@@ -39,8 +39,16 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 # not by claim-ticket.sh's ".worktrees/$issue-$slug", which is relative to the
 # caller's cwd. claim-ticket.sh always creates the worktree ON this branch, so
 # no match means there is no worktree of ours to remove.
-wt=$(git worktree list --porcelain |
-     awk -v b="refs/heads/$branch" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
+#
+# Only a LINKED worktree is ours: `worktree list --porcelain` lists the main one
+# first, and a checkout that happens to sit on this branch would otherwise be
+# selected for removal. git refuses to remove it — but not before the label was
+# dropped, which is the half-release this script exists to prevent. Measured in
+# a fresh clone, where the branch really is the main checkout's HEAD.
+wt_list=$(git worktree list --porcelain)
+wt=$(printf '%s\n' "$wt_list" |
+     awk -v b="refs/heads/$branch" '/^worktree /{w=$2;n++} /^branch /&&$2==b&&n>1{print w}')
+main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}')
 
 has_branch=false
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=true
@@ -54,6 +62,10 @@ fi
 
 blockers=""
 block() { blockers="${blockers}\"$1\","; echo "    BLOCKED: $1" >&2; }
+
+if [ "$main_branch" = "refs/heads/$branch" ]; then
+  block "branch $branch is checked out in the main checkout — release it from elsewhere"
+fi
 
 if [ "$has_branch" = true ]; then
   # Commits ahead — a member that did work. Measured on the branch ref rather

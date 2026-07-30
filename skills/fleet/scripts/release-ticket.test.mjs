@@ -237,6 +237,25 @@ test("a blocked claim reports its blocker without asking GitHub", (t) => {
   assert.deepEqual(r.calls(), [], "no tracker call is needed to know this claim is blocked");
 });
 
+test("the main checkout is never mistaken for the claim's worktree", (t) => {
+  // Found in a fresh clone, where the claim branch is what HEAD points at. Match
+  // the main worktree and `git worktree remove` refuses — but only after the
+  // label has been dropped, leaving the ticket hidden from candidates.mjs with
+  // both artefacts still on disk.
+  const r = repo(t);
+  git(r.w, "checkout", "-q", "-b", "fix/9-release-ticket", "origin/main");
+
+  const { code, json } = release(r, { args: ["9", "release-ticket", "fix"] });
+  assert.equal(json.worktree, "", "the main checkout is not a worktree this script may remove");
+  assert.match(json.blockers.join(" "), /checked out in the main checkout/);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  assert.ok(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes("fix/9-release-ticket"),
+    "the branch survives",
+  );
+});
+
 test("an unreachable remote is an unknown answer, never a 'not pushed'", (t) => {
   // Swallowing this failure reads as "no remote branch" and releases a claim
   // whose work is already on the server.
