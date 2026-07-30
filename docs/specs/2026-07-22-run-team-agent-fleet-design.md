@@ -187,8 +187,9 @@ Runs at start, and again whenever the approved pool empties.
 3. In-flight check — `next-ticket` step 3, all three probes per candidate
    (`gh pr list --state all --search`, `git ls-remote --heads origin`,
    `git worktree list` + `git branch -vv`). Any hit means the ticket is taken.
-4. For each survivor, `gh issue view <N> --comments` and read the `## Agent
-   Brief`. Record its `Out of scope` sequencing constraints.
+4. For each survivor, `gh issue view <N> --json title,body,comments --jq
+   '.title, .body, (.comments[]|.author.login + ": " + .body)'` and read the
+   `## Agent Brief`. Record its `Out of scope` sequencing constraints.
 5. **Row sizing — admit light-row only.** Judge each survivor against
    `next-ticket` step 6's table. Light row (states exactly what to change, one or
    two files, no open design choice → TDD path) is admissible. Heavy row (any
@@ -245,9 +246,12 @@ Every implementer prompt carries, verbatim:
 
 and:
 
-> Read the issue with `gh issue view <N> --comments`. The `## Agent Brief`
-> comment is authoritative over the issue body. Honor its `Respec` block — it may
-> explicitly rule out hypotheses the body raises.
+> Read the issue with `gh issue view <N> --json title,body,comments --jq
+> '.title, .body, (.comments[]|.author.login + ": " + .body)'`. Not bare `gh
+> issue view <N> --comments` — non-interactively that prints the comments alone
+> and drops the title and body, exit 0, so the loss is silent. The `## Agent
+> Brief` comment is authoritative over the issue body. Honor its `Respec` block
+> — it may explicitly rule out hypotheses the body raises.
 
 ### Phase 3 — event loop
 
