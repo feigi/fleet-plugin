@@ -56,11 +56,11 @@ const commit = (w, msg, content) => {
  * Bare origin + working clone with one commit on main, plus a `gh` stub on
  * PATH. Returns the clone dir, the stub's call log path, and an env builder.
  */
-function repo(t) {
+function repo(t, dir = "w") {
   const root = mkdtempSync(join(tmpdir(), "release-ticket-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
-  const w = join(root, "w");
+  const w = join(root, dir);
   execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
   execFileSync("git", ["clone", "-q", origin, w], { env: ENV });
   commit(w, "root", "root\n");
@@ -254,6 +254,62 @@ test("the main checkout is never mistaken for the claim's worktree", (t) => {
     git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes("fix/9-release-ticket"),
     "the branch survives",
   );
+});
+
+test("a worktree that is no longer on the branch blocks instead of releasing around it", (t) => {
+  // `worktree list` locates the claim by its branch, and the worktree does not
+  // stay on it: an interrupted rebase leaves it detached, a member can switch it.
+  // Find nothing and the dirty check is skipped, so a claim whose worktree still
+  // holds uncommitted work reports released — and the in-flight probe below still
+  // reads the ticket as taken, which is the failure this script exists to fix.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /is this claim's but is not on fix\/9-release-ticket/);
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  assert.equal(existsSync(join(c.wt, "scratch.txt")), true, "the member's work stays put");
+  assert.ok(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the branch survives",
+  );
+});
+
+test("a repo path containing a space does not truncate the worktree it reads", (t) => {
+  // `worktree list --porcelain` prints the path raw, so taking awk's $2 stops at
+  // the first space — and every worktree under a directory like "My Repos", which
+  // is ordinary on macOS, then reads as a different path. The dirty check either
+  // dies on it or, if the truncation happens to name a clean directory, passes.
+  const r = repo(t, "my repos");
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const { code, json } = release(r, c);
+  // endsWith, not equal: macOS resolves the tmpdir through /private, so the
+  // prefix legitimately differs. The part after the space is the whole point.
+  assert.ok(
+    json.worktree.endsWith("/my repos/.worktrees/9-release-ticket"),
+    `the whole path, not the part before the space: ${json.worktree}`,
+  );
+  assert.equal(json.blockers.length, 1, `only the dirty check can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /1 uncommitted change\(s\)/);
+  assert.equal(code, 1);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a clean claim under a path with a space still releases", (t) => {
+  // The other half: the space must not turn every release into a refusal either.
+  const r = repo(t, "my repos");
+  const c = claim(r.w, 9, "release-ticket");
+
+  const { code, json } = release(r, c);
+  assert.deepEqual([json.released, json.blockers, code], [true, [], 0]);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
 });
 
 test("an unreachable remote is an unknown answer, never a 'not pushed'", (t) => {

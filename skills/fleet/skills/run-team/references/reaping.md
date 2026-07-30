@@ -42,6 +42,8 @@ So nothing in the run cleans it up. Next run, phase 0's probe 3 sees the worktre
 
 **`worktree remove` without `--force`** refuses on modified and untracked files and deletes ignored files silently (verified, git 2.50.1). Ignored-silently is what is wanted: `claim-ticket.sh` writes `agent-test` into every worktree, so treating ignored files as dirt would strand every release. Its refusal is the dirty check recomputed by git at the moment of the delete.
 
+**A worktree that wandered off the branch blocks too.** The worktree is located by the branch it has checked out, and it does not stay there — an interrupted rebase leaves it detached, a member can switch it. The lookup then finds nothing, which reads as "no worktree of ours": the dirty check is skipped entirely and the release reports success while the worktree stands with the member's work in it, so the next run's probe still reads the ticket as taken. So a linked worktree at `claim-ticket.sh`'s `.worktrees/<issue>-<slug>` that is *not* on the branch is its own blocker — release it by hand. The path is read as the whole rest of the `worktree list --porcelain` line, never the first whitespace field, or every checkout under a directory with a space in its name reads as a different path.
+
 Check: `node --test skills/fleet/scripts/release-ticket.test.mjs` — real throwaway repos, only `gh` stubbed, one case per precondition proving it blocks on its own.
 
 ## Never reap a branch a live member is on

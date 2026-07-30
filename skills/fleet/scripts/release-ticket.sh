@@ -37,18 +37,35 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 
 # Locate the worktree by the branch it has checked out, the way reap.sh does —
 # not by claim-ticket.sh's ".worktrees/$issue-$slug", which is relative to the
-# caller's cwd. claim-ticket.sh always creates the worktree ON this branch, so
-# no match means there is no worktree of ours to remove.
+# caller's cwd.
 #
 # Only a LINKED worktree is ours: `worktree list --porcelain` lists the main one
 # first, and a checkout that happens to sit on this branch would otherwise be
 # selected for removal. git refuses to remove it — but not before the label was
 # dropped, which is the half-release this script exists to prevent. Measured in
 # a fresh clone, where the branch really is the main checkout's HEAD.
+#
+# The path is the whole rest of the line, never $2: `worktree list --porcelain`
+# prints it raw, so any checkout living under a directory with a space in it —
+# ordinary on macOS — would otherwise be truncated at the first one.
 wt_list=$(git worktree list --porcelain)
 wt=$(printf '%s\n' "$wt_list" |
-     awk -v b="refs/heads/$branch" '/^worktree /{w=$2;n++} /^branch /&&$2==b&&n>1{print w}')
+     awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}')
 main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}')
+
+# claim-ticket.sh creates the worktree on this branch, but it does not stay
+# there: an interrupted rebase leaves it detached, and a member can switch it.
+# The branch lookup above then finds nothing, which reads as "no worktree of
+# ours" — so the dirty check is skipped entirely and the script reports a
+# release that left the worktree standing, with the member's uncommitted work in
+# it. Next run the in-flight probe still sees it and the ticket still reads as
+# taken: the exact failure this script exists to fix, reported as success.
+#
+# The directory name is the one part of the claim that does not move, so match
+# on it — by exact suffix, not a pattern, since <slug> is caller-supplied.
+stray=$(printf '%s\n' "$wt_list" |
+        awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
+          if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}')
 
 has_branch=false
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=true
@@ -56,7 +73,7 @@ git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=tru
 # A mistyped <slug>/<type> names a branch that does not exist, and without this
 # the run would drop the label off a ticket whose real claim is untouched —
 # invisible to candidates.mjs and still in-flight. Refuse instead of guessing.
-if [ "$has_branch" = false ] && [ -z "$wt" ]; then
+if [ "$has_branch" = false ] && [ -z "$wt" ] && [ -z "$stray" ]; then
   die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
 fi
 
@@ -65,6 +82,10 @@ block() { blockers="${blockers}\"$1\","; echo "    BLOCKED: $1" >&2; }
 
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
+fi
+
+if [ -z "$wt" ] && [ -n "$stray" ]; then
+  block "worktree $stray is this claim's but is not on $branch — release it by hand"
 fi
 
 if [ "$has_branch" = true ]; then
