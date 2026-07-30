@@ -552,3 +552,20 @@ test("a quote in the slug cannot produce a payload the caller fails to parse", (
   const parsed = JSON.parse(res.stdout);
   assert.equal(parsed.branch, `fix/9-${slug}`, "and it round-trips, rather than being stripped");
 });
+
+test("a control character in the worktree name cannot produce an unparseable payload", (t) => {
+  // git rejects a control character in a ref, so the quote above is the only way
+  // in through <slug>-as-branch — but `stray` matches on the DIRECTORY name, and
+  // a detached worktree can be called anything the filesystem allows. JSON
+  // forbids every character below \040 unescaped, so escaping only `"` and `\`
+  // left this emitting output the caller cannot parse.
+  const r = repo(t);
+  const slug = "ab";
+  git(r.w, "worktree", "add", "-q", "--detach", join(r.w, ".worktrees", `9-${slug}`), "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.branch, "fix/9-a b", "the control character is neutralised, not emitted raw");
+  // The blockers carry an em-dash, so the scrub must be byte-safe for UTF-8.
+  assert.match(parsed.blockers[0], /—/, "multibyte text must survive the scrub");
+});

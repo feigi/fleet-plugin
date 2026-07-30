@@ -101,7 +101,13 @@ fi
 # caller-supplied and git's own stderr is quoted back verbatim, so without it a
 # single `"` or backslash anywhere emits a payload the caller cannot parse —
 # while the delete has already happened and the exit code still says success.
-jstr() { printf '%s' "$1" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+#
+# The whole C0 range, not just the three whitespace ones: JSON forbids every
+# character below \040 unescaped, and a worktree directory may carry one where a
+# branch may not (git rejects them in a ref, so `stray` — matched on the
+# directory name — is the way in). Byte-safe for the UTF-8 in these messages,
+# whose bytes are all >= \200. tr pads the replacement with its last character.
+jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # A mutation refused with earlier ones already applied. `die` printed prose and
 # exited before every printf, so a caller parsing this script's stdout got
