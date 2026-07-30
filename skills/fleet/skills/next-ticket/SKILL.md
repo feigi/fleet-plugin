@@ -11,17 +11,20 @@ Suggest ready tickets, maintainer picks, mark in-progress, implement at depth ti
 
 ## 1. Candidates
 
-Never fetch raw `body` for whole list — ~97% of payload. Exclude labels server-side, reduce body to dependency refs:
-
 ```bash
-gh issue list --state open --limit 100 \
-  --search '-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info' \
-  --json number,title,labels,body \
-  --jq '[.[]|{n:.number,t:.title,l:[.labels[].name],
-             d:[(.body//""|scan("(?i)(?:depends on|blocked by|requires|after)\\s+#\\d+"))]}]'
+~/.claude/skills/fleet/scripts/candidates.mjs --require-label ready-for-agent --allow-fallback
 ```
 
-Add `--label ready-for-agent` first; drop it and re-run only on empty result (`ready-for-human` / untriaged fallback).
+Script owns the query: label exclusions server-side, raw `body` never fetched for
+whole list (~97% of payload) — reduced to dependency refs, to-spec specs dropped
+by shape and named on stderr, survivors oldest first.
+
+`--allow-fallback` re-runs unfiltered when `ready-for-agent` comes back empty
+(`ready-for-human` / untriaged). Solo only — flag exists for this caller. Fleet
+never passes it: empty means no work, and an unattended fleet has no channel to
+the human `ready-for-human` needs.
+
+Exit 1 = query fine, queue empty. Exit 2 = query broke. Different facts.
 
 ## 2. Dependencies
 
@@ -88,7 +91,8 @@ Closes #N"
 
 ## Red flags
 
-- "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only.
+- "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only. `candidates.mjs` already does it.
+- "I'll inline the `gh` query instead of calling `candidates.mjs`" → don't. A hand-copied duplicate drifts: the copy that lived here missed the to-spec drop and the FIFO sort for a full release, so the solo path shortlisted specs newest-first while the fleet path did neither.
 - "Label says ready-for-agent, so it's free" → run step 3.
 - "I'll run the three probes inline instead of the script" → don't. Bare `gh pr list --search "<N>"` is a full-text match, so nearly every ticket reads as taken and free work gets skipped silently and permanently; a branch regex demanding a delimiter on both sides misses `fix/<N>` and `<N>-slug`; grepping a worktree's full path false-hits when a parent directory carries the digits. `inflight.sh` handles all three and shows its measurements.
 - "Read the issues first, then check what's taken" → probes first; a dropped candidate's full read is pure waste. Probes still stay behind step 2's cut — two of the three hit the network (three round-trips).
