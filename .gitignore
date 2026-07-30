@@ -62,6 +62,8 @@ __pycache__/
 
 # Fleet runtime state — ledger + cockpit board.json/board.html, never committed
 .fleet/
+# Fleet worktrees claim-ticket.sh creates inside the checkout
+.worktrees/
 
 # Auto-generated backups
 backups/

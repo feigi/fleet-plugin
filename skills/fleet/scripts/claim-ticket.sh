@@ -31,13 +31,27 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
 # Derive the frozen install from the lockfile. No match is a refusal, not a
-# default — guessing here is what corrupts the tree.
+# default — guessing here is what corrupts the tree. The one safe exception is
+# a repo that declares no dependencies at all: there is nothing to install, so
+# refusing is a false positive that blocks the whole claim.
 if   [ -f package-lock.json ]; then install="npm ci"
 elif [ -f pnpm-lock.yaml ];   then install="pnpm i --frozen-lockfile"
 elif [ -f yarn.lock ];        then install="yarn --immutable"
+elif node -e 'const p=require(process.cwd()+"/package.json");process.exit(p.dependencies||p.devDependencies?1:0)' 2>/dev/null; then
+  install="true"
 else die "no recognised lockfile — refusing to guess an install command"
 fi
 echo "    lockfile → install: $install" >&2
+
+# The runner runs whatever the repo's own test entrypoint is. `npm test` in a
+# repo with no `test` script fails with an npm error that reads like a broken
+# worktree, so fall back to the node runner rather than emitting a dead command.
+if node -e 'process.exit((require(process.cwd()+"/package.json").scripts||{}).test?0:1)' 2>/dev/null; then
+  testcmd="npm test --"
+else
+  testcmd="node --test"
+fi
+echo "    test entrypoint → $testcmd" >&2
 
 pg=$((16000 + issue))
 ollama=$((22000 + issue))
@@ -72,7 +86,7 @@ else
   cat > "$runner" <<SH
 #!/bin/sh
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
-exec npm test -- "\$@"
+exec $testcmd "\$@"
 SH
   chmod +x "$runner"
   echo "agent-test" >> "$(git rev-parse --git-common-dir)/info/exclude"
