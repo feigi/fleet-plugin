@@ -165,17 +165,15 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **A specialist report lands** (a task-notification from a grandchild you never
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
-  included, acknowledgement required.** You are the only path: the reviewer cannot
-  fetch it, and telling it to ping the specialist returns `had no active task` and
-  delivers nothing. Unacknowledged, a relay is indistinguishable to the reviewer
-  from its own reasoning, or from never having arrived.
-- **A reviewer's verdict claims a dimension went undelivered** → check it against
-  your relay receipts before accepting the verdict. Relayed but never acknowledged →
-  re-send naming the specialist, require the acknowledgement, and hold the verdict
-  until it lands. Only you hold the msg id, so only you can catch this: one reviewer
-  ruled a relayed dimension "not covered by a specialist" and shipped a headline
-  claim that report refuted; another reported all four relays as delivering nothing
-  while its applied list mirrored them item-for-item.
+  included.** You are the only path: the reviewer cannot fetch it, and telling it
+  to ping the specialist returns `had no active task` and delivers nothing.
+- **A reviewer's verdict claims a dimension went undelivered** → reconcile it
+  against your relay receipts before accepting it. Receipts say relayed → re-send
+  naming the specialist and hold that verdict until it lands; a relay can arrive
+  after a verdict is already composed. Only you hold the msg id, so only you can
+  catch this — the reviewer cannot tell "no report exists" from "one was sent that
+  I have not received". One reviewer ruled a relayed dimension "not covered by a
+  specialist" and shipped a headline claim that report refuted.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
@@ -229,9 +227,11 @@ See references/member-lifecycle.md.
 **Delivering specialist reports is your duty, not the reviewer's — the relay is an
 event-loop obligation above.** Reports surface to *you* and grandchildren are
 unaddressable, so a reviewer has no way to fetch one and must never be told to ping
-for it. State in its prompt that reports arrive from you, that it acknowledges each
-by source name, and that a specialist which has neither reported nor been relayed
-blocks its final verdict. See references/member-lifecycle.md.
+for it. State in its prompt that reports arrive from you, and that a specialist
+which has neither reported nor been relayed means asking you by name — not ruling
+silently, and not waiting forever. Authorize the partial ruling yourself once a
+report will not land; a killed specialist never reports and never gets relayed.
+See references/member-lifecycle.md.
 
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
 `diff-stats.mjs` and drops dead dimensions — a docs-only change runs
@@ -512,9 +512,10 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
 - "Tell the reviewer to ping its specialists" → the ping returns `had no active
   task` and delivers nothing; the relay is the only path.
-- "I relayed it, so the reviewer has it" → an unacknowledged relay is
-  indistinguishable from a lost one. Two reviewers ruled relayed dimensions
-  undelivered, one of them refuting its own applied findings.
+- "I relayed it, so the reviewer has it" → sent is not read, and a relay can land
+  after the verdict is composed. Two reviewers ruled relayed dimensions
+  undelivered, one of them shipping a headline claim the report it disclaimed
+  refuted. Reconcile verdicts against your receipts.
 - "It reported the SHA, so it's on the branch" → verify.
 - "Let the merge bot arm its own monitor" → it dies, the queue stops.
 - "The member died, SendMessage it the state" → dead agents do not read mail.
