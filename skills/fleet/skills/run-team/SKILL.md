@@ -166,7 +166,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **A specialist report lands** (a task-notification from a grandchild you never
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
   included.** You are the only path: the reviewer cannot fetch it, and telling it
-  to ping the specialist returns `had no active task` and delivers nothing.
+  to ping the specialist returns `had no active task; resumed from transcript`
+  and delivers nothing.
 - **A reviewer's verdict claims a dimension went undelivered** → reconcile it
   against your relay receipts before accepting it. Receipts say relayed → re-send
   naming the specialist and hold that verdict until it lands; a relay can arrive
@@ -224,13 +225,16 @@ requested work — otherwise the reviewer inherits the standing "do not call the
 AgentTool unless requested" and silently downgrades to a thinner solo review.
 See references/member-lifecycle.md.
 
-**Delivering specialist reports is your duty, not the reviewer's — the relay is an
-event-loop obligation above.** Reports surface to *you* and grandchildren are
-unaddressable, so a reviewer has no way to fetch one and must never be told to ping
-for it. State in its prompt that reports arrive from you, and that a specialist
-which has neither reported nor been relayed means asking you by name — not ruling
-silently, and not waiting forever. Authorize the partial ruling yourself once a
-report will not land; a killed specialist never reports and never gets relayed.
+**On the hand-dispatch path, delivering specialist reports is your duty, not the
+reviewer's — the relay is an event-loop obligation above.** Reports surface to
+*you* and grandchildren are unaddressable, so a reviewer has no way to fetch one
+and must never be told to ping for it. State in that prompt that reports arrive
+from you, and that a specialist which has neither reported nor been relayed means
+asking you by name — not ruling silently, and not waiting forever; authorize the
+partial ruling once a report will not land, since a killed specialist never
+reports and never gets relayed. **None of this belongs in a prompt for the
+`review-pr.js` path below** — there `agent()` returns into the script, so no relay
+ever occurs and the blocking rule would strand every verdict permanently.
 See references/member-lifecycle.md.
 
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
@@ -511,7 +515,8 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
   promotes a heavy row.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
 - "Tell the reviewer to ping its specialists" → the ping returns `had no active
-  task` and delivers nothing; the relay is the only path.
+  task; resumed from transcript` and delivers nothing; on the hand-dispatch path
+  the relay is the only path.
 - "I relayed it, so the reviewer has it" → sent is not read, and a relay can land
   after the verdict is composed. Two reviewers ruled relayed dimensions
   undelivered, one of them shipping a headline claim the report it disclaimed
