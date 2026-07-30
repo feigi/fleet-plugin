@@ -1,7 +1,7 @@
 # Fleet admissibility — trust the label, gate on *decided*, not on *size*
 
 Date: 2026-07-30
-Status: approved design, not yet implemented
+Status: implemented in PR #59 (`candidates.mjs`, `run-team`, `sizing-a-ticket`, `next-ticket`)
 
 Artifacts: `skills/fleet/skills/run-team/SKILL.md`,
 `skills/fleet/skills/sizing-a-ticket/SKILL.md`,
@@ -226,9 +226,12 @@ joins the existing `--jq` reduction, so it costs nothing extra:
 ```
 
 Dropped numbers are logged, per the file's own no-silent-caps rule
-(`candidates.mjs:77-78`). A `ponytail:` comment names the ceiling: an upstream
-template change re-leaks a spec into the queue, where the phase 2 bail catches
-it — today's behaviour, minus the sizing cost.
+(`candidates.mjs:77-78`). A `ponytail:` comment names the ceiling, and the
+ceiling is sharper than it first looked: this filter is the *only* line of
+defence. Nothing downstream catches a spec — it is decided and needs no human
+hands, so both of phase 2's bail tests pass it, and this same design makes heavy
+never a bail reason, retiring the light-row gate that used to stop it. An
+upstream template change to to-spec must be mirrored here in the same commit.
 
 `skills/to-spec/SKILL.md` is a detached copy, not a symlink into
 `~/.agents/skills/`, so editing it *would* be safe. Deliberately not done: the
