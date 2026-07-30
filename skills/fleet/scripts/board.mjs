@@ -85,12 +85,18 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
     ci[p.number] = out === null ? (prevCi.get(p.number) ?? "unknown") : mapCi(out);
   }
 
-  // Repo slug for PR links in the page — from the fleet's cwd, so the board is
-  // repo-agnostic. On failure, carry the previous board's value.
-  const repoJson = tryRun("gh", ["repo", "view", "--json", "nameWithOwner"]);
-  const repo = repoJson ? (JSON.parse(repoJson).nameWithOwner ?? null) : (prev?.repo ?? null);
+  // Repo identity + web URL for PR links — the url carries the host, so links
+  // resolve on GitHub Enterprise, not just github.com. From the fleet's cwd, so
+  // the board stays repo-agnostic. On failure, carry the previous board's values.
+  const repoJson = tryRun("gh", ["repo", "view", "--json", "nameWithOwner,url"]);
+  let repo = prev?.repo ?? null;
+  let repoUrl = prev?.repoUrl ?? null;
+  if (repoJson) {
+    try { const d = JSON.parse(repoJson); repo = d.nameWithOwner ?? repo; repoUrl = d.url ?? repoUrl; }
+    catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
+  }
 
-  return { ledger, issues, prs, ci, prev, repo, now: Date.now(), interval: Number(arg("interval")) || 15 };
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, now: Date.now(), interval: Number(arg("interval")) || 15 };
 }
 
 async function main() {

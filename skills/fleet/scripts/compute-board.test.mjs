@@ -124,6 +124,7 @@ const baseInputs = () => ({
   prev: null,
   now: 1000,
   repo: "owner/repo",
+  repoUrl: "https://example.test/owner/repo",
 });
 
 test("computeBoard: one ticket per column, POOL from an unrowed ready issue", () => {
@@ -174,8 +175,10 @@ test("computeBoard: queue counts pool and review-backlog", () => {
   assert.equal(b.queue.reviewBacklog, 0);
 });
 
-test("computeBoard: repo is echoed to the model", () => {
-  assert.equal(computeBoard(baseInputs()).repo, "owner/repo");
+test("computeBoard: repo and repoUrl are echoed to the model", () => {
+  const b = computeBoard(baseInputs());
+  assert.equal(b.repo, "owner/repo");
+  assert.equal(b.repoUrl, "https://example.test/owner/repo");
 });
 
 test("computeBoard: a PR with no CI entry is unknown, not null (null means no PR)", () => {

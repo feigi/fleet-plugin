@@ -152,6 +152,7 @@ export function computeBoard(inputs) {
     generatedAt: now,
     interval: inputs.interval ?? 15,
     repo: inputs.repo ?? null,
+    repoUrl: inputs.repoUrl ?? null,
     queue: { pool, supply: pool, reviewBacklog },
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),

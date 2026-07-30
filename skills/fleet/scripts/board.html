@@ -46,14 +46,14 @@
 <script>
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
 let interval = 15;
-let repo = null; // "owner/name" from the model, for PR links
+let repoUrl = null; // full repo URL from the model (carries the host) — PR links, GHE-safe
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
 
 function render(m) {
   interval = m.interval || 15;
-  repo = m.repo || null;
+  repoUrl = m.repoUrl || null;
   // attention strip
   const att = document.getElementById("attention");
   att.innerHTML = "";
@@ -102,7 +102,7 @@ function card(t) {
   if (t.agent) meta.append(el("span", null, t.agent));
   if (t.pr != null) {
     const a = el("a", null, "PR#" + t.pr);
-    a.href = repo ? "https://github.com/" + repo + "/pull/" + t.pr : "#";
+    a.href = repoUrl ? repoUrl + "/pull/" + t.pr : "#";
     a.target = "_blank"; a.rel = "noopener";
     meta.append(a);
   }
