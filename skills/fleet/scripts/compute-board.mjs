@@ -114,7 +114,7 @@ export function computeBoard(inputs) {
            : { open: false, labels: [] };
     const column = deriveColumn(p, prState);
     const sinceEnteredStage = stageEntry(prevByIssue.get(p.issue), column, now);
-    const ciState = p.pr != null ? (ci[p.pr] ?? null) : null;
+    const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
     const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now });
     const inReview = column === "REVIEW" || column === "READY";
     tickets.push({

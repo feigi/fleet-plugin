@@ -177,3 +177,12 @@ test("computeBoard: queue counts pool and review-backlog", () => {
 test("computeBoard: repo is echoed to the model", () => {
   assert.equal(computeBoard(baseInputs()).repo, "owner/repo");
 });
+
+test("computeBoard: a PR with no CI entry is unknown, not null (null means no PR)", () => {
+  const inp = baseInputs();
+  delete inp.ci[346];                       // #324's PR exists but CI has not reported
+  const t = computeBoard(inp).tickets.find((x) => x.issue === 324);
+  assert.equal(t.ci, "unknown");
+  // a genuinely PR-less ticket still reports null
+  assert.equal(computeBoard(inp).tickets.find((x) => x.issue === 340).ci, null);
+});
