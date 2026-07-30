@@ -137,7 +137,7 @@ Issues live in `feigi/claude-config` GitHub Issues, via the `gh` CLI. See `docs/
 
 ### Triage labels
 
-Label string equals role name for the three roles that exist: `ready-for-agent`, `ready-for-human`, `wontfix`. No `needs-triage` / `needs-info` label in this repo — those two roles have no equivalent. See `docs/agents/triage-labels.md`.
+Label string equals role name for all five roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
