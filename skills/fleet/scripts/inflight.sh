@@ -136,7 +136,27 @@ fi
 
 # Probe 2 — a remote branch carrying the number as its own path segment.
 echo "\$ git ls-remote --heads origin" >&2
-remote=$(git ls-remote --heads origin 2>/dev/null | awk '{print $2}' | sed 's#refs/heads/##' |
+# The lookup runs on its own, never inside the filtering pipeline below. A
+# pipeline reports its LAST command's status — `paste`, which always succeeds —
+# so an `ls-remote` that exited 128 used to arrive here as zero matching lines,
+# which is precisely what a clean ticket produces. Trailing `|| true` was not
+# the culprit and removing it would not have helped.
+#
+# The two conditions are different answers and must stay apart: `grep` exiting 1
+# is "looked, found nothing" and leaves the ticket free; a failed `ls-remote` is
+# "could not look" and is what exit 2 is for. Nothing here needs GitHub to be
+# down — no `origin` configured, an unavailable SSH key or agent, a suppressed
+# host-key prompt, or a stale URL after a rename all land in it, and probe 1
+# sails through all four, so this is the probe that decides.
+#
+# stderr is left on stderr rather than folded into the value, the way
+# release-ticket.sh's ls-remote guard does it: the emptiness of $remote IS the
+# answer here, so a host-key notice on an otherwise fine query would read as a
+# branch that exists. git's own wording is more use on the terminal anyway.
+if ! heads=$(git ls-remote --heads origin); then
+  die "git ls-remote failed, so whether #$n has a remote branch is unknown"
+fi
+remote=$(printf '%s\n' "$heads" | awk '{print $2}' | sed 's#refs/heads/##' |
          grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
 if [ -n "$remote" ]; then
   echo "    remote branches: $remote" >&2
@@ -146,13 +166,25 @@ else
 fi
 
 # Probe 3 — a local worktree or branch.
-local_b=$(git for-each-ref --format='%(refname:short)' refs/heads |
+#
+# Same shape as probe 2 and the same reasoning, at lower exposure: these two read
+# the local repository, so they fail far more rarely — a corrupt or unreadable
+# ref, a broken worktree admin file. Rarely is not never, and the failure is
+# silent and points the same wrong way, so they are guarded identically rather
+# than left as the one path that can still answer "no" without having looked.
+if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
+  die "git for-each-ref failed, so whether #$n has a local branch is unknown"
+fi
+local_b=$(printf '%s\n' "$refs" |
           grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
 # Match on the worktree's basename, not its full path — grepping the whole
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
 # a sibling directory named with digits), matching every ticket.
-wt=$(git worktree list --porcelain | awk '/^worktree /{print $2}' |
+if ! worktrees=$(git worktree list --porcelain); then
+  die "git worktree list failed, so whether #$n has a worktree is unknown"
+fi
+wt=$(printf '%s\n' "$worktrees" | awk '/^worktree /{print $2}' |
      while IFS= read -r p; do printf '%s\t%s\n' "$(basename "$p")" "$p"; done |
      awk -F'\t' -v n="$n" '$1 ~ "(^|[/-])" n "([-/]|$)" {print $2}' |
      paste -sd, - || true)
