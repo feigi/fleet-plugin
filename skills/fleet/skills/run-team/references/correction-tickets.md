@@ -12,7 +12,7 @@ Fix text **paraphrases the issue body's framing** instead of being checked claus
 
 ## Second mechanism: minted, not inherited — scope creep in the prose
 
-Second run, PR #574: shipped **two** fresh false claims, neither traceable to the issue. Issue asked for **one clause**; PR wrote **five lines**. Both errors entered in that expansion — so the inherited-claim check above cannot catch them, there being no issue clause to compare against.
+Second run, on a **different repo** — its numbers, files and test vocabulary below, not ours. Its PR 574 shipped **two** fresh false claims, neither traceable to the issue. Issue asked for **one clause**; PR wrote **five lines**. Both errors entered in that expansion — so the inherited-claim check above cannot catch them, there being no issue clause to compare against.
 
 Both were **positional references**: "the *closing* `report-file verification` block" (4th of 5) and "the *second* assertion is the one with teeth" (3rd). Positional refs are the exact rot these tickets exist to retire, and they re-rot the moment anyone inserts ahead of them.
 
