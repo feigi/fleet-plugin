@@ -249,8 +249,7 @@ Spawn up to the implementer cap, one per approved ticket, in the background.
 Every implementer prompt carries, verbatim, the blockquoted blocks under
 `## Phase 2 — dispatch implementers` in
 `~/.claude/skills/fleet/skills/run-team/SKILL.md`. That skill is the
-authoritative copy; this spec does not reproduce the blocks, so it cannot drift
-from them.
+authoritative copy; this spec does not reproduce the blocks.
 
 ### Phase 3 — event loop
 
