@@ -60,12 +60,47 @@ test("a to-spec spec is dropped — it is to-tickets' input, not a claimable tic
   assert.deepEqual(rows.map((r) => r.n), [11]);
 });
 
-test("a drop names the issue number — a filtered list that says nothing reads as complete", () => {
-  const { stderr } = run([
+test("every spec is dropped and named — a filter that stops at the first leaks the rest", () => {
+  const { rows, stderr } = run([
     ticket(10, "## User Stories\n\n1. As a user, I want…\n"),
-    ticket(11, "## What to build\n\nx\n"),
+    ticket(11, "## Problem Statement\n\ny\n\n## User Stories\n\n2. As a user…\n"),
+    ticket(12, "## What to build\n\nx\n"),
   ]);
-  assert.match(stderr, /dropped #10/);
+  assert.deepEqual(rows.map((r) => r.n), [12]);
+  // deepEqual on the parsed lines, not a substring match: `/dropped #10/` is
+  // satisfied by a hardcoded number and by logging kept rows too. This pins
+  // both that 10 and 11 are named and that 12 is not.
+  assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #10", "dropped #11"]);
+});
+
+test("near misses are kept — the predicate's shape is specified, not accidental", () => {
+  // One fixture per dimension the regex commits to. Without these, every
+  // loosening of the heading match still passes: the dropped fixture differs
+  // from a ticket in all of them at once, so it discriminates none.
+  const { rows } = run([
+    ticket(1, "### User Stories\n\nnested under an h2\n"),
+    ticket(2, "## user stories\n\nlowercase\n"),
+    ticket(3, "##User Stories\n\nno separating space\n"),
+    ticket(4, "## User Stories (draft)\n\ntrailing text\n"),
+    ticket(5, "Mentions ## User Stories mid-line, not a heading.\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.n), [1, 2, 3, 4, 5]);
+});
+
+test("the cap is checked before specs are dropped — filtering first hides truncation", () => {
+  // The ordering candidates.mjs calls load-bearing. Swap the two and this is
+  // the only thing that fails: dropSpecs shrinks the array below --limit, the
+  // cap check stops seeing a capped list, and the silent-truncation bug the
+  // "no silent caps" rule exists to close comes back with every test green.
+  const { status, stderr } = run(
+    [
+      ticket(10, "## User Stories\n\n1. As a user…\n"),
+      ticket(11, "## What to build\n\nx\n"),
+    ],
+    ["--require-label", "ready-for-agent", "--limit", "2"],
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /capped/);
 });
 
 test("the spec predicate never reaches the payload — it is pure token cost downstream", () => {
