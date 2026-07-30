@@ -5,7 +5,8 @@
 // function of ledger + GitHub — it never depends on the controller feeding it.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
+import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
@@ -62,6 +63,101 @@ export function mapCi(ciJson) {
   return "unknown";
 }
 
+// Where this session's subagent transcripts live. Claude Code writes them to
+// ~/.claude/projects/<cwd-with-slashes-as-dashes>/<session-uuid>/subagents/.
+// The session uuid is not knowable from here, so take the most recently modified
+// one — during a run that is always the live session. Null on any surprise: the
+// cockpit must degrade to "no spend panel", never crash a tick over telemetry.
+export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
+  try {
+    const projects = join(home, ".claude", "projects", cwd.replace(/\//g, "-"));
+    if (!existsSync(projects)) return null;
+    const cands = readdirSync(projects)
+      .map((s) => join(projects, s, "subagents"))
+      .filter((d) => existsSync(d))
+      .map((d) => ({ d, m: statSync(d).mtimeMs }))
+      .sort((a, b) => b.m - a.m);
+    return cands.length ? cands[0].d : null;
+  } catch { return null; }
+}
+
+// Read one agent transcript into the shape the pure module wants. Two passes are
+// deliberately avoided — a long review agent's transcript is megabytes, and this
+// runs every tick. Malformed lines are skipped rather than fatal: a transcript
+// being appended to WHILE we read it will have a torn last line, every tick.
+function readAgent(file, metaFile) {
+  let meta = {};
+  try { if (existsSync(metaFile)) meta = JSON.parse(readFileSync(metaFile, "utf8")); } catch { /* unnamed agent */ }
+
+  let cacheWrite = 0, output = 0, cacheRead = 0, maxCtx = 0;
+  const entries = [];
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!line) continue;
+    let j; try { j = JSON.parse(line); } catch { continue; }
+    // `message.content` is an array of blocks on tool-bearing turns but a plain
+    // STRING on ordinary prose turns — the first cut assumed an array and threw
+    // on the very first user line, which the catch below turned into a silent
+    // null spend panel. Normalise once, here.
+    const blocks = Array.isArray(j.message?.content) ? j.message.content : [];
+    const u = j.message?.usage;
+    if (u) {
+      const cw = u.cache_creation_input_tokens ?? 0;
+      cacheWrite += cw;
+      output += u.output_tokens ?? 0;
+      cacheRead += u.cache_read_input_tokens ?? 0;
+      maxCtx = Math.max(maxCtx, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + cw);
+      entries.push({
+        kind: "assistant", cacheWrite: cw,
+        tools: blocks.filter((c) => c?.type === "tool_use").map((c) => ({ id: c.id, name: c.name })),
+      });
+    } else if (j.type === "user") {
+      const results = blocks
+        .filter((c) => c?.type === "tool_result")
+        .map((c) => ({ id: c.tool_use_id, chars: typeof c.content === "string" ? c.content.length : JSON.stringify(c.content ?? "").length }));
+      if (results.length) entries.push({ kind: "result", results });
+    }
+  }
+  return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
+}
+
+// Scope is the SESSION directory, which is the closest thing to a run boundary
+// that actually exists on disk — one Claude Code session, one folder.
+//
+// `sinceMs` is opt-in and defaults to no filter. An earlier attempt defaulted it
+// to the ledger's mtime as a "run start" marker; that is wrong and silently
+// reported zero, because the controller rewrites ledger rows continuously, so the
+// mtime is always ~now and every transcript sorts as older than it. Kept as an
+// explicit option for the one case the session scope cannot cover: a single
+// session that spans two fleet runs, where the caller knows the boundary and the
+// board does not.
+export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
+  try {
+    dir = dir ?? findSubagentsDir();
+    if (!dir) return null;
+
+    const agents = [];
+    const toolTables = [];
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
+      const file = join(dir, f);
+      // Filter on the transcript's own mtime, not on any timestamp inside it —
+      // an agent that ran before this run is simply not this run's cost.
+      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
+      const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
+      agents.push({
+        label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
+        role: classifyRole(a.meta),
+        cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
+      });
+      toolTables.push(attributeTools(a.entries));
+    }
+    if (!agents.length) return null;
+    return { ...computeSpend({ agents, topN }), tools: mergeTools(toolTables), since: sinceMs ?? null };
+  } catch (e) {
+    console.error(`${NAME}: spend read failed: ${e.message}`);
+    return null;
+  }
+}
+
 export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal.
@@ -105,7 +201,8 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
   }
 
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
+  const spend = gatherSpend({ sinceMs: Number(arg("spend-since")) || null });
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
 }
 
 async function main() {
