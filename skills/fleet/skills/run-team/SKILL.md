@@ -134,16 +134,15 @@ multi-select**, and **a judgement the evidence cannot settle**.
 
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
-- **Implementer reports the row is heavy** (`sizing-a-ticket` returned heavy and the
-  member bailed without implementing) → the ticket is mis-scoped for the unattended
-  fleet, so take it out of the agent pool rather than leave it for the next scan:
-  move it `ready-for-agent` → `ready-for-human` — `gh issue edit <N> --remove-label
-  ready-for-agent --remove-label in-progress --add-label ready-for-human` — and
-  comment the heavy reason (what is design-open, needs a brainstorm, or needs a
-  re-scope) so the human has the context. Then discard the worktree and branch and
-  refill the slot with a *different* ticket. Leaving it `ready-for-agent` guarantees
-  a later Phase-0 scan re-grabs it for another claim-size-heavy-and-bail cycle; the
-  relabel is the only thing that stops the loop.
+- **Implementer reports the row is heavy** (sized heavy, bailed without
+  implementing) → `gh issue edit <N> --remove-label ready-for-agent --remove-label
+  in-progress --add-label ready-for-human`, comment the reason (row, path, one line
+  why), reap the worktree and branch, refill with a *different* ticket.
+  **Dropping `in-progress` is the load-bearing half** — phase 1 already applied it
+  and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
+  scans *and* the maintainer's (`next-ticket` excludes it too). It does not loop; it
+  disappears. Phase 0 excludes heavies without relabelling — an unclaimed ticket is
+  not yours to reclassify, and it surfaces its exclusions to the maintainer anyway.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
@@ -281,28 +280,26 @@ See references/reaping.md.
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
 runs 20-40, because each fans out 4-5 specialists. Five implementers saturate five
 reviewers within the hour and every later PR queues. Absent instruction, default
-**2 implementers / 5 reviewers** and say why. Backlog ≥ 2 → stop refilling
-implementer slots even with pool left; more PRs into a full pipeline buys nothing
-and costs rebases.
+**2 implementers / 5 reviewers** and say why.
 
-**The refill gate is the *review* backlog — never the merge-queue depth.** A deep
-ready-to-merge queue is not a reason to stop implementing: the merge cascade is
-serial and slow, but each PR rebases exactly once when it becomes the candidate, so
-producing more PRs adds no rebases-per-PR and does not slow the cascade — it only
-changes *when* a given PR is ready. Throttling implementers because "the pipeline is
-merge-bound" is a mistake; hold refills **only** when the review backlog ≥ 2, and
-never gate a refill on how many PRs are waiting to merge. Reconcile proactively:
-treat "a slot is free and pool-or-supply exists" as a *level* condition to act on
-**every** time it holds — a member finishing, a member sizing-heavy and bailing, a
-merge landing — not an event to wait for. An edge-triggered loop that only refills
-on completion silently stalls the moment the queue empties (0 implementers emit no
-completion event), so re-derive the deficit on every tick. An idle implementer queue
-with work available is a defect, not a throttle — the maintainer should never have
-to ask you to refill.
+**The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
+≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
+review-bound pipeline buys nothing. But a deep `ready-to-merge` queue is *not* that
+signal. Each PR rebases exactly once, when it becomes the candidate, so producing
+more PRs adds no rebases-per-PR — it changes only *when* a given PR is ready.
+(Deeper waves do cost: the last PR in one pays the largest rebase and the longest CI
+cycle. That is an argument for batching a wave, never for idling an implementer.)
+
+**Reconcile, do not wait for an event.** "A slot is free and the pool is non-empty"
+is a *level* condition — re-derive the deficit on **every** tick, whatever woke you:
+a member finishing, a member sizing-heavy and bailing, a merge landing. An
+edge-triggered loop that only refills on completion stalls silently the moment the
+queue empties, because 0 implementers emit no completion event. With pool 0 the
+table below governs — re-shortlist and ask, do not dispatch un-ticked supply.
 
 | pool | supply | action |
 |---|---|---|
-| ≥ 1 | — | dispatch from pool, silent |
+| ≥ 1 | — | dispatch from pool, silent — *unless* review backlog ≥ 2 |
 | 0 | ≥ cap | re-shortlist, ask the maintainer to tick |
 | 0 | < cap | re-shortlist **and** suggest `/triage` |
 | 0 | 0 | suggest `/triage`, hold implementer slots idle |
@@ -402,9 +399,11 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer blocked or ambiguous | Free the slot, leave `in-progress`, report |
+| Implementer sizes the row **heavy** and bails | → `ready-for-human`, drop `in-progress`, comment why, reap, refill (phase 3) |
+| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — heavy is the row above, not this one |
 | Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
+| Merge bot finds the worktree ahead of the PR head | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
 | Member silent or truncated | `SendMessage` to ping or resume — same unit of work |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |

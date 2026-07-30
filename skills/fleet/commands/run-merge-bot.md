@@ -46,9 +46,18 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 For each labeled PR clearing the hold rule, lowest first:
 
-1. Rebase onto `origin/main`; push `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout. Run the **no-undo audit** first.
+1. Rebase onto `origin/main`; push `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout. Confirm the head, then run the **no-undo audit**.
 
-   **First confirm the worktree head *is* the reviewed remote PR head** — `git -C <worktree> rev-parse HEAD` must equal `gh pr view <pr> --json headRefOid`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves the worktree *ahead of* the remote head; the no-undo audit passes (clean tree, no stash) yet rebasing from there carries an unpushed, unreviewed commit into the merge. Mismatch → STOP and report `worktree-diverged-#<pr>` instead of rebasing: the reviewed head lives on the remote, not this worktree, so either the reviewer must push its fix or the stray local commit must be discarded — that call is not the merge bot's to make silently.
+   **Confirm the worktree head *is* the reviewed remote PR head before the audit** — the audit runs every substantive check against `origin/<branch>` and never reads the worktree HEAD, so its exit 0 says nothing about the commit you are about to rebase:
+
+   ```bash
+   git -C <worktree> rev-parse HEAD
+   gh pr view <pr> --json headRefOid -q .headRefOid    # -q, or you compare a SHA to JSON
+   ```
+
+   - **Equal** → proceed to the audit.
+   - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that the audit (clean tree, no stash) passes and your rebase carries into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
+   - **Worktree behind, or no worktree at all** → not a divergence. Rebase from the remote head (`git fetch` first) and say which you used.
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
 
@@ -96,7 +105,7 @@ Measured over one three-merge wave: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / blocked after the pass.
 
 ## No-undo audit (before every rebase)
 
