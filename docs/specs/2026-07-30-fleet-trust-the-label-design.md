@@ -94,11 +94,17 @@ a read that is already paid for.
 
 **Step 5** — *"Light row only"* — is deleted.
 
-**Step 7** presents three groups instead of two:
+**Step 7** presents three groups instead of two, each ordered FIFO (below), and
+each entry annotated when step 4's `Out of scope` read sequences it after another
+survivor in the same list:
 
 - **admitted** — decided, ticked into the pool by the maintainer;
 - **unsure** — torn, each flagged with the open decision;
 - **excluded** — undecided, each with the decision that is missing.
+
+The sequencing annotation is what keeps `run-team:75-76` enforceable once FIFO
+puts a chain's members next to each other. Without it, two consecutive numbers
+read as two independent tickets.
 
 No relabelling at phase 0, preserving `run-team:164-165`. An unticked ticket
 keeps `ready-for-agent` and re-surfaces next wave.
@@ -112,17 +118,22 @@ branch*.
 
 `candidates.mjs` sorts ascending by issue number — monotonic in creation order,
 already in the payload, no extra field or query semantics. The ranking prose
-reduces to two lines:
+reduces to one line: **among the survivors, oldest first.**
 
-1. tickets that unblock others, oldest first;
-2. everything else, oldest first.
+Dependencies are a *constraint*, not a ranking input. Step 2 already drops any
+ticket whose blocker is open, so everything reaching step 7 is free to start, and
+step 7's annotation keeps a sequenced pair out of a single wave. Neither needs
+the ordering to express it — which is what lets the sort avoid the `d` array the
+*Out of scope* section records as empty for every `to-tickets` chain. FIFO also
+gets blocker-before-blocked for free: `to-tickets` publishes chains
+blockers-first, so blockers carry the lower numbers.
 
-Unblocking is the one criterion that pays for itself: clearing a blocker widens
-future supply. The other two go. **"Small"** is the same size axis this spec
-removes from the gate — keeping it as a ranking input would leave two rules about
-size pointing opposite ways in one skill. **"Adjacent to current branch"** is
-meaningless to the fleet, whose members each get a fresh worktree; it stays
-relevant only to `next-ticket`'s solo flow, where it is retained.
+All three "best first" criteria go. **"Unblocks #X"** ranked among tickets that
+step 2 has already established are unblocked. **"Small"** is the same size axis
+this spec removes from the gate — keeping it as a ranking input would leave two
+rules about size pointing opposite ways in one skill. **"Adjacent to current
+branch"** is meaningless to the fleet, whose members each get a fresh worktree;
+it stays relevant only to `next-ticket`'s solo flow, where it is retained.
 
 Ordering moves from the model to the script, so a wave costs one deterministic
 sort instead of a ranking judgment.
@@ -201,7 +212,7 @@ upstream.
 | --- | --- |
 | `run-team:57-58` | step 4 reads for sequencing **and** decided?; no sizing subagent |
 | `run-team:59-61` | step 5 deleted |
-| `run-team:71-73` | multi-select gains the **unsure** group; "best first" → FIFO, unblockers first |
+| `run-team:71-73` | multi-select gains the **unsure** group; "best first" → FIFO among survivors; sequenced survivors annotated |
 | `run-team:133-135` | member: read → bail+demote if undecided; else size for path, proceed on either row |
 | `run-team:157-162` | demotion split by cause |
 | `run-team:352-353` | supply = open `ready-for-agent` surviving in-flight scan |
@@ -211,7 +222,7 @@ upstream.
 | `sizing-a-ticket:25` | scope the flag to process depth |
 | `candidates.mjs:44-46` | `spec:` predicate in the jq; drop and log matches |
 | `candidates.mjs` (after parse) | sort ascending by `n` |
-| `next-ticket:44-46` | FIFO, unblockers first; drop "small"; keep "adjacent to current branch" for the solo flow |
+| `next-ticket:44-46` | FIFO among survivors; drop "unblocks #X" and "small"; keep "adjacent to current branch" for the solo flow |
 
 ## Testing
 
@@ -234,8 +245,11 @@ files.
 2. `sizing-a-ticket` is not invoked anywhere in phase 0.
 3. Both tie-breaks — *torn → surface* for admissibility, *torn → heavier* for
    process depth — appear in **both** `run-team` and `sizing-a-ticket`.
-4. No file-count or ticket-size wording survives in any admissibility rule.
-5. **Caveman compression applies to every edited line of LLM-consumed prose** —
+4. No file-count or ticket-size wording survives in any admissibility rule —
+   including the *ranking* prose, where "small" is removed.
+5. Phase 0 presents every group FIFO, and annotates any survivor the `Out of
+   scope` read sequences after another survivor in the same list.
+6. **Caveman compression applies to every edited line of LLM-consumed prose** —
    `run-team/SKILL.md`, `sizing-a-ticket/SKILL.md`, `next-ticket/SKILL.md`,
    and any `references/*.md` touched. Drop articles and filler; fragments are
    fine; keep code, paths, commands, and line references verbatim. It is a
@@ -250,6 +264,8 @@ files.
   one member bail and lands in a human's queue — bounded, and self-correcting
   toward the human.
 - Phase 0 never relabels an unclaimed ticket.
+- Ordering is a script sort, never a model judgment. Dependencies constrain which
+  tickets appear and which may share a wave; they never reorder what is left.
 - Phase 0 never resolves a torn case; it surfaces it.
 - `--require-label ready-for-agent` stays mandatory with no fallback.
 
