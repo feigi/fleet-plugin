@@ -137,8 +137,8 @@ Issues live in `feigi/claude-config` GitHub Issues, via the `gh` CLI. See `docs/
 
 ### Triage labels
 
-Default canonical vocabulary — label string equals role name (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+Label string equals role name for the three roles that exist: `ready-for-agent`, `ready-for-human`, `wontfix`. No `needs-triage` / `needs-info` label in this repo — those two roles have no equivalent. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. Neither exists yet; they get created lazily. See `docs/agents/domain.md`.
