@@ -166,7 +166,7 @@ All eleven obey the three rules above.
 | `verify-sha.sh` | `<branch> <sha>` | `{reachable, log}` | sha not reachable on branch |
 | `claim-ticket.sh` | `<N> <slug> <type>` | `{worktree, branch, ports, runner}` | lockfile dirty after install, worktree exists, label write failed |
 | `no-undo-audit.sh` | `<worktree> <branch>` | `{clean, stash[], conflicts[], atRisk[]}` | worktree dirty or stash non-empty |
-| `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | any leg of the proof fails |
+| `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{proved, preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | any leg of the proof fails |
 | `reap.sh` | `[--apply]` | `{reaped[], kept[{branch,reason}]}` | never — refusals are findings |
 | `worktree-audit.sh` | — | `[{worktree, commits, dirty[]}]` | never |
 | `ledger.mjs` | `set/filed/ruled/read` | row or list | ledger unreadable |

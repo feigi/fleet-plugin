@@ -10,14 +10,23 @@
 #
 # no-rebase path (pre == post) — leg 1 is unsatisfiable here: a commit is its own
 # ancestor, so leg 2 forces leg 1 true and nothing can ever prove. Its teeth move
-# to headWasCurrent: the merge's first parent — the main tip the merge was built
-# on — IS an ancestor of the merged head, which is what behind_by=0 means.
+# to headWasCurrent: the merge's first parent IS an ancestor of the merged head,
+# which is what behind_by=0 means for a merge built on main. That parent is read
+# off the merge object rather than off a ref, so the fetch below cannot perturb
+# it the way it perturbs leg 1.
 #
-# Leg 1 and headWasCurrent are the legs with teeth. Without one of them "proved"
-# is satisfiable by doing nothing at all, because an unrebased head that merged
-# cleanly is also an ancestor of main. Both paths also require exactly two
-# parents, so an octopus merge cannot drag an unreviewed third parent along
-# behind a second parent that looks right.
+# Leg 1 and headWasCurrent are the legs with teeth, but they are not the same
+# tooth: leg 1 proves the pre-rebase version did not land, headWasCurrent proves
+# the merged head was current. Only the no-rebase path demands currency, so the
+# rebase path still proves a head that went stale between its rebase and its
+# merge — it reports headWasCurrent=false next to proved=true when it does.
+# Without one of them "proved" is satisfiable by doing nothing at all, because an
+# unrebased head that merged cleanly is also an ancestor of main. Both paths also
+# require exactly two parents, so an octopus merge cannot drag an unreviewed third
+# parent along behind a second parent that looks right.
+#
+# Neither path checks that <merge> is reachable from $base, so "the first parent
+# is the main tip" is an assumption about the caller, not something proved here.
 set -eu
 
 NAME=prove-merge
@@ -50,6 +59,7 @@ post_anc=$(is_ancestor "$post_full" "$base")
 echo "    post is-ancestor = $post_anc (want true)" >&2
 
 # Word-splitting is the point: "<merge> <parent>..." -> positional params.
+# shellcheck disable=SC2046
 set -- $(git rev-list --parents -n 1 "$merge")
 shift
 parents=$#
@@ -60,6 +70,7 @@ echo "    ${merge}^1 = $first  (${parents} parents)" >&2
 echo "    ${merge}^2 = $second" >&2
 echo "    verified head = $post_full" >&2
 
+echo "\$ git merge-base --is-ancestor $first $post_full" >&2
 head_current=$(is_ancestor "$first" "$post_full")
 
 if [ "$pre_full" = "$post_full" ]; then

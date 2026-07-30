@@ -158,18 +158,54 @@ test("ATTACK: un-rebased head that merged cleanly still proves false", (t) => {
 });
 
 test("ATTACK: wrong head — merge second parent is not the verified-green head", (t) => {
+  // Leg 3 has to be the *only* gate that bites here, or this test proves nothing
+  // about leg 3. So the green head really does land (leg 2 passes) and the wrong
+  // merge's first parent really is an ancestor of it (headWasCurrent passes).
   const w = repo(t);
   const base = git(w, "rev-parse", "main");
   git(w, "checkout", "-q", "-b", "green", base);
   const green = commit(w, "the head that was verified green");
   git(w, "checkout", "-q", "-b", "other", base);
   const other = commit(w, "a different head entirely");
-  const merge = mergeNoFf(w, other, "merge the wrong branch");
+  const wrongMerge = mergeNoFf(w, other, "merge the wrong branch");
+  mergeNoFf(w, green, "merge the green branch too, later");
   git(w, "push", "-q", "origin", "main");
 
-  const { code, json } = prove(w, green, green, merge);
-  assert.notEqual(json.secondParent, green);
+  const { code, json } = prove(w, green, green, wrongMerge);
+  assert.deepEqual(
+    { post: json.postIsAncestor, current: json.headWasCurrent, parents: json.parentCount },
+    { post: true, current: true, parents: 2 },
+    "every other gate must pass, so only leg 3 can explain the disproof",
+  );
+  assert.equal(json.secondParent, other);
   assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("leg 2 still bites: a head that never landed cannot be proved", (t) => {
+  // The merge is real but lives on a side branch that was never pushed, so the
+  // head is not an ancestor of the base ref. Every other gate passes, which is
+  // what makes this a test of leg 2 rather than of whatever fires first.
+  const w = repo(t);
+  const base = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat", base);
+  const head = commit(w, "work that never reached main");
+  git(w, "checkout", "-q", "-b", "side", base);
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into a branch that is not main", head);
+  const merge = git(w, "rev-parse", "HEAD");
+
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on without either of them");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, head, head, merge);
+  assert.deepEqual(
+    { second: json.secondParent, current: json.headWasCurrent, parents: json.parentCount },
+    { second: head, current: true, parents: 2 },
+    "every other gate must pass, so only leg 2 can explain the disproof",
+  );
+  assert.equal(json.postIsAncestor, false);
+  assert.equal(json.proved, false, "a merge that never reached the base ref proves nothing");
   assert.equal(code, 1);
 });
 
