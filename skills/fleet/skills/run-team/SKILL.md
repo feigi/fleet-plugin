@@ -38,6 +38,13 @@ See references/member-lifecycle.md.
 
 At start, and whenever the pool empties.
 
+0. **Launch the cockpit, once per run.** On the first phase-0 pass only:
+   `node ~/.claude/skills/fleet/scripts/board.mjs serve --open &` in the
+   background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
+   feed or update it, and it survives your own compaction. Skip on later
+   re-shortlists (a server is already running; a second one collides on the
+   port).
+
 1. **Candidate scan** — `~/.claude/skills/fleet/scripts/candidates.mjs
    --require-label ready-for-agent`. **`--label ready-for-agent` mandatory, no
    fallback** — do NOT pass `--allow-fallback`. Empty means no work;
