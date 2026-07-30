@@ -1,7 +1,7 @@
 # `/fleet:run-team` — implement / review / merge agent fleet
 
 Date: 2026-07-22
-Status: approved design, not yet implemented
+Status: implemented
 
 > **Superseded in part.** Packaging (2026-07-23) moved every artifact named
 > here into the `fleet` plugin and made namespaced invocation mandatory. Paths

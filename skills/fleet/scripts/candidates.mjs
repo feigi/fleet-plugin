@@ -98,8 +98,13 @@ function refuseIfCapped(rows, description) {
 // ponytail: shape-match on to-spec's template, and no markdown awareness — a
 // ticket quoting `## User Stories` inside a fenced block is dropped too. Not
 // worth a fence parser: every drop is logged by number, so a false positive is
-// loud rather than silent. An upstream template change re-leaks a spec into the
-// queue, where the phase 2 bail catches it.
+// loud rather than silent.
+//
+// This is the ONLY line of defence — nothing downstream catches a spec. A
+// leaked one is decided and needs no human hands, so it passes both of phase
+// 2's bail tests, and heavy is explicitly never a bail reason (run-team:168).
+// Change to-spec's template and this predicate goes with it, or a member
+// implements an entire spec as one ticket.
 function dropSpecs(rows) {
   const kept = [];
   for (const { spec, ...rest } of rows) {
@@ -130,9 +135,12 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 rows = dropSpecs(rows);
 
 // FIFO among survivors. Issue number is monotonic in creation order, so this
-// needs no extra field and no query semantics. Dependencies do not rank: the
-// dependency scan already drops anything with an open blocker, and to-tickets
-// publishes chains blockers-first, so lower numbers are the blockers anyway.
+// needs no extra field and no query semantics. Dependencies do not rank —
+// blocked tickets are dropped by the CONSUMER reading `d` (run-team step 2 /
+// next-ticket step 2), not here, and to-tickets publishes chains blockers-first
+// so lower numbers are the blockers anyway. Note that drop under-fires: the `d`
+// scan misses to-tickets' `## Blocked by` heading form and native sub-issue
+// links, so blocked tickets do reach this sort — see #58.
 rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {

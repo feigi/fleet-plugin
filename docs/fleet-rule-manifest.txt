@@ -3,7 +3,7 @@ teammates cannot spawn teammates
 `subagent_type: "fork"` (inherits your whole conversation)
 Fresh context per member
 `--label ready-for-agent` mandatory
-**Light row only.**
+Staging, never vetting
 Never put two sequenced tickets in one wave
 never default to `npm install`
 Materialize the isolation envelope as a file
