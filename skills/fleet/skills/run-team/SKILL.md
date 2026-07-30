@@ -157,8 +157,9 @@ diff only in the worktree, and the controller cannot reap, replace, or even see
 it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly what decides
 whether a replacement redoes or destroys work. Observed twice in one run.
 
-Member reads the issue **before touching code**. Still undecided with the repo in
-front of it → bail, name the cause, demote, do not implement. Otherwise run
+Member reads the issue **before touching code**. Still undecided, or needs human
+hands the member doesn't have, with the repo in front of it → bail, name the
+cause, demote, do not implement. Otherwise run
 `sizing-a-ticket` for the process path and proceed on **either row** — heavy means
 brainstorm-then-plan here, not stop. Selection and claiming are done; start there.
 
@@ -192,10 +193,11 @@ multi-select**, and **a judgement the evidence cannot settle**.
   | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
 
   `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
-  --add-label <label>`, comment the cause, reap the worktree and branch, refill
-  with a *different* ticket. `needs-triage` routes back to `/triage`, which can
-  return it as `ready-for-agent`; `ready-for-human` is the dead end, so use it
-  only for hands, never for vagueness.
+  --add-label <label>`, comment the cause, release the worktree and branch with
+  `release-ticket.sh` (below — `reap.sh` declines a claim that never became a
+  PR), refill with a *different* ticket. `needs-triage` routes back to
+  `/triage`, which can return it as `ready-for-agent`; `ready-for-human` is the
+  dead end, so use it only for hands, never for vagueness.
 
   **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
   `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
