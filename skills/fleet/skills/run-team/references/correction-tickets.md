@@ -18,7 +18,7 @@ Both were **positional references**: "the *closing* `report-file verification` b
 
 Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation reds the named assertion and never reaches the true one, appearing to confirm the wrong claim.
 
-Two rules for the implementer, both cheap: **match the ticket's stated size** — added prose is where minted claims enter — and **never write a positional reference** (`the closing/second/last X`); name the thing semantically, as `the path-list assertion above` already does one hunk away.
+Two rules for the implementer, both cheap: **match the ticket's stated size** — added prose is where minted claims enter — and **never write a positional reference** (`the closing/second/last X`); name what the thing *is*, not where it sits.
 
 ## The clause-by-clause duty
 
