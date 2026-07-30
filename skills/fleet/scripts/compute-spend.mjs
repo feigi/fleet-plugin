@@ -100,8 +100,15 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
 // Per-TOOL attribution. Tokens are not billed per tool call, so this is a proxy
 // and is labelled as one everywhere it surfaces: a tool result arrives in a user
 // turn, and the NEXT assistant turn's cache_creation is the cost of writing that
-// result into the cache. When one turn carries several results, the cost is split
-// proportionally by result size, because that is what drove it.
+// result into the cache. When several results land before that turn, the cost is
+// split proportionally by result size, because that is what drove it.
+//
+// Those results arrive as CONSECUTIVE user turns, not as one turn carrying
+// several blocks: across 45,062 real result-bearing turns, not one carried two
+// tool_results. Parallel tool calls show up as N single-result turns in a row
+// (4,087 occurrences). So `pending` must ACCUMULATE across consecutive result
+// turns — replacing it dropped every batch but the last, losing 9.1% of all
+// attributions, and left the proportional split below unreachable on real data.
 //
 // The proxy over-attributes slightly — that next turn also caches the assistant's
 // own preceding output — so treat these as shares, not absolutes. `resultChars`
@@ -141,11 +148,12 @@ export function attributeTools(entries = []) {
         bump(t.name ?? "unknown").calls++;
       }
     } else if (e.kind === "result") {
-      pending = (e.results ?? []).map((r) => {
+      const batch = (e.results ?? []).map((r) => {
         const name = nameById.get(r.id) ?? "unknown";
         bump(name).resultChars += r.chars ?? 0;
         return { name, chars: r.chars ?? 0 };
       });
+      pending = pending ? pending.concat(batch) : batch;
     }
   }
 

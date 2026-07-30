@@ -33,6 +33,23 @@ test("a multi-result turn splits proportionally by result size", () => {
   assert.equal(by.Grep, 250);
 });
 
+test("CONSECUTIVE result turns accumulate — that, not the multi-block turn, is the real shape", () => {
+  // Regression. Parallel tool calls do NOT arrive as one user turn carrying two
+  // tool_result blocks: across 45,062 real result-bearing turns, none carried
+  // two. They arrive as N single-result turns in a row (4,087 occurrences).
+  // Replacing `pending` per result turn dropped every batch but the last —
+  // 9.1% of all attributions — and made the proportional split above dead code.
+  const tools = attributeTools([
+    { kind: "assistant", cacheWrite: 0, tools: [{ id: "a", name: "Read" }, { id: "b", name: "Grep" }] },
+    result(["a", 750]),
+    result(["b", 250]),
+    { kind: "assistant", cacheWrite: 1000, tools: [] },
+  ]);
+  const by = Object.fromEntries(tools.map((t) => [t.tool, t.cacheWrite]));
+  assert.equal(by.Read, 750);
+  assert.equal(by.Grep, 250);
+});
+
 test("an all-empty result batch still splits evenly rather than vanishing", () => {
   // A tool that returns nothing still costs a turn to process; dropping it would
   // silently under-report the cheap-but-chatty tools.
