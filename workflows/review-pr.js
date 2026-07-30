@@ -19,7 +19,7 @@ export const meta = {
 // reports surface to the controller rather than to the member that dispatched
 // them. In one fleet run, five specialists on one PR and four on another all
 // completed and not one report reached its reviewer. The reviewer then either
-// duplicated the work or applied rulings summarising reports it had never seen.
+// duplicated the work or ruled dimensions uncovered whose reports did exist.
 //
 // Here, agent() returns INTO THIS SCRIPT. There is no delivery path to lose, and
 // `schema` makes the return validated data rather than prose to be re-parsed.
