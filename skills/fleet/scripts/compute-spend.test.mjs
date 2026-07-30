@@ -143,6 +143,32 @@ test("missing meta never throws — a transcript with no sibling .meta.json stil
   assert.equal(classifyRole({}), "other");
 });
 
+test("finishers are named finish-<n>, not 'finish pr' — the real convention classifies", () => {
+  // Regression: /finish pr|finisher/ matched neither the agentType `finish-436`
+  // nor the description `Finish-label #436`, so 28 of 52 real finishers on this
+  // machine landed in `other`, quietly deflating every other role's share.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-436", description: "Finish-label #436" }), "finisher");
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-424-425", description: "Finisher: label #424" }), "finisher");
+});
+
+test("implementers classify off agentType, which is where `impl-` actually appears", () => {
+  // `^impl-` is anchored against `${agentType} ${description}`, so it only ever
+  // fires via the type. Pin that coupling — the description alone never matches.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "impl-332", description: "whatever" }), "implementer");
+});
+
+test("a role outside ROLE_ORDER is still reported, so percentages sum to 100", () => {
+  // Regression: roles were built by mapping over ROLE_ORDER, so an unknown role
+  // vanished from the table while its tokens stayed in totals — the column
+  // silently stopped summing to 100 and the run read as cheaper than it was.
+  const { roles, totals } = computeSpend({
+    agents: [agent({ role: "weird", cacheWrite: 500 }), agent({ role: "reviewer", cacheWrite: 500 })],
+  });
+  assert.equal(totals.cacheWrite, 1000);
+  assert.deepEqual(roles.map((r) => r.role).sort(), ["reviewer", "weird"]);
+  assert.equal(roles.reduce((n, r) => n + r.pct, 0), 100);
+});
+
 test("percentages are of cache_creation, not of raw tokens", () => {
   // cacheRead is deliberately lopsided here: if it leaked into the ranking or
   // the percentage base, the implementer would outrank the reviewer.

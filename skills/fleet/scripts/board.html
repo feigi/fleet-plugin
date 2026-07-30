@@ -69,15 +69,15 @@ let repoUrl = null; // full repo URL from the model (carries the host) — PR li
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
 
-const k = (n) => (n >= 1000 ? (n / 1000).toFixed(0) + "k" : String(Math.round(n)));
+// A run's headline is routinely tens of millions, where "48785k" is unreadable.
+const k = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(0) + "k" : String(Math.round(n)));
 
-// Two views of the same cache-creation total: WHO spent it (role) and WHAT it
-// went on (tool). Both are shares of cache_creation — cache reads are ~10x more
-// numerous and ~10x cheaper, so ranking on them would make every run look alike.
 function spendRows(host, items, { label, value, pct, highlight }) {
   for (const it of items) {
     const row = el("div", "srow");
-    row.append(el("span", "lbl", label(it)), el("span", "num", value(it)));
+    const lbl = el("span", "lbl", label(it));
+    lbl.title = label(it); // the column ellipsises; long tool names are unreadable without this
+    row.append(lbl, el("span", "num", value(it)));
     const bar = el("div", "bar");
     const fill = el("i", highlight?.(it) ? "rev" : null);
     fill.style.width = Math.max(1, Math.round(pct(it))) + "%";
@@ -87,19 +87,31 @@ function spendRows(host, items, { label, value, pct, highlight }) {
   }
 }
 
+// Two views of one run: WHO spent it (role) and WHAT it went on (tool). The two
+// percentage columns do NOT share a base — role pct is over total cache-write,
+// tool pct is over the attributable subset only (turns following a tool result).
+// Read each column against itself, never across.
 function renderSpend(sp) {
   const host = document.getElementById("spend");
   host.innerHTML = "";
-  // Absent whenever the transcripts are unreadable or none exist yet. Hide the
-  // panel rather than render zeroes, which would read as "this run was free".
-  if (!sp || !sp.totals || !sp.totals.cacheWrite) return;
+  if (!sp) return; // genuinely nothing yet — normal at run start
+  // A read failure is a bug the operator has to act on, and it used to look
+  // exactly like an idle run. stderr is not a channel here: the board is
+  // launched backgrounded and the operator is watching this page, not a log.
+  if (sp.error) {
+    host.append(el("div", "spend-wrap", "spend unavailable: " + sp.error));
+    return;
+  }
+  // Zeroes would read as "this run was free", a worse lie than absence.
+  if (!sp.totals || !sp.totals.cacheWrite) return;
 
   const wrap = el("div", "spend-wrap");
   const hd = el("div", "spend-hd");
   hd.append(el("h2", null, "spend"));
   hd.append(el("span", "lede",
-    `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`));
-  hd.append(el("span", "note", "share of cache-creation; tool split is attributed, not billed"));
+    `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`));
+  hd.append(el("span", "note",
+    (sp.skipped ? `${sp.skipped} transcripts skipped; ` : "") + "ranked on cache-creation; tool split is attributed, not billed"));
   wrap.append(hd);
 
   const cols = el("div", "spend-cols");

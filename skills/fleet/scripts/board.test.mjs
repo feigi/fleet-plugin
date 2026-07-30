@@ -88,15 +88,46 @@ test("findSubagentsDir resolves a dotted cwd and picks the newest session", () =
   const newer = join(proj, "22222222-bbbb", "subagents");
   mkdirSync(older, { recursive: true });
   mkdirSync(newer, { recursive: true });
-  writeFileSync(join(newer, "agent-a.jsonl"), ""); // bump newer's mtime
-  // ...but only far enough to be visible. Both dirs are created inside the same
-  // millisecond on a fast filesystem, `mtimeMs` ties, and the sort is stable —
-  // so the tie resolves to readdir order and `11111111-aaaa` wins on name. Age
-  // `older` explicitly rather than sleeping for a clock tick.
-  utimesSync(older, new Date(0), new Date(0));
+  // Ranking reads the newest *.jsonl mtime, so stamp the TRANSCRIPTS, not the
+  // dirs. Stamp both explicitly rather than sleeping for a clock tick: both are
+  // created inside the same millisecond on a fast filesystem, `mtimeMs` ties,
+  // and the sort is stable — a tie would resolve to readdir order and
+  // `11111111-aaaa` would win on name.
+  writeFileSync(join(older, "agent-a.jsonl"), "");
+  utimesSync(join(older, "agent-a.jsonl"), new Date(1000), new Date(1000));
+  writeFileSync(join(newer, "agent-b.jsonl"), "");
+  utimesSync(join(newer, "agent-b.jsonl"), new Date(9000), new Date(9000));
 
   assert.equal(findSubagentsDir(home, "/Users/x/.claude"), newer);
-  assert.equal(findSubagentsDir(home, "/Users/x/nonexistent"), null);
+  // Unresolvable path is a bug, not an empty run — it must be distinguishable.
+  assert.ok(findSubagentsDir(home, "/Users/x/nonexistent").error);
+});
+
+test("session ranking uses transcript mtime, not directory mtime", () => {
+  // Regression: a directory's mtime moves when an entry is CREATED, never when a
+  // file inside it is appended to. Ranking on it tracked the last agent spawn,
+  // so a session that spawned all its agents early lost to a newer, idle one —
+  // and since the cockpit starts before the first agent spawns, that was the
+  // common case at run start. The board would show a PREVIOUS run's spend.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  const busy = join(proj, "aaaa", "subagents");   // created first, still active
+  const idle = join(proj, "bbbb", "subagents");   // created later, then nothing
+  mkdirSync(busy, { recursive: true });
+  mkdirSync(idle, { recursive: true });
+  writeFileSync(join(idle, "agent-i.jsonl"), "");
+  utimesSync(join(idle, "agent-i.jsonl"), new Date(1000), new Date(1000));
+  writeFileSync(join(busy, "agent-b.jsonl"), ""); // appended most recently
+
+  assert.equal(findSubagentsDir(home, "/x"), busy);
+});
+
+test("one unreadable transcript does not take the whole panel down", () => {
+  const dir = fixture(TURN);
+  mkdirSync(join(dir, "agent-trap.jsonl")); // a directory where a file is expected
+  const s = gatherSpend({ dir });
+  assert.equal(s.totals.cacheWrite, 1000); // the good agent still counted
+  assert.equal(s.skipped, 1);
 });
 
 // One assistant turn, written the way Claude Code actually writes it: three
@@ -163,8 +194,16 @@ test("a prose turn whose content is a STRING does not throw", () => {
   assert.equal(s.totals.cacheWrite, 1000);
 });
 
-test("gatherSpend returns null rather than throwing when the dir is unreadable", () => {
-  assert.equal(gatherSpend({ dir: join(tmpdir(), "definitely-not-here-12345") }), null);
+test("an unreadable dir reports an error rather than posing as an empty run", () => {
+  // The distinction that hid the path bug: a hidden panel meant both "nothing
+  // yet" and "this is broken", so the broken case never surfaced.
+  const s = gatherSpend({ dir: join(tmpdir(), "definitely-not-here-12345") });
+  assert.ok(s.error, "expected an error object, got " + JSON.stringify(s));
+});
+
+test("encodeProjectDir covers every non-alphanumeric character", () => {
+  assert.equal(encodeProjectDir("/Users/x/my_repo"), "-Users-x-my-repo");
+  assert.equal(encodeProjectDir("/Users/x/a b"), "-Users-x-a-b");
 });
 
 // #169: `arg()` is CLI-internal (not exported), so this pins the trailing-flag
