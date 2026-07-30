@@ -38,7 +38,7 @@ add_hit() { hits="${hits}\"$1\","; echo "    HIT: $1" >&2; }
 # exist before anyone writes a closing keyword.
 echo "\$ gh issue view $n --json closedByPullRequestsReferences" >&2
 if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences --jq \
-                '[.closedByPullRequestsReferences[]|"#\(.number) (linked)"]|join(", ")' 2>/tmp/.inflight.$$); then
+                '[.closedByPullRequestsReferences[].number|tostring]|join(",")' 2>/tmp/.inflight.$$); then
   err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
   # "No such issue" and "GitHub is unreachable" are different facts and must not
   # share a message. An unattended fleet reading a network blip as "that ticket
@@ -60,21 +60,37 @@ pr_json=$(gh pr list --state all --search "$n" --limit 100 \
             --json number,state,headRefName 2>/dev/null) \
   || die "gh pr list failed — cannot determine whether #$n is taken"
 
-by_branch=$(printf '%s' "$pr_json" | NUM="$n" python3 -c '
+pr=$(printf '%s' "$pr_json" | NUM="$n" LINKED="$linked" python3 -c '
 import json, os, re, sys
 n = os.environ["NUM"]
 seg = re.compile(r"(^|[/-])" + re.escape(n) + r"([-/]|$)")
+prs = json.load(sys.stdin)
 # Only an OPEN PR is in-flight. A merged PR means the work is done; a closed,
 # unmerged PR means it was abandoned. Either would otherwise make a finished
 # or dead ticket read as taken forever.
-print(", ".join(
-    "#%s %s (branch)" % (p["number"], p["state"])
-    for p in json.load(sys.stdin)
-    if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"
-))') || die "could not filter PR search results for #$n"
+#
+# That applies to BOTH signals, but only the branch half can read the state off
+# its own source. `closedByPullRequestsReferences` does not carry one — measured,
+# its nodes are {id, number, repository, url} — so the linked half looks its
+# numbers up in this same search window, which is already fetched and does carry
+# state. Hence one dict, two filters.
+state = {str(p["number"]): p.get("state") for p in prs}
+out = []
+for num in filter(None, os.environ["LINKED"].split(",")):
+    # A PR linked through the Development sidebar carries no "#N" text anywhere,
+    # so the full-text window can miss it; so can a repo with more than the 100
+    # matches asked for. An unknown state stays a hit and says "?" rather than
+    # freeing the ticket: a wrong "taken" costs one skipped ticket, a wrong
+    # "free" puts two agents on the same one.
+    s = state.get(num, "?")
+    if s not in ("MERGED", "CLOSED"):
+        out.append("#%s %s (linked)" % (num, s))
+out += ["#%s %s (branch)" % (p["number"], p["state"]) for p in prs
+        if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"]
+print(", ".join(out))') || die "could not filter PR search results for #$n"
 
-raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
-pr=$(printf '%s' "$linked${linked:+${by_branch:+, }}$by_branch")
+raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') \
+  || die "could not count the PR search results for #$n"
 if [ -n "$pr" ]; then
   echo "    PRs for #$n: $pr   ($raw full-text match(es) considered)" >&2
   add_hit "pr"
