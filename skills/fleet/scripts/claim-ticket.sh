@@ -30,14 +30,42 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 [ -e "$wt" ] && die "$wt already exists — ticket may already be claimed"
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
+# Everything below is derived from origin/main, the ref the worktree is built
+# from — never from $PWD. The checkout can hold untracked or gitignored files
+# the worktree will never have (this repo's own package.json is gitignored),
+# and can sit on a different commit entirely. Probing $PWD let the script
+# announce "no lockfile" and then build a worktree containing one.
+pkg=$(git show origin/main:package.json 2>/dev/null) || pkg=
+
 # Derive the frozen install from the lockfile. No match is a refusal, not a
-# default — guessing here is what corrupts the tree.
-if   [ -f package-lock.json ]; then install="npm ci"
-elif [ -f pnpm-lock.yaml ];   then install="pnpm i --frozen-lockfile"
-elif [ -f yarn.lock ];        then install="yarn --immutable"
-else die "no recognised lockfile — refusing to guess an install command"
+# default — guessing here is what corrupts the tree. The one safe exception is
+# nothing to install: no manifest, or one whose four dependency fields are all
+# empty and which is not a workspaces root. An unparseable manifest is not
+# evidence of an empty one, so it refuses too.
+if   git cat-file -e origin/main:package-lock.json 2>/dev/null; then install="npm ci"
+elif git cat-file -e origin/main:pnpm-lock.yaml    2>/dev/null; then install="pnpm i --frozen-lockfile"
+elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="yarn --immutable"
+elif [ -z "$pkg" ]; then install="true"
+elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0))' 2>&1); then
+  die "could not read origin/main:package.json — $ndeps"
+elif [ "$ndeps" = 0 ]; then install="true"
+else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
 fi
 echo "    lockfile → install: $install" >&2
+
+# The runner runs the repo's own test entrypoint. Both guesses are unsafe when
+# wrong: `npm test` with no `test` script fails with an npm error that reads
+# like a broken worktree, and `node --test` with no test files exits 0 — a
+# runner that passes vacuously is worse than one that is dead, because the
+# review fan-out consumes it as a green suite. Refuse rather than guess.
+if printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit((p.scripts||{}).test?0:1)' 2>/dev/null; then
+  testcmd="npm test --"
+elif git ls-tree -r --name-only origin/main | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'; then
+  testcmd="node --test"
+else
+  die "origin/main has no scripts.test and no test files — refusing to emit a runner that would pass vacuously"
+fi
+echo "    test entrypoint → $testcmd" >&2
 
 pg=$((16000 + issue))
 ollama=$((22000 + issue))
@@ -60,8 +88,12 @@ else
   (cd "$wt" && $install >/dev/null 2>&1) || die "install failed in $wt"
 
   # The lockfile must be untouched by the install. Non-empty means the wrong
-  # command ran, and the worktree is now corrupt for everyone.
-  if [ -n "$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock 2>/dev/null)" ]; then
+  # command ran, and the worktree is now corrupt for everyone. Check git's exit
+  # status too: a failed status prints nothing, which is byte-identical to
+  # "clean" and would let this guard pass without having verified anything.
+  if ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock 2>&1); then
+    die "could not verify lockfile state in $wt — $dirty"
+  elif [ -n "$dirty" ]; then
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"
   fi
   echo "    lockfile clean after install" >&2
@@ -72,10 +104,11 @@ else
   cat > "$runner" <<SH
 #!/bin/sh
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
-exec npm test -- "\$@"
+exec $testcmd "\$@"
 SH
   chmod +x "$runner"
-  echo "agent-test" >> "$(git rev-parse --git-common-dir)/info/exclude"
+  excl="$(git rev-parse --git-common-dir)/info/exclude"
+  grep -qx agent-test "$excl" 2>/dev/null || echo "agent-test" >> "$excl"
   echo "    wrote $runner and excluded it" >&2
 fi
 

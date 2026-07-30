@@ -128,3 +128,17 @@ Respond like smart caveman. Cut all filler, keep technical substance.
 - No hedging. Fragments fine. Short synonyms.
 - Technical terms stay exact. Code blocks unchanged.
 - Pattern: [thing] [action] [reason]. [next step].
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in `feigi/claude-config` GitHub Issues, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Label string equals role name for the three roles that exist: `ready-for-agent`, `ready-for-human`, `wontfix`. No `needs-triage` / `needs-info` label in this repo — those two roles have no equivalent. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. Neither exists yet; they get created lazily. See `docs/agents/domain.md`.
