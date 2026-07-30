@@ -9,6 +9,16 @@ Status: approved design, not yet implemented
 > the probe results for agent naming and tool availability, remain valid — see
 > `docs/specs/2026-07-23-fleet-plugin-design.md`.
 
+> **Superseded in part.** Admissibility (2026-07-30) no longer gates on row size.
+> Phase 0's *"admit light-row only"* step is deleted; the gate asks **is what to
+> build decided?** instead. A heavy-row ticket with a complete Agent Brief is
+> admissible, and a fleet member on that row enters at
+> `superpowers:writing-plans`, skipping the maintainer-present
+> `superpowers:brainstorming`. Candidate ordering is a script sort — oldest
+> first — not a model re-rank. Phase 0's step 5 and the claims that depended on
+> it have been removed below; everything else in this document still stands. See
+> `docs/specs/2026-07-30-fleet-trust-the-label-design.md`.
+
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem
@@ -120,8 +130,9 @@ Two tools fleet members do NOT have, confirmed by probe: `Workflow` and
 output — it only sees its own children's completion notifications. Any
 cross-agent result routing goes through the controller.
 
-Implementers inherit the same capability but the fleet does not rely on it —
-see the admission rules, which keep heavy-row work out of the fleet entirely.
+Implementers inherit the same capability. Heavy-row work is admissible as of the
+2026-07-30 design, and the heavy path ends in
+`superpowers:subagent-driven-development`, so an implementer fans out too.
 
 ### Every implementer and reviewer gets a FRESH context
 
@@ -190,15 +201,11 @@ Runs at start, and again whenever the approved pool empties.
 4. For each survivor, `gh issue view <N> --json title,body,comments --jq
    '.title, .body, (.comments[]|.author.login + ": " + .body)'` and read the
    `## Agent Brief`. Record its `Out of scope` sequencing constraints.
-5. **Row sizing — admit light-row only.** Judge each survivor against
-   `next-ticket` step 6's table. Light row (states exactly what to change, one or
-   two files, no open design choice → TDD path) is admissible. Heavy row (any
-   ambiguity in *what* to build, more than ~3 files, new API/schema/UX, or
-   several viable approaches) is NOT, even with a complete Agent Brief. When torn
-   between rows, take the heavier one and exclude.
-6. Present ~10 admissible survivors, best first, as a multi-select. The
-   maintainer ticks the approved pool. List excluded heavy-row tickets
-   separately, as "needs a solo session with you" — excluded, not dropped.
+5. Judge each survivor **decided?** — would two competent implementers, reading
+   only this ticket, build materially different things? Present the survivors as
+   a multi-select; the maintainer ticks the approved pool. Excluded, not dropped.
+   The criterion, the groups, and their ordering are set by
+   `docs/specs/2026-07-30-fleet-trust-the-label-design.md`.
 
 ### Why the label boundary is hard
 
@@ -208,10 +215,11 @@ design first. The fleet has no channel to that human mid-flight, so it never
 touches `ready-for-human` — those tickets reach the fleet only after a human
 brainstorms them and triage re-labels.
 
-Heavy-row exclusion is a second, independent filter on top of that. A ticket can
-be correctly labeled `ready-for-agent` and still be too open-ended to hand a
-background implementer; the Agent Brief raises the floor but does not make
-`brainstorming` unnecessary. Both filters must pass.
+Admissibility is a second, independent filter on top of that. A ticket can be
+correctly labeled `ready-for-agent` and still be too open-ended to hand a
+background implementer. The 2026-07-30 design settles that on *is what to build
+decided?* — never on how big the ticket is — and makes the Agent Brief the
+evidence rather than ruling it inadmissible. Both filters must pass.
 
 Two sequenced tickets never go into the same wave. That constraint lives in the
 Agent Brief's `Out of scope` section and is invisible to the `depends on #N`
@@ -274,7 +282,7 @@ The controller tracks two numbers:
 
 - **pool** — approved tickets not yet dispatched
 - **supply** — open `ready-for-agent` issues that survive BOTH the in-flight scan
-  and light-row sizing. A queue full of heavy-row tickets counts as zero supply
+  and the decided? check. A queue of undecided tickets counts as zero supply
 
 Low-water mark is the implementer cap. On a freed slot:
 
