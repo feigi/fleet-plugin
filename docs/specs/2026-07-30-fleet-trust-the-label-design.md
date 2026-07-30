@@ -150,8 +150,9 @@ guard, and phase 0 flags a sequenced pair rather than presenting both as free.
 ## Phase 2
 
 The member reads the issue before touching code. If what to build is still
-undecided with the repo in front of it, it bails before implementing, **naming
-the cause**, and demotes accordingly:
+undecided with the repo in front of it — or the ticket needs human hands the
+member does not have — it bails before implementing, **naming the cause**, and
+demotes accordingly:
 
 | Cause | Label | Why |
 | --- | --- | --- |
