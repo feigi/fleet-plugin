@@ -30,16 +30,14 @@ Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket 
 ## 3. In-flight check (all three, per candidate) — then fetch
 
 ```bash
-gh pr list --state all --search "<N>"
-git ls-remote --heads origin | grep -E "[/-]<N>[-/]"
-git worktree list; git branch -vv
+~/.claude/skills/fleet/scripts/inflight.sh <N>   # 0 free, 1 taken, 2 unanswerable
 ```
 
-Any hit → taken. "Shipped" memory not proof; open PR means unmerged.
+Runs all three — a PR about the ticket, a remote branch, a local worktree or branch. Exit 1 → taken. "Shipped" memory not proof; open PR means unmerged. Exit 2 is not free: the question went unanswered (`gh` failed, not a repo), so treat it as taken until you know.
 
 Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
-Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on #7) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: two of the three probes hit the network — three round-trips if you run `~/.claude/skills/fleet/scripts/inflight.sh <N>` — so they stay behind step 2's cut and never run over the whole step 1 list.
+Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on #7) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: the script makes three network round-trips (`gh issue view`, `gh pr list`, `git ls-remote`; the local probe is free) — so it stays behind step 2's cut and never runs over the whole step 1 list.
 
 ## 4. Suggest — then stop
 
@@ -87,6 +85,7 @@ Closes #N"
 
 - "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only.
 - "Label says ready-for-agent, so it's free" → run step 3.
+- "I'll run the three probes inline instead of the script" → don't. Bare `gh pr list --search "<N>"` is a full-text match, so nearly every ticket reads as taken and free work gets skipped silently and permanently; a one-sided branch regex misses `fix/<N>`; grepping a worktree's full path false-hits every ticket. `inflight.sh` handles all three and shows its measurements.
 - "Read the issues first, then check what's taken" → probes first; a dropped candidate's full read is pure waste. Probes still stay behind step 2's cut — two of the three hit the network.
 - "Only one candidate, I'll just start" → still ask.
 - "Blocker is nearly done" → still blocked.
