@@ -526,17 +526,60 @@ test("a mistyped --apply is refused, never silently downgraded to a dry run", (t
 });
 
 test("an unreadable worktree is an unknown answer, never a clean one", (t) => {
-  // Reachable whenever the worktree directory is gone but still registered.
-  // Swallowed, it reads as no uncommitted changes and the release proceeds.
+  // A worktree whose .git file points nowhere: the directory is there, still
+  // registered and still on the branch, and its status cannot be read.
+  // Swallowed, that reads as no uncommitted changes and the release proceeds.
+  // The directory has to still exist for this to be the unknown case — a gone
+  // one is answerable, and the case below is what proves it.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  rmSync(c.wt, { recursive: true, force: true });
+  writeFileSync(join(c.wt, ".git"), `gitdir: ${join(r.w, ".git", "worktrees", "nope")}\n`);
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2);
   assert.equal(json, null);
   assert.match(stderr, /whether it holds uncommitted work is unknown/);
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a worktree directory deleted by hand releases instead of blocking forever", (t) => {
+  // `worktree list --porcelain` keeps listing an entry whose directory is gone
+  // (it marks it `prunable`), so the dirty check ran `git -C` against a path
+  // that is not there and died at exit 2 — every run, permanently, leaving the
+  // label and the branch behind for the in-flight probe to keep reading as
+  // taken. That is the state this script exists to clear.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0, "a directory that does not exist holds no work to protect");
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "including the stale entry");
+  assert.ok(
+    r.calls().some((l) => l.includes("issue edit") && l.includes("--remove-label in-progress")),
+    `the label is what had to come off: ${r.calls()}`,
+  );
+});
+
+test("a worktree deleted by hand while its branch carries work still blocks", (t) => {
+  // The gone directory is the only thing the case above makes answerable. Every
+  // other refusal is measured on the branch ref, not the worktree, and none of
+  // them may weaken because the directory went missing.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "work", "work that exists nowhere else\n");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.match(json.blockers.join(" "), /1 commit\(s\) ahead/);
+  assert.equal(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    true,
+    "the branch, and the commit on it, survive",
+  );
 });
 
 test("a quote in the slug cannot produce a payload the caller fails to parse", (t) => {

@@ -170,7 +170,22 @@ if ! remote=$(git ls-remote --heads origin "refs/heads/$branch"); then
 fi
 [ -z "$remote" ] || block "branch $branch exists on origin"
 
-if [ -n "$wt" ]; then
+# `-d`, because a directory that is not there holds no uncommitted work. Deleted
+# by hand, a worktree leaves its admin files registered, so `worktree list
+# --porcelain` keeps listing the entry and the status below ran against a path
+# that is gone: it failed, the die read that as "unknown", and the claim could
+# then never be released — label, branch and worktree entry all surviving every
+# run while the in-flight probe kept reading the ticket as taken. git agrees at
+# the delete: `worktree remove` accepts the gone entry and clears the admin
+# files, and the `prune` below is the backstop (verified, git 2.50.1).
+#
+# Not git's own `prunable` annotation, which marks this entry but is not the
+# same question: removing only a LIVE worktree's .git file marks it `prunable`
+# too, with the directory and every uncommitted change still sitting in it.
+# Keying on the annotation would skip the check on that one and let the remove
+# take the work with it. A gone directory is the only new answer here; a
+# directory that exists and cannot be read is still unknown, and still dies.
+if [ -n "$wt" ] && [ -d "$wt" ]; then
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
