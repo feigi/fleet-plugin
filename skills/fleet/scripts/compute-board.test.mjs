@@ -102,3 +102,78 @@ test("deriveFlags: cause tokens surface as flags", () => {
   const f = deriveFlags(p, { ci: null, column: "IMPLEMENTING", sinceEnteredStage: 0, now: 0 });
   assert.ok(f.includes("killed"));
 });
+
+import { computeBoard } from "./compute-board.mjs";
+
+const baseInputs = () => ({
+  ledger: {
+    rows: [
+      "#332 impl-332 → PR#344 → MERGED 73b356de",
+      "#324 impl-324 → PR#346 · review-pr-346 · held-behind:#313",
+      "#340 impl-340",
+    ],
+    filed: ["#351 flaky retry marker in ci logs"],
+    ruled: ["#346 6-applies keep the fallback"],
+  },
+  issues: [{ number: 341, title: "add a --json flag", labels: ["ready-for-agent"] }],
+  prs: [
+    { number: 344, state: "MERGED", labels: [], title: "impl 332" },
+    { number: 346, state: "OPEN", labels: [], title: "impl 324" },
+  ],
+  ci: { 344: "green", 346: "red" },
+  prev: null,
+  now: 1000,
+  repo: "owner/repo",
+});
+
+test("computeBoard: one ticket per column, POOL from an unrowed ready issue", () => {
+  const b = computeBoard(baseInputs());
+  const col = (n) => b.tickets.find((t) => t.issue === n).column;
+  assert.equal(col(332), "MERGED");
+  assert.equal(col(324), "REVIEW");
+  assert.equal(col(340), "IMPLEMENTING");
+  assert.equal(col(341), "POOL");
+});
+
+test("computeBoard: ruling attaches to the PR ticket", () => {
+  const b = computeBoard(baseInputs());
+  assert.equal(b.tickets.find((t) => t.issue === 324).ruling, "6-applies keep the fallback");
+});
+
+test("computeBoard: attention holds only flagged tickets, red-ci before held-behind", () => {
+  const b = computeBoard(baseInputs());
+  assert.deepEqual(b.attention.map((t) => t.issue), [324]); // red-ci + held-behind
+  assert.ok(b.attention[0].flags.includes("red-ci"));
+});
+
+test("computeBoard: filed follow-ups are parsed to {issue,subject}", () => {
+  const b = computeBoard(baseInputs());
+  assert.deepEqual(b.filed, [{ issue: 351, subject: "flaky retry marker in ci logs" }]);
+});
+
+test("computeBoard: dwell carries forward while the column is unchanged", () => {
+  const first = computeBoard({ ...baseInputs(), now: 1000 });
+  const second = computeBoard({ ...baseInputs(), prev: first, now: 5000 });
+  // #340 stayed IMPLEMENTING → keep the original entry time
+  assert.equal(second.tickets.find((t) => t.issue === 340).sinceEnteredStage, 1000);
+});
+
+test("computeBoard: dwell resets when the column changes", () => {
+  const first = computeBoard({ ...baseInputs(), now: 1000 });
+  const moved = baseInputs();
+  moved.ledger.rows[2] = "#340 impl-340 → PR#360"; // now REVIEW
+  moved.prs.push({ number: 360, state: "OPEN", labels: [], title: "impl 340" });
+  const second = computeBoard({ ...moved, prev: first, now: 5000 });
+  assert.equal(second.tickets.find((t) => t.issue === 340).sinceEnteredStage, 5000);
+});
+
+test("computeBoard: queue counts pool and review-backlog", () => {
+  const b = computeBoard(baseInputs());
+  assert.equal(b.queue.pool, 1);
+  // #324 has a reviewer token, so it is NOT backlog
+  assert.equal(b.queue.reviewBacklog, 0);
+});
+
+test("computeBoard: repo is echoed to the model", () => {
+  assert.equal(computeBoard(baseInputs()).repo, "owner/repo");
+});

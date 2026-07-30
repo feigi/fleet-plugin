@@ -59,3 +59,102 @@ export function deriveFlags(parsed, ctx) {
   }
   return flags;
 }
+
+// Internal helpers — not exported; covered through computeBoard's tests.
+
+// Carry the stage-entry timestamp forward while the column is unchanged, else
+// reset to now. This is what makes dwell self-contained in board.json, needing
+// no ledger timestamps and no controller involvement.
+function stageEntry(prevTicket, column, now) {
+  if (prevTicket && prevTicket.column === column && prevTicket.sinceEnteredStage != null) {
+    return prevTicket.sinceEnteredStage;
+  }
+  return now;
+}
+
+function titleFor(issue, pr, issues) {
+  if (pr && pr.title) return pr.title;
+  const i = issues.find((x) => x.number === issue);
+  return i ? i.title : `#${issue}`;
+}
+
+const FLAG_SEVERITY = { "red-ci": 5, killed: 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
+function severity(flags) {
+  let s = 0;
+  for (const f of flags) {
+    if (f.startsWith("held-behind")) s = Math.max(s, 2);
+    else s = Math.max(s, FLAG_SEVERITY[f] ?? 0);
+  }
+  return s;
+}
+
+function splitNumbered(line) {
+  const m = line.match(/^#(\d+)\s+(.*)$/);
+  return m ? { issue: Number(m[1]), subject: m[2] } : { issue: null, subject: line };
+}
+
+export function computeBoard(inputs) {
+  const { ledger, issues, prs, ci, prev, now } = inputs;
+  const prByNum = new Map(prs.map((p) => [p.number, p]));
+  const prevByIssue = new Map((prev?.tickets || []).map((t) => [t.issue, t]));
+  const ruledByPr = new Map();
+  for (const r of ledger.ruled || []) {
+    const s = splitNumbered(r);
+    if (s.issue != null) ruledByPr.set(s.issue, s.subject);
+  }
+
+  const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
+  const rowIssues = new Set(parsed.map((p) => p.issue));
+  const tickets = [];
+
+  for (const p of parsed) {
+    const pr = p.pr != null ? prByNum.get(p.pr) : undefined;
+    const prState = p.pr == null ? null
+      : pr ? { open: pr.state === "OPEN", labels: pr.labels || [] }
+           : { open: false, labels: [] };
+    const column = deriveColumn(p, prState);
+    const sinceEnteredStage = stageEntry(prevByIssue.get(p.issue), column, now);
+    const ciState = p.pr != null ? (ci[p.pr] ?? null) : null;
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now });
+    const inReview = column === "REVIEW" || column === "READY";
+    tickets.push({
+      issue: p.issue,
+      title: titleFor(p.issue, pr, issues),
+      column,
+      agent: inReview ? (p.reviewer || p.impl) : p.impl,
+      pr: p.pr,
+      ci: ciState,
+      sinceEnteredStage,
+      flags,
+      ruling: p.pr != null ? (ruledByPr.get(p.pr) ?? null) : null,
+    });
+  }
+
+  for (const iss of issues) {
+    if (rowIssues.has(iss.number)) continue;
+    const sinceEnteredStage = stageEntry(prevByIssue.get(iss.number), "POOL", now);
+    tickets.push({
+      issue: iss.number, title: iss.title, column: "POOL", agent: null,
+      pr: null, ci: null, sinceEnteredStage, flags: [], ruling: null,
+    });
+  }
+
+  const attention = tickets.filter((t) => t.flags.length)
+    .sort((a, b) => severity(b.flags) - severity(a.flags));
+
+  const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
+  const reviewBacklog = tickets.filter(
+    (t) => t.column === "REVIEW" && !parsedByIssue.get(t.issue)?.reviewer,
+  ).length;
+  const pool = tickets.filter((t) => t.column === "POOL").length;
+
+  return {
+    generatedAt: now,
+    interval: inputs.interval ?? 15,
+    repo: inputs.repo ?? null,
+    queue: { pool, supply: pool, reviewBacklog },
+    tickets,
+    filed: (ledger.filed || []).map(splitNumbered),
+    attention,
+  };
+}
