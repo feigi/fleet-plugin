@@ -175,7 +175,7 @@ multi-select**, and **a judgement the evidence cannot settle**.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
-latest runs, keyed `<run-id>:<conclusion>` so each terminal state fires once, and
+latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and
 emit the behind-count and the per-job conclusions with it: a `success` on a branch
 8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
 board you must not confuse with a red. On a GHE remote the compare call needs

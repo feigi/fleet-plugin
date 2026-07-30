@@ -26,7 +26,14 @@ function die(msg) {
 // git COMMON dir (shared by every worktree) rather than the cwd.
 function defaultLedgerPath() {
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" });
-  if (r.status !== 0 || !r.stdout.trim()) return ".fleet/ledger.md"; // not a repo: caller's cwd is all we have
+  if (r.status !== 0 || !r.stdout.trim()) {
+    // Could not resolve the shared git dir → fall back to a cwd-relative path.
+    // That re-opens the worktree fail-open this resolution exists to close (a
+    // member reads a cwd-local ledger, not the run's), so say so rather than
+    // degrading the duplicate-filing guard in silence.
+    console.error(`${NAME}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
+    return ".fleet/ledger.md";
+  }
   return join(dirname(resolve(r.stdout.trim())), ".fleet", "ledger.md");
 }
 

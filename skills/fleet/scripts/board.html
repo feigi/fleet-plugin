@@ -114,14 +114,28 @@ function card(t) {
   return c;
 }
 
+function warn(msg) {
+  const banner = document.getElementById("stale-banner");
+  banner.style.display = "block";
+  banner.textContent = msg;
+}
+
 async function poll() {
+  let r;
   try {
-    const r = await fetch("/board.json", { cache: "no-store" });
-    if (r.ok) render(await r.json());
+    r = await fetch("/board.json", { cache: "no-store" });
   } catch (e) {
-    const banner = document.getElementById("stale-banner");
-    banner.style.display = "block";
-    banner.textContent = "⚠ cockpit server not running";
+    warn("⚠ cockpit server not running");     // transport failure only — server unreachable
+    setTimeout(poll, interval * 1000);
+    return;
+  }
+  if (!r.ok) {
+    warn("⚠ board.json HTTP " + r.status);      // server up, but no readable board yet (e.g. first tick failed)
+  } else {
+    // Parse + render sit OUTSIDE the transport try: a corrupt payload or a
+    // render bug is NOT a dead server, and must not be mislabelled as one.
+    try { render(await r.json()); }
+    catch (e) { warn("⚠ board render failed: " + e.message); }
   }
   setTimeout(poll, interval * 1000);
 }

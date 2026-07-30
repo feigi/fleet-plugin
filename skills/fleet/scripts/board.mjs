@@ -23,6 +23,15 @@ function tryRun(cmd, args) {
   catch (e) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${e.message}`); return null; }
 }
 
+// Parse tool stdout defensively: a tool can exit 0 yet print malformed or
+// warning-prefixed stdout. Treat that like a failed read (fall back to the
+// caller's empty default), never let it crash the tick.
+function tryParse(json, fallback, what) {
+  if (json == null) return fallback;
+  try { return JSON.parse(json); }
+  catch (e) { console.error(`${NAME}: ${what} parse failed: ${e.message}`); return fallback; }
+}
+
 // ci-state.mjs exits 0 for green, 1 for not-green, 2 for a hard failure — and on
 // exit 1 it has ALREADY printed its verdict JSON to stdout before exiting. So a
 // thrown non-zero exit whose stdout is non-empty is a real verdict (feed it to
@@ -53,7 +62,7 @@ export function mapCi(ciJson) {
   return "unknown";
 }
 
-export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
+export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal.
   let prev = null;
@@ -63,17 +72,17 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
   }
 
   const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "read"]);
-  const ledger = ledgerJson ? JSON.parse(ledgerJson) : { rows: [], filed: [], ruled: [] };
+  const ledger = tryParse(ledgerJson, { rows: [], filed: [], ruled: [] }, "ledger read");
 
   const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
-  const issues = (issuesJson ? JSON.parse(issuesJson) : []).map((i) => ({
+  const issues = tryParse(issuesJson, [], "gh issue list").map((i) => ({
     number: i.number, title: i.title, labels: (i.labels || []).map((l) => l.name),
   }));
 
   const prsJson = tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
     "--json", "number,state,labels,title"]);
-  const prs = (prsJson ? JSON.parse(prsJson) : []).map((p) => ({
+  const prs = tryParse(prsJson, [], "gh pr list").map((p) => ({
     number: p.number, state: p.state, title: p.title, labels: (p.labels || []).map((l) => l.name),
   }));
 
@@ -96,7 +105,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR }) {
     catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
   }
 
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, now: Date.now(), interval: Number(arg("interval")) || 15 };
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
 }
 
 async function main() {
@@ -160,7 +169,12 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   server.on("error", (e) => die(e.code === "EADDRINUSE"
     ? `port ${port} in use — pass --port <n>` : e.message));
 
-  const stop = () => { clearInterval(timer); server.close(() => process.exit(0)); };
+  const stop = () => {
+    clearInterval(timer);
+    server.close(() => process.exit(0));
+    server.closeAllConnections?.();                  // drop keep-alive sockets so close() resolves promptly
+    setTimeout(() => process.exit(0), 1000).unref();  // hard backstop if a socket somehow lingers
+  };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   await new Promise(() => {}); // run until signalled
