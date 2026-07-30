@@ -230,9 +230,15 @@ upstream.
 
 1. spec-shaped body (`## User Stories`) → dropped;
 2. ticket-shaped body → kept;
-3. `## User Stories` inside a fenced code block → **not** matched;
-4. a drop emits the issue number;
+3. a drop emits the issue number on stderr;
+4. the `spec` key is stripped from the emitted payload;
 5. results ascending by number whatever order `gh` returned them in.
+
+**Accepted false positive.** The match is a plain regex with no markdown
+awareness, so a ticket whose body quotes `## User Stories` inside a fenced block
+is dropped too. Not worth a fence parser: every drop is logged by number, so the
+failure is loud rather than silent, and the maintainer sees the ticket leave the
+queue. Recorded in the `ponytail:` comment beside the predicate.
 
 Everything else is skill prose, which has no test coverage. The existing 76 tests
 stay green as a regression gate on the script, not as evidence about the prose —
