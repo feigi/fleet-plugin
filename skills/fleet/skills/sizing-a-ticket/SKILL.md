@@ -16,10 +16,18 @@ Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (
 
 Bug reports: `superpowers:systematic-debugging` first, either row.
 
-Report row, path, one line why. Admissibility is caller's policy — solo session follows heavy path, unattended fleet excludes ticket.
+Report row, path, one line why. **Process depth only** — this skill no longer
+decides admissibility for anyone. Both rows are workable, solo and in the fleet;
+heavy means more process, never a blocked ticket.
+
+Tie-break here: torn → take the heavier row. Correct for process depth,
+**opposite** of the fleet's admissibility tie-break, where torn → surface to the
+maintainer. Two questions, two biases. Do not carry this one across.
 
 ## Red flags
 
 - "Body is short, so it's simple" → short bodies hide most design ambiguity. Size by unknowns, not word count.
 - "Brainstorming is overkill here" → that thought is heavy row.
-- "The Agent Brief is thorough, so it's light now" → brief quality never promotes heavy row. Unknowns live in work, not write-up.
+- "The Agent Brief is thorough, so it's light now" → brief quality never promotes
+  a heavy row *for process depth*. Says nothing about admissibility — a thorough
+  brief is exactly what makes a big ticket safe to run unattended.

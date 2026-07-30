@@ -383,9 +383,9 @@ finding, never an obstacle**: a claim carrying commits or a pushed branch is not
 auto-released, ever — audit it with `worktree-audit.sh` and decide by hand.
 
 Run it over every pool ticket with no PR when the run ends or the maintainer
-drains, and on the spot for a claim abandoned mid-run (a heavy-row bail, a
-collision found after the claim). Update the released tickets' ledger rows in the
-same step. See references/reaping.md.
+drains, and on the spot for a claim abandoned mid-run (a bail before
+implementing, a collision found after the claim). Update the released tickets'
+ledger rows in the same step. See references/reaping.md.
 
 ## Queue depth
 
@@ -409,7 +409,7 @@ cycle. That is an argument for batching a wave, never for idling an implementer.
 
 **Reconcile, do not wait for an event.** "A slot is free and the pool is non-empty"
 is a *level* condition — re-derive the deficit on **every** tick, whatever woke you:
-a member finishing, a member sizing-heavy and bailing, a merge landing. An
+a member finishing, a member bailing before implementing, a merge landing. An
 edge-triggered loop that only refills on completion stalls silently the moment the
 queue empties, because 0 implementers emit no completion event. With pool 0 the
 table below governs — re-shortlist and ask, do not dispatch un-ticked supply.
@@ -585,8 +585,11 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.
-- "The brief is thorough, this heavy ticket is fine" → brief quality never
-  promotes a heavy row.
+- "Touches eight files, too big for the fleet" → size is not the axis. Decided is.
+- "Body is three lines, so it's simple" → short bodies hide open design choices.
+- "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
+  choice it leaves open.
+- "I'd have to pick an approach myself" → that IS undecided.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
 - "Tell the reviewer to ping its specialists" → the ping returns `had no active
   task; resumed from transcript` and delivers nothing; on the hand-dispatch path
