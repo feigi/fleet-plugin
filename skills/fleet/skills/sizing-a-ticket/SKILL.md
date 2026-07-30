@@ -1,6 +1,6 @@
 ---
 name: sizing-a-ticket
-description: Use before implementing ticket, or admitting tickets into queue by complexity — decides how much process work needs, returns light or heavy plus path to follow.
+description: Use before implementing ticket — decides how much process work needs, returns light or heavy plus path to follow.
 ---
 
 # Sizing a Ticket
