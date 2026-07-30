@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -43,6 +43,79 @@ function claim(dir) {
 
 const TESTS = "t.test.mjs";
 const pkg = (o) => JSON.stringify(o);
+
+// Runs the script for real and returns the emitted runner plus its worktree.
+// `--apply` labels the issue, so `gh` is stubbed; everything else — the
+// worktree, the install, the exclude file, the runner — is the real thing.
+// The runner is what members actually invoke, so it is what gets asserted on.
+function apply(files) {
+  const dir = repo(files);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const wt = join(dir, ".worktrees", "42-slug");
+  // `node --test` marks the processes it spawns, and an inherited mark makes
+  // the runner's own `node --test` report to a parent that is not listening —
+  // status 0 and not a byte of stdout. An artifact of testing a test runner
+  // from inside one; strip it so these assertions see what a member sees.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_TEST_WORKER_ID;
+  return {
+    text: readFileSync(join(wt, "agent-test"), "utf8"),
+    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
+  };
+}
+
+const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
+const SUITE = { "t/a.test.mjs": PASSES, "t/b.test.mjs": PASSES, "empty/README.md": "" };
+
+// `node --test <dir>` resolves the directory as a module specifier and dies
+// with MODULE_NOT_FOUND before a single test runs. A directory is the
+// ergonomic way to say "run this suite", and the red it produced was read as
+// a finding against the diff under review rather than against the invocation.
+test("runner: a directory argument runs the test files under it", () => {
+  const r = apply(SUITE).run("t");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 2/);
+});
+
+// The sharp edge. `node --test` with zero files exits 0, so an expansion that
+// matched nothing and shrugged would smuggle back the vacuous pass the emit
+// guard refuses — this time past it, at run time.
+test("runner: a directory with no test files refuses instead of exiting 0", () => {
+  const r = apply(SUITE).run("empty");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /no test files under empty/);
+});
+
+test("runner: a file argument still works", () => {
+  const r = apply(SUITE).run("t/a.test.mjs");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
+});
+
+// The shell expands a glob before the runner is entered, so the glob form
+// reaches it as the plain multi-file argv this asserts on.
+test("runner: the expanded glob form still works", () => {
+  const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 2/);
+});
+
+// Directories are only rewritten for `node --test`. Every other entrypoint is
+// somebody else's runner, and vitest and jest take a directory as a filter
+// against their own naming conventions, which need not be this regex.
+test("runner: npm test passes a directory through untouched", () => {
+  const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
+  assert.match(text, /^exec npm test -- "\$@"$/m);
+  assert.doesNotMatch(text, /no test files under/);
+});
 
 // Every row of the install matrix. `true` is the no-op: nothing to install.
 for (const [name, files, want] of [
