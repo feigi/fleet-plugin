@@ -129,6 +129,12 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 // `limit` and the cap check would stop seeing a truncated list.
 rows = dropSpecs(rows);
 
+// FIFO among survivors. Issue number is monotonic in creation order, so this
+// needs no extra field and no query semantics. Dependencies do not rank: the
+// dependency scan already drops anything with an open blocker, and to-tickets
+// publishes chains blockers-first, so lower numbers are the blockers anyway.
+rows.sort((a, b) => a.n - b.n);
+
 for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
 }
