@@ -151,7 +151,7 @@ config has no `globalSetup`, so there is no stack to collide on).
 ## Phase 2 — dispatch implementers
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
-number, worktree abs path, branch, and both of these verbatim:
+number, worktree abs path, branch, and each of these verbatim:
 
 > You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
 > another worktree. Verify with `git rev-parse --git-dir` and
@@ -168,10 +168,11 @@ number, worktree abs path, branch, and both of these verbatim:
 > you stop for any reason, uncommitted work is invisible to the controller and
 > effectively unrecoverable.
 
-That third block is not optional. A member that goes idle mid-task leaves its
-diff only in the worktree, and the controller cannot reap, replace, or even see
-it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly what decides
-whether a replacement redoes or destroys work. Observed twice in one run.
+The commit-incrementally block is not optional. A member that goes idle mid-task
+leaves its diff only in the worktree, and the controller cannot reap, replace,
+or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly
+what decides whether a replacement redoes or destroys work. Observed twice in
+one run.
 
 Member reads the issue **before touching code**. Still undecided, or needs human
 hands the member doesn't have, with the repo in front of it → bail, name the
