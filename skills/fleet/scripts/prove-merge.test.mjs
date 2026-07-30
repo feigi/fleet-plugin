@@ -78,10 +78,17 @@ function prove(cwd, pre, post, merge) {
 
 test("already-current merge (pre == post, behind_by=0) proves true", (t) => {
   const w = repo(t);
+  // Advance main first and cut the branch from the new tip. Branching off the
+  // root instead would make headWasCurrent hold trivially — every commit
+  // descends from the root — and the case would pass without measuring currency.
+  commit(w, "main moves on before the branch is cut");
+  git(w, "push", "-q", "origin", "main");
+  const mainTip = git(w, "rev-parse", "main");
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
   const merge = mergeNoFf(w, head, "merge feat");
   git(w, "push", "-q", "origin", "main");
+  assert.equal(git(w, "rev-parse", `${merge}^1`), mainTip, "fixture: main really had moved");
 
   const { code, json } = prove(w, head, head, merge);
   assert.equal(json.proved, true, "an already-current merge must not false-negative");
@@ -106,7 +113,9 @@ test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
   const pre = commit(w, "feature work");
   git(w, "rebase", "-q", "main");
   const post = git(w, "rev-parse", "HEAD");
-  assert.notEqual(pre, post, "fixture must actually rebase");
+  // Not `notEqual(pre, post)` — that only proves the sha moved, which an amend
+  // would also do. The rebase is real only if the head now sits on the main tip.
+  assert.equal(git(w, "rev-parse", `${post}^`), git(w, "rev-parse", "main"));
 
   const merge = mergeNoFf(w, post, "merge feat");
   git(w, "push", "-q", "origin", "main");
