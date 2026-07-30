@@ -15,7 +15,18 @@ Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
 war story behind each rule lives in `references/`; load one only when a member
 needs the *why*.
 
-## Two rules that fail silently
+## Rules that fail silently
+
+**A report is a `SendMessage`, not the end of a turn.** Every member owes the
+controller one `SendMessage` naming its outcome before it exits — including a
+member whose prompt carries no explicit report line. The "report the SHA",
+"report PR number" and "stop and report" instructions below *are* that message,
+not a second obligation on top of it. A member that does the work correctly and
+ends its turn has reported nothing: the controller learns the outcome only by
+re-reading artifacts and pinging, and a finding held only in that member's
+context is lost. Members did exactly this in one run — finishers, a reviewer and
+merge bots alike, the work done and only the delivery missing. Say it in every
+dispatch prompt. See references/member-lifecycle.md.
 
 **Name every member.** The name makes it a team member, and membership is what
 carries the `Agent` tool. Omit it → the member loses delegation with no error.
@@ -308,12 +319,28 @@ rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixe
 push, report the SHA, stop. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
-fine) dispatch a **finisher** — a fresh small agent that confirms deferrals filed
-and adds `ready-to-merge`, not the reviewer resumed. Gate on the `check` job,
-**not** on `ci-state --quiet` exit 0: a behind PR never reaches full green, so an
-exit-0 gate strands it unlabelled. The finisher reads per-job state (`ci-state.mjs`
-without `--quiet`, or its `jobs`), since `--quiet` drops `jobs`. Normal path, not
-only kill-recovery. See references/ci-and-staleness.md.
+fine) dispatch a **finisher** — a fresh small agent, not the reviewer resumed.
+Its duties, in this order:
+
+1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
+   it. Dirty or diverged halts the finisher *here*, before the label: it reports
+   what it found and labels nothing. A finisher that verifies the dirt is
+   harmless and labels anyway has substituted the rule's purpose for the rule,
+   and you find out at merge time.
+2. **Confirm every deferral is filed as an issue** — not parked as a comment on
+   the PR's *own* source issue, which the PR's `Closes #N` buries on merge.
+   Caught once at seven findings. A comment on an existing *follow-up* issue is
+   filed: that is `review-and-fix.md` step 5, not a violation. Not filed → file
+   it or halt, never label over it.
+3. Add `ready-to-merge`.
+4. `SendMessage` you the label, the deferral issue numbers, and anything it
+   halted on.
+
+Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
+reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
+per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
+drops `jobs`. Normal path, not only kill-recovery.
+See references/ci-and-staleness.md.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the
@@ -327,7 +354,8 @@ literally, clause by clause. See references/correction-tickets.md.
 ### Merge bot
 
 Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
-`~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then exit — and say that
+`~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then
+`SendMessage` you what it merged and what it held, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step.
 
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
