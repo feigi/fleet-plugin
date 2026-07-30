@@ -78,6 +78,11 @@ function repo(t, dir = "w") {
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
 [ "\${GH_RC:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit "\$GH_RC"; }
+# GH_RC fails the label READ, which aborts before any delete. This one fails only
+# the write, the single call that lands after both artefacts are already gone.
+case "$*" in
+  *"issue edit"*) [ "\${GH_EDIT_RC:-0}" = 0 ] || { echo "gh: HTTP 502" >&2; exit "\$GH_EDIT_RC"; } ;;
+esac
 [ -z "\${GH_STDERR:-}" ] || echo "\$GH_STDERR" >&2
 # The check-then-act window: this call sits between the last precondition and
 # the first delete, so writing here is a member committing during the round trip.
@@ -451,6 +456,25 @@ test("a refused worktree removal leaves the label on the issue", (t) => {
     !r.calls().some((l) => l.startsWith("issue edit")),
     `in-progress must survive so the ticket keeps reading as taken: ${r.calls()}`,
   );
+});
+
+test("a tracker that fails after both deletes still emits a receipt", (t) => {
+  // The label edit runs last, so it is the one failure that ends with both
+  // artefacts gone and in-progress still on the ticket — the single state a
+  // caller cannot reconstruct by looking, and the one it must not guess at.
+  // `die` printed prose and exited before every printf, so stdout was empty
+  // exactly there. The other two halt() sites are reached with nothing deleted.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_EDIT_RC: "1" } });
+  assert.equal(code, 2);
+  assert.notEqual(json, null, "a receipt is still printed — die exited before any printf");
+  assert.equal(json.released, false);
+  assert.equal(json.applied, true, "the mutations were attempted, unlike a blocked run");
+  assert.equal(json.label, true, "in-progress survives, so the ticket keeps reading as taken");
+  assert.match(stderr, /PARTIALLY RELEASED/);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "both deletes landed");
 });
 
 test("a successful release survives a failing `git worktree prune`", (t) => {
