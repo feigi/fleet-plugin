@@ -1,17 +1,20 @@
 // Regression gate for inflight.sh, the probe that decides whether a ticket is
-// already being worked on. Zero deps beyond what the script itself needs:
+// already being worked on:
 // `./agent-test skills/fleet/scripts/inflight.test.mjs`.
 //
-// The load-bearing cases are the four `linked:` rows. `linked` comes from
-// GitHub's `closedByPullRequestsReferences`, which carries no `state` field —
-// measured, the nodes are `{id, number, repository, url}` and nothing else. So
-// its state can only come from the `gh pr list` window the script already
-// fetches, and a state the window cannot supply has to stay a hit rather than
-// silently freeing a ticket.
+// The load-bearing cases are the `linked:` rows. `linked` comes from
+// `gh issue view --json closedByPullRequestsReferences`, which projects only
+// `{id, number, repository, url}` — measured. (The underlying GraphQL nodes are
+// PullRequest and do carry `state`; reaching it costs a third round-trip, so the
+// script reads state off the `gh pr list` window it already fetches.) A state
+// the window cannot supply has to stay a hit rather than silently free a ticket.
 //
 // `gh` is stubbed on PATH; `git`, `python3` and `jq` are real. The stub pipes
 // canned JSON through the real `jq` so the script's own `--jq` expression is
-// under test rather than hard-coded into the fixture.
+// under test rather than hard-coded into the fixture. Note that this makes the
+// suite need one binary the script does not: `gh --jq` is an embedded engine, so
+// inflight.sh shells out to no `jq` at all, and a host without it fails this
+// suite while the script itself works fine.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -57,7 +60,7 @@ esac
  * probe 3 matches worktrees on basename, and a random mkdtemp suffix that
  * happened to be the ticket number would make every case read as taken.
  */
-function fixture(t, { linked = [], prs = [], issueErr = null }) {
+function fixture(t, n, { linked = [], prs = [], issueErr = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -74,16 +77,27 @@ function fixture(t, { linked = [], prs = [], issueErr = null }) {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     GH_ISSUE_JSON: JSON.stringify({
-      closedByPullRequestsReferences: linked.map((number) => ({ number })),
+      url: `https://github.com/${REPO}/issues/${n}`,
+      closedByPullRequestsReferences: linked.map((l) =>
+        typeof l === "number"
+          ? { number: l, url: prUrl(l) }
+          : { number: l.number, url: prUrl(l.number, l.repo) }),
     }),
     GH_PR_JSON: JSON.stringify(prs),
   };
+  // Inherited git vars outrank `cwd`, so an ambient GIT_DIR silently retargets
+  // probe 3 at whatever repo it names — and if that directory is named for the
+  // ticket, the reds are shape-identical to the real bug. GH_ISSUE_ERR leaks the
+  // same way. Plausible here: a git hook, `rebase --exec`, `bisect run`.
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GH_ISSUE_ERR;
   if (issueErr) env.GH_ISSUE_ERR = issueErr;
   return { repo, env };
 }
 
 function inflight(n, opts, t) {
-  const { repo, env } = fixture(t, opts);
+  const { repo, env } = fixture(t, n, opts);
   const r = spawnSync("sh", [SCRIPT, String(n)], { cwd: repo, env, encoding: "utf8" });
   return {
     code: r.status,
@@ -92,9 +106,14 @@ function inflight(n, opts, t) {
   };
 }
 
-const pr = (number, state, headRefName) => ({ number, state, headRefName });
+const REPO = "feigi/claude-config";
+const prUrl = (number, repo = REPO) => `https://github.com/${repo}/pull/${number}`;
+const pr = (number, state, headRefName, repo = REPO) =>
+  ({ number, state, headRefName, url: prUrl(number, repo) });
 
-// --- linked: the four states a closedByPullRequestsReferences entry can be in.
+// --- linked: every state this script can end up attributing to an entry.
+// GitHub's PullRequestState has three (OPEN, CLOSED, MERGED); "?" is this
+// script's own marker for a state the search window could not supply.
 
 // The reported bug, in the shape it was measured in: issue #8 is closed by
 // MERGED #20, and read as taken=true forever.
@@ -130,6 +149,40 @@ test("linked: a PR outside the search window stays a hit, with the state marked 
   assert.equal(r.json.evidence.pr, "#12 ? (linked)");
 });
 
+// A present-but-null state is as unknown as an absent one. `.get(url, "?")`
+// would return None here and print it, contradicting the promise of "?".
+test("linked: a null state reads as unknown, not as the literal None", (t) => {
+  const r = inflight(8, { linked: [20], prs: [pr(20, null, "unrelated")] }, t);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.evidence.pr, "#20 ? (linked)");
+});
+
+// More than one closing reference is ordinary — two PRs, one ticket — and every
+// other case here passes 0 or 1, so this is the only one that iterates. It does
+// not pin the `join(",")`/`split(",")` contract: a wrong separator collapses the
+// list to a single element and yields the same exit 0 this asserts. The rows
+// above cover that, because the issue's own URL is field 0 and losing it takes
+// every linked row with it.
+test("linked: two MERGED PRs are both finished, not in-flight", (t) => {
+  const r = inflight(7, { linked: [12, 13], prs: [pr(12, "MERGED", "a"), pr(13, "MERGED", "b")] }, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.evidence.pr, "");
+});
+
+// `Closes owner/repo#N` from a fork is legal, which is why the node carries
+// `repository`. Its number is meaningless here: keyed by number it would inherit
+// the state of the unrelated local #5 and be filtered out, freeing a taken
+// ticket. Keyed by URL it cannot collide, so it stays an unknown-state hit.
+test("linked: a PR in another repo does not inherit a local PR's state", (t) => {
+  const r = inflight(77, {
+    linked: [{ number: 5, repo: "other/fork" }],
+    prs: [pr(5, "MERGED", "unrelated")],
+  }, t);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.taken, true);
+  assert.equal(r.json.evidence.pr, "other/fork#5 ? (linked)");
+});
+
 // --- both signals, and the branch half that already worked.
 
 test("both probes hitting the same PR still report both, each with its state", (t) => {
@@ -157,7 +210,10 @@ test("the considered-count reports every full-text match, filtered or not", (t) 
   assert.match(r.stderr, /\(3 full-text match\(es\) were all incidental\)/);
 });
 
-// --- error paths. The jq expression changed, so its failure handling is retested.
+// --- error paths. These do not reach the jq expression at all: the stub exits on
+// GH_ISSUE_ERR before piping through it. What they pin is the `if ! linked=$(...)`
+// classifier, which this change edits to stop reporting repository-level failures
+// as a missing issue.
 
 test("a nonexistent issue dies 2, distinctly from a network failure", (t) => {
   const err = "GraphQL: Could not resolve to an issue or pull request with the number of 999.";
@@ -168,6 +224,17 @@ test("a nonexistent issue dies 2, distinctly from a network failure", (t) => {
 
 test("an unreachable GitHub dies 2 without claiming the issue is missing", (t) => {
   const r = inflight(8, { issueErr: "dial tcp: lookup api.github.com: no such host" }, t);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /PR links are unknown/);
+  assert.doesNotMatch(r.stderr, /does not exist/);
+});
+
+// A renamed or deleted repo, revoked access and a token that lost `repo` scope
+// all open with "Could not resolve", so matching that alone sends the reader
+// after a missing ticket that is really a missing repository.
+test("a repository-level failure is not reported as a missing issue", (t) => {
+  const err = "GraphQL: Could not resolve to a Repository with the name 'feigi/claude-config'.";
+  const r = inflight(8, { issueErr: err }, t);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /PR links are unknown/);
   assert.doesNotMatch(r.stderr, /does not exist/);
