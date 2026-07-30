@@ -112,7 +112,13 @@ function renderSpend(sp) {
     highlight: (r) => r.role === "reviewer" || r.role === "specialist",
   });
   const byTool = el("div");
-  byTool.append(el("h3", null, "by tool"));
+  // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
+  // number: only a turn FOLLOWING a tool result can be charged to a tool, and an
+  // agent's first turn — usually its single largest write — follows nothing. Say
+  // what fraction is covered, so the two columns are not read as one base.
+  byTool.append(el("h3", null, sp.attributedPct != null
+    ? `by tool — ${sp.attributedPct.toFixed(0)}% of cache-write attributed`
+    : "by tool"));
   spendRows(byTool, (sp.tools || []).slice(0, 8), {
     label: (t) => `${t.tool} ×${t.calls}`,
     value: (t) => k(t.cacheWrite),

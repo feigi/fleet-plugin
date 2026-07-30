@@ -63,14 +63,26 @@ export function mapCi(ciJson) {
   return "unknown";
 }
 
-// Where this session's subagent transcripts live. Claude Code writes them to
-// ~/.claude/projects/<cwd-with-slashes-as-dashes>/<session-uuid>/subagents/.
+// Where this session's subagent transcripts live: Claude Code writes them to
+// ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/.
+//
+// The encoding replaces `/` AND `.` with `-`, so /Users/x/.claude encodes to
+// `-Users-x--claude` (double dash), not `-Users-x-.claude`. Replacing only
+// slashes silently missed every cwd containing a dot — including this repo,
+// which is what the fleet skills themselves run out of, so the panel never
+// rendered here at all. The miss is invisible by construction: a wrong path
+// just fails existsSync and returns null, which looks exactly like "no data".
+//
 // The session uuid is not knowable from here, so take the most recently modified
 // one — during a run that is always the live session. Null on any surprise: the
 // cockpit must degrade to "no spend panel", never crash a tick over telemetry.
+export function encodeProjectDir(cwd) {
+  return cwd.replace(/[/.]/g, "-");
+}
+
 export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
   try {
-    const projects = join(home, ".claude", "projects", cwd.replace(/\//g, "-"));
+    const projects = join(home, ".claude", "projects", encodeProjectDir(cwd));
     if (!existsSync(projects)) return null;
     const cands = readdirSync(projects)
       .map((s) => join(projects, s, "subagents"))
@@ -81,16 +93,29 @@ export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
   } catch { return null; }
 }
 
-// Read one agent transcript into the shape the pure module wants. Two passes are
-// deliberately avoided — a long review agent's transcript is megabytes, and this
-// runs every tick. Malformed lines are skipped rather than fatal: a transcript
-// being appended to WHILE we read it will have a torn last line, every tick.
+// Read one agent transcript into the shape the pure module wants. Single pass —
+// a long review agent's transcript is megabytes and this runs every tick.
+// Malformed lines are skipped rather than fatal: a transcript being appended to
+// WHILE we read it will have a torn last line, every tick.
+//
+// ONE assistant API turn is written as SEVERAL jsonl lines — one per content
+// block (thinking, text, each tool_use) — and every one of those lines repeats
+// the SAME `message.id` and the SAME `message.usage` object. Summing usage per
+// LINE therefore counts each turn's cache_creation once per block: measured
+// across 2452 real transcripts, +206% (535M counted vs 175M actual), with
+// 2445 of them affected. So fold lines back into turns on `message.id` and take
+// each turn's usage exactly once.
+//
+// `output_tokens` is the one field that genuinely differs across a turn's lines:
+// it is a streaming snapshot, so the LARGEST value is the final one. Summing it
+// double-counts too, though only by ~1.5%.
 function readAgent(file, metaFile) {
   let meta = {};
   try { if (existsSync(metaFile)) meta = JSON.parse(readFileSync(metaFile, "utf8")); } catch { /* unnamed agent */ }
 
-  let cacheWrite = 0, output = 0, cacheRead = 0, maxCtx = 0;
+  let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
   const entries = [];
+  const turnById = new Map();
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (!line) continue;
     let j; try { j = JSON.parse(line); } catch { continue; }
@@ -101,15 +126,21 @@ function readAgent(file, metaFile) {
     const blocks = Array.isArray(j.message?.content) ? j.message.content : [];
     const u = j.message?.usage;
     if (u) {
-      const cw = u.cache_creation_input_tokens ?? 0;
-      cacheWrite += cw;
-      output += u.output_tokens ?? 0;
-      cacheRead += u.cache_read_input_tokens ?? 0;
-      maxCtx = Math.max(maxCtx, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + cw);
-      entries.push({
-        kind: "assistant", cacheWrite: cw,
-        tools: blocks.filter((c) => c?.type === "tool_use").map((c) => ({ id: c.id, name: c.name })),
-      });
+      const id = j.message?.id;
+      let turn = id == null ? undefined : turnById.get(id);
+      if (!turn) {
+        // First line of this turn — bill its usage now, once.
+        const cw = u.cache_creation_input_tokens ?? 0;
+        const cr = u.cache_read_input_tokens ?? 0;
+        cacheWrite += cw;
+        cacheRead += cr;
+        maxCtx = Math.max(maxCtx, (u.input_tokens ?? 0) + cr + cw);
+        turn = { kind: "assistant", cacheWrite: cw, tools: [], output: 0 };
+        entries.push(turn);
+        if (id != null) turnById.set(id, turn);
+      }
+      turn.output = Math.max(turn.output, u.output_tokens ?? 0);
+      for (const c of blocks) if (c?.type === "tool_use") turn.tools.push({ id: c.id, name: c.name });
     } else if (j.type === "user") {
       const results = blocks
         .filter((c) => c?.type === "tool_result")
@@ -117,6 +148,7 @@ function readAgent(file, metaFile) {
       if (results.length) entries.push({ kind: "result", results });
     }
   }
+  const output = entries.reduce((n, e) => n + (e.output ?? 0), 0);
   return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
 }
 
@@ -130,10 +162,24 @@ function readAgent(file, metaFile) {
 // explicit option for the one case the session scope cannot cover: a single
 // session that spans two fleet runs, where the caller knows the boundary and the
 // board does not.
+// Warn at most once per process. "Could not resolve the transcript directory"
+// and "this run has no transcripts yet" both render as a hidden panel, and the
+// first is a bug while the second is normal — the path-encoding bug above sat
+// unnoticed precisely because nothing distinguished them. Once, not per tick:
+// the board gathers every ~15s and a repeating line would just train the eye
+// to ignore it.
+let warnedNoSpendDir = false;
+
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
-    if (!dir) return null;
+    if (!dir) {
+      if (!warnedNoSpendDir) {
+        warnedNoSpendDir = true;
+        console.error(`${NAME}: no subagent transcripts under ~/.claude/projects/${encodeProjectDir(process.cwd())}/ — spend panel hidden`);
+      }
+      return null;
+    }
 
     const agents = [];
     const toolTables = [];
@@ -151,7 +197,18 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
       toolTables.push(attributeTools(a.entries));
     }
     if (!agents.length) return null;
-    return { ...computeSpend({ agents, topN }), tools: mergeTools(toolTables), since: sinceMs ?? null };
+    const spend = computeSpend({ agents, topN });
+    const tools = mergeTools(toolTables);
+    // What fraction of cache_creation the tool table actually explains. It is
+    // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
+    // tool, and an agent's first turn — usually its largest single write, the
+    // system prompt and context — follows nothing. Surfacing the coverage keeps
+    // the two columns honest about being different bases; without it the tool
+    // percentages silently read as shares of the headline number, which they
+    // are not.
+    const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
+    const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
+    return { ...spend, tools, attributedPct, since: sinceMs ?? null };
   } catch (e) {
     console.error(`${NAME}: spend read failed: ${e.message}`);
     return null;
