@@ -95,6 +95,7 @@ test("already-current merge (pre == post, behind_by=0) proves true", (t) => {
   assert.equal(json.proofPath, "no-rebase");
   assert.equal(json.headWasCurrent, true);
   assert.equal(json.secondParent, head);
+  assert.equal(json.firstParent, mainTip, "the main tip the merge was built on");
   assert.equal(code, 0);
   // Leg 1 wants this false, and here it cannot be: the merge landed, so leg 2
   // makes pre — the same commit — an ancestor too. Legs 1 and 2 are jointly
@@ -297,6 +298,35 @@ test("a <merge-commit> that also names a file is read as a revision", (t) => {
   const { code, json } = prove(w, head, head, "mrg");
   assert.equal(json?.proved, true, "an ambiguous name must resolve as a revision, not error out");
   assert.equal(code, 0);
+});
+
+test("a git failure reading the parents is an error, never a silent disproof", (t) => {
+  // `set -- $(cmd)` discards cmd's status, and an empty result trips `shift`
+  // under `set -e` — exit 1 with no stdout, which a caller cannot tell apart
+  // from a legitimate proved=false. Shim only `rev-list`; everything else is
+  // real git, so the script gets all the way to the parents read.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const bin = mkdtempSync(join(tmpdir(), "prove-merge-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n[ "$1" = rev-list ] && exit 128\nexec ${git(w, "--exec-path").replace(/libexec.*/, "bin/git")} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` },
+    encoding: "utf8",
+  });
+  assert.equal(r.stdout.trim(), "", "fixture: the shim really did break the parents read");
+  assert.equal(r.status, 2, "a git failure is exit 2, not the exit 1 that means disproved");
+  assert.match(r.stderr, /cannot read the parents of/);
 });
 
 test("a non-merge commit as <merge-commit> is a usage error, not a disproof", (t) => {
