@@ -41,9 +41,14 @@ Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (meas
 
 ## 4. Suggest — then stop
 
-3–5 survivors, best first, one line each:
+3–5 survivors, **oldest first**, one line each:
 
-`#N — <title> — <why now: unblocks #X, small, adjacent to current branch>`
+`#N — <title> — <why now: adjacent to current branch, or nothing>`
+
+FIFO. Do not rank by size — that axis is gone. Do not rank by "unblocks #X"
+either: step 2 already dropped anything with an open blocker, so everything here
+is free to start. "Adjacent to current branch" survives because a solo session
+has one worktree; it means nothing to the fleet, whose members each get their own.
 
 Ask which. **Wait for answer.** Maintainer says taken → drop, re-suggest.
 
