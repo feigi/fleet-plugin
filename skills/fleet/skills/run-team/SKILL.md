@@ -111,6 +111,15 @@ number, worktree abs path, branch, and both of these verbatim:
 > is authoritative over the issue body. Honor its `Respec` block — it may
 > explicitly rule out hypotheses the body raises.
 
+> Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
+> you stop for any reason, uncommitted work is invisible to the controller and
+> effectively unrecoverable.
+
+That third block is not optional. A member that goes idle mid-task leaves its
+diff only in the worktree, and the controller cannot reap, replace, or even see
+it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly what decides
+whether a replacement redoes or destroys work. Observed twice in one run.
+
 Member runs `sizing-a-ticket` first and follows the path returned — selection and
 claiming are done, so it starts there. Heavy row = phase 0 mis-sized it: stop and
 report, do not implement unattended. Then `next-ticket` **step 7** (rebase, re-run
@@ -160,7 +169,12 @@ multi-select**, and **a judgement the evidence cannot settle**.
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
 latest runs, keyed `<run-id>:<conclusion>` so each terminal state fires once, and
-emit the behind-count with it: a `success` on a branch 8 behind is not actionable.
+emit the behind-count and the per-job conclusions with it: a `success` on a branch
+8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
+board you must not confuse with a red. On a GHE remote the compare call needs
+`gh api --hostname <host>` — without it the probe 404s and the monitor emits a
+placeholder instead of failing, so every event reads as unknown-behind. Copy the
+host and repo handling from `ci-state.mjs` rather than reinventing it.
 See references/ci-and-staleness.md.
 
 Read a run's true state with `~/.claude/skills/fleet/scripts/ci-state.mjs --pr
@@ -170,7 +184,10 @@ a verdict; members re-query at labelling time. See references/ci-and-staleness.m
 
 **A conclusion is not stable, even for a fixed run id on an unchanged head.** A
 rerun rewrites the run in place, so never cache a conclusion; key watchers on
-`<run-id>:<conclusion>` and check `attempt` before trusting one. Also: the newest
+`<run-id>:<attempt>:<conclusion>`. Leaving `attempt` out of the key is the bug
+that looks like it works: a rerun that lands on the *same* conclusion regenerates
+an already-seen key and fires nothing, so the second failure is silent and reads
+exactly like a run still in progress. Also: the newest
 run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
 entirely. See references/ci-and-staleness.md.
 
