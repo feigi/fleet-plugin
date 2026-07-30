@@ -44,10 +44,10 @@ No `wayfinder:*` label exists in this repo.
 `gh api repos/feigi/claude-config/labels --jq '.[].name'` lists neither
 `wayfinder:map` nor any `wayfinder:<type>`. Pass no `--label` for these two roles
 rather than inventing a string: `gh` resolves label names to ids *before* the write
-and fails the whole command with `labels not found: <name>`, so an unknown name
-aborts the create instead of being created on demand. Little is lost — a map reaches
-`/wayfinder` as a URL or number rather than by label query, and its children are
-found as sub-issues.
+and fails the whole command with `could not add label: '<name>' not found`, so an
+unknown name aborts the create instead of being created on demand. Little is lost —
+a map reaches `/wayfinder` as a URL or number rather than by label query, and its
+children are found as sub-issues.
 
 - **Map**: a single issue holding the Notes / Decisions-so-far / Fog body. `gh issue create` — no label, per above.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Record the type (`research`/`prototype`/`grilling`/`task`) in the child body — there is no `wayfinder:<type>` label to carry it. Once claimed, the ticket is assigned to the driving dev.
