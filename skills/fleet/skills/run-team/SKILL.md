@@ -163,6 +163,19 @@ multi-select**, and **a judgement the evidence cannot settle**.
   disappears. Phase 0 excludes heavies without relabelling — an unclaimed ticket is
   not yours to reclassify, and it surfaces its exclusions to the maintainer anyway.
 - **Review slot free, PR queued** → dispatch a reviewer.
+- **A specialist report lands** (a task-notification from a grandchild you never
+  dispatched) → **relay it to the reviewer that owns the PR — source named, text
+  included, acknowledgement required.** You are the only path: the reviewer cannot
+  fetch it, and telling it to ping the specialist returns `had no active task` and
+  delivers nothing. Unacknowledged, a relay is indistinguishable to the reviewer
+  from its own reasoning, or from never having arrived.
+- **A reviewer's verdict claims a dimension went undelivered** → check it against
+  your relay receipts before accepting the verdict. Relayed but never acknowledged →
+  re-send naming the specialist, require the acknowledgement, and hold the verdict
+  until it lands. Only you hold the msg id, so only you can catch this: one reviewer
+  ruled a relayed dimension "not covered by a specialist" and shipped a headline
+  claim that report refuted; another reported all four relays as delivering nothing
+  while its applied list mirrored them item-for-item.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
@@ -213,11 +226,12 @@ requested work — otherwise the reviewer inherits the standing "do not call the
 AgentTool unless requested" and silently downgrades to a thinner solo review.
 See references/member-lifecycle.md.
 
-**Name the source when relaying a finding, and send its *text*.** Specialist
-reports surface to *you*; grandchildren are unaddressable. Tell reviewers to ping
-each specialist rather than assume delivery, and do not hold rulings pending
-confirmation — the reviewer's own verify-before-apply already covers it.
-See references/member-lifecycle.md.
+**Delivering specialist reports is your duty, not the reviewer's — the relay is an
+event-loop obligation above.** Reports surface to *you* and grandchildren are
+unaddressable, so a reviewer has no way to fetch one and must never be told to ping
+for it. State in its prompt that reports arrive from you, that it acknowledges each
+by source name, and that a specialist which has neither reported nor been relayed
+blocks its final verdict. See references/member-lifecycle.md.
 
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
 `diff-stats.mjs` and drops dead dimensions — a docs-only change runs
@@ -496,6 +510,11 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "The brief is thorough, this heavy ticket is fine" → brief quality never
   promotes a heavy row.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
+- "Tell the reviewer to ping its specialists" → the ping returns `had no active
+  task` and delivers nothing; the relay is the only path.
+- "I relayed it, so the reviewer has it" → an unacknowledged relay is
+  indistinguishable from a lost one. Two reviewers ruled relayed dimensions
+  undelivered, one of them refuting its own applied findings.
 - "It reported the SHA, so it's on the branch" → verify.
 - "Let the merge bot arm its own monitor" → it dies, the queue stops.
 - "The member died, SendMessage it the state" → dead agents do not read mail.
