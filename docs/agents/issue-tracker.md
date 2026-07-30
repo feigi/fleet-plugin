@@ -47,7 +47,9 @@ rather than inventing a string: `gh` resolves label names to ids *before* the wr
 and fails the whole command with `could not add label: '<name>' not found`, so an
 unknown name aborts the create instead of being created on demand. Little is lost —
 a map reaches `/wayfinder` as a URL or number rather than by label query, and its
-children are found as sub-issues.
+children are found as sub-issues. `/wayfinder`'s own `SKILL.md` still says to label
+the map (`:21`, `:113`) and each ticket (`:65`) — this file overrides it; skip the
+label step.
 
 - **Map**: a single issue holding the Notes / Decisions-so-far / Fog body. `gh issue create` — no label, per above.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Record the type (`research`/`prototype`/`grilling`/`task`) in the child body — there is no `wayfinder:<type>` label to carry it. Once claimed, the ticket is assigned to the driving dev.
