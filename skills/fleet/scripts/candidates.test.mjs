@@ -73,3 +73,13 @@ test("the spec predicate never reaches the payload — it is pure token cost dow
   assert.equal(rows.length, 1);
   assert.deepEqual(Object.keys(rows[0]).sort(), ["d", "l", "n", "t"]);
 });
+
+test("candidates come back oldest first, whatever order gh returned them in", () => {
+  // gh defaults to created-desc, so newest-first is the realistic input.
+  const { rows } = run([
+    ticket(42, "## What to build\n\nc\n"),
+    ticket(19, "## What to build\n\nb\n"),
+    ticket(7, "## What to build\n\na\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.n), [7, 19, 42]);
+});
