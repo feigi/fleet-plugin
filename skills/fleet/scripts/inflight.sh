@@ -36,9 +36,15 @@ add_hit() { hits="${hits}\"$1\","; echo "    HIT: $1" >&2; }
 # which PRs close this issue — it returns [] for 41 and [396] for 393, both
 # correct. Then add branch-segment matching as a second signal, because a PR can
 # exist before anyone writes a closing keyword.
-echo "\$ gh issue view $n --json closedByPullRequestsReferences" >&2
-if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences --jq \
-                '[.closedByPullRequestsReferences[]|"#\(.number) (linked)"]|join(", ")' 2>/tmp/.inflight.$$); then
+echo "\$ gh issue view $n --json closedByPullRequestsReferences,url" >&2
+# URLs, not bare numbers. A closing reference may live in another repository
+# (`Closes owner/repo#N` is legal, which is why the node carries `repository`),
+# and a bare number would collide with an unrelated local PR of the same number
+# and silently inherit its state. A URL is globally unique, so the lookup below
+# cannot mismatch. The issue's own URL rides along as the first field to name
+# the repo the search window covers — same call, no extra round-trip.
+if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq \
+                '[.url] + [.closedByPullRequestsReferences[].url] | join(",")' 2>/tmp/.inflight.$$); then
   err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
   # "No such issue" and "GitHub is unreachable" are different facts and must not
   # share a message. An unattended fleet reading a network blip as "that ticket
@@ -46,8 +52,13 @@ if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences --jq \
   # GitHub's text is "Could not resolve to an issue or pull request with the
   # number of N" — issues and PRs share one number space, so the wording covers
   # both and the match must not assume a capital I.
+  #
+  # Match the whole phrase, not a bare "Could not resolve": GitHub uses the same
+  # opening for repository-level failures (renamed or deleted repo, revoked
+  # access, a token that lost `repo` scope), and reporting those as "issue #N
+  # does not exist" sends the reader after the wrong thing. Exit is 2 either way.
   case "$err" in
-    *"Could not resolve"*|*"not found"*|*"NOT_FOUND"*)
+    *"Could not resolve to an "[Ii]"ssue"*|*"NOT_FOUND"*)
       die "issue #$n does not exist in this repository" ;;
     *)
       die "gh issue view $n failed, so #$n's PR links are unknown: $(printf '%s' "$err" | tr '\n' ' ')" ;;
@@ -55,26 +66,67 @@ if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences --jq \
 fi
 rm -f /tmp/.inflight.$$
 
-echo "\$ gh pr list --state all --search $n --json number,state,headRefName" >&2
-pr_json=$(gh pr list --state all --search "$n" --limit 100 \
-            --json number,state,headRefName 2>/dev/null) \
-  || die "gh pr list failed — cannot determine whether #$n is taken"
+echo "\$ gh pr list --state all --search $n --json number,state,headRefName,url" >&2
+# Keep the cause, the way the `gh issue view` call twelve lines up does.
+# Discarding it makes rate-limited, unauthenticated and offline read alike, and
+# all three land on an operator who then has nothing to act on.
+if ! pr_json=$(gh pr list --state all --search "$n" --limit 100 \
+                 --json number,state,headRefName,url 2>/tmp/.inflight.$$); then
+  err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
+  die "gh pr list failed, so whether #$n is taken is unknown: $(printf '%s' "$err" | tr '\n' ' ')"
+fi
+rm -f /tmp/.inflight.$$
 
-by_branch=$(printf '%s' "$pr_json" | NUM="$n" python3 -c '
+pr=$(printf '%s' "$pr_json" | NUM="$n" LINKED="$linked" python3 -c '
 import json, os, re, sys
 n = os.environ["NUM"]
 seg = re.compile(r"(^|[/-])" + re.escape(n) + r"([-/]|$)")
+prs = json.load(sys.stdin)
 # Only an OPEN PR is in-flight. A merged PR means the work is done; a closed,
 # unmerged PR means it was abandoned. Either would otherwise make a finished
 # or dead ticket read as taken forever.
-print(", ".join(
-    "#%s %s (branch)" % (p["number"], p["state"])
-    for p in json.load(sys.stdin)
-    if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"
-))') || die "could not filter PR search results for #$n"
+#
+# That applies to BOTH signals, but only the branch half can read the state off
+# its own source. `gh issue view --json closedByPullRequestsReferences` projects
+# only {id, number, repository, url} — measured; the underlying GraphQL nodes are
+# PullRequest and do carry `state`, reachable via `gh api graphql`, but that is a
+# third round-trip. The `gh pr list` window is already fetched and already carries
+# state, so the linked half looks itself up there. Hence one dict, two filters.
+#
+# Keyed by URL, not number: a linked PR can belong to another repository, where
+# its number means nothing here and would collide with a local PR.
+state = {p["url"]: p.get("state") for p in prs}
+out = []
+linked = os.environ["LINKED"].split(",")
+here = "/".join(linked[0].split("/")[3:5])          # owner/repo of the issue
+for url in filter(None, linked[1:]):
+    # A PR linked through the Development sidebar need not carry "#N" text
+    # anywhere, so the full-text window can miss it; so can a repo with more than
+    # the 100 matches asked for, and so does every PR in another repository,
+    # which the window never covers. An unknown state stays a hit and says "?"
+    # rather than freeing the ticket: a wrong "taken" costs one skipped ticket, a
+    # wrong "free" puts two agents on the same one. `or` rather than a dict
+    # default, because a present-but-null state is unknown too.
+    s = state.get(url) or "?"
+    if s not in ("MERGED", "CLOSED"):
+        repo, num = "/".join(url.split("/")[3:5]), url.rsplit("/", 1)[-1]
+        # Name the repo only when it is not this one, so a foreign hit is
+        # diagnosable instead of reading as a local number that does not exist.
+        out.append("#%s %s (linked)" % (num, s) if repo == here
+                   else "%s#%s %s (linked)" % (repo, num, s))
+out += ["#%s %s (branch)" % (p["number"], p["state"]) for p in prs
+        if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"]
+print(", ".join(out))') || die "could not filter PR search results for #$n"
 
-raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
-pr=$(printf '%s' "$linked${linked:+${by_branch:+, }}$by_branch")
+# The `|| die` is not dead code. No *input* can reach it — the guarded python3
+# above already parses this same `$pr_json` and dies 2 on anything malformed —
+# but this is a second, separate process, so it can fail where the first
+# succeeded: a fork failure under process-table pressure is exactly what a
+# parallel fleet approaches by construction. Without the guard, `set -e` would
+# exit 1 with empty stdout, and the exit contract reads 1 as "taken" — a crash
+# rendered as a decision.
+raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') \
+  || die "could not count the PR search results for #$n"
 if [ -n "$pr" ]; then
   echo "    PRs for #$n: $pr   ($raw full-text match(es) considered)" >&2
   add_hit "pr"
