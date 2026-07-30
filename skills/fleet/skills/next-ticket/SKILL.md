@@ -33,7 +33,7 @@ Use `d` array. Blocker open → drop ticket, or surface blocker instead. Ticket 
 ~/.claude/skills/fleet/scripts/inflight.sh <N>   # 0 free, 1 taken, 2 unanswerable
 ```
 
-Runs all three — a PR about the ticket, a remote branch, a local worktree or branch. Exit 1 → taken. "Shipped" memory not proof; open PR means unmerged. Exit 2 is not free: the question went unanswered (`gh` failed, not a repo), so treat it as taken until you know.
+Runs all three — a PR about the ticket, a remote branch, a local worktree or branch. Exit 1 → taken. "Shipped" memory not proof; open PR means unmerged. Exit 2 is not free: the question went unanswered (`gh` failed, no such issue, not a repo), so treat it as taken until you know.
 
 Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
@@ -85,8 +85,8 @@ Closes #N"
 
 - "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only.
 - "Label says ready-for-agent, so it's free" → run step 3.
-- "I'll run the three probes inline instead of the script" → don't. Bare `gh pr list --search "<N>"` is a full-text match, so nearly every ticket reads as taken and free work gets skipped silently and permanently; a one-sided branch regex misses `fix/<N>`; grepping a worktree's full path false-hits every ticket. `inflight.sh` handles all three and shows its measurements.
-- "Read the issues first, then check what's taken" → probes first; a dropped candidate's full read is pure waste. Probes still stay behind step 2's cut — two of the three hit the network.
+- "I'll run the three probes inline instead of the script" → don't. Bare `gh pr list --search "<N>"` is a full-text match, so nearly every ticket reads as taken and free work gets skipped silently and permanently; a branch regex demanding a delimiter on both sides misses `fix/<N>` and `<N>-slug`; grepping a worktree's full path false-hits when a parent directory carries the digits. `inflight.sh` handles all three and shows its measurements.
+- "Read the issues first, then check what's taken" → probes first; a dropped candidate's full read is pure waste. Probes still stay behind step 2's cut — two of the three hit the network (three round-trips).
 - "Only one candidate, I'll just start" → still ask.
 - "Blocker is nearly done" → still blocked.
 - "I can size this myself, it's obvious" → run `sizing-a-ticket`; its red flags are ones you'd skip.
