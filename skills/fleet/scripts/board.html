@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fleet cockpit</title>
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#30363d;
+    --fg:#e6edf3; --dim:#8b949e; --red:#f85149; --amber:#d29922; --green:#3fb950; --blue:#58a6ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  #age { color:var(--dim); font-size:12px; margin-left:auto; }
+  #stale-banner { display:none; background:var(--amber); color:#000; padding:6px 16px; font-weight:600; }
+  #attention { padding:8px 16px; border-bottom:1px solid var(--line); background:#2d1618; }
+  #attention:empty { display:none; }
+  .att { display:inline-block; margin:2px 10px 2px 0; }
+  .att .n { color:var(--blue); font-weight:600; }
+  .flag { color:var(--red); font-weight:600; }
+  #board { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; padding:14px; align-items:start; }
+  .col { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; min-height:80px; }
+  .col h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:2px 4px 8px; text-transform:uppercase; }
+  .col h2 span { color:var(--fg); }
+  .card { background:#0d1117; border:1px solid var(--line); border-radius:6px; padding:7px 8px; margin-bottom:7px; }
+  .card .top { display:flex; gap:6px; align-items:baseline; }
+  .card .n { color:var(--blue); font-weight:600; }
+  .card .title { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .meta { color:var(--dim); font-size:12px; margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
+  .card a { color:var(--blue); text-decoration:none; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; vertical-align:middle; }
+  .dot.green{background:var(--green)} .dot.red{background:var(--red)} .dot.unknown{background:var(--dim)}
+  .badge { border:1px solid var(--line); border-radius:10px; padding:0 6px; }
+  .badge.flag { border-color:var(--red); color:var(--red); }
+  footer { color:var(--dim); padding:10px 16px; border-top:1px solid var(--line); font-size:12px; }
+  footer .filed { margin-top:4px; }
+</style>
+</head>
+<body>
+<header><h1>🛰 fleet cockpit</h1><span id="age"></span></header>
+<div id="stale-banner"></div>
+<div id="attention"></div>
+<div id="board"></div>
+<footer id="footer"></footer>
+<script>
+const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
+let interval = 15;
+let repo = null; // "owner/name" from the model, for PR links
+
+const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
+
+function render(m) {
+  interval = m.interval || 15;
+  repo = m.repo || null;
+  // attention strip
+  const att = document.getElementById("attention");
+  att.innerHTML = "";
+  for (const t of m.attention || []) {
+    const span = el("span", "att");
+    span.append(el("span", "n", "#" + t.issue), document.createTextNode(" "));
+    span.append(el("span", "flag", (t.flags || []).join(" ")));
+    att.append(span);
+  }
+  // columns
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  for (const name of COLUMNS) {
+    const inCol = (m.tickets || []).filter((t) => t.column === name);
+    const col = el("div", "col");
+    const h = el("h2", null, name + " ");
+    h.append(el("span", null, String(inCol.length)));
+    col.append(h);
+    for (const t of inCol) col.append(card(t));
+    board.append(col);
+  }
+  // footer
+  const q = m.queue || {};
+  const foot = document.getElementById("footer");
+  foot.innerHTML = "";
+  foot.append(el("div", null, `pool ${q.pool ?? 0} · supply ${q.supply ?? 0} · review-backlog ${q.reviewBacklog ?? 0}`));
+  const filed = el("div", "filed", `filed follow-ups (${(m.filed || []).length}): ` +
+    (m.filed || []).map((f) => "#" + f.issue).join(" "));
+  foot.append(filed);
+  // freshness
+  document.getElementById("age").textContent = "updated " + mins(m.generatedAt) + "m ago";
+  const banner = document.getElementById("stale-banner");
+  if (Date.now() - m.generatedAt > interval * 1000 * 2) {
+    banner.style.display = "block";
+    banner.textContent = "⚠ data stale — server/controller stopped?";
+  } else banner.style.display = "none";
+}
+
+function card(t) {
+  const c = el("div", "card");
+  const top = el("div", "top");
+  top.append(el("span", "n", "#" + t.issue));
+  top.append(el("span", "title", t.title || ""));
+  c.append(top);
+  const meta = el("div", "meta");
+  if (t.agent) meta.append(el("span", null, t.agent));
+  if (t.pr != null) {
+    const a = el("a", null, "PR#" + t.pr);
+    a.href = repo ? "https://github.com/" + repo + "/pull/" + t.pr : "#";
+    a.target = "_blank"; a.rel = "noopener";
+    meta.append(a);
+  }
+  if (t.ci) { const d = el("span", "dot " + t.ci); meta.append(d); }
+  if (t.sinceEnteredStage) meta.append(el("span", null, mins(t.sinceEnteredStage) + "m"));
+  for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
+  if (t.ruling) meta.append(el("span", "badge", "ruled:" + t.ruling));
+  c.append(meta);
+  return c;
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/board.json", { cache: "no-store" });
+    if (r.ok) render(await r.json());
+  } catch (e) {
+    const banner = document.getElementById("stale-banner");
+    banner.style.display = "block";
+    banner.textContent = "⚠ cockpit server not running";
+  }
+  setTimeout(poll, interval * 1000);
+}
+poll();
+</script>
+</body>
+</html>
