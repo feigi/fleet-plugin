@@ -240,14 +240,14 @@ is dropped too. Not worth a fence parser: every drop is logged by number, so the
 failure is loud rather than silent, and the maintainer sees the ticket leave the
 queue. Recorded in the `ponytail:` comment beside the predicate.
 
-Everything else is skill prose, which has no test coverage. The existing 76 tests
+Everything else is skill prose, which has no test coverage. The existing 125 tests
 stay green as a regression gate on the script, not as evidence about the prose —
 the check on the prose is that the two opposite tie-breaks are stated in both
 files.
 
 ## Acceptance criteria
 
-1. All five test cases above pass; the existing 76 stay green.
+1. All five test cases above pass; the existing 125 stay green.
 2. `sizing-a-ticket` is not invoked anywhere in phase 0.
 3. Both tie-breaks — *torn → surface* for admissibility, *torn → heavier* for
    process depth — appear in **both** `run-team` and `sizing-a-ticket`.
