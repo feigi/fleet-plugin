@@ -54,12 +54,27 @@ At start, and whenever the pool empties.
 3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
    candidate; any hit = taken. It runs all three probes (open/closed PRs, remote
    heads, local worktrees + branches) so a partial one cannot read as free.
-4. Size each survivor with `sizing-a-ticket`. It reads the full issue, so record
-   the Agent Brief's `Out of scope` sequencing while there.
-5. **Light row only.** Heavy is inadmissible even with a complete brief — the
-   fleet runs unattended and the heavy path opens with brainstorming, which needs
-   the maintainer. Excluding is this command's policy; the skill only reports.
-6. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
+4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
+   --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
+   answers both questions. Record the Agent Brief's `Out of scope` sequencing.
+   Then judge **decided?** — never size.
+
+   **Decided?** Would two competent implementers, reading only this ticket, build
+   materially different things? "Material" by inventory, not feel:
+
+   | Left open | Verdict |
+   |---|---|
+   | architecture, API shape, schema, UX | **undecided** |
+   | new dependency, new seam | **undecided** |
+   | naming, file layout, ordering, test arrangement | decided — ignore |
+
+   Any undecided item → not decided. Name it; that name is the exclusion line.
+   **Torn → surface, never guess** (step 6's `unsure` group). Opposite of
+   `sizing-a-ticket`'s tie-break, deliberately — see that skill.
+
+   No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
+   phase 2's call, after the ticket is claimed.
+5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
    with no diff, so infer its target files from the issue body (the paths it
    names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
    and against the other survivors' inferred files. `pr-overlap.mjs` is **PR-vs-PR
@@ -68,9 +83,21 @@ At start, and whenever the pool empties.
    Step 3 catches a ticket already taken, not one that *edits a file an open PR
    edits*. Overlap → admit one, defer the rest with the reason. The tracker cannot
    express this, and it is what actually stalls a wave.
-7. Present admissible survivors, best first, as a multi-select. Maintainer ticks
-   the pool. List heavy-row exclusions as "needs a solo session with you", and
-   collision-deferred ones with what they collide with. Excluded, not dropped.
+6. Present survivors as a multi-select, **oldest first** (`candidates.mjs` already
+   sorted; do not re-rank). Three groups:
+
+   - **admitted** — decided;
+   - **unsure** — torn, each flagged with the open decision;
+   - **excluded** — undecided, each with the decision that is missing.
+
+   Annotate any survivor the `Out of scope` read sequences after another survivor
+   in the same list. Without that, FIFO puts a chain's members next to each other
+   and two consecutive numbers read as two independent tickets — which is exactly
+   how both land in one wave.
+
+   Maintainer ticks the pool. Excluded, not dropped: phase 0 never relabels an
+   unclaimed ticket, and an unticked ticket keeps `ready-for-agent` and returns
+   next wave.
 
 Never put two sequenced tickets in one wave. That lives in the brief's `Out of
 scope`, is invisible to step 2, and bites hardest at five wide.
@@ -349,8 +376,8 @@ same step. See references/reaping.md.
 ## Queue depth
 
 - **pool** — approved, not yet dispatched
-- **supply** — open `ready-for-agent` surviving in-flight scan and light-row
-  sizing. A queue of heavy tickets is zero supply.
+- **supply** — open `ready-for-agent` surviving in-flight scan and the decided?
+  check. A queue of undecided tickets is zero supply.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
