@@ -95,9 +95,14 @@ At start, and whenever the pool empties.
    and two consecutive numbers read as two independent tickets — which is exactly
    how both land in one wave.
 
-   Maintainer ticks the pool. Excluded, not dropped: phase 0 never relabels an
-   unclaimed ticket, and an unticked ticket keeps `ready-for-agent` and returns
-   next wave.
+   Maintainer ticks what to **stage this wave** — how many, what order, what
+   collides. Staging, never vetting: `ready-for-agent` already carries triage's
+   verdict that an agent may take the ticket, reached with the maintainer present.
+   Phase 0 does not re-litigate it, and an unticked ticket is deferred, not judged
+   unfit. **unsure** is the only group asking a judgment.
+
+   Excluded, not dropped: phase 0 never relabels an unclaimed ticket, and an
+   unticked ticket keeps `ready-for-agent` and returns next wave.
 
 Never put two sequenced tickets in one wave. That lives in the brief's `Out of
 scope`, is invisible to step 2, and bites hardest at five wide.

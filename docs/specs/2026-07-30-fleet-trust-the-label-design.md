@@ -98,13 +98,23 @@ a read that is already paid for.
 each entry annotated when step 4's `Out of scope` read sequences it after another
 survivor in the same list:
 
-- **admitted** — decided, ticked into the pool by the maintainer;
+- **admitted** — decided, staged into the pool by the maintainer;
 - **unsure** — torn, each flagged with the open decision;
 - **excluded** — undecided, each with the decision that is missing.
 
 The sequencing annotation is what keeps `run-team:75-76` enforceable once FIFO
 puts a chain's members next to each other. Without it, two consecutive numbers
 read as two independent tickets.
+
+**The tick is staging, not vetting.** This distinction is load-bearing, because
+phase 0 was conflating two questions. *Is this ticket fit for an agent?* was
+already answered by triage when it applied `ready-for-agent`, with the maintainer
+present — phase 0 must not re-litigate it, or the double-payment this design
+removes in tokens simply reappears in the maintainer's attention. *Which of these
+do I start now?* — how many, in what order, what collides — is a dispatch
+decision that stays the maintainer's, every wave. An unticked ticket is therefore
+deferred, never judged unfit. The **unsure** group is the only place phase 0 asks
+for a judgment rather than a dispatch choice.
 
 No relabelling at phase 0, preserving `run-team:164-165`. An unticked ticket
 keeps `ready-for-agent` and re-surfaces next wave.
