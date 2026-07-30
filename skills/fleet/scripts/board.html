@@ -35,6 +35,23 @@
   .badge.flag { border-color:var(--red); color:var(--red); }
   footer { color:var(--dim); padding:10px 16px; border-top:1px solid var(--line); font-size:12px; }
   footer .filed { margin-top:4px; }
+  #spend { padding:0 14px 14px; }
+  #spend:empty { display:none; }
+  .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .spend-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .spend-hd h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0; text-transform:uppercase; }
+  .spend-hd .lede { color:var(--fg); }
+  .spend-hd .note { color:var(--dim); font-size:11px; margin-left:auto; }
+  .spend-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:900px) { .spend-cols { grid-template-columns:1fr; } }
+  .spend-cols h3 { font-size:11px; color:var(--dim); margin:0 0 6px; font-weight:600; letter-spacing:.04em; }
+  .srow { display:grid; grid-template-columns:8.5em 3.4em 1fr 3em; gap:8px; align-items:center; margin-bottom:3px; font-size:12px; }
+  .srow .lbl { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .srow .num { color:var(--dim); text-align:right; }
+  .srow .pct { color:var(--dim); text-align:right; }
+  .bar { background:#0d1117; border-radius:3px; height:9px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--blue); }
+  .bar i.rev { background:var(--amber); }
 </style>
 </head>
 <body>
@@ -42,6 +59,7 @@
 <div id="stale-banner"></div>
 <div id="attention"></div>
 <div id="board"></div>
+<div id="spend"></div>
 <footer id="footer"></footer>
 <script>
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
@@ -50,6 +68,60 @@ let repoUrl = null; // full repo URL from the model (carries the host) — PR li
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
+
+const k = (n) => (n >= 1000 ? (n / 1000).toFixed(0) + "k" : String(Math.round(n)));
+
+// Two views of the same cache-creation total: WHO spent it (role) and WHAT it
+// went on (tool). Both are shares of cache_creation — cache reads are ~10x more
+// numerous and ~10x cheaper, so ranking on them would make every run look alike.
+function spendRows(host, items, { label, value, pct, highlight }) {
+  for (const it of items) {
+    const row = el("div", "srow");
+    row.append(el("span", "lbl", label(it)), el("span", "num", value(it)));
+    const bar = el("div", "bar");
+    const fill = el("i", highlight?.(it) ? "rev" : null);
+    fill.style.width = Math.max(1, Math.round(pct(it))) + "%";
+    bar.append(fill);
+    row.append(bar, el("span", "pct", pct(it).toFixed(0) + "%"));
+    host.append(row);
+  }
+}
+
+function renderSpend(sp) {
+  const host = document.getElementById("spend");
+  host.innerHTML = "";
+  // Absent whenever the transcripts are unreadable or none exist yet. Hide the
+  // panel rather than render zeroes, which would read as "this run was free".
+  if (!sp || !sp.totals || !sp.totals.cacheWrite) return;
+
+  const wrap = el("div", "spend-wrap");
+  const hd = el("div", "spend-hd");
+  hd.append(el("h2", null, "spend"));
+  hd.append(el("span", "lede",
+    `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`));
+  hd.append(el("span", "note", "share of cache-creation; tool split is attributed, not billed"));
+  wrap.append(hd);
+
+  const cols = el("div", "spend-cols");
+  const byRole = el("div");
+  byRole.append(el("h3", null, "by role"));
+  spendRows(byRole, sp.roles || [], {
+    label: (r) => `${r.role} ×${r.agents}`,
+    value: (r) => k(r.cacheWrite),
+    pct: (r) => r.pct,
+    highlight: (r) => r.role === "reviewer" || r.role === "specialist",
+  });
+  const byTool = el("div");
+  byTool.append(el("h3", null, "by tool"));
+  spendRows(byTool, (sp.tools || []).slice(0, 8), {
+    label: (t) => `${t.tool} ×${t.calls}`,
+    value: (t) => k(t.cacheWrite),
+    pct: (t) => t.pct,
+  });
+  cols.append(byRole, byTool);
+  wrap.append(cols);
+  host.append(wrap);
+}
 
 function render(m) {
   interval = m.interval || 15;
@@ -75,6 +147,7 @@ function render(m) {
     for (const t of inCol) col.append(card(t));
     board.append(col);
   }
+  renderSpend(m.spend);
   // footer
   const q = m.queue || {};
   const foot = document.getElementById("footer");

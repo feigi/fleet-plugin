@@ -156,6 +156,10 @@ export function computeBoard(inputs) {
     queue: { pool, supply: pool, reviewBacklog },
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
+    // Telemetry, not pipeline state: null whenever the transcripts are unreadable
+    // or this run has produced none yet. The UI hides the panel rather than
+    // rendering zeroes, which would read as "this run was free".
+    spend: inputs.spend ?? null,
     attention,
   };
 }
