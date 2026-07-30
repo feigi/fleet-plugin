@@ -246,20 +246,10 @@ Branch and worktree naming follow the repo's existing convention, inferred from
 
 Spawn up to the implementer cap, one per approved ticket, in the background.
 
-Every implementer prompt carries, verbatim:
-
-> You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
-> another worktree. Verify with `git rev-parse --git-dir` and
-> `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
-
-and:
-
-> Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
-> Not bare `gh issue view <N> --comments` — non-interactively that prints only
-> the comments, and nothing at all when there are none, dropping the title and
-> body either way, exit 0, so the loss is silent. The `## Agent Brief` comment
-> is authoritative over the issue body. Honor its `Respec` block — it may
-> explicitly rule out hypotheses the body raises.
+Every implementer prompt carries, verbatim, the blockquoted blocks under
+`## Phase 2 — dispatch implementers` in
+`~/.claude/skills/fleet/skills/run-team/SKILL.md`. That skill is the
+authoritative copy; this spec does not reproduce the blocks.
 
 ### Phase 3 — event loop
 
