@@ -157,11 +157,15 @@ diff only in the worktree, and the controller cannot reap, replace, or even see
 it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly what decides
 whether a replacement redoes or destroys work. Observed twice in one run.
 
-Member runs `sizing-a-ticket` first and follows the path returned — selection and
-claiming are done, so it starts there. Heavy row = phase 0 mis-sized it: stop and
-report, do not implement unattended. Then `next-ticket` **step 7** (rebase, re-run
-tests, push, `gh pr create` with `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the branch *type*), report PR
-number and head SHA, exit. Never labels `ready-to-merge`, never merges.
+Member reads the issue **before touching code**. Still undecided with the repo in
+front of it → bail, name the cause, demote, do not implement. Otherwise run
+`sizing-a-ticket` for the process path and proceed on **either row** — heavy means
+brainstorm-then-plan here, not stop. Selection and claiming are done; start there.
+
+Then `next-ticket` **step 7** (rebase, re-run tests, push, `gh pr create` with
+`Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the
+branch *type*), report PR number and head SHA, exit. Never labels
+`ready-to-merge`, never merges.
 
 ## Phase 3 — event loop
 
@@ -180,16 +184,24 @@ multi-select**, and **a judgement the evidence cannot settle**.
 
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
-- **Implementer reports the row is heavy** (sized heavy, bailed without
-  implementing) → `gh issue edit <N> --remove-label ready-for-agent --remove-label
-  in-progress --add-label ready-for-human`, comment the reason (row, path, one line
-  why), release the worktree and branch with `release-ticket.sh` (below — `reap.sh`
-  declines a claim that never became a PR), refill with a *different* ticket.
-  **Dropping `in-progress` is the load-bearing half** — phase 1 already applied it
-  and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
-  scans *and* the maintainer's (`next-ticket` excludes it too). It does not loop; it
-  disappears. Phase 0 excludes heavies without relabelling — an unclaimed ticket is
-  not yours to reclassify, and it surfaces its exclusions to the maintainer anyway.
+- **Implementer bails before implementing** → demote by cause:
+
+  | Cause | Label |
+  |---|---|
+  | brief does not decide *what* to build | `needs-triage` |
+  | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
+
+  `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
+  --add-label <label>`, comment the cause, reap the worktree and branch, refill
+  with a *different* ticket. `needs-triage` routes back to `/triage`, which can
+  return it as `ready-for-agent`; `ready-for-human` is the dead end, so use it
+  only for hands, never for vagueness.
+
+  **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
+  `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
+  scans *and* the maintainer's. It does not loop; it disappears. Phase 0 excludes
+  without relabelling — an unclaimed ticket is not yours to reclassify, and it
+  surfaces its exclusions to the maintainer anyway.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **A specialist report lands** (a task-notification from a grandchild you never
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
@@ -502,8 +514,8 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer sizes the row **heavy** and bails | → `ready-for-human`, drop `in-progress`, comment why, release the claim, refill (phase 3) |
-| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — heavy is the row above, not this one |
+| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
+| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
 | Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
