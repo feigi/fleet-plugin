@@ -9,7 +9,8 @@
 // produced them.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve, join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const NAME = "ledger";
 
@@ -18,9 +19,20 @@ function die(msg) {
   process.exit(2);
 }
 
+// There is ONE ledger per run, and it lives in the main checkout. Members run
+// from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
+// exist — `check` then warns and reports every subject as safe to file, which
+// is precisely the duplicate-filing guard failing open. Resolve against the
+// git COMMON dir (shared by every worktree) rather than the cwd.
+function defaultLedgerPath() {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" });
+  if (r.status !== 0 || !r.stdout.trim()) return ".fleet/ledger.md"; // not a repo: caller's cwd is all we have
+  return join(dirname(resolve(r.stdout.trim())), ".fleet", "ledger.md");
+}
+
 const argv = process.argv.slice(2);
 const fileIdx = argv.indexOf("--file");
-const file = fileIdx === -1 ? ".fleet/ledger.md" : argv[fileIdx + 1];
+const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
 const requireFileIdx = argv.indexOf("--require-file");
