@@ -1,16 +1,24 @@
-// Regression gate for no-undo-audit.sh's refusal condition. Zero deps:
+// Regression gate for no-undo-audit.sh, all three of its outcomes. Zero deps:
 // `node --test skills/fleet/scripts/no-undo-audit.test.mjs`.
 //
 // The audit answers one question — is this worktree safe to rebase — and the
-// only thing that makes it refuse is uncommitted work in the worktree.
-// (Exit 2 is its own outcome: the question could not be answered at all.) It
-// used to also refuse on a nonzero repo-global stash count, which is unrelated
-// to that question: a rebase never consumes a pre-existing entry, so the count
+// only thing that makes it refuse is uncommitted work in the worktree. It used
+// to also refuse on a nonzero repo-global stash count, which is unrelated to
+// that question: a rebase never consumes a pre-existing entry, so the count
 // refused every run in a repo holding any entry while proving nothing about the
-// branch.
-//
-// Both directions are pinned here, because a fix for a false refusal is one
+// branch. Both directions are pinned, because a fix for a false refusal is one
 // keystroke from deleting the true one.
+//
+// The refusal is only half of it. A clean worktree exits 0 while still
+// answering "what would a careless resolution eat", and everything below the
+// `conflicts[] and atRisk[]` banner pins that half — the half that had no
+// coverage at all while this file called itself the regression gate.
+//
+// Exit 2 is its own outcome: the question could not be answered. Its rule is
+// that no payload is emitted, because a payload is an answer, and every exit-2
+// test asserts that as well as the code. Reported safe on a question never
+// asked is the one failure this script exists to prevent, so a shape it cannot
+// answer must exit 2 rather than exit 0 with an empty `atRisk`.
 //
 // Real git throughout: a shell script that reasons about git state can only be
 // tested against real git state.
@@ -83,15 +91,47 @@ function stashSomething(w, name = "h.txt") {
 }
 
 /** Add/add conflict on `path`, with main holding the later commit that made it. */
+// Two decoys make `atRisk` discriminating rather than merely nonempty. Without
+// them every main commit since the fork touches the conflicting path and the
+// root commit touches nothing else, so "filtered by path", "filtered by range"
+// and "not filtered at all" all return exactly one line — and dropping either
+// filter from the script leaves the suite green. DECOY_OLD is on the path but
+// before the fork; DECOY_NEW is after the fork but on another file.
 function conflictRepo(t, path) {
   const c = repo(t);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, path), "older, already shared\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "DECOY_OLD before the fork");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  git(c.w, "merge", "-q", "main", "-m", "carry main into the branch");
   writeFileSync(join(c.w, path), "branch side\n");
-  git(c.w, "add", "--", path);
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "branch edits the file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "decoy.txt"), "untouched by the conflict\n");
+  git(c.w, "add", "--", "decoy.txt");
+  git(c.w, "commit", "-q", "-m", "DECOY_NEW after the fork");
+  writeFileSync(join(c.w, path), "MAIN SIDE\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  return c;
+}
+
+/** Both sides add `path`; nothing else. Used where the decoys would be noise. */
+function bareConflictRepo(t, path) {
+  const c = repo(t);
+  writeFileSync(join(c.w, path), "branch side\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
   git(c.w, "commit", "-q", "-m", "branch edits the file");
   git(c.w, "push", "-q", "origin", c.branch);
   git(c.w, "checkout", "-q", "main");
   writeFileSync(join(c.w, path), "MAIN SIDE\n");
-  git(c.w, "add", "--", path);
+  git(c.w, "add", "--", `:(literal)${path}`);
   git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
   git(c.w, "push", "-q", "origin", "main");
   git(c.w, "checkout", "-q", c.branch);
@@ -116,6 +156,9 @@ const audit = ({ w, branch }, env = ENV) => {
   }
   return { ...r, json, jsonError };
 };
+
+/** `atRisk` with the abbreviated SHA stripped, so a test can pin the exact set. */
+const subjects = (r) => r.json.atRisk.map((l) => l.replace(/^\S+ /, ""));
 
 test("a pre-existing stash does not refuse a clean worktree", (t) => {
   const c = repo(t);
@@ -230,8 +273,7 @@ test("a conflicting path with a space and a quote still names the commits at ris
   assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
   assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.deepEqual(r.json.conflicts, [path], "the real path, not git's C-quoted rendering of it");
-  assert.equal(r.json.atRisk.length, 1, `main's commit is at risk and must be named; ground truth was ${truth}`);
-  assert.match(r.json.atRisk[0], /MAIN COMMIT AT RISK/);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], `ground truth was ${truth}`);
   assert.match(r.stderr, /at risk: /);
 });
 
@@ -243,27 +285,45 @@ test("a plain conflicting path names the commits at risk", (t) => {
   const r = audit(c);
   assert.equal(r.status, 0);
   assert.deepEqual(r.json.conflicts, ["plain.txt"]);
-  assert.equal(r.json.atRisk.length, 1);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// `--` ends the options, not the pathspec magic, so a real file named
+// `:colon.txt` is parsed as a pathspec expression and matches nothing. Same
+// false safe as the space, reached by a different byte, and `:(literal)` is
+// what closes it.
+test("a conflicting path that looks like pathspec magic names the commits at risk", (t) => {
+  const path = ":colon.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.deepEqual(r.json.conflicts, [path]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "a leading `:` must be matched literally, not as magic");
 });
 
 // A commit subject is free text, so it reaches the payload with whatever the
 // author typed. `\` matters as much as `"`: escaping the quote first and the
 // backslash second turns `\` into `\\` twice over, so the order is load-bearing
 // and only a subject holding both can tell a correct pipeline from that one.
-test("a quote and a backslash in a commit subject keep the payload parseable", (t) => {
+// The \x01 rides along because git stores control bytes in a subject happily and
+// JSON forbids them unescaped — dropping the scrub leaves the payload
+// unparseable, which is this PR's own defect class one byte over.
+test("a quote, a backslash and a control byte in a commit subject keep the payload parseable", (t) => {
   const c = conflictRepo(t, "plain.txt");
   git(c.w, "checkout", "-q", "main");
   writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
-  git(c.w, "commit", "-q", "-am", 'fix: the "quoted" back\\slash case');
+  git(c.w, "commit", "-q", "-am", 'fix: the "quoted" back\\slash \x01 case');
   git(c.w, "push", "-q", "origin", "main");
   git(c.w, "checkout", "-q", c.branch);
+  assert.match(git(c.w, "log", "-1", "--pretty=%s", "origin/main"), /\x01/, "fixture must keep the control byte in the subject");
 
   const r = audit(c);
   assert.equal(r.status, 0);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.ok(
-    r.json.atRisk.some((l) => l.includes('the "quoted" back\\slash case')),
-    `the subject must survive escaping verbatim; got ${JSON.stringify(r.json.atRisk)}`,
+    r.json.atRisk.some((l) => l.includes('the "quoted" back\\slash   case')),
+    `the subject must survive escaping verbatim, the control byte scrubbed to a space; got ${JSON.stringify(r.json.atRisk)}`,
   );
 });
 
@@ -292,6 +352,53 @@ test("a quote in the branch and a backslash in the worktree path keep the payloa
 // fine, found conflicts" — so the exit code alone cannot tell them apart and
 // the audit used to print `"conflicts":[],"atRisk":[]` and exit 0. Safe, on a
 // question it never asked.
+// The section split reads an empty line as the end of the filename list, so a
+// path holding a literal newline manufactures that marker: the list comes back
+// short — sometimes empty — and the audit exits 0 saying nothing is at risk.
+// git C-quoted such a path before `-z`, which at least emitted JSON the caller
+// choked on, so answering "safe" here would be a strict downgrade. A shell
+// variable cannot hold NUL, so the only honest answer is that there isn't one.
+test("a conflicting path containing a newline is unanswerable (2), never safe (0)", (t) => {
+  const c = bareConflictRepo(t, "lead\nline.txt");
+  writeFileSync(join(c.w, "zz.txt"), "branch side\n");
+  git(c.w, "add", "--", "zz.txt");
+  git(c.w, "commit", "-q", "-m", "branch adds a second file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "zz.txt"), "MAIN SIDE\n");
+  git(c.w, "add", "--", "zz.txt");
+  git(c.w, "commit", "-q", "-m", "MAIN ALSO AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /contains a newline/);
+});
+
+// merge-tree refuses unrelated histories at exit 128. Note what this does NOT
+// pin: that refusal also writes nothing, so `[ -s ]` alone catches it and the
+// `mt_rc` half of the guard can be deleted with the suite staying green
+// (measured). No reachable input produces a bad exit code AND output, so the
+// code check is there for a git that prints the tree OID and then fails.
+test("unrelated histories are unanswerable (2), never safe (0)", (t) => {
+  const c = repo(t);
+  git(c.w, "checkout", "-q", "--orphan", "orphan");
+  git(c.w, "rm", "-rq", "--cached", ".");
+  writeFileSync(join(c.w, "o.txt"), "no shared ancestor\n");
+  git(c.w, "add", "--", "o.txt");
+  git(c.w, "commit", "-q", "-m", "orphan root");
+  git(c.w, "push", "-q", "origin", "orphan");
+  git(c.w, "checkout", "-qf", "main");
+  git(c.w, "clean", "-qfd");
+
+  const r = audit({ w: c.w, branch: "orphan" });
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /cannot determine conflicts/);
+});
+
 test("a BASE_REF that dereferences to a blob is unanswerable (2), never safe (0)", (t) => {
   const c = repo(t);
   const blob = git(c.w, "hash-object", "-w", "f.txt");
@@ -330,6 +437,23 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
 // Dirty means dirty. Every fixture above leaves an untracked file, which is the
 // one form `status --porcelain` reports with no index involved at all.
 // ---------------------------------------------------------------------------
+
+// A payload that could not be written is not an answer, but the script's exit
+// code is spent before the write: without a guard the failing `printf` exits 1
+// under `set -e`, and 1 is "REFUSED, worktree dirty" — a clean worktree
+// reported as dirty, with no payload to contradict it. Same shape as the guard
+// inflight.sh carries on its own final printf.
+test("a payload that cannot be written is unanswerable (2), never a refusal (1)", (t) => {
+  const c = repo(t);
+
+  // node cannot hand a child a closed fd 1, so sh closes it after the fork.
+  const r = spawnSync("sh", ["-c", '"$0" "$@" >&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2, `got ${r.status}; 1 would claim the worktree is dirty`);
+});
 
 test("a modified tracked file refuses, like an untracked one", (t) => {
   const c = repo(t);
