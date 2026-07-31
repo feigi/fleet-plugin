@@ -122,8 +122,7 @@ function dropSpecs(rows) {
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
 refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
-// Wedged between the two, and both sides are load-bearing. After
-// refuseIfCapped, never before: filtering first can shrink the array below
+// After refuseIfCapped, never before: filtering first can shrink the array below
 // `limit` and the cap check would stop seeing a truncated list. Before the
 // emptiness test below, never after: a queue whose every row was filtered out
 // IS an empty queue — see #60. Telling that case apart from a genuinely empty
