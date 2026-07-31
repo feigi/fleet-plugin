@@ -136,27 +136,40 @@ fi
 
 # Probe 2 — a remote branch carrying the number as its own path segment.
 echo "\$ git ls-remote --heads origin" >&2
-# The lookup runs on its own, never inside the filtering pipeline below. A
-# pipeline reports its LAST command's status — `paste`, which always succeeds —
-# so an `ls-remote` that exited 128 used to arrive here as zero matching lines,
-# which is precisely what a clean ticket produces.
+# The lookup runs on its own, never inside the filter below. A pipeline reports
+# its LAST command's status, so an `ls-remote` that exited 128 used to arrive
+# here as zero matching lines, which is precisely what a clean ticket produces.
 #
-# The two conditions are different answers and must stay apart: `grep` exiting 1
-# is "looked, found nothing" and leaves the ticket free; a failed `ls-remote` is
-# "could not look" and is what exit 2 is for. Nothing here needs GitHub to be
-# down: an unavailable SSH key or agent will do it, and `gh` authenticates over
-# HTTPS independently, so probe 1 answers fine while this one cannot.
+# The two conditions are different answers and must stay apart: "looked, found
+# nothing" leaves the ticket free; "could not look" is what exit 2 is for.
+# Nothing here needs GitHub to be down: an unavailable SSH key or agent will do
+# it, and `gh` authenticates over HTTPS independently, so probe 1 answers fine
+# while this one cannot.
 #
 # stderr is left on stderr rather than folded into the value. That matters less
-# here than in release-ticket.sh:168 — that one tests $remote raw, so a folded-in
-# host-key notice really would read as a branch, whereas the awk/sed/grep below
-# reduces such a line to a word no numeric segment can match. git's own wording
-# is more use on the terminal anyway.
+# here than in release-ticket.sh:173, whose pushed-branch lookup tests $remote
+# raw, so a folded-in host-key notice really would read as a branch, whereas the
+# awk below reduces such a line to a word no numeric segment can match. git's
+# own wording is more use on the terminal anyway.
 if ! heads=$(git ls-remote --heads origin); then
   die "git ls-remote failed, so whether #$n has a remote branch is unknown"
 fi
-remote=$(printf '%s\n' "$heads" | awk '{print $2}' | sed 's#refs/heads/##' |
-         grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
+# One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
+# last, and the `|| true` that used to close this one discarded that too, so a
+# stage that could not run produced the same empty result a free ticket
+# produces. Collapsed, the status is the filter's own and `|| die` can read it —
+# and three fewer forks is three fewer ways to fail, a fork failure under
+# process-table pressure being what a parallel fleet approaches by construction.
+#
+# `grep` is what made that delicate: it exits 1 for "looked, found nothing",
+# which is legitimate and must never become exit 2. awk needs no such case
+# separated out — the programs here contain no `exit`, so they return 0 whether
+# or not anything matched, and every non-zero status is a real failure.
+remote=$(printf '%s\n' "$heads" | LC_ALL=C awk -v n="$n" '
+  { ref = $2; sub("^refs/heads/", "", ref)
+    if (ref ~ "(^|[/-])" n "([-/]|$)") { out = out sep ref; sep = "," } }
+  END { printf "%s", out }') ||
+  die "could not filter the remote branches for #$n"
 if [ -n "$remote" ]; then
   echo "    remote branches: $remote" >&2
   add_hit "remote-branch"
@@ -176,23 +189,34 @@ fi
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
   die "git for-each-ref failed, so whether #$n has a local branch is unknown"
 fi
-local_b=$(printf '%s\n' "$refs" |
-          grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
-# Match on the worktree's basename, not its full path — grepping the whole
+# One awk, for the reason probe 2's filter is one: a short refname is the whole
+# line, so the match is on $0.
+local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
+  $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
+  END { printf "%s", out }') ||
+  die "could not filter the local branches for #$n"
+# Match on the worktree's basename, not its full path — matching the whole
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
 # a sibling directory named with digits), matching every ticket.
 if ! worktrees=$(git worktree list --porcelain); then
   die "git worktree list failed, so whether #$n has a worktree is unknown"
 fi
-# substr($0,10), never $2, exactly as release-ticket.sh:70 does it: the porcelain
-# prints the path raw, so a checkout under a directory with a space in it — plain
-# enough on macOS — truncates at the space and the ticket stops matching. That is
-# a wrong "free", which is the one answer this script must never invent.
-wt=$(printf '%s\n' "$worktrees" | awk '/^worktree /{print substr($0,10)}' |
-     while IFS= read -r p; do printf '%s\t%s\n' "$(basename "$p")" "$p"; done |
-     awk -F'\t' -v n="$n" '$1 ~ "(^|[/-])" n "([-/]|$)" {print $2}' |
-     paste -sd, - || true)
+# substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
+# the porcelain prints the path raw, so a checkout under a directory with a
+# space in it — plain enough on macOS — truncates at the space and the ticket
+# stops matching. That is a wrong "free", the one answer this script must never
+# invent.
+#
+# The basename is taken in the same pass, by dropping everything through the
+# last `/`. It used to be a `basename` subshell per line, which had this defect
+# one level down: a failed fork there yields an empty first field and a silent
+# non-match, and `$(…)` discards the status that would have said so.
+wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
+  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
+    if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
+  END { printf "%s", out }') ||
+  die "could not filter the worktree list for #$n"
 if [ -n "$local_b" ] || [ -n "$wt" ]; then
   [ -n "$local_b" ] && echo "    local branches: $local_b" >&2
   [ -n "$wt" ] && echo "    worktrees: $wt" >&2
