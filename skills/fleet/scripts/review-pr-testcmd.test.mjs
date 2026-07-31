@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, globSync } from "node:fs";
 import { join } from "node:path";
 
 // review-pr.js tells every specialist to run `testCmd` FROM THE SNAPSHOT, and
@@ -20,12 +20,31 @@ const defaultTestCmd = () => {
   return m[1];
 };
 
-// `git ls-files <pathspec>` lists tracked paths only, which is exactly what the
-// archive carries. Empty output = the default cannot exist in the snapshot.
+// This file runs from inside the snapshot too — it is one of the files the new
+// default matches — and a `git archive` copy is not a git repo, so shelling out
+// unconditionally fails it there and would paint the default red for every
+// specialist. That is the `review-and-fix.md` hazard about suites deriving
+// identity from the checkout, hit by the very test guarding the fix.
+const inGitRepo = (() => {
+  try {
+    execFileSync("git", ["-C", REPO, "rev-parse", "--git-dir"], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+// Both branches answer one question — would this path survive `git archive`?
+// In a worktree only git can tell: `agent-test` EXISTS on disk yet is untracked,
+// which is the entire defect, so `ls-files` is the only honest check. Inside a
+// snapshot there is no git, but every file present is tracked by construction of
+// the archive, so existence settles it. Neither branch is a weakened stand-in.
 const tracked = (pathspec) =>
-  execFileSync("git", ["-C", REPO, "ls-files", "--", pathspec], { encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
+  inGitRepo
+    ? execFileSync("git", ["-C", REPO, "ls-files", "--", pathspec], { encoding: "utf8" })
+        .split("\n")
+        .filter(Boolean)
+    : globSync(pathspec, { cwd: REPO });
 
 test("every file argument in the default testCmd is tracked, so it survives git archive", () => {
   const args = defaultTestCmd().split(/\s+/).filter((a) => !a.startsWith("-"));
