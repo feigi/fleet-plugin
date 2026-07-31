@@ -167,7 +167,9 @@ number, worktree abs path, branch, and each of these verbatim:
 > the comments, and nothing at all when there are none, dropping the title and
 > body either way, exit 0, so the loss is silent. The `## Agent Brief` comment
 > is authoritative over the issue body. Honor its `Respec` block — it may
-> explicitly rule out hypotheses the body raises.
+> explicitly rule out hypotheses the body raises. Read the issue **before
+> touching code**: with the repo in front of you, still undecided or needing
+> human hands you do not have → bail, name the cause, do not implement.
 
 > Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 > you stop for any reason, uncommitted work is invisible to the controller and
@@ -179,16 +181,11 @@ or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exact
 what decides whether a replacement redoes or destroys work. Observed twice in
 one run.
 
-Member reads the issue **before touching code**. Still undecided, or needs human
-hands the member doesn't have, with the repo in front of it → bail, name the
-cause, demote, do not implement. Otherwise run `sizing-a-ticket` for the process
-path and proceed on **either row** — heavy is never a bail reason. Heavy row here
-enters at `superpowers:writing-plans` and **skips `superpowers:brainstorming`**:
-that step's `<HARD-GATE>` waits on maintainer approval no member can reach, and a
-decided ticket is already brainstormed — the `## Agent Brief` is that output, from
-`/triage` with the maintainer in the loop. Brief won't support a plan → that is
-the undecided case; bail and demote per the rule above. Selection and claiming are
-done; start there.
+A member that does not bail runs `sizing-a-ticket` for the process path and
+proceeds on **either row** — heavy is never a bail reason, and that skill owns
+the fleet's heavy-row entry point. A brief that will not support a plan is the
+undecided case: bail and demote, never a heavy row. Selection and claiming are
+done; the member starts there.
 
 Then `next-ticket` **step 7** (rebase, re-run tests, push, `gh pr create` with
 `Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the
