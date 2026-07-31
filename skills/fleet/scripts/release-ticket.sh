@@ -217,23 +217,35 @@ if [ -n "$wt" ] && [ ! -e "$wt" ] && [ ! -x "$look" ]; then
 fi
 
 if [ -n "$wt" ] && [ -d "$wt" ]; then
-  # Establish that the status below is THIS worktree's before believing it.
+  # Establish that a .git linkage EXISTS before believing the status below.
   # Delete the .git file outright — directory and every uncommitted file still on
   # disk — and `git -C` does not fail: it walks UP to the enclosing repository and
   # reports the PARENT's status at rc 0. `.worktrees/` is gitignored here, so the
   # worktree never appears in that status either: with a clean parent the answer
   # is empty, a positive assertion that the claim is clean produced without ever
-  # having looked at it. A .git that points nowhere is caught by the status die
-  # below instead — git fails outright on that one — but an absent one reaches
-  # neither that nor the -d gate above.
+  # having looked at it. The -d gate above does not reach it (the directory is
+  # there) and neither does the status die below (git succeeded).
   #
-  # `! -x` for the reason the block above gives: -e is ALSO false for a .git we
+  # Existence, NOT "points at this worktree", which is deliberately not claimed:
+  # a .git naming a gitdir whose core.worktree is some other directory passes
+  # this and still answers about that other tree at rc 0 (measured). Stopped
+  # downstream by `worktree remove` today, and left to its own ticket rather
+  # than widened into here.
+  #
+  # `-f` and not `-e`: an empty `.git` DIRECTORY leaks exactly like an absent
+  # one — git walks up and reports the parent at rc 0 — and -e is true for it
+  # (measured). A linked worktree's .git is always a regular file, since
+  # `git worktree add` writes one, so -f costs nothing and refuses that too. A
+  # dangling .git symlink is likewise rc 0, not the rc 128 the status die needs,
+  # so this guard is what catches that one as well.
+  #
+  # `! -x` for the reason the block above gives: -f is ALSO false for a .git we
   # are not permitted to stat, and this guard may not infer absence from that any
   # more than -d may. An unsearchable worktree still has its .git, so leave it to
   # the status die, which keeps git's own "Permission denied" rather than
   # asserting an absence nothing established (measured: chmod 644 on the worktree
-  # makes -e false with the .git sitting right there).
-  [ -e "$wt/.git" ] || [ ! -x "$wt" ] || die "$wt has no .git, so whether it holds uncommitted work is unknown"
+  # makes -f false with the .git sitting right there).
+  [ -f "$wt/.git" ] || [ ! -x "$wt" ] || die "$wt has no .git file, so whether it holds uncommitted work is unknown"
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"

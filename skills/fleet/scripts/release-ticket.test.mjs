@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -574,7 +574,7 @@ test("a worktree whose .git file is gone is unknown, never clean", (t) => {
   // holds uncommitted work is unknown", so the tail alone cannot tell the new
   // guard firing from the status die firing — which is the distinction the
   // comment above claims this case makes.
-  assert.match(stderr, /has no \.git, so whether it holds uncommitted work is unknown/);
+  assert.match(stderr, /has no \.git file, so whether it holds uncommitted work is unknown/);
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
@@ -618,6 +618,34 @@ test("a worktree deleted by hand while its branch carries work still blocks", (t
     { dir: false, worktree: true, branch: true },
     "the branch, and the commit on it, survive",
   );
+});
+
+test("a worktree whose .git is a directory is unknown, never clean", (t) => {
+  // Same leak as the absent .git, reached by a different input and missed by the
+  // obvious predicate: `-e` is TRUE for a .git DIRECTORY, so an existence test
+  // waves it through, git walks UP exactly as it does for an absent one, and the
+  // parent's status is believed at rc 0. Only `-f` separates them, and it costs
+  // nothing — `git worktree add` always writes .git as a regular file, so no
+  // healthy linked worktree is refused by it.
+  //
+  // Left to `worktree remove` this ends the way the absent case does: a `halt`
+  // exit 2 announcing a partial release, after the tracker was already asked.
+  const r = repo(t);
+  writeFileSync(join(r.w, ".gitignore"), ".worktrees/\n");
+  git(r.w, "add", ".gitignore");
+  git(r.w, "commit", "-q", "-m", "ignore the worktrees dir");
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  rmSync(join(c.wt, ".git"));
+  mkdirSync(join(c.wt, ".git"));
+  assert.equal(git(r.w, "status", "--porcelain"), "", "fixture: the leaked answer really is an empty one");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /has no \.git file, so whether it holds uncommitted work is unknown/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
 
 test("an unsearchable worktree is not reported as having no .git", (t) => {
