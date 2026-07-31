@@ -165,7 +165,7 @@ All eleven obey the three rules above.
 | `inflight.sh` | `<N>` | `{taken, probe, evidence}` | never — reports |
 | `verify-sha.sh` | `<branch> <sha>` | `{reachable, log}` | sha not reachable on branch |
 | `claim-ticket.sh` | `<N> <slug> <type>` | `{worktree, branch, ports, runner}` | lockfile dirty after install, worktree exists, label write failed |
-| `no-undo-audit.sh` | `<worktree> <branch>` | `{clean, stash[], conflicts[], atRisk[]}` | worktree dirty or stash non-empty |
+| `no-undo-audit.sh` | `<worktree> <branch>` | `{clean, stash, conflicts[], atRisk[]}` | worktree dirty — the stash count is reported, never gated |
 | `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{proved, preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | exit 1 any gate fails; exit 2 the merge is unreachable, not a merge, or unresolvable |
 | `reap.sh` | `[--apply]` | `{reaped[], kept[{branch,reason}]}` | never — refusals are findings |
 | `worktree-audit.sh` | — | `[{worktree, commits, dirty[]}]` | never |
