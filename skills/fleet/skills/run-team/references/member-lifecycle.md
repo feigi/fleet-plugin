@@ -34,7 +34,7 @@ Killed member cannot be resumed — row most often got wrong. `SendMessage` work
 
 - committed-and-pushed vs committed-only vs **uncommitted in the worktree**
 - uncommitted work exists nowhere else — no `git clean`, `git checkout .`,
-  `git reset --hard`, `git stash drop`
+  `git reset --hard`, `git stash`
 - for half-finished review: which specialists already reported, so it doesn't
   re-run 40-minute fan-out
 

@@ -38,18 +38,21 @@ else
   echo "    clean" >&2
 fi
 
-# The stash stack is repo-global across worktrees, and a rebase cannot reach
-# refs/stash at all. So the count says nothing about whether THIS rebase loses
+# The stash stack is repo-global across worktrees, and a rebase never pops,
+# drops or overwrites a pre-existing entry — `--autostash` can add one, it never
+# consumes yours. So the count says nothing about whether THIS rebase loses
 # THIS branch's work — only that the maintainer keeps stashes. Reported for
 # context, never gated on: gating made the audit refuse on every run in a repo
 # that holds any entry, and a check that always fires is one nobody reads.
 #
 # It cannot cover the hazard it looks like it covers, either. A member running
 # `git stash` to clear a dirty worktree so a rebase can start leaves `porcelain`
-# empty, so `clean` is already true and the entry it created is indistinguishable
-# from an old one without a baseline. This script runs once, before the rebase,
-# with nothing happening between its own entry and exit, so it has no baseline to
-# take. Catching that needs a count the caller captured before the member ran.
+# empty — for tracked changes; an untracked-only tree stashes nothing and still
+# refuses — so `clean` is already true and the entry it created is
+# indistinguishable from an old one without a baseline. This script runs once,
+# before the rebase, with nothing happening between its own entry and exit, so it
+# has no baseline to take. Catching that needs a count the caller captured before
+# the member ran.
 #
 # Never pop, drop or apply an entry this process did not create.
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
