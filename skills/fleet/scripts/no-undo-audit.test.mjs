@@ -18,7 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,6 +141,21 @@ test("a clean worktree with no stash passes", (t) => {
   assert.equal(r.status, 0);
   assert.equal(r.json.clean, true);
   assert.equal(r.json.stash, 0);
+});
+
+// `clean` is now the sole gate, so a `git status` that fails must not read as a
+// clean worktree. It used to have an accidental backstop: a repo holding any
+// stash refused anyway, whatever `status` did. That backstop left with the gate.
+test("a git status that fails is unanswerable (2), never clean (0)", (t) => {
+  if (process.getuid?.() === 0) return; // root reads a 000 file regardless
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+  chmodSync(join(c.w, ".git", "index"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, "an unreadable index cannot answer the question — it must not answer 'clean'");
+  assert.match(r.stderr, /cannot tell a clean worktree from a dirty one/);
+  assert.doesNotMatch(r.stdout, /"clean":true/);
 });
 
 test("a dirty worktree refuses even when a stash is also present", (t) => {
