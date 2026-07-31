@@ -19,10 +19,11 @@ Script owns the query: label exclusions server-side, raw `body` never fetched fo
 whole list (~97% of payload) — reduced to dependency refs, to-spec specs dropped
 by shape and named on stderr, survivors oldest first.
 
-`--allow-fallback` re-runs unfiltered when `ready-for-agent` comes back empty
-(`ready-for-human` / untriaged). Solo only — flag exists for this caller. Fleet
-never passes it: empty means no work, and an unattended fleet has no channel to
-the human `ready-for-human` needs.
+`--allow-fallback` re-runs unfiltered (`ready-for-human` / untriaged) when
+`ready-for-agent` comes back empty **after specs are dropped** — a queue of
+nothing but to-spec specs counts as empty. Solo only — flag exists for this
+caller. Fleet never passes it: empty means no work, and an unattended fleet has
+no channel to the human `ready-for-human` needs.
 
 Exit 1 = query fine, queue empty. Exit 2 = query broke. Different facts.
 

@@ -102,7 +102,7 @@ function refuseIfCapped(rows, description) {
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase
-// 2's bail tests, and heavy is explicitly never a bail reason (run-team:168).
+// 2's bail tests, and heavy is explicitly never a bail reason (run-team:180).
 // Change to-spec's template and this predicate goes with it, or a member
 // implements an entire spec as one ticket.
 function dropSpecs(rows) {
@@ -122,17 +122,23 @@ function dropSpecs(rows) {
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
 refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
+// After refuseIfCapped, never before: filtering first can shrink the array below
+// `limit` and the cap check would stop seeing a truncated list. Before the
+// emptiness test below, never after: a queue whose every row was filtered out
+// IS an empty queue — see #60. Telling that case apart from a genuinely empty
+// one, for a caller reading only the exit code, is #64 and still open.
+rows = dropSpecs(rows);
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
   rows = query(null);
   console.error(`    ${rows.length} candidate(s) unfiltered`);
   refuseIfCapped(rows, " unfiltered (fallback)");
+  // After refuseIfCapped for the same reason as above; the emptiness half does
+  // not transfer, as no gate follows this one. The call must exist because the
+  // fallback's rows arrive raw and nothing downstream drops a spec.
+  rows = dropSpecs(rows);
 }
-
-// After refuseIfCapped, never before: filtering first shrinks the array below
-// `limit` and the cap check would stop seeing a truncated list.
-rows = dropSpecs(rows);
 
 // FIFO among survivors. Issue number is monotonic in creation order, so this
 // needs no extra field and no query semantics. Dependencies do not rank —
