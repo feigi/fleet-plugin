@@ -114,14 +114,30 @@ fi
 # whose bytes are all >= \200. tr pads the replacement with its last character.
 jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
-# A mutation refused with earlier ones already applied. `die` printed prose and
+# A mutation refused mid-release. `die` printed prose and
 # exited before every printf, so a caller parsing this script's stdout got
 # nothing at all out of the one case where it most needs to know what happened.
 # Enumerate what landed, name the compensating action, still emit the receipt.
+#
+# The two booleans decide the headline, never the call site: the first mutation
+# attempted — the worktree removal when there is one, `git branch -d` when the
+# registration is already cleared — refuses with both still false, and
+# announcing a partial release over an all-false detail line overstates exactly
+# the state this script exists to report precisely. A partial release is a
+# refusal that followed a successful mutation. Distinct again from the blocked
+# message that reports refused preconditions, which means nothing was ATTEMPTED.
+#
+# They track THIS script's successful calls, not the filesystem: `worktree
+# remove` can clear the registration and still fail to delete the directory,
+# leaving done_wt false with the registration already gone (git 2.50.1).
 done_wt=false
 done_branch=false
 halt() {
-  echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+  if [ "$done_wt" = true ] || [ "$done_branch" = true ]; then
+    echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+  else
+    echo "$NAME: #$issue HALTED mid-release — nothing landed: $1" >&2
+  fi
   echo "    worktree removed: $done_wt, branch deleted: $done_branch, in-progress: still on the issue" >&2
   echo "    the ticket still reads as taken — finish or restore it by hand" >&2
   printf '{"issue":%s,"branch":"%s","worktree":"%s","label":%s,"released":false,"applied":true,"blockers":["%s"]}\n' \
@@ -250,8 +266,8 @@ fi
 # too, with the directory and every uncommitted change still sitting in it.
 # Keying on the annotation would skip the check on that one, and `worktree
 # remove` then refuses it (rc 128) — so instead of the refusal the linkage guard
-# below reaches on its own, the run gets as far as `halt` and exits 2 announcing
-# a partial release that never happened, on a worktree still holding the work.
+# below reaches on its own, the run gets as far as `halt` and exits 2 over a
+# worktree still holding the work, reporting it as a claim nothing touched.
 #
 # Absence is ESTABLISHED by `gone`, never inferred from a failed -d, because -d
 # is also false for a directory we are not permitted to stat — and on this path

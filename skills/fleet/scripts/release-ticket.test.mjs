@@ -124,6 +124,10 @@ function release(r, c, { apply = true, env = {} } = {}) {
   return {
     code: res.status,
     json: res.stdout.trim() ? JSON.parse(res.stdout) : null,
+    // Raw, alongside the parsed form: a receipt that must not move with a
+    // prose change can only be pinned by its bytes. Parsing and re-serialising
+    // would accept a reordered or reformatted payload as identical.
+    out: res.stdout,
     stderr: res.stderr,
   };
 }
@@ -197,13 +201,19 @@ test("a commit that exists nowhere else blocks, and `git cherry` says so", (t) =
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "the member's work", "work\n");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
   assert.ok(
     json.blockers.some((b) => /unique to .* \(git cherry\)/.test(b)),
     `the cherry check must report the commit as its own finding: ${json.blockers}`,
   );
   assert.equal(json.released, false);
   assert.equal(code, 1);
+  // Refused BEFORE anything was attempted, which is a different finding from a
+  // mutation refused mid-flight with nothing landed — same three artefacts
+  // standing, different thing for the operator to do about it. The two prose
+  // lines are what carry that distinction, so they may not collide.
+  assert.match(stderr, /#9 NOT released — nothing was touched/);
+  assert.doesNotMatch(stderr, /HALTED/, "nothing was attempted, so nothing halted");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
@@ -541,7 +551,8 @@ test("a refused worktree removal leaves the label on the issue", (t) => {
   const { code, json, stderr } = release(r, c, { env: { GH_DIRTY: join(c.wt, "late.txt") } });
 
   assert.equal(code, 2);
-  assert.match(stderr, /PARTIALLY RELEASED|contains modified or untracked/);
+  // This script's own prose, not git's refusal text, which is git's to reword.
+  assert.match(stderr, /#9 HALTED mid-release — nothing landed: git worktree remove refused/);
   assert.equal(json.released, false, "a receipt is still printed — die used to exit before any printf");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
   assert.ok(
@@ -555,7 +566,9 @@ test("a tracker that fails after both deletes still emits a receipt", (t) => {
   // artefacts gone and in-progress still on the ticket — the single state a
   // caller cannot reconstruct by looking, and the one it must not guess at.
   // `die` printed prose and exited before every printf, so stdout was empty
-  // exactly there. The other two halt() sites are reached with nothing deleted.
+  // exactly there. Of the other two halt() sites, the worktree removal is
+  // reached with nothing deleted and `git branch -d` with the worktree already
+  // gone — which is why this one is the only PARTIALLY RELEASED naming both.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
 
@@ -567,6 +580,94 @@ test("a tracker that fails after both deletes still emits a receipt", (t) => {
   assert.equal(json.label, true, "in-progress survives, so the ticket keeps reading as taken");
   assert.match(stderr, /PARTIALLY RELEASED/);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "both deletes landed");
+});
+
+test("the halt headline names what landed: nothing at all, or a partial release", (t) => {
+  // Both forms against a git that refuses on command, so the two receipts are
+  // deterministic to the byte and can be asserted whole: the headline is
+  // operator-facing prose and the payload may not move with it. A refusal
+  // provoked by a real dirty worktree quotes git's own message instead, which
+  // is git's to reword.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "git"),
+    `#!/bin/sh\ncase "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac\nexec ${real} "$@"\n`,
+    { mode: 0o755 },
+  );
+  // The worktree path the SCRIPT reports, never the one node built: git resolves
+  // symlinks, so the /var tmpdir node is handed comes back as /private/var
+  // (measured, macOS). A dry run reads the same `wt` the halt receipt prints and
+  // mutates nothing.
+  const wt = release(r, c, { apply: false }).json.worktree;
+  const receipt = (blocker) =>
+    `{"issue":9,"branch":"fix/9-release-ticket","worktree":"${wt}",` +
+    `"label":true,"released":false,"applied":true,"blockers":["${blocker}"]}\n`;
+
+  // The worktree removal is the first mutation attempted when there is a
+  // worktree, so its refusal leaves zero of the three artefacts touched.
+  const none = release(r, c, { env: { GIT_FAIL: "worktree remove" } });
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git worktree remove refused/);
+  assert.doesNotMatch(none.stderr, /PARTIALLY/, "no part of the release landed, so none was released");
+  assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
+  assert.equal(none.out, receipt(`git worktree remove refused ${wt}: refused by the git shim`));
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "and that headline is the truth");
+
+  // One artefact gone and the next refused — one of the two shapes a partial
+  // release takes, the other being both deletes landing and the label edit
+  // refusing, pinned by the tracker case above. Runs second on purpose: it
+  // consumes the worktree the case above left standing. Keyed on what landed
+  // and not on the call site, since this same `git branch -d` refusal is
+  // reached with nothing removed on a claim that has no worktree.
+  const partial = release(r, c, { env: { GIT_FAIL: "branch -d" } });
+  assert.equal(partial.code, 2);
+  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git branch -d refused/);
+  assert.match(partial.stderr, /worktree removed: true, branch deleted: false/, "the detail line agrees");
+  assert.equal(partial.out, receipt("git branch -d refused fix/9-release-ticket: refused by the git shim"));
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: true }, "the removal really did land");
+});
+
+test("the headline is keyed on what landed, not on which call site halted", (t) => {
+  // The two cases above leave the design's central claim unpinned: both reach
+  // `git worktree remove` first, so keying the headline on the CALL SITE passes
+  // them. A claim whose worktree was removed by hand separates the two — the
+  // removal is skipped entirely, so `git branch -d` halts with nothing landed,
+  // and the branch delete then halts with a branch gone and no worktree ever
+  // touched. Without this the (false, true) row of the table is unreachable
+  // too, and dropping `done_branch` from the condition survives the suite.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "git"),
+    `#!/bin/sh\ncase "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac\nexec ${real} "$@"\n`,
+    { mode: 0o755 },
+  );
+  // By hand, with real git: the registration goes, the branch stays.
+  execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
+
+  // Call site says "the branch delete refused"; what landed says nothing did.
+  const none = release(r, c, { env: { GIT_FAIL: "branch -d" } });
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -d refused/);
+  assert.doesNotMatch(none.stderr, /PARTIALLY/, "the same call site as the partial case above, and nothing landed");
+  assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
+  assert.equal(
+    none.out,
+    '{"issue":9,"branch":"fix/9-release-ticket","worktree":"","label":true,' +
+      '"released":false,"applied":true,"blockers":["git branch -d refused fix/9-release-ticket: ' +
+      'refused by the git shim"]}\n',
+    "an empty worktree field, and the receipt still whole",
+  );
+
+  // Branch gone, worktree never ours to remove: the (false, true) row.
+  const partial = release(r, c, { env: { GH_EDIT_RC: "1" } });
+  assert.equal(partial.code, 2);
+  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — could not drop in-progress from issue 9/);
+  assert.match(partial.stderr, /worktree removed: false, branch deleted: true/, "the detail line agrees");
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "the branch really did go");
 });
 
 test("a successful release survives a failing `git worktree prune`", (t) => {
@@ -658,7 +759,7 @@ test("a worktree whose .git file is gone is unknown, never clean", (t) => {
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2);
   // `git worktree remove` refuses this on its own, so a run that believed the
-  // leaked answer still reaches exit 2 — by `halt`, announcing a partial release
+  // leaked answer still reaches exit 2 — by `halt`, announcing nothing landed
   // and having asked the tracker. Pinning the die is what separates the guard
   // being right from a second, unrelated guard catching it downstream.
   assert.equal(json, null, "refused before any mutation, not halted after the delete refused");
@@ -721,7 +822,7 @@ test("a worktree whose .git is a directory is unknown, never clean", (t) => {
   // healthy linked worktree is refused by it.
   //
   // Left to `worktree remove` this ends the way the absent case does: a `halt`
-  // exit 2 announcing a partial release, after the tracker was already asked.
+  // exit 2 announcing nothing landed, after the tracker was already asked.
   const r = repo(t);
   writeFileSync(join(r.w, ".gitignore"), ".worktrees/\n");
   git(r.w, "add", ".gitignore");
