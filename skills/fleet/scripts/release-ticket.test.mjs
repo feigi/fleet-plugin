@@ -542,6 +542,37 @@ test("an unreadable worktree is an unknown answer, never a clean one", (t) => {
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+test("a worktree whose .git file is gone is unknown, never clean", (t) => {
+  // Disjoint from both cases around it: the directory EXISTS, so -d is true, and
+  // the .git file is not broken but absent — so `git -C` does not fail either. It
+  // walks UP and reports the PARENT repository at rc 0, and the guard that exists
+  // to answer "does THIS worktree hold uncommitted work?" answers about a
+  // different repo. With `.worktrees/` gitignored — the fleet's own layout — the
+  // worktree never appears in that parent status, so a clean parent makes the
+  // leaked answer EMPTY: a positive assertion of clean, produced without ever
+  // having looked at the worktree.
+  const r = repo(t);
+  writeFileSync(join(r.w, ".gitignore"), ".worktrees/\n");
+  git(r.w, "add", ".gitignore");
+  git(r.w, "commit", "-q", "-m", "ignore the worktrees dir");
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  rmSync(join(c.wt, ".git"));
+  assert.equal(git(r.w, "status", "--porcelain"), "", "fixture: the leaked answer really is an empty one");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  // `git worktree remove` refuses this on its own, so a run that believed the
+  // leaked answer still reaches exit 2 — by `halt`, announcing a partial release
+  // and having asked the tracker. Pinning the die is what separates the guard
+  // being right from a second, unrelated guard catching it downstream.
+  assert.equal(json, null, "refused before any mutation, not halted after the delete refused");
+  assert.match(stderr, /whether it holds uncommitted work is unknown/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
 test("a worktree directory deleted by hand releases instead of blocking forever", (t) => {
   // `worktree list --porcelain` keeps listing an entry whose directory is gone
   // (it marks it `prunable`), so the dirty check ran `git -C` against a path
