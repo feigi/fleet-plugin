@@ -336,8 +336,19 @@ defect class from dead file paths to dead invocation names.
 `a03258e` and `d739b0b`, because it depended on no scripts and the two top rows
 were why `/fleet:run-team` did not work at all. Plan 3 inherits none of it.
 
-Line numbers below are the **pre-fix** ones and no longer resolve — they are kept
-as the record of what was wrong, not as pointers.
+**Citation convention — read this before adding a row.** A citation into another
+file names a **quoted fragment and its section**, never a bare line number: a
+fragment survives renumbering, a number does not. Every count states the command
+that produces it and the ref it was run against, so the next reader re-runs it
+instead of trusting it. Deliberately historical rows — describing another
+document *as it stood* — keep their numbers and name the ref those numbers were
+measured at.
+
+Line numbers in the **Site** column of both tables in this section, and in the
+prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
+record of what was wrong, not pointers into the current files — resolve them at
+the ref they were measured at, where each still lands exactly on the content its
+row describes: `git show eacc5cf:<path> | sed -n '<N>p'`.
 
 | Site (pre-fix lines) | Was | Became | Severity |
 |---|---|---|---|
@@ -355,16 +366,58 @@ references `/triage`, which stays bare because `triage` is a personal skill in
 ### Sites the first sweep missed — found by the Plan 1 final review
 
 The sweep above was run against the plugin only. Four more sites existed, same
-defect class. **All four are also fixed**, in the same two commits. Kept as the
-record of how an incomplete sweep looks — the first pass found five sites and
-was confidently reported as complete.
+defect class. **Three are fixed**, in the same two commits; the fourth — this
+spec's own line-numbered citations into the fleet skill — had only its path half
+fixed and is **still open**. Kept as the record of how an incomplete sweep looks
+— the first pass found five sites and was confidently reported as complete.
 
-| Site | Problem (all now resolved) |
+| Site | Problem, and where it stands |
 |---|---|
-| `next-ticket` SKILL.md:80 | names **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ends `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written repairs half a line. |
-| `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references. **Not a dead document** — `run-team` SKILL.md:13 sends the reader to it as "Rationale", so it is reachable and wrong. The migration-debt note saying it gets "a pointer rather than an edit" was written before anyone knew its paths would die. |
-| `workflows/review-pr.js:6` | its `whenToUse` string reads "Called per-PR by `/run-team`" — user- and model-facing, renders in the skill listing, and names a command that no longer exists in any form. The spec's "Out of scope — rewriting `review-pr.js`" must not shelter this: a one-string description fix is not a rewrite. |
-| Every `run-team.md:NNN` citation in **this** spec (6 sites) | all were accurate when written against the then-dirty working tree, and are now stale twice over: wrong path, and **+2 lines** off. The command's 4-line frontmatter became a 6-line skill frontmatter, so a body line at N is now at N+2. The one that bites is the Plan 2 instruction citing `run-team` SKILL.md:423 for the settings.json prohibition — it resolves to nothing. |
+| `next-ticket` SKILL.md:80 | **Fixed.** Named **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ended `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written would have repaired half a line. |
+| `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | **Fixed.** 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references **as measured at `a03258e^`**; both counts are **0** at `origin/main`. **Was not a dead document** — `run-team` SKILL.md still routes the reader to it from the opening prose above `## Rules that fail silently`, on the line beginning "Rationale:", so it was reachable and wrong. **This spec's own** `## Migration debt` entry, saying it "gets a pointer to this document rather than an edit", was written before anyone knew its paths would die. |
+| `workflows/review-pr.js:6` | **Fixed.** Its `whenToUse` string read "Called per-PR by `/run-team`" — user- and model-facing, rendered in the skill listing, and named a command that no longer existed in any form. The spec's "Out of scope — rewriting `review-pr.js`" did not shelter it: a one-string description fix is not a rewrite. |
+| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Still open** — only the path half was fixed. `run-team.md:NNN` no longer occurs, but the numbers were never re-resolved and none of them point at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either, and not for the reason previously given here. These numbers were measured at `eacc5cf`, where the rule already sat at `:422` under a **5**-line frontmatter — so the 4-line *command* frontmatter (`b915414`, a 232-line file that never had a `:423` at all) is not in this citation's history. Frontmatter accounts for **1** line of the 127-line move from where the rule actually sat (`:422` → `:549`), 5 → 6 between `eacc5cf` and `b1137bd`; the other **126** is body growth above it, the file going 536 → 675 lines. The `+126` above is measured against the cited `:423`, which was already one line below the rule at `eacc5cf`. No single delta repairs these — each needs re-anchoring to a fragment individually, which is **#117**. |
+
+Every figure in the `2026-07-22` spec row and the line-numbered-citation row,
+with the command that produces it (re-derived 2026-07-31, when `origin/main` was
+`b1137bd` — the outputs below are pinned to that commit, not to wherever the
+branch has since moved):
+
+```
+$ git show a03258e^:docs/specs/2026-07-22-run-team-agent-fleet-design.md | grep -c '~/.claude/commands/'
+4
+$ git show origin/main:docs/specs/2026-07-22-run-team-agent-fleet-design.md | grep -c '~/.claude/commands/'
+0
+$ git show a03258e^:docs/specs/2026-07-22-run-team-agent-fleet-design.md | grep -cE '/run-team([^/a-zA-Z-]|$)'
+7
+$ git show origin/main:docs/specs/2026-07-22-run-team-agent-fleet-design.md | grep -cE '/run-team([^/a-zA-Z-]|$)'
+0
+$ git show origin/main:skills/fleet/skills/run-team/SKILL.md | grep -n 'settings.json'
+549:*this run produced*. No speculative polish. Never `settings.json`, permissions, or
+$ git show origin/main:skills/fleet/skills/run-team/SKILL.md | grep -c '28 gone'
+0
+$ git show eacc5cf:skills/fleet/skills/run-team/SKILL.md | grep -n 'settings.json'
+422:*this run produced*. No speculative polish. Never `settings.json`, permissions, or
+$ git show eacc5cf:skills/fleet/skills/run-team/SKILL.md | grep -n '^---'
+1:---
+5:---
+$ git show origin/main:skills/fleet/skills/run-team/SKILL.md | grep -n '^---'
+1:---
+6:---
+$ git show eacc5cf:skills/fleet/skills/run-team/SKILL.md | grep -c ''
+536
+$ git show origin/main:skills/fleet/skills/run-team/SKILL.md | grep -c ''
+675
+$ git show b915414:commands/run-team.md | grep -n '^---'
+1:---
+4:---
+$ git show b915414:commands/run-team.md | grep -c ''
+232
+```
+
+`549 - 423 = 126`. The two `/run-team` hits remaining at `origin/main` are both
+path fragments inside `~/.claude/skills/fleet/skills/run-team/SKILL.md`, which is
+why the bare-command count is 0 while the literal substring still appears.
 
 **Also decided here:** every cross-reference to a sibling fleet component inside
 these documents is a **bare backticked name in running prose**, never a slash
@@ -373,7 +426,8 @@ SKILL.md:65, :93. That is *why* namespacing broke nothing: the model resolves
 them by description, not by literal name. It is luck rather than design, and
 Plan 3 decides deliberately whether to keep depending on it.
 
-**Nothing is open.** All four items this section opened with are answered above.
+**No open item remains.** All four items this section opened with are answered
+above.
 The superseded bullets that used to sit here — restating namespacing,
 `${CLAUDE_PLUGIN_ROOT}` and the expected-job list as unresolved — were deleted
 rather than annotated, because a rule stated twice at two confidence levels is
