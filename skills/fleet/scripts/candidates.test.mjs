@@ -43,10 +43,13 @@ done
 # --limit stop the cap tests firing. So never assert a labeled row is ABSENT
 # from the fallback payload — it was never in that fixture, and it passes
 # whatever the code does.
-# gh applies \`--jq\` server-side, so a reduction that did not take is a real
-# failure mode — an old gh, an expression rejected upstream, a proxy answering
-# with an error object. Overriding the expression is the only way a test reaches
-# it: the real one always produces the reduced shape, whatever the fixture says.
+# gh applies \`--jq\` itself, inside its own process, so a reduction that did not
+# take is a real failure mode — an old gh, an expression it rejects, a proxy
+# answering with an error object. Overriding the expression is the only way a
+# test reaches the empty and non-array refusals: the real one always emits an
+# array. It is NOT the only way to reach the row-shape refusal, which a fixture
+# alone trips whenever a field's type is wrong upstream (\`"number":"11"\` reduces
+# to \`{"n":"11"}\`) — the expression fixes the key set, never the value types.
 [ -n "$JQ_OVERRIDE" ] && expr="$JQ_OVERRIDE"
 fixture="$FIXTURE"
 case " $search " in
@@ -237,6 +240,29 @@ test("a --require-label whose value is the next flag refuses — it reaches the 
   assert.equal(status, 2);
 });
 
+test("a --require-label whose value is empty refuses — an unset shell variable is not 'no label'", () => {
+  // The likeliest spelling of all of them, and the only one the caller cannot
+  // see: `--require-label "$LABEL"` with the variable unset leaves an empty
+  // argv slot, not a missing one. `""` is falsy, so query() dropped the label
+  // term and ran the UNFILTERED search at exit 0 — and stderr said
+  // `N candidate(s)` with no label suffix, indistinguishable from a clean run.
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label", ""]);
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+});
+
+test("a --require-label=value refuses — indexOf cannot see the = form, so the flag reads as absent", () => {
+  // Not the same route as the three above: `indexOf("--require-label")` misses
+  // `--require-label=x` entirely, so arg() returned null — "flag absent" — and
+  // the unfiltered query ran at exit 0 with the label the caller did pass.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label=ready-for-agent"],
+  );
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+});
+
 test("gh output that is not an array refuses — a reduction that did not apply is not an empty queue", () => {
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
@@ -279,6 +305,22 @@ test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spe
   );
   assert.equal(status, 2);
   assert.match(stderr, /^candidates: .*--jq/m);
+  // The refusal names the row by index and never prints it. This is the one
+  // payload-shaped stderr path in the file, and an unreduced row carries the
+  // full issue body — the ~97% this script exists to not fetch. Without this,
+  // a die() that interpolated the row instead of its index kept the whole
+  // suite green while emitting every body it refused to pull.
+  assert.doesNotMatch(stderr, /What to build/);
+});
+
+test("an empty queue is exit 1, not 2 — the query worked and there is no work", () => {
+  // The other half of the contract in this file's header. Every refusal above
+  // pins 2; nothing pinned 1, so a change spending 2 on an empty queue — the
+  // swap the header forbids — shipped green. Verified by mutation: flipping
+  // `rows.length === 0 ? 1 : 0` to `? 2 : 0` fails this test and only this one.
+  const { status, stdout } = run([], ["--require-label", "ready-for-agent"]);
+  assert.equal(status, 1);
+  assert.equal(stdout.trim(), "[]");
 });
 
 test("candidates come back oldest first, whatever order gh returned them in", () => {
