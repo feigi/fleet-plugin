@@ -2,10 +2,12 @@
 // `node --test skills/fleet/scripts/no-undo-audit.test.mjs`.
 //
 // The audit answers one question — is this worktree safe to rebase — and the
-// only thing that can make it unsafe is uncommitted work in the worktree. It
+// only thing that makes it refuse is uncommitted work in the worktree.
+// (Exit 2 is its own outcome: the question could not be answered at all.) It
 // used to also refuse on a nonzero repo-global stash count, which is unrelated
-// to that question: a rebase cannot reach refs/stash, so the count refused every
-// run in a repo holding any entry while proving nothing about the branch.
+// to that question: a rebase never consumes a pre-existing entry, so the count
+// refused every run in a repo holding any entry while proving nothing about the
+// branch.
 //
 // Both directions are pinned here, because a fix for a false refusal is one
 // keystroke from deleting the true one.
@@ -25,9 +27,9 @@ const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
 
 // Pin identity and cut the developer's ~/.gitconfig out of the fixtures, so a
 // local pull.rebase or hook cannot change what these repos look like. BASE_REF
-// is unset because the fleet harness is exactly the caller that has it set, and
-// inheriting it would point every fixture at a local main while the suite stayed
-// green.
+// is unset because the fleet harness is exactly the caller that would have it
+// set, and inheriting it would point every fixture at a local main while the
+// suite stayed green.
 const ENV = {
   ...process.env,
   BASE_REF: undefined,
@@ -86,7 +88,7 @@ test("a pre-existing stash does not refuse a clean worktree", (t) => {
   assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
 
   const r = audit(c);
-  assert.equal(r.status, 0, `a stash the rebase cannot reach must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.status, 0, `a stash the rebase will not consume must not refuse; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.clean, true);
   assert.equal(r.json.stash, 1, "the count is still reported, just not gated on");
   assert.doesNotMatch(r.stderr, /REFUSED/);
@@ -116,6 +118,11 @@ test("a dirty worktree still refuses, and names the worktree not the stash", (t)
   // `git stash drop` two lines later. Removing the gate must remove the
   // instruction, or the contradiction outlives the bug.
   assert.doesNotMatch(r.stderr, /stash-list-clear/);
+  // `git stash`, not `git stash drop`: stashing to clear a dirty worktree now
+  // leaves `clean` true, so this line is the only thing in the repo forbidding
+  // a maneuver nothing detects. Narrowing it back to `drop` reads like a
+  // consistency fix and silently reopens the hole.
+  assert.match(r.stderr, /`git stash` to make a rebase start/);
 });
 
 test("a dirty worktree refuses with an empty stash stack", (t) => {

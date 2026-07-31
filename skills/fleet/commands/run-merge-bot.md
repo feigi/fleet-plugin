@@ -56,7 +56,7 @@ For each labeled PR clearing the hold rule, lowest first:
    ```
 
    - **Equal** → proceed to the audit.
-   - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that the audit (clean tree, no stash) passes and your rebase carries into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
+   - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that the audit (clean tree) passes and your rebase carries into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
    - **Worktree behind, or no worktree at all** → not a divergence. Rebase from the remote head (`git fetch` first) and say which you used.
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
@@ -121,7 +121,7 @@ A rebase resolved the wrong way silently reverts work already in `main`. It look
 ~/.claude/skills/fleet/scripts/no-undo-audit.sh <worktree> <branch>
 ```
 
-It refuses (exit 1) on a dirty worktree or any existing stash entry rather than reporting one. **Never** `git clean`, `git checkout .`, `git reset --hard`, or `git stash drop` to make it pass — that work is unrecoverable and is not on the remote. The stash stack is repo-global across worktrees — never pop, drop or apply an entry you did not create. Read the at-risk commits it lists first; those are what a careless resolution deletes.
+It refuses (exit 1) on a dirty worktree. **Never** `git clean`, `git checkout .`, `git reset --hard`, or `git stash` to make it pass — that work is unrecoverable and is not on the remote, and stashing it clears `porcelain` so the audit passes on the next run without the work ever shipping. The stash count it prints is reported, not gated: the stack is repo-global across worktrees, so a nonzero count is usually the maintainer's. Read `git stash list` yourself when it is nonzero — an entry naming this branch may be a dead member's only copy — and never pop, drop or apply an entry you did not create. Read the at-risk commits it lists first; those are what a careless resolution deletes.
 
 **4. Take `main`'s side wholesale, then re-apply the branch's delta on top.** Never blanket `-X ours` / `-X theirs`. The branch's side is by definition *pre-merge* text — on a docs or comment hunk it carries claims a later PR already corrected, and keeping it reintroduces them silently.
 
