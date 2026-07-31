@@ -35,6 +35,10 @@ if [ -n "$GH_FAIL" ]; then
   echo "gh: could not authenticate to github.com (HTTP 401)" >&2
   exit 1
 fi
+if [ -n "$GH_GARBAGE" ]; then
+  echo "Welcome to gh! Run gh auth login to get started."
+  exit 0
+fi
 while IFS= read -r line || [ -n "$line" ]; do printf '%s\\n' "$line"; done < "$GH_FIXTURE"
 `;
 
@@ -47,7 +51,7 @@ function ledgerText(filed) {
 // `hits` is what the gh stub prints; `gh: false` removes gh from PATH entirely
 // (the "gh not installed" case, which throws ENOENT rather than exiting non-zero
 // — a different code path from an auth failure and worth its own coverage).
-function run(subject, { filed = [], hits = [], ghFails = false, gh = true, args = [] } = {}) {
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
     const file = join(dir, "ledger.md");
@@ -66,6 +70,7 @@ function run(subject, { filed = [], hits = [], ghFails = false, gh = true, args 
       PATH: bin,
     };
     if (ghFails) env.GH_FAIL = "1";
+    if (ghGarbage) env.GH_GARBAGE = "1";
     mkdirSync(bin, { recursive: true });
     if (gh) {
       const ghPath = join(bin, "gh");
@@ -159,10 +164,19 @@ test("near-misses are ranked best-first and capped at three", () => {
     "#3 unrelated worktree audit prose",
     "#4 the merge loop exit 2 gap in run-merge-bot.md documentation",
     "#5 loop merge unrelated tangent",
+    // Five rows must score above the floor, or "capped at three" passes on the
+    // filter and never exercises the cap: raising .slice(0, 3) to .slice(0, 10)
+    // then reds nothing.
+    "#6 merge loop tangent",
+    "#7 loop exit trivia",
   ];
   const r = run("merge loop exit 2 behaviour undocumented in run-merge-bot.md", { filed });
   assert.equal(r.status, 0);
   assert.equal(r.json.near.length, 3, "top-3 cap");
+  assert.ok(
+    filed.filter((f) => f.match(/merge|loop|exit/)).length > 3,
+    "the fixture must offer more scoring rows than the cap returns",
+  );
   assert.match(r.json.near[0].row, /^#4 /, "the closest row must rank first");
   const scores = r.json.near.map((n) => n.score);
   assert.deepEqual(scores, [...scores].sort((a, b) => b - a), "scores must be descending");
@@ -221,6 +235,43 @@ test("gh missing from PATH entirely degrades the same way", () => {
   assert.equal(r.json.tracker.ok, false);
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /^ledger: not previously filed$/m);
+});
+
+test("gh exiting 0 with unparseable stdout is a failed read, not a clean tracker", () => {
+  // gh can succeed and still print something that is not the JSON asked for — a
+  // first-run banner, a deprecation notice. Parsing lives inside the try for
+  // exactly this reason. Treating the parse failure as an empty hit list would
+  // report a tracker that was never actually read as clean, which is the #145
+  // fail-open one layer up.
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghGarbage: true });
+  assert.equal(r.status, 0, "it still degrades rather than blocking the filing");
+  assert.equal(r.json.tracker.ok, false, "an unparseable payload is NOT a clean tracker");
+  assert.deepEqual(r.json.tracker.hits, []);
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  assert.doesNotMatch(r.stderr, /found no related issues/, "never claim the tracker was searched clean");
+});
+
+test("a filed row contained in a longer subject scores on the smaller set, not the union", () => {
+  // Pins the overlap coefficient against Jaccard and against dividing by the
+  // larger set: either would dilute a fully-contained row toward zero and the
+  // ranking would stop discriminating. Swapping Math.min for Math.max here
+  // otherwise reds nothing in this file.
+  const r = run("the merge loop exit 2 behaviour is undocumented in run-merge-bot.md and elsewhere", {
+    filed: ["#1 merge loop exit"],
+  });
+  assert.equal(r.json.near[0].score, 1, "a fully contained filed row scores 1.0");
+});
+
+test("gh returning JSON of the wrong shape is a failed read, not a tracker hit", () => {
+  // Parsing succeeded, so the parse guard above does not fire — but the rows are
+  // not issues. Reported as hits, this escalates to exit 3 and prints
+  // "TRACKER HIT — #undefined", blocking a filing on an answer nobody can read.
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [1, 2, 3] });
+  assert.equal(r.status, 0, "an unreadable answer must not escalate to a tracker hit");
+  assert.equal(r.json.tracker.ok, false);
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  assert.doesNotMatch(r.stderr, /TRACKER HIT/);
+  assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
 });
 
 test("a ledger hit short-circuits: gh is never invoked", () => {
