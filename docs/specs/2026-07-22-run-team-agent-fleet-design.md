@@ -19,13 +19,14 @@ Status: implemented
 > it have been removed below; everything else in this document still stands. See
 > `docs/specs/2026-07-30-fleet-trust-the-label-design.md`.
 
-> **Superseded in part.** In-flight probing (2026-07-30) is now a script call.
-> Phase 0's *In-flight check* step below still names the three probes inline; PR
-> #40 replaced them with a single call to
-> `~/.claude/skills/fleet/scripts/inflight.sh`, which runs all three itself and
-> exits 0 free, 1 taken, 2 the question could not be answered. The step is left
-> as written; run the script instead of the inline commands. See
-> `~/.claude/skills/fleet/skills/next-ticket/SKILL.md`.
+> **Superseded in part.** In-flight probing (2026-07-23) is now a script call.
+> Phase 0's *In-flight check* step below still names the three probes inline;
+> `~/.claude/skills/fleet/scripts/inflight.sh` runs all three itself and exits
+> 0 free, 1 taken, 2 the question could not be answered. The step is left as
+> written, but do not run its commands as a fallback — bare `gh pr list
+> --search` is a full-text match, so nearly every ticket reads as taken and free
+> work is skipped silently, which is what PR #40 was filed to fix. See
+> `docs/specs/2026-07-23-fleet-plugin-design.md`.
 
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
