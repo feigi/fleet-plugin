@@ -58,6 +58,12 @@ const IDENT = {
   GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid",
 };
 
+// Resolved once, and resolved through a shell so it is the same awk the script
+// would have found. The `awkFailAt` shim shadows `awk` on PATH and has to hand
+// off to the real one for every invocation it is not breaking; calling `awk`
+// from inside the shim would find the shim.
+const REAL_AWK = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+
 /**
  * A branch in the bare origin, built from an empty tree straight in that repo.
  *
@@ -85,7 +91,7 @@ function remoteBranch(bare, name) {
  * failures that used to be reported as "no remote branch".
  */
 function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
-                         detachedWorktreeUnder = null }) {
+                         detachedWorktreeUnder = null, awkFailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -93,6 +99,29 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare"
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), GH_STUB);
   chmodSync(join(bin, "gh"), 0o755);
+
+  // A filter that could not run at all. Written only when a case asks for it,
+  // so every other case forks the real awk directly.
+  //
+  // Selected by a substring of the awk program, never by counting invocations:
+  // a count cannot address one filter. The worktree filter used to be two awks
+  // in one pipeline, and a pipeline starts its stages concurrently, so both
+  // read the same counter before either wrote it — measured, they were both
+  // "the second awk" and no invocation was ever the third. A case built on that
+  // count broke nothing and passed the script a clean bill of health.
+  //
+  // Exits 1, deliberately, rather than some louder status: 1 is precisely what
+  // the removed `grep … | paste -sd, - || true` shape existed to swallow. A lone
+  // awk never returns 1 for "matched nothing" — these programs contain no
+  // `exit`, so they return 0 whether or not anything matched, which is what
+  // makes any non-zero status readable as a failure.
+  if (awkFailWhenProgramHas !== null) {
+    writeFileSync(join(bin, "awk"), `#!/bin/sh
+case "$*" in *'${awkFailWhenProgramHas}'*) exit 1 ;; esac
+exec '${REAL_AWK}' "$@"
+`);
+    chmodSync(join(bin, "awk"), 0o755);
+  }
 
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -474,4 +503,100 @@ test("a repository-level failure is not reported as a missing issue", (t) => {
   assert.equal(r.code, 2);
   assert.match(r.stderr, /PR links are unknown/);
   assert.doesNotMatch(r.stderr, /does not exist/);
+});
+
+// --- a filter stage that could not run at all.
+//
+// The lookups are guarded; the filtering of what they returned was not. Each
+// filter was a pipeline ending in `paste -sd, - || true`, and a pipeline
+// reports only its LAST command's status — which the `|| true` then discarded
+// too. So a stage that could not run produced an empty result, and an empty
+// result is exactly what a genuinely free ticket produces. The realistic
+// trigger is not a shimmed binary but a fork failure under process-table
+// pressure, which a parallel fleet approaches by construction — the argument
+// the script already makes for the `|| die` on its PR-counting call.
+//
+// Each case names its filter by a substring the filter's own awk program must
+// contain to do its job — the prefix the remote filter strips, the whole-line
+// match a short refname needs, the raw-path read the worktree filter takes. A
+// key that stops matching stops breaking anything, and the case reddens on the
+// exit code; it cannot pass green over an untouched filter. Nothing else can
+// emit the message each case asserts, so exit 2 plus that message is what
+// proves the intended filter is the one that failed.
+//
+// Each case keeps a real hit present, so "exit 2" is a fact about the filter
+// and not about there being nothing to find. The pre-fix numbers below were
+// measured per filter by breaking the stage that filter actually had, since
+// there was no single awk to break: `sed` for the remote filter, `grep` for the
+// branch filter, `basename` for the worktree filter. Each was checked against
+// the same fixture with that stage intact, which answers taken, exit 1.
+
+test("probe 2: a remote-branch filter that could not run is unknown, never free", (t) => {
+  // Measured pre-fix with its `sed` broken: "no remote branch for #42",
+  // taken=false, exit 0 — the wrong "free", with the branch on the remote.
+  const r = inflight(42, {
+    remoteBranches: ["main", "fix/42-thing"], awkFailWhenProgramHas: "refs/heads/",
+  }, t);
+  assert.equal(r.code, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /could not filter the remote branches for #42/);
+  assert.doesNotMatch(r.stderr, /no remote branch/, "a stage that could not run never reports 'no'");
+  assert.equal(r.json, null, "an unanswered probe emits no verdict to parse");
+});
+
+test("probe 3: a local-branch filter that could not run is unknown, never free", (t) => {
+  // Built by hand rather than through a `fixture` option: probe 3 reads the
+  // repo it is run in, so the branch in that repo is the fixture.
+  const { repo, env } = fixture(t, 42, { awkFailWhenProgramHas: "$0 ~" });
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/42-thing");
+
+  // Measured pre-fix with its `grep` broken: "no local branch or worktree",
+  // taken=false, exit 0 — the wrong "free", with the branch checked out.
+  const r = spawnSync("sh", [SCRIPT, "42"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /could not filter the local branches for #42/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a stage that could not run never reports 'no'");
+  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+});
+
+test("probe 3: a worktree filter that could not run is unknown, never free", (t) => {
+  // Detached for the reason `fixture` is: a branch carrying the same number
+  // would let probe 3's branch half answer for its worktree half, and this
+  // case is about the worktree half alone.
+  const { repo, env } = fixture(t, 77, { awkFailWhenProgramHas: "substr($0,10)" });
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", "fix-77-slug"), "HEAD");
+
+  // Measured pre-fix with its per-line `basename` broken — the same defect one
+  // level down, and the one that needs no shimmed binary to reach: "no local
+  // branch or worktree for #77", taken=false, exit 0, worktree checked out.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /could not filter the worktree list for #77/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a stage that could not run never reports 'no'");
+  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+});
+
+// --- the substring guard, across all three filters at once.
+//
+// Green before the rewrite as well as after: it exists to stay green through
+// it. The matching is a path-segment regex, not a substring search, and a
+// rewrite that reaches for `index`, a bare `~ n`, or a dropped anchor turns
+// every ticket whose digits appear inside a longer number into a false hit —
+// which reads as taken and silently drops real work on the floor.
+test("41 is not claimed by a remote branch, a local branch or a worktree named for 341", (t) => {
+  const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/341-thing"] });
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/341-thing");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", "fix-341-slug"), "HEAD");
+
+  const r = spawnSync("sh", [SCRIPT, "41"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.equal(r.status, 0);
+  assert.equal(json.taken, false);
+  assert.equal(json.evidence.remote, "", "341 on the remote is not 41");
+  assert.equal(json.evidence.localBranch, "", "341 on a local branch is not 41");
+  assert.equal(json.evidence.worktree, "", "341 in a worktree name is not 41");
 });
