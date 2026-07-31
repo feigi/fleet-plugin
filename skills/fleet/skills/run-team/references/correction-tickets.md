@@ -16,10 +16,10 @@ Second run, on a **different repo**; the numbers and test vocabulary describing 
 
 Both were **positional references**: "the *closing* `report-file verification` block" (4th of 5) and "the *second* assertion is the one with teeth" (3rd). Positional refs are one of the four classes in the four-for-four finding, and they re-rot the moment anyone inserts ahead of them.
 
-Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation reds the named assertion and never reaches the true one, appearing to confirm the wrong claim.
+Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation (setting the workflow step under test to `if: ${{ always() }}`) reds the named assertion and never reaches the true one, appearing to confirm the wrong claim. One mutation cannot discriminate an ordinal: PR #32 measured that `always()` reds the named assertion, and only the narrower `always() && steps.mutate.outcome == 'success'` reds the true one.
 
 Two rules for the implementer, both cheap: **match the ticket's stated size** — added prose is where minted claims enter — and **never write a positional reference** (`the closing/second/last X`); name what the thing *is*, not where it sits.
 
 ## The clause-by-clause duty
 
-Put check on **implementer**, not only reviewer: every factual claim it restates must have settling command run against tree first. Issue body is lead, never citation. Tell reviewers same, and to read each corrected sentence literally, asking whether every clause true under that reading — nobody hunts this unprompted, because diff "obviously" improves accuracy.
+Put check on **implementer**, not only reviewer: every factual claim the diff restates must have settling command run against tree first. Issue body is lead, never citation. Tell reviewers same, and to read each corrected sentence literally, asking whether every clause true under that reading — nobody hunts this unprompted, because diff "obviously" improves accuracy.
