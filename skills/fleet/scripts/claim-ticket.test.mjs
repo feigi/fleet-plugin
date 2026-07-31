@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -119,6 +119,30 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
   const r = apply(SUITE).run("with space");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /pass 1/);
+});
+
+// `[ -d ]` follows symlinks and `find` does not descend a symlinked argument,
+// so the two halves of the shim disagreed on the same target: the branch test
+// admitted the symlink, `find` matched nothing under it, and the count guard
+// below refused a suite that is right there. The trailing slash on `find`'s
+// argument is what settles the disagreement; `find -L` would settle it too, but
+// by also following symlinks *inside* the tree, which is how a suite sweeps
+// into a symlinked `node_modules` or walks a loop.
+// The symlink is written into the worktree rather than through `repo()` because
+// the runner only ever stats a path in its cwd — whether a commit or a local
+// `ln -s` put it there is invisible to it — and keeping it out of the shared
+// fixture leaves every other count assertion in this file measuring what it
+// measured before.
+test("runner: a symlink to a directory runs the test files under it", () => {
+  const a = apply(SUITE);
+  symlinkSync("t", join(a.wt, "tlink"));
+  const r = a.run("tlink");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // Anchored for the same reason as the vendored-test count above: bare
+  // `pass 3` is a substring of `pass 3<n>` and stops discriminating once a
+  // fixture grows. 3 is `t/`'s own two files plus the one under `t/nested/`,
+  // so a symlink followed only one level deep reads as a red here too.
+  assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
 });
 
 // The sharp edge. `node --test` with zero files exits 0, so an expansion that
