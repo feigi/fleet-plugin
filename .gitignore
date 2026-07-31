@@ -73,3 +73,9 @@ backups/
 .caveman-active
 # ponytail runtime marker — same kind of transient *-active flag
 .ponytail-active
+
+# agent-brain — installer output, not our config. Reinstalled on every update.
+.agent-brain/
+hooks/memory-*.sh
+hooks/lib/
+agents/memory-*.agent.md

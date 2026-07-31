@@ -32,8 +32,8 @@ No `additionalContext` line for substantive prompt → hook unreachable (server 
 
 ### Identity Parameters
 
-- **`user_id`**: OS username, output of `whoami`. User identity across all memory tools.
-- **`workspace_id`**: Canonical git repo dir name (e.g., `agent-brain`), lowercased. Worktree-stable — worktree session resolves same value as main checkout.
+- **`user_id`**: OS username, output of `whoami`, slugified the same way (`First.Last` → `first-last`). User identity across all memory tools.
+- **`workspace_id`**: Canonical git repo directory name, slugified — lowercase alphanumeric and hyphens (`~/.claude` → `claude`, `my_repo` → `my-repo`). Worktree-stable — worktree session resolves same value as main checkout.
 
 ### When to Call `memory_search`
 
