@@ -360,6 +360,27 @@ test("a stray worktree the script may not stat keeps the hand-release remedy", (
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
 
+test("a stray worktree taken out by rm -rf .worktrees still names the prune", (t) => {
+  // The stray half of the guard reaching the WALK, not just the one-level lookup.
+  // `rm -rf .worktrees` is how this usually happens and it takes the parent along
+  // with the child — the case the predicate's own comment names as its motive —
+  // yet the two cases above only ever remove the child. Without this, a
+  // stray-only precondition like `[ -d "${stray%/*}" ] &&` on the guard leaves the
+  // whole file green while handing back "release it by hand" for a directory that
+  // is not there: the permanent refusal, reinstated, with nothing to catch it.
+  // The dirty-check caller has this covered at "the whole .worktrees directory
+  // deleted by hand still releases"; the stray caller did not.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  rmSync(join(r.w, ".worktrees"), { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree prune/, "the parent going too does not make the child unanswerable");
+});
+
 test("a repo path containing a space does not truncate the worktree it reads", (t) => {
   // `worktree list --porcelain` prints the path raw, so taking awk's $2 stops at
   // the first space — and every worktree under a directory like "My Repos", which
