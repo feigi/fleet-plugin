@@ -3,10 +3,17 @@
 // codes, which are the whole interface for a caller that reads no stderr: 2 is
 // "the query broke", 1 is "the queue is empty", and the two must never swap.
 //
-// candidates.mjs applies its reduction through gh's server-side `--jq`, so the
-// stub below runs the real jq against a fixture with the same expression gh
-// would have received. Stubbing gh to return already-reduced JSON would leave
-// the jq expression — which is where the spec predicate actually lives —
+// candidates.mjs applies its reduction through gh's `--jq`, so the stub below
+// runs the same expression gh would have received — under the system jq it
+// execs, not the gojq gh embeds and applies in its own process. The spec
+// predicate is under test; the ENGINE is not, and the live predicate already
+// turns on the difference: `\s` and `\d` are Unicode-aware in jq's Oniguruma
+// and ASCII-only in Go's RE2, so a `## User Stories` padded with U+00A0 is a
+// spec here and NOT one under gh, where dropSpecs is the only line of defence
+// (#204). Nothing announces that: a pattern gojq rejects outright at least
+// exits non-zero, but a class that merely matches differently leaves this
+// suite green either way. Stubbing gh to return already-reduced JSON would
+// leave the jq expression — which is where the spec predicate actually lives —
 // completely untested.
 
 import { test } from "node:test";
