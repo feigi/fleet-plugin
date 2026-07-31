@@ -195,8 +195,11 @@ test("runner: a vendored test under a nested node_modules does not run", () => {
   const r = a.run("t");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   // Anchored: a bare `pass 4` is a substring and matches `pass 41`, so the pin
-  // would dissolve the moment the fixture grows past 40.
-  assert.match(r.stdout, /^ℹ pass 4$/m);
+  // would dissolve the moment the fixture grows past 40. Both prefixes because
+  // `node --test`'s default reporter is version- and TTY-dependent — spec
+  // (`ℹ pass 4`) on a terminal and on newer node, tap (`# pass 4`) when older
+  // node writes to a pipe, which is every CI run.
+  assert.match(r.stdout, /^(?:ℹ|#) pass 4$/m);
 });
 
 // Directories are only rewritten for `node --test`. Every other entrypoint is
