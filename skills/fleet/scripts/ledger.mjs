@@ -199,8 +199,10 @@ if (cmd === "check") {
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
     console.log(JSON.stringify({ subject, found: true, match }));
-    // Exit 1 means "do not file this again". Non-zero is the stop signal, so a
-    // caller that checks only the exit status still cannot duplicate.
+    // Exit 1 means "do not file this again" — the strong signal. Exit 3 is also
+    // non-zero but weaker: tracker rows to review, not a ruling. A caller that
+    // checks only the exit status stops on both, which errs toward not
+    // duplicating.
     process.exit(1);
   }
 
@@ -224,12 +226,11 @@ if (cmd === "check") {
         .map((t) => t.replace(/s$/, "")),
     );
   // Overlap coefficient (shared / smaller set), not Jaccard. A filed row carries
-  // a `#NNN` prefix, a source tag like `(review-pr-108)` and other metadata the
-  // checked subject can never contain, so the union is dominated by tokens with
-  // no chance of matching: Jaccard drives every row to a similar small number
-  // and the ranking stops discriminating. Dividing by the smaller set is also
-  // indifferent to which side is more verbose, which is the asymmetry the
-  // subset rule gets backwards.
+  // a source tag like `(review-pr-108)` and other metadata the checked subject
+  // can never contain, so the union is dominated by tokens with no chance of
+  // matching: Jaccard drives every row to a similar small number and the
+  // ranking stops discriminating. Dividing by the smaller set also keeps the
+  // score indifferent to which side is more verbose.
   const overlap = (a, b) => {
     if (a.size === 0 || b.size === 0) return 0;
     let shared = 0;
@@ -255,13 +256,16 @@ if (cmd === "check") {
   // five times in one run and `check` reported it safe to file every time. Ask
   // the tracker.
   //
-  // gh ANDs the search terms, so the query has to stay SHORT to match anything
-  // at all — three of the subject's most distinctive words. Measured against
-  // the live tracker: "candidates opposite states" returns #114, and adding a
-  // fourth, less distinctive term drops it, because under AND every extra term
-  // can only subtract. Longest-first is a crude stand-in for distinctiveness
-  // (no corpus to weigh terms against); upgrade to a real frequency weighting
-  // if the query starts missing.
+  // gh ANDs the search terms, so every extra term can only narrow the result —
+  // keep the query SHORT: three of the subject's most distinctive words.
+  // Measured against the live tracker, "candidates opposite states" returns
+  // #114. Whether a fourth term helps or hurts turns on whether it happens to
+  // occur in the target issue's text — gh searches bodies, not just titles —
+  // which the subject cannot know: "code" leaves #114 in, "open" drops it. So
+  // three is a recall-preserving floor, not a measured optimum. Longest-first is a crude stand-in for distinctiveness (no
+  // corpus to weigh terms against) and the >= 3 filter erases short but
+  // distinctive identifiers like `CI` or `gh`; upgrade to a real frequency
+  // weighting if the query starts missing.
   //
   // norm() has already stripped punctuation, which is also what keeps a subject
   // containing `is:open` or `file.mjs:164` from smuggling a qualifier into the
@@ -286,9 +290,18 @@ if (cmd === "check") {
       // Parsing inside the try on purpose: gh can exit 0 and still print
       // something that is not the JSON asked for. A parse failure is a failed
       // tracker read, not a clean tracker.
-      const hits = JSON.parse(out)
+      const parsed = JSON.parse(out);
+      // Parseable is not the same as the shape asked for. Without this, a gh
+      // printing a JSON array that is not an issue list escalates to exit 3 and
+      // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
+      // that is in fact unverified. Throw into the catch below: an unreadable
+      // answer is a failed tracker read, exactly like unparseable output.
+      if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
+        throw new Error("gh returned JSON that is not an issue list");
+      }
+      const hits = parsed
         .map((h) => ({
-          number: h.number, title: h.title, state: h.state, url: h.url,
+          number: h.number, title: h.title || "", state: h.state, url: h.url,
           score: round2(overlap(scored, scoreTokens(h.title || ""))),
         }))
         .sort((a, b) => b.score - a.score);
@@ -317,10 +330,13 @@ if (cmd === "check") {
   }
   console.log(JSON.stringify({ subject, found: false, match: null, near, tracker }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
-  // 0 would mean safe to file, which is the claim this whole change exists to
-  // stop making; 1 would mean ALREADY FILED in this run, which a tracker hit
-  // does not establish; 2 is taken by die(). Near-misses stay exit 0: they are
-  // a ranked suggestion, not a finding of duplication.
+  // 1 would mean ALREADY FILED in this run, which a tracker hit does not
+  // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
+  // suggestion, not a finding of duplication. Exit 0 covers two states — the
+  // tracker searched and clean, or never searched at all — which `tracker.ok`
+  // and the stderr line distinguish but the exit code does not. A hit scoring
+  // 0.00 still forces 3: gh matched the issue body, which the title-based score
+  // cannot see.
   process.exit(tracker.hits.length ? 3 : 0);
 }
 
