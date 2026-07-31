@@ -253,6 +253,21 @@ test("gh output that is not an array refuses — a reduction that did not apply 
   assert.match(stderr, /^candidates: .*--jq/m);
 });
 
+test("gh output that is empty refuses — the reduction emits an array for every input, including none", () => {
+  // The one shape the checks below cannot see, because it never reaches the
+  // parse. `[…]`-wrapped, the expression emits `[]` for an empty list, so no
+  // output at all means it did not run — the same fact as a wrong shape, and
+  // NOT an empty queue. Returning `[]` here spent that on exit 1, "no work".
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: "empty" },
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: .*--jq/m);
+});
+
 test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spec}", () => {
   // What a gh that ignored `--jq` actually returns: the unreduced `--json`
   // payload. An array, so an array check alone passes it through.
