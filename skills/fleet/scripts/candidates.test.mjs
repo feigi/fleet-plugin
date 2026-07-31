@@ -3,11 +3,15 @@
 // codes, which are the whole interface for a caller that reads no stderr: 2 is
 // "the query broke", 1 is "the queue is empty", and the two must never swap.
 //
-// candidates.mjs applies its reduction through gh's server-side `--jq`, so the
-// stub below runs the real jq against a fixture with the same expression gh
-// would have received. Stubbing gh to return already-reduced JSON would leave
-// the jq expression — which is where the spec predicate actually lives —
-// completely untested.
+// candidates.mjs applies its reduction through gh's `--jq`, so the stub below
+// runs the same expression gh would have received — under the system jq it
+// execs, not the gojq gh embeds and applies in its own process. The expression
+// is under test; the ENGINE is not. Their regex flavours differ — gojq's is
+// Go's, which rejects the lookahead system jq accepts — so a predicate that
+// turns on flavour is out of this suite's reach. The current one does not: it
+// reduces live issues to identical rows under both. Stubbing gh to return
+// already-reduced JSON would leave the jq expression — which is where the spec
+// predicate actually lives — completely untested.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
