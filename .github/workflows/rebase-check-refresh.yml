@@ -1,0 +1,197 @@
+# `rebase-check` only runs on `pull_request` events, so a PR that passed it keeps
+# a stale green check after main advances — the branch protection still blocks the
+# merge, but the PR itself looks green with nothing saying why. This workflow
+# re-runs the real `rebase-check` job on open PRs targeting main whenever main
+# moves, so the PR goes red with the actionable log line instead.
+#
+# Only PRs actually BEHIND their base are re-run: `POST
+# /actions/jobs/{id}/rerun` re-runs a job AND ITS DEPENDENT JOBS, and re-running
+# unconditionally would flip an already-green required check back to in-progress
+# — blocking the merge it was meant to unblock. Gating on `behind_by > 0` avoids
+# that; PRs that are up to date are never touched.
+name: Refresh rebase-check
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  pull-requests: read
+  contents: read
+
+# A newer main push supersedes an in-flight refresh — its PR list is strictly
+# fresher. Not a clean supersession: reruns the cancelled run already POSTed stay
+# in flight, and the replacement run will see those jobs as running and skip them
+# (see the rerun branch below).
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Re-run rebase-check on stale open PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Derive the host from the runner-provided server URL rather than
+          # letting gh default to github.com, so this keeps working if the repo
+          # ever lives on a GHE instance.
+          export GH_HOST="${GITHUB_SERVER_URL#https://}"
+
+          # `if !` rather than a bare assignment: `set -e` would abort here, but
+          # silently, with no annotation in the run log.
+          # `baseRefName` is requested even though the list is filtered to base
+          # main: the compare below derives its base from it, so widening or
+          # dropping the filter cannot silently measure a PR against the wrong base.
+          if ! PRS=$(gh pr list --base main --state open --limit 100 \
+                       --json number,baseRefName,headRefOid \
+                       --jq '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
+            echo "::error::gh pr list failed"
+            exit 1
+          fi
+
+          if [ -z "$PRS" ]; then
+            echo "No open PRs targeting main."
+            exit 0
+          fi
+
+          TOTAL=$(printf '%s\n' "$PRS" | grep -c . || true)
+          if [ "$TOTAL" -ge 100 ]; then
+            echo "::warning::Hit the 100-PR list cap — PRs beyond the first 100 were not refreshed."
+          fi
+
+          UPTODATE=0
+          BEHIND=0
+          RERAN=0
+          NO_RUN=0
+          NO_JOB=0
+          REJECTED=0
+          FAILED=0
+
+          # Read the PR list on fd 3 so a loop-body command that reads stdin cannot
+          # drain it and silently reduce the loop to a single iteration.
+          while read -r PR BASE SHA <&3; do
+            if [ -z "$PR" ] || [ -z "$BASE" ] || [ -z "$SHA" ]; then
+              echo "::warning::Skipping malformed PR row: '$PR $BASE $SHA'"
+              continue
+            fi
+
+            # `behind_by > 0` is exactly rebase-check's own `"$MERGE_BASE" !=
+            # "$BASE_SHA"` guard, so this is one field, not a second copy of the
+            # merge-base logic. It is that one guard, not the whole job: ci.yml's
+            # step has further guards — no common ancestor, merge commits above
+            # the base — so `behind_by == 0` does NOT imply rebase-check would
+            # pass. That costs this gate nothing: a branch tripping another guard
+            # is already red, and the base only advances, so re-running would
+            # learn nothing new about the branch's shape.
+            #
+            # Both sides must be measured against the SAME base: ci.yml resolves
+            # `origin/$BASE_REF` per PR, so this compares against `$BASE` — the
+            # PR's own `baseRefName` — rather than a hardcoded `main` that only
+            # agrees while the list above stays filtered to base main.
+            if ! BEHIND_BY=$(gh api "repos/$GH_REPO/compare/$BASE...$SHA" --jq '.behind_by' </dev/null); then
+              echo "::error::#$PR ($SHA): failed to compare against $BASE — see gh error above."
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            if [ "$BEHIND_BY" -eq 0 ]; then
+              echo "#$PR ($SHA): up to date with $BASE — nothing to refresh."
+              UPTODATE=$((UPTODATE + 1))
+              continue
+            fi
+            BEHIND=$((BEHIND + 1))
+
+            # Runs for this PR's current head. `per_page=5` rather than 1 because
+            # ci.yml sets `cancel-in-progress: true`, so the newest run is often a
+            # cancelled stub with no jobs at all — taking only the newest would
+            # exclude that PR permanently, since every later push re-resolves the
+            # same stub. Ordering is created-descending in practice; GitHub does
+            # not document a guarantee, hence the walk rather than an index.
+            if ! RUNS_JSON=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$SHA&per_page=5" </dev/null); then
+              echo "::error::#$PR ($SHA): failed to query CI runs — see gh error above. This is an API failure, not a missing run."
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            RUN_IDS=$(printf '%s' "$RUNS_JSON" \
+              | jq -r '.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped") | .id')
+
+            if [ -z "$RUN_IDS" ]; then
+              echo "#$PR ($SHA): behind by $BEHIND_BY but no usable CI run found — skipping."
+              NO_RUN=$((NO_RUN + 1))
+              continue
+            fi
+
+            # `first(...)` inside jq rather than `| head -1`: under `pipefail`, head
+            # closing the pipe early can SIGPIPE gh (141), which would discard a job
+            # id that was in fact found.
+            JOB=""
+            for RUN in $RUN_IDS; do
+              if ! JOBS_JSON=$(gh api "repos/$GH_REPO/actions/runs/$RUN/jobs?filter=latest&per_page=100" </dev/null); then
+                echo "::error::#$PR: failed to list jobs for run $RUN — see gh error above."
+                continue
+              fi
+              JOB=$(printf '%s' "$JOBS_JSON" \
+                | jq -r 'first(.jobs[] | select(.name == "rebase-check") | .id) // empty')
+              if [ -n "$JOB" ]; then
+                break
+              fi
+            done
+
+            if [ -z "$JOB" ]; then
+              echo "#$PR ($SHA): behind by $BEHIND_BY but no rebase-check job in any candidate run — skipping."
+              NO_JOB=$((NO_JOB + 1))
+              continue
+            fi
+
+            # The rerun endpoint rejects a job whose parent RUN is still in
+            # progress — not merely a queued job. `check` runs in parallel with
+            # `rebase-check` and is capped at 10 minutes, so rebase-check can sit
+            # completed inside a run that stays in progress for that long, and a
+            # main push landing mid-CI can leave a PR stale until the next push.
+            # Reruns also fail once a run ages out of the retention window.
+            #
+            # 401/403 is a different animal: it means this workflow's token cannot
+            # rerun anything here, so it is fatal rather than per-PR — otherwise a
+            # global config defect reads as N benign timing races.
+            if RERUN_ERR=$(gh api --method POST "repos/$GH_REPO/actions/jobs/$JOB/rerun" </dev/null 2>&1); then
+              # A 2xx means accepted for scheduling, not completed: the rerun re-enters
+              # ci.yml's concurrency group and a later push to the PR branch can cancel it.
+              echo "#$PR ($SHA): behind by $BEHIND_BY — requested rerun of rebase-check (job $JOB)."
+              RERAN=$((RERAN + 1))
+            elif printf '%s' "$RERUN_ERR" | grep -qE 'HTTP (401|403)'; then
+              echo "::error::#$PR: rerun POST denied — $RERUN_ERR"
+              echo "::error::GITHUB_TOKEN lacks 'actions: write' here, or a secondary rate limit is active. No PR can be refreshed until this is fixed."
+              exit 1
+            else
+              echo "#$PR ($SHA): rerun of job $JOB rejected — $RERUN_ERR"
+              REJECTED=$((REJECTED + 1))
+            fi
+          done 3<<< "$PRS"
+
+          SUMMARY="Checked $TOTAL open PR(s): $UPTODATE up to date, $BEHIND behind their base → $RERAN re-run (no-run: $NO_RUN, no-job: $NO_JOB, rejected: $REJECTED, failed: $FAILED)."
+          echo "$SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+          # Without this the workflow is green whether it refreshed everything or
+          # nothing — the exact failure mode it exists to fix. The condition is
+          # "something needed refreshing and none of it worked": every PR being up
+          # to date is a legitimate no-op, not a failure.
+          if [ "$BEHIND" -gt 0 ] && [ "$RERAN" -eq 0 ]; then
+            echo "::error::$BEHIND PR(s) are behind their base but none were re-run. Check the errors above, the actions:write permission, and GH_HOST resolution."
+            exit 1
+          fi
+          # Every PR erroring out means we learned nothing about any of them — that
+          # is a broken token/host, not a quiet success, and must not exit green.
+          if [ "$FAILED" -eq "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
+            echo "::error::All $TOTAL PR(s) failed to evaluate — no staleness check succeeded. Check the errors above, GH_HOST resolution, and token scopes."
+            exit 1
+          fi
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::$FAILED PR(s) hit API errors and may still show a stale rebase-check."
+          fi
