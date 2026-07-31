@@ -16,11 +16,12 @@ Phase 0 admits a ticket only if `sizing-a-ticket` calls it **light**
 is paid.
 
 **Wrong axis.** The design of record already argues for the axis we want.
-`docs/specs/2026-07-22-run-team-agent-fleet-design.md:211-213` justifies the
-filter as: *"A ticket can be correctly labeled `ready-for-agent` and still be
-too open-ended to hand a background implementer."* Open-endedness — whether
-what to build is decided. But `:193` implements it by importing `next-ticket`'s
-row table wholesale, and that table (`sizing-a-ticket:14-15`) ANDs open-endedness
+`docs/specs/2026-07-22-run-team-agent-fleet-design.md` justifies the filter as:
+*"A ticket can be correctly labeled `ready-for-agent` and still be too
+open-ended to hand a background implementer."* Open-endedness — whether what to
+build is decided. But Phase 0's *"admit light-row only"* step implements it by
+importing `next-ticket`'s row table wholesale, and that table
+(`sizing-a-ticket:14-15`) ANDs open-endedness
 together with *"one-two files"* / *"more than ~3 files"*. Intent is ambiguity;
 mechanism is size. A large, fully-decided ticket — a mechanical rename across
 eight files with acceptance criteria — is heavy by the table and excluded, forever.
