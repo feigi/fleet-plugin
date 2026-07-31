@@ -84,7 +84,8 @@ function remoteBranch(bare, name) {
  * able to answer probe 2 first. "unreachable" and "none" opt into the two
  * failures that used to be reported as "no remote branch".
  */
-function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [] }) {
+function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
+                         detachedWorktreeUnder = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -106,6 +107,17 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare"
     execFileSync("git", ["-C", repo, "remote", "add", "origin", join(root, "definitely-not-a-repo")]);
   } // "none": no origin configured at all.
 
+  // Detached on purpose. `worktree add -b` would leave a local branch carrying
+  // the same number, and probe 3's branch half would answer for its worktree
+  // half — the same "passing for the wrong reason" the bare origin above avoids.
+  if (detachedWorktreeUnder !== null) {
+    const g = (...args) => execFileSync("git", ["-C", repo, ...args],
+      { env: { ...process.env, ...IDENT } });
+    g("commit", "-q", "--allow-empty", "-m", "x");
+    mkdirSync(join(root, detachedWorktreeUnder), { recursive: true });
+    g("worktree", "add", "-q", "--detach", join(root, detachedWorktreeUnder, `fix-${n}-slug`), "HEAD");
+  }
+
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
@@ -113,6 +125,16 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare"
     // an inherited insteadOf rule). An unattended probe that blocks forever is
     // worse than either answer, and a suite that hangs reports nothing at all.
     GIT_TERMINAL_PROMPT: "0",
+    // The developer's own git config must not reach these cases, the way
+    // release-ticket.test.mjs:30 already shuts it out. Probe 2 only became a
+    // hard dependency of this file with the fail-closed guard — before it, a
+    // broken origin was swallowed and no config could reach it. Now
+    // `protocol.file.allow=never` (documented hardening after CVE-2022-39253)
+    // reddens most of the file, and a global `[remote "origin"] url` is worse
+    // than red: `remote.<name>.url` is multi-valued, the global entry wins, and
+    // "no matching branch" passes while pointed at somebody else's repository.
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
     GH_ISSUE_JSON: JSON.stringify({
       url: `https://github.com/${REPO}/issues/${n}`,
       closedByPullRequestsReferences: linked.map((l) =>
@@ -297,6 +319,28 @@ test("probe 2: a reachable origin with a matching branch still reports taken", (
   assert.equal(r.json.taken, true);
   assert.equal(r.json.evidence.remote, "fix/33-probe");
   assert.deepEqual(r.json.hits, ["remote-branch"], "probe 2 alone, not probe 3 answering for it");
+});
+
+// --- probe 3, the worktree lookup.
+//
+// `worktree list --porcelain` prints the path raw, so reading it as awk's $2
+// truncates at the first space and the ticket stops matching — a wrong "free",
+// the same answer probe 2 was just stopped from inventing. The pair below is
+// one fixture differing in one character, so a red names the space and nothing
+// else. release-ticket.sh:70 already reads this field as substr($0,10).
+
+test("probe 3: a worktree under a path with a space is still found", (t) => {
+  const r = inflight(77, { detachedWorktreeUnder: "some dir" }, t);
+  assert.equal(r.code, 1, "a worktree that exists must never read as free");
+  assert.equal(r.json.taken, true);
+  assert.match(r.json.evidence.worktree, /some dir\/fix-77-slug$/);
+  assert.deepEqual(r.json.hits, ["local"]);
+});
+
+test("probe 3: the same worktree without a space in the path, as the control", (t) => {
+  const r = inflight(77, { detachedWorktreeUnder: "nospace" }, t);
+  assert.equal(r.code, 1);
+  assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
 });
 
 // --- error paths. These do not reach the jq expression at all: the stub exits on
