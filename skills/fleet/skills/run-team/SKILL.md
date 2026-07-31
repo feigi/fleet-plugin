@@ -231,9 +231,10 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Review slot free, PR queued** → dispatch a reviewer.
 - **A specialist report lands** (a task-notification from a grandchild you never
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
-  included.** You are the only path: the reviewer cannot fetch it, and telling it
-  to ping the specialist returns `had no active task; resumed from transcript`
-  and delivers nothing.
+  included.** Relay anyway even though the reviewer can retrieve it itself from
+  the specialist's output file — a duplicate costs nothing, a missed report costs
+  a verdict. Telling it to ping the specialist still returns `had no active task;
+  resumed from transcript` and delivers nothing.
 - **A reviewer's verdict claims a dimension went undelivered** → reconcile it
   against your relay receipts before accepting it. Receipts say relayed → re-send
   naming the specialist and hold that verdict until it lands; a relay can arrive
@@ -295,12 +296,14 @@ See references/member-lifecycle.md.
 
 **On the hand-dispatch path, delivering specialist reports is your duty, not the
 reviewer's — the relay is an event-loop obligation above.** Reports surface to
-*you* and grandchildren are unaddressable, so a reviewer has no way to fetch one
-and must never be told to ping for it. State in that prompt that reports arrive
-from you, and that a specialist which has neither reported nor been relayed means
-asking you by name — not ruling silently, and not waiting forever; authorize the
-partial ruling once a report will not land, since a killed specialist never
-reports and never gets relayed. **None of this belongs in a prompt for the
+*you* and grandchildren are unaddressable, so a reviewer must never be told to
+ping for one. But it **can** read the report itself: a specialist it spawned
+writes its transcript to the output file named in its spawn result, and
+`tail -1 <file> | jq -r '.message.content[]?|select(.type=="text").text'`
+extracts the final report — bounded, unlike reading the whole file. State that in
+the prompt: retrieve first, ask you by name only if the file yields nothing, and
+rule a dimension **unrun** only when neither works — not silently, and not after
+waiting forever, since a killed specialist never reports and never gets relayed. **None of this belongs in a prompt for the
 `review-pr.js` path below** — there `agent()` returns into the script, so no relay
 ever occurs and the blocking rule would strand every verdict permanently.
 See references/member-lifecycle.md.
@@ -646,8 +649,8 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
 - "I'd have to pick an approach myself" → that IS undecided.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
 - "Tell the reviewer to ping its specialists" → the ping returns `had no active
-  task; resumed from transcript` and delivers nothing; on the hand-dispatch path
-  the relay is the only path.
+  task; resumed from transcript` and delivers nothing. Tell it to read the
+  specialist's output file instead; your relay is the backup, not the only path.
 - "I relayed it, so the reviewer has it" → sent is not read, and a relay can land
   after the verdict is composed. Two reviewers ruled relayed dimensions
   undelivered, one of them shipping a headline claim the report it disclaimed
