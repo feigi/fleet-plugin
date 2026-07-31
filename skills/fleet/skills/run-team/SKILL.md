@@ -352,7 +352,7 @@ See references/ci-and-staleness.md.
 minted in prose the ticket never asked for.** Put the check on the
 **implementer**, not only the reviewer: every factual claim it restates must have
 a settling command run against the tree first — the issue body is a lead, never a
-citation — and it must **match the ticket's stated size**, since added prose is
+citation — and the diff must **match the ticket's stated size**, since added prose is
 where minted claims enter. No positional references (`the closing/second/last X`);
 name the thing semantically. Tell reviewers to read each corrected sentence
 literally, clause by clause. See references/correction-tickets.md.
