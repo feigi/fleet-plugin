@@ -118,10 +118,22 @@ jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g
 # exited before every printf, so a caller parsing this script's stdout got
 # nothing at all out of the one case where it most needs to know what happened.
 # Enumerate what landed, name the compensating action, still emit the receipt.
+#
+# Which headline is a claim about what LANDED, so the two booleans decide it and
+# never the call site: the worktree removal is the FIRST mutation, so its refusal
+# — the ordinary way here — leaves both false, and announcing a partial release
+# over an all-false detail line overstates exactly the state this script exists
+# to report precisely. A partial release is a refusal that followed a successful
+# one. Distinct again from the blocked message that reports refused
+# preconditions, which means nothing was ATTEMPTED.
 done_wt=false
 done_branch=false
 halt() {
-  echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+  if [ "$done_wt" = true ] || [ "$done_branch" = true ]; then
+    echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+  else
+    echo "$NAME: #$issue HALTED mid-release — nothing landed: $1" >&2
+  fi
   echo "    worktree removed: $done_wt, branch deleted: $done_branch, in-progress: still on the issue" >&2
   echo "    the ticket still reads as taken — finish or restore it by hand" >&2
   printf '{"issue":%s,"branch":"%s","worktree":"%s","label":%s,"released":false,"applied":true,"blockers":["%s"]}\n' \
