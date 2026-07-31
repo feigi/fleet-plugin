@@ -493,8 +493,9 @@ strands the feature worktree on `main`. `gh pr merge <n> --merge` alone; GitHub
 deletes the remote branch anyway.
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
-`git reset --hard`. Uncommitted changes may exist nowhere else. Non-empty
-`git status --porcelain` → stop and report.
+`git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.
+Non-empty `git status --porcelain` → stop and report — stashing empties it, so
+that check and `no-undo-audit.sh` both go quiet on work nothing else holds.
 
 **Cross-check what members report about their environment.** Wrong often enough
 to matter, and a confident wrong report from a reviewer flips a verdict.
