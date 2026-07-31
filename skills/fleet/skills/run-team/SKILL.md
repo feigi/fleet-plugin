@@ -63,8 +63,13 @@ At start, and whenever the pool empties.
    one mid-flight.
 2. Dependency scan, `next-ticket` step 2, on the `d` array. Open blocker → drop.
 3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
-   candidate; any hit = taken. It runs all three probes (open/closed PRs, remote
-   heads, local worktrees + branches) so a partial one cannot read as free.
+   candidate; any hit = taken. It runs all three probes (PRs, remote heads, local
+   worktrees + branches) so a partial one cannot read as free. The PR probe is
+   two signals rather than a full-text search — GitHub's own closing-PR links
+   plus branch-segment matching — and both drop `MERGED` and `CLOSED`, so a
+   merged or abandoned PR cannot hold a ticket forever. A linked PR the
+   `gh pr list` window does not cover has no state to read: it prints `?` and
+   still counts as taken.
 4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
    --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
    answers both questions. Record the Agent Brief's `Out of scope` sequencing.
