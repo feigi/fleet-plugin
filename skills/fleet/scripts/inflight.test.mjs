@@ -53,14 +53,39 @@ case "$sub" in
 esac
 `;
 
+const IDENT = {
+  GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid",
+  GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid",
+};
+
+/**
+ * A branch in the bare origin, built from an empty tree straight in that repo.
+ *
+ * Deliberately not `push`ed from the local clone: pushing would leave a local
+ * branch of the same name behind, probe 3 would hit it too, and a probe-2 case
+ * would pass on probe 3's evidence.
+ */
+function remoteBranch(bare, name) {
+  const g = (args, input) => execFileSync("git", ["-C", bare, ...args],
+    { input, encoding: "utf8", env: { ...process.env, ...IDENT } }).trim();
+  const commit = g(["commit-tree", g(["hash-object", "-t", "tree", "-w", "--stdin"], ""), "-m", "x"]);
+  g(["update-ref", `refs/heads/${name}`, commit]);
+}
+
 /**
  * A git repo with `gh` stubbed on PATH.
  *
  * The repo lives in a fixed-name subdirectory, never in the mkdtemp dir itself:
  * probe 3 matches worktrees on basename, and a random mkdtemp suffix that
  * happened to be the ticket number would make every case read as taken.
+ *
+ * `origin` defaults to a real bare repo because probe 2 now exits 2 when it
+ * cannot read one — so a case that means to exercise anything else has to be
+ * able to answer probe 2 first. "unreachable" and "none" opt into the two
+ * failures that used to be reported as "no remote branch".
  */
-function fixture(t, n, { linked = [], prs = [], issueErr = null }) {
+function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
+                         detachedWorktreeUnder = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -73,9 +98,43 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null }) {
   mkdirSync(repo);
   execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", repo]);
 
+  if (origin === "bare") {
+    const bare = join(root, "remote.git");
+    execFileSync("git", ["init", "-q", "--bare", bare]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", bare]);
+    for (const b of remoteBranches) remoteBranch(bare, b);
+  } else if (origin === "unreachable") {
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", join(root, "definitely-not-a-repo")]);
+  } // "none": no origin configured at all.
+
+  // Detached on purpose. `worktree add -b` would leave a local branch carrying
+  // the same number, and probe 3's branch half would answer for its worktree
+  // half — the same "passing for the wrong reason" the bare origin above avoids.
+  if (detachedWorktreeUnder !== null) {
+    const g = (...args) => execFileSync("git", ["-C", repo, ...args],
+      { env: { ...process.env, ...IDENT } });
+    g("commit", "-q", "--allow-empty", "-m", "x");
+    mkdirSync(join(root, detachedWorktreeUnder), { recursive: true });
+    g("worktree", "add", "-q", "--detach", join(root, detachedWorktreeUnder, `fix-${n}-slug`), "HEAD");
+  }
+
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    // A local path can still prompt (a stale credential helper, a host key on
+    // an inherited insteadOf rule). An unattended probe that blocks forever is
+    // worse than either answer, and a suite that hangs reports nothing at all.
+    GIT_TERMINAL_PROMPT: "0",
+    // The developer's own git config must not reach these cases, the way
+    // release-ticket.test.mjs:30 already shuts it out. Probe 2 only became a
+    // hard dependency of this file with the fail-closed guard — before it, a
+    // broken origin was swallowed and no config could reach it. Now
+    // `protocol.file.allow=never` (documented hardening after CVE-2022-39253)
+    // reddens most of the file, and a global `[remote "origin"] url` is worse
+    // than red: `remote.<name>.url` is multi-valued, the global entry wins, and
+    // "no matching branch" passes while pointed at somebody else's repository.
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
     GH_ISSUE_JSON: JSON.stringify({
       url: `https://github.com/${REPO}/issues/${n}`,
       closedByPullRequestsReferences: linked.map((l) =>
@@ -208,6 +267,80 @@ test("branch: an OPEN branch-matched PR is still a hit", (t) => {
 test("the considered-count reports every full-text match, filtered or not", (t) => {
   const r = inflight(8, { linked: [], prs: [pr(1, "MERGED", "a"), pr(2, "OPEN", "b"), pr(3, "CLOSED", "c")] }, t);
   assert.match(r.stderr, /\(3 full-text match\(es\) were all incidental\)/);
+});
+
+// --- probe 2, the remote-branch lookup.
+//
+// `git ls-remote` used to run inside the filtering pipeline, and a pipeline
+// reports its LAST command's status — `paste`, which always succeeds. So the
+// lookup's exit 128 never reached the script at all, and `2>/dev/null` dropped
+// the reason with it. What arrived was zero matching lines, which is exactly
+// what a clean ticket produces. Dropping the trailing `|| true` alone would not
+// have changed that: `|| true` was never the thing swallowing it.
+//
+// The two directions are separate answers and both are pinned below: `grep`
+// exiting 1 is "looked, found nothing" and must stay a free ticket; a failed
+// `ls-remote` is "could not look" and must reach exit 2. A fix that collapses
+// them the other way makes every clean ticket unanswerable.
+
+test("probe 2: an unreachable origin is an unknown answer, never a 'no remote branch'", (t) => {
+  // The direction that matters: a wrong "taken" costs one skipped ticket, a
+  // wrong "free" puts two agents on the same one.
+  const r = inflight(8, { origin: "unreachable" }, t);
+  assert.equal(r.code, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+  assert.doesNotMatch(r.stderr, /no remote branch/);
+  assert.equal(r.json, null, "an unanswered probe emits no verdict to parse");
+});
+
+// Not a synthetic non-zero exit: this is the plain "no origin configured" a
+// fresh clone-less checkout has, and it took the same silent path.
+test("probe 2: an origin that is not configured at all is unknown, not free", (t) => {
+  const r = inflight(8, { origin: "none" }, t);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+  assert.equal(r.json, null);
+});
+
+// The opposite direction. This one passed before the fix too, which is the
+// point — it fails only if the fix over-reaches and turns `grep`'s no-match
+// exit 1 into a death, making every clean ticket unanswerable.
+test("probe 2: a reachable origin with no matching branch still reports free", (t) => {
+  const r = inflight(8, { remoteBranches: ["main", "fix/other-thing"] }, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.taken, false);
+  assert.equal(r.json.evidence.remote, "");
+  assert.match(r.stderr, /no remote branch for #8/);
+});
+
+test("probe 2: a reachable origin with a matching branch still reports taken", (t) => {
+  const r = inflight(33, { remoteBranches: ["main", "fix/33-probe"] }, t);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.taken, true);
+  assert.equal(r.json.evidence.remote, "fix/33-probe");
+  assert.deepEqual(r.json.hits, ["remote-branch"], "probe 2 alone, not probe 3 answering for it");
+});
+
+// --- probe 3, the worktree lookup.
+//
+// `worktree list --porcelain` prints the path raw, so reading it as awk's $2
+// truncates at the first space and the ticket stops matching — a wrong "free",
+// the same answer probe 2 was just stopped from inventing. The pair below is
+// one fixture differing in one character, so a red names the space and nothing
+// else. release-ticket.sh:70 already reads this field as substr($0,10).
+
+test("probe 3: a worktree under a path with a space is still found", (t) => {
+  const r = inflight(77, { detachedWorktreeUnder: "some dir" }, t);
+  assert.equal(r.code, 1, "a worktree that exists must never read as free");
+  assert.equal(r.json.taken, true);
+  assert.match(r.json.evidence.worktree, /some dir\/fix-77-slug$/);
+  assert.deepEqual(r.json.hits, ["local"]);
+});
+
+test("probe 3: the same worktree without a space in the path, as the control", (t) => {
+  const r = inflight(77, { detachedWorktreeUnder: "nospace" }, t);
+  assert.equal(r.code, 1);
+  assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
 });
 
 // --- error paths. These do not reach the jq expression at all: the stub exits on
