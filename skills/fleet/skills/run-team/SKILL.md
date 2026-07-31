@@ -262,10 +262,12 @@ run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
 latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and
 emit the behind-count and the per-job conclusions with it: a `success` on a branch
 8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
-board you must not confuse with a red. On a GHE remote the compare call needs
-`gh api --hostname <host>` — without it the probe 404s and the monitor emits a
-placeholder instead of failing, so every event reads as unknown-behind. Copy the
-host and repo handling from `ci-state.mjs` rather than reinventing it.
+board you must not confuse with a red. Do not reinvent that read: one
+`ci-state.mjs --pr <N>` per open PR already emits run id, attempt, conclusion,
+behind-count, per-job conclusions and the staleness verdict — including the
+`gh api --hostname <host>` a GHE compare call needs, without which the probe
+404s and the monitor emits a placeholder, so every event reads as
+unknown-behind. Call it **without `--quiet`**, which drops `jobs`.
 See references/ci-and-staleness.md.
 
 Read a run's true state with `~/.claude/skills/fleet/scripts/ci-state.mjs --pr
@@ -322,7 +324,12 @@ merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 **The reviewer pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
 rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
-push, report the SHA, stop. When the diff-validating `check` job is green **and no
+push, report the SHA, stop — and that a verdict already sent **pins that SHA**, so
+resuming on new information means messaging you *before* touching the tree again.
+A reviewer that reports "clean, stopping" and then silently keeps editing
+invalidates the verdict you are holding; the finisher's audit is the only thing
+that catches it, and it catches it as a halt. Observed once, from a relay that
+legitimately changed the work. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine) dispatch a **finisher** — a fresh small agent, not the reviewer resumed.
