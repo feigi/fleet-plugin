@@ -59,9 +59,9 @@ const IDENT = {
 };
 
 // Resolved once, and resolved through a shell so it is the same awk the script
-// would have found. The `awkFailAt` shim shadows `awk` on PATH and has to hand
-// off to the real one for every invocation it is not breaking; calling `awk`
-// from inside the shim would find the shim.
+// would have found. The `awkFailWhenProgramHas` shim shadows `awk` on PATH and
+// hands off to the real one for every invocation it is not breaking; calling
+// `awk` from inside the shim would find the shim.
 const REAL_AWK = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 
 /**
@@ -356,7 +356,7 @@ test("probe 2: a reachable origin with a matching branch still reports taken", (
 // truncates at the first space and the ticket stops matching — a wrong "free",
 // the same answer probe 2 was just stopped from inventing. The pair below is
 // one fixture differing in one character, so a red names the space and nothing
-// else. release-ticket.sh:70 already reads this field as substr($0,10).
+// else. release-ticket.sh:78 already reads this field as substr($0,10).
 
 test("probe 3: a worktree under a path with a space is still found", (t) => {
   const r = inflight(77, { detachedWorktreeUnder: "some dir" }, t);
@@ -391,7 +391,7 @@ test("probe 3: the same worktree without a space in the path, as the control", (
 // consumer that cannot read the evidence, not a ticket claimed twice.
 //
 // The first two are built by hand rather than through `fixture`'s options, the
-// way release-ticket.test.mjs:628 builds its own: the names are the fixture.
+// way release-ticket.test.mjs:729 builds its own: the names are the fixture.
 
 // Takes the fixture's `env`, not `process.env`: that is the copy with GIT_DIR
 // and GIT_WORK_TREE deleted. Inherited, they outrank `-C`, so a suite run from
@@ -441,7 +441,8 @@ test("a control character in a worktree path cannot produce an unparseable paylo
   // release-ticket.test.mjs:743.
   //
   // \001 specifically, not \n: awk's record separator ends the line, so a
-  // newline cannot reach `jstr` and would pin nothing here (#122). \t once
+  // newline cannot reach `jstr` and would pin nothing here — it is lost one
+  // stage earlier, splitting the record, which is #185 and still open. \t once
   // could not either, but that was the `-F'\t'` split and the `read -r` loop
   // eating it, and both are gone — measured, a worktree named `fix-88-a<TAB>b`
   // used to arrive as the bare string `b`, its path cut at the tab it was
@@ -530,10 +531,13 @@ test("a repository-level failure is not reported as a missing issue", (t) => {
 //
 // Each case keeps a real hit present, so "exit 2" is a fact about the filter
 // and not about there being nothing to find. The pre-fix numbers below were
-// measured per filter by breaking the stage that filter actually had, since
-// there was no single awk to break: `sed` for the remote filter, `grep` for the
-// branch filter, `basename` for the worktree filter. Each was checked against
-// the same fixture with that stage intact, which answers taken, exit 1.
+// measured per filter by breaking the stage that filter actually had, since no
+// filter then had an awk a substring could address on its own: the branch
+// filter had none, the worktree filter had two in one pipeline, and the remote
+// filter's lone `{print $2}` is also the worktree filter's second awk. So `sed`
+// for the remote filter, `grep` for the branch filter, `basename` for the
+// worktree one. Each was checked against the same fixture with that stage
+// intact, which answers taken, exit 1.
 
 test("probe 2: a remote-branch filter that could not run is unknown, never free", (t) => {
   // Measured pre-fix with its `sed` broken: "no remote branch for #42",
