@@ -211,14 +211,16 @@ fi
 echo "$NAME: #$n taken=$taken" >&2
 
 # Every evidence string goes through here, the same helper and the same pipeline
-# as release-ticket.sh:115. The four fields are names chosen elsewhere: git
+# as release-ticket.sh:115. Three of the four are names chosen elsewhere: git
 # accepts a `"` in a ref, so a branch — local or remote — carries one in; a
 # worktree path is a filename, so it carries in `\` as well, which git's ref
 # rules reject. Raw, either emits a payload no JSON parser accepts.
 #
 # The whole C0 range, not just the three whitespace ones: JSON forbids every
-# character below \040 unescaped. Byte-safe for UTF-8, whose bytes are all
-# >= \200. tr pads the replacement with its last character.
+# character below \040 unescaped. Byte-safe because the tr set is ASCII-only
+# and a multi-byte UTF-8 sequence uses no byte below \200, so nothing here can
+# split one — not because UTF-8 avoids the low bytes, which it does not: half
+# of it is ASCII. tr pads the replacement with its last character.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
 # already refused unless it is all digits — which is not the same as a valid
