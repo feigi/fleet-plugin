@@ -61,11 +61,23 @@ test("the default testCmd cannot be a zero-match glob", () => {
 // The prompt is what specialists actually obey, so the reading rule has to be in
 // it. Without this, a specialist that guesses a glob still reports `tests 0` as
 // a pass — the exact failure the default fix alone does not cover.
-test("the specialist prompt teaches that 'tests 0' is a failed run", () => {
-  assert.match(SOURCE, /tests 0/, "the prompt no longer warns about a zero-test run");
+test("the specialist prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
+  const prompt = SOURCE.slice(SOURCE.indexOf("READ ONLY FROM THE SNAPSHOT"));
+  assert.ok(prompt, "the specialist prompt moved — update this test");
+  // The worked example must INTERPOLATE the default, not restate it. A
+  // hardcoded copy drifts from testCmd the moment either one changes, and a
+  // caller passing args.testCmd would be handed the wrong command.
   assert.match(
-    SOURCE,
-    /Tests: from the snapshot's root, run exactly this/,
-    "the prompt no longer hands specialists a verbatim worked example",
+    prompt,
+    /run exactly this[^\n]*\n\s*\$\{testCmd\}/,
+    "the prompt no longer hands specialists the interpolated command verbatim",
+  );
+  // Match the ruling itself, not the phrase `tests 0` — that appears in the
+  // surrounding explanation too, so a looser assertion passes with the rule
+  // deleted (observed: it did).
+  assert.match(
+    prompt,
+    /'tests 0' is a FAILED run/,
+    "the prompt no longer rules a zero-test run a failure",
   );
 });
