@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -43,6 +43,135 @@ function claim(dir) {
 
 const TESTS = "t.test.mjs";
 const pkg = (o) => JSON.stringify(o);
+
+// Runs the script for real and returns the emitted runner plus its worktree.
+// `--apply` labels the issue, so `gh` is stubbed; everything else — the
+// worktree, the install, the exclude file, the runner — is the real thing.
+// The runner is what members actually invoke, so it is what gets asserted on.
+function apply(files) {
+  const dir = repo(files);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const wt = join(dir, ".worktrees", "42-slug");
+  // `node --test` marks the processes it spawns, and an inherited mark makes
+  // the runner's own `node --test` report to a parent that is not listening —
+  // status 0 and not a byte of stdout. An artifact of testing a test runner
+  // from inside one; strip it so these assertions see what a member sees.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_TEST_WORKER_ID;
+  return {
+    wt,
+    text: readFileSync(join(wt, "agent-test"), "utf8"),
+    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
+  };
+}
+
+const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
+// `root.test.mjs` exists so no assertion below can be satisfied by the argv
+// being dropped: bare `node --test` discovers the whole fixture, and every
+// count asserted here differs from that. Without it the two-file cases and
+// discovery both landed on `pass 2`, and a test that cannot tell "argv was
+// honoured" from "argv was discarded" pins nothing.
+const SUITE = {
+  "t/a.test.mjs": PASSES,
+  "t/b.test.mjs": PASSES,
+  "t/nested/c.test.mjs": PASSES,
+  "root.test.mjs": PASSES,
+  "with space/s.test.mjs": PASSES,
+  "br[a]cket/g.test.mjs": PASSES,
+  "empty/README.md": "",
+};
+
+// `node --test <dir>` resolves the directory as a module specifier and dies
+// with MODULE_NOT_FOUND before a single test runs. A directory is the
+// ergonomic way to say "run this suite", and the red it produced was read as
+// a finding against the diff under review rather than against the invocation.
+// `pass 3` also pins the recursion: `t/` holds two files and `t/nested/` a
+// third, so a `find` capped at one level reads as a red here.
+test("runner: a directory argument runs the test files under it", () => {
+  const r = apply(SUITE).run("t");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 3/);
+});
+
+// `set -f` and IFS only settle how the *shell* splits the expansion. Node
+// globs its own argv afterwards, where a literal `[` is a bracket expression
+// that cannot match itself — so an unescaped path matches nothing, node runs
+// nothing, and it exits 0. That is the vacuous pass this shim exists to
+// refuse, reached past the guard because `find` did match the file.
+test("runner: a directory whose path holds a glob character still runs its tests", () => {
+  const r = apply(SUITE).run("br[a]cket");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
+});
+
+// The other half of the same claim: IFS pinned to a newline is what keeps a
+// path with a space in it one word. On the default IFS it splits into two
+// words node cannot resolve, and node drops unresolvable arguments silently.
+test("runner: a directory whose path holds a space still runs its tests", () => {
+  const r = apply(SUITE).run("with space");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
+});
+
+// The sharp edge. `node --test` with zero files exits 0, so an expansion that
+// matched nothing and shrugged would smuggle back the vacuous pass the emit
+// guard refuses — this time past it, at run time.
+test("runner: a directory with no test files refuses instead of exiting 0", () => {
+  const r = apply(SUITE).run("empty");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /no test files under empty/);
+});
+
+test("runner: a file argument still works", () => {
+  const r = apply(SUITE).run("t/a.test.mjs");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
+});
+
+// The shell expands a glob before the runner is entered, so the glob form
+// reaches it as the plain multi-file argv this asserts on. Only the *matching*
+// glob, though: one that matches nothing is handed over unexpanded, is not a
+// directory, and so misses the shim entirely — node globs it, matches nothing
+// and exits 0. That path is #100, not this test.
+test("runner: the expanded glob form still works", () => {
+  const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 2/);
+});
+
+// A subtree find cannot descend is the quiet version of the same hazard: find
+// still prints what it reached, grep still matches it, and the count guard
+// still passes — so the suite goes green having silently skipped whatever the
+// unreadable directory held. Root can read anything, so it cannot see this.
+test("runner: a directory it cannot fully read refuses instead of running a partial suite", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply({ ...SUITE, "t/locked/z.test.mjs": PASSES });
+  chmodSync(join(a.wt, "t", "locked"), 0o000);
+  try {
+    const r = a.run("t");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read every path under t/);
+  } finally {
+    chmodSync(join(a.wt, "t", "locked"), 0o755);
+  }
+});
+
+// Directories are only rewritten for `node --test`. Every other entrypoint is
+// somebody else's runner, and vitest and jest take a directory as a filter
+// against their own naming conventions, which need not be this regex.
+test("runner: the npm entrypoint is emitted without the directory shim", () => {
+  const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
+  assert.match(text, /^exec npm test -- "\$@"$/m);
+  assert.doesNotMatch(text, /no test files under/);
+});
 
 // Every row of the install matrix. `true` is the no-op: nothing to install.
 for (const [name, files, want] of [

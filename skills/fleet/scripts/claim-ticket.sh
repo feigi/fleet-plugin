@@ -53,6 +53,12 @@ else die "origin/main declares $ndeps dependencies but has no lockfile — refus
 fi
 echo "    lockfile → install: $install" >&2
 
+# One shape for "is a test file", shared by the emit guard below and by the
+# directory expansion in the runner it writes. Separate copies would drift,
+# and the two disagreeing means a directory the guard counted as a suite
+# expands to nothing at run time.
+testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
+
 # The runner runs the repo's own test entrypoint. Both guesses are unsafe when
 # wrong: `npm test` with no `test` script fails with an npm error that reads
 # like a broken worktree, and `node --test` with no test files exits 0 — a
@@ -60,7 +66,7 @@ echo "    lockfile → install: $install" >&2
 # review fan-out consumes it as a green suite. Refuse rather than guess.
 if printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit((p.scripts||{}).test?0:1)' 2>/dev/null; then
   testcmd="npm test --"
-elif git ls-tree -r --name-only origin/main | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'; then
+elif git ls-tree -r --name-only origin/main | grep -qE "$testfile_re"; then
   testcmd="node --test"
 else
   die "origin/main has no scripts.test and no test files — refusing to emit a runner that would pass vacuously"
@@ -104,6 +110,55 @@ else
   cat > "$runner" <<SH
 #!/bin/sh
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
+SH
+
+  # Only `node --test` gets the directory shim. Every other entrypoint is
+  # somebody else's runner — vitest and jest already take a directory, as a
+  # filter against naming conventions that need not be this regex — and
+  # rewriting their arguments would refuse suites that are perfectly fine.
+  if [ "$testcmd" = "node --test" ]; then
+    cat >> "$runner" <<SH
+# A directory is the ergonomic way to say "run this suite", but node resolves
+# it as a module specifier and dies with MODULE_NOT_FOUND before a test runs.
+# Expand it to the test files underneath instead. IFS and -f settle only how
+# the *shell* splits that expansion: a newline IFS keeps a path with a space
+# in it one word, and -f stops the shell re-globbing the result.
+IFS='
+'
+set -f
+for arg do
+  shift
+  if [ -d "\$arg" ]; then
+    # Zero matches must refuse. Appending nothing does not run nothing — it
+    # leaves argv empty, and bare \`node --test\` then discovers the whole
+    # worktree: a green for a suite nobody asked for. Shrugging instead, when
+    # something else is on the line, runs a subset and still exits 0. Both are
+    # the vacuous pass this script exists to refuse.
+    # Node globs its own argv, downstream of anything the shell settled. A
+    # literal \`[\` there is a bracket expression that cannot match itself, so
+    # an unescaped path matches nothing — and node runs nothing and exits 0,
+    # the same vacuous pass, reached past this guard because find did match.
+    # \`[[]\` is the bracket idiom for a literal \`[\`; \`*\` and \`?\` need no
+    # escape, since a path holding one still matches itself.
+    # find's own status has to be read before grep overwrites it. A subtree it
+    # cannot descend still yields the part it reached, grep still matches, and
+    # the guard below still passes — a green over a suite that silently lost
+    # whatever was under the unreadable directory.
+    found=\$(find "\$arg" -type f) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
+    # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
+    # match, so under -e the shell would abort here and the refusal below would
+    # never print. Read a status you care about explicitly, as find does above.
+    [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
+    set -- "\$@" \$files
+  else
+    set -- "\$@" "\$arg"
+  fi
+done
+SH
+  fi
+
+  cat >> "$runner" <<SH
 exec $testcmd "\$@"
 SH
   chmod +x "$runner"
