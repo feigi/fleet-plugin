@@ -38,10 +38,22 @@ else
   echo "    clean" >&2
 fi
 
-# The stash stack is repo-global across worktrees. Report it; never pop, drop or
-# apply an entry this process did not create.
+# The stash stack is repo-global across worktrees, and a rebase cannot reach
+# refs/stash at all. So the count says nothing about whether THIS rebase loses
+# THIS branch's work — only that the maintainer keeps stashes. Reported for
+# context, never gated on: gating made the audit refuse on every run in a repo
+# that holds any entry, and a check that always fires is one nobody reads.
+#
+# It cannot cover the hazard it looks like it covers, either. A member running
+# `git stash` to clear a dirty worktree so a rebase can start leaves `porcelain`
+# empty, so `clean` is already true and the entry it created is indistinguishable
+# from an old one without a baseline. This script runs once, before the rebase,
+# with nothing happening between its own entry and exit, so it has no baseline to
+# take. Catching that needs a count the caller captured before the member ran.
+#
+# Never pop, drop or apply an entry this process did not create.
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
-echo "    stash entries (repo-global): $stash" >&2
+echo "    stash entries (repo-global, not gated): $stash" >&2
 
 # 2. Which files would conflict. merge-tree exits 0 clean, 1 conflicts found,
 #    >=1 other on real failure (bad refs, corrupt tree, etc — treat >=2 as an
@@ -85,12 +97,12 @@ if [ -n "$conflicts" ]; then
 fi
 at_risk_json=$(printf '%s' "$at_risk" | awk 'NF{gsub(/"/,"\\\""); print "\""$0"\""}' | paste -sd, -)
 
-if [ "$clean" = true ] && [ "$stash" -eq 0 ]; then
+if [ "$clean" = true ]; then
   rc=0
 else
   rc=1
-  echo "$NAME: REFUSED — commit or stash-list-clear before rebasing. Never \`git clean\`," >&2
-  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash drop\` to make a rebase start." >&2
+  echo "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`," >&2
+  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start." >&2
 fi
 
 printf '{"worktree":"%s","branch":"%s","clean":%s,"stash":%s,"conflicts":[%s],"atRisk":[%s]}\n' \
