@@ -305,8 +305,8 @@ See references/member-lifecycle.md.
 
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
 `diff-stats.mjs` and drops dead dimensions — a docs-only change runs
-correctness+comments, not the full five — and skips the adversarial pass on
-`suggestion`s, which are deferred and never applied. So you need not compute a
+correctness+comments, not the full six — and skips the adversarial pass on
+`suggestion`s, which are deferred and never auto-applied. So you need not compute a
 count. Manual fallback (no workflow): two or three specialists for annotation-only
 or single-file, the full set for production code.
 
@@ -434,7 +434,7 @@ ledger rows in the same step. See references/reaping.md.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
-runs 20-40, because each fans out 4-5 specialists. Five implementers saturate five
+runs 20-40, because each fans out up to six specialists. Five implementers saturate five
 reviewers within the hour and every later PR queues. Absent instruction, default
 **2 implementers / 5 reviewers** and say why.
 
