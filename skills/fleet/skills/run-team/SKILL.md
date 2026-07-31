@@ -602,9 +602,20 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 Plus two append-only lists:
 
 - **filed** (`ledger.mjs filed <issue> <subject>`, checked with `ledger.mjs check
-  <subject>` before every `gh issue create`) — so no finding is filed twice.
+  <subject>` before every `gh issue create`) — so a finding already recorded
+  this run is not filed twice. That is not a guarantee against duplicates at
+  large; the tracker query below is what covers those.
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
+
+`check` exits **0** clean, **1** already in this run's filed list, **2** usage
+error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read
+those and decide. It also prints the closest filed rows with an overlap score;
+those are advisory and do not change the exit code, because the same finding
+gets worded differently by whoever finds it second. **Exit 0 is not
+automatically "safe to file":** when `gh` cannot be reached the answer is
+ledger-only, and it says `TRACKER NOT CHECKED` — an issue filed by an earlier
+run is invisible to it.
 
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.

@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 
 const NAME = "ledger";
 
@@ -199,13 +199,145 @@ if (cmd === "check") {
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
     console.log(JSON.stringify({ subject, found: true, match }));
-    // Exit 1 means "do not file this again". Non-zero is the stop signal, so a
-    // caller that checks only the exit status still cannot duplicate.
+    // Exit 1 means "do not file this again" — the strong signal. Exit 3 is also
+    // non-zero but weaker: tracker rows to review, not a ruling. A caller that
+    // checks only the exit status stops on both, which errs toward not
+    // duplicating.
     process.exit(1);
   }
-  console.error(`${NAME}: not previously filed`);
-  console.log(JSON.stringify({ subject, found: false, match: null }));
-  process.exit(0);
+
+  // Near-miss reporting. The subset match above answers exactly one question —
+  // "was this near-verbatim wording already filed" — and answers it well. It
+  // says nothing about the same finding described in DIFFERENT words, which is
+  // how a second discoverer actually words it: one measured run rediscovered
+  // #114 five times, each in its own phrasing, and the check caught none of
+  // them. Rank the filed list by token overlap and hand the top rows back with
+  // a score, instead of collapsing all of that into `found: false`.
+  //
+  // Scored on its own token set, deliberately not the exact path's. Stopwords
+  // and the singular fold only sharpen a ranking, but folding them into
+  // isMatch() would widen what counts as ALREADY FILED — the one behaviour
+  // here that callers gate on and that must not move.
+  const STOP = new Set("the a an of to in is it its and or for on with that this from at by".split(" "));
+  const scoreTokens = (s) =>
+    new Set(
+      norm(s).split(/\s+/)
+        .filter((t) => t.length >= 3 && !STOP.has(t))
+        .map((t) => t.replace(/s$/, "")),
+    );
+  // Overlap coefficient (shared / smaller set), not Jaccard. A filed row carries
+  // a source tag like `(review-pr-108)` and other metadata the checked subject
+  // can never contain, so the union is dominated by tokens with no chance of
+  // matching: Jaccard drives every row to a similar small number and the
+  // ranking stops discriminating. Dividing by the smaller set also keeps the
+  // score indifferent to which side is more verbose.
+  const overlap = (a, b) => {
+    if (a.size === 0 || b.size === 0) return 0;
+    let shared = 0;
+    for (const t of a) if (b.has(t)) shared++;
+    return shared / Math.min(a.size, b.size);
+  };
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const scored = scoreTokens(subject);
+  // Floor is "shares at least one content word", not a score threshold: the
+  // measured #114 rewording shares exactly one, and a threshold tuned to look
+  // tidy would drop the very case this exists for. The top-3 cap, not the
+  // floor, is what keeps the output short.
+  const near = data.filed
+    .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
+    .filter((n) => n.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  // The ledger can only see what THIS run recorded. An issue that already
+  // exists on the tracker but never reached this `filed` list — filed by an
+  // earlier run, by the maintainer, by hand — is structurally invisible to
+  // every match above, and that is the measured failure: #114 was rediscovered
+  // five times in one run and `check` reported it safe to file every time. Ask
+  // the tracker.
+  //
+  // gh ANDs the search terms, so every extra term can only narrow the result —
+  // keep the query SHORT: three of the subject's most distinctive words.
+  // Measured against the live tracker, "candidates opposite states" returns
+  // #114. Whether a fourth term helps or hurts turns on whether it happens to
+  // occur in the target issue's text — gh searches bodies, not just titles —
+  // which the subject cannot know: "code" leaves #114 in, "open" drops it. So
+  // three is a recall-preserving floor, not a measured optimum. Longest-first is a crude stand-in for distinctiveness (no
+  // corpus to weigh terms against) and the >= 3 filter erases short but
+  // distinctive identifiers like `CI` or `gh`; upgrade to a real frequency
+  // weighting if the query starts missing.
+  //
+  // norm() has already stripped punctuation, which is also what keeps a subject
+  // containing `is:open` or `file.mjs:164` from smuggling a qualifier into the
+  // search and silently changing what was searched for.
+  const terms = [...new Set(norm(subject).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t)))]
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3);
+  const query = terms.join(" ");
+  let tracker;
+  if (terms.length === 0) {
+    // An empty --search matches every issue in the repo, which would report
+    // every subject as a tracker hit. Not searching is the honest answer.
+    tracker = { ok: false, query: null, hits: [], error: "subject has no distinctive terms to search for" };
+  } else {
+    try {
+      const out = execFileSync(
+        "gh",
+        ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
+          "--json", "number,title,state,url"],
+        { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      // Parsing inside the try on purpose: gh can exit 0 and still print
+      // something that is not the JSON asked for. A parse failure is a failed
+      // tracker read, not a clean tracker.
+      const parsed = JSON.parse(out);
+      // Parseable is not the same as the shape asked for. Without this, a gh
+      // printing a JSON array that is not an issue list escalates to exit 3 and
+      // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
+      // that is in fact unverified. Throw into the catch below: an unreadable
+      // answer is a failed tracker read, exactly like unparseable output.
+      if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
+        throw new Error("gh returned JSON that is not an issue list");
+      }
+      const hits = parsed
+        .map((h) => ({
+          number: h.number, title: h.title || "", state: h.state, url: h.url,
+          score: round2(overlap(scored, scoreTokens(h.title || ""))),
+        }))
+        .sort((a, b) => b.score - a.score);
+      tracker = { ok: true, query, hits };
+    } catch (e) {
+      // Every gh failure lands here — no network, no auth, rate limit, gh not
+      // installed (ENOENT), a timeout, unparseable output. None of them may
+      // produce a bare "safe to file": that is the same fail-open class the
+      // --git-common-dir resolution above already closed once. Degrade to the
+      // ledger-only answer and say so.
+      tracker = { ok: false, query, hits: [], error: String(e.stderr || e.message).trim() };
+    }
+  }
+
+  for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
+  for (const h of tracker.hits) {
+    console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
+  }
+  if (!tracker.ok) {
+    console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
+    console.error(`${NAME}: not previously filed in this run's ledger — ledger-only answer, tracker unchecked`);
+  } else if (tracker.hits.length) {
+    console.error(`${NAME}: not in this run's filed list, but ${tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
+  } else {
+    console.error(`${NAME}: not previously filed; tracker search '${query}' found no related issues`);
+  }
+  console.log(JSON.stringify({ subject, found: false, match: null, near, tracker }));
+  // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
+  // 1 would mean ALREADY FILED in this run, which a tracker hit does not
+  // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
+  // suggestion, not a finding of duplication. Exit 0 covers two states — the
+  // tracker searched and clean, or never searched at all — which `tracker.ok`
+  // and the stderr line distinguish but the exit code does not. A hit scoring
+  // 0.00 still forces 3: gh matched the issue body, which the title-based score
+  // cannot see.
+  process.exit(tracker.hits.length ? 3 : 0);
 }
 
 die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
