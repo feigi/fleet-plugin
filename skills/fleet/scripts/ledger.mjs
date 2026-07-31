@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 
 const NAME = "ledger";
 
@@ -248,10 +248,80 @@ if (cmd === "check") {
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 
+  // The ledger can only see what THIS run recorded. An issue that already
+  // exists on the tracker but never reached this `filed` list — filed by an
+  // earlier run, by the maintainer, by hand — is structurally invisible to
+  // every match above, and that is the measured failure: #114 was rediscovered
+  // five times in one run and `check` reported it safe to file every time. Ask
+  // the tracker.
+  //
+  // gh ANDs the search terms, so the query has to stay SHORT to match anything
+  // at all — three of the subject's most distinctive words. Measured against
+  // the live tracker: "candidates opposite states" returns #114, and adding a
+  // fourth, less distinctive term drops it, because under AND every extra term
+  // can only subtract. Longest-first is a crude stand-in for distinctiveness
+  // (no corpus to weigh terms against); upgrade to a real frequency weighting
+  // if the query starts missing.
+  //
+  // norm() has already stripped punctuation, which is also what keeps a subject
+  // containing `is:open` or `file.mjs:164` from smuggling a qualifier into the
+  // search and silently changing what was searched for.
+  const terms = [...new Set(norm(subject).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t)))]
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3);
+  const query = terms.join(" ");
+  let tracker;
+  if (terms.length === 0) {
+    // An empty --search matches every issue in the repo, which would report
+    // every subject as a tracker hit. Not searching is the honest answer.
+    tracker = { ok: false, query: null, hits: [], error: "subject has no distinctive terms to search for" };
+  } else {
+    try {
+      const out = execFileSync(
+        "gh",
+        ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
+          "--json", "number,title,state,url"],
+        { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      // Parsing inside the try on purpose: gh can exit 0 and still print
+      // something that is not the JSON asked for. A parse failure is a failed
+      // tracker read, not a clean tracker.
+      const hits = JSON.parse(out)
+        .map((h) => ({
+          number: h.number, title: h.title, state: h.state, url: h.url,
+          score: round2(overlap(scored, scoreTokens(h.title || ""))),
+        }))
+        .sort((a, b) => b.score - a.score);
+      tracker = { ok: true, query, hits };
+    } catch (e) {
+      // Every gh failure lands here — no network, no auth, rate limit, gh not
+      // installed (ENOENT), a timeout, unparseable output. None of them may
+      // produce a bare "safe to file": that is the same fail-open class the
+      // --git-common-dir resolution above already closed once. Degrade to the
+      // ledger-only answer and say so.
+      tracker = { ok: false, query, hits: [], error: String(e.stderr || e.message).trim() };
+    }
+  }
+
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
-  console.error(`${NAME}: not previously filed`);
-  console.log(JSON.stringify({ subject, found: false, match: null, near }));
-  process.exit(0);
+  for (const h of tracker.hits) {
+    console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
+  }
+  if (!tracker.ok) {
+    console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
+    console.error(`${NAME}: not previously filed in this run's ledger — ledger-only answer, tracker unchecked`);
+  } else if (tracker.hits.length) {
+    console.error(`${NAME}: not in this run's filed list, but ${tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
+  } else {
+    console.error(`${NAME}: not previously filed; tracker search '${query}' found no related issues`);
+  }
+  console.log(JSON.stringify({ subject, found: false, match: null, near, tracker }));
+  // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
+  // 0 would mean safe to file, which is the claim this whole change exists to
+  // stop making; 1 would mean ALREADY FILED in this run, which a tracker hit
+  // does not establish; 2 is taken by die(). Near-misses stay exit 0: they are
+  // a ranked suggestion, not a finding of duplication.
+  process.exit(tracker.hits.length ? 3 : 0);
 }
 
 die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);

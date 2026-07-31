@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,13 +22,20 @@ const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 // `printf '%s\n' "$@"` before any early exit: the argv record has to survive the
 // failure paths too, or the "what query did gh receive" assertions can only run
 // on the success path.
+//
+// Shell builtins only — no `cat`. PATH is reduced to the stub's own directory
+// (see run()), so an external binary here fails with 127 and the stub then
+// looks exactly like a broken `gh`: every "tracker returned hits" test would
+// silently assert the offline path instead. The `|| [ -n "$line" ]` guard emits
+// the last line of a fixture written without a trailing newline, which is what
+// JSON.stringify produces.
 const GH_STUB = `#!/bin/sh
 printf '%s\\n' "$@" > "$GH_ARGS_FILE"
 if [ -n "$GH_FAIL" ]; then
   echo "gh: could not authenticate to github.com (HTTP 401)" >&2
   exit 1
 fi
-cat "$GH_FIXTURE"
+while IFS= read -r line || [ -n "$line" ]; do printf '%s\\n' "$line"; done < "$GH_FIXTURE"
 `;
 
 // filed rows go in verbatim; the script's own escaping is exercised by the
@@ -59,7 +66,7 @@ function run(subject, { filed = [], hits = [], ghFails = false, gh = true, args 
       PATH: bin,
     };
     if (ghFails) env.GH_FAIL = "1";
-    spawnSync("mkdir", ["-p", bin]);
+    mkdirSync(bin, { recursive: true });
     if (gh) {
       const ghPath = join(bin, "gh");
       writeFileSync(ghPath, GH_STUB);
@@ -165,6 +172,87 @@ test("a subject sharing no content words with any filed row reports no near-miss
   const r = run("postgres connection pooling exhausted under load", { filed: [FILED_114, FILED_131] });
   assert.equal(r.status, 0);
   assert.deepEqual(r.json.near, []);
+});
+
+// ---------------------------------------------------------------------------
+// Tracker query (issue #145, option 1) and its offline degradation.
+// ---------------------------------------------------------------------------
+
+const HIT_114 = {
+  number: 114,
+  title: "fleet-plugin-design: the Script surface table's Non-zero column was written from intent",
+  state: "OPEN",
+  url: "https://github.com/feigi/claude-config/issues/114",
+};
+
+test("an open tracker issue absent from the ledger is reported, not passed as safe", () => {
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [HIT_114] });
+  assert.equal(r.status, 3, "a tracker hit with a clean ledger is exit 3, not 0");
+  assert.equal(r.json.found, false, "the ledger genuinely did not have it — `found` stays ledger-only");
+  assert.equal(r.json.tracker.ok, true);
+  assert.equal(r.json.tracker.hits[0].number, 114);
+  assert.equal(r.json.tracker.hits[0].state, "OPEN");
+  assert.equal(typeof r.json.tracker.hits[0].score, "number");
+  assert.match(r.stderr, /TRACKER HIT/);
+  assert.doesNotMatch(r.stderr, /ALREADY FILED/, "a tracker hit is not the same claim as a filed row");
+});
+
+test("a clean ledger and a clean tracker is the only path that reads safe, exit 0", () => {
+  const r = run("postgres connection pooling exhausted under load", { filed: [FILED_114], hits: [] });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.tracker.ok, true);
+  assert.deepEqual(r.json.tracker.hits, []);
+});
+
+test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghFails: true });
+  assert.equal(r.status, 0, "offline must not block filing — it degrades, per the ledger-only answer");
+  assert.equal(r.json.tracker.ok, false);
+  assert.match(r.json.tracker.error, /\S/, "the failure reason must reach the caller");
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  // The exact fail-open this guards: a stderr line that reads like a clean bill
+  // of health when the tracker was never consulted at all.
+  assert.doesNotMatch(r.stderr, /^ledger: not previously filed$/m);
+});
+
+test("gh missing from PATH entirely degrades the same way", () => {
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], gh: false });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.tracker.ok, false);
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  assert.doesNotMatch(r.stderr, /^ledger: not previously filed$/m);
+});
+
+test("a ledger hit short-circuits: gh is never invoked", () => {
+  const r = run("Non-zero column audit 11 rows", { filed: [FILED_114], hits: [HIT_114] });
+  assert.equal(r.status, 1);
+  assert.equal(r.ghRan, false, "exit 1 already stops the filing; the query cannot change the answer");
+});
+
+test("a subject with no distinctive terms is never sent as an empty search", () => {
+  // `gh issue list --search ""` matches every issue in the repo, which would
+  // report every such subject as a tracker hit. Not searching is the honest
+  // answer, and it still may not read as safe.
+  const r = run("the of it", { filed: [], hits: [HIT_114] });
+  assert.equal(r.ghRan, false);
+  assert.equal(r.json.tracker.ok, false);
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  assert.equal(r.status, 0);
+});
+
+test("the search query carries at most three sanitised terms and no qualifiers", () => {
+  // `is:open` and `candidates.mjs:164` must not reach gh as search qualifiers —
+  // they would silently change what was searched for. A fourth term is dropped
+  // by design: gh ANDs terms, so the least distinctive one can only subtract
+  // (measured — adding it loses #114, the issue this feature exists to catch).
+  const r = run("candidates.mjs:164 is:open states the opposite of its code", { filed: [] });
+  const query = r.ghArgv[r.ghArgv.indexOf("--search") + 1];
+  assert.doesNotMatch(query, /:/, "a colon would let a subject smuggle a search qualifier into the query");
+  const terms = query.split(" ").filter(Boolean);
+  assert.ok(terms.length <= 3, `expected at most 3 terms, got ${terms.length}: ${query}`);
+  const subjectWords = "candidates mjs 164 is open states the opposite of its code".split(" ");
+  for (const t of terms) assert.ok(subjectWords.includes(t), `term '${t}' is not from the subject`);
+  assert.ok(r.ghArgv.includes("--state") && r.ghArgv.includes("all"), "closed issues are duplicates too");
 });
 
 test("the measured #114 rewording surfaces, weakly — it is the tracker query that catches this class", () => {
