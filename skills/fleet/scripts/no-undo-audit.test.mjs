@@ -463,7 +463,7 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
 
 // The `is not a git worktree` case in the preconditions above passes a plain
 // directory with no repo ANYWHERE above it, so `rev-parse --git-dir` fails and
-// the script refuses. That is the harmless half. These two are the other half:
+// the script refuses. That is the harmless half. These are the other half:
 // `rev-parse --git-dir` WALKS UP, so with an enclosing repo present the gate
 // passes at rc 0 having resolved a git dir that is not this worktree's, and
 // `status --porcelain` then answers for that repo — empty, at rc 0, because the
@@ -488,7 +488,7 @@ function refusedAsUnknownBeforeAnySay(c) {
   assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
   assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
   assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs, let alone reports");
-  assert.match(r.stderr, /has no \.git of its own/);
+  assert.match(r.stderr, /answers for the repo above/);
 }
 
 test("a worktree whose .git was deleted is unanswerable (2), never clean (0)", (t) => {
@@ -498,28 +498,51 @@ test("a worktree whose .git was deleted is unanswerable (2), never clean (0)", (
   refusedAsUnknownBeforeAnySay(c);
 });
 
-// One byte over, and the reason the sibling guard in release-ticket.sh is `-f`
-// rather than `-e`: an EMPTY `.git` DIRECTORY is something `-e` calls present,
-// and git walks up past it exactly as it does past an absent one. `-f` alone
-// cannot be borrowed here — `$wt` is whatever worktree the caller names, and a
-// main checkout's `.git` is a directory, which is what every fixture in this
-// file is.
+// One byte over: an EMPTY `.git` DIRECTORY is something a `-e "$wt/.git"` guard
+// calls present, and git walks up past it exactly as it does past an absent one.
 test("a worktree whose .git is an empty directory is unanswerable (2), never clean (0)", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, ".git"));
   mkdirSync(join(c.w, ".git"));
-  assert.ok(existsSync(join(c.w, ".git")), "fixture: `-e` must call this .git present, or it pins the case above again");
+  assert.ok(existsSync(join(c.w, ".git")), "fixture: a `-e` guard must call this .git present, or it pins the case above again");
 
   refusedAsUnknownBeforeAnySay(c);
 });
 
-// The other direction, and it is not theory: a guard of `-e "$wt/.git/HEAD"`
-// alone passes every test above (measured) while refusing every LINKED worktree
-// on disk, whose `.git` is a file and which therefore has no `.git/HEAD` to
-// stat. That is the fleet's own shape — `claim-ticket.sh` makes worktrees with
-// `git worktree add` — so the false refusal would land on every real caller
-// while the suite stayed green. The two clauses answer for the two shapes; this
-// pins the one the refusal tests do not reach.
+// And one byte over again, which is why the guard asks git instead of stat-ing
+// `.git`: a DIRECTORY holding a lone HEAD. Every "does the linkage exist" guard
+// spelled against the filesystem calls this present — `-e "$wt/.git/HEAD"` most
+// obviously — and git still walks up, because it wants HEAD *and* `objects/`
+// *and* `refs/` before it will call a directory a git dir. Each subset below
+// manufactured `clean:true` at exit 0 against such a guard (measured, git
+// 2.50.1); the last is a REAL `.git` whose HEAD an interrupted write truncated,
+// so this is not only a hand-built shape.
+for (const [why, build] of [
+  ["holding a lone HEAD", (g) => writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n")],
+  ["whose HEAD is empty", (g) => writeFileSync(join(g, "HEAD"), "")],
+  ["missing objects/", (g) => {
+    writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n");
+    mkdirSync(join(g, "refs"));
+  }],
+]) {
+  test(`a worktree whose .git is a directory ${why} is unanswerable (2), never clean (0)`, (t) => {
+    const c = nestedWorktree(t);
+    rmSync(join(c.w, ".git"));
+    mkdirSync(join(c.w, ".git"));
+    build(join(c.w, ".git"));
+    assert.ok(existsSync(join(c.w, ".git", "HEAD")), "fixture: HEAD must be present, or this pins the empty-directory case again");
+
+    refusedAsUnknownBeforeAnySay(c);
+  });
+}
+
+// The other direction, and it is not theory: a guard spelled `-e
+// "$wt/.git/HEAD"` alone passes every refusal test above (measured) while
+// refusing every LINKED worktree on disk, whose `.git` is a file and which
+// therefore has no `.git/HEAD` to stat. That is the fleet's own shape —
+// `claim-ticket.sh` makes worktrees with `git worktree add` — so the false
+// refusal would land on every real caller while the suite stayed green. This
+// pins the shape the refusal tests do not reach.
 test("an intact linked worktree, whose .git is a file, still passes", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
