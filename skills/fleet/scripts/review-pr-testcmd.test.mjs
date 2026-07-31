@@ -12,21 +12,17 @@ import { join } from "node:path";
 // `No such file or directory` for every caller that does not pass args.testCmd,
 // and specialists reason from source instead of measuring.
 //
-// Guard it by CUTTING THE ARCHIVE AND RUNNING THE DEFAULT IN IT. An earlier
-// version of this file parsed the command string and checked its arguments
-// against `git ls-files` instead, and that guard reported three green on
-// `./agent-test skills/fleet/scripts/*.test.mjs` — this ticket's own defect —
-// because it dropped the first token as "the executable" and only ever checked
-// the arguments. Predicting what a shell command will do is the same bet that
-// produced the defect; running it is the only answer that cannot be gamed.
+// So cut the archive and RUN the default in it. Parsing the command to predict
+// what it will do is the same bet that produced the defect — a guard that did
+// that passed `./agent-test skills/…/*.test.mjs`, treating the first token as
+// "the executable" and never checking it.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
-// review-pr.js runs a top-level `await pipeline(...)`, so it cannot be imported
-// for this value. Reading the source couples this test to the literal spelling
-// of the default — a behaviour-preserving requote breaks it — but it breaks
-// LOUDLY, with the message below, and only ever binds the default, never a
-// caller's args.testCmd.
+// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported for
+// this value. Reading the source couples us to the default's literal spelling —
+// a behaviour-preserving requote breaks it, but breaks LOUDLY with the message
+// below, and only ever binds the default, never a caller's args.testCmd.
 const defaultTestCmd = () => {
   const m = SOURCE.match(/args\.testCmd\)\s*\|\|\s*"([^"]+)"/);
   assert.ok(m, "review-pr.js no longer has a quoted default testCmd — update this test");
@@ -38,11 +34,10 @@ const NESTED = "REVIEW_PR_TESTCMD_NESTED";
 
 test("the default testCmd runs from a git archive snapshot and actually runs tests", (t) => {
   if (process.env[NESTED]) return t.skip("this is the nested run being measured");
-  // `rev-parse` walks UP, so a copy of this tree sitting anywhere inside another
-  // repo answers yes — a snapshot under a scratch dir that happens to be in one
-  // included. Only the checkout whose toplevel IS this repo can cut an archive
-  // of it. Anywhere else, SKIP: a skip is visible in the output, where a quieter
-  // fallback check would read as a pass.
+  // `rev-parse` walks UP, so a snapshot sitting anywhere inside another repo
+  // answers yes. Only the checkout whose toplevel IS this repo can cut an
+  // archive of it; anywhere else SKIP, which is visible in the output where a
+  // quieter fallback check would read as a pass.
   let top;
   try {
     top = execFileSync("git", ["-C", REPO, "rev-parse", "--show-toplevel"], {
@@ -63,10 +58,9 @@ test("the default testCmd runs from a git archive snapshot and actually runs tes
     execFileSync("tar", ["-x", "-f", tar, "-C", dir]);
 
     const cmd = defaultTestCmd();
-    // `node --test` marks its own children with these. Inheriting them makes the
-    // nested run believe it is a test worker and emit the v8-serialized stream
-    // instead of the readable report — stdout arrives empty and the count below
-    // reads as `tests 0`, failing this test for the wrong reason.
+    // `node --test` marks its children with these; inherited, the nested run
+    // emits the v8-serialized worker stream instead of the readable report —
+    // stdout arrives empty and the count below reads `tests 0`, a false red.
     const env = { ...process.env, [NESTED]: "1" };
     delete env.NODE_TEST_CONTEXT;
     delete env.NODE_TEST_WORKER_ID;
@@ -78,9 +72,9 @@ test("the default testCmd runs from a git archive snapshot and actually runs tes
       0,
       `default testCmd '${cmd}' does not run in the snapshot (exit ${r.status}):\n${r.stdout}${r.stderr}`,
     );
-    // Exit status alone is not enough, and that is the whole ticket: a glob
-    // matching nothing exits 0 reporting `tests 0`, having run nothing. No node
-    // flag fails a zero-test run (checked on v26.5.0), so assert on the count.
+    // Exit status alone is not enough, which is the whole ticket: a glob
+    // matching nothing exits 0 reporting `tests 0`, and no node flag fails a
+    // zero-test run (checked on v26.5.0). Assert on the count.
     const ran = r.stdout.match(/^ℹ tests (\d+)$/m);
     assert.ok(
       ran && Number(ran[1]) > 0,
@@ -95,15 +89,12 @@ test("the default testCmd runs from a git archive snapshot and actually runs tes
 // it. Without this, a specialist that guesses a glob still reports `tests 0` as
 // a pass — the exact failure the default fix alone does not cover.
 test("the specialist prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
-  // indexOf returns -1 when absent, and slice(-1) is a truthy one-character
-  // string — so asserting on the slice would pass with the prompt gone. Assert
-  // the index instead.
+  // indexOf returns -1 when absent and slice(-1) is a truthy one-character
+  // string, so asserting on the slice passes with the prompt gone. Assert the
+  // index — and bound the END too: unbounded, this slice ran to EOF and the
+  // assertions below were satisfiable from the verifier prompt further down.
   const at = SOURCE.indexOf("READ ONLY FROM THE SNAPSHOT");
   assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  // Bound the END too. Unbounded, this slice ran to EOF and the assertions below
-  // could be satisfied from the verifier prompt further down the file — verified
-  // by moving the ruling there, which left this test green while the specialist
-  // prompt no longer carried it at all.
   const end = SOURCE.indexOf("Scratch files go in", at);
   assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
   const prompt = SOURCE.slice(at, end);
