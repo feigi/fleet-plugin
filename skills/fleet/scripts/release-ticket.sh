@@ -140,11 +140,18 @@ block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
 # both `prunable`, and `worktree remove` ACCEPTS a prunable-because-absent entry
 # (rc 0) where a live worktree whose .git was merely deleted it refuses — so
 # nothing downstream recomputes what this gets wrong. So walk up to the nearest
-# ancestor that does exist and require THAT to be searchable: only then is "not
+# existing ancestor BELOW `/` and require THAT to be searchable: only then is "not
 # there" a measurement rather than a guess. The walk is what keeps `rm -rf
 # .worktrees` answerable — the parent goes with the child, and testing the
 # immediate parent alone reads its absence as unknown, which is the permanent
 # refusal both callers exist to stop producing.
+#
+# Below `/` and not including it: `${p%/*}` on `/x` yields the empty string rather
+# than `/`, so a path whose every ancestor below the root is gone falls out of the
+# loop on "" and answers unknown. Safe direction, unreachable for the
+# `<repo>/.worktrees/<issue>-<slug>` paths claim-ticket.sh writes, and #178 to
+# close it — stated here because the walk does not do what "nearest ancestor that
+# exists" would promise.
 #
 # One predicate, because both callers ask one question. Answered twice they drift,
 # and the halves of this script that protect a member's work stop agreeing about
@@ -153,6 +160,11 @@ block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
 # `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
 # slash, so the emptiness form spins forever on one. git emits absolute paths
 # here, but a delete script may not hang on the input that proves otherwise.
+#
+# 0 ONLY for established absent; 1 covers present AND cannot-stat, so a caller
+# needing those apart pairs this with its own `[ ! -e ]`, as the dirty check does.
+# Condition context only: a bare `gone` returns 1 on the ordinary present answer
+# and `set -e` exits — rc 1, this script's own blocked-run code, and no receipt.
 gone() {
   look=$1
   while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
@@ -176,7 +188,7 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   #
   # Blocked either way, never released. This worktree is not on the claim's
   # branch, so releasing would delete a different ref and then reach the
-  # `git worktree prune` every apply ends with — unanchoring a detached HEAD's
+  # `git worktree prune` a completed apply ends with — unanchoring a detached HEAD's
   # commits, which no ref points at, as a side effect of releasing something
   # else. Naming that prune hands the operator the command that does clear the
   # entry (verified, git 2.50.1: the run after it releases) and leaves the
