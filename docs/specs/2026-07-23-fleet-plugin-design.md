@@ -344,8 +344,11 @@ instead of trusting it. Deliberately historical rows — describing another
 document *as it stood* — keep their numbers and name the ref those numbers were
 measured at.
 
-Line numbers below are the **pre-fix** ones and no longer resolve — they are kept
-as the record of what was wrong, not as pointers.
+Line numbers in the **Site** column of both tables in this section, and in the
+prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
+record of what was wrong, not pointers into the current files — resolve them at
+the ref they were measured at, where each still lands exactly on the content its
+row describes: `git show eacc5cf:<path> | sed -n '<N>p'`.
 
 | Site (pre-fix lines) | Was | Became | Severity |
 |---|---|---|---|
@@ -371,12 +374,14 @@ fixed and is **still open**. Kept as the record of how an incomplete sweep looks
 | Site | Problem, and where it stands |
 |---|---|
 | `next-ticket` SKILL.md:80 | names **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ends `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written repairs half a line. |
-| `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | **Fixed.** 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references **as measured at `a03258e^`**; both counts are **0** at `origin/main`. **Was not a dead document** — `run-team` SKILL.md still routes the reader to it from the opening prose above `## Rules that fail silently`, on the line beginning "Rationale:", so it was reachable and wrong. The `## Migration debt` entry saying it "gets a pointer to this document rather than an edit" was written before anyone knew its paths would die. |
+| `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | **Fixed.** 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references **as measured at `a03258e^`**; both counts are **0** at `origin/main`. **Was not a dead document** — `run-team` SKILL.md still routes the reader to it from the opening prose above `## Rules that fail silently`, on the line beginning "Rationale:", so it was reachable and wrong. **This spec's own** `## Migration debt` entry, saying it "gets a pointer to this document rather than an edit", was written before anyone knew its paths would die. |
 | `workflows/review-pr.js:6` | its `whenToUse` string reads "Called per-PR by `/run-team`" — user- and model-facing, renders in the skill listing, and names a command that no longer exists in any form. The spec's "Out of scope — rewriting `review-pr.js`" must not shelter this: a one-string description fix is not a rewrite. |
-| Every line-numbered citation into `run-team` SKILL.md from **this** spec | **Still open** — only the path half was fixed. `run-team.md:NNN` no longer occurs, but the numbers were never re-resolved and none of them point at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in the file at all**. The stated cause does not carry the rot either: the command's 4-line frontmatter (`b915414`) did become a 6-line skill frontmatter, but that accounts for 2 lines of a +126 drift; the rest is body growth. No single delta repairs these — each needs re-anchoring to a fragment individually, which is **#117**. |
+| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Still open** — only the path half was fixed. `run-team.md:NNN` no longer occurs, but the numbers were never re-resolved and none of them point at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either: the command's 4-line frontmatter (`b915414`) did become a 6-line skill frontmatter, but that accounts for 2 lines of a +126 drift; the rest is body growth. No single delta repairs these — each needs re-anchoring to a fragment individually, which is **#117**. |
 
 Every figure in the `2026-07-22` spec row and the line-numbered-citation row,
-with the command that produces it (re-derived 2026-07-31):
+with the command that produces it (re-derived 2026-07-31, when `origin/main` was
+`b1137bd` — the outputs below are pinned to that commit, not to wherever the
+branch has since moved):
 
 ```
 $ git show a03258e^:docs/specs/2026-07-22-run-team-agent-fleet-design.md | grep -c '~/.claude/commands/'
@@ -410,7 +415,8 @@ SKILL.md:65, :93. That is *why* namespacing broke nothing: the model resolves
 them by description, not by literal name. It is luck rather than design, and
 Plan 3 decides deliberately whether to keep depending on it.
 
-**Nothing is open.** All four items this section opened with are answered above.
+**No open item remains.** All four items this section opened with are answered
+above.
 The superseded bullets that used to sit here — restating namespacing,
 `${CLAUDE_PLUGIN_ROOT}` and the expected-job list as unresolved — were deleted
 rather than annotated, because a rule stated twice at two confidence levels is
