@@ -75,7 +75,11 @@ test("the default testCmd runs from a git archive snapshot and actually runs tes
     // Exit status alone is not enough, which is the whole ticket: a glob
     // matching nothing exits 0 reporting `tests 0`, and no node flag fails a
     // zero-test run (checked on v26.5.0). Assert on the count.
-    const ran = r.stdout.match(/^ℹ tests (\d+)$/m);
+    // Both prefixes: the default reporter is spec on a terminal and on newer
+    // node, tap when older node writes to a pipe. Pinning only `ℹ` reads a tap
+    // run — every CI run — as `tests 0`, which is this assertion's own failure
+    // message inverted: a false red claiming a silent green.
+    const ran = r.stdout.match(/^(?:ℹ|#) tests (\d+)$/m);
     assert.ok(
       ran && Number(ran[1]) > 0,
       `default testCmd '${cmd}' ran no tests in the snapshot — 'tests 0' at exit 0 is a silent green:\n${r.stdout}`,
