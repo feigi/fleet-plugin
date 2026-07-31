@@ -116,8 +116,12 @@ git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$
 # that ends the section, and `conflicts` comes back short or empty while the
 # audit exits 0. That is a false safe, and worse than what this replaced: git
 # C-quoted such a path, which at least emitted JSON the caller choked on.
-# Unanswerable is exit 2; a shell variable cannot hold the NUL that answering it
-# properly would need.
+# Unanswerable is exit 2. ponytail: refusing, not answering — a shell variable
+# cannot hold NUL, so answering means keeping the whole list in a file and
+# reading it with something NUL-capable. That is available (inflight.sh already
+# shells out to python3, claim-ticket.sh to node) and is not the constraint; it
+# is a restructure bought for a filename shape nobody has produced. Upgrade
+# there if one ever turns up.
 conflicts=$(tr '\n' '\001' <"$mt_out" | tr '\0' '\n' | awk 'NR==1{next} /^$/{exit} {print}')
 nl=$(printf '\001')
 case "$conflicts" in
@@ -147,7 +151,10 @@ if [ -n "$conflicts" ]; then
   #
   # `:(literal)` because `--` ends the OPTIONS, not the magic: a real file named
   # `:colon.txt` is read as a pathspec expression and silently matches nothing,
-  # which is the same false safe by a different byte.
+  # which is the same false safe by a different byte. It is reachable: `git add
+  # -A` and `git add .` track such a file happily, because the name never
+  # appears as a pathspec there. Naming it as one is what fails — so
+  # `git add -- :colon.txt` erroring is not evidence this guard is dead weight.
   at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
     || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
