@@ -434,7 +434,7 @@ ledger rows in the same step. See references/reaping.md.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
-runs 20-40, because each fans out 4-5 specialists. Five implementers saturate five
+runs 20-40, because each fans out up to six specialists. Five implementers saturate five
 reviewers within the hour and every later PR queues. Absent instruction, default
 **2 implementers / 5 reviewers** and say why.
 
