@@ -306,7 +306,7 @@ See references/member-lifecycle.md.
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
 `diff-stats.mjs` and drops dead dimensions — a docs-only change runs
 correctness+comments, not the full six — and skips the adversarial pass on
-`suggestion`s, which are deferred and never applied. So you need not compute a
+`suggestion`s, which are deferred and never auto-applied. So you need not compute a
 count. Manual fallback (no workflow): two or three specialists for annotation-only
 or single-file, the full set for production code.
 
