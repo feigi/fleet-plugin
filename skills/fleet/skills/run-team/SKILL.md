@@ -606,6 +606,14 @@ Plus two append-only lists:
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
 
+`check` exits **0** clean, **1** already in this run's filed list, **3** the ledger
+is clean but open or closed tracker issues match — read those and decide. It also
+prints the closest filed rows with an overlap score; those are advisory and do not
+change the exit code, because the same finding gets worded differently by whoever
+finds it second. **Exit 0 is not automatically "safe to file":** when `gh` cannot be
+reached the answer is ledger-only, and it says `TRACKER NOT CHECKED` — an issue
+filed by an earlier run is invisible to it.
+
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.
 
