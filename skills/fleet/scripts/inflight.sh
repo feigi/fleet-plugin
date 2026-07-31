@@ -221,19 +221,15 @@ echo "$NAME: #$n taken=$taken" >&2
 # >= \200. tr pads the replacement with its last character.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
-# already refused unless it is all digits, `$taken` is this script's own
-# true/false, and `$hits` is built only from the fixed literals `add_hit` is
-# called with. `$pr` is wrapped with the rest — GitHub's own repo, number and
-# state vocabulary cannot currently produce a quote, so it is uniformity
-# against a later edit rather than a reachable vector today.
+# already refused unless it is all digits — which is not the same as a valid
+# JSON number, since a zero-padded `007` clears that guard and still emits a
+# payload no parser accepts (#121); `$taken` is this script's own true/false,
+# and `$hits` is built only from the fixed literals `add_hit` is called with.
+# `$pr` is wrapped with the rest — GitHub's own repo, number and state
+# vocabulary cannot currently produce a quote, so it is uniformity against a
+# later edit rather than a reachable vector today.
 jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
-# This is evidence, not the decision. Escaping cannot reach the exit code, and
-# no caller in this repo parses this payload at all: next-ticket/SKILL.md:36
-# documents the exit code as the contract, run-team/SKILL.md:65 states "any hit
-# = taken", and release-ticket.test.mjs:161 spawns this script and reads only
-# `.status`. So nothing here can alter a taken/free call.
-#
 # Guarded for the same reason as the python3 call above: under `set -e` a failed
 # write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
 # rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
