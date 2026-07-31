@@ -356,22 +356,27 @@ test("probe 3: the same worktree without a space in the path, as the control", (
 // (`evidence.pr` is the fourth wrapped field and has no case, because it is
 // built only from a URL-derived owner/repo, a PR number and a state — none of
 // which can carry a quote.) None of them changes the verdict — the exit code
-// and `taken` are already right, and next-ticket/SKILL.md and run-team/SKILL.md
-// both read the EXIT CODE as the decision — so a red here is a consumer that
-// cannot read the evidence, not a ticket claimed twice.
+// and `taken` are already right — next-ticket/SKILL.md reads the exit code as
+// the decision, and run-team/SKILL.md states "any hit = taken", which is the
+// same call by way of the hits rather than the code. So a red here is a
+// consumer that cannot read the evidence, not a ticket claimed twice.
 //
 // The first two are built by hand rather than through `fixture`'s options, the
 // way release-ticket.test.mjs:628 builds its own: the names are the fixture.
 
-const git = (repo, ...args) => execFileSync("git", ["-C", repo, ...args],
-  { encoding: "utf8", env: { ...process.env, ...IDENT } });
+// Takes the fixture's `env`, not `process.env`: that is the copy with GIT_DIR
+// and GIT_WORK_TREE deleted. Inherited, they outrank `-C`, so a suite run from
+// inside a git hook would create these deliberately hostile names in whatever
+// repo they name — and `git worktree prune` does not reclaim a stray branch.
+const git = (repo, env, ...args) => execFileSync("git", ["-C", repo, ...args],
+  { encoding: "utf8", env: { ...env, ...IDENT } });
 
 test("a quote in a local branch cannot produce a payload the caller fails to parse", (t) => {
   // Measured on the pre-fix script: exit 1 with stdout breaking at char 100,
   // `"localBranch":"fix-42-say"hi"`.
   const { repo, env } = fixture(t, 42, {});
-  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
-  git(repo, "branch", 'fix-42-say"hi');
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", 'fix-42-say"hi');
 
   const r = spawnSync("sh", [SCRIPT, "42"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
@@ -387,8 +392,8 @@ test("a quote and a backslash in a worktree path cannot produce an unparseable p
   // same number would let probe 3's branch half answer for its worktree half.
   const { repo, env } = fixture(t, 77, {});
   const name = 'fix-77-sa"y\\b';
-  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
-  git(repo, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
 
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
@@ -414,8 +419,8 @@ test("a control character in a worktree path cannot produce an unparseable paylo
   // and the assertion says so rather than pretending otherwise.
   const { repo, env } = fixture(t, 99, {});
   const name = "fix-99-c\u0001x";
-  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
-  git(repo, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
 
   const r = spawnSync("sh", [SCRIPT, "99"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
