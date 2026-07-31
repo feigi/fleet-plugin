@@ -16,7 +16,7 @@ Second run, on a **different repo**; the numbers and test vocabulary describing 
 
 Both were **positional references**: "the *closing* `report-file verification` block" (4th of 5) and "the *second* assertion is the one with teeth" (3rd). Positional refs are one of the four classes in the four-for-four finding, and they re-rot the moment anyone inserts ahead of them.
 
-Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation reds the named assertion and never reaches the true one, appearing to confirm the wrong claim.
+Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation (`if: ${{ always() }}`) reds the named assertion and never reaches the true one, appearing to confirm the wrong claim.
 
 Two rules for the implementer, both cheap: **match the ticket's stated size** — added prose is where minted claims enter — and **never write a positional reference** (`the closing/second/last X`); name what the thing *is*, not where it sits.
 
