@@ -27,9 +27,13 @@ git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does no
 git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null \
   || die "origin/$branch does not resolve — fetch it, or it was never pushed"
 
-# 1. Uncommitted work. This may exist nowhere else on disk.
+# 1. Uncommitted work. This may exist nowhere else on disk. `|| true` here would
+#    turn a failed `status` into empty output and print "clean" over a dirty
+#    tree — and since the stash count stopped gating, nothing else would catch
+#    it. Unanswerable is exit 2, never exit 0. Same rule as worktree-audit.sh.
 echo "\$ git -C $wt status --porcelain" >&2
-porcelain=$(git -C "$wt" status --porcelain || true)
+porcelain=$(git -C "$wt" status --porcelain) \
+  || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
   clean=false
   echo "$porcelain" | sed 's/^/    /' >&2
@@ -38,10 +42,24 @@ else
   echo "    clean" >&2
 fi
 
-# The stash stack is repo-global across worktrees. Report it; never pop, drop or
-# apply an entry this process did not create.
+# Repo-global across worktrees, and a rebase never consumes a pre-existing entry
+# — `--autostash` stores its own on top, never takes yours. So the count says
+# nothing about whether THIS rebase loses THIS branch's work. Reported, never
+# gated: gating refused every run in a repo holding any entry, and a check that
+# always fires is one nobody reads. Read the list when it is nonzero — an entry
+# labelled `on <this branch>` may be a dead member's only copy.
+#
+# It cannot cover the hazard it looks like it covers, either. A member running
+# `git stash` to clear a dirty worktree leaves `porcelain` empty, so `clean` is
+# already true — and `-u` takes the untracked files too, so no case is left that
+# this still refuses. Entries carry `WIP on <branch>`, so an old entry on
+# ANOTHER branch is separable; a stale one on THIS branch is not, and telling it
+# from the member's fresh entry needs a count the caller captured before the
+# member ran. This script runs once, before the rebase, so it has no baseline.
+#
+# Never pop, drop or apply an entry this process did not create.
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
-echo "    stash entries (repo-global): $stash" >&2
+echo "    stash entries (repo-global, not gated): $stash" >&2
 
 # 2. Which files would conflict. merge-tree exits 0 clean, 1 conflicts found,
 #    >=1 other on real failure (bad refs, corrupt tree, etc — treat >=2 as an
@@ -85,12 +103,12 @@ if [ -n "$conflicts" ]; then
 fi
 at_risk_json=$(printf '%s' "$at_risk" | awk 'NF{gsub(/"/,"\\\""); print "\""$0"\""}' | paste -sd, -)
 
-if [ "$clean" = true ] && [ "$stash" -eq 0 ]; then
+if [ "$clean" = true ]; then
   rc=0
 else
   rc=1
-  echo "$NAME: REFUSED — commit or stash-list-clear before rebasing. Never \`git clean\`," >&2
-  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash drop\` to make a rebase start." >&2
+  echo "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`," >&2
+  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start." >&2
 fi
 
 printf '{"worktree":"%s","branch":"%s","clean":%s,"stash":%s,"conflicts":[%s],"atRisk":[%s]}\n' \
