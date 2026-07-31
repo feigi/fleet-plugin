@@ -289,6 +289,77 @@ test("a worktree that is no longer on the branch blocks instead of releasing aro
   );
 });
 
+test("a stray worktree whose directory is gone names the prune that clears it", (t) => {
+  // Same guard, the other outcome: `stray` is matched on the worktree LIST, and
+  // the registration outlives the directory — `worktree list --porcelain` keeps
+  // the entry, annotated `prunable`, after an `rm -rf`. Asking only whether it is
+  // registered sent every such claim to "release it by hand", which names an
+  // action on a directory that is not there: nothing to release, so nothing the
+  // operator does clears it, so the next run blocks identically — permanently,
+  // with the label and the branch standing and the in-flight probe still reading
+  // the ticket as taken.
+  //
+  // Still a blocker, not a release: the claim's branch is not what this worktree
+  // has checked out, so releasing would delete a different ref and then reach the
+  // `git worktree prune` every apply ends with — unanchoring a detached HEAD's
+  // commits, which nothing else points at, as a side effect of releasing
+  // something else. Naming that prune is handing the operator the same command
+  // as a decision they make. It does clear the entry, and the run after it
+  // releases (measured, git 2.50.1).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree prune/, "the remedy must be the one that clears a registration");
+  assert.doesNotMatch(json.blockers[0], /by hand/, "there is no directory left for the operator to release");
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  // `artefacts().worktree` asks whether a worktree is registered ON THE BRANCH,
+  // which a detached one never is — that is what makes it stray in the first
+  // place. So the entry this case is about is measured by its path instead.
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: true }, "the branch survives");
+  assert.ok(
+    git(r.w, "worktree", "list", "--porcelain").includes("/.worktrees/9-release-ticket\n"),
+    "and so does the stale entry: clearing it is the prune's job, not this blocked run's",
+  );
+});
+
+test("a stray worktree the script may not stat keeps the hand-release remedy", (t) => {
+  // -e is false for a directory that is gone and for one inside a prefix we may
+  // not search, and only the first is an absence — the distinction the ancestor
+  // walk exists to make, which a bare `[ -e "$stray" ]` would collapse. Read as
+  // gone, this hands the operator `git worktree prune`: a command that discards
+  // the registration of a worktree that is still sitting there with uncommitted
+  // work in it, unregistering the only record of where that work lives.
+  //
+  // 0o000 on the PARENT, not on the worktree: the walk stops at the nearest
+  // ancestor that exists, so making the worktree itself unsearchable leaves it
+  // stat-able from outside and -e still answers true. Dropping the parent's bits
+  // is what makes the entry unstattable while the ancestor that does answer is
+  // the unsearchable one.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  const parent = join(r.w, ".worktrees");
+
+  chmodSync(parent, 0o000);
+  const { code, json } = release(r, c);
+  // Restored before the first assert, for the reason "a worktree the script may
+  // not look at is unknown, never a release" gives: a failure here would
+  // otherwise leave a fixture the suite's own cleanup cannot remove.
+  chmodSync(parent, 0o755);
+
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.doesNotMatch(json.blockers[0], /prune/, "never a prune of a registration whose worktree may still be there");
+  assert.match(json.blockers[0], /release it by hand/);
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
 test("a repo path containing a space does not truncate the worktree it reads", (t) => {
   // `worktree list --porcelain` prints the path raw, so taking awk's $2 stops at
   // the first space — and every worktree under a directory like "My Repos", which
