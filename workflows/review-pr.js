@@ -113,7 +113,7 @@ const worktree = args && args.worktree;
 // The default has to exist in the SNAPSHOT, which is where specialists are told
 // to run it — not in the worktree. The snapshot is cut with `git archive HEAD`
 // (below), which carries tracked files only, and `agent-test` is written into
-// the worktree by `claim-ticket.sh:27` and added to `.git/info/exclude` at :166
+// the worktree by `claim-ticket.sh:110` and added to `.git/info/exclude` at :166
 // — untracked by construction, so it is never in the archive. `./agent-test` as
 // the default therefore handed every specialist `No such file or directory`,
 // and they reasoned from source instead of measuring. These paths are tracked.
