@@ -165,7 +165,7 @@ fi
 # which is legitimate and must never become exit 2. awk needs no such case
 # separated out — the programs here contain no `exit`, so they return 0 whether
 # or not anything matched, and every non-zero status is a real failure.
-remote=$(printf '%s\n' "$heads" | awk -v n="$n" '
+remote=$(printf '%s\n' "$heads" | LC_ALL=C awk -v n="$n" '
   { ref = $2; sub("^refs/heads/", "", ref)
     if (ref ~ "(^|[/-])" n "([-/]|$)") { out = out sep ref; sep = "," } }
   END { printf "%s", out }') ||
@@ -191,7 +191,7 @@ if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
 fi
 # One awk, for the reason probe 2's filter is one: a short refname is the whole
 # line, so the match is on $0.
-local_b=$(printf '%s\n' "$refs" | awk -v n="$n" '
+local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
   END { printf "%s", out }') ||
   die "could not filter the local branches for #$n"
@@ -212,7 +212,7 @@ fi
 # last `/`. It used to be a `basename` subshell per line, which had this defect
 # one level down: a failed fork there yields an empty first field and a silent
 # non-match, and `$(…)` discards the status that would have said so.
-wt=$(printf '%s\n' "$worktrees" | awk -v n="$n" '
+wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
   /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
     if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
   END { printf "%s", out }') ||

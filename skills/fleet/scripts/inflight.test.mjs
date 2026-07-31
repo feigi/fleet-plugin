@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -607,4 +607,33 @@ test("41 is not claimed by a remote branch, a local branch or a worktree named f
   assert.equal(json.evidence.remote, "", "341 on the remote is not 41");
   assert.equal(json.evidence.localBranch, "", "341 on a local branch is not 41");
   assert.equal(json.evidence.worktree, "", "341 in a worktree name is not 41");
+});
+
+// --- a ref byte that is not valid UTF-8.
+//
+// Refs and paths are byte strings; nothing guarantees they decode as UTF-8. A
+// BWK awk in a UTF-8 locale aborts on a record it cannot convert to wide
+// characters — even a record it is only scanning past — so one such ref
+// anywhere on the remote takes EVERY ticket to exit 2, permanently, until
+// somebody deletes it. The collapse to a lone awk is what introduced that:
+// `grep` matched bytes and was unbothered. `LC_ALL=C` restores byte matching,
+// which is what a ref and a path are, and the regex is pure ASCII so nothing
+// is lost. Without it this case reports "could not filter the remote branches"
+// for a ticket that is plainly free.
+//
+// Written straight into `packed-refs`, a plain text file: no such filename is
+// ever created, so the filesystem never has to accept one, and the bytes still
+// reach probe 2 through `git ls-remote`.
+test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t) => {
+  const { repo, env } = fixture(t, 41, { remoteBranches: ["main"] });
+  const bare = join(repo, "..", "remote.git");
+  const main = execFileSync("git", ["-C", bare, "rev-parse", "refs/heads/main"],
+    { encoding: "utf8" }).trim();
+  appendFileSync(join(bare, "packed-refs"), Buffer.concat([
+    Buffer.from(`${main} refs/heads/feat/caf`), Buffer.from([0xff]), Buffer.from("-nine\n")]));
+
+  const r = spawnSync("sh", [SCRIPT, "41"],
+    { cwd: repo, env: { ...env, LC_ALL: "en_US.UTF-8" }, encoding: "utf8" });
+  assert.equal(r.status, 0, `a free ticket stays free, got: ${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).taken, false);
 });
