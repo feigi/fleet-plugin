@@ -20,7 +20,7 @@ One agent, one unit of work, gone. Never re-task finished agent — `SendMessage
 
 ## Grandchildren surface to you, not to the member that spawned them
 
-Specialist's report routes to *you*, controller; completed agent's final text is return value, lost if unconsumed. Relay is only path — reviewer has no channel to grandchild, and `SendMessage` to one returns `had no active task; resumed from transcript` without report. ~15 specialists pinged, one run, 0 reports retrieved — reports that existed had already reached controller.
+Specialist's report routes to *you*, controller; completed agent's final text is return value, lost if unconsumed. Reviewer has no *messaging* channel to a grandchild — `SendMessage` to one returns `had no active task; resumed from transcript` without report; ~15 pinged, one run, 0 retrieved. But it **can read the transcript**: `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` yields the final report, bounded (299 KB transcript → 8 KB last record → 6.6 KB report; never read the whole file). Reviewer retrieves first, relay is the backup — duplicate costs nothing, missed report costs a verdict.
 
 So relay each: name source, send its *text* (ruling on it as "your finding" makes reviewer verify report it never sent, or act on one it cannot check). Then **reconcile every verdict against your relay receipts** — verdict claims dimension undelivered, receipts say relayed → re-send naming specialist, hold verdict until it lands. Only controller holds msg id, so only controller detects discrepancy. Do not require reviewer-side acknowledgement: compliance depends on same failure it catches, and receipt check needs nothing from reviewer.
 
