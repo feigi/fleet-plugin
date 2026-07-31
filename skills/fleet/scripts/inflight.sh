@@ -139,20 +139,19 @@ echo "\$ git ls-remote --heads origin" >&2
 # The lookup runs on its own, never inside the filtering pipeline below. A
 # pipeline reports its LAST command's status — `paste`, which always succeeds —
 # so an `ls-remote` that exited 128 used to arrive here as zero matching lines,
-# which is precisely what a clean ticket produces. Trailing `|| true` was not
-# the culprit and removing it would not have helped.
+# which is precisely what a clean ticket produces.
 #
 # The two conditions are different answers and must stay apart: `grep` exiting 1
 # is "looked, found nothing" and leaves the ticket free; a failed `ls-remote` is
 # "could not look" and is what exit 2 is for. Nothing here needs GitHub to be
-# down — no `origin` configured, an unavailable SSH key or agent, a suppressed
-# host-key prompt, or a stale URL after a rename all land in it, and probe 1
-# sails through all four, so this is the probe that decides.
+# down: an unavailable SSH key or agent will do it, and `gh` authenticates over
+# HTTPS independently, so probe 1 answers fine while this one cannot.
 #
-# stderr is left on stderr rather than folded into the value, the way
-# release-ticket.sh's ls-remote guard does it: the emptiness of $remote IS the
-# answer here, so a host-key notice on an otherwise fine query would read as a
-# branch that exists. git's own wording is more use on the terminal anyway.
+# stderr is left on stderr rather than folded into the value. That matters less
+# here than in release-ticket.sh:168 — that one tests $remote raw, so a folded-in
+# host-key notice really would read as a branch, whereas the awk/sed/grep below
+# reduces such a line to a word no numeric segment can match. git's own wording
+# is more use on the terminal anyway.
 if ! heads=$(git ls-remote --heads origin); then
   die "git ls-remote failed, so whether #$n has a remote branch is unknown"
 fi
@@ -167,11 +166,13 @@ fi
 
 # Probe 3 — a local worktree or branch.
 #
-# Same shape as probe 2 and the same reasoning, at lower exposure: these two read
-# the local repository, so they fail far more rarely — a corrupt or unreadable
-# ref, a broken worktree admin file. Rarely is not never, and the failure is
-# silent and points the same wrong way, so they are guarded identically rather
-# than left as the one path that can still answer "no" without having looked.
+# Same guard shape as probe 2, and it catches the same class: a lookup that
+# could not run at all (git missing, a fork failure, an unreadable packed-refs,
+# which exits 128). Know its ceiling, though — it does NOT catch git's own
+# degraded reads, which exit 0 with output missing. Measured: an unreadable
+# refs/heads prints nothing at rc 0, and a broken worktree admin file is skipped
+# at rc 0. Those still answer "no" without having looked, and only git can fix
+# it. The guard is the floor, not the whole answer.
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
   die "git for-each-ref failed, so whether #$n has a local branch is unknown"
 fi
@@ -184,7 +185,11 @@ local_b=$(printf '%s\n' "$refs" |
 if ! worktrees=$(git worktree list --porcelain); then
   die "git worktree list failed, so whether #$n has a worktree is unknown"
 fi
-wt=$(printf '%s\n' "$worktrees" | awk '/^worktree /{print $2}' |
+# substr($0,10), never $2, exactly as release-ticket.sh:70 does it: the porcelain
+# prints the path raw, so a checkout under a directory with a space in it — plain
+# enough on macOS — truncates at the space and the ticket stops matching. That is
+# a wrong "free", which is the one answer this script must never invent.
+wt=$(printf '%s\n' "$worktrees" | awk '/^worktree /{print substr($0,10)}' |
      while IFS= read -r p; do printf '%s\t%s\n' "$(basename "$p")" "$p"; done |
      awk -F'\t' -v n="$n" '$1 ~ "(^|[/-])" n "([-/]|$)" {print $2}' |
      paste -sd, - || true)
@@ -205,6 +210,10 @@ else
 fi
 echo "$NAME: #$n taken=$taken" >&2
 
+# Guarded for the same reason as the python3 call above: under `set -e` a failed
+# write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
+# rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
 printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","remote":"%s","localBranch":"%s","worktree":"%s"}}\n' \
-  "$n" "$taken" "${hits%,}" "$pr" "$remote" "$local_b" "$wt"
+  "$n" "$taken" "${hits%,}" "$pr" "$remote" "$local_b" "$wt" \
+  || die "could not write the verdict for #$n"
 exit "$rc"
