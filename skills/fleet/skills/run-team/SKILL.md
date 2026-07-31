@@ -311,9 +311,9 @@ See references/member-lifecycle.md.
 **The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
 `diff-stats.mjs` and drops dead dimensions — a docs-only change runs
 correctness+comments, not the full six — and skips the adversarial pass on
-`suggestion`s, which are deferred and never auto-applied. So you need not compute a
-count. Manual fallback (no workflow): two or three specialists for annotation-only
-or single-file, the full set for production code.
+`suggestion`s, which `review-and-fix.md` step 2 defers and never auto-applies.
+So you need not compute a count. Manual fallback (no workflow): two or three
+specialists for annotation-only or single-file, the full set for production code.
 
 **Put the standing CI facts in the reviewer prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per reviewer per
