@@ -122,17 +122,24 @@ function dropSpecs(rows) {
 let rows = query(requireLabel);
 console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
 refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
+// Wedged between the two, and both sides are load-bearing. After
+// refuseIfCapped, never before: filtering first shrinks the array below
+// `limit` and the cap check would stop seeing a truncated list. Before the
+// emptiness test below, never after: a queue whose every row was filtered out
+// IS an empty queue, and gating the fallback on the raw count left a
+// ready-for-agent queue of nothing but specs reporting "no work" with the
+// retry never attempted.
+rows = dropSpecs(rows);
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
   rows = query(null);
   console.error(`    ${rows.length} candidate(s) unfiltered`);
   refuseIfCapped(rows, " unfiltered (fallback)");
+  // Same two reasons one branch deeper: the fallback's rows arrive as raw as
+  // the labeled query's did, and nothing downstream drops a spec.
+  rows = dropSpecs(rows);
 }
-
-// After refuseIfCapped, never before: filtering first shrinks the array below
-// `limit` and the cap check would stop seeing a truncated list.
-rows = dropSpecs(rows);
 
 // FIFO among survivors. Issue number is monotonic in creation order, so this
 // needs no extra field and no query semantics. Dependencies do not rank —
