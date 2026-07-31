@@ -44,6 +44,9 @@ const ENV = {
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
+// Absolute path to the real git, for the one test that shadows `git` on PATH.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
   git(w, "commit", "-q", "--allow-empty", "-m", msg);
@@ -313,9 +316,15 @@ test("a git failure reading the parents is an error, never a silent disproof", (
 
   const bin = mkdtempSync(join(tmpdir(), "prove-merge-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
+  // Ask the shell where git is, rather than deriving it from `--exec-path`:
+  // that answer is `<prefix>/libexec/git-core` on macOS but `/usr/lib/git-core`
+  // on Debian, where a `libexec` rewrite matches nothing and the shim execs a
+  // DIRECTORY — "Permission denied", the fetch fails first, and the parents are
+  // never read, so this test measures the wrong failure. Resolved out here,
+  // where PATH is still the real one; inside the shim, `git` is the shim.
   writeFileSync(
     join(bin, "git"),
-    `#!/bin/sh\n[ "$1" = rev-list ] && exit 128\nexec ${git(w, "--exec-path").replace(/libexec.*/, "bin/git")} "$@"\n`,
+    `#!/bin/sh\n[ "$1" = rev-list ] && exit 128\nexec ${REAL_GIT} "$@"\n`,
     { mode: 0o755 },
   );
 
