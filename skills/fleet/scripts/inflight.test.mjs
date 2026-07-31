@@ -594,19 +594,31 @@ test("probe 3: a worktree filter that could not run is unknown, never free", (t)
 // rewrite that reaches for `index`, a bare `~ n`, or a dropped anchor turns
 // every ticket whose digits appear inside a longer number into a false hit —
 // which reads as taken and silently drops real work on the floor.
-test("41 is not claimed by a remote branch, a local branch or a worktree named for 341", (t) => {
-  const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/341-thing"] });
+//
+// Both anchors, because they guard opposite collisions and one fixture cannot
+// catch the other's loss: 341 is a SUFFIX collision, held off by the leading
+// `(^|[/-])`, and 410 is a PREFIX collision, held off by the trailing
+// `([-/]|$)`. Measured — with only 341 here, dropping the trailing anchor left
+// the whole suite green while 41 read as taken off 410 on all three probes.
+// Neither number is hypothetical in this repo: 17 vs 174, 13 vs 132, 4 vs 48.
+test("41 is not claimed by a remote branch, a local branch or a worktree named for 341 or 410", (t) => {
+  const { repo, env } = fixture(t, 41, {
+    remoteBranches: ["main", "fix/341-thing", "fix/410-thing"],
+  });
   git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
-  git(repo, env, "branch", "fix/341-thing");
-  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", "fix-341-slug"), "HEAD");
+  for (const other of ["341", "410"]) {
+    git(repo, env, "branch", `fix/${other}-thing`);
+    git(repo, env, "worktree", "add", "-q", "--detach",
+      join(repo, ".worktrees", `fix-${other}-slug`), "HEAD");
+  }
 
   const r = spawnSync("sh", [SCRIPT, "41"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
   assert.equal(r.status, 0);
   assert.equal(json.taken, false);
-  assert.equal(json.evidence.remote, "", "341 on the remote is not 41");
-  assert.equal(json.evidence.localBranch, "", "341 on a local branch is not 41");
-  assert.equal(json.evidence.worktree, "", "341 in a worktree name is not 41");
+  assert.equal(json.evidence.remote, "", "341 or 410 on the remote is not 41");
+  assert.equal(json.evidence.localBranch, "", "341 or 410 on a local branch is not 41");
+  assert.equal(json.evidence.worktree, "", "341 or 410 in a worktree name is not 41");
 });
 
 // --- a ref byte that is not valid UTF-8.
