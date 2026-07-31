@@ -189,9 +189,9 @@ fi
 # same question: removing only a LIVE worktree's .git file marks it `prunable`
 # too, with the directory and every uncommitted change still sitting in it.
 # Keying on the annotation would skip the check on that one, and `worktree
-# remove` then refuses it (rc 128) — so instead of the plain "has N uncommitted
-# change(s)" this reports today, the run reaches `halt` and exits 2 announcing a
-# partial release that never happened, on a worktree still holding the work.
+# remove` then refuses it (rc 128) — so instead of the refusal the linkage guard
+# below reaches on its own, the run gets as far as `halt` and exits 2 announcing
+# a partial release that never happened, on a worktree still holding the work.
 #
 # Absence is ESTABLISHED here, never inferred from a failed -d, because -d is
 # also false for a directory we are not permitted to stat. git cannot separate
@@ -216,6 +216,16 @@ if [ -n "$wt" ] && [ ! -e "$wt" ] && [ ! -x "$look" ]; then
 fi
 
 if [ -n "$wt" ] && [ -d "$wt" ]; then
+  # Establish that the status below is THIS worktree's before believing it.
+  # Delete the .git file outright — directory and every uncommitted file still on
+  # disk — and `git -C` does not fail: it walks UP to the enclosing repository and
+  # reports the PARENT's status at rc 0. `.worktrees/` is gitignored here, so the
+  # worktree never appears in that status either: with a clean parent the answer
+  # is empty, a positive assertion that the claim is clean produced without ever
+  # having looked at it. A .git that points nowhere is caught by the die below
+  # instead — git fails outright on that one — but an absent one reaches neither.
+  [ -e "$wt/.git" ] ||
+    die "$wt has no .git, so whether it holds uncommitted work is unknown"
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
