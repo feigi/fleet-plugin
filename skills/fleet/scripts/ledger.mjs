@@ -203,8 +203,54 @@ if (cmd === "check") {
     // caller that checks only the exit status still cannot duplicate.
     process.exit(1);
   }
+
+  // Near-miss reporting. The subset match above answers exactly one question —
+  // "was this near-verbatim wording already filed" — and answers it well. It
+  // says nothing about the same finding described in DIFFERENT words, which is
+  // how a second discoverer actually words it: one measured run rediscovered
+  // #114 five times, each in its own phrasing, and the check caught none of
+  // them. Rank the filed list by token overlap and hand the top rows back with
+  // a score, instead of collapsing all of that into `found: false`.
+  //
+  // Scored on its own token set, deliberately not the exact path's. Stopwords
+  // and the singular fold only sharpen a ranking, but folding them into
+  // isMatch() would widen what counts as ALREADY FILED — the one behaviour
+  // here that callers gate on and that must not move.
+  const STOP = new Set("the a an of to in is it its and or for on with that this from at by".split(" "));
+  const scoreTokens = (s) =>
+    new Set(
+      norm(s).split(/\s+/)
+        .filter((t) => t.length >= 3 && !STOP.has(t))
+        .map((t) => t.replace(/s$/, "")),
+    );
+  // Overlap coefficient (shared / smaller set), not Jaccard. A filed row carries
+  // a `#NNN` prefix, a source tag like `(review-pr-108)` and other metadata the
+  // checked subject can never contain, so the union is dominated by tokens with
+  // no chance of matching: Jaccard drives every row to a similar small number
+  // and the ranking stops discriminating. Dividing by the smaller set is also
+  // indifferent to which side is more verbose, which is the asymmetry the
+  // subset rule gets backwards.
+  const overlap = (a, b) => {
+    if (a.size === 0 || b.size === 0) return 0;
+    let shared = 0;
+    for (const t of a) if (b.has(t)) shared++;
+    return shared / Math.min(a.size, b.size);
+  };
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const scored = scoreTokens(subject);
+  // Floor is "shares at least one content word", not a score threshold: the
+  // measured #114 rewording shares exactly one, and a threshold tuned to look
+  // tidy would drop the very case this exists for. The top-3 cap, not the
+  // floor, is what keeps the output short.
+  const near = data.filed
+    .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
+    .filter((n) => n.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
   console.error(`${NAME}: not previously filed`);
-  console.log(JSON.stringify({ subject, found: false, match: null }));
+  console.log(JSON.stringify({ subject, found: false, match: null, near }));
   process.exit(0);
 }
 
