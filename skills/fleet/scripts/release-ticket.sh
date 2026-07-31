@@ -189,15 +189,16 @@ fi
 # same question: removing only a LIVE worktree's .git file marks it `prunable`
 # too, with the directory and every uncommitted change still sitting in it.
 # Keying on the annotation would skip the check on that one, and `worktree
-# remove` then refuses it (rc 128) — so instead of the plain "has N uncommitted
-# change(s)" this reports today, the run reaches `halt` and exits 2 announcing a
-# partial release that never happened, on a worktree still holding the work.
+# remove` then refuses it (rc 128) — so instead of the refusal the linkage guard
+# below reaches on its own, the run gets as far as `halt` and exits 2 announcing
+# a partial release that never happened, on a worktree still holding the work.
 #
 # Absence is ESTABLISHED here, never inferred from a failed -d, because -d is
 # also false for a directory we are not permitted to stat. git cannot separate
 # those two either: it marks both `prunable`, and `worktree remove` ACCEPTS a
-# prunable entry (rc 0), so the delete-time recomputation the header leans on
-# is the one thing absent on this path and this test is the only check left
+# prunable-because-absent entry (rc 0) — a live worktree whose .git was merely
+# deleted it refuses instead — so the delete-time recomputation the header leans
+# on is the one thing absent on this path and this test is the only check left
 # standing. Read as "gone", an unsearchable prefix released the claim — branch
 # deleted, label dropped, exit 0, `"blockers":[]` — with the member's
 # uncommitted work still on disk and now orphaned. So walk up to the nearest
@@ -216,6 +217,35 @@ if [ -n "$wt" ] && [ ! -e "$wt" ] && [ ! -x "$look" ]; then
 fi
 
 if [ -n "$wt" ] && [ -d "$wt" ]; then
+  # Establish that a .git linkage EXISTS before believing the status below.
+  # Delete the .git file outright — directory and every uncommitted file still on
+  # disk — and `git -C` does not fail: it walks UP to the enclosing repository and
+  # reports the PARENT's status at rc 0. `.worktrees/` is gitignored here, so the
+  # worktree never appears in that status either: with a clean parent the answer
+  # is empty, a positive assertion that the claim is clean produced without ever
+  # having looked at it. The -d gate above does not reach it (the directory is
+  # there) and neither does the status die below (git succeeded).
+  #
+  # Existence, NOT "points at this worktree", which is deliberately not claimed:
+  # a .git naming a gitdir whose core.worktree is some other directory passes
+  # this and still answers about that other tree at rc 0 (measured). Stopped
+  # downstream by `worktree remove` today, and left to its own ticket rather
+  # than widened into here.
+  #
+  # `-f` and not `-e`: an empty `.git` DIRECTORY leaks exactly like an absent
+  # one — git walks up and reports the parent at rc 0 — and -e is true for it
+  # (measured). A linked worktree's .git is always a regular file, since
+  # `git worktree add` writes one, so -f costs nothing and refuses that too. A
+  # dangling .git symlink is likewise rc 0, not the rc 128 the status die needs,
+  # so this guard is what catches that one as well.
+  #
+  # `! -x` for the reason the block above gives: -f is ALSO false for a .git we
+  # are not permitted to stat, and this guard may not infer absence from that any
+  # more than -d may. An unsearchable worktree still has its .git, so leave it to
+  # the status die, which keeps git's own "Permission denied" rather than
+  # asserting an absence nothing established (measured: chmod 644 on the worktree
+  # makes -f false with the .git sitting right there).
+  [ -f "$wt/.git" ] || [ ! -x "$wt" ] || die "$wt has no .git file, so whether it holds uncommitted work is unknown"
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
