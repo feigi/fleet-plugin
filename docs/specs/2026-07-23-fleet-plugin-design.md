@@ -165,7 +165,7 @@ All eleven obey the three rules above.
 | `inflight.sh` | `<N>` | `{issue, taken, hits[], evidence}` | exit 1 the ticket is taken; exit 2 the question could not be answered — bad argument, no such issue, not a repository, or a probe failed |
 | `verify-sha.sh` | `<branch> <sha>` | `{reachable, log}` | sha not reachable on branch |
 | `claim-ticket.sh` | `<N> <slug> <type>` | `{worktree, branch, ports, runner}` | lockfile dirty after install, worktree exists, label write failed |
-| `no-undo-audit.sh` | `<worktree> <branch>` | `{clean, stash, conflicts[], atRisk[]}` | exit 1 the worktree is dirty — the stash count is reported, never gated; exit 2 the question is unanswerable (a ref that does not resolve, a `status` or `merge-tree` that could not run) and no payload is emitted |
+| `no-undo-audit.sh` | `<worktree> <branch>` | `{worktree, branch, clean, stash, conflicts[], atRisk[]}` | exit 1 the worktree is dirty — the stash count is reported, never gated; exit 2 the question is unanswerable — bad argument, no such worktree, a ref that does not resolve, a probe that could not run, or a conflicting path no pathspec can name — and no payload is emitted |
 | `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{proved, preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | exit 1 any gate fails; exit 2 the merge is unreachable, not a merge, or unresolvable |
 | `reap.sh` | `[--apply]` | `{reaped[], kept[{branch,reason}]}` | never — refusals are findings |
 | `worktree-audit.sh` | — | `[{worktree, commits, dirty[]}]` | never |
@@ -240,7 +240,7 @@ Takes `{prs[]}`; owns the sequence per PR in numeric order:
 1. `pr-overlap.mjs` against each lower unlabeled PR. When a signal fires, spawn
    an `agent()` to rule related / not-related. Judgement is delegated to an
    agent; **sequencing** belongs to the script.
-2. `no-undo-audit.sh` → refuse or proceed.
+2. `no-undo-audit.sh` → refuse, proceed, or stop for a human on exit 2.
 3. Rebase, push.
 4. **The wait loop** —
    `while (!green && attempts < 6) { await agent('gh run watch <rid> --exit-status'); green = await agent('ci-state.mjs …') }`.

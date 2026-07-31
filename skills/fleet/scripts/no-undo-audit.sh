@@ -12,16 +12,18 @@ set -eu
 NAME=no-undo-audit
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-# JSON string escaping. Same helper and same pipeline as release-ticket.sh:115
-# and inflight.sh:227 — backslashes BEFORE quotes, because escaping the quote
-# first turns the backslash that escape just introduced into `\\` on the second
-# pass. Every C0 byte becomes a space, JSON forbidding them unescaped; UTF-8 is
-# untouched, its bytes all being >= \200. tr pads the replacement with its last
-# character.
+# JSON string escaping. Same helper and same pipeline as release-ticket.sh's
+# `jstr` — backslashes BEFORE quotes, because escaping the quote first turns the
+# backslash that escape just introduced into `\\` on the second pass. Every byte
+# below \040 becomes a space, JSON forbidding those unescaped, and \177 rides
+# along with them; the UTF-8 in these strings is untouched, its bytes all being
+# >= \200. tr pads the replacement with its last character. (No line number: the
+# same citation named a line that had not been written yet, and #129 tracks four
+# more that drifted.)
 jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # The array form: one JSON string per input line, comma-joined. Identical except
 # that it spares \012, the record separator here rather than part of an element.
-jarr() { tr '\001-\011\013-\037\177' ' ' | sed '/^$/d; s/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/' | paste -sd, -; }
+jarr() { tr '\001-\011\013-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/' | paste -sd, -; }
 
 [ $# -eq 2 ] || die "usage: no-undo-audit.sh <worktree> <branch>"
 wt=$1
@@ -75,12 +77,14 @@ echo "    stash entries (repo-global, not gated): $stash" >&2
 # 2. Which files would conflict.
 #
 #    `-z` is load-bearing twice. It turns OFF git's C-quoting, so a path holding
-#    a space or a `"` arrives verbatim instead of as the rendering
+#    a `"` arrives verbatim instead of as the rendering
 #    `"has\"quote and space.txt"` — which is neither a pathspec git will match
 #    nor a JSON string, and which used to reach both the caller and the `git
-#    log` below. And it separates records with NUL, the one byte a filename
-#    cannot contain. NUL does not survive a command substitution, so this lands
-#    in a file rather than a variable.
+#    log` below. A space alone git does NOT quote, so that half of the fixture
+#    was broken by the word-split at step 3 and by nothing here; `-z` earns its
+#    place on `"`, `\` and the control bytes. And it separates records with NUL,
+#    the one byte a filename cannot contain. NUL does not survive a command
+#    substitution, so this lands in a file rather than a variable.
 #
 #    merge-tree exits 0 clean, 1 conflicts found, >=2 on gross failure. Exit 1
 #    is NOT only "ran fine, found conflicts": git 2.50.1 spends it on
@@ -94,17 +98,10 @@ echo "    stash entries (repo-global, not gated): $stash" >&2
 mt_out=$(mktemp) || die "cannot create a temporary file"
 trap 'rm -f "$mt_out"' EXIT
 echo "\$ git merge-tree --write-tree --name-only -z $base origin/$branch" >&2
-if git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$mt_out"; then
-  mt_rc=0
-else
-  mt_rc=$?
-fi
-case "$mt_rc" in
-  0|1) : ;;
-  *) die "git merge-tree failed (exit $mt_rc) against origin/$branch — cannot determine conflicts" ;;
-esac
-[ -s "$mt_out" ] \
-  || die "git merge-tree wrote nothing (exit $mt_rc) against origin/$branch — cannot determine conflicts"
+mt_rc=0
+git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$mt_out" || mt_rc=$?
+[ "$mt_rc" -le 1 ] && [ -s "$mt_out" ] \
+  || die "git merge-tree could not answer (exit $mt_rc) against origin/$branch — cannot determine conflicts"
 
 # --name-only output is: tree OID, then (if conflicted) the conflicted-file
 # list, then an EMPTY record, then prose ("Auto-merging ...", "CONFLICT ...").
@@ -112,13 +109,20 @@ esac
 # `tail -n +2` grabbed the prose section too and word-split it into the
 # `git log -- $conflicts` pathspec below.
 #
-# ponytail: NUL back to newline, so a filename containing a literal newline
-# would split into two pathspecs matching nothing — the same silent-empty
-# `atRisk` this fix closes for spaces. Closing it too needs a NUL-capable
-# reader: macOS awk 20200816 reads RS="\0" as RS="" and silently switches to
-# paragraph mode, and POSIX sh has no `read -d ''`. Upgrade path is `perl -0`
-# or GNU `sed -z` if a path like that ever turns up.
-conflicts=$(tr '\0' '\n' <"$mt_out" | awk 'NR==1{next} /^$/{exit} {print}')
+# The section split needs newline as the separator, because macOS awk 20200816
+# reads RS="\0" as RS="" and silently switches to paragraph mode, and POSIX sh
+# has no `read -d ''`. So a filename holding a literal newline has to be got out
+# of the way FIRST — parking it on \001 — or it manufactures the empty record
+# that ends the section, and `conflicts` comes back short or empty while the
+# audit exits 0. That is a false safe, and worse than what this replaced: git
+# C-quoted such a path, which at least emitted JSON the caller choked on.
+# Unanswerable is exit 2; a shell variable cannot hold the NUL that answering it
+# properly would need.
+conflicts=$(tr '\n' '\001' <"$mt_out" | tr '\0' '\n' | awk 'NR==1{next} /^$/{exit} {print}')
+nl=$(printf '\001')
+case "$conflicts" in
+  *"$nl"*) die "a conflicting path contains a newline — cannot build a pathspec for it" ;;
+esac
 if [ -n "$conflicts" ]; then
   echo "$conflicts" | sed 's/^/    conflict: /' >&2
 else
@@ -140,7 +144,11 @@ if [ -n "$conflicts" ]; then
   # back empty on a branch that really was about to eat a commit. The swallow
   # goes anyway, because a `git log` that genuinely fails leaves the same empty
   # answer, and that one is unanswerable rather than safe.
-  at_risk=$(printf '%s\n' "$conflicts" | tr '\n' '\0' \
+  #
+  # `:(literal)` because `--` ends the OPTIONS, not the magic: a real file named
+  # `:colon.txt` is read as a pathspec expression and silently matches nothing,
+  # which is the same false safe by a different byte.
+  at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
     || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && echo "$at_risk" | sed 's/^/    at risk: /' >&2
@@ -159,5 +167,6 @@ fi
 # name, so `$branch` admits one too. `$clean` and `$stash` are this script's own
 # boolean and a digit count, and the two arrays arrive escaped already.
 printf '{"worktree":"%s","branch":"%s","clean":%s,"stash":%s,"conflicts":[%s],"atRisk":[%s]}\n' \
-  "$(jstr "$wt")" "$(jstr "$branch")" "$clean" "$stash" "$conflicts_json" "$at_risk_json"
+  "$(jstr "$wt")" "$(jstr "$branch")" "$clean" "$stash" "$conflicts_json" "$at_risk_json" \
+  || die "could not write the audit for $branch"
 exit "$rc"
