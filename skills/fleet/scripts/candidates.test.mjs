@@ -5,13 +5,16 @@
 //
 // candidates.mjs applies its reduction through gh's `--jq`, so the stub below
 // runs the same expression gh would have received — under the system jq it
-// execs, not the gojq gh embeds and applies in its own process. The expression
-// is under test; the ENGINE is not. Their regex flavours differ — gojq's is
-// Go's, which rejects the lookahead system jq accepts — so a predicate that
-// turns on flavour is out of this suite's reach. The current one does not: it
-// reduces live issues to identical rows under both. Stubbing gh to return
-// already-reduced JSON would leave the jq expression — which is where the spec
-// predicate actually lives — completely untested.
+// execs, not the gojq gh embeds and applies in its own process. The spec
+// predicate is under test; the ENGINE is not, and the live predicate already
+// turns on the difference: `\s` and `\d` are Unicode-aware in jq's Oniguruma
+// and ASCII-only in Go's RE2, so a `## User Stories` padded with U+00A0 is a
+// spec here and NOT one under gh, where dropSpecs is the only line of defence
+// (#204). Nothing announces that: a pattern gojq rejects outright at least
+// exits non-zero, but a class that merely matches differently leaves this
+// suite green either way. Stubbing gh to return already-reduced JSON would
+// leave the jq expression — which is where the spec predicate actually lives —
+// completely untested.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
