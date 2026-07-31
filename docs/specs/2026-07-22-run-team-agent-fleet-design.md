@@ -19,6 +19,13 @@ Status: implemented
 > it have been removed below; everything else in this document still stands. See
 > `docs/specs/2026-07-30-fleet-trust-the-label-design.md`.
 
+> **Superseded in part.** In-flight probing (2026-07-30) moved into a script.
+> Phase 0's step 3 below still names the three probes inline; issue #33 replaced
+> them with a single call to `~/.claude/skills/fleet/scripts/inflight.sh`, which
+> runs all three itself and exits 0 free, 1 taken, 2 the question could not be
+> answered. The step is left as written; run the script instead of the inline
+> commands. See `~/.claude/skills/fleet/skills/next-ticket/SKILL.md`.
+
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem
