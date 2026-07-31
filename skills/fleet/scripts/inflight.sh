@@ -189,23 +189,34 @@ fi
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
   die "git for-each-ref failed, so whether #$n has a local branch is unknown"
 fi
-local_b=$(printf '%s\n' "$refs" |
-          grep -E "(^|[/-])$n([-/]|$)" | paste -sd, - || true)
-# Match on the worktree's basename, not its full path — grepping the whole
+# One awk, for the reason probe 2's filter is one: a short refname is the whole
+# line, so the match is on $0.
+local_b=$(printf '%s\n' "$refs" | awk -v n="$n" '
+  $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
+  END { printf "%s", out }') ||
+  die "could not filter the local branches for #$n"
+# Match on the worktree's basename, not its full path — matching the whole
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
 # a sibling directory named with digits), matching every ticket.
 if ! worktrees=$(git worktree list --porcelain); then
   die "git worktree list failed, so whether #$n has a worktree is unknown"
 fi
-# substr($0,10), never $2, exactly as release-ticket.sh:70 does it: the porcelain
-# prints the path raw, so a checkout under a directory with a space in it — plain
-# enough on macOS — truncates at the space and the ticket stops matching. That is
-# a wrong "free", which is the one answer this script must never invent.
-wt=$(printf '%s\n' "$worktrees" | awk '/^worktree /{print substr($0,10)}' |
-     while IFS= read -r p; do printf '%s\t%s\n' "$(basename "$p")" "$p"; done |
-     awk -F'\t' -v n="$n" '$1 ~ "(^|[/-])" n "([-/]|$)" {print $2}' |
-     paste -sd, - || true)
+# substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
+# the porcelain prints the path raw, so a checkout under a directory with a
+# space in it — plain enough on macOS — truncates at the space and the ticket
+# stops matching. That is a wrong "free", the one answer this script must never
+# invent.
+#
+# The basename is taken in the same pass, by dropping everything through the
+# last `/`. It used to be a `basename` subshell per line, which had this defect
+# one level down: a failed fork there yields an empty first field and a silent
+# non-match, and `$(…)` discards the status that would have said so.
+wt=$(printf '%s\n' "$worktrees" | awk -v n="$n" '
+  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
+    if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
+  END { printf "%s", out }') ||
+  die "could not filter the worktree list for #$n"
 if [ -n "$local_b" ] || [ -n "$wt" ]; then
   [ -n "$local_b" ] && echo "    local branches: $local_b" >&2
   [ -n "$wt" ] && echo "    worktrees: $wt" >&2

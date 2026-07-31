@@ -438,11 +438,15 @@ test("a quote and a backslash in a worktree path cannot produce an unparseable p
 test("a control character in a worktree path cannot produce an unparseable payload", (t) => {
   // What pins the `tr` stage; without it the two cases above stay green and a
   // raw C0 byte reaches the payload, which JSON forbids unescaped. Mirrors
-  // release-ticket.test.mjs:642.
+  // release-ticket.test.mjs:743.
   //
-  // \001 specifically, not \t or \n: those two are eaten upstream by probe 3's
-  // own `awk -F'\t'` and `read -r` before `jstr` ever sees them (#122), so they
-  // would pin nothing here. \001 is neither, so it survives to the payload.
+  // \001 specifically, not \n: awk's record separator ends the line, so a
+  // newline cannot reach `jstr` and would pin nothing here (#122). \t once
+  // could not either, but that was the `-F'\t'` split and the `read -r` loop
+  // eating it, and both are gone — measured, a worktree named `fix-88-a<TAB>b`
+  // used to arrive as the bare string `b`, its path cut at the tab it was
+  // joined on, and now arrives whole with the tab neutralised like any other
+  // C0 byte. \001 is the case that held before that change and after it.
   //
   // Neutralised to a space rather than escaped — the byte does not round-trip,
   // and the assertion says so rather than pretending otherwise.
