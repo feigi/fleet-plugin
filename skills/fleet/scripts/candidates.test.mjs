@@ -1,5 +1,7 @@
-// Regression gate for the candidate query's two filters: to-spec specs never
-// reach the queue, and the list comes back oldest-first.
+// Regression gate for the candidate query's two filters — to-spec specs never
+// reach the queue, and the list comes back oldest-first — and for its exit
+// codes, which are the whole interface for a caller that reads no stderr: 2 is
+// "the query broke", 1 is "the queue is empty", and the two must never swap.
 //
 // candidates.mjs applies its reduction through gh's server-side `--jq`, so the
 // stub below runs the real jq against a fixture with the same expression gh
@@ -41,6 +43,11 @@ done
 # --limit stop the cap tests firing. So never assert a labeled row is ABSENT
 # from the fallback payload — it was never in that fixture, and it passes
 # whatever the code does.
+# gh applies \`--jq\` server-side, so a reduction that did not take is a real
+# failure mode — an old gh, an expression rejected upstream, a proxy answering
+# with an error object. Overriding the expression is the only way a test reaches
+# it: the real one always produces the reduced shape, whatever the fixture says.
+[ -n "$JQ_OVERRIDE" ] && expr="$JQ_OVERRIDE"
 fixture="$FIXTURE"
 case " $search " in
   *\\ label:*) ;;
@@ -49,14 +56,14 @@ esac
 exec jq -c "$expr" "$fixture"
 `;
 
-function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null) {
+function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null, extraEnv = {}) {
   const dir = mkdtempSync(join(tmpdir(), "candidates-"));
   const fixture = join(dir, "issues.json");
   writeFileSync(fixture, JSON.stringify(issues));
   const gh = join(dir, "gh");
   writeFileSync(gh, STUB);
   chmodSync(gh, 0o755);
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ...extraEnv };
   if (unfiltered) {
     const second = join(dir, "unfiltered.json");
     writeFileSync(second, JSON.stringify(unfiltered));
@@ -190,6 +197,73 @@ test("the spec predicate never reaches the payload — it is pure token cost dow
   const { rows } = run([ticket(12, "## What to build\n\nplain ticket\n")]);
   assert.equal(rows.length, 1);
   assert.deepEqual(Object.keys(rows[0]).sort(), ["d", "l", "n", "t"]);
+});
+
+// `$ gh …` is echoed by query() before every invocation, so its absence is how
+// these pin that the refusal came BEFORE any query ran. Status 2 alone does not:
+// a query that ran and then died still exits 2, and for --require-label the
+// query that runs is the widening one the whole file exists to prevent.
+const queriesRun = (stderr) => (stderr.match(/^\$ gh /gm) ?? []).length;
+
+test("a trailing --limit refuses — an absent value is not a licence to use the default", () => {
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent", "--limit"],
+  );
+  assert.equal(status, 2);
+  // Not 0-with-500-rows. `arg()` handed back `undefined`, `?? 500` read that as
+  // "flag absent", and the positive-integer guard never saw the malformed input
+  // it exists to catch.
+  assert.equal(queriesRun(stderr), 0);
+});
+
+test("a trailing --require-label refuses — a falsy label runs the query --allow-fallback exists to gate", () => {
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label"]);
+  // The worst of the three: query() reads a falsy label as "no label", so the
+  // UNFILTERED query shipped at exit 0 — the exact widening onto ready-for-human
+  // that run-team/SKILL.md:61 withholds --allow-fallback to prevent, reached
+  // without the flag. Asserting the status alone would pass on a run that
+  // widened and then happened to die.
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+});
+
+test("a --require-label whose value is the next flag refuses — it reaches the same widening", () => {
+  // Same harm as the trailing case, one keystroke away: `--allow-fallback` is
+  // consumed as the label, `label:--allow-fallback` matches nothing, and the
+  // empty result hands straight over to the unfiltered fallback at exit 0.
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label", "--allow-fallback"]);
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+});
+
+test("gh output that is not an array refuses — a reduction that did not apply is not an empty queue", () => {
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: '{message:"Not Found"}' },
+  );
+  // 2, not 1. Unchecked, the object flows on and the first use of it throws —
+  // and an uncaught throw exits 1, the code reserved for "successful query, no
+  // survivors". A caller reading only the status hears "there is no work".
+  assert.equal(status, 2);
+  // Anchored on the die() prefix: `--jq` also appears in the echoed `$ gh` line,
+  // so an unanchored /--jq/ passes on a run that never refused at all.
+  assert.match(stderr, /^candidates: .*--jq/m);
+});
+
+test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spec}", () => {
+  // What a gh that ignored `--jq` actually returns: the unreduced `--json`
+  // payload. An array, so an array check alone passes it through.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: "." },
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: .*--jq/m);
 });
 
 test("candidates come back oldest first, whatever order gh returned them in", () => {
