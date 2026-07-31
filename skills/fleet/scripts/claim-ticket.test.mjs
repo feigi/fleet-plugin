@@ -164,6 +164,29 @@ test("runner: a directory it cannot fully read refuses instead of running a part
   }
 });
 
+// Node's own discovery excludes `node_modules`; `find` does not, so a vendored
+// test ran and the suite's result hung on third-party code passing. A *nested*
+// `node_modules` is the live shape — the pnpm / npm-workspaces layout. The
+// top-level one is inert only because node refuses those paths outright.
+// The vendor test fails on purpose: `pass 3` alone cannot tell "vendor was
+// pruned" from "vendor ran and failed", and the exit status alone cannot tell
+// "pruned" from "expansion dropped everything". Both, or neither pins it.
+// It is written into the worktree rather than through `repo()` because that is
+// where `node_modules` actually comes from — the install step, not a commit —
+// and committing it would rest this test on whatever `core.excludesFile` the
+// machine happens to have.
+test("runner: a vendored test under a nested node_modules does not run", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "t", "node_modules", "vendor"), { recursive: true });
+  writeFileSync(
+    join(a.wt, "t", "node_modules", "vendor", "v.test.mjs"),
+    'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
+  );
+  const r = a.run("t");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 3/);
+});
+
 // Directories are only rewritten for `node --test`. Every other entrypoint is
 // somebody else's runner, and vitest and jest take a directory as a filter
 // against their own naming conventions, which need not be this regex.

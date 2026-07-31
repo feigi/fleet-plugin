@@ -144,7 +144,12 @@ for arg do
     # cannot descend still yields the part it reached, grep still matches, and
     # the guard below still passes — a green over a suite that silently lost
     # whatever was under the unreadable directory.
-    found=\$(find "\$arg" -type f) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    # Node's own discovery excludes \`node_modules\`; find does not. Without the
+    # prune a vendored test runs and the suite's result hangs on third-party
+    # code passing. Nested \`node_modules\` — the pnpm / workspaces shape — is
+    # the live case; the top-level one is inert only because node refuses those
+    # paths outright, and refused paths in a mixed argv are dropped silently.
+    found=\$(find "\$arg" -type f -not -path '*/node_modules/*') || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here and the refusal below would
