@@ -343,6 +343,58 @@ test("probe 3: the same worktree without a space in the path, as the control", (
   assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
 });
 
+// --- the evidence payload as JSON.
+//
+// Every probe copies a name somebody else chose straight into a JSON string
+// position, so the characters those names may legally carry decide whether the
+// payload parses. The two cases below are the two reachable vectors, and they
+// differ: git's ref rules reject `\` but allow `"`, while a worktree path is a
+// filename and allows both. Neither changes the verdict — the exit code and
+// `taken` are already right, and next-ticket/SKILL.md and run-team/SKILL.md
+// both read the EXIT CODE as the decision — so a red here is a consumer that
+// cannot read the evidence, not a ticket claimed twice.
+//
+// Built by hand rather than through `fixture`'s options, the way
+// release-ticket.test.mjs:628 builds its own: the names are the fixture.
+
+const git = (repo, ...args) => execFileSync("git", ["-C", repo, ...args],
+  { encoding: "utf8", env: { ...process.env, ...IDENT } });
+
+test("a quote in a local branch cannot produce a payload the caller fails to parse", (t) => {
+  // Measured on the pre-fix script: exit 1 with stdout breaking at char 100,
+  // `"localBranch":"fix-42-say"hi"`.
+  const { repo, env } = fixture(t, 42, {});
+  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, "branch", 'fix-42-say"hi');
+
+  const r = spawnSync("sh", [SCRIPT, "42"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.evidence.localBranch, 'fix-42-say"hi', "and it round-trips, rather than being stripped");
+  assert.equal(r.status, 1, "the verdict is unchanged — this was only ever the evidence");
+  assert.equal(json.taken, true);
+});
+
+test("a quote and a backslash in a worktree path cannot produce an unparseable payload", (t) => {
+  // A path is not a ref: `\` is illegal in a branch name but fine in a
+  // filename, and it is the character the escape has to double rather than
+  // pass through. Detached for the reason `fixture` is — a branch carrying the
+  // same number would let probe 3's branch half answer for its worktree half.
+  const { repo, env } = fixture(t, 77, {});
+  const name = 'fix-77-sa"y\\b';
+  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  // The tail, not the whole path: git reports a worktree by its resolved path,
+  // and on macOS the temp dir arrives back as /private/var for a /var fixture —
+  // which is why the probe-3 pair above anchors on the suffix too.
+  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name)),
+    `both characters must survive intact, got ${json.evidence.worktree}`);
+  assert.equal(r.status, 1);
+  assert.deepEqual(json.hits, ["local"]);
+});
+
 // --- error paths. These do not reach the jq expression at all: the stub exits on
 // GH_ISSUE_ERR before piping through it. What they pin is the `if ! linked=$(...)`
 // classifier, which this change edits to stop reporting repository-level failures
