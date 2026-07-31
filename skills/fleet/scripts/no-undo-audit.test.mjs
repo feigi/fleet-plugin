@@ -454,6 +454,13 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Whose worktree is the answer about. Exit 2 again for the refusals, but the
+// question is upstream of every check above: the script has to be looking at
+// the tree it was handed. The passing case closes the block, because a guard
+// that establishes identity is one keystroke from refusing every real worktree.
+// ---------------------------------------------------------------------------
+
 // The `is not a git worktree` case in the preconditions above passes a plain
 // directory with no repo ANYWHERE above it, so `rev-parse --git-dir` fails and
 // the script refuses. That is the harmless half. These two are the other half:
@@ -504,6 +511,24 @@ test("a worktree whose .git is an empty directory is unanswerable (2), never cle
   assert.ok(existsSync(join(c.w, ".git")), "fixture: `-e` must call this .git present, or it pins the case above again");
 
   refusedAsUnknownBeforeAnySay(c);
+});
+
+// The other direction, and it is not theory: a guard of `-e "$wt/.git/HEAD"`
+// alone passes every test above (measured) while refusing every LINKED worktree
+// on disk, whose `.git` is a file and which therefore has no `.git/HEAD` to
+// stat. That is the fleet's own shape — `claim-ticket.sh` makes worktrees with
+// `git worktree add` — so the false refusal would land on every real caller
+// while the suite stayed green. The two clauses answer for the two shapes; this
+// pins the one the refusal tests do not reach.
+test("an intact linked worktree, whose .git is a file, still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  assert.ok(existsSync(join(c.w, ".git")), "fixture must leave the linkage intact");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a linked worktree is the fleet's own shape; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
 });
 
 // ---------------------------------------------------------------------------

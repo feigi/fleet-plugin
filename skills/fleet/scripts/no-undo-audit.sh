@@ -32,6 +32,32 @@ base=${BASE_REF:-origin/main}
 
 [ -d "$wt" ] || die "worktree $wt does not exist"
 git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || die "$wt is not a git worktree"
+# That gate answers "can git operate here", NOT "is this the tree it answers
+# about" — `rev-parse --git-dir` walks UP exactly as `status` does. Delete the
+# worktree's `.git` and it resolves the ENCLOSING repo's git dir at rc 0, so the
+# gate waves the run through; the status below then answers for that repo, and
+# with a clean parent (`.worktrees/` gitignored, the fleet's own layout) the
+# answer is EMPTY at rc 0 while the uncommitted work sits on disk. `clean` for a
+# tree nothing looked at, out of a script whose whole job is gating an
+# irreversible action. The `die` on a failing status cannot catch it: this
+# failure is a SUCCESSFUL command answering about another repository.
+#
+# release-ticket.sh spends `-f` on the same hole, which cannot be borrowed
+# whole: `$wt` here is any worktree the caller names, and a main checkout's
+# `.git` is a DIRECTORY. `-e` alone is the other half-measure — it calls an
+# EMPTY `.git` directory present, and git walks up past that one too (measured,
+# git 2.50.1). So: the `.git` file a linked worktree has, or the HEAD every real
+# `.git` directory has.
+#
+# Existence, not "points at THIS worktree", which is deliberately not claimed.
+# Comparing `rev-parse --show-toplevel` against `$wt` would claim it and buy a
+# false-refusal class with it, macOS resolving the tmpdir through `/private`.
+# git's `prunable` annotation is worse than useless here: it means the gitdir
+# link is broken, which is precisely a fully-populated worktree holding work
+# that exists nowhere else — keying on it would skip the check on exactly the
+# worktree that needs it.
+[ -f "$wt/.git" ] || [ -e "$wt/.git/HEAD" ] \
+  || die "$wt has no .git of its own — cannot tell a clean worktree from a dirty one"
 git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
 # A branch never pushed, a stale remote-tracking ref, or a caller who already
 # passed a name prefixed "origin/" all make this not resolve. Left unchecked,
