@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every check below is `git ls-files | xargs <checker>`; without pipefail a
+# broken left-hand side is a green run that checked nothing.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # NOTE: this job's name is load-bearing. `rebase-check-refresh.yml` locates it
+  # by `select(.name == "rebase-check")` to re-run it when main advances. Adding a
+  # `name:` key here (or renaming the job) makes that workflow silently find
+  # nothing and go green while refreshing no PRs.
+  rebase-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify branch is rebased on base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if ! git fetch --no-tags --prune origin "$BASE_REF"; then
+            echo "::error::Failed to fetch origin/$BASE_REF — base branch may have been deleted or renamed"
+            exit 1
+          fi
+          if ! BASE_SHA=$(git rev-parse "origin/$BASE_REF" 2>&1); then
+            echo "::error::Could not resolve origin/$BASE_REF: $BASE_SHA"
+            exit 1
+          fi
+          HEAD_SHA=$(git rev-parse HEAD)
+          if ! MERGE_BASE=$(git merge-base HEAD "$BASE_SHA" 2>&1); then
+            echo "::error::No common ancestor with origin/$BASE_REF: $MERGE_BASE"
+            exit 1
+          fi
+          if [ "$MERGE_BASE" != "$BASE_SHA" ]; then
+            echo "::error::Branch is not rebased on origin/$BASE_REF (head=$HEAD_SHA base=$BASE_SHA merge-base=$MERGE_BASE). Run: git fetch origin && git rebase origin/$BASE_REF"
+            exit 1
+          fi
+          MERGE_COMMITS=$(git rev-list --merges --count "$BASE_SHA..HEAD")
+          if [ "$MERGE_COMMITS" != "0" ]; then
+            echo "::error::Branch contains $MERGE_COMMITS merge commit(s) above origin/$BASE_REF (head=$HEAD_SHA). Rebase to keep linear history: git fetch origin && git rebase origin/$BASE_REF"
+            exit 1
+          fi
+          echo "Branch rebased on origin/$BASE_REF ($BASE_SHA), no merge commits."
+
+  check:
+    runs-on: ubuntu-latest
+    # The suite spawns git/python3 subprocesses per test and one case builds a
+    # `git archive` snapshot (~25s locally); cap the run so a wedged subprocess
+    # can't hold a runner open indefinitely.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # There is no build: this repo ships .mjs and .sh straight to the runtime.
+      # `node --check` is the whole of it — the only thing that catches a syntax
+      # error in a script no test imports before a hook runs it for real.
+      - name: Syntax-check scripts
+        run: git ls-files '*.mjs' | xargs -r -n1 node --check
+
+      # settings.json and the caches are read by hooks that die on a parse error.
+      - name: Validate JSON
+        run: git ls-files '*.json' | xargs -r -n1 jq -e . > /dev/null
+
+      # -S warning, not the default: the only info-level hits in the tree are
+      # false positives (SC2016 on inflight.sh's python3 heredoc, SC1003 on
+      # statusline-command.sh's OSC-8 escape). Raise this to `style` only after
+      # silencing those two at the source.
+      - name: Shellcheck
+        run: git ls-files '*.sh' | xargs -r shellcheck -x -S warning
+
+      # Explicit glob, not the directory: `node --test <dir>` also picks up
+      # vendored trees under it (see 'the runner's directory expansion ran
+      # vendored tests'). The suite stubs `gh` and sets its own git identity, so
+      # it needs no auth and no network.
+      - name: Tests
+        run: node --test skills/fleet/scripts/*.test.mjs
