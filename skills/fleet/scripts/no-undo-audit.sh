@@ -31,7 +31,50 @@ branch=$2
 base=${BASE_REF:-origin/main}
 
 [ -d "$wt" ] || die "worktree $wt does not exist"
-git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || die "$wt is not a git worktree"
+# "Can git operate here" is NOT "is this the tree it answers about", and only
+# the second licenses the status below — every git command here walks UP,
+# `status` included. Delete the worktree's `.git` and git resolves the ENCLOSING
+# repo at rc 0, so a gate asking only the first waves the run through (a bare
+# `rev-parse --git-dir` stood here and did exactly that); the status below then
+# answers for that repo, and with a clean parent (`.worktrees/` gitignored, the
+# fleet's own layout) the answer is EMPTY at rc 0 while the uncommitted work
+# sits on disk. `clean` for a tree nothing looked at, out of a script whose
+# whole job is gating an irreversible action. The `die` on a failing status
+# cannot catch it: this failure is a SUCCESSFUL command answering about another
+# repository.
+#
+# `--show-prefix` is where git states which tree it actually resolved: the path
+# of the directory asked about, RELATIVE to that tree's root. Empty iff `$wt` IS
+# the root, `.worktrees/9-x/` when git walked up. Ask git for the identity
+# rather than infer it from what `.git` looks like on disk.
+#
+# Inferring from disk is one byte from a manufactured clean in every spelling:
+# `-e "$wt/.git"` calls an EMPTY `.git` directory present; `-f "$wt/.git"` alone
+# refuses every main checkout, whose `.git` is a DIRECTORY and which `$wt` may
+# be, being any worktree the caller names; `-e "$wt/.git/HEAD"` calls a `.git`
+# directory holding a lone HEAD present. git wants HEAD *and* `objects/` *and*
+# `refs/` and walks up past anything less — including a REAL `.git` whose HEAD
+# an interrupted write truncated (measured, git 2.50.1).
+#
+# The rc is captured, not swallowed: `--show-prefix` is empty both when `$wt` is
+# the root and when the command FAILS, so `[ -z ]` over a swallowed failure
+# would admit exactly what this refuses. Capturing it is also what retired the
+# `--git-dir` gate rather than leaving it above: the two return the SAME rc on
+# every shape (measured — plain directory, garbage `.git`, dangling symlink,
+# unsearchable worktree all 128 for both; main checkout, linked worktree, bare
+# repo, deleted/empty/lone-HEAD `.git` all 0), so keeping both left one gate
+# that could never fire and an ordering dependency that did not exist.
+#
+# `--show-toplevel` compared against `$wt` is the spelling to avoid: it needs a
+# string compare, and `$wt` arrives relative (`claim-ticket.sh:26`), through a
+# symlink, or under a macOS tmpdir git reports back through `/private` — three
+# false-refusal classes `--show-prefix` cannot have, comparing nothing. git's
+# `prunable` is no use either: it marks a worktree whose DIRECTORY is gone, and
+# stays silent for one still holding work whose linkage broke (measured).
+prefix=$(git -C "$wt" rev-parse --show-prefix) \
+  || die "$wt is not a git worktree"
+[ -z "$prefix" ] \
+  || die "git answers for the repo above $wt, not $wt — cannot tell a clean worktree from a dirty one"
 git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
 # A branch never pushed, a stale remote-tracking ref, or a caller who already
 # passed a name prefixed "origin/" all make this not resolve. Left unchecked,

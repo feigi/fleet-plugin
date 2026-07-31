@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,27 @@ function bareConflictRepo(t, path) {
   git(c.w, "push", "-q", "origin", "main");
   git(c.w, "checkout", "-q", c.branch);
   return c;
+}
+
+/**
+ * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
+ * fleet's own layout, and the only one where breaking the linkage is dangerous:
+ * an enclosing repo is standing by to answer in the worktree's place, and being
+ * clean it answers "nothing uncommitted here". A worktree with no repo above it
+ * has nothing to walk up to, so git fails there and the script already refuses.
+ * `precious.txt` is the uncommitted work that exists nowhere else.
+ */
+function nestedWorktree(t, branch = "fix/9-nested") {
+  const c = repo(t);
+  writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
+  git(c.w, "add", ".gitignore");
+  git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
+  git(c.w, "push", "-q", "origin", c.branch);
+  const w = join(c.w, ".worktrees", "9-x");
+  git(c.w, "worktree", "add", "-q", "-b", branch, w);
+  git(w, "push", "-q", "-u", "origin", branch);
+  writeFileSync(join(w, "precious.txt"), "work that exists nowhere else\n");
+  return { parent: c.w, w, branch };
 }
 
 // The payload is parsed here rather than at the call site: "the audit passed and
@@ -431,6 +452,106 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
     assert.match(r.stderr, re, why);
     assert.equal(r.stdout, "", `${why}: an unanswerable audit must not emit a payload`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Whose worktree is the answer about. Exit 2 again for the refusals, but the
+// question is upstream of every check above: the script has to be looking at
+// the tree it was handed. The passing case closes the block, because a guard
+// that establishes identity is one keystroke from refusing every real worktree.
+// ---------------------------------------------------------------------------
+
+// The `is not a git worktree` case in the preconditions above passes a plain
+// directory with no repo ANYWHERE above it, so `rev-parse --git-dir` fails and
+// the script refuses. That is the harmless half. These are the other half:
+// `rev-parse --git-dir` WALKS UP, so with an enclosing repo present the gate
+// passes at rc 0 having resolved a git dir that is not this worktree's, and
+// `status --porcelain` then answers for that repo — empty, at rc 0, because the
+// enclosing repo is clean and `.worktrees/` is gitignored. `clean:true` for a
+// tree the script never looked at, with the work still sitting on disk. The
+// `die` on a failing status is the wrong side of this: the command SUCCEEDS,
+// it just answers about somewhere else.
+//
+// Both assert the refusal lands BEFORE the audit reports anything. Exit 2 alone
+// would not pin it — a script that audits, prints "clean", and refuses
+// afterwards has already put the wrong answer on the caller's screen.
+function refusedAsUnknownBeforeAnySay(c) {
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: the uncommitted work must still be on disk");
+  assert.equal(git(c.parent, "status", "--porcelain"), "", "fixture: a CLEAN enclosing repo is what makes the leak answer 'clean'");
+  assert.doesNotThrow(
+    () => git(c.w, "rev-parse", "--git-dir"),
+    "fixture: the script's own gate must still pass here, or this test pins nothing",
+  );
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: git answers for the enclosing repo — the manufactured clean this must refuse");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs, let alone reports");
+  assert.match(r.stderr, /answers for the repo above/);
+}
+
+test("a worktree whose .git was deleted is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// One byte over: an EMPTY `.git` DIRECTORY is something a `-e "$wt/.git"` guard
+// calls present, and git walks up past it exactly as it does past an absent one.
+test("a worktree whose .git is an empty directory is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+  mkdirSync(join(c.w, ".git"));
+  assert.ok(existsSync(join(c.w, ".git")), "fixture: a `-e` guard must call this .git present, or it pins the case above again");
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// And one byte over again, which is why the guard asks git instead of stat-ing
+// `.git`: a DIRECTORY holding a lone HEAD. Every "does the linkage exist" guard
+// spelled against the filesystem calls this present — `-e "$wt/.git/HEAD"` most
+// obviously — and git still walks up, because it wants HEAD *and* `objects/`
+// *and* `refs/` before it will call a directory a git dir. Each subset below
+// manufactured `clean:true` at exit 0 against such a guard (measured, git
+// 2.50.1); the last is a REAL `.git` whose HEAD an interrupted write truncated,
+// so this is not only a hand-built shape.
+for (const [why, build] of [
+  ["holding a lone HEAD", (g) => writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n")],
+  ["whose HEAD is empty", (g) => writeFileSync(join(g, "HEAD"), "")],
+  ["missing objects/", (g) => {
+    writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n");
+    mkdirSync(join(g, "refs"));
+  }],
+]) {
+  test(`a worktree whose .git is a directory ${why} is unanswerable (2), never clean (0)`, (t) => {
+    const c = nestedWorktree(t);
+    rmSync(join(c.w, ".git"));
+    mkdirSync(join(c.w, ".git"));
+    build(join(c.w, ".git"));
+    assert.ok(existsSync(join(c.w, ".git", "HEAD")), "fixture: HEAD must be present, or this pins the empty-directory case again");
+
+    refusedAsUnknownBeforeAnySay(c);
+  });
+}
+
+// The other direction, and it is not theory: a guard spelled `-e
+// "$wt/.git/HEAD"` alone passes every refusal test above (measured) while
+// refusing every LINKED worktree on disk, whose `.git` is a file and which
+// therefore has no `.git/HEAD` to stat. That is the fleet's own shape —
+// `claim-ticket.sh` makes worktrees with `git worktree add` — so the false
+// refusal would land on every real caller while the suite stayed green. This
+// pins the shape the refusal tests do not reach.
+test("an intact linked worktree, whose .git is a file, still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  assert.ok(existsSync(join(c.w, ".git")), "fixture must leave the linkage intact");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a linked worktree is the fleet's own shape; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
 });
 
 // ---------------------------------------------------------------------------
