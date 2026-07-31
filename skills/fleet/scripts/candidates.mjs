@@ -20,9 +20,35 @@ function die(msg) {
   process.exit(2);
 }
 
+// Refuses here, once, rather than at each call site: a flag given without a
+// value yields `undefined`, and every caller reads a falsy result as "the flag
+// was absent" — `--limit` falls back to 500 past its own positive-integer
+// guard, and `--require-label` runs the UNFILTERED query at exit 0, the exact
+// widening `--allow-fallback` gates. Both are the malformed invocation reading
+// as a successful one that this file's exit codes exist to tell apart.
+//
+// Four spellings reach that one harm, so all four are refused here: no value,
+// an empty or blank value (`--require-label "$LABEL"` with the var unset), a
+// value that is itself a `--flag`, and the `--flag=value` form `indexOf` cannot
+// see. The last two are the interesting ones. Rejecting a `--`-prefixed value
+// does forfeit a real capability — GitHub permits a label named `--watch`, and
+// `denoland/deno` has one — but no caller passes a variable label, this repo
+// has no such label, and refusing loudly beats resolving it to the unfiltered
+// query. `--flag=value` is otherwise invisible: `indexOf` misses it, `arg()`
+// reports the flag absent, and the caller widens exactly as if it were.
+//
+// Neither caller is a hand-typed CLI — both are markdown read by a model — so
+// a malformed invocation is more plausible here than the shape of this guard
+// suggests.
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
-  return i === -1 ? null : process.argv[i + 1];
+  if (i === -1) {
+    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+    return null;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+  return value;
 }
 const has = (name) => process.argv.includes(`--${name}`);
 
@@ -66,12 +92,38 @@ function query(label) {
     die(`gh issue list failed: ${String(e.stderr || e.message).trim()}`);
   }
   const trimmed = out.trim();
-  if (trimmed === "") return [];
+  // Not `return []`. The reduction is `[…]`-wrapped, so it emits an array for
+  // every input including none — empty output means it did not run, which is
+  // the same fact as the shape check below, not an empty queue.
+  if (trimmed === "") die("gh returned no output — the --jq reduction did not apply");
+  let rows;
   try {
-    return JSON.parse(trimmed);
+    rows = JSON.parse(trimmed);
   } catch (e) {
     die(`could not parse gh output as JSON: ${e.message}`);
   }
+  // The reduction runs inside gh, not here, so nothing at this end guarantees
+  // it applied — an older gh, an expression it rejects, an error object from a
+  // proxy. Unchecked, the wrong shape flows on until the first use of it
+  // throws, and an uncaught throw exits 1: the code reserved for "successful
+  // query, no survivors". Fail closed, same as the failed-query path above.
+  if (!Array.isArray(rows)) die("gh output is not an array — the --jq reduction did not apply");
+  const bad = rows.findIndex(
+    (r) =>
+      !r ||
+      typeof r.n !== "number" ||
+      typeof r.t !== "string" ||
+      !Array.isArray(r.l) ||
+      !Array.isArray(r.d) ||
+      typeof r.spec !== "boolean",
+  );
+  // The row is named, never dumped: an unreduced payload carries every issue
+  // body, ~97% of what this file refuses to fetch in the first place.
+  // Says what is wrong, not why: this also fires when the reduction ran fine
+  // and the upstream field types were not what it assumed, so it cannot claim
+  // the reduction did not apply the way the two checks above can.
+  if (bad !== -1) die(`gh output row ${bad} is not {n,t,l,d,spec} — not the shape the --jq reduction produces`);
+  return rows;
 }
 
 // Hitting the limit exactly means the answer may be incomplete, and there is
