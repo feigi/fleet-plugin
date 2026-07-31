@@ -110,7 +110,14 @@ const DEFAULT_DIMENSIONS = [
 const pr = args && args.pr;
 const branch = args && args.branch;
 const worktree = args && args.worktree;
-const testCmd = (args && args.testCmd) || "./agent-test";
+// The default has to exist in the SNAPSHOT, which is where specialists are told
+// to run it — not in the worktree. The snapshot is cut with `git archive HEAD`
+// (below), which carries tracked files only, and `agent-test` is written into
+// the worktree by `claim-ticket.sh:110` and added to `.git/info/exclude` at :166
+// — untracked by construction, so it is never in the archive. `./agent-test` as
+// the default therefore handed every specialist `No such file or directory`,
+// and they reasoned from source instead of measuring. These paths are tracked.
+const testCmd = (args && args.testCmd) || "node --test skills/fleet/scripts/*.test.mjs";
 const scratch = args && args.scratch;
 const explicitDimensions = args && args.dimensions; // caller override; else derived from the diff below
 const verifiers = (args && args.verifiers) || 2;
@@ -238,8 +245,13 @@ const reviewed = await pipeline(
 READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}).
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
-Tests: use '${testCmd}' from the snapshot; never a bare test command, whose
-default config tears down a shared container mid-run for every sibling.
+Tests: from the snapshot's root, run exactly this — copy it verbatim:
+  ${testCmd}
+Do not substitute a command of your own. A bare runner picks up a default config
+that tears down a shared container mid-run for every sibling; a guessed glob is
+worse, because one matching nothing still exits 0 reporting 'tests 0' — a green
+that ran nothing. Whatever you run, 'tests 0' is a FAILED run, not a pass:
+report that dimension as unrun and say the command produced no tests.
 Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
