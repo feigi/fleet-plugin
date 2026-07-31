@@ -152,7 +152,15 @@ for arg do
     # filter, not node, is what keeps vendored tests out. It is deliberately
     # not a \`-prune\`: pruning skips the walk, and the readability check above
     # would stop seeing an unreadable directory under \`node_modules\`.
-    found=\$(find "\$arg" -type f -not -path '*/node_modules/*') || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    # The trailing slash is what lets a symlinked directory through. \`[ -d ]\`
+    # above follows symlinks and find does not descend a symlinked *argument*,
+    # so without it the two disagree on one target: the branch admits the
+    # symlink, find matches nothing under it, and the guard below refuses a
+    # suite that is right there. \`find -L\` would agree with \`[ -d ]\` too, but
+    # by following symlinks *inside* the tree as well — which walks into a
+    # symlinked \`node_modules\` the filter above only sees by path, and loops
+    # on a cycle. The slash settles the argument alone.
+    found=\$(find "\$arg/" -type f -not -path '*/node_modules/*') || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here and the refusal below would
