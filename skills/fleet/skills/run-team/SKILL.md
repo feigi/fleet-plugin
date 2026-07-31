@@ -167,9 +167,9 @@ number, worktree abs path, branch, and each of these verbatim:
 > the comments, and nothing at all when there are none, dropping the title and
 > body either way, exit 0, so the loss is silent. The `## Agent Brief` comment
 > is authoritative over the issue body. Honor its `Respec` block — it may
-> explicitly rule out hypotheses the body raises. Read it **before touching
-> code**: still undecided with the repo in front of you, or needing human hands
-> you do not have → bail, name the cause, do not implement.
+> explicitly rule out hypotheses the body raises. Read the issue **before
+> touching code**: with the repo in front of you, still undecided or needing
+> human hands you do not have → bail, name the cause, do not implement.
 
 > Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 > you stop for any reason, uncommitted work is invisible to the controller and
