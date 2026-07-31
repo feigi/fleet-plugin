@@ -69,7 +69,7 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Take `<run-id>` from the same `gh run list --json` row you took the head from. A CI cycle here runs ~5-6 minutes; if `gh run watch` outlives your shell timeout, re-issue it — that is still one blocking call per turn, not an idle turn. Never `sleep`-poll in a loop you exit early.
 
-   **`gh run watch` returning is permission to look, not a verdict.** It tells you the run reached a terminal state; it does not tell you which one, and a rerun can rewrite that state in place afterwards. Re-query `gh run view <run-id> --json jobs,attempt` for the decision — see step 3 and the re-query rule below.
+   **`gh run watch` returning is permission to look, not a verdict.** It tells you the run reached a terminal state, not which one — and that state can still change under you afterwards (step 3's re-query rule). Re-query `gh run view <run-id> --json jobs,attempt` for the decision.
 
    **You are the only place currency is proven, so never merge on a green from before your rebase.** The reviewer's green attests the diff was correct against *its* base — that claim does not expire and does not cover yours. Only a run on the rebased head shows it is still correct against current `main`.
 
@@ -83,7 +83,7 @@ For each labeled PR clearing the hold rule, lowest first:
    ~/.claude/skills/fleet/scripts/ci-state.mjs --pr <pr>
    ```
 
-   No `--branch` flag — it derives the branch from the PR. It binds run head, `status`, and every expected job from one query, and reports non-green unless the run's head matches the PR head, `status` is **completed**, and every expected job is present and succeeded. A force-push cancels the run under it; finished jobs keep their conclusions and keep being reported, so an absent job reads as `pending` and an inherited one as `pass` if you aggregate instead of binding to this one run.
+   No `--branch` flag — it derives the branch from the PR. It binds run head, `status`, and every expected job from one query, and reports non-green unless the run's head matches the PR head, `status` is **completed**, and every expected job is present and succeeded. That presence requirement is what catches the case above — a force-push cancels the run under you, its finished jobs go on reporting what they concluded, and whatever never ran is missing from the run entirely, which reads as `pending`.
 
    **Re-query at the moment you merge — a conclusion can invert under a fixed run id.** A rerun rewrites the *existing* run rather than creating a new one, so a run id you read as `success` can later read `failure` with nothing pushed to the branch. Observed twice in one fleet run, on two PRs: a refresh workflow re-ran the currency check after `main` advanced and flipped the same id on the same SHA. This cuts both ways — a red you cached may since have gone green on re-run, and a green you cached may be red. Never carry a conclusion across a wait.
 
