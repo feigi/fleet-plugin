@@ -125,8 +125,8 @@ jobs:
       # `failglob` because the bare glob is exactly the silent green this repo
       # already documents in review-and-fix.md — unmatched, bash passes the
       # pattern through literally, node globs it itself, finds nothing, and
-      # exits 0 having run none of the 213 tests. No node flag fails a
-      # zero-test run, so the shell has to be the guard.
+      # exits 0 having run not one test. No node flag fails a zero-test run,
+      # so the shell has to be the guard.
       - name: Tests
         run: |
           shopt -s failglob
