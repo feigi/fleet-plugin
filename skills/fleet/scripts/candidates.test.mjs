@@ -33,8 +33,8 @@ done
 # the whole test and cannot be dropped: every exclusion is spelled \`-label:\`,
 # so a bare \`*label:*\` matches the unfiltered query too and silently serves it
 # the labeled fixture — the fallback then looks untaken however well it works.
-# Serving it its own fixture is what makes "the fallback ran" provable from the
-# payload, rather than from a log line printed before the answer is known.
+# \$search is padded so the term still matches when it leads: gh ignores
+# qualifier order, so reordering query()'s template must not invert this.
 # No second fixture supplied — both queries see the same rows, as before.
 # The two fixtures are deliberately DISJOINT, which real gh could never be
 # (unfiltered is a superset). A faithful superset makes the stub's ignored
@@ -42,7 +42,7 @@ done
 # from the fallback payload — it was never in that fixture, and it passes
 # whatever the code does.
 fixture="$FIXTURE"
-case "$search" in
+case " $search " in
   *\\ label:*) ;;
   *) [ -n "$FIXTURE_UNFILTERED" ] && fixture="$FIXTURE_UNFILTERED" ;;
 esac
@@ -140,7 +140,13 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
       ticket(11, "## User Stories\n\n2. As a user…\n"),
     ],
     ["--require-label", "ready-for-agent", "--allow-fallback"],
-    [ticket(12, "## What to build\n\nreal work\n", ["ready-for-human"])],
+    [
+      ticket(12, "## What to build\n\nreal work\n", ["ready-for-human"]),
+      // A spec HERE is what makes the assertion below discriminate: delete the
+      // strip inside the fallback and #13 ships as a claimable ticket. A leaked
+      // spec passes phase 2's bail tests, so a member implements a whole spec.
+      ticket(13, "## User Stories\n\n4. As a user…\n", ["ready-for-human"]),
+    ],
   );
   assert.deepEqual(rows.map((r) => r.n), [12]);
   // The BRANCH ran, not merely that the unfiltered fixture reached some query.
@@ -148,6 +154,9 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
   // LABELED query the unfiltered fixture: same payload, same status, fallback
   // never entered. The payload alone pins the fixture, never the branch.
   assert.match(stderr, /retrying unfiltered/);
+  // Two queries actually RAN. The announcement above prints before the query,
+  // so it pins the branch being entered, never that its answer shipped.
+  assert.equal(stderr.match(/^\$ gh /gm).length, 2);
   // The strip inside the block ran. Delete that line and every assertion above
   // still passes while `spec` — and any spec row — reaches the payload.
   assert.deepEqual(Object.keys(rows[0]).sort(), ["d", "l", "n", "t"]);
