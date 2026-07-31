@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,27 @@ function bareConflictRepo(t, path) {
   git(c.w, "push", "-q", "origin", "main");
   git(c.w, "checkout", "-q", c.branch);
   return c;
+}
+
+/**
+ * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
+ * fleet's own layout, and the only one where breaking the linkage is dangerous:
+ * an enclosing repo is standing by to answer in the worktree's place, and being
+ * clean it answers "nothing uncommitted here". A worktree with no repo above it
+ * has nothing to walk up to, so git fails there and the script already refuses.
+ * `precious.txt` is the uncommitted work that exists nowhere else.
+ */
+function nestedWorktree(t, branch = "fix/9-nested") {
+  const c = repo(t);
+  writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
+  git(c.w, "add", ".gitignore");
+  git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
+  git(c.w, "push", "-q", "origin", c.branch);
+  const w = join(c.w, ".worktrees", "9-x");
+  git(c.w, "worktree", "add", "-q", "-b", branch, w);
+  git(w, "push", "-q", "-u", "origin", branch);
+  writeFileSync(join(w, "precious.txt"), "work that exists nowhere else\n");
+  return { parent: c.w, w, branch };
 }
 
 // The payload is parsed here rather than at the call site: "the audit passed and
@@ -431,6 +452,58 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
     assert.match(r.stderr, re, why);
     assert.equal(r.stdout, "", `${why}: an unanswerable audit must not emit a payload`);
   }
+});
+
+// The `is not a git worktree` case in the preconditions above passes a plain
+// directory with no repo ANYWHERE above it, so `rev-parse --git-dir` fails and
+// the script refuses. That is the harmless half. These two are the other half:
+// `rev-parse --git-dir` WALKS UP, so with an enclosing repo present the gate
+// passes at rc 0 having resolved a git dir that is not this worktree's, and
+// `status --porcelain` then answers for that repo — empty, at rc 0, because the
+// enclosing repo is clean and `.worktrees/` is gitignored. `clean:true` for a
+// tree the script never looked at, with the work still sitting on disk. The
+// `die` on a failing status is the wrong side of this: the command SUCCEEDS,
+// it just answers about somewhere else.
+//
+// Both assert the refusal lands BEFORE the audit reports anything. Exit 2 alone
+// would not pin it — a script that audits, prints "clean", and refuses
+// afterwards has already put the wrong answer on the caller's screen.
+function refusedAsUnknownBeforeAnySay(c) {
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: the uncommitted work must still be on disk");
+  assert.equal(git(c.parent, "status", "--porcelain"), "", "fixture: a CLEAN enclosing repo is what makes the leak answer 'clean'");
+  assert.doesNotThrow(
+    () => git(c.w, "rev-parse", "--git-dir"),
+    "fixture: the script's own gate must still pass here, or this test pins nothing",
+  );
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: git answers for the enclosing repo — the manufactured clean this must refuse");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs, let alone reports");
+  assert.match(r.stderr, /has no \.git of its own/);
+}
+
+test("a worktree whose .git was deleted is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// One byte over, and the reason the sibling guard in release-ticket.sh is `-f`
+// rather than `-e`: an EMPTY `.git` DIRECTORY is something `-e` calls present,
+// and git walks up past it exactly as it does past an absent one. `-f` alone
+// cannot be borrowed here — `$wt` is whatever worktree the caller names, and a
+// main checkout's `.git` is a directory, which is what every fixture in this
+// file is.
+test("a worktree whose .git is an empty directory is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+  mkdirSync(join(c.w, ".git"));
+  assert.ok(existsSync(join(c.w, ".git")), "fixture: `-e` must call this .git present, or it pins the case above again");
+
+  refusedAsUnknownBeforeAnySay(c);
 });
 
 // ---------------------------------------------------------------------------
