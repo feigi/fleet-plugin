@@ -31,16 +31,17 @@ branch=$2
 base=${BASE_REF:-origin/main}
 
 [ -d "$wt" ] || die "worktree $wt does not exist"
-git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || die "$wt is not a git worktree"
-# That gate answers "can git operate here", NOT "is this the tree it answers
-# about" — `rev-parse --git-dir` walks UP exactly as `status` does. Delete the
-# worktree's `.git` and it resolves the ENCLOSING repo's git dir at rc 0, so the
-# gate waves the run through; the status below then answers for that repo, and
-# with a clean parent (`.worktrees/` gitignored, the fleet's own layout) the
-# answer is EMPTY at rc 0 while the uncommitted work sits on disk. `clean` for a
-# tree nothing looked at, out of a script whose whole job is gating an
-# irreversible action. The `die` on a failing status cannot catch it: this
-# failure is a SUCCESSFUL command answering about another repository.
+# "Can git operate here" is NOT "is this the tree it answers about", and only
+# the second licenses the status below — every git command here walks UP,
+# `status` included. Delete the worktree's `.git` and git resolves the ENCLOSING
+# repo at rc 0, so a gate asking only the first waves the run through (a bare
+# `rev-parse --git-dir` stood here and did exactly that); the status below then
+# answers for that repo, and with a clean parent (`.worktrees/` gitignored, the
+# fleet's own layout) the answer is EMPTY at rc 0 while the uncommitted work
+# sits on disk. `clean` for a tree nothing looked at, out of a script whose
+# whole job is gating an irreversible action. The `die` on a failing status
+# cannot catch it: this failure is a SUCCESSFUL command answering about another
+# repository.
 #
 # `--show-prefix` is where git states which tree it actually resolved: the path
 # of the directory asked about, RELATIVE to that tree's root. Empty iff `$wt` IS
@@ -57,7 +58,12 @@ git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || die "$wt is not a git worktr
 #
 # The rc is captured, not swallowed: `--show-prefix` is empty both when `$wt` is
 # the root and when the command FAILS, so `[ -z ]` over a swallowed failure
-# would admit exactly what this refuses.
+# would admit exactly what this refuses. Capturing it is also what retired the
+# `--git-dir` gate rather than leaving it above: the two return the SAME rc on
+# every shape (measured — plain directory, garbage `.git`, dangling symlink,
+# unsearchable worktree all 128 for both; main checkout, linked worktree, bare
+# repo, deleted/empty/lone-HEAD `.git` all 0), so keeping both left one gate
+# that could never fire and an ordering dependency that did not exist.
 #
 # `--show-toplevel` compared against `$wt` is the spelling to avoid: it needs a
 # string compare, and `$wt` arrives relative (`claim-ticket.sh:26`), through a
