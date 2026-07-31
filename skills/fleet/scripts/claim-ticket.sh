@@ -114,7 +114,7 @@ SH
 
   # Only `node --test` gets the directory shim. Every other entrypoint is
   # somebody else's runner — vitest and jest already take a directory, as a
-  # filter against naming conventions that need not be $testfile_re — and
+  # filter against naming conventions that need not be this regex — and
   # rewriting their arguments would refuse suites that are perfectly fine.
   if [ "$testcmd" = "node --test" ]; then
     cat >> "$runner" <<SH
@@ -129,9 +129,11 @@ set -f
 for arg do
   shift
   if [ -d "\$arg" ]; then
-    # Zero matches must refuse. \`node --test\` with nothing to run exits 0,
-    # and a green that ran no tests is the one failure this script exists to
-    # refuse — do not let the expansion walk it back in past that guard.
+    # Zero matches must refuse. Appending nothing does not run nothing — it
+    # leaves argv empty, and bare \`node --test\` then discovers the whole
+    # worktree: a green for a suite nobody asked for. Shrugging instead, when
+    # something else is on the line, runs a subset and still exits 0. Both are
+    # the vacuous pass this script exists to refuse.
     # Node globs its own argv, downstream of anything the shell settled. A
     # literal \`[\` there is a bracket expression that cannot match itself, so
     # an unescaped path matches nothing — and node runs nothing and exits 0,
@@ -144,6 +146,9 @@ for arg do
     # whatever was under the unreadable directory.
     found=\$(find "\$arg" -type f) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
+    # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
+    # match, so under -e the shell would abort here and the refusal below would
+    # never print. Read a status you care about explicitly, as find does above.
     [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
     set -- "\$@" \$files
   else

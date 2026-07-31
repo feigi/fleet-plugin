@@ -137,7 +137,10 @@ test("runner: a file argument still works", () => {
 });
 
 // The shell expands a glob before the runner is entered, so the glob form
-// reaches it as the plain multi-file argv this asserts on.
+// reaches it as the plain multi-file argv this asserts on. Only the *matching*
+// glob, though: one that matches nothing is handed over unexpanded, is not a
+// directory, and so misses the shim entirely — node globs it, matches nothing
+// and exits 0. That path is #100, not this test.
 test("runner: the expanded glob form still works", () => {
   const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -164,7 +167,7 @@ test("runner: a directory it cannot fully read refuses instead of running a part
 // Directories are only rewritten for `node --test`. Every other entrypoint is
 // somebody else's runner, and vitest and jest take a directory as a filter
 // against their own naming conventions, which need not be this regex.
-test("runner: npm test passes a directory through untouched", () => {
+test("runner: the npm entrypoint is emitted without the directory shim", () => {
   const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
   assert.match(text, /^exec npm test -- "\$@"$/m);
   assert.doesNotMatch(text, /no test files under/);
