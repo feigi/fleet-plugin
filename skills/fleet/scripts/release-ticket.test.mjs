@@ -530,7 +530,10 @@ test("an unreadable worktree is an unknown answer, never a clean one", (t) => {
   // registered and still on the branch, and its status cannot be read.
   // Swallowed, that reads as no uncommitted changes and the release proceeds.
   // The directory has to still exist for this to be the unknown case — a gone
-  // one is answerable, and the case below is what proves it.
+  // one is answerable, and "a worktree directory deleted by hand releases
+  // instead of blocking forever" is what proves it. Named, not "the case
+  // below": the .git-is-gone case now sits between the two and asserts the
+  // opposite, so a positional reference here points at the wrong test.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   writeFileSync(join(c.wt, ".git"), `gitdir: ${join(r.w, ".git", "worktrees", "nope")}\n`);
@@ -567,7 +570,11 @@ test("a worktree whose .git file is gone is unknown, never clean", (t) => {
   // and having asked the tracker. Pinning the die is what separates the guard
   // being right from a second, unrelated guard catching it downstream.
   assert.equal(json, null, "refused before any mutation, not halted after the delete refused");
-  assert.match(stderr, /whether it holds uncommitted work is unknown/);
+  // The whole message, not the shared tail: all three dies end in "whether it
+  // holds uncommitted work is unknown", so the tail alone cannot tell the new
+  // guard firing from the status die firing — which is the distinction the
+  // comment above claims this case makes.
+  assert.match(stderr, /has no \.git, so whether it holds uncommitted work is unknown/);
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
@@ -611,6 +618,41 @@ test("a worktree deleted by hand while its branch carries work still blocks", (t
     { dir: false, worktree: true, branch: true },
     "the branch, and the commit on it, survive",
   );
+});
+
+test("an unsearchable worktree is not reported as having no .git", (t) => {
+  // The .git-linkage guard tests `-e "$wt/.git"`, and -e is false for two
+  // different reasons: the file is absent, or $wt is not searchable so the entry
+  // cannot be stat'ed at all. Only the first is an absence. Without the `! -x`
+  // clause the guard fires here and announces "has no .git" about a worktree
+  // whose .git is sitting right there — the same inference from a failed stat
+  // that the block above the guard exists to forbid, and it costs git's own
+  // "Permission denied" on the way out, since git never runs.
+  //
+  // 0o644 and not 0o000: the directory must stay stat-able from its parent so
+  // that -d is true and the run reaches the linkage guard at all. Only the
+  // search bit is dropped, which is exactly what makes -e answer false.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+
+  chmodSync(c.wt, 0o644);
+  const { code, json, stderr } = release(r, c);
+  // Restored before the first assert, for the reason "a worktree the script may
+  // not look at is unknown, never a release" gives: a failure here would
+  // otherwise leave a fixture the suite's own cleanup cannot remove.
+  chmodSync(c.wt, 0o755);
+
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  // The negative is the whole point, so it is pinned even though "a worktree the
+  // script may not look at is unknown, never a release" deliberately declines to
+  // pin wording on a permission path: refusing is not in question here — both
+  // versions refuse — and the only thing separating this fix from the bug it
+  // replaces is WHICH refusal it is.
+  assert.doesNotMatch(stderr, /has no \.git/, "never an absence nothing established");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
 
 test("a worktree the script may not look at is unknown, never a release", (t) => {

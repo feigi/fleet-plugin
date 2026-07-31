@@ -196,8 +196,9 @@ fi
 # Absence is ESTABLISHED here, never inferred from a failed -d, because -d is
 # also false for a directory we are not permitted to stat. git cannot separate
 # those two either: it marks both `prunable`, and `worktree remove` ACCEPTS a
-# prunable entry (rc 0), so the delete-time recomputation the header leans on
-# is the one thing absent on this path and this test is the only check left
+# prunable-because-absent entry (rc 0) — a live worktree whose .git was merely
+# deleted it refuses instead — so the delete-time recomputation the header leans
+# on is the one thing absent on this path and this test is the only check left
 # standing. Read as "gone", an unsearchable prefix released the claim — branch
 # deleted, label dropped, exit 0, `"blockers":[]` — with the member's
 # uncommitted work still on disk and now orphaned. So walk up to the nearest
@@ -222,10 +223,17 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # reports the PARENT's status at rc 0. `.worktrees/` is gitignored here, so the
   # worktree never appears in that status either: with a clean parent the answer
   # is empty, a positive assertion that the claim is clean produced without ever
-  # having looked at it. A .git that points nowhere is caught by the die below
-  # instead — git fails outright on that one — but an absent one reaches neither.
-  [ -e "$wt/.git" ] ||
-    die "$wt has no .git, so whether it holds uncommitted work is unknown"
+  # having looked at it. A .git that points nowhere is caught by the status die
+  # below instead — git fails outright on that one — but an absent one reaches
+  # neither that nor the -d gate above.
+  #
+  # `! -x` for the reason the block above gives: -e is ALSO false for a .git we
+  # are not permitted to stat, and this guard may not infer absence from that any
+  # more than -d may. An unsearchable worktree still has its .git, so leave it to
+  # the status die, which keeps git's own "Permission denied" rather than
+  # asserting an absence nothing established (measured: chmod 644 on the worktree
+  # makes -e false with the .git sitting right there).
+  [ -e "$wt/.git" ] || [ ! -x "$wt" ] || die "$wt has no .git, so whether it holds uncommitted work is unknown"
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
