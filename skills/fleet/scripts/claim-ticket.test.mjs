@@ -169,10 +169,14 @@ test("runner: a directory it cannot fully read refuses instead of running a part
 // shape is a *real* nested `node_modules` — an install that did not hoist, or
 // a bundled dependency. Not pnpm's: its per-package `node_modules` is a
 // symlink farm, and `find` without `-L` never descends it.
-// The vendor test fails on purpose: `pass 3` alone cannot tell "vendor was
+// The vendor test fails on purpose: the count alone cannot tell "vendor was
 // pruned" from "vendor ran and failed", and the exit status alone cannot tell
 // "pruned" from "the expansion dropped some of ours" — losing all of them
 // refuses with `no test files`, losing a few still exits 0. Both, or neither.
+// `node_modules_old/` pins the other direction. Over-pruning is the worse
+// bug — it deletes real tests and still exits 0 — and this is its only
+// coverage in the fleet suite: an over-broad `*node_modules*` passes every
+// other test in this file.
 // It is written into the worktree rather than through `repo()` because that is
 // where `node_modules` actually comes from — the install step, not a commit —
 // and committing it would rest this test on whatever `core.excludesFile` the
@@ -185,9 +189,14 @@ test("runner: a vendored test under a nested node_modules does not run", () => {
     join(vendor, "v.test.mjs"),
     'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
   );
+  const lookalike = join(a.wt, "t", "node_modules_old");
+  mkdirSync(lookalike, { recursive: true });
+  writeFileSync(join(lookalike, "k.test.mjs"), PASSES);
   const r = a.run("t");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 3/);
+  // Anchored: a bare `pass 4` is a substring and matches `pass 41`, so the pin
+  // would dissolve the moment the fixture grows past 40.
+  assert.match(r.stdout, /^ℹ pass 4$/m);
 });
 
 // Directories are only rewritten for `node --test`. Every other entrypoint is
