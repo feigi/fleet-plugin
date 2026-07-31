@@ -12,8 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Every check below is `git ls-files | xargs <checker>`; without pipefail a
-# broken left-hand side is a green run that checked nothing.
+# Most checks in the `check` job are `git ls-files | xargs <checker>`; without
+# pipefail a broken left-hand side is a green run that checked nothing. (The
+# Tests step and rebase-check's script are not that shape — both set their own
+# options.)
 defaults:
   run:
     shell: bash
@@ -21,8 +23,10 @@ defaults:
 jobs:
   # NOTE: this job's name is load-bearing. `rebase-check-refresh.yml` locates it
   # by `select(.name == "rebase-check")` to re-run it when main advances. Adding a
-  # `name:` key here (or renaming the job) makes that workflow silently find
-  # nothing and go green while refreshing no PRs.
+  # `name:` key here (or renaming the job) makes that workflow match nothing —
+  # loudly, not silently: every behind PR counts as no-job and its
+  # `BEHIND>0 && RERAN==0` guard exits 1. Red with a per-PR reason, not a
+  # green that refreshed nothing.
   rebase-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -78,23 +82,52 @@ jobs:
       # There is no build: this repo ships .mjs and .sh straight to the runtime.
       # `node --check` is the whole of it — the only thing that catches a syntax
       # error in a script no test imports before a hook runs it for real.
+      # Scoped to `.mjs`, so the two tracked `.js` files are NOT covered.
+      # Widening the glob does not work as-is: workflows/review-pr.js is ESM in
+      # a `.js` file and the repo has no package.json, so `node --check` parses
+      # it as CJS and dies on its first `export`. Verified — it turns this step
+      # red. Tracked as a follow-up rather than papered over here.
       - name: Syntax-check scripts
         run: git ls-files '*.mjs' | xargs -r -n1 node --check
 
-      # settings.json and the caches are read by hooks that die on a parse error.
+      # Exactly two tracked JSON files: settings.json and the fleet plugin
+      # manifest. The runtime caches are NOT covered and cannot be — every one
+      # of them is gitignored, so `git ls-files` never sees them. Do not read
+      # this step as saying anything about a cache.
+      # `jq empty`, not `jq -e .`: `-e` takes its status from the last OUTPUT
+      # value, so it exits 1 on a file holding `null` or `false` — both valid
+      # JSON — and a step named "Validate JSON" then fails saying nothing.
       - name: Validate JSON
-        run: git ls-files '*.json' | xargs -r -n1 jq -e . > /dev/null
+        run: git ls-files '*.json' | xargs -r -n1 jq empty
 
       # -S warning, not the default: the only info-level hits in the tree are
-      # false positives (SC2016 on inflight.sh's python3 heredoc, SC1003 on
+      # false positives (SC2016 on inflight.sh's single-quoted `python3 -c`
+      # script — there is no heredoc in that file — SC1003 on
       # statusline-command.sh's OSC-8 escape). Raise this to `style` only after
       # silencing those two at the source.
       - name: Shellcheck
         run: git ls-files '*.sh' | xargs -r shellcheck -x -S warning
 
-      # Explicit glob, not the directory: `node --test <dir>` also picks up
-      # vendored trees under it (see 'the runner's directory expansion ran
-      # vendored tests'). The suite stubs `gh` and sets its own git identity, so
-      # it needs no auth and no network.
+      # The caveman-compress skill ships tracked .py that runs as modules; no
+      # other step here would catch a syntax error in it.
+      - name: Syntax-check python
+        run: git ls-files '*.py' | xargs -r -n1 python3 -m py_compile
+
+      # Explicit glob, not the directory, to pin exactly which files run.
+      # NOT because node would otherwise walk into a vendored tree: node's own
+      # discovery excludes `node_modules` (measured), and the defect behind
+      # 'the runner's directory expansion ran vendored tests' was a `find` in
+      # the emitted runner — see claim-ticket.sh, which says so itself: "this
+      # filter, not node, is what keeps vendored tests out". There is no
+      # vendored tree under skills/fleet/scripts/ anyway; it is 29 flat files.
+      # The suite stubs `gh` and sets its own git identity, so it needs no auth
+      # and no network.
+      # `failglob` because the bare glob is exactly the silent green this repo
+      # already documents in review-and-fix.md — unmatched, bash passes the
+      # pattern through literally, node globs it itself, finds nothing, and
+      # exits 0 having run none of the 212 tests. No node flag fails a
+      # zero-test run, so the shell has to be the guard.
       - name: Tests
-        run: node --test skills/fleet/scripts/*.test.mjs
+        run: |
+          shopt -s failglob
+          node --test skills/fleet/scripts/*.test.mjs

@@ -1,6 +1,8 @@
 # `rebase-check` only runs on `pull_request` events, so a PR that passed it keeps
-# a stale green check after main advances — the branch protection still blocks the
-# merge, but the PR itself looks green with nothing saying why. This workflow
+# a stale green check after main advances. Note main is NOT a protected branch
+# today (`gh api repos/.../branches/main/protection` → 404), so nothing blocks
+# the merge and that stale green is the whole signal, not a cosmetic wart on top
+# of a real gate. Making it a gate is the follow-up in the PR body. This workflow
 # re-runs the real `rebase-check` job on open PRs targeting main whenever main
 # moves, so the PR goes red with the actionable log line instead.
 #
@@ -46,10 +48,15 @@ jobs:
 
           # `if !` rather than a bare assignment: `set -e` would abort here, but
           # silently, with no annotation in the run log.
-          # `baseRefName` is requested even though the list is filtered to base
-          # main: the compare below derives its base from it, so widening or
-          # dropping the filter cannot silently measure a PR against the wrong base.
-          if ! PRS=$(gh pr list --base main --state open --limit 100 \
+          # `baseRefName` is requested even though the list is filtered to the
+          # branch that was pushed: the compare below derives its base from it, so
+          # widening or dropping the filter cannot silently measure a PR against
+          # the wrong base.
+          # `$GITHUB_REF_NAME`, not a literal `main`: this workflow only triggers
+          # on a push to main, so the two agree by construction today — but a
+          # hardcoded `main` that stops matching the default branch returns an
+          # empty list, exits 0 at the guard below, and refreshes nothing forever.
+          if ! PRS=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit 100 \
                        --json number,baseRefName,headRefOid \
                        --jq '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
             echo "::error::gh pr list failed"
@@ -57,11 +64,15 @@ jobs:
           fi
 
           if [ -z "$PRS" ]; then
-            echo "No open PRs targeting main."
+            echo "No open PRs targeting $GITHUB_REF_NAME."
             exit 0
           fi
 
-          TOTAL=$(printf '%s\n' "$PRS" | grep -c . || true)
+          # `wc -l`, not `grep -c . || true`: that `|| true` is needed because
+          # grep exits 1 on a zero count, but it also swallows grep exiting 2,
+          # which leaves TOTAL empty and silently disables the accounting guard
+          # at the bottom of this step.
+          TOTAL=$(printf '%s\n' "$PRS" | wc -l | tr -d '[:space:]')
           if [ "$TOTAL" -ge 100 ]; then
             echo "::warning::Hit the 100-PR list cap — PRs beyond the first 100 were not refreshed."
           fi
@@ -100,6 +111,19 @@ jobs:
               FAILED=$((FAILED + 1))
               continue
             fi
+            # `gh api --jq` exits 0 printing the literal `null` when the field
+            # is absent, and `[ null -eq 0 ]` is not an abort — `set -e` is
+            # suspended inside an `if` condition, so bash prints `integer
+            # expression expected`, the test reads FALSE, and the PR falls
+            # through to the rerun branch. That re-runs a PR nothing established
+            # to be behind, which is the one thing the behind_by gate exists to
+            # prevent.
+            case "$BEHIND_BY" in
+              ''|*[!0-9]*)
+                echo "::error::#$PR ($SHA): compare returned a non-numeric behind_by ('$BEHIND_BY') — treating as an API failure, not as behind."
+                FAILED=$((FAILED + 1))
+                continue ;;
+            esac
             if [ "$BEHIND_BY" -eq 0 ]; then
               echo "#$PR ($SHA): up to date with $BASE — nothing to refresh."
               UPTODATE=$((UPTODATE + 1))
@@ -127,9 +151,11 @@ jobs:
               continue
             fi
 
-            # `first(...)` inside jq rather than `| head -1`: under `pipefail`, head
-            # closing the pipe early can SIGPIPE gh (141), which would discard a job
-            # id that was in fact found.
+            # `first(...)` inside jq rather than `| head -1`: it short-circuits on
+            # the first match instead of building the whole list. Note gh is NOT in
+            # this pipeline — its output was captured into $JOBS_JSON on the line
+            # above — so the SIGPIPE-the-fetch hazard this guards against in other
+            # code does not apply here.
             JOB=""
             for RUN in $RUN_IDS; do
               if ! JOBS_JSON=$(gh api "repos/$GH_REPO/actions/runs/$RUN/jobs?filter=latest&per_page=100" </dev/null); then
@@ -164,6 +190,14 @@ jobs:
               # ci.yml's concurrency group and a later push to the PR branch can cancel it.
               echo "#$PR ($SHA): behind by $BEHIND_BY — requested rerun of rebase-check (job $JOB)."
               RERAN=$((RERAN + 1))
+            elif printf '%s' "$RERUN_ERR" | grep -qiE 'in progress|queued'; then
+              # Checked BEFORE the 401/403 branch: GitHub refuses a rerun whose
+              # parent run is still going, and returns 403 for it. That is the
+              # routine per-PR skip described above, not a token problem — and
+              # reading it as one would exit 1 with a wrong diagnosis and
+              # abandon every remaining PR in the loop.
+              echo "#$PR ($SHA): rerun of job $JOB rejected — parent run still in progress or queued: $RERUN_ERR"
+              REJECTED=$((REJECTED + 1))
             elif printf '%s' "$RERUN_ERR" | grep -qE 'HTTP (401|403)'; then
               echo "::error::#$PR: rerun POST denied — $RERUN_ERR"
               echo "::error::GITHUB_TOKEN lacks 'actions: write' here, or a secondary rate limit is active. No PR can be refreshed until this is fixed."
@@ -194,4 +228,12 @@ jobs:
           fi
           if [ "$FAILED" -gt 0 ]; then
             echo "::warning::$FAILED PR(s) hit API errors and may still show a stale rebase-check."
+          fi
+          # Without this, ONE accepted rerun clears the all-or-nothing guard
+          # above and every other behind PR is laundered into a green check —
+          # the stale-green this whole workflow exists to end. These are skips,
+          # not errors, so they warn rather than fail.
+          SKIPPED=$((NO_RUN + NO_JOB + REJECTED))
+          if [ "$SKIPPED" -gt 0 ]; then
+            echo "::warning::$SKIPPED behind PR(s) were not re-run (no-run: $NO_RUN, no-job: $NO_JOB, rejected: $REJECTED) and still show a stale rebase-check."
           fi
