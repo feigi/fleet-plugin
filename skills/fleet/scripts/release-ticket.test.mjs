@@ -629,6 +629,47 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: true }, "the removal really did land");
 });
 
+test("the headline is keyed on what landed, not on which call site halted", (t) => {
+  // The two cases above leave the design's central claim unpinned: both reach
+  // `git worktree remove` first, so keying the headline on the CALL SITE passes
+  // them. A claim whose worktree was removed by hand separates the two — the
+  // removal is skipped entirely, so `git branch -d` halts with nothing landed,
+  // and the branch delete then halts with a branch gone and no worktree ever
+  // touched. Without this the (false, true) row of the table is unreachable
+  // too, and dropping `done_branch` from the condition survives the suite.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "git"),
+    `#!/bin/sh\ncase "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac\nexec ${real} "$@"\n`,
+    { mode: 0o755 },
+  );
+  // By hand, with real git: the registration goes, the branch stays.
+  execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
+
+  // Call site says "the branch delete refused"; what landed says nothing did.
+  const none = release(r, c, { env: { GIT_FAIL: "branch -d" } });
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -d refused/);
+  assert.doesNotMatch(none.stderr, /PARTIALLY/, "the same call site as the partial case above, and nothing landed");
+  assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
+  assert.equal(
+    none.out,
+    '{"issue":9,"branch":"fix/9-release-ticket","worktree":"","label":true,' +
+      '"released":false,"applied":true,"blockers":["git branch -d refused fix/9-release-ticket: ' +
+      'refused by the git shim"]}\n',
+    "an empty worktree field, and the receipt still whole",
+  );
+
+  // Branch gone, worktree never ours to remove: the (false, true) row.
+  const partial = release(r, c, { env: { GH_EDIT_RC: "1" } });
+  assert.equal(partial.code, 2);
+  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — could not drop in-progress from issue 9/);
+  assert.match(partial.stderr, /worktree removed: false, branch deleted: true/, "the detail line agrees");
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "the branch really did go");
+});
+
 test("a successful release survives a failing `git worktree prune`", (t) => {
   // prune ran unchecked as the last statement under `set -e`, so its failure
   // exited 1 — this script's code for "NOT released, nothing was touched" — out
