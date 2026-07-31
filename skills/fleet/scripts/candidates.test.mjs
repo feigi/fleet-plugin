@@ -36,6 +36,11 @@ done
 # Serving it its own fixture is what makes "the fallback ran" provable from the
 # payload, rather than from a log line printed before the answer is known.
 # No second fixture supplied — both queries see the same rows, as before.
+# The two fixtures are deliberately DISJOINT, which real gh could never be
+# (unfiltered is a superset). A faithful superset makes the stub's ignored
+# --limit stop the cap tests firing. So never assert a labeled row is ABSENT
+# from the fallback payload — it was never in that fixture, and it passes
+# whatever the code does.
 fixture="$FIXTURE"
 case "$search" in
   *\\ label:*) ;;
@@ -129,7 +134,7 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
   // the specs are dropped. Reading the raw one leaves a ready-for-agent queue
   // holding nothing but to-spec specs reporting "no work" with the fallback
   // untried, while #12 sits there claimable.
-  const { rows, status } = run(
+  const { rows, status, stderr } = run(
     [
       ticket(10, "## Problem Statement\n\nx\n\n## User Stories\n\n1. As a user…\n"),
       ticket(11, "## User Stories\n\n2. As a user…\n"),
@@ -138,16 +143,26 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
     [ticket(12, "## What to build\n\nreal work\n", ["ready-for-human"])],
   );
   assert.deepEqual(rows.map((r) => r.n), [12]);
+  // The BRANCH ran, not merely that the unfiltered fixture reached some query.
+  // Move the positive term to the front of `search` and the stub serves the
+  // LABELED query the unfiltered fixture: same payload, same status, fallback
+  // never entered. The payload alone pins the fixture, never the branch.
+  assert.match(stderr, /retrying unfiltered/);
+  // The strip inside the block ran. Delete that line and every assertion above
+  // still passes while `spec` — and any spec row — reaches the payload.
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["d", "l", "n", "t"]);
   // Exit 0, not 1: the payload and the "is there work" answer are one fact,
   // and a caller that reads only the status must not still hear "empty".
   assert.equal(status, 0);
 });
 
 test("the cap is checked before specs are dropped in the fallback too, not only in the labeled query", () => {
-  // Same load-bearing ordering as the test above it, one branch deeper. The
-  // labeled query is under its cap on 1 row, empties out, and hands over to
-  // the fallback — whose 2 rows hit --limit 2 exactly. Drop first and one spec
-  // leaves, the cap check sees 1, and the truncated list ships as an answer.
+  // The cap-before-drop ordering of "the cap is checked before specs are
+  // dropped", one branch deeper — NOT the drop-before-emptiness test directly
+  // above, which pins the other half of the same wedge. The labeled query is
+  // under its cap on 1 row, empties out, and hands over to the fallback —
+  // whose 2 rows hit --limit 2 exactly. Drop first and one spec leaves, the
+  // cap check sees 1, and the truncated list ships as an answer.
   const { status, stderr } = run(
     [ticket(10, "## User Stories\n\n1. As a user…\n")],
     ["--require-label", "ready-for-agent", "--allow-fallback", "--limit", "2"],
