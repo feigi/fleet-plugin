@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -67,22 +67,58 @@ function apply(files) {
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_TEST_WORKER_ID;
   return {
+    wt,
     text: readFileSync(join(wt, "agent-test"), "utf8"),
     run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
   };
 }
 
 const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
-const SUITE = { "t/a.test.mjs": PASSES, "t/b.test.mjs": PASSES, "empty/README.md": "" };
+// `root.test.mjs` exists so no assertion below can be satisfied by the argv
+// being dropped: bare `node --test` discovers the whole fixture, and every
+// count asserted here differs from that. Without it the two-file cases and
+// discovery both landed on `pass 2`, and a test that cannot tell "argv was
+// honoured" from "argv was discarded" pins nothing.
+const SUITE = {
+  "t/a.test.mjs": PASSES,
+  "t/b.test.mjs": PASSES,
+  "t/nested/c.test.mjs": PASSES,
+  "root.test.mjs": PASSES,
+  "with space/s.test.mjs": PASSES,
+  "br[a]cket/g.test.mjs": PASSES,
+  "empty/README.md": "",
+};
 
 // `node --test <dir>` resolves the directory as a module specifier and dies
 // with MODULE_NOT_FOUND before a single test runs. A directory is the
 // ergonomic way to say "run this suite", and the red it produced was read as
 // a finding against the diff under review rather than against the invocation.
+// `pass 3` also pins the recursion: `t/` holds two files and `t/nested/` a
+// third, so a `find` capped at one level reads as a red here.
 test("runner: a directory argument runs the test files under it", () => {
   const r = apply(SUITE).run("t");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 2/);
+  assert.match(r.stdout, /pass 3/);
+});
+
+// `set -f` and IFS only settle how the *shell* splits the expansion. Node
+// globs its own argv afterwards, where a literal `[` is a bracket expression
+// that cannot match itself — so an unescaped path matches nothing, node runs
+// nothing, and it exits 0. That is the vacuous pass this shim exists to
+// refuse, reached past the guard because `find` did match the file.
+test("runner: a directory whose path holds a glob character still runs its tests", () => {
+  const r = apply(SUITE).run("br[a]cket");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
+});
+
+// The other half of the same claim: IFS pinned to a newline is what keeps a
+// path with a space in it one word. On the default IFS it splits into two
+// words node cannot resolve, and node drops unresolvable arguments silently.
+test("runner: a directory whose path holds a space still runs its tests", () => {
+  const r = apply(SUITE).run("with space");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /pass 1/);
 });
 
 // The sharp edge. `node --test` with zero files exits 0, so an expansion that
@@ -106,6 +142,23 @@ test("runner: the expanded glob form still works", () => {
   const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /pass 2/);
+});
+
+// A subtree find cannot descend is the quiet version of the same hazard: find
+// still prints what it reached, grep still matches it, and the count guard
+// still passes — so the suite goes green having silently skipped whatever the
+// unreadable directory held. Root can read anything, so it cannot see this.
+test("runner: a directory it cannot fully read refuses instead of running a partial suite", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply({ ...SUITE, "t/locked/z.test.mjs": PASSES });
+  chmodSync(join(a.wt, "t", "locked"), 0o000);
+  try {
+    const r = a.run("t");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read every path under t/);
+  } finally {
+    chmodSync(join(a.wt, "t", "locked"), 0o755);
+  }
 });
 
 // Directories are only rewritten for `node --test`. Every other entrypoint is

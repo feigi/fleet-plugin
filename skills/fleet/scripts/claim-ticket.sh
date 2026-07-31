@@ -120,8 +120,9 @@ SH
     cat >> "$runner" <<SH
 # A directory is the ergonomic way to say "run this suite", but node resolves
 # it as a module specifier and dies with MODULE_NOT_FOUND before a test runs.
-# Expand it to the test files underneath instead. IFS and -f make the split
-# safe for paths holding spaces or glob characters.
+# Expand it to the test files underneath instead. IFS and -f settle only how
+# the *shell* splits that expansion: a newline IFS keeps a path with a space
+# in it one word, and -f stops the shell re-globbing the result.
 IFS='
 '
 set -f
@@ -131,7 +132,18 @@ for arg do
     # Zero matches must refuse. \`node --test\` with nothing to run exits 0,
     # and a green that ran no tests is the one failure this script exists to
     # refuse — do not let the expansion walk it back in past that guard.
-    files=\$(find "\$arg" -type f | grep -E '$testfile_re')
+    # Node globs its own argv, downstream of anything the shell settled. A
+    # literal \`[\` there is a bracket expression that cannot match itself, so
+    # an unescaped path matches nothing — and node runs nothing and exits 0,
+    # the same vacuous pass, reached past this guard because find did match.
+    # \`[[]\` is the bracket idiom for a literal \`[\`; \`*\` and \`?\` need no
+    # escape, since a path holding one still matches itself.
+    # find's own status has to be read before grep overwrites it. A subtree it
+    # cannot descend still yields the part it reached, grep still matches, and
+    # the guard below still passes — a green over a suite that silently lost
+    # whatever was under the unreadable directory.
+    found=\$(find "\$arg" -type f) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
     set -- "\$@" \$files
   else
