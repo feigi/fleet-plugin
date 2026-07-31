@@ -3,7 +3,7 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
@@ -72,6 +72,11 @@ test("findSubagentsDir resolves a dotted cwd and picks the newest session", () =
   mkdirSync(older, { recursive: true });
   mkdirSync(newer, { recursive: true });
   writeFileSync(join(newer, "agent-a.jsonl"), ""); // bump newer's mtime
+  // ...but only far enough to be visible. Both dirs are created inside the same
+  // millisecond on a fast filesystem, `mtimeMs` ties, and the sort is stable —
+  // so the tie resolves to readdir order and `11111111-aaaa` wins on name. Age
+  // `older` explicitly rather than sleeping for a clock tick.
+  utimesSync(older, new Date(0), new Date(0));
 
   assert.equal(findSubagentsDir(home, "/Users/x/.claude"), newer);
   assert.equal(findSubagentsDir(home, "/Users/x/nonexistent"), null);
