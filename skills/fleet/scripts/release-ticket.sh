@@ -132,12 +132,72 @@ halt() {
 blockers=""
 block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
 
+# Is this path ABSENT, or merely one we are not permitted to stat? -e is false
+# for both, and neither caller may infer the first from the second: on the dirty
+# check that releases a claim whose worktree is still on disk holding the
+# member's uncommitted work, on the stray guard it hands the operator a prune
+# that unregisters that same worktree. git cannot separate them either — it marks
+# both `prunable`, and `worktree remove` ACCEPTS a prunable-because-absent entry
+# (rc 0) where a live worktree whose .git was merely deleted it refuses — so
+# nothing downstream recomputes what this gets wrong. So walk up to the nearest
+# existing ancestor BELOW `/` and require THAT to be searchable: only then is "not
+# there" a measurement rather than a guess. The walk is what keeps `rm -rf
+# .worktrees` answerable — the parent goes with the child, and testing the
+# immediate parent alone reads its absence as unknown, which is the permanent
+# refusal both callers exist to stop producing.
+#
+# Below `/` and not including it: `${p%/*}` on `/x` yields the empty string rather
+# than `/`, so a path whose every ancestor below the root is gone falls out of the
+# loop on "" and answers unknown. Safe direction, unreachable for the
+# `<repo>/.worktrees/<issue>-<slug>` paths claim-ticket.sh writes, and #178 to
+# close it — stated here because the walk does not do what "nearest ancestor that
+# exists" would promise.
+#
+# One predicate, because both callers ask one question. Answered twice they drift,
+# and the halves of this script that protect a member's work stop agreeing about
+# whether there is any work there to protect.
+#
+# `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
+# slash, so the emptiness form spins forever on one. git emits absolute paths
+# here, but a delete script may not hang on the input that proves otherwise.
+#
+# 0 ONLY for established absent; 1 covers present AND cannot-stat, so a caller
+# needing those apart pairs this with its own `[ ! -e ]`, as the dirty check does.
+# Condition context only: a bare `gone` returns 1 on the ordinary present answer
+# and `set -e` exits — rc 1, this script's own blocked-run code, and no receipt.
+gone() {
+  look=$1
+  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+  [ ! -e "$1" ] && [ -x "$look" ]
+}
+
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
 fi
 
 if [ -z "$wt" ] && [ -n "$stray" ]; then
-  block "worktree $stray is this claim's but is not on $branch — release it by hand"
+  # Which remedy applies turns on whether that directory is still there, and
+  # asking only the registration named the wrong one whenever it is not: the
+  # entry outlives the directory — `worktree list --porcelain` keeps listing it,
+  # annotated `prunable`, after an `rm -rf` — so a claim with nothing left to
+  # hand-release was told to hand-release it. That instruction names no action
+  # the operator can take, so nothing cleared the entry and every later run
+  # blocked identically: the permanent refusal, with the label and the branch
+  # standing and the in-flight probe still reading the ticket as taken, that this
+  # script exists to clear.
+  #
+  # Blocked either way, never released. This worktree is not on the claim's
+  # branch, so releasing would delete a different ref and then reach the
+  # `git worktree prune` a completed apply ends with — unanchoring a detached HEAD's
+  # commits, which no ref points at, as a side effect of releasing something
+  # else. Naming that prune hands the operator the command that does clear the
+  # entry (verified, git 2.50.1: the run after it releases) and leaves the
+  # discard their decision.
+  if gone "$stray"; then
+    block "worktree $stray is this claim's and its directory is gone — git worktree prune to clear the registration"
+  else
+    block "worktree $stray is this claim's but is not on $branch — release it by hand"
+  fi
 fi
 
 if [ "$has_branch" = true ]; then
@@ -193,26 +253,18 @@ fi
 # below reaches on its own, the run gets as far as `halt` and exits 2 announcing
 # a partial release that never happened, on a worktree still holding the work.
 #
-# Absence is ESTABLISHED here, never inferred from a failed -d, because -d is
-# also false for a directory we are not permitted to stat. git cannot separate
-# those two either: it marks both `prunable`, and `worktree remove` ACCEPTS a
-# prunable-because-absent entry (rc 0) — a live worktree whose .git was merely
-# deleted it refuses instead — so the delete-time recomputation the header leans
-# on is the one thing absent on this path and this test is the only check left
-# standing. Read as "gone", an unsearchable prefix released the claim — branch
-# deleted, label dropped, exit 0, `"blockers":[]` — with the member's
-# uncommitted work still on disk and now orphaned. So walk up to the nearest
-# ancestor that does exist and require THAT to be searchable: only then is "not
-# there" a measurement rather than a guess. The walk is what keeps `rm -rf
-# .worktrees` answerable — the parent goes with the child, and testing the
-# immediate parent alone reads its absence as unknown and puts that case back
-# on the permanent exit 2 this fix exists to end.
-look=$wt
-# `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
-# slash, so the emptiness form spins forever on one. git emits absolute paths
-# here, but a delete script may not hang on the input that proves otherwise.
-while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
-if [ -n "$wt" ] && [ ! -e "$wt" ] && [ ! -x "$look" ]; then
+# Absence is ESTABLISHED by `gone`, never inferred from a failed -d, because -d
+# is also false for a directory we are not permitted to stat — and on this path
+# the delete-time recomputation the header leans on is absent (`worktree remove`
+# accepts the entry either way, as `gone` explains), so this is the only check
+# left standing. Read as "gone", an unsearchable prefix released the claim —
+# branch deleted, label dropped, exit 0, `"blockers":[]` — with the member's
+# uncommitted work still on disk and now orphaned.
+#
+# The -e test stays: `gone` reports a path that EXISTS as not-established-absent,
+# which is the same answer it gives for one it cannot stat, and only the second
+# is unknown.
+if [ -n "$wt" ] && [ ! -e "$wt" ] && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
 fi
 
