@@ -157,9 +157,13 @@ for arg do
     # so without it the two disagree on one target: the branch admits the
     # symlink, find matches nothing under it, and the guard below refuses a
     # suite that is right there. \`find -L\` would agree with \`[ -d ]\` too, but
-    # by following symlinks *inside* the tree as well — which walks into a
-    # symlinked \`node_modules\` the filter above only sees by path, and loops
-    # on a cycle. The slash settles the argument alone.
+    # by following symlinks *inside* the tree as well — sweeping in vendored
+    # code reached through a symlink named anything other than
+    # \`node_modules\`, which the \`-not -path\` filter cannot catch: it matches
+    # the path find prints, and that path holds no \`node_modules\`. On a
+    # cycle the platforms then disagree: GNU find exits 1, which the \`||\`
+    # below reports as an unreadable directory, while BSD find skips it
+    # silently. The slash settles the argument alone.
     found=\$(find "\$arg/" -type f -not -path '*/node_modules/*') || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no

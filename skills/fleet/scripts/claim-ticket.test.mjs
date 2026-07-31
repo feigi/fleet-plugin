@@ -121,13 +121,7 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
   assert.match(r.stdout, /pass 1/);
 });
 
-// `[ -d ]` follows symlinks and `find` does not descend a symlinked argument,
-// so the two halves of the shim disagreed on the same target: the branch test
-// admitted the symlink, `find` matched nothing under it, and the count guard
-// below refused a suite that is right there. The trailing slash on `find`'s
-// argument is what settles the disagreement; `find -L` would settle it too, but
-// by also following symlinks *inside* the tree, which is how a suite sweeps
-// into a symlinked `node_modules` or walks a loop.
+// Why the trailing slash, and why not `-L`: claim-ticket.sh, above `found=`.
 // The symlink is written into the worktree rather than through `repo()` because
 // the runner only ever stats a path in its cwd — whether a commit or a local
 // `ln -s` put it there is invisible to it — and keeping it out of the shared
@@ -136,12 +130,21 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
 test("runner: a symlink to a directory runs the test files under it", () => {
   const a = apply(SUITE);
   symlinkSync("t", join(a.wt, "tlink"));
+  // `t/vendor` is the shape the `-not -path` filter cannot see: a symlink into
+  // `node_modules` under another name, so the path find prints never contains
+  // `node_modules`. The slash form does not descend it and reads 3; `find -L`
+  // sweeps the vendored test in and reads 4. Without this every test passes
+  // under `-L`, leaving the reasoning in claim-ticket.sh as the only thing
+  // between a future tidy-up and a suite resting on third-party code.
+  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
+  writeFileSync(join(a.wt, "node_modules", "v.test.mjs"), PASSES);
+  symlinkSync("../node_modules", join(a.wt, "t", "vendor"));
   const r = a.run("tlink");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Anchored for the same reason as the vendored-test count above: bare
+  // Anchored for the same reason as the vendored-test count below: bare
   // `pass 3` is a substring of `pass 3<n>` and stops discriminating once a
   // fixture grows. 3 is `t/`'s own two files plus the one under `t/nested/`,
-  // so a symlink followed only one level deep reads as a red here too.
+  // so a `find` capped at one level reads as a red here too.
   assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
 });
 
