@@ -347,15 +347,21 @@ test("probe 3: the same worktree without a space in the path, as the control", (
 //
 // Every probe copies a name somebody else chose straight into a JSON string
 // position, so the characters those names may legally carry decide whether the
-// payload parses. The two cases below are the two reachable vectors, and they
-// differ: git's ref rules reject `\` but allow `"`, while a worktree path is a
-// filename and allows both. Neither changes the verdict — the exit code and
-// `taken` are already right, and next-ticket/SKILL.md and run-team/SKILL.md
+// payload parses. The three cases below are the three reachable vectors, one
+// per wrapped field that a name can reach: a local branch, a worktree path and
+// a remote branch. They are not one case written three times — git's ref rules
+// reject `\` but allow `"`, while a worktree path is a filename and allows
+// both, and the three arrive through different probes into different fields,
+// so dropping the escape from any one of them is caught by exactly one.
+// (`evidence.pr` is the fourth wrapped field and has no case, because it is
+// built only from a URL-derived owner/repo, a PR number and a state — none of
+// which can carry a quote.) None of them changes the verdict — the exit code
+// and `taken` are already right, and next-ticket/SKILL.md and run-team/SKILL.md
 // both read the EXIT CODE as the decision — so a red here is a consumer that
 // cannot read the evidence, not a ticket claimed twice.
 //
-// Built by hand rather than through `fixture`'s options, the way
-// release-ticket.test.mjs:628 builds its own: the names are the fixture.
+// The first two are built by hand rather than through `fixture`'s options, the
+// way release-ticket.test.mjs:628 builds its own: the names are the fixture.
 
 const git = (repo, ...args) => execFileSync("git", ["-C", repo, ...args],
   { encoding: "utf8", env: { ...process.env, ...IDENT } });
@@ -393,6 +399,46 @@ test("a quote and a backslash in a worktree path cannot produce an unparseable p
     `both characters must survive intact, got ${json.evidence.worktree}`);
   assert.equal(r.status, 1);
   assert.deepEqual(json.hits, ["local"]);
+});
+
+test("a control character in a worktree path cannot produce an unparseable payload", (t) => {
+  // What pins the `tr` stage; without it the two cases above stay green and a
+  // raw C0 byte reaches the payload, which JSON forbids unescaped. Mirrors
+  // release-ticket.test.mjs:642.
+  //
+  // \001 specifically, not \t or \n: those two are eaten upstream by probe 3's
+  // own `awk -F'\t'` and `read -r` before `jstr` ever sees them (#122), so they
+  // would pin nothing here. \001 is neither, so it survives to the payload.
+  //
+  // Neutralised to a space rather than escaped — the byte does not round-trip,
+  // and the assertion says so rather than pretending otherwise.
+  const { repo, env } = fixture(t, 99, {});
+  const name = "fix-99-c\u0001x";
+  git(repo, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+
+  const r = spawnSync("sh", [SCRIPT, "99"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", "fix-99-c x")),
+    `the C0 byte must be neutralised, not passed through, got ${json.evidence.worktree}`);
+  assert.equal(r.status, 1);
+  assert.deepEqual(json.hits, ["local"]);
+});
+
+test("a quote in a remote branch cannot produce an unparseable payload", (t) => {
+  // The third reachable vector, and the one the two cases above cannot reach:
+  // the name is a ref like the local-branch case, but it arrives through probe
+  // 2 and lands in a different field. Without this, dropping `jstr` from
+  // `$remote` alone leaves the whole suite green — measured. This one goes
+  // through `fixture`'s own `remoteBranches`, since a bare origin is exactly
+  // what it builds and probe 2 has no path a hand-built name would exercise.
+  const { repo, env } = fixture(t, 55, { remoteBranches: ['fix-55-re"mote'] });
+
+  const r = spawnSync("sh", [SCRIPT, "55"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.evidence.remote, 'fix-55-re"mote', "and it round-trips, rather than being stripped");
+  assert.equal(r.status, 1, "the verdict is unchanged — this was only ever the evidence");
+  assert.deepEqual(json.hits, ["remote-branch"]);
 });
 
 // --- error paths. These do not reach the jq expression at all: the stub exits on
