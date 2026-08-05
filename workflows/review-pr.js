@@ -107,9 +107,27 @@ const DEFAULT_DIMENSIONS = [
   },
 ];
 
-const pr = args && args.pr;
-const branch = args && args.branch;
-const worktree = args && args.worktree;
+// `args` can arrive as a JSON STRING rather than an object. Observed twice on
+// this script: every read below returns undefined, and the failure surfaces as
+// the required-args throw at the bottom of this block with `duration_ms: 3` and
+// `agent_count: 0` — which reads as a bad invocation rather than a serialization
+// bug, so it gets re-tried verbatim. Decode first; an object passes through
+// untouched. Now that the fleet's default review path is this workflow
+// (run-team/SKILL.md's Reviewers section), an undecoded call is a PR nobody
+// reviews.
+function decodeArgs(a) {
+  if (typeof a !== "string") return a || {};
+  try {
+    return JSON.parse(a);
+  } catch (e) {
+    throw new Error(`review-pr: args arrived as a string this could not parse (${e.message})`);
+  }
+}
+const A = decodeArgs(args);
+
+const pr = A.pr;
+const branch = A.branch;
+const worktree = A.worktree;
 // The default has to exist in the SNAPSHOT, which is where specialists are told
 // to run it — not in the worktree. The snapshot is cut with `git archive HEAD`
 // (below), which carries tracked files only, and `agent-test` is written into
@@ -117,19 +135,24 @@ const worktree = args && args.worktree;
 // — untracked by construction, so it is never in the archive. `./agent-test` as
 // the default therefore handed every specialist `No such file or directory`,
 // and they reasoned from source instead of measuring. These paths are tracked.
-const testCmd = (args && args.testCmd) || "node --test skills/fleet/scripts/*.test.mjs";
-const scratch = args && args.scratch;
-const explicitDimensions = args && args.dimensions; // caller override; else derived from the diff below
-const verifiers = (args && args.verifiers) || 2;
-const snapshotModel = (args && args.snapshotModel) || "haiku";
-const verifierEffort = (args && args.verifierEffort) || "low";
+const testCmd = A.testCmd || "node --test skills/fleet/scripts/*.test.mjs";
+// Defaulted, and defaulted PER PR. Undefined it is not caught by the required-
+// args guard below, so `mkdir -p undefined/snapshot` succeeds and every agent
+// writes to `undefined/<key>/` relative to whatever cwd it picked — and every
+// CONCURRENT workflow writes to the same one, which is the sibling-clobbering
+// this snapshot design exists to prevent.
+const scratch = A.scratch || `/tmp/review-pr-${pr}`;
+const explicitDimensions = A.dimensions; // caller override; else derived from the diff below
+const verifiers = A.verifiers || 2;
+const snapshotModel = A.snapshotModel || "haiku";
+const verifierEffort = A.verifierEffort || "low";
 
 // Verification budget follows apply-probability. A critical/important finding
 // gets applied, so a plausible-but-wrong one is expensive: 2 adversarial
 // refuters each. A `suggestion` is deferred by review-and-fix, never
 // auto-applied — paying the most expensive check on the lowest-stakes finding
 // is pure waste, so 0 by default. Override with args.verifiersBySeverity.
-const verifiersBySeverity = (args && args.verifiersBySeverity) || {
+const verifiersBySeverity = A.verifiersBySeverity || {
   critical: verifiers,
   important: verifiers,
   suggestion: 0,
@@ -211,6 +234,15 @@ modify ${worktree}.`,
       },
     } },
 );
+
+// A dead snapshot agent returns falsy, and every read below dereferences it.
+// Unguarded this is a TypeError a hundred lines from its cause; guarded it names
+// the one thing the caller can act on — there is no tree, so there is no review.
+// The `.filter(Boolean)` guards on the review and verify agents are the same
+// rule applied where a partial result is still usable; here it is not.
+if (!snap || !snap.path || !snap.head) {
+  throw new Error("review-pr: the snapshot agent returned no tree — nothing to review");
+}
 
 log(`snapshot ${snap.head} at ${snap.path}`);
 

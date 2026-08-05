@@ -229,7 +229,9 @@ multi-select**, and **a judgement the evidence cannot settle**.
   without relabelling — an unclaimed ticket is not yours to reclassify, and it
   surfaces its exclusions to the maintainer anyway.
 - **Review slot free, PR queued** → run the review workflow yourself, then
-  dispatch a fix-applier for what survives (below).
+  dispatch a fix-applier for what survives (below). Nothing survived and nothing
+  to file → skip the fix-applier and dispatch the **finisher** directly: no
+  member will touch that PR, so no push is coming and nothing will wake you.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
@@ -243,6 +245,15 @@ multi-select**, and **a judgement the evidence cannot settle**.
   still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
   reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
   one only if it genuinely is.
+- **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
+  the finisher **now**, against the existing head. No push means no new run, and
+  the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
+  head's terminal state already fired once and will never fire again, so waiting
+  for the CI event waits forever. This is the *normal* outcome on a clean PR:
+  every `suggestion` defers, `suggestion` is the band a clean diff produces, and
+  deferrals are filed as issues rather than committed. An edge-only label path
+  therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
+  not wait for an event** governs here too, not only implementer refill.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
@@ -274,21 +285,53 @@ entirely. See references/ci-and-staleness.md.
 
 **You run the review yourself: `Workflow({name: "review-pr", args: {pr, branch,
 worktree, testCmd, scratch}})`, once per PR. That is the default path.** Only you
-can run it — members have no `Workflow` tool — and it is the only path on which
-`selectDimensions` sizes the fan-out to the diff (a docs-only PR runs
-correctness+comments, not the full six) and the verify budget follows severity.
-Hand-dispatched, neither executes at all: sizing falls back to a reviewer's own
-judgement and nothing budgets the adversarial pass. It cuts one immutable
-snapshot, verifies every critical/important finding adversarially, and has
-`agent()` return **into the script**, so no report can go undelivered and you
+can run it — members have no `Workflow` tool (verified 2026-07-30 for the
+`general-purpose` subagent; tool availability is per-agent-type, so recheck after
+a harness change rather than treating it as permanent) — and it is the only path
+on which `selectDimensions` sizes the fan-out to the diff and the verify budget
+follows severity. Hand-dispatched, neither executes at all: sizing falls back to a
+reviewer's own judgement and nothing budgets the adversarial pass. It cuts one
+immutable snapshot, verifies every critical/important finding adversarially, and
+has `agent()` return **into the script**, so no report can go undelivered and you
 relay nothing — the delivery failure that cost one fleet five reports on one PR
-and four on another. The workflow is not a member: count the **fix-applier**
-against the reviewer cap, never the workflow.
+and four on another.
+
+**The trim is narrower than it sounds.** `diff-stats.mjs` calls a PR docs-only
+only when it touches **no** src, tests *or* config — so a docs PR that also adds
+one test file keeps the full six, and only a purely-prose diff runs
+correctness+comments alone. An unknown profile also widens to the full six, the
+safe direction, so a trim is never something to count on in advance.
+
+**One review workflow at a time.** The workflow is not a member — count the
+**fix-applier** against the reviewer cap, never the workflow — but that
+accounting leaves the workflow itself ungated, and the cap bounds *members*, not
+the agents members and workflows spawn. Its own fan-out is 1 snapshot + up to 6
+specialists + 2 refuters per critical/important finding, and the fix-applier is
+not dispatched until it returns, so the reviewer cap reads five free slots for
+the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
+to start a second.
 
 It returns `{pr, head, snapshot, dimensionsRun, survived, refuted, unverified}`.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Hand those over
-with the rest; never rule on them yourself.
+with the rest; never rule on them yourself. `refuted` comes back deliberately as
+well — a refutation is itself a claim, and one has been reversed on new evidence —
+so record it in the ledger's `ruled` line and hand it over only when you reverse
+it.
+
+**`dimensionsRun` names what ran, never what returned.** A specialist that dies
+contributes zero findings while its key stays in that list, so a dimension listed
+in `dimensionsRun` with nothing in `survived`/`refuted`/`unverified` is **unrun,
+not clean**. Re-run it, or name it unrun in the report — an absence of findings is
+not coverage. Same rule the fallback below states for a killed specialist, for
+the same reason.
+
+**A throw or an empty return is a failure event, not a clean review.** It throws
+on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no
+tree, and it surfaces to you mid-loop, where "react, never block" makes it easy to
+log and carry on — leaving a PR that *reads* as reviewed and is not. Being no
+member, it has no row in **Failure handling**. Retry once; still failing →
+hand-dispatch the fallback reviewer below and record in the ledger which path ran.
 
 **Then dispatch a fix-applier** — one named member per PR, `fix-pr-<pr#>`, never
 the PR's implementer. Its prompt carries the PR number, the worktree abs path, and
@@ -304,11 +347,24 @@ the returned `survived` / `unverified` findings verbatim, plus:
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
-> **Every `suggestion` defers. Never apply one.** No adversarial pass checks that
-> band, so applying one applies a claim nothing verified.
+> **Apply only `survived` findings. Every `suggestion` and every `unverified`
+> defers — never apply one.** A `suggestion` is budgeted 0 adversarial refuters
+> by policy; an `unverified` is one the pass never settled, and at `critical` it
+> means every refuter crashed. Neither was checked, so applying one applies a
+> claim nothing verified. Severity does not override this: `unverified` records
+> whether anything looked, not how much it would matter if true.
+>
+> The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
+> `skipped` off a non-zero behind-count, is staleness and not a failure. Never
+> rebase to clear it.
 >
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
-> the deferral issue numbers, and exit.
+> the deferral issue numbers, and exit. **Deferring everything is a normal
+> outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
+> index, `git push` prints `Everything up-to-date`, and you report `no-op, HEAD
+> unchanged at <sha>` in place of a new SHA. Say it explicitly — silence there is
+> indistinguishable from a member that died. Never manufacture a commit to make
+> CI fire.
 
 **Put the standing CI facts in that prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per member per
@@ -352,16 +408,21 @@ minted in prose the ticket never asked for.** Put the check on the
 must have a settling command run against the tree first — the issue body is a
 lead, never a citation — and the diff must **match the ticket's stated size**,
 since added prose is where minted claims enter. No positional references (`the
-closing/second/last X`); name the thing semantically. Every corrected sentence
-gets read literally, clause by clause — the workflow's `comments` dimension does
-that; a fallback reviewer has to be told to.
+closing/second/last X`); name the thing semantically. The workflow's `comments`
+dimension checks every added assertion against the tree, including comments in
+files the diff does not touch; a fallback reviewer has to be told that *and* told
+to read each corrected sentence literally, clause by clause.
 See references/correction-tickets.md.
 
 #### Fallback: hand-dispatched reviewer member (no `Workflow` tool)
 
-Only where the workflow is unavailable — its absence, never a preference. One
-named member per PR, `review-pr-<pr#>`, never its implementer. Give the PR number
-and tell it to read `~/.claude/skills/fleet/commands/review-and-fix.md` — the file
+Only where the workflow is unavailable **or has failed** — never a preference.
+"Unavailable" is `ToolSearch` not finding it; "failed" is the throw or empty
+return above, surviving one retry. A workflow that is present and throwing is not
+absent, and reading this line as absence-only leaves the likeliest failure with no
+sanctioned path at all. One named member per PR, `review-pr-<pr#>`, never its
+implementer. Give it the PR number and tell it to read
+`~/.claude/skills/fleet/commands/review-and-fix.md` — the file
 path, not a slash invocation; command availability inside a member is not
 guaranteed the way skill availability is. It then does the fix-applier's job too:
 apply, defer, file, push, report, exit.
@@ -486,9 +547,13 @@ ledger rows in the same step. See references/reaping.md.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
-runs 20-40, because each fans out up to six specialists. Five implementers saturate five
-reviewers within the hour and every later PR queues. Absent instruction, default
-**2 implementers / 5 reviewers** and say why.
+runs 20-40, because each fans out up to six specialists. On the default path
+**you** run each review, one at a time, so reviews serialize on your own turn and
+the reviewer cap buys no review parallelism at all — those slots hold
+fix-appliers, which do the cheap half (apply, commit, push, file). Five
+implementers still saturate the pipeline within the hour and every later PR
+queues; the queue now forms ahead of the workflow rather than ahead of a slot.
+Absent instruction, default **2 implementers / 5 reviewers** and say why.
 
 **The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
 ≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
@@ -610,7 +675,8 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
-| Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
+| `review-pr` workflow throws or returns no tree | Retry once, then hand-dispatch the fallback reviewer. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
+| Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
@@ -622,7 +688,7 @@ A red PR never silently becomes `ready-to-merge`.
 
 **A killed member cannot be resumed** — `SendMessage` does nothing for dead, and a
 spend limit kills every member at once. Recovery is a fresh agent, fresh name
-(`impl-<N>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
+(`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
 reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
 
@@ -643,7 +709,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
 ```
 #332 impl-332 → PR#344 → MERGED 73b356de
-#324 impl-324 → PR#346 · review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313
+#324 impl-324 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
 ```
 
 Plus two append-only lists:
