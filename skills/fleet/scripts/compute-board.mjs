@@ -5,9 +5,15 @@
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332 → PR#344 → MERGED 73b356de
-//   #324 impl-324 → PR#346 · review-pr-346-b · ruled:6-applies · held-behind:#313
+//   #324 impl-324 → PR#346 · fix-pr-346 · ruled:6-applies · held-behind:#313
 // Extract by token regex, never by position — the controller reorders and
 // appends tokens freely. Unknown text is ignored, never fatal.
+//
+// The per-PR member is `fix-pr-<n>` on the default review path and
+// `review-pr-<n>` on the hand-dispatch fallback, so `reviewer` must match both.
+// Matching only the older name left every default-path row with reviewer null,
+// which shows the implementer on the card and counts the PR as review backlog
+// forever.
 export function parseRow(row) {
   const issueM = row.match(/^#(\d+)\b/);
   if (!issueM) return null;
@@ -22,7 +28,7 @@ export function parseRow(row) {
   return {
     issue: Number(issueM[1]),
     impl: first(/\bimpl-\d+[a-z-]*\b/),
-    reviewer: first(/\breview-pr-\d+[a-z-]*\b/),
+    reviewer: first(/\b(?:review|fix)-pr-\d+[a-z-]*\b/),
     pr: prM ? Number(prM[1]) : null,
     merged: !!mergedM,
     sha: mergedM ? mergedM[1] : null,

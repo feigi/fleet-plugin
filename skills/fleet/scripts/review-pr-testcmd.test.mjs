@@ -24,7 +24,10 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 // a behaviour-preserving requote breaks it, but breaks LOUDLY with the message
 // below, and only ever binds the default, never a caller's args.testCmd.
 const defaultTestCmd = () => {
-  const m = SOURCE.match(/args\.testCmd\)\s*\|\|\s*"([^"]+)"/);
+  // `A` is review-pr.js's decoded `args` — it reads args once through a
+  // JSON-string guard and destructures off the result, so the binding here is
+  // `A.testCmd`, not `args.testCmd`.
+  const m = SOURCE.match(/\bA\.testCmd\s*\|\|\s*"([^"]+)"/);
   assert.ok(m, "review-pr.js no longer has a quoted default testCmd — update this test");
   return m[1];
 };

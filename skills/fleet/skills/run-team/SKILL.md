@@ -30,13 +30,13 @@ dispatch prompt. See references/member-lifecycle.md.
 
 **Name every member.** The name makes it a team member, and membership is what
 carries the `Agent` tool. Omit it → the member loses delegation with no error.
-Names follow the unit of work: `impl-<issue#>`, `review-pr-<pr#>`,
-`merge-bot-<wave#>`. See references/member-lifecycle.md.
+Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
+`review-pr-<pr#>`, `merge-bot-<wave#>`. See references/member-lifecycle.md.
 
 **Inverts one level down: members must name their children `undefined`.** A named
 member passing a `name` fails with `teammates cannot spawn teammates`, so
-specialists are dispatched **unnamed**. Say so in the reviewer prompt, or it
-silently downgrades to a solo review. See references/member-lifecycle.md.
+specialists are dispatched **unnamed**. Say so in a fallback reviewer's prompt, or
+it silently downgrades to a solo review. See references/member-lifecycle.md.
 
 **Fresh context per member.** One agent, one unit of work, gone. Never
 `subagent_type: "fork"` (inherits your whole conversation). Never re-task a
@@ -228,20 +228,10 @@ multi-select**, and **a judgement the evidence cannot settle**.
   scans *and* the maintainer's. It does not loop; it disappears. Phase 0 excludes
   without relabelling — an unclaimed ticket is not yours to reclassify, and it
   surfaces its exclusions to the maintainer anyway.
-- **Review slot free, PR queued** → dispatch a reviewer.
-- **A specialist report lands** (a task-notification from a grandchild you never
-  dispatched) → **relay it to the reviewer that owns the PR — source named, text
-  included.** Relay anyway even though the reviewer can retrieve it itself from
-  the specialist's output file — a duplicate costs nothing, a missed report costs
-  a verdict. Telling it to ping the specialist still returns `had no active task;
-  resumed from transcript` and delivers nothing.
-- **A reviewer's verdict claims a dimension went undelivered** → reconcile it
-  against your relay receipts before accepting it. Receipts say relayed → re-send
-  naming the specialist and hold that verdict until it lands; a relay can arrive
-  after a verdict is already composed. Only you hold the msg id, so only you can
-  catch this — the reviewer cannot tell "no report exists" from "one was sent that
-  I have not received". One reviewer ruled a relayed dimension "not covered by a
-  specialist" and shipped a headline claim that report refuted.
+- **Review slot free, PR queued** → run the review workflow yourself, then
+  dispatch a fix-applier for what survives (below). Nothing survived and nothing
+  to file → skip the fix-applier and dispatch the **finisher** directly: no
+  member will touch that PR, so no push is coming and nothing will wake you.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below).
@@ -253,8 +243,17 @@ multi-select**, and **a judgement the evidence cannot settle**.
   label, a `check` **failure** → a fixer. A `check`-green board whose
   heavy jobs are merely `skipped` (behind-count staleness, the normal wave case)
   still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
-  reaches. Reviewers push-and-exit, so a member is rarely still waiting — ping one
-  only if it genuinely is.
+  reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
+  one only if it genuinely is.
+- **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
+  the finisher **now**, against the existing head. No push means no new run, and
+  the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
+  head's terminal state already fired once and will never fire again, so waiting
+  for the CI event waits forever. This is the *normal* outcome on a clean PR:
+  every `suggestion` defers, `suggestion` is the band a clean diff produces, and
+  deferrals are filed as issues rather than committed. An edge-only label path
+  therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
+  not wait for an event** governs here too, not only implementer refill.
 - **Pool empty** → phase 0 again, subject to queue depth.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
@@ -284,51 +283,103 @@ entirely. See references/ci-and-staleness.md.
 
 ### Reviewers
 
-One named member per PR, never its implementer. Give the PR number and tell it to
-read `~/.claude/skills/fleet/commands/review-and-fix.md` — the file path, not a slash
-invocation; command availability inside a member is not guaranteed the way skill
-availability is.
+**You run the review yourself: `Workflow({name: "review-pr", args: {pr, branch,
+worktree, testCmd, scratch}})`, once per PR. That is the default path.** Only you
+can run it — members have no `Workflow` tool (verified 2026-07-30 for the
+`general-purpose` subagent; tool availability is per-agent-type, so recheck after
+a harness change rather than treating it as permanent) — and it is the only path
+on which `selectDimensions` sizes the fan-out to the diff and the verify budget
+follows severity. Hand-dispatched, neither executes at all: sizing falls back to a
+reviewer's own judgement and nothing budgets the adversarial pass. It cuts one
+immutable snapshot, verifies every critical/important finding adversarially, and
+has `agent()` return **into the script**, so no report can go undelivered and you
+relay nothing — the delivery failure that cost one fleet five reports on one PR
+and four on another.
 
-**Authorize the fan-out explicitly.** State that the full specialist set IS the
-requested work — otherwise the reviewer inherits the standing "do not call the
-AgentTool unless requested" and silently downgrades to a thinner solo review.
-See references/member-lifecycle.md.
+**The trim is narrower than it sounds.** `diff-stats.mjs` calls a PR docs-only
+only when it touches **no** src, tests *or* config — so a docs PR that also adds
+one test file keeps the full six, and only a purely-prose diff runs
+correctness+comments alone. An unknown profile also widens to the full six, the
+safe direction, so a trim is never something to count on in advance.
 
-**On the hand-dispatch path, delivering specialist reports is your duty, not the
-reviewer's — the relay is an event-loop obligation above.** Reports surface to
-*you* and grandchildren are unaddressable, so a reviewer must never be told to
-ping for one. But it **can** read the report itself: a specialist it spawned
-writes its transcript to the output file named in its spawn result, and
-`tail -1 <file> | jq -r '.message.content[]?|select(.type=="text").text'`
-extracts the final report — bounded, unlike reading the whole file. State that in
-the prompt: retrieve first, ask you by name only if the file yields nothing, and
-rule a dimension **unrun** only when neither works — not silently, and not after
-waiting forever, since a killed specialist never reports and never gets relayed. **None of this belongs in a prompt for the
-`review-pr.js` path below** — there `agent()` returns into the script, so no relay
-ever occurs and the blocking rule would strand every verdict permanently.
-See references/member-lifecycle.md.
+**One review workflow at a time.** The workflow is not a member — count the
+**fix-applier** against the reviewer cap, never the workflow — but that
+accounting leaves the workflow itself ungated, and the cap bounds *members*, not
+the agents members and workflows spawn. Its own fan-out is 1 snapshot + up to 6
+specialists + 2 refuters per critical/important finding, and the fix-applier is
+not dispatched until it returns, so the reviewer cap reads five free slots for
+the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
+to start a second.
 
-**The fan-out scales itself to the diff.** `review-pr.js` sizes the PR with
-`diff-stats.mjs` and drops dead dimensions — a docs-only change runs
-correctness+comments, not the full six — and skips the adversarial pass on
-`suggestion`s, which `review-and-fix.md` step 2 defers and never auto-applies.
-So you need not compute a count. Manual fallback (no workflow): two or three
-specialists for annotation-only or single-file, the full set for production code.
+It returns `{pr, head, snapshot, dimensionsRun, survived, refuted, unverified}`.
+`unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
+policy, and a finding whose refuters all crashed lands there too. Hand those over
+with the rest; never rule on them yourself. `refuted` comes back deliberately as
+well — a refutation is itself a claim, and one has been reversed on new evidence —
+so record it in the ledger's `ruled` line and hand it over only when you reverse
+it.
 
-**Put the standing CI facts in the reviewer prompt, not in per-event messages** —
-otherwise you send "your red is staleness, do not rebase" once per reviewer per
+**`dimensionsRun` names what ran, never what returned.** A specialist that dies
+contributes zero findings while its key stays in that list, so a dimension listed
+in `dimensionsRun` with nothing in `survived`/`refuted`/`unverified` is **unrun,
+not clean**. Re-run it, or name it unrun in the report — an absence of findings is
+not coverage. Same rule the fallback below states for a killed specialist, for
+the same reason.
+
+**A throw or an empty return is a failure event, not a clean review.** It throws
+on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no
+tree, and it surfaces to you mid-loop, where "react, never block" makes it easy to
+log and carry on — leaving a PR that *reads* as reviewed and is not. Being no
+member, it has no row in **Failure handling**. Retry once; still failing →
+hand-dispatch the fallback reviewer below and record in the ledger which path ran.
+
+**Then dispatch a fix-applier** — one named member per PR, `fix-pr-<pr#>`, never
+the PR's implementer. Its prompt carries the PR number, the worktree abs path, and
+the returned `survived` / `unverified` findings verbatim, plus:
+
+> You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The
+> review is done and these findings are its output — do not re-review, do not
+> dispatch specialists.
+>
+> Read `~/.claude/skills/fleet/commands/review-and-fix.md` and run **steps 2, 3
+> and 5 only**: split apply-now/defer, commit, push, file every deferral as its
+> own issue with the label the finding's state calls for. Skip step 1 — the
+> review already ran — and steps 4 and 6: the controller owns the CI wait and
+> dispatches the finisher.
+>
+> **Apply only `survived` findings. Every `suggestion` and every `unverified`
+> defers — never apply one.** A `suggestion` is budgeted 0 adversarial refuters
+> by policy; an `unverified` is one the pass never settled, and at `critical` it
+> means every refuter crashed. Neither was checked, so applying one applies a
+> claim nothing verified. Severity does not override this: `unverified` records
+> whether anything looked, not how much it would matter if true.
+>
+> The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
+> `skipped` off a non-zero behind-count, is staleness and not a failure. Never
+> rebase to clear it.
+>
+> Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
+> the deferral issue numbers, and exit. **Deferring everything is a normal
+> outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
+> index, `git push` prints `Everything up-to-date`, and you report `no-op, HEAD
+> unchanged at <sha>` in place of a new SHA. Say it explicitly — silence there is
+> indistinguishable from a member that died. Never manufacture a commit to make
+> CI fire.
+
+**Put the standing CI facts in that prompt, not in per-event messages** —
+otherwise you send "your red is staleness, do not rebase" once per member per
 merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 
-**The reviewer pushes and exits — it does not hold the CI wait.** You own the
+**The fix-applier pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
 rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
-push, report the SHA, stop — and that a verdict already sent **pins that SHA**, so
+push, report the SHA, stop — and that a report already sent **pins that SHA**, so
 resuming on new information means messaging you *before* touching the tree again.
 Observed once: a finisher halted on a tree the reviewer had legitimately re-edited
 after its verdict. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
-fine) dispatch a **finisher** — a fresh small agent, not the reviewer resumed.
+fine) dispatch a **finisher** — a fresh small agent, not the fix-applier resumed.
 Its duties, in this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
@@ -357,9 +408,62 @@ minted in prose the ticket never asked for.** Put the check on the
 must have a settling command run against the tree first — the issue body is a
 lead, never a citation — and the diff must **match the ticket's stated size**,
 since added prose is where minted claims enter. No positional references (`the
-closing/second/last X`); name the thing semantically. Tell reviewers to read
-each corrected sentence literally, clause by clause.
+closing/second/last X`); name the thing semantically. The workflow's `comments`
+dimension checks every added assertion against the tree, including comments in
+files the diff does not touch; a fallback reviewer has to be told that *and* told
+to read each corrected sentence literally, clause by clause.
 See references/correction-tickets.md.
+
+#### Fallback: hand-dispatched reviewer member (no `Workflow` tool)
+
+Only where the workflow is unavailable **or has failed** — never a preference.
+"Unavailable" is `ToolSearch` not finding it; "failed" is the throw or empty
+return above, surviving one retry. A workflow that is present and throwing is not
+absent, and reading this line as absence-only leaves the likeliest failure with no
+sanctioned path at all. One named member per PR, `review-pr-<pr#>`, never its
+implementer. Give it the PR number and tell it to read
+`~/.claude/skills/fleet/commands/review-and-fix.md` — the file
+path, not a slash invocation; command availability inside a member is not
+guaranteed the way skill availability is. It then does the fix-applier's job too:
+apply, defer, file, push, report, exit.
+
+**Authorize the fan-out explicitly.** State that the full specialist set IS the
+requested work — otherwise the reviewer inherits the standing "do not call the
+AgentTool unless requested" and silently downgrades to a thinner solo review.
+Nothing computes the count here, so apply the heuristic yourself: two or three
+specialists for annotation-only or single-file, the full set for production code.
+See references/member-lifecycle.md.
+
+**Delivering specialist reports is your duty on this path, not the reviewer's.**
+Reports surface to *you* and grandchildren are unaddressable, so a reviewer must
+never be told to ping for one. But it **can** read the report itself: a specialist
+it spawned writes its transcript to the output file named in its spawn result, and
+`tail -1 <file> | jq -r '.message.content[]?|select(.type=="text").text'`
+extracts the final report — bounded, unlike reading the whole file. State that in
+the prompt: retrieve first, ask you by name only if the file yields nothing, and
+rule a dimension **unrun** only when neither works — not silently, and not after
+waiting forever, since a killed specialist never reports and never gets relayed.
+See references/member-lifecycle.md.
+
+So two obligations enter the event loop for as long as a hand-dispatched reviewer
+is live:
+
+- **A specialist report lands** (a task-notification from a grandchild you never
+  dispatched) → **relay it to the reviewer that owns the PR — source named, text
+  included.** Relay anyway even though the reviewer can retrieve it itself — a
+  duplicate costs nothing, a missed report costs a verdict. Telling it to ping the
+  specialist still returns `had no active task; resumed from transcript` and
+  delivers nothing.
+- **A reviewer's verdict claims a dimension went undelivered** → reconcile it
+  against your relay receipts before accepting it. Receipts say relayed → re-send
+  naming the specialist and hold that verdict until it lands; a relay can arrive
+  after a verdict is already composed. Only you hold the msg id, so only you can
+  catch this — the reviewer cannot tell "no report exists" from "one was sent that
+  I have not received". One reviewer ruled a relayed dimension "not covered by a
+  specialist" and shipped a headline claim that report refuted.
+
+Neither belongs in a workflow-path prompt: there `agent()` returns into the
+script, no relay ever occurs, and a rule to wait for one strands every finding.
 
 ### Merge bot
 
@@ -443,9 +547,13 @@ ledger rows in the same step. See references/reaping.md.
 - **review backlog** — PRs verified and queued with no reviewer slot.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
-runs 20-40, because each fans out up to six specialists. Five implementers saturate five
-reviewers within the hour and every later PR queues. Absent instruction, default
-**2 implementers / 5 reviewers** and say why.
+runs 20-40, because each fans out up to six specialists. On the default path
+**you** run each review, one at a time, so reviews serialize on your own turn and
+the reviewer cap buys no review parallelism at all — those slots hold
+fix-appliers, which do the cheap half (apply, commit, push, file). Five
+implementers still saturate the pipeline within the hour and every later PR
+queues; the queue now forms ahead of the workflow rather than ahead of a slot.
+Absent instruction, default **2 implementers / 5 reviewers** and say why.
 
 **The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
 ≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
@@ -567,7 +675,8 @@ members hold the old text — re-brief only if it changes what they do *now*.
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
-| Reviewer cannot reach green | Report, leave the PR unlabeled, free the slot |
+| `review-pr` workflow throws or returns no tree | Retry once, then hand-dispatch the fallback reviewer. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
+| Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
@@ -579,7 +688,7 @@ A red PR never silently becomes `ready-to-merge`.
 
 **A killed member cannot be resumed** — `SendMessage` does nothing for dead, and a
 spend limit kills every member at once. Recovery is a fresh agent, fresh name
-(`impl-<N>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
+(`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
 reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
 
@@ -600,7 +709,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
 ```
 #332 impl-332 → PR#344 → MERGED 73b356de
-#324 impl-324 → PR#346 · review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313
+#324 impl-324 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
 ```
 
 Plus two append-only lists:
@@ -629,8 +738,8 @@ between spawn and write is invisible — and members die in batches.
 One running table, updated as events land:
 
 ```
-#N  ticket   impl-<N>       PR #M  review-pr-<M>   label:yes  merged
-#N  ticket   impl-<N>       PR #M  review-pr-<M>   label:no   -        red CI
+#N  ticket   impl-<N>       PR #M  fix-pr-<M>      label:yes  merged
+#N  ticket   impl-<N>       PR #M  fix-pr-<M>      label:no   -        red CI
 #N  ticket   impl-<N>       -      -               -          -        blocked: SHA off-branch
 ```
 
@@ -651,10 +760,11 @@ Plus a queue-depth line: pool, supply, whether triage was suggested.
   choice it leaves open.
 - "I'd have to pick an approach myself" → that IS undecided.
 - "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
-- "Tell the reviewer to ping its specialists" → the ping returns `had no active
-  task; resumed from transcript` and delivers nothing. Tell it to read the
-  specialist's output file instead; your relay is the backup, not the only path.
-- "I relayed it, so the reviewer has it" → sent is not read, and a relay can land
+- "Tell the reviewer to ping its specialists" (fallback path) → the ping returns
+  `had no active task; resumed from transcript` and delivers nothing. Tell it to
+  read the specialist's output file instead; your relay is the backup, not the
+  only path.
+- "I relayed it, so the reviewer has it" (fallback path) → sent is not read, and a relay can land
   after the verdict is composed. Two reviewers ruled relayed dimensions
   undelivered, one of them shipping a headline claim the report it disclaimed
   refuted. Reconcile verdicts against your receipts.

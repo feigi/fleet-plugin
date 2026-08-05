@@ -4,7 +4,7 @@ Why member name load-bearing, why every member single-use, how killed/idle/trunc
 
 ## The name is what carries the `Agent` tool
 
-Name makes it team member; membership carries `Agent` tool. Omit it → member loses delegation, no error, improvises something worse. `subagent_type` irrelevant — name is mechanism, not label. Names follow unit of work: `impl-<issue#>`, `review-pr-<pr#>`, `merge-bot-<wave#>`.
+Name makes it team member; membership carries `Agent` tool. Omit it → member loses delegation, no error, improvises something worse. `subagent_type` irrelevant — name is mechanism, not label. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `merge-bot-<wave#>`.
 
 ## Members cannot name their children
 
@@ -30,7 +30,7 @@ Grandchild surfaces as own task-notification; unrecognized task-id not a member 
 
 ## Killed vs idle vs truncated
 
-Killed member cannot be resumed — row most often got wrong. `SendMessage` works on idle or truncated; does nothing for dead, and spend limit kills every member at once, so temptation to re-task peaks exactly when it cannot work. Recovery = fresh agent, fresh name (`impl-<N>-b`, `review-pr-<M>-b`), whose prompt states what it inherits:
+Killed member cannot be resumed — row most often got wrong. `SendMessage` works on idle or truncated; does nothing for dead, and spend limit kills every member at once, so temptation to re-task peaks exactly when it cannot work. Recovery = fresh agent, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`), whose prompt states what it inherits:
 
 - committed-and-pushed vs committed-only vs **uncommitted in the worktree**
 - uncommitted work exists nowhere else — no `git clean`, `git checkout .`,

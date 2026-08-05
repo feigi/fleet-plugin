@@ -13,7 +13,7 @@
 // recovered from how the controller named the work. Depth first: anything the
 // controller did not spawn directly is a specialist, whatever it calls itself.
 // Then description patterns, which are controller-authored and stable because
-// run-team fixes them (`impl-<n>`, `review-pr-<n>`, `merge-bot-<n>`).
+// run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`, `merge-bot-<n>`).
 export function classifyRole(meta) {
   const type = String(meta?.agentType ?? "");
   const desc = String(meta?.description ?? "");
@@ -38,7 +38,11 @@ export function classifyRole(meta) {
   if (Number(meta?.spawnDepth ?? 0) >= 1) return "specialist";
 
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
-  if (/review pr|review-pr-/.test(hay)) return "reviewer";
+  // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
+  // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
+  // one and its cache writes fall through to "other", moving the review-side
+  // headline — the one number anyone acts on — by several points.
+  if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
   if (/finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return "other";
