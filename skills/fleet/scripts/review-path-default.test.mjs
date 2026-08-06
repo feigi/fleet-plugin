@@ -212,5 +212,17 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
   assert.match(steps["3"] ?? "", /^Commit, push/, "step 3 is no longer commit+push");
   assert.match(steps["4"] ?? "", /do not hold this wait/, "step 4 is no longer the CI wait the prompt skips");
   assert.match(steps["5"] ?? "", /^File each deferred finding/, "step 5 is no longer deferral filing");
+  // The workflow already supplies `dimension` on every finding; only the
+  // filing step dropped it. Without it the backlog cannot be attributed to a
+  // specialist — measured once at 89 deferral issues, none traceable to a
+  // dimension. Pinned as the literal phrase (not a wide proximity window):
+  // a proximity match survives "the dimension need not be recorded in the
+  // issue body" as easily as it survives the real requirement, because both
+  // put the same two terms near each other — only the exact adjacency does not.
+  assert.match(
+    steps["5"] ?? "",
+    /`dimension`\s+in the issue body/i,
+    "step 5 no longer records the finding's dimension in the filed issue",
+  );
   assert.match(steps["6"] ?? "", /add-label ready-to-merge/, "step 6 is no longer the labelling step the prompt skips");
 });
