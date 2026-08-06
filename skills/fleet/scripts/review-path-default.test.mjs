@@ -87,9 +87,16 @@ test("the fix-applier dispatch is specified: named, apply-only-survived, push, r
   // Asserting on the word "suggestion" alone is vacuous — the new rule contains
   // it too. These pin the SPLIT: the in-scope branch, the refuter it requires,
   // and the fact that `unverified` did not inherit the new permission.
+  //
+  // A loose `/in scope[\s\S]{0,400}?refuter/i` is ALSO vacuous: "refuter" shows
+  // up 400 chars later regardless of what the in-scope branch actually says, so
+  // "In scope → apply it directly, and never dispatch a refuter" still matches.
+  // Tying "dispatch" to sit right after "in scope", with "refuter" close behind
+  // IT, pins that dispatching a refuter is the action taken, not just a word
+  // that occurs somewhere downstream.
   assert.match(
     prompt,
-    /in scope[\s\S]{0,400}?refuter/i,
+    /in scope\b[^a-zA-Z]{1,10}dispatch\b[\s\S]{0,20}refuter/i,
     "the prompt no longer ties applying an in-scope suggestion to a refuter pass",
   );
   assert.match(
