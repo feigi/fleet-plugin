@@ -249,9 +249,9 @@ multi-select**, and **a judgement the evidence cannot settle**.
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
   head's terminal state already fired once and will never fire again, so waiting
-  for the CI event waits forever. This is the *normal* outcome on a clean PR:
-  every `suggestion` defers, `suggestion` is the band a clean diff produces, and
-  deferrals are filed as issues rather than committed. An edge-only label path
+  for the CI event waits forever. This stays a common outcome on a clean PR:
+  `suggestion` is the band a clean diff produces, and every out-of-scope or
+  refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
   not wait for an event** governs here too, not only implementer refill.
 - **Pool empty** → phase 0 again, subject to queue depth.
@@ -296,11 +296,17 @@ has `agent()` return **into the script**, so no report can go undelivered and yo
 relay nothing — the delivery failure that cost one fleet five reports on one PR
 and four on another.
 
-**The trim is narrower than it sounds.** `diff-stats.mjs` calls a PR docs-only
-only when it touches **no** src, tests *or* config — so a docs PR that also adds
-one test file keeps the full six, and only a purely-prose diff runs
-correctness+comments alone. An unknown profile also widens to the full six, the
-safe direction, so a trim is never something to count on in advance.
+**Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
+`diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
+config, but that strictness cuts both ways and the size tier trims again on top.
+Measured: a docs PR that also adds one test file is profile `tests-only` and runs
+**three** (correctness+tests+comments), not six; a docs+config diff runs
+correctness+comments without being docs-only at all; and any `single-file` or
+`small` profile trims to correctness+silent-failure, keeping comments only when a
+docs file is in the diff and tests only when a test file is. `single-file` means
+one file at **any** size, so a one-file rewrite trims too. An unknown profile
+widens to the full six, the safe direction, so a trim is never something to count
+on in advance — and a full six is never something to assume.
 
 **One review workflow at a time.** The workflow is not a member — count the
 **fix-applier** against the reviewer cap, never the workflow — but that
@@ -338,6 +344,13 @@ the PR's implementer. Its prompt carries the PR number, the worktree abs path, t
 passed the workflow, and the returned `survived` / `unverified` findings
 verbatim, plus:
 
+**Where `testCmd` comes from:** the repo's own test command, the one you hand
+specialists per **Give specialists a stack-free test command** above — in this
+repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
+workflow and to the fix-applier so both gates run one command. Omit it from the
+workflow args and `review-pr.js` defaults to that string; the fix-applier has no
+default, so substituting `<testCmd>` with nothing leaves it no gate at all.
+
 > You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The
 > review is done and these findings are its output — do not re-review, do not
 > dispatch specialists.
@@ -365,13 +378,29 @@ verbatim, plus:
 > > RUNNING something — compile it, run the test, apply the mutation. Do not
 > > reason your way to agreement.
 >
-> Survives → apply it. Refuted → defer and file it, and say the refutation in
-> the issue body. **Read your refuter's report yourself** — on the hand-dispatch
-> path a subagent's report has surfaced to the controller rather than to its
-> dispatcher, and waiting for a relay that never comes strands the finding.
-> That has not been measured for a refuter dispatched from here, so **confirm it
-> on the first run** rather than assuming either way; reading the report
-> yourself is right regardless of which way it turns out.
+> Survives → apply it. Refuted → defer and file it, and say the refutation in the
+> issue body. **Apply only what survives — no report is not a survival.** A
+> refuter you never hear from leaves the finding exactly as unchecked as it
+> arrived, so it defers like a refuted one.
+>
+> **Retrieve that report yourself; do not wait to be handed it.** On the
+> hand-dispatch path a subagent's report has surfaced to the controller rather
+> than to its dispatcher, and waiting for a relay that never comes strands the
+> finding. Its transcript is at the output file named in your spawn result, and
+> its report is the last record:
+>
+> ```
+> tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'
+> ```
+>
+> **Never read the whole file** — it is the full JSONL transcript and will
+> overflow your context. **Pinging is not retrieval and never becomes one:**
+> `SendMessage` to a finished subagent returns `had no active task; resumed from
+> transcript` without the report (~15 pinged in one run, 0 retrieved). If the file
+> yields nothing, ask the controller by name. Only when neither works is the
+> finding **unchecked** — defer and file it, and say so in the body. This is
+> `review-and-fix.md`'s **Specialists** rule; it reaches you here because the
+> steps that point at it are the ones you skip.
 >
 > The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
 > `skipped` off a non-zero behind-count, is staleness and not a failure. Never
