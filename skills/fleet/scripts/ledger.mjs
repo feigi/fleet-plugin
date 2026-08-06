@@ -312,7 +312,16 @@ if (cmd === "check") {
       // produce a bare "safe to file": that is the same fail-open class the
       // --git-common-dir resolution above already closed once. Degrade to the
       // ledger-only answer and say so.
-      tracker = { ok: false, query, hits: [], error: String(e.stderr || e.message).trim() };
+      // Capped, and deliberately still carrying the stderr — the opposite call
+      // from the fleet's other gh catches (#176). Those omit it because
+      // execFileSync forwarded the child's bytes to our stderr already, so
+      // interpolating emits them twice; this call sets `stdio`, which turns
+      // that forwarding OFF, so this string is the only place the cause is
+      // ever seen. What it must not be is unbounded: it lands in
+      // `tracker.error`, which ships on stdout as part of a machine-parsed
+      // contract, and a megabyte of gh stderr inside a JSON field is a payload
+      // problem wherever the forwarding argument lands.
+      tracker = { ok: false, query, hits: [], error: String(e.stderr || e.message).trim().slice(0, 500) };
     }
   }
 

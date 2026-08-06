@@ -17,6 +17,7 @@
 // this file is executed directly.
 
 import { execFileSync } from "node:child_process";
+import { writeSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const NAME = "diff-stats";
@@ -86,8 +87,14 @@ export function computeStats(files) {
 
 // --- CLI (runs only when executed directly, never on import) ---------------
 
+// writeSync, not console.error: stderr on a pipe is async and the exit below
+// discards what is still queued, so a large forwarded child stderr swallows
+// this line — the refusal is queued last and dropped first (#176). The leading
+// newline is load-bearing: writeSync goes straight to the fd while the stream
+// is still draining, so without it this text lands mid-line inside the child's
+// output and stops matching every line-anchored reader.
 function die(msg) {
-  console.error(`${NAME}: ${msg}`);
+  writeSync(2, `\n${NAME}: ${msg}\n`);
   process.exit(2);
 }
 
@@ -106,7 +113,15 @@ function run(cmd, args) {
     // WIDENS to the full set. It is that a real production PR would be sized
     // from a lie, and the widen only looks safe until the next caller reads
     // these facts for something else.
-    die(`${cmd} failed: ${String(e.stderr || e.message).trim()}`);
+    // Names the cause, never the child's stderr — execFileSync forwarded it
+    // already (no `stdio` above), so interpolating it emits every byte twice:
+    // measured 7,700 B becoming 15,454 B, into review-pr.js's snapshot agent,
+    // which is markdown read by a model. `e.message` is the same string, not a
+    // fallback — Node builds it as `Command failed: <cmd>\n<stderr>`. Three
+    // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+    die(
+      `${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`,
+    );
   }
 }
 
@@ -114,7 +129,17 @@ function main() {
   const pr = arg("pr");
   if (!pr) die("usage: diff-stats.mjs --pr <number>");
 
-  const info = JSON.parse(run("gh", ["pr", "view", String(pr), "--json", "files"]));
+  // Parsed through a guard, not bare. gh can exit 0 with a non-JSON body — a
+  // proxy's HTML error page is the measured case — and an uncaught SyntaxError
+  // exits 1, a code this script does not define (die is 2, success 0). Same
+  // fail-closed rule as run() above: a broken response is not an empty diff.
+  const raw = run("gh", ["pr", "view", String(pr), "--json", "files"]);
+  let info;
+  try {
+    info = JSON.parse(raw);
+  } catch {
+    die(`gh pr view ${pr} returned no JSON — ${raw.trim().slice(0, 120)}`);
+  }
   // Same fail-closed rule as run() above, and the one place it was missing: `||
   // []` turned a malformed response into a fully-formed `profile: "empty"`
   // measurement, exit 0, indistinguishable on stdout from a real empty PR. That

@@ -12,11 +12,24 @@
 // unattended fleet has no channel to one.
 
 import { execFileSync } from "node:child_process";
+import { writeSync } from "node:fs";
 
 const NAME = "candidates";
 
+// writeSync, not console.error. On a pipe — which is every caller that captures
+// this script — process.stderr.write is ASYNC, and the process.exit below
+// discards whatever is still queued. gh's forwarded stderr goes first and this
+// line goes last, so the refusal is the first thing dropped: measured, a 70 KB
+// gh stderr swallowed it entirely and the caller saw exit 2 with no cause.
+//
+// The leading newline is load-bearing, not formatting. writeSync goes straight
+// to the fd while the forwarded stderr is still draining through the stream, so
+// this text lands wherever the child's output happens to be — mid-line, with no
+// separator. Every reader of this script's refusals, tests included, matches
+// them line-anchored; without this they silently stop matching under exactly
+// the large-stderr failure the writeSync is here to survive.
 function die(msg) {
-  console.error(`${NAME}: ${msg}`);
+  writeSync(2, `\n${NAME}: ${msg}\n`);
   process.exit(2);
 }
 
@@ -91,12 +104,25 @@ function query(label) {
     // only one of them means "there is no work".
     //
     // Names the cause, never gh's stderr — same discipline as the row-shape
-    // refusal below. execFileSync forwards the child's stderr to ours already,
-    // so interpolating `e.stderr` (or `e.message`, which Node builds from it)
-    // emitted every byte twice: 1.06 MB on one ENOBUFS query, into a caller
-    // that is markdown read by a model. `e.code` covers the spawn failures
-    // that print nothing at all — ENOENT, ENOBUFS — and `e.status` the rest.
-    die(`gh issue list failed: ${e.code ?? `exit ${e.status}`}`);
+    // refusal below. execFileSync forwards the child's stderr to ours already
+    // (it does so precisely because `stdio` is absent from the options above —
+    // Node gates the forward on `!options.stdio`, so adding one silently makes
+    // this message the only report). Interpolating `e.stderr` therefore emitted
+    // every byte twice: measured 7,700 B of gh stderr → 15,454 B, into a caller
+    // that is markdown read by a model. `e.message` is the same string, not a
+    // safer fallback — Node builds it as `Command failed: <cmd>\n<stderr>`.
+    //
+    // Three disjoint shapes, so three branches. `e.code` is set when Node
+    // itself aborted the call: ENOENT (nothing spawned, nothing printed),
+    // ENOBUFS/ETIMEDOUT (the child ran and printed, then Node killed it).
+    // `e.signal` is the only field a signal death sets — without it this reads
+    // `exit null`, naming nothing, for the OOM kill and the SIGPIPE. `e.status`
+    // carries a real exit code, whose stderr the caller has already seen.
+    die(
+      `gh issue list failed: ${
+        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
+      }`,
+    );
   }
   const trimmed = out.trim();
   // Not `return []`. The reduction is `[…]`-wrapped, so it emits an array for
@@ -219,4 +245,10 @@ console.log(JSON.stringify(rows));
 
 // Exit 1 for a successful query with no survivors. The caller must be able to
 // tell "the queue is empty" from "the query broke" (2) without reading stderr.
-process.exit(rows.length === 0 ? 1 : 0);
+//
+// exitCode, not exit(): stdout on a pipe is async too, and process.exit() drops
+// the queued payload at the 64 KiB buffer while still reporting 0. Measured,
+// 499 rows — one under the DEFAULT --limit — arrived truncated mid-JSON at exit
+// 0, the corrupt-payload-typed-as-success this file's exit codes exist to make
+// impossible. refuseIfCapped cannot see it: that fires at exactly `limit`.
+process.exitCode = rows.length === 0 ? 1 : 0;
