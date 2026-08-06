@@ -347,12 +347,25 @@ the returned `survived` / `unverified` findings verbatim, plus:
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
-> **Apply only `survived` findings. Every `suggestion` and every `unverified`
-> defers — never apply one.** A `suggestion` is budgeted 0 adversarial refuters
-> by policy; an `unverified` is one the pass never settled, and at `critical` it
-> means every refuter crashed. Neither was checked, so applying one applies a
-> claim nothing verified. Severity does not override this: `unverified` records
-> whether anything looked, not how much it would matter if true.
+> **Apply `survived` findings. Every `unverified` always defers**, at every
+> severity — it is one the pass never settled, and at `critical` it means every
+> refuter crashed. Severity records how much a finding would matter if true,
+> never whether anything looked.
+>
+> **A `suggestion` is budgeted 0 refuters, so it is unchecked until you check
+> it.** For each one, first decide scope: is it inside the scope of the PR's own
+> ticket, or a different piece of work? **Out of scope → defer and file, never
+> apply.** **In scope → dispatch ONE refuter** against the finding before
+> touching the tree, biased to refuse:
+>
+> > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
+> > RUNNING something — compile it, run the test, apply the mutation. Do not
+> > reason your way to agreement.
+>
+> Survives → apply it. Refuted → defer and file it, and say the refutation in
+> the issue body. **Read your refuter's report yourself** — a subagent you
+> dispatch reports to the controller, not to you, and waiting for a relay that
+> never comes strands the finding.
 >
 > The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
 > `skipped` off a non-zero behind-count, is staleness and not a failure. Never

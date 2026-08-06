@@ -79,13 +79,29 @@ test("the fix-applier dispatch is specified: named, apply-only-survived, push, r
     /\*\*steps 2, 3\s*>?\s*and 5 only\*\*/,
     "the prompt no longer scopes the fix-applier to review-and-fix steps 2/3/5",
   );
-  // `suggestion` gets 0 refuters by policy; `unverified` is the bucket whose
-  // refuters all crashed, and at `critical` it walks straight through an
-  // apply/defer split that only knows about the suggestion band. Both must be
-  // named IN THE PROMPT — the controller-facing rule above it is read by the
-  // controller, which is not the agent doing the applying.
-  assert.match(prompt, /suggestion/, "the prompt no longer defers `suggestion` findings");
-  assert.match(prompt, /unverified/, "the prompt no longer defers `unverified` findings");
+  // `suggestion` and `unverified` are no longer one rule. An in-scope suggestion
+  // is verified by one refuter and applied; an out-of-scope one is filed; an
+  // `unverified` ALWAYS defers, at every severity, because at `critical` it means
+  // every refuter crashed.
+  //
+  // Asserting on the word "suggestion" alone is vacuous — the new rule contains
+  // it too. These pin the SPLIT: the in-scope branch, the refuter it requires,
+  // and the fact that `unverified` did not inherit the new permission.
+  assert.match(
+    prompt,
+    /in scope[\s\S]{0,400}?refuter/i,
+    "the prompt no longer ties applying an in-scope suggestion to a refuter pass",
+  );
+  assert.match(
+    prompt,
+    /`unverified`[^.]{0,200}always defers/i,
+    "the prompt no longer defers every `unverified` finding unconditionally",
+  );
+  assert.doesNotMatch(
+    prompt,
+    /Every `suggestion` and every `unverified` defers/,
+    "the prompt still couples the suggestion and unverified bands as one rule",
+  );
   assert.match(prompt, /push/i, "the prompt no longer says to push");
   assert.match(prompt, /SHA/, "the prompt no longer says to report the SHA");
   assert.match(prompt, /exit/i, "the prompt no longer says to exit");
