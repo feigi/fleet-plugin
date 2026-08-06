@@ -1,7 +1,19 @@
 # Review cost tiering, and the apply/verify policy that is filling the ticket backlog
 
 Date: 2026-08-06
-Status: designed, not implemented. Ticket #211, widened during brainstorm.
+Status: implemented on `feat/211-review-cost-and-apply-policy` (`8a84402..9bd71b0`,
+14 commits). Ticket #211, widened during brainstorm.
+
+One change was made after implementation and is recorded below: the size tier
+keeps `comments` on any small diff that touches docs (Change 2). The whole-branch
+review found that mixed prose PRs — this repo's modal PR, and the category the
+`docsOnly` branch exists for — were losing comment-analyzer coverage entirely,
+a case this spec's original matrix had no row for.
+
+Open, deliberately not closed here: whether `opts.model` beats `agentType`
+frontmatter in workflow `agent()` (see Unknowns). The new `models …` log line
+reports what was **sent**, not what was **used**, so only a subagent-JSONL read
+settles it — and no cost saving should be claimed until it does.
 
 Artifacts: `workflows/review-pr.js`,
 `skills/fleet/commands/review-and-fix.md`,
