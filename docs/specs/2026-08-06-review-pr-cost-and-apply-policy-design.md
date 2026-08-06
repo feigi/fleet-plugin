@@ -1,8 +1,10 @@
 # Review cost tiering, and the apply/verify policy that is filling the ticket backlog
 
 Date: 2026-08-06
-Status: implemented on `feat/211-review-cost-and-apply-policy` (`8a84402..9bd71b0`,
-14 commits). Ticket #211, widened during brainstorm.
+Status: implemented on `feat/211-review-cost-and-apply-policy`, base `8a84402`.
+Ticket #211, widened during brainstorm. No commit count or head SHA here — a
+status line cannot name the commit that writes it, and the last one was stale the
+moment it landed. `git log 8a84402..` is the answer that stays true.
 
 One change was made after implementation and is recorded below: the size tier
 keeps `comments` on any small diff that touches docs (Change 2). The whole-branch
@@ -35,10 +37,12 @@ the same path, one of them larger than the cost issue that started it.
 ### 1. Specialists run top-tier — but not for the reason the ticket says
 
 #211 states "every specialist inherits the session model." That is wrong for two
-of six. Frontmatter of the installed plugin
-(`plugins/cache/claude-plugins-official/pr-review-toolkit/8a84402dfb43/agents/`,
-byte-identical to the marketplace checkout, install path per
-`plugins/installed_plugins.json:156`):
+of six. Frontmatter of the six `pr-review-toolkit` agent definitions, read from the
+marketplace checkout under `plugins/marketplaces/` and byte-identical to the
+installed copy. (The `plugins/cache/.../<sha>/agents/` path is deliberately not
+cited: `plugins/` is gitignored, so that path is machine-local, outside the
+"verified against `8a84402`" claim below, and it rotates on every plugin update —
+it already has.)
 
 | Dimension | Agent | Frontmatter | Opus session |
 |---|---|---|---|
@@ -70,8 +74,22 @@ Measured 2026-08-06 against `feigi/claude-config`:
 open issues:                                    107
 open issues whose body says "Deferred from PR":  89
     of those, labelled ready-for-agent:          84
-    of those, mentioning "simplif" anywhere:      0
+    of those, naming a specialist in the body:   15
 ```
+
+**The last row was first measured as `0`, and that was an instrument failure, not
+a result.** It came from `gh issue list --search 'simplif'`, which returns `[]` —
+GitHub's search tokenizes and does not substring-match, so a truncated stem
+matches nothing. `--search 'simplifier'` returns results immediately. Re-measured
+by fetching the 89 deferral bodies and grepping them locally for the six
+specialist names: **15** name one outright (#208 #184 #179 #176 #175 #156 #154
+#153 #152 #151 #86 #79 #25 #23 #18), two of them explicitly — #156 *"From the
+code-simplifier specialist"*, #153 *"the code-simplifier measured that..."*.
+
+The argument below is unchanged: 15 of 89 is still an unattributable backlog, and
+recording `dimension` at filing time is still the fix. But the `0` overstated it,
+and a server-side substring search is not a measurement — it is the clean answer
+this repo's tooling keeps failing toward.
 
 Two rules compose to produce this. `review-and-fix.md:7` (step 2) defers **every**
 `suggestion` and **every** `unverified` finding; `review-and-fix.md:10` (step 5)
@@ -157,26 +175,32 @@ It must **not** be an early return. A single `.github/workflows/ci.yml` change i
 `silent-failure` on YAML, which the existing `hasSrc` guard exists to prevent. So
 the content trim runs first and the size tier intersects what survived:
 
-```js
-const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
-const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
-// ... after the existing hasTests / hasSrc filters:
-if (SIZE_TIER_PROFILES.has(stats.profile))
-  dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "comments" && stats.kinds?.docs > 0));
-return dims.length ? dims : all;
-```
+The shipped filter is in `review-pr.js`; it is not copied here, because a copy in
+a doc cannot be tested and drifts silently. Read `selectDimensions`.
 
-**`comments` is carved out of the size trim for any diff carrying prose.** The
-`docsOnly` branch keeps comment-analyzer because the failure mode of prose is a
-wrong CLAIM, but `docsOnly` is strict — one config or src file in the same diff
-falsifies it, and the size trim then dropped `comments` outright. That left the
-mixed prose PR, this repo's modal PR and its most defect-prone category, with
-zero comment coverage. The two `small`, mixed rows below are that case; it had
-no row in this matrix before, which is how the gap was missed.
+**Two dimensions are carved out of the size trim.** `comments`, whenever the diff
+touches a docs file: the `docsOnly` branch keeps comment-analyzer because the
+failure mode of prose is a wrong CLAIM, but `docsOnly` is strict — one config or
+src file in the same diff falsifies it, and the size trim then dropped `comments`
+outright. That left the mixed prose PR, this repo's modal PR and its most
+defect-prone category, with zero comment coverage. And `tests`, whenever the diff
+touches a test file: when the diff's substance IS a test, mutation-discrimination
+is the check it most needs, and this repo's recurring defect is a vacuous pin
+shipping green.
 
-Thresholds stay named once, in `diff-stats.mjs` where `files === 1` and
-`loc < 30` already live. Nothing new to keep in sync, and `diff-stats.mjs` is
-untouched.
+Both carve-outs are **file-kind** tests, not content tests. `classify()` scores
+any code extension `src` before it checks `isDocs`, so a comment-only edit to one
+`.js` file is `docs: 0` and still loses comment coverage — filed as #218, not
+fixed here.
+
+The `comments` guard is `stats.kinds?.docs !== 0`, not `> 0`, matching the
+`=== true` guards above it: the blob is relayed by an agent, so a field can go
+missing without failing `JSON.parse`, and absence must widen rather than be the
+one input that narrows coverage.
+
+`single-file` is `files === 1` at **any** size, so this trims a one-file rewrite,
+not only a short diff. Thresholds stay named once, in `diff-stats.mjs` where
+`files === 1` and `loc < 30` already live.
 
 Resulting matrix over `DEFAULT_DIMENSIONS` (`[correctness, silent-failure, tests,
 comments, types, simplify]`):
@@ -192,14 +216,24 @@ comments, types, simplify]`):
 | `small`, has src | correctness, silent-failure | 2 |
 | `small`, docs + config (not `docsOnly`) | correctness, comments | 2 |
 | `small`, docs + src (not `docsOnly`) | correctness, silent-failure, comments | 3 |
+| `small`, src + test | correctness, silent-failure, tests | 3 |
+| `small`, `kinds` missing from the blob | correctness, silent-failure, comments | 3 |
 | `production`, has tests | all | 6 |
 | `production`, no tests | all but tests | 5 |
 
-**The two cost changes do not compound, by construction.** The size tier keeps
-exactly the two dimensions that carry no `model` override, so small PRs save by
-running fewer specialists and large PRs save by running three of six cheaper.
-Neither multiplies the other. This is a property to be aware of when measuring,
-not a defect.
+**The two cost changes barely compound — but "by construction" was too strong.**
+The base size tier keeps `correctness` + `silent-failure`, both of which carry no
+`model` override, so on a plain small source diff the trim and the tier are
+independent: small PRs save by running fewer specialists, large PRs by running
+three of six cheaper.
+
+Two things qualify it, both added after this paragraph was first written. Three
+dimensions carry no `model` override, not two — `simplify` is the third, and it
+is dropped rather than kept. And the carve-outs keep `comments` (on a docs file)
+and `tests` (on a test file), both of which DO carry `model: "sonnet"` — so on a
+small mixed diff the fan-out is trimmed *and* a survivor is downgraded. Rows
+`small, docs+config` and `small, docs+src` in the matrix above are the cases.
+Worth knowing when measuring; still not a defect.
 
 `log()` names both trims and the model choice. No silent caps.
 
@@ -318,7 +352,7 @@ edited files. Re-verify every anchor after editing.
 9. Every filed deferral issue names the dimension that produced it.
 10. The fix-applier runs `testCmd` before committing and reports the result with the SHA; `tests 0` blocks the commit.
 11. No path uses `--no-verify`.
-12. `select-dimensions.test.mjs` pins all nine matrix rows and the `model` assignments.
+12. `select-dimensions.test.mjs` pins every matrix row above and the `model` assignments — and pins that `review-pr.js` still CALLS `selectDimensions`, without which every row pins a copy nothing runs. (No count here on purpose: "nine" was hand-derived against an eleven-row table, which is the defect class #118 exists for.)
 13. The rewritten fix-applier assertion fails when the apply/defer split is deleted.
 
 ## Unknowns to settle during implementation
