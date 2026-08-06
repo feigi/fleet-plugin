@@ -348,10 +348,12 @@ verbatim, plus:
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
-> **Apply `survived` findings. Every `unverified` always defers**, at every
-> severity — it is one the pass never settled, and at `critical` it means every
-> refuter crashed. Severity records how much a finding would matter if true,
-> never whether anything looked.
+> **Apply `survived` findings. A finding in `unverified` whose refuters ran and
+> crashed always defers** — at `critical` that means every one of them died.
+> Severity records how much a finding would matter if true, never whether
+> anything looked. **A `suggestion` is also in `unverified`, for a different
+> reason — the workflow budgets it 0 refuters by policy — and the rule below,
+> not this one, covers it.**
 >
 > **A `suggestion` is budgeted 0 refuters, so it is unchecked until you check
 > it.** For each one, first decide scope: is it inside the scope of the PR's own
