@@ -145,6 +145,52 @@ function usableDiff(snap) {
   return snap.diffPath;
 }
 
+// The read rules every agent in this workflow obeys — specialist and refuter
+// alike. One function, two call sites: the Workflow sandbox forbids `import`, so
+// this is as close to single-source as this file gets, and
+// `review-pr-reads.test.mjs` pins both INTERPOLATIONS rather than the prose.
+// Text lifted into a second copy disconnects in one token; that is this repo's
+// recurring pin defect.
+//
+// `skills/fleet/commands/review-and-fix.md:47` owns the prose rationale, for the
+// hand-dispatch path. This is the operational form for the workflow path, where
+// the premise differs: there is no live worktree to be contaminated BY, because
+// the snapshot IS the object store already materialized (:355-356 verifies the
+// byte-identity). So only the BOUNDING half of that rule ports here; the
+// source-of-truth half is true by construction and only needs stating, so a
+// specialist stops hunting for a git command to settle what the snapshot
+// already settles.
+//
+// The specialists are pr-review-toolkit agents whose stated default is to read
+// `git diff` (code-reviewer.md:21). The snapshot is `git archive HEAD | tar -x`
+// and therefore NOT a git repo, so that default fails and the only fallback is
+// reading files whole. Handing them the change is the fix; the bounding rule
+// alone would only treat the symptom.
+function readRules(diffPath, stats) {
+  const change = diffPath
+    ? `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
+change you are reviewing, and the snapshot around it is context.`
+    : stats && stats.paths && stats.paths.length
+      ? `No diff file was captured. The PR touched exactly these files (changed
+loc in parens) and no others:
+${stats.paths.map((p) => `  ${p.path} (${p.loc})`).join("\n")}`
+      : `No diff file and no file list were captured. Scope your reading from
+the review request itself; do not survey the snapshot.`;
+
+  return `${change}
+
+The snapshot IS the source of truth: 'git archive HEAD', byte-identical to
+'git show HEAD:<path>' — verified when it was cut. No agent can contaminate it
+and no git command settles what the PR contains any better. A finding that
+disagrees with the snapshot is a probe artifact.
+
+BOUND EVERY READ: an offset and a limit, or '| sed -n A,Bp'. Take a file whole
+only after 'wc -l' says it is small — a count, not a feeling. An unbounded read
+is never a one-off cost: it rides your prefix for every remaining turn,
+re-billed as cache-read each time. Measured over one run, 88 unpiped whole-file
+reads carried 434 KB.`;
+}
+
 // `args` can arrive as a JSON STRING rather than an object. Observed twice on
 // this script: every read below returns undefined, and the failure surfaces as
 // the required-args throw at the bottom of this block with `duration_ms: 3` and

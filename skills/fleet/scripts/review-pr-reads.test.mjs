@@ -61,3 +61,68 @@ test("usableDiff accepts when prHead is absent or matching", () => {
     "/s/pr.diff",
   );
 });
+
+const readRules = lift("readRules", "diffPath, stats");
+
+const PATHS = {
+  paths: [
+    { path: "workflows/review-pr.js", kind: "src", loc: 115 },
+    { path: "docs/specs/a.md", kind: "docs", loc: 393 },
+  ],
+};
+
+// Emitting both the diff pointer and the file list doubles the block on exactly
+// the PRs where prompt size matters most. The branches are exclusive.
+test("readRules names the diff and does not also list files", () => {
+  const out = readRules("/s/pr.diff", PATHS);
+  assert.match(out, /\/s\/pr\.diff/);
+  assert.doesNotMatch(out, /touched exactly these files/);
+});
+
+test("readRules falls back to the changed-file list with each file's loc", () => {
+  const out = readRules(null, PATHS);
+  assert.match(out, /No diff file was captured/);
+  assert.match(out, /workflows\/review-pr\.js \(115\)/);
+  assert.match(out, /docs\/specs\/a\.md \(393\)/);
+});
+
+// `stats` is null whenever diff-stats.mjs errored or its blob was unparseable
+// (review-pr.js:399-406). Saying so beats emitting an empty list, which reads
+// as "the PR touched no files".
+test("readRules says so when it has neither a diff nor a file list", () => {
+  const out = readRules(null, null);
+  assert.match(out, /No diff file and no file list were captured/);
+  assert.doesNotMatch(out, /touched exactly these files/);
+});
+
+// A `stats` object whose `paths` is empty must NOT fall into branch 2 — that
+// would print the header with nothing under it. `.length` is the guard.
+test("readRules treats an empty paths array as no file list", () => {
+  const out = readRules(null, { paths: [] });
+  assert.match(out, /No diff file and no file list were captured/);
+  assert.doesNotMatch(out, /touched exactly these files/);
+});
+
+// A `stats` object that is truthy but carries no `paths` key at all (distinct
+// from an empty array) must hit the same fallback. `stats.paths` is its own
+// conjunct in the guard, separate from `.length`, and nothing above isolates
+// it: every other test's `stats` either has a real `paths` array or is `null`
+// outright, so a middle-conjunct deletion (`stats && stats.paths.length`,
+// dropping `stats.paths &&`) reads `undefined.length` — a real production
+// crash if diff-stats.mjs ever returns a blob without `paths` — and every
+// existing test still passes around it.
+test("readRules treats a stats object with no paths key as no file list", () => {
+  const out = readRules(null, {});
+  assert.match(out, /No diff file and no file list were captured/);
+  assert.doesNotMatch(out, /touched exactly these files/);
+});
+
+// The rule is the whole point of the block; it must survive every branch, not
+// just the happy one. Assert the imperative and the counting clause, not a word
+// that also appears in the surrounding rationale.
+test("every branch carries the bounding rule", () => {
+  for (const out of [readRules("/s/pr.diff", PATHS), readRules(null, PATHS), readRules(null, null)]) {
+    assert.match(out, /BOUND EVERY READ/);
+    assert.match(out, /'wc -l' says it is small/);
+  }
+});
