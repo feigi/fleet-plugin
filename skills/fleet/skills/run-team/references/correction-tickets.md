@@ -1,6 +1,8 @@
 # Correction tickets ship new wrong claims
 
-Why ticket meant to correct fact tends to ship fresh wrong one, and why check belongs on implementer as much as reviewer. Assertion this justifies lives in SKILL.md's Reviewers section; evidence here.
+Why ticket meant to correct fact tends to ship fresh wrong one, and why check belongs on implementer as much as reviewer. Two assertions in SKILL.md cite this: the Reviewers section, and phase 0 step 4's `class=correction` judgement. Evidence here.
+
+Nothing below measures a **model tier**. The four-for-four ran at one tier and this file records no comparison, so it cannot support a claim that either tier is better or worse for this class — step 4 cites it as a precaution and says so.
 
 ## The four-for-four finding
 
