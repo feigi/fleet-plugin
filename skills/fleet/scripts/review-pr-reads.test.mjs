@@ -30,6 +30,11 @@ const usableDiff = lift("usableDiff", "snap");
 test("usableDiff rejects a diff that would lie about the snapshot", () => {
   assert.equal(usableDiff({ head: "aaa" }), null, "no diffPath");
   assert.equal(
+    usableDiff({ head: "aaa", diffLines: 40 }),
+    null,
+    "diffPath absent but diffLines truthy — isolates the diffPath guard from the diffLines guard",
+  );
+  assert.equal(
     usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 0 }),
     null,
     "0-byte diff — `gh pr diff` exits 1 and still leaves the file",
