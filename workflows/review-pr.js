@@ -226,7 +226,17 @@ function selectDimensions(all, stats) {
   // INTERSECT, never an early return: a single-file `.github/workflows/ci.yml`
   // change is profile "single-file" with hasSrc false, and returning early here
   // would hand silent-failure a YAML file — exactly what the guard above drops.
-  if (SIZE_TIER_PROFILES.has(stats.profile)) dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key));
+  //
+  // `comments` survives the size trim whenever the diff carries ANY prose. The
+  // docsOnly branch above keeps comment-analyzer because the failure mode of
+  // prose is a wrong CLAIM — four correction tickets each shipped a fresh wrong
+  // one — but `docsOnly` is strict: a single config or src file in the same diff
+  // falsifies it, and the size trim then dropped `comments` outright. That left
+  // the mixed prose PR — this repo's modal PR, and its most defect-prone
+  // category — with zero comment coverage. A wrong claim is no less wrong for
+  // shipping next to code, and it is exactly as invisible.
+  if (SIZE_TIER_PROFILES.has(stats.profile))
+    dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "comments" && stats.kinds?.docs > 0));
   return dims.length ? dims : all;
 }
 

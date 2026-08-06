@@ -149,9 +149,18 @@ the content trim runs first and the size tier intersects what survived:
 const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
 // ... after the existing hasTests / hasSrc filters:
-if (SIZE_TIER_PROFILES.has(stats.profile)) dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key));
+if (SIZE_TIER_PROFILES.has(stats.profile))
+  dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "comments" && stats.kinds?.docs > 0));
 return dims.length ? dims : all;
 ```
+
+**`comments` is carved out of the size trim for any diff carrying prose.** The
+`docsOnly` branch keeps comment-analyzer because the failure mode of prose is a
+wrong CLAIM, but `docsOnly` is strict — one config or src file in the same diff
+falsifies it, and the size trim then dropped `comments` outright. That left the
+mixed prose PR, this repo's modal PR and its most defect-prone category, with
+zero comment coverage. The two `small`, mixed rows below are that case; it had
+no row in this matrix before, which is how the gap was missed.
 
 Thresholds stay named once, in `diff-stats.mjs` where `files === 1` and
 `loc < 30` already live. Nothing new to keep in sync, and `diff-stats.mjs` is
@@ -169,6 +178,8 @@ comments, types, simplify]`):
 | `single-file`, has src | correctness, silent-failure | 2 |
 | `single-file`, config only | correctness | 1 |
 | `small`, has src | correctness, silent-failure | 2 |
+| `small`, docs + config (not `docsOnly`) | correctness, comments | 2 |
+| `small`, docs + src (not `docsOnly`) | correctness, silent-failure, comments | 3 |
 | `production`, has tests | all | 6 |
 | `production`, no tests | all but tests | 5 |
 

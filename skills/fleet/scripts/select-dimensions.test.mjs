@@ -104,6 +104,25 @@ test("a small multi-file source diff trims to correctness + silent-failure", () 
   );
 });
 
+// `comments` survives the size trim on ANY diff carrying prose, not just a
+// `docsOnly` one. Both rows below are profile `small` with `docsOnly` FALSE —
+// one config file or one source file is enough to falsify it — so before the
+// carve-out they lost comment-analyzer entirely. Key ordering follows
+// DEFAULT_DIMENSIONS because `.filter()` preserves it.
+test("a small mixed docs+config diff keeps comments, which docsOnly alone would miss", () => {
+  assert.deepEqual(
+    dimensionKeys([f("README.md", 5, 3), f(".github/workflows/ci.yml", 2, 1)]),
+    ["correctness", "comments"],
+  );
+});
+
+test("a small mixed docs+source diff keeps comments alongside silent-failure", () => {
+  assert.deepEqual(
+    dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("README.md", 5, 5)]),
+    ["correctness", "silent-failure", "comments"],
+  );
+});
+
 // Downgrade only dimensions whose findings face refuters. verifiersBySeverity
 // gives `suggestion` 0, and simplify's prompt forces every finding to
 // `suggestion` — so a cheaper simplify finder has nothing checking it. The other
