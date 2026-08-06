@@ -230,22 +230,29 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
 test("the fix commit is gated on a test run, in both files", () => {
   // The fleet runs in arbitrary host repos. The gate cannot rely on a pre-commit
   // hook existing — and must never bypass one that does.
+  //
+  // Every assertion below is matched against `step3`, never the whole-file
+  // `REVIEW_AND_FIX` — matching file-wide is satisfied by ANY sibling mention
+  // of the phrase anywhere else in the doc, so it passes even with step 3's
+  // own rule gutted. Proven, not assumed: neutering step 3's testCmd clause
+  // while planting an unrelated comment mentioning the same phrase at EOF left
+  // the file-wide version at `pass 7 / fail 0` — green with the gate removed.
+  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
   // A proximity gap (`testCmd ⟨gap⟩ before committing`) is blind to a negation
   // prepended before `testCmd` — the gap survives untouched and the loose match
   // still fires. Pin the literal contiguous phrase instead.
   assert.match(
-    REVIEW_AND_FIX,
+    step3,
     /`testCmd` before you commit/i,
     "step 3 no longer runs testCmd before committing",
   );
-  assert.match(REVIEW_AND_FIX, /never `--no-verify`/i, "step 3 no longer forbids --no-verify");
+  assert.match(step3, /never `--no-verify`/i, "step 3 no longer forbids --no-verify");
   // `tests 0` is a FAILED run, not a pass — the same rule the specialist prompt
   // already states. A glob matching nothing exits 0 reporting `tests 0`. Scoped
   // to step 3 itself, not matched file-wide: the Specialists section already
   // says `tests 0` (about the specialist test command), so a bare file-wide
   // match is satisfied by that pre-existing prose and never fails no matter
   // what step 3 says.
-  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
   assert.match(step3, /tests 0/, "step 3 no longer treats a zero-test run as a failure");
 
   // Bare token existence (`/testCmd/`, `/--no-verify/`) is satisfied by ANY
