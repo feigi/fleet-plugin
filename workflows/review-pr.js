@@ -70,6 +70,18 @@ const VERDICT_SCHEMA = {
   },
 };
 
+// `model` is optional and deliberately absent on three entries. Absent means
+// INHERIT, which is not one behaviour: pr-review-toolkit pins `code-reviewer`
+// (correctness) and `code-simplifier` (simplify) to `model: opus` in frontmatter,
+// while the other four are `model: inherit`. So omitting it keeps a vendor pin
+// for two dimensions and follows the session model for one. That frontmatter is
+// vendored third-party — editing it is clobbered on the next plugin update, so
+// this is the only durable lever.
+//
+// The rule: downgrade only dimensions whose findings face refuters. A refute
+// pass kills false POSITIVES; a cheaper finder's real cost is false NEGATIVES,
+// which nothing downstream catches. `simplify` gets 0 refuters by policy, so it
+// is not downgraded — its cost is addressed by the size tier instead.
 const DEFAULT_DIMENSIONS = [
   {
     key: "correctness",
@@ -85,18 +97,21 @@ const DEFAULT_DIMENSIONS = [
   {
     key: "tests",
     agentType: "pr-review-toolkit:pr-test-analyzer",
+    model: "sonnet",
     prompt:
       "whether each test DISCRIMINATES: apply the mutation it should catch, confirm that test goes red, revert, then apply one it should NOT catch and confirm green. Vary the syntactic form — a guard catching `// whole-line` may let `code; // trailing` through",
   },
   {
     key: "comments",
     agentType: "pr-review-toolkit:comment-analyzer",
+    model: "sonnet",
     prompt:
       "every added factual assertion checked against the tree, INCLUDING comments in files this diff does not touch but whose claims it falsifies (test-name references, 'N of 3' counts, tracking-issue pointers)",
   },
   {
     key: "types",
     agentType: "pr-review-toolkit:type-design-analyzer",
+    model: "sonnet",
     prompt: "invariants expressed vs merely documented; casts that erase conformance",
   },
   {
@@ -146,12 +161,31 @@ const explicitDimensions = A.dimensions; // caller override; else derived from t
 const verifiers = A.verifiers || 2;
 const snapshotModel = A.snapshotModel || "haiku";
 const verifierEffort = A.verifierEffort || "low";
+// Applies to ALL six dimensions when set — that is what an override is for.
+// Unset, each dimension falls back to its own optional `model`, and `undefined`
+// inherits. UNVERIFIED, confirm on the first run: whether opts.model beats
+// agentType frontmatter in workflow agent(). It does for the Agent tool. Only
+// correctness and simplify have a pin to lose, and neither is sent a model here,
+// so a wrong answer costs nothing — but read the dispatched model off the
+// subagent JSONL once and record it.
+const specialistModel = A.specialistModel || null;
 
-// Verification budget follows apply-probability. A critical/important finding
-// gets applied, so a plausible-but-wrong one is expensive: 2 adversarial
-// refuters each. A `suggestion` is deferred by review-and-fix, never
-// auto-applied — paying the most expensive check on the lowest-stakes finding
-// is pure waste, so 0 by default. Override with args.verifiersBySeverity.
+// Verification budget follows WHERE a finding gets checked, not how much it
+// matters. A critical/important finding is applied off this pass alone — nothing
+// downstream re-checks it — so a plausible-but-wrong one is expensive: 2
+// adversarial refuters each.
+//
+// A `suggestion` gets 0 here because its check MOVED, not because it is never
+// applied. review-and-fix splits suggestions by scope: out-of-scope ones are
+// filed, and each in-scope one gets exactly one refuter from the fix-applier
+// before it is applied. Paying for refuters here would price every suggestion
+// FOUND; paying there prices only the ones actually APPLIED, which is the
+// smaller set and the reason this stays 0.
+// Override with args.verifiersBySeverity — but it routes suggestions AROUND the
+// scope split rather than into it. One arriving `survived` matches the
+// fix-applier's "apply survived" rule before it ever reaches the scope check, so
+// an out-of-scope suggestion gets applied; `refuted` ones are not handed over at
+// all. Give that band a budget only if you also want it applied unscoped.
 const verifiersBySeverity = A.verifiersBySeverity || {
   critical: verifiers,
   important: verifiers,
@@ -160,6 +194,17 @@ const verifiersBySeverity = A.verifiersBySeverity || {
 const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
+
+// Thresholds are NOT redefined here. `single-file` is `files === 1` and `small`
+// is `loc < 30`, both already named once in diff-stats.mjs's computeStats — this
+// reads the profile it already computed rather than re-deriving a size.
+const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
+// A trimmed diff still gets the two dimensions whose misses are silent and
+// permanent. Of the four dropped, `tests`/`comments`/`types` findings face
+// refuters downstream; `simplify` faces none, and this tier is where its cost is
+// paid instead. `single-file` is `files === 1` at ANY size, so this trims a
+// one-file rewrite too — not only a short diff.
+const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
 
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
 // for annotation-only or single-file; the full set for production") but nothing
@@ -170,7 +215,8 @@ function selectDimensions(all, stats) {
   // Unknown, unparseable, or empty diff → the full set, the safe direction. An
   // empty `files` array is NOT a signal to trim: `gh` can report no files for a
   // real PR (async diff computation, a transient hiccup), and treating that as
-  // "nothing to review" would silently drop three dimensions on production code.
+  // "nothing to review" would silently drop FOUR dimensions on production code:
+  // an empty profile falls through to both the hasTests and hasSrc branches.
   // Only an affirmatively-reported profile over real files narrows the fan-out.
   if (!stats || !stats.profile || stats.profile === "empty") return all;
   // Strict `=== true`, matching the `hasSrc`/`hasTests` guards below: only an
@@ -190,6 +236,37 @@ function selectDimensions(all, stats) {
   // No source → nothing to type-check, hunt for swallowed errors in, or simplify.
   if (stats.hasSrc === false)
     dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure" && d.key !== "simplify");
+  // INTERSECT, never an early return: a single-file `.github/workflows/ci.yml`
+  // change is profile "single-file" with hasSrc false, and returning early here
+  // would hand silent-failure a YAML file — exactly what the guard above drops.
+  //
+  // `comments` survives the size trim whenever the diff touches a docs-CLASSIFIED
+  // FILE. The docsOnly branch above keeps comment-analyzer because the failure
+  // mode of prose is a wrong CLAIM — four correction tickets each shipped a fresh
+  // wrong one — but `docsOnly` is strict: a single config or src file in the same
+  // diff falsifies it, and the size trim then dropped `comments` outright. That
+  // left the mixed prose PR — this repo's modal PR, and its most defect-prone
+  // category — with zero comment coverage.
+  //
+  // It is a file test, NOT a prose test: `classify()` scores any code extension
+  // `src` before it checks isDocs, so a comment-only edit to one `.js` file is
+  // `docs: 0` and still loses comment coverage. Widening that is #218.
+  //
+  // `!== 0`, not `> 0`, matching the `=== true` guards above: absence must not be
+  // the one value that NARROWS coverage. A blob relayed without `kinds` keeps
+  // comment-analyzer rather than silently dropping it.
+  //
+  // `tests` gets the same carve-out on the same reasoning: when the diff's own
+  // substance IS a test, mutation-discrimination is the check it most needs, and
+  // a vacuous pin shipping green is this repo's recurring defect. Trimming the
+  // test analyzer off a 20-loc test PR drops coverage exactly where it counts.
+  if (SIZE_TIER_PROFILES.has(stats.profile))
+    dims = dims.filter(
+      (d) =>
+        SIZE_TIER_DIMS.has(d.key) ||
+        (d.key === "comments" && stats.kinds?.docs !== 0) ||
+        (d.key === "tests" && stats.hasTests === true),
+    );
   return dims.length ? dims : all;
 }
 
@@ -261,7 +338,15 @@ if (snap.diffStats) {
 const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, stats);
 log(
   `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
-    (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set"),
+    (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
+    (stats && SIZE_TIER_PROFILES.has(stats.profile) && !explicitDimensions ? " — size tier" : ""),
+);
+// "sent", not "used": this reports what the dispatch passes. `frontmatter` means
+// no model was sent, so the agent's own pin decides — which for `correctness` and
+// `simplify` is `opus`, NOT the session model. Printing `inherit` there named the
+// one behaviour the comment above DEFAULT_DIMENSIONS exists to deny.
+log(
+  `models sent ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "frontmatter"}`).join(" ")}`,
 );
 
 // --- Review → Verify ------------------------------------------------------
@@ -288,7 +373,13 @@ Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
 'suggestion', not 'critical'. State your search scope for every negative claim.`,
-      { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
+      {
+        label: `review:${d.key}`,
+        phase: "Review",
+        model: specialistModel || d.model,
+        agentType: d.agentType,
+        schema: FINDINGS_SCHEMA,
+      },
     ),
 
   // Adversarial verification. Each finding faces N independent refuters biased
@@ -298,9 +389,11 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
     parallel(
       (review && review.findings ? review.findings : []).map((f) => () => {
         const n = verifiersFor(f.severity);
-        // 0 verifiers → unverified, NOT dropped. A deferred suggestion still
-        // reaches the controller; it just skips an adversarial pass its
-        // apply-probability does not warrant.
+        // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
+        // the controller; it just skips the adversarial pass HERE, which the
+        // fix-applier runs itself for each in-scope one it means to apply.
+        // `unverified` is therefore "nothing looked yet", never "not worth
+        // looking at".
         if (n === 0) return Promise.resolve({ ...f, dimension: d.key, verdict: "unverified", votes: [] });
         return parallel(
           Array.from({ length: n }, (_, i) => () =>

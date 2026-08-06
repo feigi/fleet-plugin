@@ -101,8 +101,11 @@ function run(cmd, args) {
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
-    // Fail closed. A broken query must not read as "empty diff" — that would
-    // silently trim a real production PR down to two specialists.
+    // Fail closed. A broken query must not read as "empty diff". The harm is not
+    // a trim — computeStats([]) yields profile "empty", which review-pr.js
+    // WIDENS to the full set. It is that a real production PR would be sized
+    // from a lie, and the widen only looks safe until the next caller reads
+    // these facts for something else.
     die(`${cmd} failed: ${String(e.stderr || e.message).trim()}`);
   }
 }
@@ -112,7 +115,12 @@ function main() {
   if (!pr) die("usage: diff-stats.mjs --pr <number>");
 
   const info = JSON.parse(run("gh", ["pr", "view", String(pr), "--json", "files"]));
-  const stats = computeStats(info.files || []);
+  // Same fail-closed rule as run() above, and the one place it was missing: `||
+  // []` turned a malformed response into a fully-formed `profile: "empty"`
+  // measurement, exit 0, indistinguishable on stdout from a real empty PR. That
+  // is the lie the comment in run() warns about, manufactured one line later.
+  if (!Array.isArray(info.files)) die("gh returned no files array");
+  const stats = computeStats(info.files);
 
   console.error(
     `    ${NAME}: pr=${pr} files=${stats.files} loc=${stats.loc} ` +
