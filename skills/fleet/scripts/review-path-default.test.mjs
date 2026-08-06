@@ -209,7 +209,7 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
   );
   assert.match(steps["1"] ?? "", /pr-review-toolkit:review-pr/, "step 1 is no longer the review step the prompt skips");
   assert.match(steps["2"] ?? "", /\*\*apply now\*\*/, "step 2 is no longer the apply/defer split");
-  assert.match(steps["3"] ?? "", /^Commit, push/, "step 3 is no longer commit+push");
+  assert.match(steps["3"] ?? "", /commit and push/i, "step 3 is no longer the commit+push step (now gated on a test run first)");
   assert.match(steps["4"] ?? "", /do not hold this wait/, "step 4 is no longer the CI wait the prompt skips");
   assert.match(steps["5"] ?? "", /^File each deferred finding/, "step 5 is no longer deferral filing");
   // The workflow already supplies `dimension` on every finding; only the
@@ -225,4 +225,38 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
     "step 5 no longer records the finding's dimension in the filed issue",
   );
   assert.match(steps["6"] ?? "", /add-label ready-to-merge/, "step 6 is no longer the labelling step the prompt skips");
+});
+
+test("the fix commit is gated on a test run, in both files", () => {
+  // The fleet runs in arbitrary host repos. The gate cannot rely on a pre-commit
+  // hook existing — and must never bypass one that does.
+  // A proximity gap (`testCmd ⟨gap⟩ before committing`) is blind to a negation
+  // prepended before `testCmd` — the gap survives untouched and the loose match
+  // still fires. Pin the literal contiguous phrase instead.
+  assert.match(
+    REVIEW_AND_FIX,
+    /`testCmd` before you commit/i,
+    "step 3 no longer runs testCmd before committing",
+  );
+  assert.match(REVIEW_AND_FIX, /never `--no-verify`/i, "step 3 no longer forbids --no-verify");
+  // `tests 0` is a FAILED run, not a pass — the same rule the specialist prompt
+  // already states. A glob matching nothing exits 0 reporting `tests 0`. Scoped
+  // to step 3 itself, not matched file-wide: the Specialists section already
+  // says `tests 0` (about the specialist test command), so a bare file-wide
+  // match is satisfied by that pre-existing prose and never fails no matter
+  // what step 3 says.
+  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
+  assert.match(step3, /tests 0/, "step 3 no longer treats a zero-test run as a failure");
+
+  // Bare token existence (`/testCmd/`, `/--no-verify/`) is satisfied by ANY
+  // mention, including one that grants permission — "you may use --no-verify"
+  // contains the literal token and would pass a bare check. Pin the actual gate
+  // phrasing, same discipline as the review-and-fix.md pins above.
+  const prompt = fixApplierPrompt();
+  assert.match(
+    prompt,
+    /`<testCmd>` from the worktree before committing/i,
+    "the fix-applier prompt no longer carries testCmd",
+  );
+  assert.match(prompt, /never `--no-verify`/i, "the fix-applier prompt no longer forbids --no-verify");
 });

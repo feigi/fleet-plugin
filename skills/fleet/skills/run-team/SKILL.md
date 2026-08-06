@@ -334,8 +334,9 @@ member, it has no row in **Failure handling**. Retry once; still failing →
 hand-dispatch the fallback reviewer below and record in the ledger which path ran.
 
 **Then dispatch a fix-applier** — one named member per PR, `fix-pr-<pr#>`, never
-the PR's implementer. Its prompt carries the PR number, the worktree abs path, and
-the returned `survived` / `unverified` findings verbatim, plus:
+the PR's implementer. Its prompt carries the PR number, the worktree abs path, the same `testCmd` you
+passed the workflow, and the returned `survived` / `unverified` findings
+verbatim, plus:
 
 > You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The
 > review is done and these findings are its output — do not re-review, do not
@@ -370,6 +371,14 @@ the returned `survived` / `unverified` findings verbatim, plus:
 > The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
 > `skipped` off a non-zero behind-count, is staleness and not a failure. Never
 > rebase to clear it.
+>
+> **Run `<testCmd>` from the worktree before committing**, copied verbatim.
+> `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
+> finding to defer; never commit over it. **Never `--no-verify`** — a failing
+> hook is a finding you report, not an obstacle you route around. Report the test
+> result with your SHA. Nothing re-reviews this commit: the review ran against a
+> snapshot cut before your edits existed, and a refuter checked the finding's
+> claim, never your patch.
 >
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
