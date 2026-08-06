@@ -101,8 +101,11 @@ function run(cmd, args) {
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
-    // Fail closed. A broken query must not read as "empty diff" — that would
-    // silently trim a real production PR down to two specialists.
+    // Fail closed. A broken query must not read as "empty diff". The harm is not
+    // a trim — computeStats([]) yields profile "empty", which review-pr.js
+    // WIDENS to the full set. It is that a real production PR would be sized
+    // from a lie, and the widen only looks safe until the next caller reads
+    // these facts for something else.
     die(`${cmd} failed: ${String(e.stderr || e.message).trim()}`);
   }
 }

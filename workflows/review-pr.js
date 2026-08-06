@@ -202,7 +202,8 @@ function selectDimensions(all, stats) {
   // Unknown, unparseable, or empty diff → the full set, the safe direction. An
   // empty `files` array is NOT a signal to trim: `gh` can report no files for a
   // real PR (async diff computation, a transient hiccup), and treating that as
-  // "nothing to review" would silently drop three dimensions on production code.
+  // "nothing to review" would silently drop FOUR dimensions on production code:
+  // an empty profile falls through to both the hasTests and hasSrc branches.
   // Only an affirmatively-reported profile over real files narrows the fan-out.
   if (!stats || !stats.profile || stats.profile === "empty") return all;
   // Strict `=== true`, matching the `hasSrc`/`hasTests` guards below: only an
