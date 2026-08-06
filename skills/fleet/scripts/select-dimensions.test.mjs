@@ -104,11 +104,12 @@ test("a small multi-file source diff trims to correctness + silent-failure", () 
   );
 });
 
-// `comments` survives the size trim on ANY diff carrying prose, not just a
-// `docsOnly` one. Both rows below are profile `small` with `docsOnly` FALSE —
-// one config file or one source file is enough to falsify it — so before the
-// carve-out they lost comment-analyzer entirely. Key ordering follows
-// DEFAULT_DIMENSIONS because `.filter()` preserves it.
+// `comments` survives the size trim on any diff touching a docs-CLASSIFIED FILE,
+// not just a `docsOnly` one. Both rows below are profile `small` with `docsOnly`
+// FALSE — one config file or one source file is enough to falsify it — so before
+// the carve-out they lost comment-analyzer entirely. Key ordering follows
+// DEFAULT_DIMENSIONS because `.filter()` preserves it. Prose living in a source
+// comment is NOT covered: that scores `docs: 0`. See #218.
 test("a small mixed docs+config diff keeps comments, which docsOnly alone would miss", () => {
   assert.deepEqual(
     dimensionKeys([f("README.md", 5, 3), f(".github/workflows/ci.yml", 2, 1)]),
@@ -119,6 +120,28 @@ test("a small mixed docs+config diff keeps comments, which docsOnly alone would 
 test("a small mixed docs+source diff keeps comments alongside silent-failure", () => {
   assert.deepEqual(
     dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("README.md", 5, 5)]),
+    ["correctness", "silent-failure", "comments"],
+  );
+});
+
+// Same carve-out shape for `tests`: when the diff's substance IS a test, the
+// mutation-discrimination check is the one it most needs. Without this the row
+// below trims to correctness + silent-failure.
+test("a small diff that adds a test keeps the tests dimension", () => {
+  assert.deepEqual(
+    dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/a.test.mjs", 5, 5)]),
+    ["correctness", "silent-failure", "tests"],
+  );
+});
+
+// Fail DIRECTION, not a matrix row. The blob reaches review-pr.js relayed by an
+// agent, so a field can go missing without failing JSON.parse. Absence must
+// widen — `!== 0` — matching the `=== true` guards. Under `> 0` this row loses
+// comments, making a dropped field the one input that narrows coverage.
+test("a size-tier stats blob missing `kinds` keeps comments rather than dropping it", () => {
+  const stats = { profile: "small", docsOnly: false, hasSrc: true, hasTests: false };
+  assert.deepEqual(
+    selectDimensions(DEFAULT_DIMENSIONS, stats).map((d) => d.key),
     ["correctness", "silent-failure", "comments"],
   );
 });
@@ -141,15 +164,53 @@ test("only the refuter-backed dimensions carry a model downgrade", () => {
   assert.equal(models.simplify, undefined);
 });
 
-test("the review dispatch lets a caller override every dimension's model", () => {
+// Everything above tests a LIFTED COPY of selectDimensions. Nothing above proves
+// review-pr.js calls it: replacing the call with `explicitDimensions ||
+// DEFAULT_DIMENSIONS` left this file at 12/12 green, disconnecting the entire
+// size tier in one token. This is the only assertion that fails on that.
+test("review-pr.js actually calls selectDimensions to pick the fan-out", () => {
   assert.match(
     SOURCE,
+    /^const dimensions = explicitDimensions \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
+    "the selectDimensions call site changed — every size-tier test above now pins a copy nothing runs",
+  );
+});
+
+// Slice, then match. A whole-file `assert.match` for this proved nothing: it
+// survived commenting the line out, planting the phrase in a comment elsewhere,
+// AND moving the `model` option off the review dispatch onto the refuter
+// dispatch. Comment lines are stripped so a commented-out option cannot satisfy
+// it, and the slice is the review dispatch's options object alone.
+function reviewDispatchOptions() {
+  const m = SOURCE.match(/\{\s*\n\s*label: `review:\$\{d\.key\}`[\s\S]*?\n\s*\},/);
+  assert.ok(m, "review-pr.js no longer passes an options object labelled review:${d.key} — update this test");
+  return m[0]
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+}
+
+test("the review dispatch lets a caller override every dimension's model", () => {
+  assert.match(
+    reviewDispatchOptions(),
     /model:\s*specialistModel\s*\|\|\s*d\.model/,
     "the review dispatch no longer prefers args.specialistModel over the per-dimension model",
   );
   assert.match(
     SOURCE,
-    /const specialistModel = A\.specialistModel \|\| null;/,
+    /^const specialistModel = A\.specialistModel \|\| null;$/m,
     "args.specialistModel is no longer read",
   );
+});
+
+// The log is the only runtime evidence the model policy took effect, and
+// review-pr.js defers confirming `opts.model` vs agentType frontmatter to a
+// first-run read of it. `frontmatter`, never `inherit`: correctness and simplify
+// are pinned `model: opus` by the vendored agent definitions, so `inherit` named
+// the one behaviour the DEFAULT_DIMENSIONS comment exists to deny.
+test("the models log reports what was sent and does not call a vendored pin 'inherit'", () => {
+  const m = SOURCE.match(/^\s*`models sent \$\{dimensions[\s\S]*?\n/m);
+  assert.ok(m, "the `models sent` log line is gone — nothing then reports the dispatched model tier");
+  assert.match(m[0], /\|\| "frontmatter"/, "an unset model is reported as something other than `frontmatter`");
+  assert.doesNotMatch(m[0], /"inherit"/, "the log calls an unset model `inherit`, which is false for correctness/simplify");
 });

@@ -240,6 +240,16 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
     /`dimension`\s+in the issue body/i,
     "step 5 no longer records the finding's dimension in the filed issue",
   );
+  // Adjacency alone still is not enough: "the finding's `dimension` in the issue
+  // body is optional and may be omitted" satisfies the match above verbatim.
+  // Measured GREEN under exactly that mutation, so the permissive forms are
+  // excluded explicitly — the positive pin proves the phrase is present, this
+  // one proves it was not turned into a permission.
+  assert.doesNotMatch(
+    steps["5"] ?? "",
+    /`dimension`[\s\S]{0,120}?(optional|may be omitted|need not|where available|if known)/i,
+    "step 5 now makes the dimension optional — the backlog goes back to being unattributable",
+  );
   assert.match(steps["6"] ?? "", /add-label ready-to-merge/, "step 6 is no longer the labelling step the prompt skips");
 });
 
@@ -252,6 +262,17 @@ test("the in-scope-suggestion refuter carries its anti-rubber-stamp clause, in b
   // prompt, a standalone reviewer gets review-and-fix's step 2 and nothing else.
   const step2 = section(REVIEW_AND_FIX, "2. Plan the actions", "\n3. **Run `testCmd`", "review-and-fix step 2");
   for (const [label, slice] of [["review-and-fix step 2", step2], ["the fix-applier prompt", fixApplierPrompt()]]) {
+    // The instruction text alone does not pin that a refuter is DISPATCHED.
+    // Measured GREEN on review-and-fix step 2 under "In scope → apply it
+    // directly; never dispatch a refuter. Had you dispatched one, biased to
+    // refuse, you would hand it this instruction verbatim:" — every clause below
+    // still present, the permission inverted. run-team's copy already carried
+    // this tighter form; step 2 did not. Same regex, both files now.
+    assert.match(
+      slice,
+      /in scope\b[^a-zA-Z]{1,10}dispatch\b[\s\S]{0,20}refuter/i,
+      `${label} no longer ties applying an in-scope suggestion to dispatching a refuter`,
+    );
     assert.match(
       slice,
       /Verify by[\s>\n]+RUNNING something/,
