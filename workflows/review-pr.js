@@ -181,9 +181,11 @@ const specialistModel = A.specialistModel || null;
 // before it is applied. Paying for refuters here would price every suggestion
 // FOUND; paying there prices only the ones actually APPLIED, which is the
 // smaller set and the reason this stays 0.
-// Override with args.verifiersBySeverity — note that giving `suggestion` a
-// non-zero budget makes suggestions arrive as `survived`/`refuted` rather than
-// `unverified`, which the fix-applier's rules already handle.
+// Override with args.verifiersBySeverity — but it routes suggestions AROUND the
+// scope split rather than into it. One arriving `survived` matches the
+// fix-applier's "apply survived" rule before it ever reaches the scope check, so
+// an out-of-scope suggestion gets applied; `refuted` ones are not handed over at
+// all. Give that band a budget only if you also want it applied unscoped.
 const verifiersBySeverity = A.verifiersBySeverity || {
   critical: verifiers,
   important: verifiers,
@@ -197,9 +199,11 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // is `loc < 30`, both already named once in diff-stats.mjs's computeStats — this
 // reads the profile it already computed rather than re-deriving a size.
 const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
-// A tiny diff still gets the two dimensions whose misses are silent and
-// permanent. The other four are the ones whose findings face refuters or have
-// nothing to act on at this size.
+// A trimmed diff still gets the two dimensions whose misses are silent and
+// permanent. Of the four dropped, `tests`/`comments`/`types` findings face
+// refuters downstream; `simplify` faces none, and this tier is where its cost is
+// paid instead. `single-file` is `files === 1` at ANY size, so this trims a
+// one-file rewrite too — not only a short diff.
 const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
 
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
@@ -236,16 +240,33 @@ function selectDimensions(all, stats) {
   // change is profile "single-file" with hasSrc false, and returning early here
   // would hand silent-failure a YAML file — exactly what the guard above drops.
   //
-  // `comments` survives the size trim whenever the diff carries ANY prose. The
-  // docsOnly branch above keeps comment-analyzer because the failure mode of
-  // prose is a wrong CLAIM — four correction tickets each shipped a fresh wrong
-  // one — but `docsOnly` is strict: a single config or src file in the same diff
-  // falsifies it, and the size trim then dropped `comments` outright. That left
-  // the mixed prose PR — this repo's modal PR, and its most defect-prone
-  // category — with zero comment coverage. A wrong claim is no less wrong for
-  // shipping next to code, and it is exactly as invisible.
+  // `comments` survives the size trim whenever the diff touches a docs-CLASSIFIED
+  // FILE. The docsOnly branch above keeps comment-analyzer because the failure
+  // mode of prose is a wrong CLAIM — four correction tickets each shipped a fresh
+  // wrong one — but `docsOnly` is strict: a single config or src file in the same
+  // diff falsifies it, and the size trim then dropped `comments` outright. That
+  // left the mixed prose PR — this repo's modal PR, and its most defect-prone
+  // category — with zero comment coverage.
+  //
+  // It is a file test, NOT a prose test: `classify()` scores any code extension
+  // `src` before it checks isDocs, so a comment-only edit to one `.js` file is
+  // `docs: 0` and still loses comment coverage. Widening that is #218.
+  //
+  // `!== 0`, not `> 0`, matching the `=== true` guards above: absence must not be
+  // the one value that NARROWS coverage. A blob relayed without `kinds` keeps
+  // comment-analyzer rather than silently dropping it.
+  //
+  // `tests` gets the same carve-out on the same reasoning: when the diff's own
+  // substance IS a test, mutation-discrimination is the check it most needs, and
+  // a vacuous pin shipping green is this repo's recurring defect. Trimming the
+  // test analyzer off a 20-loc test PR drops coverage exactly where it counts.
   if (SIZE_TIER_PROFILES.has(stats.profile))
-    dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "comments" && stats.kinds?.docs > 0));
+    dims = dims.filter(
+      (d) =>
+        SIZE_TIER_DIMS.has(d.key) ||
+        (d.key === "comments" && stats.kinds?.docs !== 0) ||
+        (d.key === "tests" && stats.hasTests === true),
+    );
   return dims.length ? dims : all;
 }
 
@@ -320,8 +341,12 @@ log(
     (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
     (stats && SIZE_TIER_PROFILES.has(stats.profile) && !explicitDimensions ? " — size tier" : ""),
 );
+// "sent", not "used": this reports what the dispatch passes. `frontmatter` means
+// no model was sent, so the agent's own pin decides — which for `correctness` and
+// `simplify` is `opus`, NOT the session model. Printing `inherit` there named the
+// one behaviour the comment above DEFAULT_DIMENSIONS exists to deny.
 log(
-  `models ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "inherit"}`).join(" ")}`,
+  `models sent ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "frontmatter"}`).join(" ")}`,
 );
 
 // --- Review → Verify ------------------------------------------------------
