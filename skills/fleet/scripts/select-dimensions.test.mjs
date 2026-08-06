@@ -103,3 +103,34 @@ test("a small multi-file source diff trims to correctness + silent-failure", () 
     ["correctness", "silent-failure"],
   );
 });
+
+// Downgrade only dimensions whose findings face refuters. verifiersBySeverity
+// gives `suggestion` 0, and simplify's prompt forces every finding to
+// `suggestion` — so a cheaper simplify finder has nothing checking it. The other
+// two omissions are open-ended searches where a MISS is the cost, and a refuter
+// pass catches false positives, never false negatives.
+test("only the refuter-backed dimensions carry a model downgrade", () => {
+  const models = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d.model]));
+  assert.equal(models.tests, "sonnet");
+  assert.equal(models.comments, "sonnet");
+  assert.equal(models.types, "sonnet");
+  // Undefined, not a string: `undefined` inherits. correctness and simplify keep
+  // their vendored `model: opus` frontmatter pin; silent-failure follows the
+  // session model.
+  assert.equal(models.correctness, undefined);
+  assert.equal(models["silent-failure"], undefined);
+  assert.equal(models.simplify, undefined);
+});
+
+test("the review dispatch lets a caller override every dimension's model", () => {
+  assert.match(
+    SOURCE,
+    /model:\s*specialistModel\s*\|\|\s*d\.model/,
+    "the review dispatch no longer prefers args.specialistModel over the per-dimension model",
+  );
+  assert.match(
+    SOURCE,
+    /const specialistModel = A\.specialistModel \|\| null;/,
+    "args.specialistModel is no longer read",
+  );
+});

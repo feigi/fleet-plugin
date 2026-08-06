@@ -70,6 +70,18 @@ const VERDICT_SCHEMA = {
   },
 };
 
+// `model` is optional and deliberately absent on three entries. Absent means
+// INHERIT, which is not one behaviour: pr-review-toolkit pins `code-reviewer`
+// (correctness) and `code-simplifier` (simplify) to `model: opus` in frontmatter,
+// while the other four are `model: inherit`. So omitting it keeps a vendor pin
+// for two dimensions and follows the session model for one. That frontmatter is
+// vendored third-party — editing it is clobbered on the next plugin update, so
+// this is the only durable lever.
+//
+// The rule: downgrade only dimensions whose findings face refuters. A refute
+// pass kills false POSITIVES; a cheaper finder's real cost is false NEGATIVES,
+// which nothing downstream catches. `simplify` gets 0 refuters by policy, so it
+// is not downgraded — its cost is addressed by the size tier instead.
 const DEFAULT_DIMENSIONS = [
   {
     key: "correctness",
@@ -85,18 +97,21 @@ const DEFAULT_DIMENSIONS = [
   {
     key: "tests",
     agentType: "pr-review-toolkit:pr-test-analyzer",
+    model: "sonnet",
     prompt:
       "whether each test DISCRIMINATES: apply the mutation it should catch, confirm that test goes red, revert, then apply one it should NOT catch and confirm green. Vary the syntactic form — a guard catching `// whole-line` may let `code; // trailing` through",
   },
   {
     key: "comments",
     agentType: "pr-review-toolkit:comment-analyzer",
+    model: "sonnet",
     prompt:
       "every added factual assertion checked against the tree, INCLUDING comments in files this diff does not touch but whose claims it falsifies (test-name references, 'N of 3' counts, tracking-issue pointers)",
   },
   {
     key: "types",
     agentType: "pr-review-toolkit:type-design-analyzer",
+    model: "sonnet",
     prompt: "invariants expressed vs merely documented; casts that erase conformance",
   },
   {
@@ -146,6 +161,14 @@ const explicitDimensions = A.dimensions; // caller override; else derived from t
 const verifiers = A.verifiers || 2;
 const snapshotModel = A.snapshotModel || "haiku";
 const verifierEffort = A.verifierEffort || "low";
+// Applies to ALL six dimensions when set — that is what an override is for.
+// Unset, each dimension falls back to its own optional `model`, and `undefined`
+// inherits. UNVERIFIED, confirm on the first run: whether opts.model beats
+// agentType frontmatter in workflow agent(). It does for the Agent tool. Only
+// correctness and simplify have a pin to lose, and neither is sent a model here,
+// so a wrong answer costs nothing — but read the dispatched model off the
+// subagent JSONL once and record it.
+const specialistModel = A.specialistModel || null;
 
 // Verification budget follows apply-probability. A critical/important finding
 // gets applied, so a plausible-but-wrong one is expensive: 2 adversarial
@@ -277,6 +300,9 @@ log(
     (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
     (stats && SIZE_TIER_PROFILES.has(stats.profile) && !explicitDimensions ? " — size tier" : ""),
 );
+log(
+  `models ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "inherit"}`).join(" ")}`,
+);
 
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
@@ -302,7 +328,13 @@ Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
 'suggestion', not 'critical'. State your search scope for every negative claim.`,
-      { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
+      {
+        label: `review:${d.key}`,
+        phase: "Review",
+        model: specialistModel || d.model,
+        agentType: d.agentType,
+        schema: FINDINGS_SCHEMA,
+      },
     ),
 
   // Adversarial verification. Each finding faces N independent refuters biased
