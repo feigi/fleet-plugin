@@ -122,6 +122,29 @@ const DEFAULT_DIMENSIONS = [
   },
 ];
 
+// The snapshot agent reports three raw values and no judgement. This is the
+// judgement, in deterministic code, for the same reason `diffStats` is
+// transported as an opaque string (schema comment at :328-333) and parsed by the
+// caller (:349-358): an agent asked to decide can decide wrong and report a path
+// anyway.
+//
+// Every clause is a MEASURED failure, not a hypothetical. `gh pr diff 999999`
+// exits 1 and still leaves a 0-byte file, which a specialist reads as "this PR
+// changed nothing" — the silent green of `tests 0`. And local HEAD can differ
+// from the PR's headRefOid (ac110b5 vs 482e523, observed), which hands a
+// specialist a diff describing a tree it is not reading.
+//
+// A MISSING prHead is deliberately not disqualifying: `gh pr view` can fail
+// while `gh pr diff` succeeded, and dropping a good diff over an absent
+// cross-check would let missing input narrow coverage — the inversion the
+// `=== true` guards at :278-280 exist to prevent.
+function usableDiff(snap) {
+  if (!snap.diffPath) return null;
+  if (!snap.diffLines) return null;
+  if (snap.prHead && snap.prHead !== snap.head) return null;
+  return snap.diffPath;
+}
+
 // `args` can arrive as a JSON STRING rather than an object. Observed twice on
 // this script: every read below returns undefined, and the failure surfaces as
 // the required-args throw at the bottom of this block with `duration_ms: 3` and
