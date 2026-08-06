@@ -115,7 +115,12 @@ function main() {
   if (!pr) die("usage: diff-stats.mjs --pr <number>");
 
   const info = JSON.parse(run("gh", ["pr", "view", String(pr), "--json", "files"]));
-  const stats = computeStats(info.files || []);
+  // Same fail-closed rule as run() above, and the one place it was missing: `||
+  // []` turned a malformed response into a fully-formed `profile: "empty"`
+  // measurement, exit 0, indistinguishable on stdout from a real empty PR. That
+  // is the lie the comment in run() warns about, manufactured one line later.
+  if (!Array.isArray(info.files)) die("gh returned no files array");
+  const stats = computeStats(info.files);
 
   console.error(
     `    ${NAME}: pr=${pr} files=${stats.files} loc=${stats.loc} ` +
