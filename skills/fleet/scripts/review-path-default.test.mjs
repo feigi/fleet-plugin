@@ -17,6 +17,15 @@ import { join } from "node:path";
 // as documented; relay prose left in the Phase 3 event loop reads as an
 // obligation on every run, including the path where no relay can ever occur.
 // Neither shows up as an error.
+// THE CEILING EVERY PIN IN THIS FILE SHARES. These prove a phrase is PRESENT.
+// None can prove it is not NEGATED — a sentence inserted inside the slice
+// granting the opposite permission leaves every anchor and every pinned phrase
+// intact, and the suite green (verified 2026-08-06). Tightening a regex does
+// not close this; only a different mechanism would. So read the per-assertion
+// comments below as "this pin is not vacuous to *rewording*", never as "this
+// rule cannot be subverted" — the contradiction that shipped on this branch
+// (an absolute `unverified` rule sitting above the `suggestion` exception that
+// contradicted it) was exactly that, and was invisible to all of them.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "skills", "fleet", "commands", "review-and-fix.md"), "utf8");
@@ -46,6 +55,13 @@ const reviewersSection = () => section(RUN_TEAM, "### Reviewers", FALLBACK_ANCHO
 // prompt, and every assertion below then reports on the wrong agent.
 const fixApplierPrompt = () =>
   section(reviewersSection(), PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt");
+// The lead-in is what SUBSTITUTES the prompt's `<testCmd>` placeholder, so it
+// gets its own slice ending where the prompt begins — deliberately tighter than
+// the Reviewers section. Section-wide, the phrase is satisfied by any mention
+// inside the prompt itself, so the substitution duty could be deleted with the
+// pin still green; that is the whole failure mode being pinned.
+const fixApplierLeadIn = () =>
+  section(reviewersSection(), "**Then dispatch a fix-applier**", PROMPT_ANCHOR, "run-team fix-applier lead-in");
 
 test("the Reviewers section names the workflow call as the default, ahead of the fallback", () => {
   const dflt = reviewersSection();
@@ -227,6 +243,28 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
   assert.match(steps["6"] ?? "", /add-label ready-to-merge/, "step 6 is no longer the labelling step the prompt skips");
 });
 
+test("the in-scope-suggestion refuter carries its anti-rubber-stamp clause, in both files", () => {
+  // The one new permission this branch grants is "apply an in-scope suggestion
+  // if it survives one refuter". A refuter that reasons its way to agreement
+  // survives everything, which degrades that into "apply everything in scope" —
+  // so the RUNNING clause is the whole mechanism, not decoration. Both files
+  // carry it because different agents read each: the fix-applier gets run-team's
+  // prompt, a standalone reviewer gets review-and-fix's step 2 and nothing else.
+  const step2 = section(REVIEW_AND_FIX, "2. Plan the actions", "\n3. **Run `testCmd`", "review-and-fix step 2");
+  for (const [label, slice] of [["review-and-fix step 2", step2], ["the fix-applier prompt", fixApplierPrompt()]]) {
+    assert.match(
+      slice,
+      /Verify by[\s>\n]+RUNNING something/,
+      `${label} no longer tells the refuter to verify by RUNNING something`,
+    );
+    assert.match(
+      slice,
+      /(Do not|never)[\s>\n]+reason your way to agreement/i,
+      `${label} no longer forbids the refuter reasoning its way to agreement`,
+    );
+  }
+});
+
 test("the fix commit is gated on a test run, in both files", () => {
   // The fleet runs in arbitrary host repos. The gate cannot rely on a pre-commit
   // hook existing — and must never bypass one that does.
@@ -254,12 +292,42 @@ test("the fix commit is gated on a test run, in both files", () => {
   // match is satisfied by that pre-existing prose and never fails no matter
   // what step 3 says.
   assert.match(step3, /tests 0/, "step 3 no longer treats a zero-test run as a failure");
+  // Acceptance criterion 10's second clause. The gate is worth nothing to the
+  // controller if the result never leaves the fix-applier: a green it does not
+  // report is indistinguishable from one it never ran.
+  assert.match(
+    step3,
+    /report the test result alongside the SHA/i,
+    "step 3 no longer reports the test result with the pushed SHA",
+  );
+  // Standalone (step 4 explicitly supports no-controller), nothing else defines
+  // `testCmd` — the reader must either infer it or pick a runner the same
+  // sentence forbids picking.
+  assert.match(
+    step3,
+    /standalone[\s\S]{0,80}repo's own test command/i,
+    "step 3 no longer defines `testCmd` for the standalone path, where no dispatcher hands one over",
+  );
 
   // Bare token existence (`/testCmd/`, `/--no-verify/`) is satisfied by ANY
   // mention, including one that grants permission — "you may use --no-verify"
   // contains the literal token and would pass a bare check. Pin the actual gate
   // phrasing, same discipline as the review-and-fix.md pins above.
   const prompt = fixApplierPrompt();
+  assert.match(
+    prompt,
+    /Report the test\s*\n?>?\s*result with your SHA/i,
+    "the fix-applier prompt no longer reports the test result with its SHA",
+  );
+  // The prompt says `<testCmd>` — a PLACEHOLDER. Only the lead-in tells the
+  // controller to substitute it. Delete that sentence and the fix-applier is
+  // handed a literal `<testCmd>` against a step reading "copied verbatim — not
+  // a runner you picked": no error, both files individually coherent.
+  assert.match(
+    fixApplierLeadIn(),
+    /the same `testCmd` you\s+passed the workflow/,
+    "the controller no longer carries testCmd into the fix-applier's prompt — `<testCmd>` reaches it unsubstituted",
+  );
   assert.match(
     prompt,
     /`<testCmd>` from the worktree before committing/i,

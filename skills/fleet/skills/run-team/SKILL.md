@@ -366,9 +366,12 @@ verbatim, plus:
 > > reason your way to agreement.
 >
 > Survives → apply it. Refuted → defer and file it, and say the refutation in
-> the issue body. **Read your refuter's report yourself** — a subagent you
-> dispatch reports to the controller, not to you, and waiting for a relay that
-> never comes strands the finding.
+> the issue body. **Read your refuter's report yourself** — on the hand-dispatch
+> path a subagent's report has surfaced to the controller rather than to its
+> dispatcher, and waiting for a relay that never comes strands the finding.
+> That has not been measured for a refuter dispatched from here, so **confirm it
+> on the first run** rather than assuming either way; reading the report
+> yourself is right regardless of which way it turns out.
 >
 > The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
 > `skipped` off a non-zero behind-count, is staleness and not a failure. Never

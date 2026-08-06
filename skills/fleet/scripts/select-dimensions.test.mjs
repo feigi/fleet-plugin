@@ -56,7 +56,7 @@ test("the lifted values have the shape the rest of this file assumes", () => {
   );
 });
 
-test("unknown or unparseable stats widen to the full set", () => {
+test("unknown, unparseable or empty stats widen to the full set", () => {
   assert.equal(selectDimensions(DEFAULT_DIMENSIONS, null).length, 6);
   assert.equal(selectDimensions(DEFAULT_DIMENSIONS, undefined).length, 6);
   // An empty `files` array is NOT a signal to trim: `gh` can report no files for
