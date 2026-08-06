@@ -170,11 +170,20 @@ const verifierEffort = A.verifierEffort || "low";
 // subagent JSONL once and record it.
 const specialistModel = A.specialistModel || null;
 
-// Verification budget follows apply-probability. A critical/important finding
-// gets applied, so a plausible-but-wrong one is expensive: 2 adversarial
-// refuters each. A `suggestion` is deferred by review-and-fix, never
-// auto-applied — paying the most expensive check on the lowest-stakes finding
-// is pure waste, so 0 by default. Override with args.verifiersBySeverity.
+// Verification budget follows WHERE a finding gets checked, not how much it
+// matters. A critical/important finding is applied off this pass alone — nothing
+// downstream re-checks it — so a plausible-but-wrong one is expensive: 2
+// adversarial refuters each.
+//
+// A `suggestion` gets 0 here because its check MOVED, not because it is never
+// applied. review-and-fix splits suggestions by scope: out-of-scope ones are
+// filed, and each in-scope one gets exactly one refuter from the fix-applier
+// before it is applied. Paying for refuters here would price every suggestion
+// FOUND; paying there prices only the ones actually APPLIED, which is the
+// smaller set and the reason this stays 0.
+// Override with args.verifiersBySeverity — note that giving `suggestion` a
+// non-zero budget makes suggestions arrive as `survived`/`refuted` rather than
+// `unverified`, which the fix-applier's rules already handle.
 const verifiersBySeverity = A.verifiersBySeverity || {
   critical: verifiers,
   important: verifiers,
@@ -355,9 +364,11 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
     parallel(
       (review && review.findings ? review.findings : []).map((f) => () => {
         const n = verifiersFor(f.severity);
-        // 0 verifiers → unverified, NOT dropped. A deferred suggestion still
-        // reaches the controller; it just skips an adversarial pass its
-        // apply-probability does not warrant.
+        // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
+        // the controller; it just skips the adversarial pass HERE, which the
+        // fix-applier runs itself for each in-scope one it means to apply.
+        // `unverified` is therefore "nothing looked yet", never "not worth
+        // looking at".
         if (n === 0) return Promise.resolve({ ...f, dimension: d.key, verdict: "unverified", votes: [] });
         return parallel(
           Array.from({ length: n }, (_, i) => () =>
