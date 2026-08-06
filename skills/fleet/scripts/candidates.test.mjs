@@ -320,6 +320,27 @@ test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spe
   assert.doesNotMatch(stderr, /What to build/);
 });
 
+test("a failed gh query refuses without re-emitting gh's own stderr", () => {
+  // A program jq cannot compile: it exits non-zero, so execFileSync throws and
+  // the fail-closed die() runs. jq echoes the offending program in its own
+  // error, which is the marker below.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: "MARKER_ZZZ(((" },
+  );
+  // 2, not 1: a broken query is not an empty queue — the archetypal fail-closed
+  // path, and the one die() in query() that had no test at all.
+  assert.equal(status, 2);
+  // Exactly once. execFileSync forwards the child's stderr to ours already, so
+  // interpolating `e.stderr` into the message emitted every byte a second time
+  // — measured at 1.06 MB on one ENOBUFS query, into a context window (#176).
+  // The same duplication this file's row-shape refusal already refuses to do.
+  assert.equal((stderr.match(/MARKER_ZZZ/g) ?? []).length, 1);
+  assert.match(stderr, /^candidates: gh issue list failed/m);
+});
+
 test("an empty queue is exit 1, not 2 — the query worked and there is no work", () => {
   // The other half of the contract in this file's header. Every refusal above
   // pins 2; nothing pinned 1, so a change spending 2 on an empty queue — the

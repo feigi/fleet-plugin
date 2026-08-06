@@ -89,7 +89,14 @@ function query(label) {
   } catch (e) {
     // Fail closed. A failed query and an empty queue are different facts, and
     // only one of them means "there is no work".
-    die(`gh issue list failed: ${String(e.stderr || e.message).trim()}`);
+    //
+    // Names the cause, never gh's stderr — same discipline as the row-shape
+    // refusal below. execFileSync forwards the child's stderr to ours already,
+    // so interpolating `e.stderr` (or `e.message`, which Node builds from it)
+    // emitted every byte twice: 1.06 MB on one ENOBUFS query, into a caller
+    // that is markdown read by a model. `e.code` covers the spawn failures
+    // that print nothing at all — ENOENT, ENOBUFS — and `e.status` the rest.
+    die(`gh issue list failed: ${e.code ?? `exit ${e.status}`}`);
   }
   const trimmed = out.trim();
   // Not `return []`. The reduction is `[…]`-wrapped, so it emits an array for
