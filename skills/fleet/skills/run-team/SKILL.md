@@ -90,6 +90,16 @@ At start, and whenever the pool empties.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
+
+   **Class?** Second judgement off the same read, so it costs no extra tokens.
+   A **correction ticket** — stale docs, wrong comments, bad citations — keeps
+   the session's top tier: that is the class where four tickets in one run each
+   shipped a *new* wrong claim at top tier (references/correction-tickets.md).
+   Everything else is `sonnet`. What makes the cheaper tier safe is the decided?
+   judgement directly above — no architecture, API or schema left open — plus
+   specialist review, adversarial verify, CI and the merge bot's post-rebase
+   green all sitting behind the implementer. Record the class with the survivor;
+   phase 2 dispatches on it.
 5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
    with no diff, so infer its target files from the issue body (the paths it
    names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
@@ -154,6 +164,21 @@ directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
 config has no `globalSetup`, so there is no stack to collide on).
 
 ## Phase 2 — dispatch implementers
+
+**Dispatch at the tier phase 0 classed the ticket at.** Correction ticket →
+**omit `model`** on the Agent call, inheriting the session's tier; that omission
+is the whole mechanism, and a member dispatched with `model` set does not get it
+back. Everything else → `model: "sonnet"`. Carry the class in the ticket's
+ledger row (`ledger.mjs row <N> "impl-<N> · class=correction"`), written before
+dispatch like every other field — after a compaction it is the only record of
+which wave ran at which tier, and the guard below compares waves.
+
+**Guard: measure the wave before widening it.** After the first `sonnet` wave,
+compare implementer spend (`board.mjs` spend view, or `compute-spend.mjs`
+directly) and findings-per-PR against the prior wave. The risk is not shipped
+bugs, it is economic — review runs 3-5x implementation, so a rise in findings or
+one extra fix-round eats the saving the cheaper implementer made. Either climbs
+→ revert **that class** to top tier, never the rule wholesale.
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
