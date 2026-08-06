@@ -90,6 +90,29 @@ At start, and whenever the pool empties.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
+
+   **Class?** Second judgement off the same read, so it costs no extra tokens.
+   Stale docs, wrong comments, bad citations → `class=correction`; everything
+   else → `class=routine`, which dispatches at `sonnet`. **Torn → correction**:
+   a misjudged routine is a missed saving, a misjudged correction runs the one
+   class that demonstrably ships new wrong claims at the cheaper tier.
+
+   Corrections keep the session's top tier as a **precaution, not a
+   measurement.** references/correction-tickets.md records four tickets in one
+   run each shipping a *new* wrong claim, and blames the ticket's framing and
+   unasked-for prose — **not** implementer capability; it measures no tier at
+   all. What it does establish is that this class fails in the reasoning
+   wrapped around a correct mechanical fix, which is what a cheaper model is
+   likeliest to add to. Price of the precaution: corrections never run
+   `sonnet`, so the guard in phase 2 can never produce evidence either way
+   about the one class it would matter most for.
+
+   What makes `sonnet` safe for `class=routine` is the decided? judgement
+   directly above — no undecided row left open — plus specialist review,
+   adversarial verify, CI and the merge bot's post-rebase green all sitting
+   behind the implementer. Thinner than it reads on a prose-only diff, which
+   `diff-stats.mjs` gives `profile: "docs"` and the trimmed dimension set.
+   Record the class in step 6's annotation; phase 2 dispatches on it.
 5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
    with no diff, so infer its target files from the issue body (the paths it
    names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
@@ -106,10 +129,12 @@ At start, and whenever the pool empties.
    - **unsure** — torn, each flagged with the open decision;
    - **excluded** — undecided, each with the decision that is missing.
 
-   Annotate any survivor the `Out of scope` read sequences after another survivor
-   in the same list. Without that, FIFO puts a chain's members next to each other
-   and two consecutive numbers read as two independent tickets — which is exactly
-   how both land in one wave.
+   Annotate every survivor with its class — `correction` or `routine` — so the
+   maintainer sees which tickets are about to run at the cheaper tier before
+   ticking them. Annotate any survivor the `Out of scope` read sequences after
+   another survivor in the same list. Without that, FIFO puts a chain's members
+   next to each other and two consecutive numbers read as two independent
+   tickets — which is exactly how both land in one wave.
 
    Maintainer ticks what to **stage this wave** — how many, what order, what
    collides. Staging, never vetting: `ready-for-agent` already carries triage's
@@ -154,6 +179,53 @@ directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
 config has no `globalSetup`, so there is no stack to collide on).
 
 ## Phase 2 — dispatch implementers
+
+**Dispatch at the tier phase 0 classed the ticket at.** `class=routine` →
+`model: "sonnet"` on the Agent call. `class=correction` → **omit `model`**,
+inheriting the session's tier; that omission is the whole mechanism, and a
+member dispatched with `model` set does not get it back. It holds only while the
+implementer's subagent type carries no `model:` frontmatter — an omitted `model`
+takes the *agent definition's* tier first and the session's only after.
+
+**No class recorded → omit `model`, and record `class=unknown`.** Never
+`sonnet`: the cheap tier is the structural complement of "correction", so a lost
+class silently strips protection from the one class that must keep it. Every
+path that loses it lands here — a compaction, a phase-3 refill re-entering phase
+1 then 2 without a fresh issue read, a killed member replaced from inherited
+state. Writing the gap down is what makes it visible; re-read the issue to
+recover the class when the saving is worth one `gh issue view`.
+
+Carry the class in the ticket's ledger row, written before dispatch like every
+other field:
+
+```
+ledger.mjs row <N> "impl-<N> · class=routine"
+ledger.mjs row <N> "impl-<N> · class=correction"
+ledger.mjs row <N> "impl-<N> · class=unknown"
+```
+
+`row` **replaces the whole line**, it does not append. Re-dispatching over a row
+that already carries `KILLED`, `ports=` or `→ PR#` must repeat those tokens or
+they are gone, with only `rewrote row #N` on stderr to say so. Recover a class
+after a compaction with `ledger.mjs read` — `class=` is a raw-row field, and the
+cockpit does not parse or surface it.
+
+**Guard: measure per PR, not per wave.** There are no implementer waves — refill
+is level-triggered, one slot at a time — so the unit is the PR. Once at least
+three `class=routine` PRs have been ruled, compare their `ruled:` outcomes in
+`ledger.mjs read` against the top-tier PRs above them, and the implementer-vs-review
+split in `board.mjs build`'s `.spend.roles`. Per-`impl-<N>` spend is not
+available: `.spend.top` labels agents by their Agent-call `description`, not
+their member name.
+
+The risk is not shipped bugs, it is economic. Reviews run 3-5x *longer* than
+implementation (Red flags, below), so one extra fix-round costs a wave slot and
+eats the saving the cheaper implementer made. Findings climb, or the implementer
+share does → revert **`class=routine`** to top tier, never the rule wholesale.
+
+The first run under this rule has no baseline — every routine PR in it is a
+sonnet PR. The guard cannot fire until a run that mixes both, or until a prior
+run's numbers are on hand. Say that; never read its silence as a pass.
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
@@ -254,7 +326,9 @@ multi-select**, and **a judgement the evidence cannot settle**.
   refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
   not wait for an event** governs here too, not only implementer refill.
-- **Pool empty** → phase 0 again, subject to queue depth.
+- **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
+  guard here once three or more `class=routine` PRs have been ruled since the
+  last check; nothing else in the loop owns it.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
