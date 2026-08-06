@@ -27,8 +27,13 @@ function liftFromSource(name) {
     return new Function(`${m[0]}\nreturn DEFAULT_DIMENSIONS;`)();
   }
   if (name === "selectDimensions") {
-    const m = SOURCE.match(/^function selectDimensions\(all, stats\) \{[\s\S]*?^\}$/m);
-    assert.ok(m, "review-pr.js no longer declares selectDimensions(all, stats) — update this test");
+    // Widened to start at SIZE_TIER_PROFILES, not just `function selectDimensions`:
+    // that Set and SIZE_TIER_DIMS are module-level consts selectDimensions closes
+    // over, declared immediately above it by construction. Lifting the function
+    // alone leaves them out of the `new Function` eval scope — a ReferenceError,
+    // not a wrong answer, so it fails loud rather than pinning a stale result.
+    const m = SOURCE.match(/^const SIZE_TIER_PROFILES = new Set[\s\S]*?^function selectDimensions\(all, stats\) \{[\s\S]*?^\}$/m);
+    assert.ok(m, "review-pr.js no longer declares SIZE_TIER_PROFILES/selectDimensions(all, stats) as expected — update this test");
     return new Function(`${m[0]}\nreturn selectDimensions;`)();
   }
   throw new Error(`liftFromSource: unknown name ${name}`);
@@ -78,16 +83,23 @@ test("a production diff runs everything, less `tests` when the diff has none", (
   assert.ok(!keys.includes("tests"));
 });
 
-// --- The three rows Task 2 flips. Current behaviour, asserted so the change is
-// --- visible as a diff rather than assumed.
-test("CURRENT: a single-file source diff still runs five dimensions", () => {
-  assert.equal(dimensionKeys([f("workflows/review-pr.js", 3, 2)]).length, 5);
+// --- Size tier. `profile` is assigned through an else-if chain in computeStats,
+// --- so these values are mutually exclusive and cannot race `docsOnly`.
+test("a single-file source diff trims to correctness + silent-failure", () => {
+  assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), ["correctness", "silent-failure"]);
 });
 
-test("CURRENT: a single-file config diff still runs two dimensions", () => {
-  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), ["correctness", "comments"]);
+// The size tier INTERSECTS what the content guards left; it is not an early
+// return. A single .github/workflows/ci.yml change is profile "single-file" with
+// hasSrc false — an early return would run silent-failure on YAML, which the
+// hasSrc guard exists to prevent.
+test("a single-file config diff trims to correctness alone, never silent-failure", () => {
+  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), ["correctness"]);
 });
 
-test("CURRENT: a small multi-file source diff still runs five dimensions", () => {
-  assert.equal(dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/b.mjs", 5, 4)]).length, 5);
+test("a small multi-file source diff trims to correctness + silent-failure", () => {
+  assert.deepEqual(
+    dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/b.mjs", 5, 4)]),
+    ["correctness", "silent-failure"],
+  );
 });

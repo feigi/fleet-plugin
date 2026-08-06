@@ -161,6 +161,15 @@ const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
 
+// Thresholds are NOT redefined here. `single-file` is `files === 1` and `small`
+// is `loc < 30`, both already named once in diff-stats.mjs's computeStats — this
+// reads the profile it already computed rather than re-deriving a size.
+const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
+// A tiny diff still gets the two dimensions whose misses are silent and
+// permanent. The other four are the ones whose findings face refuters or have
+// nothing to act on at this size.
+const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
+
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
 // for annotation-only or single-file; the full set for production") but nothing
 // computed it, so the full set ran on every PR. Facts come from diff-stats.mjs
@@ -190,6 +199,10 @@ function selectDimensions(all, stats) {
   // No source → nothing to type-check, hunt for swallowed errors in, or simplify.
   if (stats.hasSrc === false)
     dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure" && d.key !== "simplify");
+  // INTERSECT, never an early return: a single-file `.github/workflows/ci.yml`
+  // change is profile "single-file" with hasSrc false, and returning early here
+  // would hand silent-failure a YAML file — exactly what the guard above drops.
+  if (SIZE_TIER_PROFILES.has(stats.profile)) dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key));
   return dims.length ? dims : all;
 }
 
@@ -261,7 +274,8 @@ if (snap.diffStats) {
 const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, stats);
 log(
   `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
-    (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set"),
+    (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
+    (stats && SIZE_TIER_PROFILES.has(stats.profile) && !explicitDimensions ? " — size tier" : ""),
 );
 
 // --- Review → Verify ------------------------------------------------------
