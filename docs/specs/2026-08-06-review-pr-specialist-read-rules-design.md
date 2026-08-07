@@ -155,10 +155,15 @@ So the workflow decides, not the agent:
 function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
-  if (snap.prHead && snap.prHead !== snap.head) return null;
+  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead)) return null;
   return snap.diffPath;
 }
 ```
+
+The head compare is prefix-tolerant in both directions, not `!==`. `prHead` is
+always 40 chars from `gh`, but `head` is relayed by an agent asked for "the HEAD
+sha" — under a raw `!==` an abbreviated but matching sha reads as divergence and
+drops a good diff.
 
 `prHead` missing is NOT disqualifying — `gh pr view` can fail on its own while
 `gh pr diff` succeeded, and dropping a good diff over a missing cross-check
@@ -198,11 +203,12 @@ function readRules(diffPath, stats) {
     ? `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
 change you are reviewing, and the snapshot around it is context.`
     : stats && stats.paths && stats.paths.length
-      ? `No diff file was captured. The PR touched exactly these files (changed
-loc in parens) and no others:
-${stats.paths.map((p) => `  ${p.path} (${p.loc})`).join("\n")}`
-      : `No diff file and no file list were captured. Scope your reading from
-the review request itself; do not survey the snapshot.`;
+      ? `No diff file was captured. The PR touched exactly these files and no
+others:
+${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
+      : `No diff file and no file list were captured. Locate the files your
+dimension covers by searching the snapshot ('grep -rn', 'ls -R' — git does not
+run in it), then read them under the bounding rule below: 'wc -l' first.`;
 
   return `${change}
 
@@ -241,9 +247,19 @@ lens 1) answerable by reading the change rather than the file.
   `selectDimensions` and then dropped.
 - `diff-stats.mjs` also failed, or its blob was unparseable → `stats` is already
   `null` at `:330-337` → third branch. Says so explicitly rather than emitting
-  an empty list, which would read as "the PR touched no files".
+  an empty list, which would read as "the PR touched no files". This branch is
+  **one** failure away, not two: `diff-stats.mjs` shells out to `gh pr view <pr>
+  --json files`, so a single broken `gh` — no auth, rate limit, unresolvable
+  remote — takes the diff and the file list together.
 - No path can produce a dangling reference or an empty interpolation. The
   degraded case is today's prompt plus the bounding rule, never a worse one.
+  That constrains branch 3's wording, and this design's first draft broke it: a
+  specialist's "review request" is a dimension prompt (*"simplification
+  opportunities — dead branches, redundant state, needless indirection"*) naming
+  no file, so "scope your reading from the review request itself; do not survey
+  the snapshot" left it nothing it could follow — strictly worse than base.
+  Branch 3 must therefore name a discovery move and hand it to the bounding
+  rule. A refuter is unaffected either way: it holds a `file:line`.
 
 ## Change 3 — `skills/fleet/scripts/review-pr-reads.test.mjs`
 
@@ -258,7 +274,8 @@ importing it executes the workflow, and moving the functions to a module would
 require `import` to resolve inside the Workflow sandbox — which nothing in
 `workflows/` does, and a failed import bricks the fleet's default review path.
 
-Ten tests.
+Twelve tests: the ten designed below, plus two guard-isolation cases added
+during execution (11 and 12).
 
 **`readRules` behaviour** (against the lifted function):
 
@@ -298,6 +315,16 @@ disconnect-in-one-token defect this repo has shipped:
 10. The refuter prompt slice contains `${readRules(`. Anchor on
     `Try to REFUTE this finding` and terminate on `Scratch: `.
 
+Added during execution, each after a task reviewer found the guard it covers
+uncovered by any of the ten above. Numbered after them so the mutation table's
+references stay valid:
+
+11. `usableDiff` with `diffPath` absent and `diffLines` truthy → `null`,
+    isolating the `diffPath` guard from the `diffLines` guard.
+12. `readRules` with a truthy `stats` carrying no `paths` key at all → third
+    branch, isolating the `stats.paths &&` conjunct from `.length`. Dropping it
+    reads `undefined.length` in production and every other test stays green.
+
 **Mutation-tested both ways before merge**, per this repo's standing rule that a
 pin proven to fail is not proven to discriminate. Record the results in the PR
 body:
@@ -332,7 +359,8 @@ three new fields must be declared or a compliant agent's report is rejected.
 
 ## Testing
 
-`node --test skills/fleet/scripts/*.test.mjs` — 262 at base, expected 272.
+`node --test skills/fleet/scripts/*.test.mjs` — 262 at base, 274 after (the ten
+tests above plus the two added during execution).
 
 `review-pr-testcmd.test.mjs:98-124` slices the specialist prompt between
 `READ ONLY FROM THE SNAPSHOT` and `Scratch files go in`. Change 2 interpolates
