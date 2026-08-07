@@ -133,7 +133,11 @@ test("readRules says so when it has neither a diff nor a file list", () => {
   // on anything else from — its "review request" is a dimension prompt naming no
   // file. So it has to name a discovery move. The wording it replaces
   // ("do not survey the snapshot") forbade the only one left.
-  assert.match(out, /Locate the files your\s+dimension covers/);
+  // `\s+` spans every word gap, not just the one where the source happens to
+  // wrap today — the same reflow-tolerance convention the FIX-3 pins below
+  // use. An anchor tied to one wrap point reds on a routine rewrap with a
+  // message claiming the discovery move is missing, which it is not.
+  assert.match(out, /Locate\s+the\s+files\s+your\s+dimension\s+covers/);
   assert.doesNotMatch(out, /do not survey/i);
 });
 
@@ -223,8 +227,15 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   const B = "\\\\?`";
   for (const [re, missing] of [
     [
-      `Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
-      "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
+      // Anchored past `^(?!\s*(?:\/\/|\/\*))` — same vacuous-pin class as the
+      // schema-field loop above, adapted for a paragraph instead of a single
+      // declaration line: a `//`-only anchor does not close it, because the
+      // measured escape re-inserts this paragraph verbatim inside a `/* */`
+      // block comment, which starts the paragraph's line with `/*`, not `//`.
+      // `Report \`diffPath\`` opens the paragraph on its own line in the
+      // source, so anchoring this one entry catches the whole block.
+      `^(?!\\s*(?:\\/\\/|\\/\\*))\\s*Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
+      "diffPath is not both bound to a value and gated on the exit code, or the whole paragraph is dead text (commented out) — the agent must infer the path from the redirect target",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
     [`${B}diffLines${B}\\s+=\\s+the\\s+wc\\s+-l\\s+count`, "diffLines' value is not bound to the wc -l count"],
@@ -233,7 +244,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       "one gh failure can suppress the fields that succeeded",
     ],
   ])
-    assert.match(snapshot, new RegExp(re), missing);
+    assert.match(snapshot, new RegExp(re, "m"), missing);
 });
 
 // The functions are worthless if nothing calls them, and a text-lift pin tests a
@@ -241,6 +252,20 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
 test("the specialist prompt interpolates the read rules", () => {
   const prompt = slice("READ ONLY FROM THE SNAPSHOT", "Scratch files go in");
   assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats\)\}/);
+  // `pr.diff` is a SIBLING of the snapshot tree, not a child of it — reading it
+  // under an unqualified "READ ONLY FROM THE SNAPSHOT" is the exact
+  // contradiction this branch's headline fix removes. Bound to the clause
+  // itself (the `)` closing the HEAD parenthetical, then the qualifier), not
+  // to "diff" appearing anywhere in the prompt: `${readRules(usableDiff(snap),
+  // stats)}` a few lines down contains "Diff" in its own text, so a
+  // presence-only check would stay green against a qualifier reading
+  // "— nothing else." — which restores the original contradiction outright.
+  // `\s+` between every word so a reflow of the same sentence stays green.
+  assert.match(
+    prompt,
+    /READ ONLY FROM THE SNAPSHOT:[^\n]*\)\s+—\s+plus\s+the\s+diff\s+file\s+named\s+below,\s+if\s+one\s+is\s+given\./,
+    "the SNAPSHOT permission is not qualified to admit the diff file named below — the sibling-file contradiction FIX-1 removed is back",
+  );
 });
 
 test("the refuter prompt interpolates the same read rules", () => {
