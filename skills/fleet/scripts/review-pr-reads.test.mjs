@@ -169,3 +169,23 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // The review must survive a gh failure. These three stay out of `required`.
   assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
 });
+
+// The functions are worthless if nothing calls them, and a text-lift pin tests a
+// COPY: it stays green while the feature disconnects. Pin the CALL SITES.
+test("the specialist prompt interpolates the read rules", () => {
+  const prompt = slice("READ ONLY FROM THE SNAPSHOT", "Scratch files go in");
+  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats\)\}/);
+});
+
+test("the refuter prompt interpolates the same read rules", () => {
+  const prompt = slice("Try to REFUTE this finding", "Scratch: ");
+  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats\)\}/);
+});
+
+// A second declaration would let one call site silently bind a different body.
+test("each function is declared exactly once at top level", () => {
+  for (const name of ["usableDiff", "readRules"]) {
+    const hits = SOURCE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
+    assert.equal(hits.length, 1, `${name} is declared ${hits.length} times`);
+  }
+});

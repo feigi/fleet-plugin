@@ -453,6 +453,9 @@ const reviewed = await pipeline(
 READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}).
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
+
+${readRules(usableDiff(snap), stats)}
+
 Tests: from the snapshot's root, run exactly this — copy it verbatim:
   ${testCmd}
 Do not substitute a command of your own. A bare runner picks up a default config
@@ -497,6 +500,9 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
 
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
 the test, apply the mutation. Do not reason your way to agreement.
+
+${readRules(usableDiff(snap), stats)}
+
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
 Scratch: ${scratch}/verify-${d.key}/`,
               { label: `verify:${d.key}`, phase: "Verify", effort: verifierEffort, schema: VERDICT_SCHEMA },
