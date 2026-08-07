@@ -355,6 +355,19 @@ const snap = await agent(
 Verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
 diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
 
+Then capture the PR's diff for the specialists, plus the two facts the caller
+needs to judge whether it is usable:
+
+    gh pr diff ${pr} > ${scratch}/pr.diff
+    gh pr view ${pr} --json headRefOid -q .headRefOid
+    wc -l < ${scratch}/pr.diff
+
+Report \`diffPath\` ONLY if 'gh pr diff' exited 0 — note it writes an empty file
+on failure, so a file existing is not success. Report \`prHead\` = the headRefOid
+and \`diffLines\` = the wc -l count. Do not judge whether the diff is usable, and
+do not withhold one field because another failed: report what you got and let the
+caller decide.
+
 Then size the diff:
 
     ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
@@ -362,8 +375,9 @@ Then size the diff:
 Report the snapshot's absolute path, the HEAD sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
-omit diffStats entirely (path and head are the only required fields). Do not
-modify ${worktree}.`,
+omit diffStats entirely. Only path and head are ever required — diffStats,
+diffPath, diffLines and prHead are each omitted independently when their
+command failed. Do not modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
       type: "object",
       additionalProperties: false,
@@ -377,6 +391,14 @@ modify ${worktree}.`,
         // fails JSON.parse and widens to the full set, instead of silently
         // flipping one field and trimming real coverage.
         diffStats: { type: "string" },
+        // All three optional, and each omitted independently. `gh` reaches the
+        // network and can fail — no auth, PR deleted, rate limit — and a
+        // required field would abort a review that is otherwise fully runnable.
+        // `usableDiff()` is what decides whether they add up to a usable diff;
+        // the agent only transports them.
+        diffPath: { type: "string" },
+        diffLines: { type: "integer" },
+        prHead: { type: "string" },
       },
     } },
 );

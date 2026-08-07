@@ -126,3 +126,46 @@ test("every branch carries the bounding rule", () => {
     assert.match(out, /'wc -l' says it is small/);
   }
 });
+
+// Bound the slice at BOTH ends. `indexOf` returns -1 when absent and `slice(-1)`
+// is a truthy one-character string, so asserting on an unbounded slice passes
+// with the whole block deleted — and an unbounded end runs to EOF, where the
+// specialist and refuter prompts can satisfy the same assertions. This is the
+// defect `review-pr-testcmd.test.mjs:99-107` records having shipped.
+function slice(from, to) {
+  const at = SOURCE.indexOf(from);
+  assert.notEqual(at, -1, `review-pr.js no longer contains "${from}" — update this test`);
+  const end = SOURCE.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, `review-pr.js no longer contains "${to}" after "${from}" — update this test`);
+  return SOURCE.slice(at, end);
+}
+
+// `additionalProperties: false` at :300 REJECTS an undeclared field, so a prompt
+// that asks for these three while the schema omits them silently yields nothing.
+// Both halves have to be pinned or the feature disconnects in one token.
+test("the snapshot agent asks for the diff facts AND declares them in its schema", () => {
+  const snapshot = slice("const snap = await agent(", "if (!snap");
+  assert.match(snapshot, /gh pr diff \$\{pr\} > \$\{scratch\}\/pr\.diff/, "no diff capture");
+  // `/headRefOid/` alone also matches the prose ("Report `prHead` = the
+  // headRefOid") a few lines down, so deleting this command left the suite
+  // green — pin the command line itself, not a word it shares with prose.
+  assert.match(
+    snapshot,
+    /gh pr view \$\{pr\} --json headRefOid -q \.headRefOid/,
+    "no PR head to cross-check against the snapshot's",
+  );
+  assert.match(snapshot, /wc -l < \$\{scratch\}\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
+  for (const field of ["diffPath", "diffLines", "prHead"]) {
+    // Anchored past `^(?!\s*\/\/)` so a commented-out declaration — text a
+    // reader's eye skips but an unanchored regex still matches — reds. Same
+    // vacuous-pin class recorded against this file in PR #216 (`select-dimensions`
+    // pin): a whole/sliced-source assert.match satisfied by dead text.
+    assert.match(
+      snapshot,
+      new RegExp(`^(?!\\s*//)\\s*${field}:\\s*\\{\\s*type:`, "m"),
+      `${field} is not declared in the schema — additionalProperties:false drops it`,
+    );
+  }
+  // The review must survive a gh failure. These three stay out of `required`.
+  assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
+});
