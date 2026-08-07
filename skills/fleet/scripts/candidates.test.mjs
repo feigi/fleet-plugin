@@ -84,6 +84,23 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
   return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [] };
 }
 
+// For the failure shapes the fixture stub cannot reach — it always `exec`s jq,
+// so it can only ever fail by exit status. A gh that kills itself, or one that
+// is absent, is a different `execFileSync` error object entirely.
+function runWithGh(script) {
+  const dir = mkdtempSync(join(tmpdir(), "candidates-gh-"));
+  const gh = join(dir, "gh");
+  writeFileSync(gh, script);
+  chmodSync(gh, 0o755);
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
+  const r = spawnSync(process.execPath, [SCRIPT, "--require-label", "ready-for-agent"], {
+    encoding: "utf8",
+    env,
+  });
+  rmSync(dir, { recursive: true, force: true });
+  return r;
+}
+
 // Labels are settled by the fixture, not by the query: the stub ignores
 // `--search`'s label term beyond picking a fixture. A row in the unfiltered
 // fixture therefore has to carry a label that would NOT have matched the
@@ -318,6 +335,102 @@ test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spe
   // a die() that interpolated the row instead of its index kept the whole
   // suite green while emitting every body it refused to pull.
   assert.doesNotMatch(stderr, /What to build/);
+});
+
+test("a failed gh query refuses without re-emitting gh's own stderr", () => {
+  // A program jq cannot compile: it exits non-zero, so execFileSync throws and
+  // the fail-closed die() runs. jq echoes the offending program in its own
+  // error, which is the marker below.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: "MARKER_ZZZ(((" },
+  );
+  // 2, not 1: a broken query is not an empty queue — the archetypal fail-closed
+  // path, and the one die() in query() that had no test at all.
+  assert.equal(status, 2);
+  // Both halves of the contract, and neither is a count over the whole stream.
+  // Counting occurrences looks like the tighter pin but is coupled to jq's
+  // choice of error path: `(((` is unbalanced, so jq takes the SYNTAX-error
+  // branch, which echoes the program once. Balanced `MARKER_ZZZ` takes the
+  // undefined-function branch, which names the symbol AND echoes the program —
+  // two occurrences from the child alone, failing an exactly-1 assertion
+  // against correct code.
+  //
+  // So: the child's copy must arrive (execFileSync forwards it), and the
+  // refusal line must not carry it a second time (#176 — measured 7,700 B of
+  // gh stderr becoming 15,454 B, into a caller that is markdown read by a
+  // model). The same duplication this file's row-shape refusal already avoids.
+  assert.match(stderr, /MARKER_ZZZ/);
+  const refusal = stderr.match(/^candidates: .*$/m)[0];
+  assert.match(refusal, /^candidates: gh issue list failed/);
+  assert.doesNotMatch(refusal, /MARKER_ZZZ/);
+});
+
+test("the refusal survives a gh stderr larger than the pipe buffer — the case that motivated it", () => {
+  // The failure mode the fix targets, at the size it actually happens. gh's
+  // forwarded stderr is written first and die()'s line last, so with an async
+  // console.error the refusal is the FIRST thing process.exit() discards: the
+  // caller gets 64 KiB of gh noise, exit 2, and no statement of what broke.
+  // Under the buffer every variant passes, so the program must stay large.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { JQ_OVERRIDE: `${"z".repeat(100_000)}(((` },
+  );
+  assert.equal(status, 2);
+  assert.ok(stderr.length > 60_000, `gh stderr must exceed the buffer, got ${stderr.length}`);
+  assert.match(stderr, /^candidates: gh issue list failed/m);
+});
+
+test("gh missing entirely is named as ENOENT — the shape that prints nothing at all", () => {
+  // The other side of `e.code ?? …`. Deleting the whole `e.code` half leaves
+  // the suite green without this: the jq test above only ever reaches the
+  // exit-status branch. ENOENT is the shape where die() is the SOLE diagnostic
+  // — nothing spawned, so no child stderr was forwarded to fall back on.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { PATH: "/nonexistent" },
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: gh issue list failed: ENOENT$/m);
+});
+
+test("a signal-killed gh is named by its signal, not reported as `exit null`", () => {
+  // Third disjoint shape: `e.code` undefined AND `e.status` null, so a
+  // two-branch expression prints `exit null` and names nothing. Live for gh —
+  // the OOM killer on a large query, a SIGPIPE, a propagated Ctrl-C — and the
+  // child prints nothing on its way out, so this line is all the caller gets.
+  const { status, stderr } = runWithGh(`#!/bin/sh\nkill -TERM $$\n`);
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: gh issue list failed: killed by SIGTERM$/m);
+  assert.doesNotMatch(stderr, /exit null/);
+});
+
+test("a payload past the pipe buffer arrives whole — truncated JSON must never read as exit 0", () => {
+  // process.exit() discards queued writes, and stdout on a pipe (which is what
+  // spawnSync gives us, and what every real caller gives it) is async. 499 rows
+  // — one UNDER the default --limit, so refuseIfCapped never fires — measured
+  // 65,536 B and mid-JSON at exit 0: a corrupt payload typed as success, the
+  // one outcome this file's exit codes exist to make impossible.
+  //
+  // The pin is `rows`, which run() JSON.parses: truncation throws there. The
+  // byte assertion is what makes it meaningful — under the buffer this test
+  // passes against process.exit() too, so it must stay comfortably over.
+  const issues = Array.from({ length: 499 }, (_, i) => ({
+    number: i + 1,
+    title: "t".repeat(120),
+    labels: [{ name: "ready-for-agent" }, { name: "size:m" }],
+    body: "## What to build\n\ndepends on #7\n",
+  }));
+  const { status, stdout, rows } = run(issues);
+  assert.ok(stdout.length > 70_000, `payload must exceed the 64 KiB buffer, got ${stdout.length}`);
+  assert.equal(rows.length, 499);
+  assert.equal(status, 0);
 });
 
 test("an empty queue is exit 1, not 2 — the query worked and there is no work", () => {

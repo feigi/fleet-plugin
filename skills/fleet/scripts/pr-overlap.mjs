@@ -10,12 +10,19 @@
 // the answer is therefore unknown.
 
 import { execFileSync } from "node:child_process";
+import { writeSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 const NAME = "pr-overlap";
 
+// writeSync, not console.error: stderr on a pipe is async and the exit below
+// discards what is still queued, so a large forwarded child stderr swallows
+// this line — the refusal is queued last and dropped first (#176). The leading
+// newline is load-bearing: writeSync goes straight to the fd while the stream
+// is still draining, so without it this text lands mid-line inside the child's
+// output and stops matching every line-anchored reader.
 function die(msg) {
-  console.error(`${NAME}: ${msg}`);
+  writeSync(2, `\n${NAME}: ${msg}\n`);
   process.exit(2);
 }
 
@@ -36,7 +43,16 @@ function changedFiles(pr) {
       encoding: "utf8",
     });
   } catch (e) {
-    die(`gh pr diff ${pr} failed: ${String(e.stderr || e.message).trim()}`);
+    // Names the cause, never gh's stderr — execFileSync forwarded it already
+    // (no `stdio` above), so interpolating it emits every byte twice, and this
+    // is the biggest payload of the fleet scripts. `e.message` is the same
+    // string, not a fallback: Node builds it as `Command failed:\n<stderr>`.
+    // Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+    die(
+      `gh pr diff ${pr} failed: ${
+        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
+      }`,
+    );
   }
   const files = out.split("\n").map((s) => s.trim()).filter(Boolean);
   // Fail closed: a PR with no changed files is not a legitimate "no overlap"

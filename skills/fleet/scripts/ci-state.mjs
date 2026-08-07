@@ -12,12 +12,19 @@
 // re-query at the moment of decision, which is what this script is for.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 
 const NAME = "ci-state";
 
+// writeSync, not console.error: stderr on a pipe is async and the exit below
+// discards what is still queued, so a large forwarded child stderr swallows
+// this line — the refusal is queued last and dropped first (#176). It also
+// survives --quiet, which is the mode the controller's CI Monitor polls in.
+// The leading newline is load-bearing: writeSync goes straight to the fd while
+// the forwarded child stderr is still draining through the stream, so without
+// it this text lands mid-line and stops matching line-anchored readers.
 function die(msg) {
-  console.error(`${NAME}: ${msg}`);
+  writeSync(2, `\n${NAME}: ${msg}\n`);
   process.exit(2);
 }
 
@@ -43,7 +50,25 @@ function run(cmd, args) {
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
-    die(`${cmd} failed: ${String(e.stderr || e.message).trim()}`);
+    // Names the cause, never the child's stderr — execFileSync forwarded it
+    // already (no `stdio` above), so interpolating it emits every byte twice.
+    // `e.message` is the same string, not a fallback: Node builds it as
+    // `Command failed: <cmd>\n<stderr>`. Three disjoint shapes — Node-aborted
+    // (ENOENT/ENOBUFS), signal, exit (#176).
+    die(`${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);
+  }
+}
+
+// Every gh read in this file is JSON, and a bare JSON.parse of a child's stdout
+// fails OPEN: gh can exit 0 with a non-JSON body (a proxy's HTML error page is
+// the measured case) and the uncaught SyntaxError exits 1 — which in THIS
+// script is the code for not-green, so a crash renders as a CI verdict.
+function runJson(cmd, args) {
+  const raw = run(cmd, args);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${raw.trim().slice(0, 120)}`);
   }
 }
 
@@ -54,9 +79,10 @@ const workflow = arg("workflow") || "CI";
 const workflowFile = arg("workflow-file") || ".github/workflows/ci.yml";
 
 // --- PR facts -------------------------------------------------------------
-const prInfo = JSON.parse(
-  run("gh", ["pr", "view", String(pr), "--json", "headRefName,headRefOid,state,mergeStateStatus"]),
-);
+const prInfo = runJson("gh", [
+  "pr", "view", String(pr),
+  "--json", "headRefName,headRefOid,state,mergeStateStatus",
+]);
 const branch = prInfo.headRefName;
 const prHead = prInfo.headRefOid;
 vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
@@ -103,15 +129,13 @@ vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
 // `--limit 1` is wrong: the newest run on a branch is frequently a label or
 // policy workflow, which hides the CI result entirely. Filter by workflow, then
 // match the head, then take the newest survivor.
-const runs = JSON.parse(
-  run("gh", [
-    "run", "list",
-    "--branch", branch,
-    "--workflow", workflow,
-    "--limit", "30",
-    "--json", "databaseId,headSha,status,conclusion,event,createdAt",
-  ]),
-);
+const runs = runJson("gh", [
+  "run", "list",
+  "--branch", branch,
+  "--workflow", workflow,
+  "--limit", "30",
+  "--json", "databaseId,headSha,status,conclusion,event,createdAt",
+]);
 const matching = runs
   .filter((r) => r.headSha === prHead)
   .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
@@ -132,9 +156,10 @@ if (matching.length === 0) {
   runId = chosen.databaseId;
   // Re-query the run itself. The list's conclusion is a second read from a
   // different moment; the authoritative job list is this one.
-  const view = JSON.parse(
-    run("gh", ["run", "view", String(runId), "--json", "jobs,attempt,status,conclusion,headSha"]),
-  );
+  const view = runJson("gh", [
+    "run", "view", String(runId),
+    "--json", "jobs,attempt,status,conclusion,headSha",
+  ]);
   attempt = view.attempt;
   runHeadSha = view.headSha;
   status = view.status;
@@ -180,7 +205,15 @@ function tryRun(cmd, args) {
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
-    vlog(`    ${NAME}: ${cmd} failed: ${String(e.stderr || e.message).trim()}`);
+    // Same discipline as run(), and it matters more here: --quiet suppresses
+    // vlog entirely, so under the controller's Monitor this line is discarded
+    // and the interpolated stderr would have been paid for and then thrown
+    // away. Name the cause; the child's own bytes already reached the caller.
+    vlog(
+      `    ${NAME}: ${cmd} failed: ${
+        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
+      }`,
+    );
     return null;
   }
 }
