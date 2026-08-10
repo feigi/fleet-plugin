@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeStats } from "./diff-stats.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing it
-// executes the workflow. Both values under test are lifted out of the SOURCE TEXT
+// executes the workflow. Every value under test is lifted out of the SOURCE TEXT
 // instead — the same technique as `review-pr-testcmd.test.mjs:23-33`, and the
 // reason #118 existed: every count claim about `selectDimensions` had to be
 // hand-derived, and two hand-derived comments were wrong.
@@ -18,8 +18,8 @@ import { computeStats } from "./diff-stats.mjs";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
-// Both declarations end at a column-0 terminator and are the only top-level
-// declaration of their name, so these matches are unambiguous.
+// Every declaration below ends at a column-0 terminator and is the only
+// top-level declaration of its name, so these matches are unambiguous.
 function liftFromSource(name) {
   if (name === "DEFAULT_DIMENSIONS") {
     const m = SOURCE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m);
@@ -180,6 +180,15 @@ test("no override leaves the size tier in charge", () => {
   assert.equal(resolveDimensions(null, DEFAULT_DIMENSIONS), null);
 });
 
+// ...but only an ABSENT override does. A falsy-but-present one is a caller
+// error, and falling back to the size tier would silently run a DIFFERENT set
+// than the one that was pinned, with nothing in the log naming the override.
+test("a falsy-but-present override stops the run rather than degrading to the size tier", () => {
+  for (const override of ["", 0, false, NaN]) {
+    assert.throws(() => resolveDimensions(override, DEFAULT_DIMENSIONS), /must be an array/);
+  }
+});
+
 test("an object override behaves as it does today — passed through unchanged", () => {
   const objs = [DEFAULT_DIMENSIONS[0], DEFAULT_DIMENSIONS[2]];
   assert.deepEqual(resolveDimensions(objs, DEFAULT_DIMENSIONS), objs);
@@ -216,6 +225,19 @@ test("an object override missing a required field stops the run and names the fi
     () => resolveDimensions([{}], DEFAULT_DIMENSIONS),
     /missing required field\(s\): key, prompt, agentType/,
   );
+});
+
+// The `!entry ||` half of that same filter is what turns a hole in the array
+// into the named error above instead of an uncaught `TypeError: Cannot read
+// properties of null (reading 'key')`. Every other negative case here passes
+// an object, so nothing else fails when that clause is deleted.
+test("a null or undefined entry stops the run instead of crashing on the field check", () => {
+  for (const entry of [null, undefined]) {
+    assert.throws(
+      () => resolveDimensions([entry], DEFAULT_DIMENSIONS),
+      /missing required field\(s\): key, prompt, agentType/,
+    );
+  }
 });
 
 test("an override resolving to nothing stops the run", () => {

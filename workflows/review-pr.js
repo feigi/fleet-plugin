@@ -400,7 +400,13 @@ function selectDimensions(all, stats) {
 // misconfigured review is worse than no review, because its findings look
 // like findings.
 function resolveDimensions(override, all) {
-  if (!override) return null;
+  // `== null` is exact where `!override` was not: only an ABSENT override
+  // falls through to the size tier. `!override` also swallowed `""`, `0` and
+  // `false`, silently trading a caller's pinned set for the heuristic one —
+  // measured on a `single-file` diff, `dimensions: ""` against a pin of
+  // ["correctness","comments","types"] ran [correctness, silent-failure]
+  // instead. Anything else non-array now reaches the throw below.
+  if (override == null) return null;
   if (!Array.isArray(override))
     throw new Error("review-pr: args.dimensions must be an array of keys or dimension objects");
   const REQUIRED = ["key", "prompt", "agentType"];
