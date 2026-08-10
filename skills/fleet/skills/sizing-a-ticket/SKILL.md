@@ -17,24 +17,23 @@ Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (
 
 **Fleet member on heavy: enter at `superpowers:writing-plans`.**
 `superpowers:brainstorming` is the maintainer-present step — its `<HARD-GATE>`
-waits on user approval no unattended member can get, and a `ready-for-agent`
-ticket's `## Agent Brief` already is that output. Solo session has a user: run the
-full path.
+waits on user approval no unattended member gets, and a `ready-for-agent`
+ticket's `## Agent Brief` already is that output. Solo session has a user: run full path.
 
 Bug reports: `superpowers:systematic-debugging` first, either row.
 
-Report row, path, one line why. **Process depth only** — this skill no longer
-decides admissibility for anyone. Both rows are workable, solo and in the fleet;
-heavy means more process, never a blocked ticket.
+Report row, path, one-line why. **Process depth only** — no admissibility call
+here, for anyone. Both rows workable, solo and in fleet; heavy means more process,
+never blocked ticket.
 
-Tie-break here: torn → take the heavier row. Correct for process depth,
-**opposite** of the fleet's admissibility tie-break, where torn → surface to the
-maintainer. Two questions, two biases. Do not carry this one across.
+Tie-break here: torn → take the heavier row. Right for process depth, **opposite** of
+fleet's admissibility tie-break, where torn → surface to maintainer. Two
+questions, two biases. Never carry this one across.
 
 ## Red flags
 
 - "Body is short, so it's simple" → short bodies hide most design ambiguity. Size by unknowns, not word count.
 - "Brainstorming is overkill here" → that thought is heavy row.
 - "The Agent Brief is thorough, so it's light now" → brief quality never promotes
-  a heavy row *for process depth*. Says nothing about admissibility — a thorough
-  brief is exactly what makes a big ticket safe to run unattended.
+  a heavy row *for process depth*. Says nothing about admissibility — thorough
+  brief is exactly what makes big ticket safe to run unattended.
