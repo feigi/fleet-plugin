@@ -99,6 +99,14 @@ jobs:
       #     without running them; it's also what
       #     skills/fleet/scripts/review-pr-reads.test.mjs:439 already uses to
       #     catch exactly this, reused here rather than reinvented.
+      #     That test pins review-pr.js BY NAME, so for that one file this loop
+      #     is redundant today. The loop is here so workflows/merge-wave.js
+      #     (docs/specs/2026-07-23-fleet-plugin-design.md:151) and successors
+      #     are covered on arrival without a CI edit.
+      #     Exactly ONE top-level `export` is the contract (`meta`, first thing
+      #     in the file), which is why the strip below is `/m` and not `/gm`: a
+      #     second top-level export is a file the harness rejects, and `/gm`
+      #     would green it.
       #   Naively widening the old glob to `*.js` turns this red: node --check
       #   parses workflows/*.js as CJS and dies on its first `export`.
       #   Next person to touch this glob: this is why it isn't `*.js`.
