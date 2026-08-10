@@ -170,11 +170,11 @@ test("only the refuter-backed dimensions carry a model downgrade", () => {
   assert.equal(models.simplify, undefined);
 });
 
-// --- args.dimensions normalization (#113). `skills/fleet/commands/review-
-// and-fix.md:49` documents the override as accepting "keys or dimension
-// objects"; before this, only objects worked and a key array passed through
-// untouched, dereferencing `d.key`, `d.prompt` and `d.agentType` to
-// `undefined` with no throw and no warning.
+// --- args.dimensions normalization (#113). The "Specialists" section of
+// `skills/fleet/commands/review-and-fix.md` documents the override as
+// accepting "keys or dimension objects"; before this, only objects worked and
+// a key array passed through untouched, dereferencing `d.key`, `d.prompt` and
+// `d.agentType` to `undefined` with no throw and no warning.
 test("no override leaves the size tier in charge", () => {
   assert.equal(resolveDimensions(undefined, DEFAULT_DIMENSIONS), null);
   assert.equal(resolveDimensions(null, DEFAULT_DIMENSIONS), null);
