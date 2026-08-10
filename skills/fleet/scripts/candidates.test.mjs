@@ -136,8 +136,10 @@ test("every spec is dropped and named — a filter that stops at the first leaks
 test("a drop line names its pass — a cross-run grep -c must not double-count a spec dropped once", () => {
   // Pins the message SHAPE per pass, not the superset relationship the fixture
   // stub cannot produce (its two fixtures are deliberately disjoint — see the
-  // file header). #12 forces the labeled query empty so the fallback runs, and
-  // #13 in the fallback fixture is a second, unrelated spec dropped there —
+  // file header). #10 is the labeled fixture's sole entry and is a spec, so
+  // dropping it empties the labeled query and the fallback runs. #12 is the
+  // fallback fixture's non-spec row, there so the fallback result is not
+  // itself all specs, and #13 is a second, unrelated spec dropped there —
   // nothing is dropped by both passes here, only that each pass's own drop
   // line is attributable to it.
   const { stderr } = run(
