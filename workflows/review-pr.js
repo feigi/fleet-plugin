@@ -434,7 +434,7 @@ function resolveDimensions(override, all) {
       if (!found) throw new Error(`review-pr: args.dimensions named an unknown key "${entry}"`);
       return found;
     }
-    const missing = REQUIRED.filter((f) => !entry || !entry[f]);
+    const missing = REQUIRED.filter((f) => !entry?.[f]);
     if (missing.length)
       throw new Error(`review-pr: args.dimensions object is missing required field(s): ${missing.join(", ")}`);
     return entry;
