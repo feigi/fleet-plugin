@@ -10,9 +10,9 @@ Env vars in prompt missed five times in one run — including briefed member, an
 
 Snapshot and `./agent-test` solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Symlinking `node_modules` does not help. "I'm on my own copy" is exactly the intuition that skips runner — say both, every time.
 
-## Per-member scratchpad subdirectory
+## Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`
 
-One flat namespace, generic filenames (`b.min.js`, `probe.mjs`) — one agent overwrote sibling's `package.json`. Each member gets own scratchpad subdirectory so throwaway files cannot collide by name.
+One flat namespace, generic filenames (`b.min.js`, `probe.mjs`) — one agent overwrote sibling's `package.json`. Per-member is the wrong axis: refuters are grandchildren, not members, so a per-member rule does not cover the agents that actually collided. And finding ids restart at 1 every review, so two fix-appliers on different PRs both reach for `unv1`. Two levels, and nothing outside them — a probe built a git repo at the *checkout root*. Read from the object store at a pinned ref, write only under own path.
 
 ## IDE/harness diagnostics attribute by bare filename, with no path
 
