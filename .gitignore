@@ -29,6 +29,7 @@ daemon/
 jobs/
 chrome/
 daemon.log
+recall-debug.log
 gh-pr-status-cache.json
 .last-update-result.json
 
