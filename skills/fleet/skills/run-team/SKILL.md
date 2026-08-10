@@ -317,7 +317,10 @@ multi-select**, and **a judgement the evidence cannot settle**.
   heavy jobs are merely `skipped` (behind-count staleness, the normal wave case)
   still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
   reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
-  one only if it genuinely is.
+  one only if it genuinely is. **This edge fires on the fix-applier's own push, so
+  it is exactly where a ruling you still owe it is outstanding — never dispatch off
+  it while you do.** Hand the ruling over, wait for the final report, then
+  dispatch (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -331,7 +334,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
   complete for this repo, so the CI-run-completion edge above never fires and
   waiting for it stalls the whole PR — the same silent-stall shape #111 reported
   before this verdict existed. Dispatch the finisher off the reviewer's final
-  verdict instead, the moment it lands. The finisher's gate is then the
+  verdict instead, the moment it lands — and, same as above, never while you still
+  owe it a ruling. The finisher's gate is then the
   `--declare-no-ci` declaration, not a `check` job: with it, label off the
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. Absence never reads as
@@ -515,8 +519,11 @@ default, so substituting `<testCmd>` with nothing leaves it no gate at all.
 > claim, never your patch.
 >
 > **A test you ADD must kill its own mutant** — break what it pins, confirm it and
-> only it goes red, restore. A green suite says nothing about a new test: one pin
-> this run survived the exact mutation it was named for.
+> only it goes red, restore. **Then a change it should *not* catch, staying
+> green** — else you proved it fails, not that it discriminates: a pin asserting
+> whole-file text clears "it and only it goes red" and still reddens on any edit
+> (measured). A green suite says nothing about a new test: one pin this run
+> survived the exact mutation it was named for.
 >
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal

@@ -189,6 +189,32 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
   );
 });
 
+test("the Phase 3 finisher edges gate on a ruling the controller still owes", () => {
+  // The rule also lives in the narrative finisher section below, but the
+  // controller ACTS from these two bullets, and that is the site that produced
+  // the failure: a ruling handed over after the finisher was already dispatched
+  // put a new commit under a mid-audit finisher. A pin on the narrative copy
+  // alone stays green while the acting site still reads "a member is rarely
+  // still waiting". One bullet each, not the whole loop — the loop slice is
+  // satisfied by either bullet carrying it.
+  // Unwrap first: these are wrapped prose bullets, so a pinned phrase spans a
+  // newline plus indent and an exact-adjacency regex reports a rule that is
+  // right there as missing.
+  const flat = (s) => s.replace(/\s+/g, " ");
+  const ciEdge = flat(section(RUN_TEAM, "- **Monitor: CI run completes**", "- **A fix-applier reports", "run-team CI-completes edge"));
+  assert.match(
+    ciEdge,
+    /never dispatch off it while you do/i,
+    "the CI-completes edge lost the outstanding-ruling gate — it fires on the fix-applier's own push, which is exactly when a ruling is still owed",
+  );
+  const noCiEdge = flat(section(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "- **Pool empty**", "run-team no-ci edge"));
+  assert.match(
+    noCiEdge,
+    /never while you still owe it a ruling/i,
+    "the no-ci edge lost the outstanding-ruling gate — it dispatches off the reviewer's verdict, with the same window open",
+  );
+});
+
 test("review-and-fix agrees the workflow is the controller's default, not its preference", () => {
   const specialists = section(REVIEW_AND_FIX, "## Specialists", "\n## Judging findings", "review-and-fix Specialists");
   // Allow an adverb: /should prefer/ is exact-adjacency and "should generally
