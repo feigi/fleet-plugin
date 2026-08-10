@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -712,4 +712,29 @@ test("a staged change refuses", (t) => {
   const r = audit(c);
   assert.equal(r.status, 1, "the index is not a commit — a rebase does not carry it");
   assert.equal(r.json.clean, false);
+});
+
+// The design spec's script-surface table names this script's payload field by
+// field, and #146 added four fields to it. The table went stale in the same
+// commit that added them — the fix for that is one edited row, and this is the
+// part that keeps the next one from going stale silently. Derived from a real
+// run, never from a hand-written key list: a list typed here drifts from the
+// script exactly the way the table did.
+test("the design spec's script-surface row names every field the payload actually emits", (t) => {
+  const c = repo(t);
+  const r = audit(c);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
+
+  // Word-boundary match, so `worktree` cannot be satisfied by `worktreeRewritten`
+  // sitting elsewhere in the cell — the exact substring trap that would let the
+  // four new flags be dropped again while this test stayed green.
+  const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(row));
+  assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
 });
