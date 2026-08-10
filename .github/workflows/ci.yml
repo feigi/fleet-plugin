@@ -82,13 +82,47 @@ jobs:
       # There is no build: this repo ships .mjs and .sh straight to the runtime.
       # `node --check` is the whole of it — the only thing that catches a syntax
       # error in a script no test imports before a hook runs it for real.
-      # Scoped to `.mjs`, so the two tracked `.js` files are NOT covered.
-      # Widening the glob does not work as-is: workflows/review-pr.js is ESM in
-      # a `.js` file and the repo has no package.json, so `node --check` parses
-      # it as CJS and dies on its first `export`. Verified — it turns this step
-      # red. Tracked as a follow-up rather than papered over here.
       - name: Syntax-check scripts
         run: git ls-files '*.mjs' | xargs -r -n1 node --check
+
+      # The two tracked `.js` files need DIFFERENT invocations, not a wider glob:
+      #   - hooks/statusline.js is an ordinary CommonJS script. `node --check`
+      #     accepts it as-is.
+      #   - workflows/*.js (review-pr.js) is a Workflow-harness script: the
+      #     harness reads `export const meta = …` off it without running it,
+      #     then wraps the REST of the file's body in an async function it
+      #     executes — so the file also has top-level `await`/`return`, legal
+      #     only inside that wrapper. That combination parses as neither a
+      #     module (top-level `return` is always illegal in ESM) nor a plain
+      #     CJS script (the `export`) — `node --check` rejects it either way.
+      #     `new AsyncFunction(...)` is the one thing that compiles both parts
+      #     without running them; it's also what
+      #     skills/fleet/scripts/review-pr-reads.test.mjs:439 already uses to
+      #     catch exactly this, reused here rather than reinvented.
+      #   Naively widening the old glob to `*.js` turns this red: node --check
+      #   parses workflows/*.js as CJS and dies on its first `export`.
+      #   Next person to touch this glob: this is why it isn't `*.js`.
+      - name: Syntax-check .js scripts
+        run: |
+          set -euo pipefail
+          for f in $(git ls-files '*.js'); do
+            case "$f" in
+              workflows/*)
+                node -e '
+                  const fs = require("fs");
+                  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+                  const src = fs.readFileSync(process.argv[1], "utf8");
+                  new AsyncFunction(
+                    "args", "budget", "agent", "parallel", "pipeline", "phase", "log", "workflow",
+                    src.replace(/^export /m, ""),
+                  );
+                ' "$f"
+                ;;
+              *)
+                node --check "$f"
+                ;;
+            esac
+          done
 
       # Exactly two tracked JSON files: settings.json and the fleet plugin
       # manifest. The runtime caches are NOT covered and cannot be — every one
