@@ -77,6 +77,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       writeFileSync(ghPath, GH_STUB);
       chmodSync(ghPath, 0o755);
     }
+    // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
+    // readable at all, and `check`'s stderr stays far under the ~64 KiB pipe
+    // buffer where `console.error` + `process.exit()` starts dropping writes
+    // (measured on candidates.mjs, issue #132) — so these assertions are honest.
     const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "check", ...args, subject], {
       encoding: "utf8",
       env,
@@ -116,6 +120,7 @@ test("an exactly-reworded filed subject is still ALREADY FILED, exit 1", () => {
   assert.equal(r.status, 1);
   assert.equal(r.json.found, true);
   assert.match(r.json.match, /^#114 /);
+  assert.equal(r.json.verdict, "already-filed");
   assert.match(r.stderr, /ALREADY FILED/);
 });
 
@@ -207,7 +212,12 @@ test("an open tracker issue absent from the ledger is reported, not passed as sa
   assert.equal(r.json.tracker.hits[0].number, 114);
   assert.equal(r.json.tracker.hits[0].state, "OPEN");
   assert.equal(typeof r.json.tracker.hits[0].score, "number");
+  assert.equal(r.json.verdict, "tracker-hit");
   assert.match(r.stderr, /TRACKER HIT/);
+  // Order, not just presence: the hits are listed inside the same branch that
+  // prints the count, so a careless edit can emit the summary above the rows it
+  // summarises. Nothing else pins this.
+  assert.match(r.stderr, /TRACKER HIT[\s\S]*tracker issue\(s\) match/, "every hit is listed before the line that counts them");
   assert.doesNotMatch(r.stderr, /ALREADY FILED/, "a tracker hit is not the same claim as a filed row");
 });
 
@@ -215,13 +225,16 @@ test("a clean ledger and a clean tracker is the only path that reads safe, exit 
   const r = run("postgres connection pooling exhausted under load", { filed: [FILED_114], hits: [] });
   assert.equal(r.status, 0);
   assert.equal(r.json.tracker.ok, true);
-  assert.deepEqual(r.json.tracker.hits, []);
+  assert.deepEqual(r.json.tracker.hits, [], "a searched-and-clean tracker reports an empty list, not absent");
+  assert.equal(r.json.verdict, "clean");
 });
 
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghFails: true });
   assert.equal(r.status, 0, "offline must not block filing — it degrades, per the ledger-only answer");
   assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "hits must be absent, not [], on a failure arm — a consumer testing .length must fail loudly, not read this as clean");
+  assert.equal(r.json.verdict, "unverified");
   assert.match(r.json.tracker.error, /\S/, "the failure reason must reach the caller");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   // The exact fail-open this guards: a stderr line that reads like a clean bill
@@ -233,6 +246,8 @@ test("gh missing from PATH entirely degrades the same way", () => {
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], gh: false });
   assert.equal(r.status, 0);
   assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "gh ENOENT is the same failure arm — hits stays absent");
+  assert.equal(r.json.verdict, "unverified");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /^ledger: not previously filed$/m);
 });
@@ -246,7 +261,8 @@ test("gh exiting 0 with unparseable stdout is a failed read, not a clean tracker
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghGarbage: true });
   assert.equal(r.status, 0, "it still degrades rather than blocking the filing");
   assert.equal(r.json.tracker.ok, false, "an unparseable payload is NOT a clean tracker");
-  assert.deepEqual(r.json.tracker.hits, []);
+  assert.equal(r.json.tracker.hits, undefined, "an unread tracker must not be representable as an empty result set");
+  assert.equal(r.json.verdict, "unverified");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /found no related issues/, "never claim the tracker was searched clean");
 });
@@ -269,6 +285,8 @@ test("gh returning JSON of the wrong shape is a failed read, not a tracker hit",
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [1, 2, 3] });
   assert.equal(r.status, 0, "an unreadable answer must not escalate to a tracker hit");
   assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "wrong-shape output is the same failure arm — hits stays absent");
+  assert.equal(r.json.verdict, "unverified");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /TRACKER HIT/);
   assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
@@ -287,6 +305,8 @@ test("a subject with no distinctive terms is never sent as an empty search", () 
   const r = run("the of it", { filed: [], hits: [HIT_114] });
   assert.equal(r.ghRan, false);
   assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "the no-distinctive-terms arm is the other construction site for `tracker` — hits stays absent there too");
+  assert.equal(r.json.verdict, "unverified");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.equal(r.status, 0);
 });
