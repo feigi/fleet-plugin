@@ -232,13 +232,19 @@ function refuseIfCapped(rows, description) {
 // 2's bail tests, and heavy is explicitly never a bail reason (run-team:180).
 // Change to-spec's template and this predicate goes with it, or a member
 // implements an entire spec as one ticket.
-function dropSpecs(rows) {
+// `pass` names which query the drop came from — required, not defaulted: the
+// fallback runs only when the labeled query emptied out, so in production the
+// unfiltered query is a SUPERSET of the labeled one, and every spec dropped in
+// pass 1 is dropped again in pass 2. Unattributed, that reads as the same spec
+// counted twice; named, a reader can tell "2 drops, 1 spec, seen both passes"
+// from "2 drops, 2 specs" at a glance. Deliberately not deduplicated — #133.
+function dropSpecs(rows, pass) {
   const kept = [];
   for (const { spec, ...rest } of rows) {
     if (spec) {
       // "no silent caps" covers drops too — a filtered list that does not say
       // what it filtered is indistinguishable from a complete one.
-      console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (## User Stories)`);
+      console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (## User Stories) [${pass}]`);
     } else {
       kept.push(rest);
     }
@@ -254,7 +260,7 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // emptiness test below, never after: a queue whose every row was filtered out
 // IS an empty queue — see #60. Telling that case apart from a genuinely empty
 // one, for a caller reading only the exit code, is #64 and still open.
-rows = dropSpecs(rows);
+rows = dropSpecs(rows, requireLabel ? `label:${requireLabel}` : "unfiltered");
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
@@ -264,7 +270,7 @@ if (rows.length === 0 && allowFallback && requireLabel) {
   // After refuseIfCapped for the same reason as above; the emptiness half does
   // not transfer, as no gate follows this one. The call must exist because the
   // fallback's rows arrive raw and nothing downstream drops a spec.
-  rows = dropSpecs(rows);
+  rows = dropSpecs(rows, "unfiltered (fallback)");
 }
 
 // FIFO among survivors. Issue number is monotonic in creation order, so this
