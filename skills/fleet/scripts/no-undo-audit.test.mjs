@@ -309,6 +309,37 @@ test("a plain conflicting path names the commits at risk", (t) => {
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
 });
 
+// #146: a tab, CR or DEL in a conflicting path used to be replaced with a
+// space, so `conflicts[]` named a file that exists nowhere on disk — this is
+// the case the ticket itself measured. Tab and CR now get JSON short forms
+// and DEL (\177) is not a C0 byte at all, so all three must round-trip, and
+// `conflictsRewritten` must say so.
+test("a conflicting path with a tab, a CR and a DEL round-trips and is not flagged rewritten", (t) => {
+  const path = "has\ttab\rcr\x7fdel.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the real path, byte for byte — this is what a consumer pastes into `git diff --`");
+  assert.deepEqual(r.json.conflictsRewritten, [false], "escaped or preserved, not replaced");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// The other half: a byte with no JSON short form still has to be replaced —
+// unlike tab/CR/DEL, JSON has nowhere to put it — but the payload must now say
+// so, since the runbook step that pastes `conflicts[]` into a diff command must
+// skip exactly this path.
+test("a conflicting path with a byte that has no short form is replaced and flagged rewritten", (t) => {
+  const path = "has\x02bell.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.deepEqual(r.json.conflicts, ["has bell.txt"], "no short form for \\002 — still neutralised to a space");
+  assert.deepEqual(r.json.conflictsRewritten, [true], "and the payload must disclose that it was");
+});
+
 // `--` ends the options, not the pathspec magic, so a real file named
 // `:colon.txt` is parsed as a pathspec expression and matches nothing. Same
 // false safe as the space, reached by a different byte, and `:(literal)` is
@@ -346,6 +377,29 @@ test("a quote, a backslash and a control byte in a commit subject keep the paylo
     r.json.atRisk.some((l) => l.includes('the "quoted" back\\slash   case')),
     `the subject must survive escaping verbatim, the control byte scrubbed to a space; got ${JSON.stringify(r.json.atRisk)}`,
   );
+  assert.deepEqual(r.json.atRiskRewritten, [true, false], "\\001 has no JSON short form — the payload must disclose the scrub");
+});
+
+// #146: tab, CR and DEL in a commit subject get the opposite treatment from
+// \x01 above — two now have JSON short forms and the third is not a C0 byte at
+// all, so all three must round-trip in atRisk[] too, and none may flag the
+// entry as rewritten.
+test("a tab, a CR and a DEL in a commit subject round-trip in atRisk without being flagged rewritten", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: has\ttab\rcr\x7fdel case");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.ok(
+    r.json.atRisk.some((l) => l.includes("has\ttab\rcr\x7fdel case")),
+    `all three bytes must survive verbatim; got ${JSON.stringify(r.json.atRisk)}`,
+  );
+  assert.deepEqual(r.json.atRiskRewritten, [false, false]);
 });
 
 // git accepts `"` in a ref name and every byte but NUL and `/` in a path
@@ -360,6 +414,31 @@ test("a quote in the branch and a backslash in the worktree path keep the payloa
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.branch, 'fix/1-say"hi');
   assert.equal(r.json.worktree, c.w);
+  assert.equal(r.json.branchRewritten, false);
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+// #146, the scalar fields: git forbids control bytes in a ref outright, so
+// `branch` cannot carry one — but `worktree` is a filesystem path, the same
+// vector as the conflicting-path cases above. Tab, CR and DEL must round-trip
+// there too, and a byte with no short form must still be replaced and flagged.
+test("a tab, a CR and a DEL in the worktree path round-trip and are not flagged rewritten", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\ttab\rcr\x7fdel-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "tab, CR and DEL must all survive intact");
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+test("a byte with no short form in the worktree path is replaced and flagged rewritten", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\x02bell-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.worktree, c.w.replace("\x02", " "), "no short form for \\002 — still neutralised to a space");
+  assert.equal(r.json.worktreeRewritten, true, "and the payload must disclose that it was");
 });
 
 // ---------------------------------------------------------------------------

@@ -464,6 +464,44 @@ test("a control character in a worktree path cannot produce an unparseable paylo
   assert.deepEqual(json.hits, ["local"]);
 });
 
+test("a tab, a CR and a DEL in a worktree path round-trip rather than being scrubbed", (t) => {
+  // Same vector as the \001 case above, but the three bytes #146 gives a
+  // different treatment to: tab and CR have JSON short forms and DEL (\177) is
+  // not a C0 byte at all, so — unlike \001 — none of the three may reach the
+  // space-scrub, and the field must not be marked rewritten.
+  const { repo, env } = fixture(t, 88, {});
+  const name = "fix-88-a\tb\rc\x7fd";
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+
+  const r = spawnSync("sh", [SCRIPT, "88"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name)),
+    `tab, CR and DEL must all survive intact, got ${json.evidence.worktree}`);
+  assert.equal(json.evidence.worktreeRewritten, false, "escaped or preserved, not replaced");
+  assert.equal(r.status, 1);
+  assert.deepEqual(json.hits, ["local"]);
+});
+
+test("a byte with no JSON short form in a worktree path is replaced and flagged rewritten", (t) => {
+  // The \001 case above already pins the neutralising itself; this pins the
+  // other half of #146 — that the payload discloses it, so a consumer reading
+  // `evidence.worktree` back cannot mistake the neutralised string for the real
+  // name on disk.
+  const { repo, env } = fixture(t, 66, {});
+  const name = "fix-66-c\x02x";
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
+
+  const r = spawnSync("sh", [SCRIPT, "66"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name.replace("\x02", " "))),
+    `no short form for \\002 — still neutralised to a space, got ${json.evidence.worktree}`);
+  assert.equal(json.evidence.worktreeRewritten, true, "and the payload must disclose that it was");
+  assert.equal(r.status, 1);
+  assert.deepEqual(json.hits, ["local"]);
+});
+
 test("a quote in a remote branch cannot produce an unparseable payload", (t) => {
   // The third reachable vector, and the one the two cases above cannot reach:
   // the name is a ref like the local-branch case, but it arrives through probe
