@@ -185,8 +185,37 @@ fi
 # member ran. This script runs once, before the rebase, so it has no baseline.
 #
 # Never pop, drop or apply an entry this process did not create.
-stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
-echo "    stash entries (repo-global, not gated): $stash" >&2
+#
+# The count above is only honest when the list can be trusted, and it cannot
+# always be. `git stash list` prints nothing at rc 0 for a reflog this process
+# cannot read (`chmod 000 .git/logs/refs/stash`, measured) and prints nothing
+# at rc 1 for a corrupted stash ref (`fatal: bad object refs/stash`, measured)
+# — neither is distinguishable from a genuinely empty stash by the list alone,
+# and `0` is the one value the runbook reads as nothing to look at.
+# `rev-parse --verify --quiet refs/stash` answers a different question — does
+# the ref resolve at all — and it still says yes in both broken cases (the ref
+# itself is fine; only what it points at, or the log behind it, is not), while
+# a genuinely empty stash has no ref either. That disagreement is what makes
+# zero and unknown separable; a plain exit-status guard on `stash list` cannot
+# make it, because the reflog-unreadable case never fails.
+#
+# This does not close every unreadable reflog: one that is merely TRUNCATED —
+# some entries lost, the rest still parses — resolves the ref and returns a
+# nonempty list, so the cross-check sees no disagreement and reports the
+# (too-low) count as exact. That gap is the remaining ceiling.
+stash_list=$(git -C "$wt" stash list 2>/dev/null) || stash_list=""
+if [ -z "$stash_list" ]; then
+  if git -C "$wt" rev-parse --verify --quiet refs/stash >/dev/null 2>&1; then
+    stash=null
+    echo "    stash entries (repo-global, not gated): unknown — refs/stash resolves but the list came back empty (unreadable or corrupted reflog)" >&2
+  else
+    stash=0
+    echo "    stash entries (repo-global, not gated): $stash" >&2
+  fi
+else
+  stash=$(printf '%s\n' "$stash_list" | wc -l | tr -d ' ')
+  echo "    stash entries (repo-global, not gated): $stash" >&2
+fi
 
 # 2. Which files would conflict.
 #
