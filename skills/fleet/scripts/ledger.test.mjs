@@ -77,6 +77,15 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       writeFileSync(ghPath, GH_STUB);
       chmodSync(ghPath, 0o755);
     }
+    // No `stdio` override — spawnSync's default is a real OS pipe, not a TTY,
+    // and it blocks until the child's fd closes. That is what makes `r.stderr`
+    // an honest check of the #152 warning: on a pipe, `console.error` is async
+    // and a following `process.exit()` can truncate it before the write lands
+    // (measured on candidates.mjs, PR #222/#132) — a TTY write is synchronous
+    // and would hide exactly that loss. `check`'s stderr here stays far under
+    // the ~64 KiB threshold that provokes it (tracker.error capped at 500
+    // chars, hits capped at 5, near capped at 3), so this suite cannot trip
+    // the hazard either way — but the capture path is the right one regardless.
     const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "check", ...args, subject], {
       encoding: "utf8",
       env,
