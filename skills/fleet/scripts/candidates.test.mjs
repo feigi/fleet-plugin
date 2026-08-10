@@ -154,6 +154,29 @@ test("a drop line names its pass — an untagged drop cannot be attributed to th
   assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered \(fallback\)\]/);
 });
 
+
+test("a drop from the no-label run is tagged [unfiltered] — the one pass tag no other test reaches", () => {
+  // Every other run() in this file passes --require-label, so the pass-1
+  // ternary always takes its `label:` arm and the `unfiltered` arm is
+  // unpinned: rename it to anything and the whole suite stays green. Both
+  // documented callers do pass the flag (next-ticket/SKILL.md:15,
+  // run-team/SKILL.md:60), so this arm is reachable only by a hand-run — but
+  // it is a supported invocation, and its tag is what tells a reader which
+  // query dropped what. Two rows, not one: the spec supplies the drop line,
+  // the ticket keeps the queue non-empty so this exits 0, not the empty-queue 1.
+  const { status, stderr, rows } = run(
+    [
+      ticket(10, "## User Stories\n\n1. As a user…\n", ["ready-for-human"]),
+      ticket(11, "## What to build\n\nx\n", ["ready-for-human"]),
+    ],
+    [],
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+  // The closing `\]` is load-bearing: without it this is also satisfied by the
+  // fallback pass's `[unfiltered (fallback)]`, the one tag already pinned above.
+  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered\]/);
+});
 test("near misses are kept — the predicate's shape is specified, not accidental", () => {
   // One fixture per dimension the regex commits to. Without these, every
   // loosening of the heading match still passes: the dropped fixture differs
