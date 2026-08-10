@@ -558,12 +558,25 @@ per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
 drops `jobs`. Normal path, not only kill-recovery.
 
 **`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
-to gate on, and that is not a third way to skip the wait. Re-run it with
-`--declare-no-ci`: present in the payload → this repo's declared gate is the
-reviewer's own `testCmd` run, label off that. Absent → halt here, same as a
-dirty worktree: report `no CI configured, no --declare-no-ci on record` and add
-no label. An undeclared no-ci repo is indistinguishable from one whose CI is
-merely misconfigured, which is exactly the case that must never ship silently.
+to gate on, and that is not a third way to skip the wait. **The
+`--declare-no-ci` declaration is caller-side, and reading it back out of the
+payload verifies nothing**: the flag is echoed into `reasons` and flips the exit
+code, so re-running with it and finding it there confirms only that you passed
+it. Passing it yourself is not a second opinion. Check the two facts it stands
+for instead:
+
+1. `ci-state.mjs` **without** the flag still reads `verdict: "no-ci"`. A repo
+   whose CI is merely misconfigured — workflow files present under other names,
+   or `.github/workflows/` unreadable — exits 2 there rather than reading no-ci,
+   so this is the check that separates real absence from misconfiguration, the
+   case that must never ship silently.
+2. The reviewer's own final verdict reports a green `testCmd` run on the SHA it
+   pushed. `review-and-fix.md` step 3 requires it to, and that run is the only
+   gate this repo actually has.
+
+Both → add the label, and say it rests on the reviewer's suite run, not on CI.
+Either missing → halt here, same as a dirty worktree: report `no CI configured,
+no verified suite run on record` and add no label.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the

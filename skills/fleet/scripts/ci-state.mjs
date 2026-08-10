@@ -107,51 +107,106 @@ vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prI
 // cannot settle by itself: two workflow files sharing a name.
 const WORKFLOWS_DIR = ".github/workflows";
 
+// Anchored to the repo root, never to the cwd. Every other fact in this script
+// comes from `gh`, which resolves the repo from any depth, so a cwd-relative
+// read made the SAME repo answer `no-ci` from a subdirectory while answering
+// not-green from its root — and board.mjs spawns this with whatever cwd the
+// cockpit happens to have. `git rev-parse` is a local read, so anchoring costs
+// no REST call (#262). A root we cannot locate is exit 2, never `no-ci`:
+// absence has to be established, and failing to find the root establishes
+// nothing at all. Called only when discovery actually runs — an explicit
+// --workflow-file answers the question without a repo root and must not die
+// for want of one.
+function workflowsPath() {
+  const root = tryRun("git", ["rev-parse", "--show-toplevel"])?.trim();
+  if (!root) {
+    die(`git rev-parse --show-toplevel failed — cannot locate ${WORKFLOWS_DIR}/ to answer whether this repo has CI`);
+  }
+  return `${root}/${WORKFLOWS_DIR}`;
+}
+
+// Returns the workflow's path, or null ONLY where this repo genuinely has no
+// CI: no workflows directory, or a directory holding no YAML at all. Every
+// other outcome is die() (exit 2, "could not be answered") — the directory
+// unreadable, the target unreadable, or YAML present under other names. #111's
+// whole point is that absence must be DECLARED, never inferred from an error:
+// a repo whose CI is merely misconfigured must never read as one with no CI.
 function discoverWorkflowFile(dir, workflowName) {
   let entries;
   try {
     entries = readdirSync(dir);
-  } catch {
-    return null; // no workflows directory at all — no CI configured
+  } catch (e) {
+    // ENOENT is the one and only condition that means "no CI configured".
+    // EACCES, ENOTDIR, ELOOP and friends all mean the directory is there and
+    // we could not read it — unanswerable, exactly like the unreadable
+    // workflow file below. The bare `catch` this replaced relabelled every one
+    // of them `no-ci`, so a `chmod 000` on .github/workflows/ reported no-CI
+    // for a repo whose CI run was `failure` — and exit 0 under --declare-no-ci.
+    if (e.code === "ENOENT") return null;
+    die(`cannot read ${dir}: ${e.message}`);
   }
   const candidates = [];
+  const yamls = [];
+  const unreadable = [];
   for (const f of entries) {
     if (!/\.ya?ml$/.test(f)) continue;
     const path = `${dir}/${f}`;
+    yamls.push(f);
     let text;
     try {
       text = readFileSync(path, "utf8");
     } catch (e) {
-      // Fail closed, same as expectedJobs() below on the explicit-path case.
-      // Silently skipping would let a permission-broken workflow file read as
-      // "no CI configured" — exactly the misconfigured-CI case the no-ci
-      // verdict must never be confused with (issue #111).
-      die(`cannot read ${path}: ${e.message}`);
+      // NOT fatal on the spot: this entry may be an unrelated sibling, and
+      // dying on it blinds discovery to a target sitting readable right next
+      // to it (one chmod-000 workflow made a green repo exit 2). Fail closed
+      // only if nothing matched — then this file is the one that might have
+      // been the CI workflow. The ambiguity check below sees readable files
+      // only, so an unreadable second `CI` is invisible; a matched target wins.
+      unreadable.push(`${path}: ${e.message}`);
+      continue;
     }
     // Top-level `name:` only (column 0) — a job's own `name:` step is indented
-    // and expectedJobs() below already treats that as a different concern.
-    const m = text.match(/^name:\s*(.+?)\s*$/m);
+    // and expectedJobs() below already treats that as a different concern. The
+    // optional ` #…` tail is a YAML comment, not part of the name: without it
+    // `name: CI  # main pipeline` parsed as a workflow called `CI  # main
+    // pipeline`, so a correctly configured repo reported no-ci. ` #` with the
+    // space is what makes it a comment in YAML, so `name: CI#1` stays `CI#1`.
+    const m = text.match(/^name:\s*(.+?)(?:\s+#.*)?\s*$/m);
     const name = m ? m[1].replace(/^['"]|['"]$/g, "") : null;
     if (name === workflowName) candidates.push(path);
   }
-  if (candidates.length === 0) return null; // files exist, none is this workflow — still no CI configured
   if (candidates.length > 1) {
     die(
       `${candidates.length} workflow files under ${dir}/ are named '${workflowName}' (${candidates.join(", ")}) — pass --workflow-file to pick one`,
     );
   }
-  return candidates[0];
+  if (candidates.length === 1) return candidates[0];
+  if (unreadable.length) {
+    // Nothing matched, so an unreadable file could have been the match.
+    die(`cannot read ${unreadable.join("; ")}`);
+  }
+  if (yamls.length) {
+    // Workflows ARE configured here, just none under this name: a --workflow /
+    // --workflow-file mismatch, not an absence. Saying "no CI configured" of a
+    // directory full of workflows is a false statement, and letting
+    // --declare-no-ci wave it through would hand the caller exit 0 for a repo
+    // whose CI it never looked at.
+    die(
+      `${yamls.length} workflow file(s) under ${dir}/ (${yamls.join(", ")}), none named '${workflowName}' — pass --workflow <name> or --workflow-file <path>`,
+    );
+  }
+  return null; // directory present, no workflow files in it — genuinely no CI
 }
 
-const workflowFile = arg("workflow-file") || discoverWorkflowFile(WORKFLOWS_DIR, workflow);
-// No workflow found under that name anywhere in the directory: this repo has
-// no CI configured for ci-state to read. That is its own verdict (`no-ci`),
-// never the exit code reserved for "the question could not be answered" — a
-// workflow file that exists but is unreadable or malformed still dies below,
-// unchanged, via expectedJobs().
+const workflowFile = arg("workflow-file") || discoverWorkflowFile(workflowsPath(), workflow);
+// No workflows at all, so this repo has no CI configured for ci-state to read.
+// That is its own verdict (`no-ci`), never the exit code reserved for "the
+// question could not be answered" — every way of failing to READ a workflow
+// (unreadable directory, unreadable file, malformed file) dies with exit 2
+// instead, above or via expectedJobs() below.
 const noCi = workflowFile === null;
 if (noCi) {
-  vlog(`    no workflow named '${workflow}' found under ${WORKFLOWS_DIR}/ — no-ci verdict`);
+  vlog(`    no workflow files under ${WORKFLOWS_DIR}/ — no-ci verdict`);
 }
 
 // --- Expected jobs, derived from the workflow file ------------------------
@@ -212,8 +267,8 @@ let conclusion = null;
 if (noCi) {
   reasons.push(
     declareNoCi
-      ? `no ${workflow} workflow configured under ${WORKFLOWS_DIR}/ — --declare-no-ci passed, gating on the caller's verified suite run instead`
-      : `no ${workflow} workflow configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
+      ? `no workflows configured under ${WORKFLOWS_DIR}/ — --declare-no-ci passed, gating on the caller's verified suite run instead`
+      : `no workflows configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
   );
 } else {
   const runs = runJson("gh", [

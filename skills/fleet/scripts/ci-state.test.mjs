@@ -8,14 +8,16 @@
 // `gh` is stubbed on PATH and logs every call it receives, so a test can
 // assert `run list`/`run view` were never reached under no-ci — the point of
 // skipping them (#262's REST budget) is unverifiable without that log. `git`
-// is real: the repo fixture is never an actual git repo, so `git remote
-// get-url origin` fails on its own and the behind-count block degrades to
-// `null`, exactly the path it already has a contract for.
+// is real, and the repo fixture IS `git init`-ed: discovery anchors itself to
+// `git rev-parse --show-toplevel`, so a non-repo fixture would exit 2 before
+// reaching any of this. No `origin` is added, so `git remote get-url origin`
+// still fails on its own and the behind-count block degrades to `null`,
+// exactly the path it already has a contract for.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,18 +53,26 @@ const RUN_VIEW = JSON.stringify({
   headSha: PR_HEAD,
 });
 
-// repoFiles: { "relative/path": "content" }, written under a fresh cwd. gh
-// responses default to the green fixtures above; pass `null` to make that gh
+// repoFiles: { "relative/path": "content" }, written under a fresh cwd.
+// unreadable: repo-relative files OR directories chmod'ed 0o000 for the run and
+// restored after, so a permission probe cannot leave an undeletable tmpdir.
+// cwd: repo-relative directory to run from, for the repo-root anchoring test.
+// gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
+  // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
+  // never the cwd, so the fixture has to be a real repo. No remote is added:
+  // the behind-count block still degrades to null as before.
+  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
   const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
   for (const [rel, content] of Object.entries(repoFiles)) {
     const full = join(repoDir, rel);
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content);
   }
+  mkdirSync(join(repoDir, cwd), { recursive: true });
   const gh = join(binDir, "gh");
   writeFileSync(gh, GH_STUB);
   chmodSync(gh, 0o755);
@@ -83,7 +93,18 @@ function run(args, { repoFiles = {}, prView = PR_VIEW, runList = RUN_LIST, runVi
     RUN_LIST_FILE: fixtureFile("run-list.json", runList),
     RUN_VIEW_FILE: fixtureFile("run-view.json", runView),
   };
-  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", ...args], { cwd: repoDir, encoding: "utf8", env });
+  const restore = [];
+  for (const rel of unreadable) {
+    const full = join(repoDir, rel);
+    restore.push([full, statSync(full).mode & 0o777]);
+    chmodSync(full, 0o000);
+  }
+  let r;
+  try {
+    r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
+  } finally {
+    for (const [full, mode] of restore.reverse()) chmodSync(full, mode);
+  }
   const log = readFileSync(ghLog, "utf8");
   const payload = r.stdout.trim() ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
   rmSync(repoDir, { recursive: true, force: true });
@@ -186,6 +207,7 @@ test("explicit --workflow-file bypasses discovery; an unreadable target still di
 test("discovery-time unreadable candidate fails closed (exit 2) instead of reading as no-ci", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads every file");
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
+  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" }); // discovery anchors on the repo root
   const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
   const wfDir = join(repoDir, ".github", "workflows");
   mkdirSync(wfDir, { recursive: true });
@@ -218,4 +240,125 @@ test("discovery-time unreadable candidate fails closed (exit 2) instead of readi
     rmSync(repoDir, { recursive: true, force: true });
     rmSync(binDir, { recursive: true, force: true });
   }
+});
+
+// --- Error policy (#111): only a genuinely absent workflow set is `no-ci` ---
+// The verdict must be reachable one way only: `.github/workflows/` absent, or
+// present and holding no workflow files. Every other outcome — the directory
+// unreadable, the target unreadable, files present under other names — is exit
+// 2, "the question could not be answered", and `--declare-no-ci` must not
+// convert any of them to exit 0. The four tests below pin one branch each,
+// because the first review of this file reached merge with two of them wrong.
+
+const CI_WORKFLOW_COMMENTED = CI_WORKFLOW.replace("name: CI", `name: "CI"  # main pipeline`);
+
+test("unreadable .github/workflows directory: exit 2, never no-ci — --declare-no-ci cannot wave it through", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  for (const args of [[], ["--declare-no-ci"]]) {
+    // Same repo, same real CI: only the directory's mode differs. Reading this
+    // as no-ci reported "no CI configured" for a repo whose run was `failure`.
+    const r = run(args, {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      unreadable: [".github/workflows"],
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read/);
+    assert.equal(r.payload, null);
+  }
+});
+
+test("workflow name with a trailing YAML comment (and quotes) still matches — a configured repo never reads as no-ci", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW_COMMENTED } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+});
+
+test("workflow files present but none named CI: exit 2 naming them, never a declarable no-ci", () => {
+  for (const args of [[], ["--declare-no-ci"]]) {
+    const r = run(args, {
+      repoFiles: {
+        ".github/workflows/rebase-check-refresh.yml": OTHER_WORKFLOW,
+        ".github/workflows/release.yml": OTHER_WORKFLOW.replace("Refresh rebase-check", "Release"),
+      },
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /none named 'CI'/);
+    assert.match(r.stderr, /rebase-check-refresh\.yml/);
+    // The false statement this replaced: "no workflows configured under
+    // .github/workflows/" said of a directory full of workflows.
+    assert.doesNotMatch(r.stderr, /no workflows configured/);
+  }
+});
+
+test("an unreadable irrelevant sibling does not blind discovery to a readable target", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every file");
+  const r = run([], {
+    repoFiles: {
+      ".github/workflows/ci.yml": CI_WORKFLOW,
+      ".github/workflows/zz-other.yml": OTHER_WORKFLOW,
+    },
+    unreadable: [".github/workflows/zz-other.yml"],
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+});
+
+test("discovery is anchored to the repo root, not the cwd — a subdirectory answers the same", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    cwd: "skills/fleet/scripts",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+});
+
+// --- The not-green detectors, one negative case each ------------------------
+// Every fixture above is green, so the four `reasons.push` branches this PR
+// relocated into the `else` arm were never entered: deleting any one of them
+// left the whole suite passing, and each deletion is a silent false green
+// reaching board.mjs's mapCi() and the merge bot's gate. The relocation itself
+// was covered; the detectors' true branches were not.
+
+const TWO_JOB_WORKFLOW = `name: CI
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+`;
+
+const notGreen = (overrides, repoFiles = { ".github/workflows/ci.yml": CI_WORKFLOW }) =>
+  run([], { repoFiles, runView: JSON.stringify({ ...JSON.parse(RUN_VIEW), ...overrides }) });
+
+test("run bound to another commit: not-green, exit 1 — the cancelled-run-on-a-superseded-SHA case", () => {
+  const r = notGreen({ headSha: "0000000" });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /run headSha 0000000 != PR head abc123def/);
+});
+
+test("run still in progress: not-green, exit 1 — an incomplete run is not a pass", () => {
+  const r = notGreen({ status: "in_progress" });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /run status is in_progress, not completed/);
+});
+
+test("expected job absent from the run: not-green, exit 1 — an absent job reads as pending, never as green", () => {
+  const r = notGreen({}, { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /expected jobs absent from the run: integration/);
+});
+
+test("`skipped` is not `passed`: a skipped job is not-green, exit 1", () => {
+  const r = notGreen({ jobs: [{ name: "check", status: "completed", conclusion: "skipped" }] });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /job check is skipped, not success/);
 });
