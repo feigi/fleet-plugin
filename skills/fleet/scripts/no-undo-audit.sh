@@ -185,8 +185,46 @@ fi
 # member ran. This script runs once, before the rebase, so it has no baseline.
 #
 # Never pop, drop or apply an entry this process did not create.
+#
+# The count above is only honest when the list can be trusted, and it cannot
+# always be. `git stash list` prints nothing at rc 0 for a reflog this process
+# cannot read (`chmod 000 .git/logs/refs/stash`), nothing at rc 1 for a stash
+# ref whose object is gone (`fatal: bad object refs/stash`), and nothing at rc 0
+# again for a `refs/stash` FILE this process cannot read (`chmod 000
+# .git/refs/stash`) — all measured, and none distinguishable from a genuinely
+# empty stash by the list alone, while `0` is the one value the runbook reads as
+# nothing to look at.
+#
+# `show-ref` is the discriminator because its exit code separates "no such ref"
+# from "could not read the ref". Measured, git 2.50.1:
+#
+#   state                | stash list   | show-ref | verdict
+#   healthy, entries     | rc0 nonempty | rc0      | the count
+#   genuinely empty      | rc0 empty    | rc1      | 0
+#   unreadable reflog    | rc0 empty    | rc0      | unknown
+#   stash object gone    | rc1 empty    | rc128    | unknown
+#   unreadable ref file  | rc0 empty    | rc128    | unknown
+#
+# rc 1 is genuine absence and nothing else, so `-ne 1` is the whole test.
+# `rev-parse --verify --quiet` cannot do this job: it returns 1 for the
+# unreadable ref FILE for the same reason the list is empty, collapsing that
+# case onto the genuinely-empty branch and printing a confident `0` with a real
+# entry on the stack. A plain exit-status guard on `stash list` cannot do it
+# either, because neither reflog case fails.
+#
+# This does not close every unreadable reflog: one that is merely TRUNCATED —
+# some entries lost, the rest still parses — resolves the ref and returns a
+# nonempty list, so the cross-check sees no disagreement and reports the
+# (too-low) count as exact. That gap is the remaining ceiling.
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
-echo "    stash entries (repo-global, not gated): $stash" >&2
+sr_rc=0
+git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
+if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
+  stash=null
+  echo "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)" >&2
+else
+  echo "    stash entries (repo-global, not gated): $stash" >&2
+fi
 
 # 2. Which files would conflict.
 #
@@ -288,7 +326,8 @@ fi
 
 # `$wt` is a filename, so it admits both `"` and `\`; git accepts `"` in a ref
 # name, so `$branch` admits one too. `$clean` and `$stash` are this script's own
-# boolean and a digit count, and the four arrays arrive escaped already.
+# boolean and a digit count (or the literal `null` when the count is unknown),
+# and the four arrays arrive escaped already.
 # `*Rewritten` says which of the paired values lost bytes to the space-scrub
 # above and so is not safe to treat as the real path or ref — most concretely,
 # not safe to hand to `git diff -- <path>` in the no-undo-audit runbook step.

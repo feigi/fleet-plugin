@@ -243,6 +243,77 @@ test("a clean worktree with no stash passes", (t) => {
   assert.equal(r.json.stash, 0);
 });
 
+// #147: `git stash list` prints nothing at rc 0 when the reflog behind
+// `refs/stash` cannot be read — no error to catch, so this used to report
+// `stash: 0`, indistinguishable from the case right above, where there really
+// is nothing. `show-ref` still finds `refs/stash` here (rc 0), which is what
+// tells the two apart.
+test("stash entries present but the reflog is unreadable reports unknown, not zero", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+  chmodSync(join(c.w, ".git", "logs", "refs", "stash"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "an unreadable reflog must report unknown, not the zero this used to silently report");
+  assert.match(r.stderr, /unknown/);
+});
+
+// The third trap, and the one a `rev-parse --verify` cross-check cannot see:
+// the `refs/stash` FILE itself unreadable. The list comes back empty at rc 0
+// exactly as above, but this time the ref does not resolve either — so
+// rev-parse takes the genuinely-empty branch and prints the confident `0`
+// that #147 exists to remove. `show-ref` returns 1 only for a ref that is
+// genuinely ABSENT, and 128 for one that is there but unreadable, which is
+// what keeps the two apart.
+test("stash entries present but refs/stash is unreadable reports unknown, not zero", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+  chmodSync(join(c.w, ".git", "refs", "stash"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "an unreadable refs/stash must report unknown, not the zero a rev-parse cross-check reports");
+  assert.match(r.stderr, /unknown/);
+});
+
+// The second, different trap: a corrupted stash ref (missing object) makes
+// `git stash list` itself fail — `fatal: bad object refs/stash`, rc 1 — but
+// the pipeline's exit status was always `wc`'s, never git's, so an rc capture
+// on the old pipeline would not have caught this either. `show-ref` fails
+// here at rc 128 rather than the rc 1 that means genuinely absent, so the
+// same cross-check catches this case too.
+test("a corrupted stash ref reports unknown, not zero", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero");
+  assert.match(r.stderr, /unknown/);
+});
+
+// The count stays reported-only, even at "unknown" — the dirty check is the
+// sole gate, and an unreadable reflog must not mask it either.
+test("a dirty worktree refuses even when the stash is unknown", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  chmodSync(join(c.w, ".git", "logs", "refs", "stash"), 0o000);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "unknown must not mask the dirty check, in either direction");
+  assert.equal(r.json.clean, false);
+  assert.equal(r.json.stash, null);
+});
+
 // `clean` is now the sole gate, so a `git status` that fails must not read as a
 // clean worktree. It used to have an accidental backstop: a repo holding any
 // stash refused anyway, whatever `status` did. That backstop left with the gate.
