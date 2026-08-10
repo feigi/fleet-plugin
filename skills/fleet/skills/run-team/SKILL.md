@@ -327,6 +327,15 @@ multi-select**, and **a judgement the evidence cannot settle**.
   refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
   not wait for an event** governs here too, not only implementer refill.
+- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
+  complete for this repo, so the CI-run-completion edge above never fires and
+  waiting for it stalls the whole PR — the same silent-stall shape #111 reported
+  before this verdict existed. Dispatch the finisher off the reviewer's final
+  verdict instead, the moment it lands. The finisher's gate is then the
+  `--declare-no-ci` declaration, not a `check` job: with it, label off the
+  reviewer's verified suite run; **without it, do not label** — report that this
+  repo has no CI configured and no declaration, and stop. Absence never reads as
+  pass. See `review-and-fix.md` step 6.
 - **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
   guard here once three or more `class=routine` PRs have been ruled since the
   last check; nothing else in the loop owns it.
@@ -525,8 +534,9 @@ Observed once: a finisher halted on a tree the reviewer had legitimately re-edit
 after its verdict. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
-fine) dispatch a **finisher** — a fresh small agent, not the fix-applier resumed.
-Its duties, in this order:
+fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
+**finisher** — a fresh small agent, not the fix-applier resumed. Its duties, in
+this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
    it. Dirty or diverged halts the finisher *here*, before the label: it reports
@@ -546,6 +556,27 @@ Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
 drops `jobs`. Normal path, not only kill-recovery.
+
+**`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
+to gate on, and that is not a third way to skip the wait. **The
+`--declare-no-ci` declaration is caller-side, and reading it back out of the
+payload verifies nothing**: the flag is echoed into `reasons` and flips the exit
+code, so re-running with it and finding it there confirms only that you passed
+it. Passing it yourself is not a second opinion. Check the two facts it stands
+for instead:
+
+1. `ci-state.mjs` **without** the flag still reads `verdict: "no-ci"`. A repo
+   whose CI is merely misconfigured — workflow files present under other names,
+   or `.github/workflows/` unreadable — exits 2 there rather than reading no-ci,
+   so this is the check that separates real absence from misconfiguration, the
+   case that must never ship silently.
+2. The reviewer's own final verdict reports a green `testCmd` run on the SHA it
+   pushed. `review-and-fix.md` step 3 requires it to, and that run is the only
+   gate this repo actually has.
+
+Both → add the label, and say it rests on the reviewer's suite run, not on CI.
+Either missing → halt here, same as a dirty worktree: report `no CI configured,
+no verified suite run on record` and add no label.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the

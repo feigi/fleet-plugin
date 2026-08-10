@@ -23,6 +23,18 @@ test("mapCi: still-running → unknown (never a false red)", () => {
 test("mapCi: no run yet (status null) → unknown, not red", () => {
   assert.equal(mapCi(JSON.stringify({ status: null, verdict: "not-green" })), "unknown");
 });
+// ci-state.mjs (#111) added verdict: "no-ci" for a repo with no workflow
+// configured. mapCi has no branch for that string, so what protects the board
+// is the trailing `return "unknown"` — and only a payload that gets PAST the
+// status gate can reach it. A real no-ci payload carries status null, which the
+// gate swallows two lines earlier; written that way this test took the same
+// branch as its sibling above and stayed green while `verdict === "no-ci"` was
+// mutated to return "green". `status: "completed"` is the whole pin: it is the
+// shape that reaches the last line, so a silent no-ci→green mapping fails here
+// and nowhere else.
+test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped", () => {
+  assert.equal(mapCi(JSON.stringify({ status: "completed", verdict: "no-ci" })), "unknown");
+});
 test("mapCi: null or unparseable input → unknown", () => {
   assert.equal(mapCi(null), "unknown");
   assert.equal(mapCi("not json"), "unknown");
