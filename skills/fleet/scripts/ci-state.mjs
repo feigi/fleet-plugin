@@ -12,7 +12,7 @@
 // re-query at the moment of decision, which is what this script is for.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeSync } from "node:fs";
+import { readdirSync, readFileSync, writeSync } from "node:fs";
 
 const NAME = "ci-state";
 
@@ -73,10 +73,20 @@ function runJson(cmd, args) {
 }
 
 const pr = arg("pr");
-if (!pr) die("usage: ci-state.mjs --pr <number> [--base main] [--workflow CI] [--workflow-file <path>] [--quiet]");
+if (!pr) {
+  die(
+    "usage: ci-state.mjs --pr <number> [--base main] [--workflow CI] " +
+      "[--workflow-file <path>] [--declare-no-ci] [--quiet]",
+  );
+}
 const base = arg("base") || "main";
 const workflow = arg("workflow") || "CI";
-const workflowFile = arg("workflow-file") || ".github/workflows/ci.yml";
+// --declare-no-ci is the caller's opt-out, never inferred: without it, a repo
+// with no workflow file yields verdict=no-ci but still exits non-zero (#111),
+// so absence never silently reads as pass. Fits the argv-flag surface every
+// other option here already uses, rather than a repo-committed marker file
+// that would sit uncommitted or drift stale.
+const declareNoCi = has("declare-no-ci");
 
 // --- PR facts -------------------------------------------------------------
 const prInfo = runJson("gh", [
@@ -86,6 +96,63 @@ const prInfo = runJson("gh", [
 const branch = prInfo.headRefName;
 const prHead = prInfo.headRefOid;
 vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
+
+// --- Workflow file: discovered, not assumed --------------------------------
+// A hard-coded `.github/workflows/ci.yml` default made every fleet CI read
+// exit 2 the moment a repo's workflow had a different filename — no caller
+// anywhere passed --workflow-file to work around it (#111). Locate the file
+// by the SAME workflow identity `--workflow` already selects runs by (default
+// "CI"), read off disk rather than another `gh api` round trip (#262 budget).
+// --workflow-file stays as the explicit override for the one case discovery
+// cannot settle by itself: two workflow files sharing a name.
+const WORKFLOWS_DIR = ".github/workflows";
+
+function discoverWorkflowFile(dir, workflowName) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null; // no workflows directory at all — no CI configured
+  }
+  const candidates = [];
+  for (const f of entries) {
+    if (!/\.ya?ml$/.test(f)) continue;
+    const path = `${dir}/${f}`;
+    let text;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (e) {
+      // Fail closed, same as expectedJobs() below on the explicit-path case.
+      // Silently skipping would let a permission-broken workflow file read as
+      // "no CI configured" — exactly the misconfigured-CI case the no-ci
+      // verdict must never be confused with (issue #111).
+      die(`cannot read ${path}: ${e.message}`);
+    }
+    // Top-level `name:` only (column 0) — a job's own `name:` step is indented
+    // and expectedJobs() below already treats that as a different concern.
+    const m = text.match(/^name:\s*(.+?)\s*$/m);
+    const name = m ? m[1].replace(/^['"]|['"]$/g, "") : null;
+    if (name === workflowName) candidates.push(path);
+  }
+  if (candidates.length === 0) return null; // files exist, none is this workflow — still no CI configured
+  if (candidates.length > 1) {
+    die(
+      `${candidates.length} workflow files under ${dir}/ are named '${workflowName}' (${candidates.join(", ")}) — pass --workflow-file to pick one`,
+    );
+  }
+  return candidates[0];
+}
+
+const workflowFile = arg("workflow-file") || discoverWorkflowFile(WORKFLOWS_DIR, workflow);
+// No workflow found under that name anywhere in the directory: this repo has
+// no CI configured for ci-state to read. That is its own verdict (`no-ci`),
+// never the exit code reserved for "the question could not be answered" — a
+// workflow file that exists but is unreadable or malformed still dies below,
+// unchanged, via expectedJobs().
+const noCi = workflowFile === null;
+if (noCi) {
+  vlog(`    no workflow named '${workflow}' found under ${WORKFLOWS_DIR}/ — no-ci verdict`);
+}
 
 // --- Expected jobs, derived from the workflow file ------------------------
 // Never hardcoded. The fleet's prose names four jobs; the workflow defines five.
@@ -122,24 +189,17 @@ function expectedJobs(file) {
   return ids;
 }
 
-const expected = expectedJobs(workflowFile);
-vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
+const expected = noCi ? [] : expectedJobs(workflowFile);
+if (!noCi) vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
 
 // --- Find the run bound to this head --------------------------------------
 // `--limit 1` is wrong: the newest run on a branch is frequently a label or
 // policy workflow, which hides the CI result entirely. Filter by workflow, then
 // match the head, then take the newest survivor.
-const runs = runJson("gh", [
-  "run", "list",
-  "--branch", branch,
-  "--workflow", workflow,
-  "--limit", "30",
-  "--json", "databaseId,headSha,status,conclusion,event,createdAt",
-]);
-const matching = runs
-  .filter((r) => r.headSha === prHead)
-  .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
-
+//
+// Skipped entirely under no-ci: there is no workflow to bind a run to, and
+// asking anyway would spend the REST budget #262 is already tight on for a
+// question this repo cannot answer either way.
 const reasons = [];
 let jobs = [];
 let missing = [];
@@ -149,43 +209,62 @@ let runHeadSha = null;
 let status = null;
 let conclusion = null;
 
-if (matching.length === 0) {
-  reasons.push(`no ${workflow} run whose headSha equals the PR head ${prHead}`);
+if (noCi) {
+  reasons.push(
+    declareNoCi
+      ? `no ${workflow} workflow configured under ${WORKFLOWS_DIR}/ — --declare-no-ci passed, gating on the caller's verified suite run instead`
+      : `no ${workflow} workflow configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
+  );
 } else {
-  const chosen = matching[0];
-  runId = chosen.databaseId;
-  // Re-query the run itself. The list's conclusion is a second read from a
-  // different moment; the authoritative job list is this one.
-  const view = runJson("gh", [
-    "run", "view", String(runId),
-    "--json", "jobs,attempt,status,conclusion,headSha",
+  const runs = runJson("gh", [
+    "run", "list",
+    "--branch", branch,
+    "--workflow", workflow,
+    "--limit", "30",
+    "--json", "databaseId,headSha,status,conclusion,event,createdAt",
   ]);
-  attempt = view.attempt;
-  runHeadSha = view.headSha;
-  status = view.status;
-  conclusion = view.conclusion;
-  jobs = (view.jobs || []).map((j) => ({
-    name: j.name,
-    status: j.status,
-    conclusion: j.conclusion ?? null,
-  }));
-  for (const j of jobs) vlog(`    ${j.name}: ${j.status}/${j.conclusion ?? "-"}`);
-  vlog(`    attempt=${attempt} runHeadSha=${runHeadSha} status=${status} conclusion=${conclusion}`);
+  const matching = runs
+    .filter((r) => r.headSha === prHead)
+    .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
 
-  if (runHeadSha !== prHead) reasons.push(`run headSha ${runHeadSha} != PR head ${prHead}`);
-  if (status !== "completed") reasons.push(`run status is ${status}, not completed`);
+  if (matching.length === 0) {
+    reasons.push(`no ${workflow} run whose headSha equals the PR head ${prHead}`);
+  } else {
+    const chosen = matching[0];
+    runId = chosen.databaseId;
+    // Re-query the run itself. The list's conclusion is a second read from a
+    // different moment; the authoritative job list is this one.
+    const view = runJson("gh", [
+      "run", "view", String(runId),
+      "--json", "jobs,attempt,status,conclusion,headSha",
+    ]);
+    attempt = view.attempt;
+    runHeadSha = view.headSha;
+    status = view.status;
+    conclusion = view.conclusion;
+    jobs = (view.jobs || []).map((j) => ({
+      name: j.name,
+      status: j.status,
+      conclusion: j.conclusion ?? null,
+    }));
+    for (const j of jobs) vlog(`    ${j.name}: ${j.status}/${j.conclusion ?? "-"}`);
+    vlog(`    attempt=${attempt} runHeadSha=${runHeadSha} status=${status} conclusion=${conclusion}`);
 
-  const present = new Set(jobs.map((j) => j.name));
-  missing = expected.filter((e) => !present.has(e));
-  // An absent job reads as pending and is invisible in a checks summary. This is
-  // the case a force-push creates: the run is cancelled, finished jobs keep their
-  // conclusions, and the missing ones simply never appear.
-  if (missing.length) reasons.push(`expected jobs absent from the run: ${missing.join(", ")}`);
+    if (runHeadSha !== prHead) reasons.push(`run headSha ${runHeadSha} != PR head ${prHead}`);
+    if (status !== "completed") reasons.push(`run status is ${status}, not completed`);
 
-  // `skipped` is NOT `passed`. When the currency check fails, the heavy suites
-  // report skipped — they did not execute.
-  for (const j of jobs) {
-    if (j.conclusion !== "success") reasons.push(`job ${j.name} is ${j.conclusion ?? j.status}, not success`);
+    const present = new Set(jobs.map((j) => j.name));
+    missing = expected.filter((e) => !present.has(e));
+    // An absent job reads as pending and is invisible in a checks summary. This is
+    // the case a force-push creates: the run is cancelled, finished jobs keep their
+    // conclusions, and the missing ones simply never appear.
+    if (missing.length) reasons.push(`expected jobs absent from the run: ${missing.join(", ")}`);
+
+    // `skipped` is NOT `passed`. When the currency check fails, the heavy suites
+    // report skipped — they did not execute.
+    for (const j of jobs) {
+      if (j.conclusion !== "success") reasons.push(`job ${j.name} is ${j.conclusion ?? j.status}, not success`);
+    }
   }
 }
 
@@ -251,7 +330,12 @@ if (behind === null) {
   vlog(`    ${NAME}: behind-count unknown (reported as null; verdict unaffected)`);
 }
 
-const verdict = reasons.length === 0 ? "green" : "not-green";
+// no-ci is its own verdict, distinguishable from both green and not-green —
+// board.mjs's mapCi() and any other caller that reads `verdict` by string
+// value sees "no-ci" rather than either, so it cannot be silently folded into
+// a pass or a red. reasons.length is never 0 here: the no-ci branch above
+// always pushes exactly one, whichever way --declare-no-ci went.
+const verdict = noCi ? "no-ci" : reasons.length === 0 ? "green" : "not-green";
 console.error(`\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}`);
 
 // Compact, single-line: the consumer is an agent/script parsing JSON, and the
@@ -262,4 +346,12 @@ const payload = { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, st
 if (!quiet) Object.assign(payload, { jobs, missing });
 console.log(JSON.stringify(payload));
 
-process.exit(verdict === "green" ? 0 : 1);
+// Exit vocabulary unchanged: 0 only when the gate is satisfied, 1 when it is
+// not, 2 (via die(), above) only when the question could not be answered at
+// all. no-ci without --declare-no-ci is a satisfiable question with an
+// unsatisfied gate — exit 1, same bucket as not-green, so absence never reads
+// as pass to a caller that checks only the exit code. no-ci WITH the
+// declaration is the caller saying the gate is satisfied elsewhere (their own
+// verified suite run) — exit 0.
+const gateSatisfied = verdict === "green" || (verdict === "no-ci" && declareNoCi);
+process.exit(gateSatisfied ? 0 : 1);
