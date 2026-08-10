@@ -26,7 +26,7 @@ Report row, path, one-line why. **Process depth only** — no admissibility call
 here, for anyone. Both rows workable, solo and in fleet; heavy means more process,
 never blocked ticket.
 
-Tie-break here: torn → heavier row. Right for process depth, **opposite** of
+Tie-break here: torn → take the heavier row. Right for process depth, **opposite** of
 fleet's admissibility tie-break, where torn → surface to maintainer. Two
 questions, two biases. Never carry this one across.
 
