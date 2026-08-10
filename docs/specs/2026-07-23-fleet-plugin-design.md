@@ -157,19 +157,28 @@ Everything inside the plugin addresses siblings via `${CLAUDE_PLUGIN_ROOT}`.
 
 All eleven obey the three rules above.
 
+`Non-zero when` states the exits a script can actually produce, verdicts and
+preconditions alike: a caller cannot act on a verdict while an operational
+failure carries the same code. The codes mean the same thing in every row —
+**0** is the answer that was asked for, **1** is a verdict the caller must act
+on and never an error, **2** is "the question could not be answered" (bad
+argument, no repository, a failed probe or query) and never a finding. A script
+with no verdict to report never exits 1. `ledger.mjs check` mints one further
+code, stated in its own row.
+
 | Script | In | Out | Non-zero when |
 |---|---|---|---|
-| `ci-state.mjs` | `--pr --branch` | `{rid, attempt, headSha, branchHead, prHead, status, jobs[], missing[], behind, verdict}` | not bound-green: head mismatch, run incomplete, expected job absent, any job not `success` |
-| `pr-overlap.mjs` | `--a --b` | `{files[], modules[], dirs[], signal}` | never — it reports, the model rules |
-| `candidates.mjs` | `[--require-label L]` | `[{n,t,l,d}]` | `gh` failure only; empty result is exit 0 with `[]` |
-| `inflight.sh` | `<N>` | `{issue, taken, hits[], evidence}` | exit 1 the ticket is taken; exit 2 the question could not be answered — bad argument, no such issue, not a repository, or a probe failed |
-| `verify-sha.sh` | `<branch> <sha>` | `{reachable, log}` | sha not reachable on branch |
-| `claim-ticket.sh` | `<N> <slug> <type>` | `{worktree, branch, ports, runner}` | lockfile dirty after install, worktree exists, label write failed |
+| `ci-state.mjs` | `--pr --branch` | `{rid, attempt, headSha, branchHead, prHead, status, jobs[], missing[], behind, verdict}` | exit 1 not bound-green: head mismatch, run incomplete, expected job absent, any job not `success`; exit 2 the question could not be answered — bad or missing `--pr`/`--branch`, no such PR, a `gh` or `git` query failed, or output that is not the JSON it asked for |
+| `pr-overlap.mjs` | `--a --b` | `{files[], modules[], dirs[], signal}` | exit 2 only — bad usage, or a query failed and the overlap is therefore unknown; every verdict, `none` included, is exit 0: it reports, the model rules |
+| `candidates.mjs` | `[--require-label L]` | `[{n,t,l,d}]` | exit 1 the query succeeded and no candidate survived — an empty queue, not an error; exit 2 the query cannot be trusted — malformed invocation, `--allow-fallback` without `--require-label`, `gh` failed, or output that is not the shape the `--jq` reduction produces |
+| `inflight.sh` | `<N>` | `{issue, taken, hits[], evidence}` | exit 1 the ticket is taken; exit 2 the question could not be answered — bad argument, no such issue, not a repository, a probe failed, or the verdict could not be written |
+| `verify-sha.sh` | `<branch> <sha>` | `{reachable, log}` | exit 1 the sha is not reachable on `origin/<branch>`; exit 2 the question could not be answered — bad argument, the fetch failed, `origin/<branch>` does not resolve after it, or the sha is not a commit object in this repository |
+| `claim-ticket.sh` | `<N> <slug> <type>` | `{worktree, branch, ports, runner}` | exit 2 only, one code for every refusal — bad argument, not a repository, the worktree or the branch already exists, no lockfile to derive the install command from, no test command to stamp a runner from, and under `--apply` a failed label write, worktree add or install, or a lockfile the install mutated |
 | `no-undo-audit.sh` | `<worktree> <branch>` | `{worktree, worktreeRewritten, branch, branchRewritten, clean, stash, conflicts[], conflictsRewritten[], atRisk[], atRiskRewritten[]}` | exit 1 the worktree is dirty — the stash count is reported, never gated; exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, so git walks up and reports the enclosing repo), a ref that does not resolve, a probe that could not run, or a conflicting path no pathspec can name — and no payload is emitted |
-| `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{proved, preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | exit 1 any gate fails; exit 2 the merge is unreachable, not a merge, or unresolvable |
-| `reap.sh` | `[--apply]` | `{reaped[], kept[{branch,reason}]}` | never — refusals are findings |
-| `worktree-audit.sh` | — | `[{worktree, commits, dirty[]}]` | never |
-| `ledger.mjs` | `set/filed/ruled/read` | row or list | ledger unreadable |
+| `prove-merge.sh` | `<pre> <post> <mergeCommit>` | `{proved, preIsAncestor, postIsAncestor, secondParent, firstParent, parentCount, proofPath, headWasCurrent}` | exit 1 any gate fails — the proof is a "no"; exit 2 the question could not be answered — bad argument, the fetch failed, the base or an argument is not a commit here, the merge is not reachable from the base, or it has no second parent and is therefore not a merge |
+| `reap.sh` | `[--apply]` | `{reaped[], kept[{branch,reason}]}` | exit 2 only — more than one argument, not a repository, the fetch failed, or `${BASE_REF:-origin/main}` does not resolve. A kept branch is a finding at exit 0, refusals included |
+| `worktree-audit.sh` | — | `[{worktree, commits, dirty[]}]` | exit 2 only — not a repository, or `${BASE_REF:-origin/main}` does not resolve. A worktree that is dirty, missing on disk or unreadable is a finding at exit 0 |
+| `ledger.mjs` | `set/filed/ruled/read` | row or list | `check` alone reaches a verdict: exit 1 the subject was already filed in this run, exit 3 this run's ledger is clean but the tracker has matching issues — review before filing. Exit 2 on any subcommand — bad usage, unknown subcommand, `--require-file` with no ledger file, or a ledger that cannot be read or written |
 
 ### The three carrying real risk
 
