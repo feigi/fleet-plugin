@@ -534,8 +534,9 @@ Observed once: a finisher halted on a tree the reviewer had legitimately re-edit
 after its verdict. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
-fine) dispatch a **finisher** — a fresh small agent, not the fix-applier resumed.
-Its duties, in this order:
+fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
+**finisher** — a fresh small agent, not the fix-applier resumed. Its duties, in
+this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
    it. Dirty or diverged halts the finisher *here*, before the label: it reports

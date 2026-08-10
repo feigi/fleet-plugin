@@ -23,6 +23,16 @@ test("mapCi: still-running → unknown (never a false red)", () => {
 test("mapCi: no run yet (status null) → unknown, not red", () => {
   assert.equal(mapCi(JSON.stringify({ status: null, verdict: "not-green" })), "unknown");
 });
+// ci-state.mjs (#111) added verdict: "no-ci" for a repo with no workflow
+// configured. mapCi has no branch for that string, so this pins the fallback
+// it actually hits: status is null for a no-ci payload (no run ever bound),
+// so the status gate above returns "unknown" before the verdict is even read
+// — never a false green, never a false red. If ci-state.mjs ever started
+// stamping a non-null status on a no-ci payload, this is what would catch the
+// unrecognised verdict falling through the LAST line instead.
+test("mapCi: no-ci verdict (no run bound, status null) → unknown, not silently mapped", () => {
+  assert.equal(mapCi(JSON.stringify({ status: null, verdict: "no-ci" })), "unknown");
+});
 test("mapCi: null or unparseable input → unknown", () => {
   assert.equal(mapCi(null), "unknown");
   assert.equal(mapCi("not json"), "unknown");
