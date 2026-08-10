@@ -127,6 +127,12 @@ test("depth-0 fleet roles come off the controller's naming convention", () => {
   assert.equal(classifyRole({ spawnDepth: 0, description: "something else entirely" }), "other");
 });
 
+test("finish-<n> agentType classifies as finisher — the controller's actual naming convention", () => {
+  // run-team dispatches finishers as agentType `finish-<n>` / description
+  // `Finish-label #<n>`, not the literal words "finish pr" or "finisher".
+  assert.equal(classifyRole({ agentType: "finish-436", description: "Finish-label #436" }), "finisher");
+});
+
 test("missing meta never throws — a transcript with no sibling .meta.json still counts", () => {
   assert.equal(classifyRole(undefined), "other");
   assert.equal(classifyRole({}), "other");

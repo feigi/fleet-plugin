@@ -43,7 +43,7 @@ export function classifyRole(meta) {
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
   if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
-  if (/finish pr|finisher/.test(hay)) return "finisher";
+  if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return "other";
 }
