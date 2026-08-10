@@ -229,6 +229,47 @@ test("runner: a vendored test under a nested node_modules does not run", () => {
   assert.match(r.stdout, /^(?:ℹ|#) pass 4$/m);
 });
 
+// The point of `-prune` over a path filter: content under `node_modules` is
+// excluded from the run either way, so its readability cannot change the
+// verdict. An unreadable directory *in* it used to still fail `find` and trip
+// the guard above — a loud but pointless stall. Pruning skips descending
+// `node_modules` entirely, so this directory's permissions are never even
+// read. `pass 3` (not `pass 4` or a refusal) pins that: same count as the
+// bare "t" case, proving the vendored content was excluded from the run, not
+// included and passing.
+test("runner: an unreadable directory under node_modules no longer refuses the suite", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply(SUITE);
+  const locked = join(a.wt, "t", "node_modules", "locked");
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, "v.test.mjs"), PASSES);
+  chmodSync(locked, 0o000);
+  try {
+    const r = a.run("t");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
+});
+
+// Same directory name, different spelling of the argument. The shipped
+// `-not -path '*/node_modules/*'` filter needed a `/` before `node_modules`
+// to match, so a bare vendored argument leaked its files while the
+// dot-prefixed spelling of the same directory did not. `-name node_modules
+// -prune` matches on the directory's own name, so both spellings expand to
+// nothing and both refuse identically.
+test("runner: a vendored directory argument refuses however it is spelled", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
+  writeFileSync(join(a.wt, "node_modules", "v.test.mjs"), PASSES);
+  for (const spelling of ["node_modules", "./node_modules"]) {
+    const r = a.run(spelling);
+    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /no test files under/);
+  }
+});
+
 // Directories are only rewritten for `node --test`. Every other entrypoint is
 // somebody else's runner, and vitest and jest take a directory as a filter
 // against their own naming conventions, which need not be this regex.

@@ -149,9 +149,19 @@ for arg do
     # code passing. Node refuses an argv path only when its relative form
     # starts with \`node_modules/\` — a deeper segment or an absolute path runs,
     # and in a mixed argv the refused ones are dropped silently — so this
-    # filter, not node, is what keeps vendored tests out. It is deliberately
-    # not a \`-prune\`: pruning skips the walk, and the readability check above
-    # would stop seeing an unreadable directory under \`node_modules\`.
+    # walk, not node, is what keeps vendored tests out.
+    # \`-name node_modules -prune\` skips descending it rather than filtering
+    # its output after the fact: an unreadable directory under \`node_modules\`
+    # can no longer flip find's exit status, so the readability check above
+    # stops refusing a whole suite over content that was excluded regardless.
+    # Measured against the previously-shipped \`-not -path '*/node_modules/*'\`:
+    # that form still descends \`node_modules\` — an unreadable directory in
+    # there still fails it, identically to one in our own code — and it only
+    # catches a dot-prefixed argument, since the path glob needs a \`/\` before
+    # \`node_modules\` to match: \`find node_modules -type f -not -path
+    # '*/node_modules/*'\` leaked vendored files that \`find ./node_modules ...\`
+    # did not. \`-prune\` matches the directory's own name rather than a path
+    # substring, so both spellings of a vendored argument now prune alike.
     # The trailing slash is what lets a symlinked directory through. \`[ -d ]\`
     # above follows symlinks and find does not descend a symlinked *argument*,
     # so without it the two disagree on one target: the branch admits the
@@ -159,12 +169,12 @@ for arg do
     # suite that is right there. \`find -L\` would agree with \`[ -d ]\` too, but
     # by following symlinks *inside* the tree as well — sweeping in vendored
     # code reached through a symlink named anything other than
-    # \`node_modules\`, which the \`-not -path\` filter cannot catch: it matches
-    # the path find prints, and that path holds no \`node_modules\`. On a
-    # cycle the platforms then disagree: GNU find exits 1, which the \`||\`
-    # below reports as an unreadable directory, while BSD find skips it
-    # silently. The slash settles the argument alone.
-    found=\$(find "\$arg/" -type f -not -path '*/node_modules/*') || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    # \`node_modules\`, which \`-name node_modules -prune\` cannot catch either:
+    # it matches on the directory's name, and a symlink named anything else
+    # never has it. On a cycle the platforms then disagree: GNU find exits 1,
+    # which the \`||\` below reports as an unreadable directory, while BSD find
+    # skips it silently. The slash settles the argument alone.
+    found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here and the refusal below would
