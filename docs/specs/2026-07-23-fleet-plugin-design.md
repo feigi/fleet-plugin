@@ -360,6 +360,15 @@ instead of trusting it. Deliberately historical rows — describing another
 document *as it stood* — keep their numbers and name the ref those numbers were
 measured at.
 
+Sweep the whole directory for this class with:
+
+```
+$ grep -rnoE '(`|[A-Za-z0-9_./-]+):[0-9]+(-[0-9]+)?' docs/specs/
+```
+
+Run at `5cd42be` it returns 161 hits across five of the six specs; #117
+classified every one and re-anchored this document's nine live ones.
+
 Line numbers in the **Site** column of both tables in this section, and in the
 prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
 record of what was wrong, not pointers into the current files — resolve them at
