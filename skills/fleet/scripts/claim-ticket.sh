@@ -107,8 +107,18 @@ else
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
   # not pass them down. Anyone who finds the worktree finds the runner.
+  #
+  # The runner is written once at claim time and never rewritten (#124), so an
+  # old worktree can be sitting on a runner a later template fix never
+  # reached. This stamp does not detect or fix that — nothing reads it,
+  # nothing refuses on a mismatch — it only makes staleness legible: diff the
+  # stamp against a fresh `cksum` of this script to see if they match. A
+  # content hash of the script IS the template, so it changes exactly when
+  # the template does and stays put otherwise.
+  tmpl_stamp=$(cksum "$0" | cut -d' ' -f1)
   cat > "$runner" <<SH
 #!/bin/sh
+# agent-test template: $tmpl_stamp
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
 SH
 

@@ -298,6 +298,56 @@ test("runner: the npm entrypoint is emitted without the directory shim", () => {
   assert.doesNotMatch(text, /no test files under/);
 });
 
+// #124: the runner is written once at claim time and never rewritten, so an
+// old worktree can hold a runner a later template fix never reached. Nothing
+// in the file said which template produced it — this pins the fix, on both
+// entrypoint forms, since the stamp line is emitted before the branch that
+// tells them apart.
+const STAMP_RE = /^# agent-test template: (\S+)$/m;
+
+test("runner: carries a template stamp on the npm entrypoint", () => {
+  const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
+  assert.match(text, STAMP_RE);
+});
+
+test("runner: carries a template stamp on the node --test entrypoint", () => {
+  const { text } = apply(SUITE);
+  assert.match(text, STAMP_RE);
+});
+
+// Same script, two claims — the stamp is a property of the template, not the
+// instance, so it must not vary with the issue number, ports, or install
+// command baked into the rest of the file.
+test("runner: the stamp is stable across claims of the same template", () => {
+  const a = apply(SUITE).text.match(STAMP_RE)[1];
+  const b = apply(SUITE).text.match(STAMP_RE)[1];
+  assert.equal(a, b);
+});
+
+// The other half: point a claim at a byte-for-byte-different copy of the
+// script and the stamp must move. Copying rather than editing the real
+// script in place keeps this test from mutating the file under test.
+test("runner: the stamp changes when the template's content changes", () => {
+  const before = apply(SUITE).text.match(STAMP_RE)[1];
+
+  const editedScript = join(mkdtempSync(join(tmpdir(), "claim-script-")), "claim-ticket.sh");
+  writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
+  chmodSync(editedScript, 0o755);
+
+  const dir = repo(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const r = spawnSync("sh", [editedScript, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const after = readFileSync(join(dir, ".worktrees", "42-slug", "agent-test"), "utf8").match(STAMP_RE)[1];
+
+  assert.notEqual(after, before);
+});
+
 // Every row of the install matrix. `true` is the no-op: nothing to install.
 for (const [name, files, want] of [
   ["lockfile wins", { "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" }, "npm ci"],
