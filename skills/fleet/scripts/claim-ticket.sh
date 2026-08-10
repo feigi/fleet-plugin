@@ -53,23 +53,21 @@ else die "origin/main declares $ndeps dependencies but has no lockfile — refus
 fi
 echo "    lockfile → install: $install" >&2
 
-# One shape for "is a test file", shared by the emit guard below and by the
-# directory expansion in the runner it writes. Separate copies would drift,
-# and the two disagreeing means a directory the guard counted as a suite
-# expands to nothing at run time.
+# One shape for "is a test file", fed into the directory-expansion shim the
+# runner writes below (a shell string at RUN time, not a git query, so it
+# cannot simply call derive-testcmd.sh for this value). Kept in sync BY HAND
+# with derive-testcmd.sh's own copy, which the emit guard below now defers to.
 testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 
-# The runner runs the repo's own test entrypoint. Both guesses are unsafe when
-# wrong: `npm test` with no `test` script fails with an npm error that reads
-# like a broken worktree, and `node --test` with no test files exits 0 — a
-# runner that passes vacuously is worse than one that is dead, because the
-# review fan-out consumes it as a green suite. Refuse rather than guess.
-if printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit((p.scripts||{}).test?0:1)' 2>/dev/null; then
-  testcmd="npm test --"
-elif git ls-tree -r --name-only origin/main | grep -qE "$testfile_re"; then
-  testcmd="node --test"
-else
-  die "origin/main has no scripts.test and no test files — refusing to emit a runner that would pass vacuously"
+# The runner runs the repo's own test entrypoint. The inference itself — a
+# manifest test script, else a direct test-file run, else refuse rather than
+# emit a runner that would pass vacuously — is NOT reimplemented here: it lives
+# once in derive-testcmd.sh, reused by review-pr.js's snapshot agent for the
+# same decision against a reviewed repo's HEAD (#142). A second copy is what
+# drifts.
+script_dir=$(dirname -- "$0")
+if ! testcmd=$("$script_dir/derive-testcmd.sh" . origin/main); then
+  die "$testcmd"
 fi
 echo "    test entrypoint → $testcmd" >&2
 
