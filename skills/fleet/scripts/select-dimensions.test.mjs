@@ -227,10 +227,10 @@ test("an object override missing a required field stops the run and names the fi
   );
 });
 
-// The `!entry ||` half of that same filter is what turns a hole in the array
-// into the named error above instead of an uncaught `TypeError: Cannot read
-// properties of null (reading 'key')`. Every other negative case here passes
-// an object, so nothing else fails when that clause is deleted.
+// The `?.` in `!entry?.[f]` is what turns a hole in the array into the named
+// error above instead of an uncaught `TypeError: Cannot read properties of
+// null (reading 'key')`. Every other negative case here passes an object, so
+// nothing else fails when that `?.` is dropped.
 test("a null or undefined entry stops the run instead of crashing on the field check", () => {
   for (const entry of [null, undefined]) {
     assert.throws(
