@@ -12,8 +12,9 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 Merge bot is at most one, not configurable.
 
 Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
-war story behind each rule lives in `references/`; load one only when a member
-needs the *why*.
+war story behind a rule ending `See references/<file>` lives in that file; load
+it only when a member needs the *why*. A rule without that line carries its
+reasoning inline — nothing is missing.
 
 ## Rules that fail silently
 
@@ -160,7 +161,7 @@ isolation runner in one serial pass. Infer branch/worktree convention from
 
 **Infer `<install>` — never default to `npm install`.** A lockfile-mutating
 install in a throwaway worktree corrupts it for everyone; the script derives the
-frozen form from the lockfile and refuses to guess. See references/isolation.md.
+frozen form from the lockfile and refuses to guess.
 
 **Materialize the isolation envelope as a file, not a briefing.** The script
 writes `.worktrees/<N>-slug/agent-test` (ports derived from `<N>`, so collisions
@@ -545,7 +546,6 @@ Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
 drops `jobs`. Normal path, not only kill-recovery.
-See references/ci-and-staleness.md.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the
