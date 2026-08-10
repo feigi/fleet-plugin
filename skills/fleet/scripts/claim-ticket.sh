@@ -65,8 +65,18 @@ testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 # once in derive-testcmd.sh, reused by review-pr.js's snapshot agent for the
 # same decision against a reviewed repo's HEAD (#142). A second copy is what
 # drifts.
+#
+# `2>&1`, exactly as the install probe above does at its own capture: the
+# script's refusal reason travels on its STDERR, and `$(...)` captures stdout
+# only — without the merge `die "$testcmd"` fires with an empty argument and
+# prints the bare line `claim-ticket: `. The reason survives today only
+# because the child's stderr happens to share this terminal; any caller that
+# captures or redirects it gets nothing, and the missing-sibling case (a PATH
+# or symlink invocation where `dirname -- "$0"` is not this directory) is
+# unreadable either way. derive-testcmd.sh writes nothing to stderr when it
+# succeeds, so the success path still captures the command alone.
 script_dir=$(dirname -- "$0")
-if ! testcmd=$("$script_dir/derive-testcmd.sh" . origin/main); then
+if ! testcmd=$("$script_dir/derive-testcmd.sh" . origin/main 2>&1); then
   die "$testcmd"
 fi
 echo "    test entrypoint → $testcmd" >&2

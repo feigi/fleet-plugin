@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
 
 // review-pr.js used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
@@ -20,11 +21,20 @@ import { join } from "node:path";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
+// Every pin below runs against CODE, not SOURCE — the same policy, and now the
+// same stripper, as `review-pr-reads.test.mjs`. Written against raw source,
+// this file's schema-declaration pin was VACUOUS: wrapping the real
+// `testCmd: { type: "string" },` in a `/* */` block left the suite 9 pass / 0
+// fail while `additionalProperties: false` silently dropped the field at
+// runtime, breaking the very derivation #142 adds. The `^\s*` anchor those
+// pins use rejects a leading `//` and nothing else. Measured, #142 review.
+const CODE = stripComments(SOURCE);
+
 // review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
-// so resolveTestCmd is lifted out of the SOURCE TEXT instead — same technique
+// so resolveTestCmd is lifted out of the source text instead — same technique
 // as `select-dimensions.test.mjs` and `review-pr-reads.test.mjs`.
 function liftResolveTestCmd() {
-  const m = SOURCE.match(/^function resolveTestCmd\(explicit, snap\) \{[\s\S]*?^\}$/m);
+  const m = CODE.match(/^function resolveTestCmd\(explicit, snap\) \{[\s\S]*?^\}$/m);
   assert.ok(m, "review-pr.js no longer declares resolveTestCmd(explicit, snap) at top level — update this test");
   return new Function(`${m[0]}\nreturn resolveTestCmd;`)();
 }
@@ -69,14 +79,14 @@ test("an empty-string override is not treated as an explicit command", () => {
 // green while the feature disconnected.
 test("review-pr.js actually calls resolveTestCmd once the snapshot is validated", () => {
   assert.match(
-    SOURCE,
+    CODE,
     /^const testCmd = resolveTestCmd\(A\.testCmd, snap\);$/m,
     "the testCmd call site changed — the derivation may be disconnected",
   );
   // Textually after the snapshot's own validity guard, not before — snap must
   // be known good (or the throw above already fired) before this reads it.
-  const guardAt = SOURCE.indexOf("the snapshot agent returned no tree");
-  const callAt = SOURCE.indexOf("const testCmd = resolveTestCmd(");
+  const guardAt = CODE.indexOf("the snapshot agent returned no tree");
+  const callAt = CODE.indexOf("const testCmd = resolveTestCmd(");
   assert.ok(guardAt !== -1 && callAt !== -1 && callAt > guardAt, "resolveTestCmd is called before snap is validated");
 });
 
@@ -84,7 +94,7 @@ test("review-pr.js actually calls resolveTestCmd once the snapshot is validated"
 // fixes — `A.testCmd || "<literal>"` is the shape it used to take.
 test("no hardcoded testCmd default remains", () => {
   assert.doesNotMatch(
-    SOURCE,
+    CODE,
     /A\.testCmd\s*\|\|\s*"/,
     "a literal testCmd default reappeared — it must come from resolveTestCmd/derive-testcmd.sh instead",
   );
@@ -97,16 +107,27 @@ test("no hardcoded testCmd default remains", () => {
 // token exactly like `review-pr-reads.test.mjs:308-367` records happening to
 // the diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
-  const at = SOURCE.indexOf("const snap = await agent(");
-  const end = SOURCE.indexOf("if (!snap", at);
+  const at = CODE.indexOf("const snap = await agent(");
+  const end = CODE.indexOf("if (!snap", at);
   assert.notEqual(at, -1, "the snapshot agent dispatch moved — update this test");
   assert.notEqual(end, -1, "the snapshot agent's validity guard moved — update this test");
-  const snapshot = SOURCE.slice(at, end);
+  const snapshot = CODE.slice(at, end);
 
   assert.match(
     snapshot,
     /~\/\.claude\/skills\/fleet\/scripts\/derive-testcmd\.sh \$\{worktree\} HEAD/,
     "the snapshot agent no longer runs derive-testcmd.sh",
+  );
+  // Deriving the command is half the job — it also has to RUN where the
+  // specialists are told to run it. `git archive` carries tracked files only,
+  // so `npm test --` (the derivation's first branch, for any repo whose
+  // scripts.test invokes a node_modules binary) exits 127 in the snapshot
+  // while passing in the worktree the derivation was run against. Measured on
+  // a synthetic repo during the #142 review: worktree exit 0, archive exit 127.
+  assert.match(
+    snapshot,
+    /ln -s \$\{worktree\}\/node_modules \$\{scratch\}\/snapshot\/node_modules/,
+    "the snapshot no longer provisions node_modules — a derived `npm test --` cannot run in it",
   );
   // These names live inside a template literal, so each backtick is a
   // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
@@ -146,11 +167,11 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
   // string, so asserting on the slice passes with the prompt gone. Assert the
   // index — and bound the END too: unbounded, this slice ran to EOF and the
   // assertions below were satisfiable from the verifier prompt further down.
-  const at = SOURCE.indexOf("READ ONLY FROM THE SNAPSHOT");
+  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
   assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = SOURCE.indexOf("Scratch files go in", at);
+  const end = CODE.indexOf("Scratch files go in", at);
   assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = SOURCE.slice(at, end);
+  const prompt = CODE.slice(at, end);
   // The worked example must INTERPOLATE testCmd, not restate it. A hardcoded
   // copy drifts from the resolved value the moment either one changes, and a
   // caller passing args.testCmd (or the derivation) would be handed the wrong

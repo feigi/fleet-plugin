@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -132,4 +132,58 @@ test("derives from the given ref, not just the latest commit", () => {
   const atHead = derive(dir, "HEAD");
   assert.equal(atHead.status, 0);
   assert.equal(atHead.out, "node --test");
+});
+
+// A ref this repo cannot list is a DIFFERENT failure from "this ref has no
+// tests", and the refusal has to say which. Piped into `grep -q`, a dying
+// `ls-tree` was swallowed — the pipeline reports grep's status — so a repo
+// that demonstrably HAS test files got the vacuous-pass refusal, naming a
+// cause that is not the cause. review-pr.js forwards this stderr verbatim as
+// `testCmdError`, so the review then refuses for the wrong reason.
+test("a ref that cannot be listed names THAT, not a missing test suite", () => {
+  const dir = repo({ "t.test.mjs": PASSES });
+  const { status, err } = derive(dir, "nosuchref");
+  assert.notEqual(status, 0);
+  assert.match(err, /derive-testcmd: cannot list nosuchref/);
+  assert.doesNotMatch(err, /pass vacuously/);
+});
+
+test("an unborn HEAD names the listing failure too", () => {
+  const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-unborn-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  const { status, err } = derive(dir, "HEAD");
+  assert.notEqual(status, 0);
+  assert.match(err, /derive-testcmd: cannot list HEAD/);
+  assert.doesNotMatch(err, /pass vacuously/);
+});
+
+// A manifest that does not parse is not evidence of a manifest without a test
+// script. Swallowed, this repo's real entrypoint (`vitest run`) was silently
+// replaced by `node --test` and reported as a success — review-pr.js has no
+// install step to trip over the same corruption later, so nothing downstream
+// catches it. claim-ticket.sh already refuses on this same file for the
+// dependency count it reads; both readers now agree.
+test("a manifest that does not parse refuses instead of degrading to node --test", () => {
+  const dir = repo({ "package.json": '{"scripts":{"test":"vitest run"},}', "t.test.mjs": PASSES });
+  const { status, out, err } = derive(dir);
+  assert.notEqual(status, 0);
+  assert.equal(out, "");
+  assert.match(err, /could not read HEAD:package\.json/);
+  assert.doesNotMatch(err, /pass vacuously/);
+});
+
+// The two `testfile_re` literals cannot be one — claim-ticket.sh needs a shell
+// string inside the runner heredoc it writes, not a git query — so the comment
+// on each says "kept in sync by hand". This turns that promise into a checked
+// invariant: adding a suffix to one copy alone previously left all 55 tests in
+// this file, claim-ticket.test.mjs and review-pr-testcmd.test.mjs green, so
+// "does a suite exist at all" could drift from "which files the runner picks
+// up" in silence. Exactly the drift #142 exists to remove for testCmd itself.
+test("derive-testcmd.sh and claim-ticket.sh declare the same testfile_re", () => {
+  const literal = (file) => {
+    const m = readFileSync(join(import.meta.dirname, file), "utf8").match(/^testfile_re=(.+)$/m);
+    assert.ok(m, `${file} no longer declares testfile_re at the start of a line — update this test`);
+    return m[1];
+  };
+  assert.equal(literal("derive-testcmd.sh"), literal("claim-ticket.sh"));
 });

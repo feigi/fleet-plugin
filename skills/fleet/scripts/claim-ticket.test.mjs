@@ -393,9 +393,16 @@ test("runner: no scripts.test but test files present falls back to node --test",
 
 // `node --test` with zero test files exits 0. A runner that passes vacuously is
 // worse than a dead one — the review fan-out consumes it as a green suite.
+// Anchored on THIS script's own prefix, not on `pass vacuously` alone: the
+// nested derive-testcmd.sh writes its reason to a stderr that claim-ticket.sh
+// does not redirect, so the loose form is satisfied by the child's line and
+// stays green while claim-ticket's own `die` prints a bare `claim-ticket: `
+// with nothing after the colon. Anchoring is what makes the capture's `2>&1`
+// a pinned invariant rather than a promise. `.` does not cross a newline, so
+// this matches only when one line carries both.
 test("runner: no scripts.test and no test files refuses rather than passing vacuously", () => {
   const { err } = claim(repo({ "README.md": "" }));
-  assert.match(err, /pass vacuously/);
+  assert.match(err, /claim-ticket: .*pass vacuously/);
 });
 
 // The worktree is built from origin/main, so every probe must read origin/main.

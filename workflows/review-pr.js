@@ -458,6 +458,14 @@ const snap = await agent(
 
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
+    if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
+
+The symlink is not optional. 'git archive' carries TRACKED files only, so the
+snapshot has no node_modules — and the command derived below is 'npm test --'
+for any repo whose scripts.test runs a binary from there, which exits 127 in
+the very tree specialists are told to run it in. Skip it and the derivation is
+validated where the command never runs (#142). No node_modules in the worktree,
+no symlink, nothing to report — that repo does not need one.
 
 Verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
 diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
