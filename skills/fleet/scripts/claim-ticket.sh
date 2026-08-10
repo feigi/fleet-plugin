@@ -112,9 +112,13 @@ else
   # old worktree can be sitting on a runner a later template fix never
   # reached. This stamp does not detect or fix that — nothing reads it,
   # nothing refuses on a mismatch — it only makes staleness legible: diff the
-  # stamp against a fresh `cksum` of this script to see if they match. A
-  # content hash of the script IS the template, so it changes exactly when
-  # the template does and stays put otherwise.
+  # stamp against a fresh `cksum` of this script to see if they match. It is a
+  # checksum of the WHOLE script, not of the emitted template, so it
+  # over-reports: any edit here moves it — a reworded die message, a comment —
+  # while the runner it produces stays byte-identical. The error is one-way,
+  # a runner missing a template fix never reads as fresh, so a match means
+  # fresh and a mismatch means "re-materialize to be sure", not "definitely
+  # stale".
   tmpl_stamp=$(cksum "$0" | cut -d' ' -f1)
   cat > "$runner" <<SH
 #!/bin/sh

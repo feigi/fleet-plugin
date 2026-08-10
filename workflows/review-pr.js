@@ -259,10 +259,11 @@ const worktree = A.worktree;
 // The default has to exist in the SNAPSHOT, which is where specialists are told
 // to run it — not in the worktree. The snapshot is cut with `git archive HEAD`
 // (below), which carries tracked files only, and `agent-test` is written into
-// the worktree by `claim-ticket.sh:110` and added to `.git/info/exclude` at :166
-// — untracked by construction, so it is never in the archive. `./agent-test` as
-// the default therefore handed every specialist `No such file or directory`,
-// and they reasoned from source instead of measuring. These paths are tracked.
+// the worktree by claim-ticket.sh's `cat > "$runner"` heredoc and added to
+// `.git/info/exclude` by the `grep -qx agent-test` line below it — untracked by
+// construction, so it is never in the archive. `./agent-test` as the default
+// therefore handed every specialist `No such file or directory`, and they
+// reasoned from source instead of measuring. These paths are tracked.
 const testCmd = A.testCmd || "node --test skills/fleet/scripts/*.test.mjs";
 // Defaulted, and defaulted PER PR. Undefined it is not caught by the required-
 // args guard below, so `mkdir -p undefined/snapshot` succeeds and every agent

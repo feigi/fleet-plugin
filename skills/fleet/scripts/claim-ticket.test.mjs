@@ -48,11 +48,13 @@ const pkg = (o) => JSON.stringify(o);
 // `--apply` labels the issue, so `gh` is stubbed; everything else — the
 // worktree, the install, the exclude file, the runner — is the real thing.
 // The runner is what members actually invoke, so it is what gets asserted on.
-function apply(files) {
+// `script` defaults to the real one; pass a copy to claim from a different
+// template.
+function apply(files, script = SCRIPT) {
   const dir = repo(files);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+  const r = spawnSync("sh", [script, "42", "slug", "fix", "--apply"], {
     cwd: dir,
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -328,22 +330,11 @@ test("runner: the stamp is stable across claims of the same template", () => {
 // script and the stamp must move. Copying rather than editing the real
 // script in place keeps this test from mutating the file under test.
 test("runner: the stamp changes when the template's content changes", () => {
-  const before = apply(SUITE).text.match(STAMP_RE)[1];
-
   const editedScript = join(mkdtempSync(join(tmpdir(), "claim-script-")), "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
-  chmodSync(editedScript, 0o755);
 
-  const dir = repo(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const r = spawnSync("sh", [editedScript, "42", "slug", "fix", "--apply"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  const after = readFileSync(join(dir, ".worktrees", "42-slug", "agent-test"), "utf8").match(STAMP_RE)[1];
+  const after = apply(SUITE, editedScript).text.match(STAMP_RE)[1];
+  const before = apply(SUITE).text.match(STAMP_RE)[1];
 
   assert.notEqual(after, before);
 });
