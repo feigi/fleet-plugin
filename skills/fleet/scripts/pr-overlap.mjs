@@ -6,8 +6,8 @@
 // it" is judgement, and a script that ruled would recreate the blind-obey
 // failure the rule exists to prevent.
 //
-// Exit 0 for every verdict, `none` included. Exit 2 only when a query failed and
-// the answer is therefore unknown.
+// Exit 0 for every verdict, `none` included. Exit 2 when the answer is unknown —
+// bad usage, or a query failed.
 
 import { execFileSync } from "node:child_process";
 import { writeSync } from "node:fs";
