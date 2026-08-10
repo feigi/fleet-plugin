@@ -305,6 +305,102 @@ test("an unknown flag refuses and names it — a flag that is merely ignored run
   assert.match(stderr, /^candidates: Unknown option '--label'/m);
 });
 
+// The test above is satisfied by a guard that only works when the bad flag is
+// FIRST, which is what shipped: the catch tested
+// `e.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"` and dropped every other
+// parseArgs error. That is not a narrower guard but a disabled one. parseArgs
+// stops at the FIRST offending argument, so an argument raising any other code
+// was swallowed and the unknown flag behind it was never reached — the query
+// then ran UNFILTERED at exit 0, which is the whole harm #173 exists to stop.
+//
+// Rows 1-2 are the two masking arguments on their own; rows 3-4 put a real
+// `--label` BEHIND each of them, which is the shape the code test let through
+// and the one no other test in this file covers. All four must refuse before
+// any query — `status` alone is not enough, since exit 2 is also what a broken
+// query produces after gh has already run.
+for (const [what, args, refusal] of [
+  [
+    "a bare positional",
+    ["ready-for-agent"],
+    /^candidates: Unexpected argument 'ready-for-agent'\./m,
+  ],
+  [
+    "a boolean flag handed a =value",
+    ["--allow-fallback=true"],
+    /^candidates: Option '--allow-fallback' does not take an argument/m,
+  ],
+  [
+    "an unknown flag behind a positional",
+    ["junk", "--label", "ready-for-agent"],
+    /^candidates: Unexpected argument 'junk'\./m,
+  ],
+  [
+    "an unknown flag behind a =value boolean",
+    ["--allow-fallback=true", "--label", "ready-for-agent"],
+    /^candidates: Option '--allow-fallback' does not take an argument/m,
+  ],
+]) {
+  test(`${what} refuses before any query — every parseArgs error is a refusal, not just the unknown-name one`, () => {
+    const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], args);
+    assert.equal(queriesRun(stderr), 0);
+    assert.equal(status, 2);
+    // The refusal has to name the OFFENDING argument, not merely the accepted
+    // set: parseArgs reports the first offender, and a caller told only "bad
+    // arguments" cannot tell which of its four tokens was wrong.
+    assert.match(stderr, refusal);
+  });
+}
+
+// `--allow-fallback=true` is silently IGNORED rather than merely unchecked:
+// `has()` compares exactly, so the `=` form never matches and the fallback is
+// disabled without a word. The fixtures below are the arrangement that shows
+// it — the labeled query comes back empty and the unfiltered one has a row —
+// so the flag is the only thing standing between exit 1 and exit 0. Measured
+// on the code-testing version, `--allow-fallback=true` here exited 1 ("queue
+// empty, query fine") for a run that never applied the flag it was handed,
+// while the space-separated spelling exited 0 off the fallback. `notEqual(1)`
+// is therefore the load-bearing assertion, not decoration: it is the exact
+// code the ignored form produced.
+test("--allow-fallback=true never reaches the fallback — a flag has() cannot see must refuse, not be dropped", () => {
+  const { status, stderr } = run(
+    [],
+    ["--require-label", "nonexistent", "--allow-fallback=true"],
+    [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
+  );
+  assert.equal(queriesRun(stderr), 0);
+  assert.notEqual(status, 1);
+  assert.equal(status, 2);
+});
+
+// The control for the test above. Without it, "refuses the = form" is equally
+// satisfied by a guard that refuses `--allow-fallback` in every spelling, which
+// would break the one caller that legitimately passes it
+// (next-ticket/SKILL.md:15). Same fixtures, space-separated: the fallback has
+// to run and ship the unfiltered row at exit 0.
+test("--allow-fallback still falls back in its space-separated spelling — the = refusal is not a blanket one", () => {
+  const { status, stderr, rows } = run(
+    [],
+    ["--require-label", "nonexistent", "--allow-fallback"],
+    [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
+  );
+  assert.equal(queriesRun(stderr), 2);
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [12]);
+});
+
+// The parseArgs call sits BELOW the value guards so their wording wins wherever
+// both would refuse, and ORDER is the only thing that decides that. Node's
+// message for this same argv is "Option '--require-label <value>' argument
+// missing", which names the syntax; #169's names the flag the way every other
+// refusal in this file does. Anchored at both ends so the suffix parseArgs'
+// branch appends cannot satisfy it.
+test("--require-label with no value keeps #169's wording — the name check runs after the value guards", () => {
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label"]);
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label needs a value$/m);
+});
+
 test("gh output that is not an array refuses — a reduction that did not apply is not an empty queue", () => {
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],

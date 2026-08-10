@@ -34,28 +34,6 @@ function die(msg) {
   process.exit(2);
 }
 
-// The accepted flag set, declared once. `parseArgs` enforces the NAMES; the
-// guards below enforce the VALUES.
-//
-// Nothing checked a flag's name until #173: an unrecognised flag was ignored,
-// so `--label ready-for-agent` — the spelling run-team's own phase 0 rule
-// carried — ran the UNFILTERED query at exit 0, the widening `--require-label`
-// exists to prevent. Only the unknown-name error is refused here; `parseArgs`
-// also rejects a missing value, and those spellings are left to `arg()` below,
-// whose refusals are #169's and say more about the harm than Node's do.
-const OPTIONS = {
-  "require-label": { type: "string" },
-  "allow-fallback": { type: "boolean" },
-  "limit": { type: "string" },
-};
-try {
-  parseArgs({ options: OPTIONS, strict: true });
-} catch (e) {
-  if (e.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
-    die(`${e.message} — accepted: ${Object.keys(OPTIONS).map((f) => `--${f}`).join(", ")}`);
-  }
-}
-
 // Refuses here, once, rather than at each call site: a flag given without a
 // value yields `undefined`, and every caller reads a falsy result as "the flag
 // was absent" — `--limit` falls back to 500 past its own positive-integer
@@ -98,6 +76,43 @@ const allowFallback = has("allow-fallback");
 // the fleet and nothing said so.
 const limit = Number(arg("limit") ?? 500);
 if (!Number.isInteger(limit) || limit < 1) die(`--limit must be a positive integer, got '${arg("limit")}'`);
+
+// The accepted flag set, declared once, and the only check on flag NAMES.
+// Nothing checked them until #173: an unrecognised flag was ignored, so
+// `--label ready-for-agent` — the spelling run-team's own phase 0 rule carried
+// — ran the UNFILTERED query at exit 0, the widening `--require-label` exists
+// to prevent.
+//
+// Runs BELOW the value guards, deliberately: where both would refuse — notably
+// `--require-label` and `--limit` given with no value — arriving second leaves
+// the refusal to #169's wording above rather than Node's. Nothing above emits
+// output or runs a query, so refusing this late is still refusing before gh.
+//
+// The catch is unconditional, and THAT is the guard. Testing `e.code` for
+// `ERR_PARSE_ARGS_UNKNOWN_OPTION` is what shipped first and it did not hold.
+// `parseArgs` throws on the FIRST offending argument, so dropping any other
+// code does not narrow the guard, it disables it for every argv where such an
+// argument comes earlier — the unknown flag behind it is never reached. Two
+// other codes were measured on node v26.5.0: ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL
+// for a bare positional, ERR_PARSE_ARGS_INVALID_OPTION_VALUE both for
+// `--boolflag=value` and for a string flag left without its value.
+//
+// Measured on that version: `ready-for-agent`, `junk --label ready-for-agent`
+// and `--allow-fallback=true --label ready-for-agent` each ran the UNFILTERED
+// query at exit 0, while `--label ready-for-agent` and
+// `--require-label x --bogus` both refused. Position is not what decided it —
+// a bad flag last still refused — only whether something earlier threw a code
+// the catch dropped.
+const OPTIONS = {
+  "require-label": { type: "string" },
+  "allow-fallback": { type: "boolean" },
+  "limit": { type: "string" },
+};
+try {
+  parseArgs({ options: OPTIONS, strict: true });
+} catch (e) {
+  die(`${e.message} — accepted: ${Object.keys(OPTIONS).map((f) => `--${f}`).join(", ")}`);
+}
 
 if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without --require-label");
 
