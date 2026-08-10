@@ -14,6 +14,10 @@
 // controller did not spawn directly is a specialist, whatever it calls itself.
 // Then description patterns, which are controller-authored and stable because
 // run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`, `merge-bot-<n>`).
+// The finisher is the exception, and :46 is why this matters: run-team/SKILL.md's
+// naming list does not mention it at all, and both `finish-<n>` and
+// `finisher-pr-<n>` are live. So :46 keys on an OBSERVED convention, not a fixed
+// one — pick a canonical name and document it in both places (#326).
 export function classifyRole(meta) {
   const type = String(meta?.agentType ?? "");
   const desc = String(meta?.description ?? "");
@@ -43,7 +47,7 @@ export function classifyRole(meta) {
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
   if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
-  if (/finish pr|finisher/.test(hay)) return "finisher";
+  if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return "other";
 }
