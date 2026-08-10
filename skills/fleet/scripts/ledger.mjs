@@ -198,7 +198,7 @@ if (cmd === "check") {
   const match = data.filed.find((f) => isMatch(tokenSet(subjectOf(f))));
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
-    console.log(JSON.stringify({ subject, found: true, match }));
+    console.log(JSON.stringify({ subject, found: true, match, verdict: "already-filed" }));
     // Exit 1 means "do not file this again" — the strong signal. Exit 3 is also
     // non-zero but weaker: tracker rows to review, not a ruling. A caller that
     // checks only the exit status stops on both, which errs toward not
@@ -278,7 +278,10 @@ if (cmd === "check") {
   if (terms.length === 0) {
     // An empty --search matches every issue in the repo, which would report
     // every subject as a tracker hit. Not searching is the honest answer.
-    tracker = { ok: false, query: null, hits: [], error: "subject has no distinctive terms to search for" };
+    // `hits` is omitted, not `[]` — the tracker was never read, so an empty
+    // list here would be a claim of cleanliness this branch never earned
+    // (issue #152: a consumer testing `.length` must not read this as clean).
+    tracker = { ok: false, query: null, error: "subject has no distinctive terms to search for" };
   } else {
     try {
       const out = execFileSync(
@@ -321,12 +324,16 @@ if (cmd === "check") {
       // `tracker.error`, which ships on stdout as part of a machine-parsed
       // contract, and a megabyte of gh stderr inside a JSON field is a payload
       // problem wherever the forwarding argument lands.
-      tracker = { ok: false, query, hits: [], error: String(e.stderr || e.message).trim().slice(0, 500) };
+      // `hits` omitted here too, same reason as the no-terms branch above:
+      // the search never ran, so there is no empty result to report.
+      tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
     }
   }
 
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
-  for (const h of tracker.hits) {
+  // `tracker.hits` is absent on both failure arms now — only iterate when the
+  // search actually ran.
+  for (const h of tracker.hits ?? []) {
     console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
   }
   if (!tracker.ok) {
@@ -337,16 +344,22 @@ if (cmd === "check") {
   } else {
     console.error(`${NAME}: not previously filed; tracker search '${query}' found no related issues`);
   }
-  console.log(JSON.stringify({ subject, found: false, match: null, near, tracker }));
+  // Named explicitly so a consumer does not have to reconstruct it from
+  // `tracker.ok` plus `tracker.hits` — issue #152. `!tracker.ok` short-circuits
+  // before `tracker.hits` is read, which is required: hits is absent, not `[]`,
+  // on that branch.
+  const verdict = !tracker.ok ? "unverified" : tracker.hits.length ? "tracker-hit" : "clean";
+  console.log(JSON.stringify({ subject, found: false, match: null, near, tracker, verdict }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
-  // suggestion, not a finding of duplication. Exit 0 covers two states — the
-  // tracker searched and clean, or never searched at all — which `tracker.ok`
-  // and the stderr line distinguish but the exit code does not. A hit scoring
-  // 0.00 still forces 3: gh matched the issue body, which the title-based score
-  // cannot see.
-  process.exit(tracker.hits.length ? 3 : 0);
+  // suggestion, not a finding of duplication. Exit 0 covers two states —
+  // "clean" and "unverified" — which `verdict` now names explicitly but the
+  // exit code deliberately still does not: minting a code for unverified would
+  // break `check "$s" && gh issue create` on every offline run (ruled against
+  // in #152). A hit scoring 0.00 still forces 3: gh matched the issue body,
+  // which the title-based score cannot see.
+  process.exit(tracker.hits?.length ? 3 : 0);
 }
 
 die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
