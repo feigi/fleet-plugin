@@ -235,6 +235,27 @@ re-billed as cache-read each time. Measured over one run, 88 unpiped whole-file
 reads carried 434 KB.`;
 }
 
+// An explicit caller override always wins. Otherwise the command must be
+// DERIVED from the repo under review — this workflow is global config and
+// `worktree` is a caller-supplied argument, so a hardcoded default is either
+// wrong for a foreign repo or vacuous, a glob matching nothing that exits 0
+// reporting `tests 0` (#142). The snapshot agent performs the derivation (see
+// its prompt) by running derive-testcmd.sh — the SAME inference
+// claim-ticket.sh uses, refusal included, reused rather than reinvented here.
+//
+// A derivation this workflow cannot read — the script refused, or the agent
+// never reported `testCmd` — is treated as no derivation: refuse the review
+// outright, never fall back to a guess. `snap.testCmdError` names why when
+// the script itself refused; its absence means the agent never ran or never
+// reported, which is worth saying too.
+function resolveTestCmd(explicit, snap) {
+  if (explicit) return explicit;
+  if (snap && snap.testCmd) return snap.testCmd;
+  throw new Error(
+    `review-pr: no test command for this repository — ${(snap && snap.testCmdError) || "the snapshot agent did not derive one"}. Pass args.testCmd to override.`,
+  );
+}
+
 // `args` can arrive as a JSON STRING rather than an object. Observed twice on
 // this script: every read below returns undefined, and the failure surfaces as
 // the required-args throw at the bottom of this block with `duration_ms: 3` and
@@ -256,15 +277,12 @@ const A = decodeArgs(args);
 const pr = A.pr;
 const branch = A.branch;
 const worktree = A.worktree;
-// The default has to exist in the SNAPSHOT, which is where specialists are told
-// to run it — not in the worktree. The snapshot is cut with `git archive HEAD`
-// (below), which carries tracked files only, and `agent-test` is written into
-// the worktree by claim-ticket.sh's `cat > "$runner"` heredoc and added to
-// `.git/info/exclude` by the `grep -qx agent-test` line below it — untracked by
-// construction, so it is never in the archive. `./agent-test` as the default
-// therefore handed every specialist `No such file or directory`, and they
-// reasoned from source instead of measuring. These paths are tracked.
-const testCmd = A.testCmd || "node --test skills/fleet/scripts/*.test.mjs";
+// testCmd is NOT defaulted here — see resolveTestCmd, called once the
+// snapshot agent has derived it. This workflow is global config and
+// `worktree` is a caller-supplied argument, so any fixed string here is
+// either wrong (a foreign repo has no such path) or vacuous (a glob matching
+// nothing exits 0 reporting `tests 0` — a silent green). The previous default
+// was exactly that everywhere but this repo (#142).
 // Defaulted, and defaulted PER PR. Undefined it is not caught by the required-
 // args guard below, so `mkdir -p undefined/snapshot` succeeds and every agent
 // writes to `undefined/<key>/` relative to whatever cwd it picked — and every
@@ -457,6 +475,16 @@ writes an empty file on failure, so a file existing is not success. Report
 whether the diff is usable, and do not withhold one field because another
 failed: report what you got and let the caller decide.
 
+Then derive this repository's own test command — reusing the SAME inference
+claim-ticket.sh runs at claim time, refusal included, so nothing here
+reinvents it:
+
+    ~/.claude/skills/fleet/scripts/derive-testcmd.sh ${worktree} HEAD
+
+Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
+report \`testCmdError\` = its stderr and omit \`testCmd\` — never invent a
+command of your own when it refuses.
+
 Then size the diff:
 
     ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
@@ -488,6 +516,14 @@ command failed. Do not modify ${worktree}.`,
         diffPath: { type: "string" },
         diffLines: { type: "integer" },
         prHead: { type: "string" },
+        // Derived by this agent running derive-testcmd.sh against the repo
+        // under review — reusing claim-ticket.sh's own entrypoint inference
+        // and its refusal, never a second copy of that logic here (#142).
+        // Omitted when the script refused; testCmdError then carries why.
+        // resolveTestCmd (below) is what decides whether the run can proceed;
+        // this agent only transports the derivation.
+        testCmd: { type: "string" },
+        testCmdError: { type: "string" },
       },
     } },
 );
@@ -502,6 +538,13 @@ if (!snap || !snap.path || !snap.head) {
 }
 
 log(`snapshot ${snap.head} at ${snap.path}`);
+
+// Resolved here, right after snap is known good: everything downstream (the
+// specialist prompt) just interpolates `testCmd`. Throws when neither an
+// override nor a derivation is available — see resolveTestCmd above for why
+// that is a refusal, not a fallback.
+const testCmd = resolveTestCmd(A.testCmd, snap);
+log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
 
 // The diff decision, named in the run log. Without it the whole feature is
 // unobservable: `usableDiff` returning null forever looks identical to a run
