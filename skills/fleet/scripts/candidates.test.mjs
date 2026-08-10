@@ -133,28 +133,6 @@ test("every spec is dropped and named — a filter that stops at the first leaks
   assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #10", "dropped #11"]);
 });
 
-test("a drop line names its pass — an untagged drop cannot be attributed to the query it came from", () => {
-  // Pins the message SHAPE per pass, not the superset relationship the fixture
-  // stub cannot produce (its two fixtures are deliberately disjoint — see the
-  // file header). #10 is the labeled fixture's sole entry and is a spec, so
-  // dropping it empties the labeled query and the fallback runs. #12 is the
-  // fallback fixture's non-spec row, there so the fallback result is not
-  // itself all specs, and #13 is a second, unrelated spec dropped there —
-  // nothing is dropped by both passes here, only that each pass's own drop
-  // line is attributable to it.
-  const { stderr } = run(
-    [ticket(10, "## User Stories\n\n1. As a user…\n")],
-    ["--require-label", "ready-for-agent", "--allow-fallback"],
-    [
-      ticket(12, "## What to build\n\nreal work\n", ["ready-for-human"]),
-      ticket(13, "## User Stories\n\n2. As a user…\n", ["ready-for-human"]),
-    ],
-  );
-  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[label:ready-for-agent\]/);
-  assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered \(fallback\)\]/);
-});
-
-
 test("a drop from the no-label run is tagged [unfiltered] — the one pass tag no other test reaches", () => {
   // Every other run() in this file passes --require-label, so the pass-1
   // ternary always takes its `label:` arm and the `unfiltered` arm is
@@ -232,6 +210,14 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
   // LABELED query the unfiltered fixture: same payload, same status, fallback
   // never entered. The payload alone pins the fixture, never the branch.
   assert.match(stderr, /retrying unfiltered/);
+  // Each pass's drop line is attributable to the query it came from. Swap the
+  // two dropSpecs call-site labels and both lines still print, both still name
+  // a real spec, and nothing else in this file notices — these two asserts are
+  // what tell pass 1's drop from pass 2's. Deliberately not a count: drops are
+  // not deduplicated across passes (candidates.mjs:239, #133), so a raw
+  // `grep -c 'dropped #'` reads 4 here whether or not the tags are present.
+  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[label:ready-for-agent\]/);
+  assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered \(fallback\)\]/);
   // Two queries actually RAN. The announcement above prints before the query,
   // so it pins the branch being entered, never that its answer shipped.
   assert.equal(stderr.match(/^\$ gh /gm).length, 2);
