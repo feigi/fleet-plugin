@@ -12,9 +12,9 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 Merge bot is at most one, not configurable.
 
 Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
-war story behind a rule ending `See references/<file>` lives there; load it only
-when a member needs the *why*. A rule without that line carries its reasoning
-inline — nothing is missing.
+war story behind a rule ending `See references/<file>` lives in that file; load
+it only when a member needs the *why*. A rule without that line carries its
+reasoning inline — nothing is missing.
 
 ## Rules that fail silently
 
