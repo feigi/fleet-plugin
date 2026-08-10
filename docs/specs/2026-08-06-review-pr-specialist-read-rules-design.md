@@ -1,7 +1,9 @@
 # The workflow's specialists have no diff, so they read whole files to find the change
 
-Ticket: #194. Base: `ac110b5`. Suite at base: 262 pass.
-All line references below verified against `ac110b5`.
+Ticket: #194. Written against `ac110b5`; rebased onto `54dd5c6`, where the suite
+is 271 pass. All line references below were verified against `ac110b5` and have
+NOT been re-derived — this branch's own +139 lines in `review-pr.js` shift most
+of them. Read them as "the construct named", not as line numbers.
 
 Closes #194 — and declines the mechanism #194's second comment proposes. See
 **Out of scope**.
@@ -359,8 +361,9 @@ three new fields must be declared or a compliant agent's report is rejected.
 
 ## Testing
 
-`node --test skills/fleet/scripts/*.test.mjs` — 262 at base, 274 after (the ten
-tests above plus the two added during execution).
+`node --test skills/fleet/scripts/*.test.mjs` — 271 at base `54dd5c6`, 290 after.
+Measured, not projected: the count at the ORIGINAL base `ac110b5` was 262, and
+main moved under this branch when #222 merged.
 
 `review-pr-testcmd.test.mjs:98-124` slices the specialist prompt between
 `READ ONLY FROM THE SNAPSHOT` and `Scratch files go in`. Change 2 interpolates

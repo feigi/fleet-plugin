@@ -102,3 +102,19 @@ test("computeStats: loc tolerates a file missing additions/deletions", () => {
   assert.equal(computeStats([{ path: "a.ts" }]).loc, 0);
   assert.equal(computeStats([{ path: "a.ts", additions: 3 }]).loc, 3);
 });
+
+// `gh pr view --json files` pages at 100 and exits 0, so a 124-file PR arrives
+// as a fully-formed 100-file measurement with nothing contradicting it —
+// measured on microsoft/vscode#329568. `changedFiles` from the same query is the
+// only disagreement available. Absent on every normal PR: `review-pr.js` reads
+// its PRESENCE as "widen the fan-out, this list is short", so a flag set when
+// the counts agree would widen every review.
+test("computeStats: truncated is set only when gh's file list is short", () => {
+  const files = Array.from({ length: 100 }, (_, i) => ({ path: `src/f${i}.ts`, additions: 1 }));
+  assert.equal(computeStats(files, 124).truncated, 124);
+  assert.equal(computeStats(files, 100).truncated, undefined, "counts agree — a complete list is not truncated");
+  assert.equal(computeStats(files).truncated, undefined, "gh omitted changedFiles — no cap can be inferred");
+  // A short list under-reports `files` too, so nothing else in the blob can
+  // stand in for the flag.
+  assert.equal(computeStats(files, 124).files, 100);
+});

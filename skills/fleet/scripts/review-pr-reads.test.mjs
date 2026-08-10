@@ -13,12 +13,43 @@ import { join } from "node:path";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
+// Every pin below runs against CODE, not SOURCE: a declaration or a paragraph a
+// reader's eye skips must not satisfy an assertion. Both escapes were MEASURED
+// green on this file — the three diff fields wrapped in `/* */` (schema drops
+// them, `usableDiff` returns null forever, 12 pass / 0 fail), and the snapshot
+// agent's `Report \`diffPath\`` paragraph deleted and re-inserted inside a block
+// comment (same, 12 pass / 0 fail). A `^(?!\s*//)` anchor closes neither: the
+// commented-out line starts with `/*`, and per-assertion anchors have to be
+// remembered once per pin. Stripping once closes the class for every assertion
+// in this file, including ones added later.
+//
+// Line-based on purpose. A regex stripper (`/\*[\s\S]*?\*\//`) would open a
+// comment at `"node --test skills/fleet/scripts/*.test.mjs"` — a glob inside a
+// string literal — and swallow real code up to the next `*/`. Blank lines
+// rather than deleted ones, so offsets stay line-aligned with the file.
+const CODE = (() => {
+  const out = [];
+  let inBlock = false;
+  for (const line of SOURCE.split("\n")) {
+    if (inBlock) {
+      if (line.includes("*/")) inBlock = false;
+      out.push("");
+    } else if (/^\s*\/\*/.test(line)) {
+      if (!line.includes("*/")) inBlock = true;
+      out.push("");
+    } else {
+      out.push(/^\s*\/\//.test(line) ? "" : line);
+    }
+  }
+  return out.join("\n");
+})();
+
 // Each declaration is a top-level `function` whose body contains no line
 // starting at column 0 with `}`, so the non-greedy match ends on its own
 // closing brace.
 function lift(name, signature) {
   const re = new RegExp(`^function ${name}\\(${signature}\\) \\{[\\s\\S]*?^\\}$`, "m");
-  const m = SOURCE.match(re);
+  const m = CODE.match(re);
   assert.ok(m, `review-pr.js no longer declares ${name}(${signature}) at top level — update this test`);
   return new Function(`${m[0]}\nreturn ${name};`)();
 }
@@ -93,7 +124,7 @@ test("usableDiff accepts when prHead is absent or matching", () => {
   );
 });
 
-const readRules = lift("readRules", "diffPath, stats");
+const readRules = lift("readRules", "diffPath, stats, snap");
 
 const PATHS = {
   paths: [
@@ -108,6 +139,15 @@ test("readRules names the diff and does not also list files", () => {
   const out = readRules("/s/pr.diff", PATHS);
   assert.match(out, /\/s\/pr\.diff/);
   assert.doesNotMatch(out, /touched exactly these files/);
+  // The IMPERATIVE, not just the path. Reducing this branch to `The PR's whole
+  // diff is at ${diffPath}.` left the suite green — and a path with no order to
+  // read it first is pre-fix behaviour plus tokens, which is the entire defect
+  // this branch exists to fix. `\s+` per the file's reflow convention.
+  assert.match(
+    out,
+    /Read\s+it\s+FIRST,\s+bounded/,
+    "the diff is named but not ordered read first — a specialist keeps reading whole files",
+  );
 });
 
 // The unit is stated INLINE, per file. A bare `(115)` under a header is read as
@@ -118,6 +158,15 @@ test("readRules falls back to the changed-file list with each file's loc", () =>
   assert.match(out, /No diff file was captured/);
   assert.match(out, /workflows\/review-pr\.js \(115 changed\)/);
   assert.match(out, /docs\/specs\/a\.md \(393 changed\)/);
+  // The POSITIVE companion the four `doesNotMatch(/touched exactly these files/)`
+  // assertions in this file need. Without it, renaming the phrase makes all four
+  // pass forever against a branch 2 that no longer says anything of the kind —
+  // a `doesNotMatch` over an unverified baseline passes trivially.
+  assert.match(
+    out,
+    /touched exactly these files and no others/,
+    "branch 2 no longer emits the closure phrase the negative assertions are written against",
+  );
 });
 
 // `stats` is null whenever diff-stats.mjs errored or its blob was unparseable
@@ -139,6 +188,14 @@ test("readRules says so when it has neither a diff nor a file list", () => {
   // message claiming the discovery move is missing, which it is not.
   assert.match(out, /Locate\s+the\s+files\s+your\s+dimension\s+covers/);
   assert.doesNotMatch(out, /do not survey/i);
+  // The blacklist above plus the sentence pin are both evadable together:
+  // rewriting this branch to "ONLY from the names your review request already
+  // gives you. Never explore the snapshot" passes both — and that is verbatim
+  // the regression 830bddb exists to prevent, since this branch's review request
+  // names no file. Pin the AFFIRMATIVE moves instead: a synonym walks around a
+  // blacklist, but it cannot supply a command that does the discovery.
+  assert.match(out, /'grep -rn'/, "the discovery move is not given as a runnable command");
+  assert.match(out, /'ls -R'/, "the discovery move is not given as a runnable command");
 });
 
 // A `stats` object whose `paths` is empty must NOT fall into branch 2 — that
@@ -163,6 +220,67 @@ test("readRules treats a stats object with no paths key as no file list", () => 
   assert.doesNotMatch(out, /touched exactly these files/);
 });
 
+// `gh pr view --json files` pages at 100 and exits 0 — measured 100 listed
+// against `changedFiles` 124. Branch 2 is the first consumer to put that list in
+// front of an agent, and it did so under a closure clause. The files that fell
+// off the end vanish undetectably: `stats.files` is short too, so nothing in the
+// blob contradicts the sentence.
+test("readRules does not claim closure over a list gh truncated", () => {
+  const out = readRules(null, { ...PATHS, truncated: 124 });
+  assert.doesNotMatch(
+    out,
+    /touched exactly these files and no others/,
+    "a capped file list is still presented as the complete set of changed files",
+  );
+  assert.match(out, /at\s+least\s+these\s+files/);
+  assert.match(out, /capped\s+the\s+list\s+at\s+2\s+of\s+124/, "the cap is not quantified, so it cannot be acted on");
+  // Still a usable list — the fix is to stop overclaiming, not to withhold.
+  assert.match(out, /workflows\/review-pr\.js \(115 changed\)/);
+});
+
+// `gh pr diff > pr.diff` is a shell REDIRECT: the file exists in every run, in
+// the same ${scratch} tree the specialist is pointed at for its own work. On
+// head skew it is non-empty and describes another commit, and "No diff file was
+// captured" is then false in the one way that matters — the specialist can find
+// the file and has been given no reason not to trust it.
+test("readRules names a rejected diff rather than denying a file that exists", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 500, prHead: "bbb", head: "aaa" });
+  assert.doesNotMatch(out, /No diff file was captured/, "the diff file exists — the redirect always creates it");
+  assert.match(out, /REJECTED/);
+  assert.match(out, /\/s\/pr\.diff/, "the rejected file is not named, so the specialist cannot know which one to skip");
+  assert.match(out, /Do not read it/);
+  assert.match(out, /describes\s+commit\s+bbb/, "the rejection reason is not carried, only the rejection");
+  // And the file list inherits the defect the diff was rejected FOR: it comes
+  // from `gh pr view <pr> --json files`, which describes that same rejected
+  // commit. Dropping the diff for the wrong tree and then serving that tree's
+  // file list stamped "and no others" is the same error with the evidence gone.
+  assert.doesNotMatch(
+    out,
+    /touched exactly these files and no others/,
+    "the file list is from the rejected commit and is still stamped as closed over this snapshot",
+  );
+  assert.match(out, /NOT\s+this\s+snapshot's\s+commit/);
+});
+
+// The empty-file case is the OTHER rejection, and it must not borrow the head-
+// skew wording — `gh pr diff 999999` exits 1 leaving a 0-byte file, with no
+// commit to name. Isolates `skew` from `rejected`.
+test("readRules distinguishes an empty rejected diff from a skewed one", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+  assert.match(out, /REJECTED — it is empty/);
+  assert.doesNotMatch(out, /describes commit/);
+  // No skew, complete list — closure is TRUE here and must still be claimed.
+  assert.match(out, /touched exactly these files and no others/);
+});
+
+// A run with no diffPath at all is not a rejection: nothing was captured, and
+// saying "a diff was captured and rejected" would be a fresh false claim.
+test("readRules reports no capture when the snapshot agent reported no diffPath", () => {
+  const out = readRules(null, PATHS, { head: "aaa" });
+  assert.match(out, /No diff file was captured/);
+  assert.doesNotMatch(out, /REJECTED/);
+});
+
 // The rule is the whole point of the block; it must survive every branch, not
 // just the happy one. Assert the imperative and the counting clause, not a word
 // that also appears in the surrounding rationale.
@@ -178,13 +296,14 @@ test("every branch carries the bounding rule", () => {
 // with the whole block deleted — and an unbounded end runs to EOF, where the
 // specialist and refuter prompts can satisfy the same assertions. This is the
 // defect `review-pr-testcmd.test.mjs:99-107` records having shipped.
-function slice(from, to) {
-  const at = SOURCE.indexOf(from);
-  assert.notEqual(at, -1, `review-pr.js no longer contains "${from}" — update this test`);
-  const end = SOURCE.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `review-pr.js no longer contains "${to}" after "${from}" — update this test`);
-  return SOURCE.slice(at, end);
+function between(text, from, to, what) {
+  const at = text.indexOf(from);
+  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
+  const end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
+  return text.slice(at, end);
 }
+const slice = (from, to) => between(CODE, from, to, "review-pr.js");
 
 // The snapshot schema's `additionalProperties: false` REJECTS an undeclared
 // field, so a prompt that asks for these three while the schema omits them
@@ -202,21 +321,24 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     "no PR head to cross-check against the snapshot's",
   );
   assert.match(snapshot, /wc -l < \$\{scratch\}\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
+  // Scoped to the `properties` object, not the whole schema. Declaring a field
+  // ANYWHERE else — beside `required`, in the options bag — leaves it undeclared
+  // as far as `additionalProperties: false` is concerned, and a slice covering
+  // the whole schema passes on it. Measured escape; `required` sits above
+  // `properties` in the source, so this end-anchor excludes it. (Dead text is
+  // already handled globally by CODE.)
+  const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
   for (const field of ["diffPath", "diffLines", "prHead"]) {
-    // Anchored past `^(?!\s*\/\/)` so a commented-out declaration — text a
-    // reader's eye skips but an unanchored regex still matches — reds. Same
-    // vacuous-pin class recorded against this file in PR #216 (`select-dimensions`
-    // pin): a whole/sliced-source assert.match satisfied by dead text.
     assert.match(
-      snapshot,
-      new RegExp(`^(?!\\s*//)\\s*${field}:\\s*\\{\\s*type:`, "m"),
-      `${field} is not declared in the schema — additionalProperties:false drops it`,
+      props,
+      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
+      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
     );
   }
   // The review must survive a gh failure. These three stay out of `required`.
   assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
-  // Measured: deleting this paragraph outright left this file at 44 pass, 0
+  // Measured: deleting this paragraph outright left this file at 12 pass, 0
   // fail. The commands still run, the schema still accepts the fields, and
   // nothing tells the agent to report any of them, so all three come back
   // omitted, `usableDiff` returns null on every run forever, and the feature
@@ -227,15 +349,12 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   const B = "\\\\?`";
   for (const [re, missing] of [
     [
-      // Anchored past `^(?!\s*(?:\/\/|\/\*))` — same vacuous-pin class as the
-      // schema-field loop above, adapted for a paragraph instead of a single
-      // declaration line: a `//`-only anchor does not close it, because the
-      // measured escape re-inserts this paragraph verbatim inside a `/* */`
-      // block comment, which starts the paragraph's line with `/*`, not `//`.
-      // `Report \`diffPath\`` opens the paragraph on its own line in the
-      // source, so anchoring this one entry catches the whole block.
-      `^(?!\\s*(?:\\/\\/|\\/\\*))\\s*Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
-      "diffPath is not both bound to a value and gated on the exit code, or the whole paragraph is dead text (commented out) — the agent must infer the path from the redirect target",
+      // The measured escape for this one was re-inserting the paragraph verbatim
+      // inside a `/* */` block — which starts its line with `/*`, not `//`, so a
+      // `//`-only anchor would have stayed green. Handled once by CODE now,
+      // rather than by an anchor each future assertion has to remember.
+      `Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
+      "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
     [`${B}diffLines${B}\\s+=\\s+the\\s+wc\\s+-l\\s+count`, "diffLines' value is not bound to the wc -l count"],
@@ -251,7 +370,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
 // COPY: it stays green while the feature disconnects. Pin the CALL SITES.
 test("the specialist prompt interpolates the read rules", () => {
   const prompt = slice("READ ONLY FROM THE SNAPSHOT", "Scratch files go in");
-  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats\)\}/);
+  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats, snap\)\}/);
   // `pr.diff` is a SIBLING of the snapshot tree, not a child of it — reading it
   // under an unqualified "READ ONLY FROM THE SNAPSHOT" is the exact
   // contradiction this branch's headline fix removes. Bound to the clause
@@ -263,20 +382,75 @@ test("the specialist prompt interpolates the read rules", () => {
   // `\s+` between every word so a reflow of the same sentence stays green.
   assert.match(
     prompt,
-    /READ ONLY FROM THE SNAPSHOT:[^\n]*\)\s+—\s+plus\s+the\s+diff\s+file\s+named\s+below,\s+if\s+one\s+is\s+given\./,
+    /READ ONLY FROM THE SNAPSHOT:[\s\S]*?\)\s+—\s+plus\s+the\s+diff\s+file\s+named\s+below,\s+if\s+one\s+is\s+given\./,
     "the SNAPSHOT permission is not qualified to admit the diff file named below — the sibling-file contradiction FIX-1 removed is back",
   );
 });
 
 test("the refuter prompt interpolates the same read rules", () => {
   const prompt = slice("Try to REFUTE this finding", "Scratch: ");
-  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats\)\}/);
+  assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats, snap\)\}/);
 });
 
 // A second declaration would let one call site silently bind a different body.
 test("each function is declared exactly once at top level", () => {
   for (const name of ["usableDiff", "readRules"]) {
-    const hits = SOURCE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
+    const hits = CODE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
     assert.equal(hits.length, 1, `${name} is declared ${hits.length} times`);
   }
+});
+
+// Nothing pinned this line, and its own comment says the feature is unobservable
+// without it: deleting the whole `log()` call left the repo-wide suite at
+// 283/283. That is how it shipped stating a measurement never taken — the clause
+// chain printed `diff is 0 lines` for an ABSENT `diffLines`, so a run where
+// `gh pr diff` produced 500 real lines and only `wc -l` failed read as an empty
+// PR and nobody looked at `wc`. Both deferred follow-ups in the spec read this
+// line for their evidence. Shape from `select-dimensions.test.mjs:211-216`:
+// match the call, then assert on what it prints.
+test("the no-diff log reports the raw fields, not a guard it did not measure", () => {
+  const m = CODE.match(/^log\(\n\s*usable[\s\S]*?^\);$/m);
+  assert.ok(m, "the diff-decision log line is gone — `usableDiff` returning null forever is then invisible");
+  for (const field of ["diffPath", "diffLines", "prHead"]) {
+    assert.match(
+      m[0],
+      new RegExp(`${field}=\\$\\{snap\\.${field}`),
+      `the no-diff log does not print raw ${field} — the reader cannot tell absent from zero`,
+    );
+  }
+  // The exact regression: a message asserting a count that was never reported.
+  assert.doesNotMatch(
+    m[0],
+    /diff is 0 lines/,
+    "an absent diffLines is reported as a measured 0 — a failed read and an empty read are indistinguishable again",
+  );
+  assert.match(m[0], /\(absent\)/, "an omitted field prints as empty rather than saying it was omitted");
+});
+
+// Every reader in this repo lifts text by regex or `new Function` over a
+// fragment, so a syntax error anywhere in the fleet's DEFAULT review path ships
+// with all five green — verified by inserting `const = ;`.
+//
+// `node --check` cannot do it: package.json is `commonjs`, and the file is
+// neither a module (top-level `return`, legal only because the Workflow harness
+// wraps the body) nor a script (`export const meta`). AsyncFunction is the one
+// parser that accepts both — and it COMPILES without executing, which matters
+// because importing this file runs the workflow.
+test("review-pr.js parses — no other reader in this repo would notice a syntax error", () => {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  assert.doesNotThrow(
+    () =>
+      new AsyncFunction(
+        "args",
+        "budget",
+        "agent",
+        "parallel",
+        "pipeline",
+        "phase",
+        "log",
+        "workflow",
+        SOURCE.replace(/^export /m, ""),
+      ),
+    "workflows/review-pr.js does not parse",
+  );
 });

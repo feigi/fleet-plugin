@@ -174,13 +174,48 @@ function usableDiff(snap) {
 // and therefore NOT a git repo, so that default fails and the only fallback is
 // reading files whole. Handing them the change is the fix; the bounding rule
 // alone would only treat the symptom.
-function readRules(diffPath, stats) {
+//
+// The third argument is the raw snapshot report, and it is here for one reason:
+// `readRules(diffPath, stats)` structurally cannot know WHY a diff was dropped,
+// and both fallback branches lie without that. See `rejected`/`skew` below.
+function readRules(diffPath, stats, snap) {
+  // A REJECTED diff file still EXISTS. The capture is a shell redirect —
+  // `gh pr diff ${pr} > ${scratch}/pr.diff` — so the path is there in every run,
+  // inside the scratch dir this same prompt points the specialist at for its own
+  // work. On head skew it is also non-empty and authoritative-looking. "No diff
+  // file was captured" sent a specialist hunting for a file it can find and must
+  // not read; name it and name why instead.
+  const rejected = !diffPath && snap && snap.diffPath ? snap.diffPath : null;
+  // Head skew is what makes the FILE LIST untrustworthy too: `stats.paths` comes
+  // from `gh pr view <pr> --json files`, which describes the PR's head — the
+  // exact commit `usableDiff` just rejected the diff for describing. Dropping
+  // the diff for the wrong tree and then serving that tree's file list stamped
+  // "and no others" is the same error with the evidence removed.
+  const skew = !!(rejected && snap.diffLines && snap.prHead);
+  // Three headers, one list. `exactly ... and no others` is a CLOSURE claim, and
+  // it is only true when the list is both complete and about this tree.
+  // `stats.truncated` is set by diff-stats.mjs where the cap is visible: `gh pr
+  // view --json files` stops at 100 and exits 0 (measured: 100 listed against
+  // `changedFiles` 124), so nothing downstream can tell short from complete.
+  const listed = stats && stats.paths ? stats.paths.length : 0;
+  const header =
+    stats && stats.truncated
+      ? `The PR touched at least these files — GitHub capped the list at ${listed} of
+${stats.truncated}, so there are more it does not name:`
+      : skew
+        ? `The PR touched these files as of its own head, which is NOT this snapshot's
+commit — treat the list as approximate:`
+        : `The PR touched exactly these files and no others:`;
+
   const change = diffPath
     ? `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
 change you are reviewing, and the snapshot around it is context.`
     : stats && stats.paths && stats.paths.length
-      ? `No diff file was captured. The PR touched exactly these files and no
-others:
+      ? `${
+          rejected
+            ? `A diff was captured at ${rejected} and REJECTED — ${skew ? `it describes commit ${snap.prHead}, not this snapshot` : "it is empty"}. Do not read it.`
+            : "No diff file was captured."
+        } ${header}
 ${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
       : `No diff file and no file list were captured. Locate the files your
 dimension covers by searching the snapshot ('grep -rn', 'ls -R' — git does not
@@ -297,6 +332,12 @@ function selectDimensions(all, stats) {
   // an empty profile falls through to both the hasTests and hasSrc branches.
   // Only an affirmatively-reported profile over real files narrows the fan-out.
   if (!stats || !stats.profile || stats.profile === "empty") return all;
+  // A capped file list is a MEASUREMENT that is short, not a small PR. `gh pr
+  // view --json files` stops at 100 and exits 0, so `loc` under-counts and
+  // `docsOnly` can be true only because the src files fell off the end — either
+  // one trims dimensions off a production diff. Widen, the safe direction, same
+  // as an unparseable blob above.
+  if (stats.truncated) return all;
   // Strict `=== true`, matching the `hasSrc`/`hasTests` guards below: only an
   // affirmative boolean trims. A corrupt-but-parseable blob with a truthy
   // non-boolean docsOnly must not be the one value that narrows coverage.
@@ -429,8 +470,16 @@ log(`snapshot ${snap.head} at ${snap.path}`);
 // wait on evidence from a real run — "add the line count to the prompt only if a
 // run shows specialists reading pr.diff whole", and "if the head check fires,
 // that is a finding about the fleet's ordering, report it". Neither is
-// observable from a log that never mentions the diff. The clause chain mirrors
-// `usableDiff`'s guards in order; a new guard there needs a branch here.
+// observable from a log that never mentions the diff.
+//
+// It prints the three RAW inputs rather than naming the guard that fired. A
+// clause chain mirroring `usableDiff` states a measurement that was never taken:
+// `!snap.diffLines` is true when the field is ABSENT, and it printed `diff is 0
+// lines` — so a run where `gh pr diff` returned 500 real lines and only `wc -l`
+// failed reads as an empty PR, and nobody goes looking at `wc`. That is the
+// "a read that failed and a read that found nothing are indistinguishable"
+// defect this whole feature exists to close, reintroduced in its own log line.
+// Raw values also drop the coupling that chain had to `usableDiff`'s guard order.
 //
 // The two prompts below re-call `usableDiff(snap)` rather than reading this
 // binding, deliberately: both call sites being the IDENTICAL expression is what
@@ -440,13 +489,7 @@ const usable = usableDiff(snap);
 log(
   usable
     ? `diff ${usable} (${snap.diffLines} lines)`
-    : `no diff — ${
-        !snap.diffPath
-          ? "the snapshot agent reported no diffPath"
-          : !snap.diffLines
-            ? "diff is 0 lines"
-            : `prHead ${snap.prHead} is not the snapshot's head ${snap.head}`
-      } — specialists get the fallback read rules`,
+    : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
 );
 
 // Parse the diff-stats blob the snapshot agent carried back. A parse failure —
@@ -490,7 +533,7 @@ file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
 
-${readRules(usableDiff(snap), stats)}
+${readRules(usableDiff(snap), stats, snap)}
 
 Tests: from the snapshot's root, run exactly this — copy it verbatim:
   ${testCmd}
@@ -537,7 +580,7 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
 the test, apply the mutation. Do not reason your way to agreement.
 
-${readRules(usableDiff(snap), stats)}
+${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
 Scratch: ${scratch}/verify-${d.key}/`,

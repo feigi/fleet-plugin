@@ -57,7 +57,17 @@ export function classify(p) {
 // PR that also nudges a CI workflow keeps its fuller review. `hasSrc`/`hasTests`
 // let the caller drop the `tests`/`types`/`silent-failure`/`simplify` dimensions
 // when there is nothing for them.
-export function computeStats(files) {
+//
+// `changedFiles` is the PR's UNCAPPED file count, and it is a second argument
+// because `files` is capped: `gh pr view --json files` pages at 100 and exits 0
+// with no warning (measured on microsoft/vscode#329568 — `files` 100 against
+// `changedFiles` 124). Every fact below is then computed off a short list with
+// nothing in the blob contradicting it: `loc` under-counts, `docsOnly` can flip
+// because the src files fell off the end, and `paths` is what `review-pr.js`
+// puts in front of a specialist under "and no others". `truncated` is set ONLY
+// when the two counts disagree, so it is absent on every normal PR and the
+// caller can treat its presence as "this list is short by construction".
+export function computeStats(files, changedFiles) {
   const kinds = { docs: 0, test: 0, config: 0, src: 0 };
   let loc = 0;
   const paths = [];
@@ -82,7 +92,9 @@ export function computeStats(files) {
   else if (loc < 30) profile = "small";
   else profile = "production";
 
-  return { files: files.length, loc, kinds, docsOnly, hasSrc, hasTests, hasConfig, profile, paths };
+  const stats = { files: files.length, loc, kinds, docsOnly, hasSrc, hasTests, hasConfig, profile, paths };
+  if (Number.isInteger(changedFiles) && changedFiles > files.length) stats.truncated = changedFiles;
+  return stats;
 }
 
 // --- CLI (runs only when executed directly, never on import) ---------------
@@ -133,7 +145,9 @@ function main() {
   // proxy's HTML error page is the measured case — and an uncaught SyntaxError
   // exits 1, a code this script does not define (die is 2, success 0). Same
   // fail-closed rule as run() above: a broken response is not an empty diff.
-  const raw = run("gh", ["pr", "view", String(pr), "--json", "files"]);
+  // `changedFiles` rides the same query for free and is the only thing that
+  // reveals the 100-file cap on `files` — see computeStats.
+  const raw = run("gh", ["pr", "view", String(pr), "--json", "files,changedFiles"]);
   let info;
   try {
     info = JSON.parse(raw);
@@ -145,11 +159,12 @@ function main() {
   // measurement, exit 0, indistinguishable on stdout from a real empty PR. That
   // is the lie the comment in run() warns about, manufactured one line later.
   if (!Array.isArray(info.files)) die("gh returned no files array");
-  const stats = computeStats(info.files);
+  const stats = computeStats(info.files, info.changedFiles);
 
   console.error(
     `    ${NAME}: pr=${pr} files=${stats.files} loc=${stats.loc} ` +
-      `docs=${stats.kinds.docs} test=${stats.kinds.test} config=${stats.kinds.config} src=${stats.kinds.src} → ${stats.profile}`,
+      `docs=${stats.kinds.docs} test=${stats.kinds.test} config=${stats.kinds.config} src=${stats.kinds.src} → ${stats.profile}` +
+      (stats.truncated ? ` (TRUNCATED: gh listed ${stats.files} of ${stats.truncated} files)` : ""),
   );
 
   console.log(JSON.stringify({ pr: Number(pr), ...stats }));
