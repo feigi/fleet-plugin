@@ -318,7 +318,7 @@ test("a dirty worktree refuses even when the stash is unknown", (t) => {
 // clean worktree. It used to have an accidental backstop: a repo holding any
 // stash refused anyway, whatever `status` did. That backstop left with the gate.
 test("a git status that fails is unanswerable (2), never clean (0)", (t) => {
-  if (process.getuid?.() === 0) return; // root reads a 000 file regardless
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
   const c = repo(t);
   writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
   chmodSync(join(c.w, ".git", "index"), 0o000);
