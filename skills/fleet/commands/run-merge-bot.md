@@ -133,6 +133,8 @@ git diff origin/main...HEAD -- <conflicting files>
 
 Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains as deletions and reads as a mass revert. Every hunk must be the PR's own intended change. A deletion of a line `main` introduced that this PR has no business touching means the resolution ate merged work — redo it. Re-derive any numbers, offsets or anchors the conflict touched rather than carrying stale ones.
 
+`<conflicting files>` is the audit's `conflicts[]`, not typed by hand — and `conflictsRewritten[]` sits next to it for exactly this step. A path is reported at the same index in both arrays; `true` there means the path held a control byte the audit could not give a JSON short form to and replaced with a space, so the string in `conflicts[]` is not the byte-for-byte name of anything on disk. Pasting it into the command above builds a pathspec that matches nothing — the diff comes back empty, and empty reads as "nothing to prove", the opposite of unproven. Skip the command for any path flagged `true` and inspect it by hand (`git status`, or `ls` the worktree) instead of by pathspec.
+
 ## Then stay armed
 
 **Skip this whole section if a controller dispatched you** (`/fleet:run-team`, or any

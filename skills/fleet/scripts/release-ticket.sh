@@ -107,12 +107,44 @@ fi
 # single `"` or backslash anywhere emits a payload the caller cannot parse —
 # while the delete has already happened and the exit code still says success.
 #
-# The whole C0 range, not just the three whitespace ones: JSON forbids every
-# character below \040 unescaped, and a worktree directory may carry one where a
-# branch may not (git rejects them in a ref, so `stray` — matched on the
-# directory name — is the way in). Byte-safe for the UTF-8 in these messages,
-# whose bytes are all >= \200. tr pads the replacement with its last character.
-jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# Backslash first, always — escaping the quote (or a short form below) before
+# the backslash rule runs turns the backslash IT just introduced into `\\` on
+# the second pass, so every rule that adds a backslash has to come after this
+# one. Tab, CR and LF get their JSON short forms; \177 (DEL) is not a C0 byte
+# and JSON permits it unescaped, so — unlike every version of this helper
+# before #146 — it is left alone. Every other byte below \040 has no short
+# form: a worktree directory may carry one where a branch may not (git rejects
+# them in a ref, so `stray` — matched on the directory name — is the way in).
+# tr still turns it into a space, and jrewritten (below) is how a caller finds
+# out that happened, since a replaced value is not the original bytes and must
+# not be treated as a real path or ref. Byte-safe for the UTF-8 in these
+# messages, whose bytes are all >= \200. tr pads the replacement with its last
+# character.
+#
+# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
+# runs, so a literal newline in $1 is data the LF rule can reach rather than a
+# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
+# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
+# EOF with nothing to append and discards the pattern space instead of printing
+# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
+# `N;$!ba` prints nothing at all for a single-line value.
+jstr() {
+  printf '%s' "$1" \
+    | sed -e ':a' -e '$!N' -e '$!ba' \
+        -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' -e 's/\n/\\n/g' \
+    | tr '\001-\010\013\014\016-\037' ' '
+}
+
+# True iff $1 held a byte jstr had to replace rather than escape — every C0
+# byte except \011 \012 \015 (tab, LF, CR: escaped above, never replaced) and
+# \177 (DEL: preserved, never replaced). Appending a non-deleted sentinel `X`
+# to both sides of the comparison keeps `$()`'s own trailing-newline strip from
+# reading as a rewrite that tr never made.
+jrewritten() {
+  raw=$(printf '%sX' "$1" | tr -d '\001-\010\013\014\016-\037')
+  orig=$(printf '%sX' "$1")
+  [ "$raw" = "$orig" ] && printf false || printf true
+}
 
 # A mutation refused mid-release. `die` printed prose and
 # exited before every printf, so a caller parsing this script's stdout got
@@ -140,8 +172,8 @@ halt() {
   fi
   echo "    worktree removed: $done_wt, branch deleted: $done_branch, in-progress: still on the issue" >&2
   echo "    the ticket still reads as taken — finish or restore it by hand" >&2
-  printf '{"issue":%s,"branch":"%s","worktree":"%s","label":%s,"released":false,"applied":true,"blockers":["%s"]}\n' \
-    "$issue" "$(jstr "$branch")" "$(jstr "$wt")" "$has_label" "$(jstr "$1")"
+  printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":%s,"released":false,"applied":true,"blockers":["%s"]}\n' \
+    "$issue" "$(jstr "$branch")" "$(jrewritten "$branch")" "$(jstr "$wt")" "$(jrewritten "$wt")" "$has_label" "$(jstr "$1")"
   exit 2
 }
 
@@ -333,8 +365,8 @@ fi
 # caller actually needs. "label":null says it was never read.
 if [ -n "$blockers" ]; then
   echo "$NAME: #$issue NOT released — nothing was touched" >&2
-  printf '{"issue":%s,"branch":"%s","worktree":"%s","label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
-    "$issue" "$(jstr "$branch")" "$(jstr "$wt")" "$apply" "${blockers%,}"
+  printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
+    "$issue" "$(jstr "$branch")" "$(jrewritten "$branch")" "$(jstr "$wt")" "$(jrewritten "$wt")" "$apply" "${blockers%,}"
   exit 1
 fi
 
@@ -403,5 +435,5 @@ else
   git worktree prune || echo "$NAME: git worktree prune failed; the release itself is done" >&2
 fi
 
-printf '{"issue":%s,"branch":"%s","worktree":"%s","label":%s,"released":true,"applied":%s,"blockers":[]}\n' \
-  "$issue" "$(jstr "$branch")" "$(jstr "$wt")" "$has_label" "$apply"
+printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":%s,"released":true,"applied":%s,"blockers":[]}\n' \
+  "$issue" "$(jstr "$branch")" "$(jrewritten "$branch")" "$(jstr "$wt")" "$(jrewritten "$wt")" "$has_label" "$apply"

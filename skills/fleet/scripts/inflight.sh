@@ -240,11 +240,27 @@ echo "$NAME: #$n taken=$taken" >&2
 # worktree path is a filename, so it carries in `\` as well, which git's ref
 # rules reject. Raw, either emits a payload no JSON parser accepts.
 #
-# The whole C0 range, not just the three whitespace ones: JSON forbids every
-# character below \040 unescaped. Byte-safe because the tr set is ASCII-only
-# and a multi-byte UTF-8 sequence uses no byte below \200, so nothing here can
-# split one — not because UTF-8 avoids the low bytes, which it does not: half
-# of it is ASCII. tr pads the replacement with its last character.
+# Backslash first, always — escaping the quote (or a short form below) before
+# the backslash rule runs turns the backslash IT just introduced into `\\` on
+# the second pass, so every rule that adds a backslash has to come after this
+# one. Tab, CR and LF get their JSON short forms; \177 (DEL) is not a C0 byte
+# and JSON permits it unescaped, so — unlike every version of this helper
+# before #146 — it is left alone. Every other byte below \040 has no short
+# form; tr still turns it into a space, and jrewritten (below) is how a caller
+# finds out that happened, since a replaced value is not the original bytes
+# and must not be treated as a real path or ref. Byte-safe because the tr set
+# is ASCII-only and a multi-byte UTF-8 sequence uses no byte below \200, so
+# nothing here can split one — not because UTF-8 avoids the low bytes, which
+# it does not: half of it is ASCII. tr pads the replacement with its last
+# character.
+#
+# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
+# runs, so a literal newline in $1 is data the LF rule can reach rather than a
+# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
+# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
+# EOF with nothing to append and discards the pattern space instead of printing
+# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
+# `N;$!ba` prints nothing at all for a single-line value.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
 # already refused unless it is all digits — which is not the same as a valid
@@ -254,12 +270,30 @@ echo "$NAME: #$n taken=$taken" >&2
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.
-jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+jstr() {
+  printf '%s' "$1" \
+    | sed -e ':a' -e '$!N' -e '$!ba' \
+        -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' -e 's/\n/\\n/g' \
+    | tr '\001-\010\013\014\016-\037' ' '
+}
+
+# True iff $1 held a byte jstr had to replace rather than escape — every C0
+# byte except \011 \012 \015 (tab, LF, CR: escaped above, never replaced) and
+# \177 (DEL: preserved, never replaced). Appending a non-deleted sentinel `X`
+# to both sides of the comparison keeps `$()`'s own trailing-newline strip from
+# reading as a rewrite that tr never made.
+jrewritten() {
+  raw=$(printf '%sX' "$1" | tr -d '\001-\010\013\014\016-\037')
+  orig=$(printf '%sX' "$1")
+  [ "$raw" = "$orig" ] && printf false || printf true
+}
 
 # Guarded for the same reason as the python3 call above: under `set -e` a failed
 # write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
 # rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
-printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","remote":"%s","localBranch":"%s","worktree":"%s"}}\n' \
-  "$n" "$taken" "${hits%,}" "$(jstr "$pr")" "$(jstr "$remote")" "$(jstr "$local_b")" "$(jstr "$wt")" \
+printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
+  "$n" "$taken" "${hits%,}" \
+  "$(jstr "$pr")" "$(jrewritten "$pr")" "$(jstr "$remote")" "$(jrewritten "$remote")" \
+  "$(jstr "$local_b")" "$(jrewritten "$local_b")" "$(jstr "$wt")" "$(jrewritten "$wt")" \
   || die "could not write the verdict for #$n"
 exit "$rc"

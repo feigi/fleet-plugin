@@ -602,7 +602,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // mutates nothing.
   const wt = release(r, c, { apply: false }).json.worktree;
   const receipt = (blocker) =>
-    `{"issue":9,"branch":"fix/9-release-ticket","worktree":"${wt}",` +
+    `{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"${wt}","worktreeRewritten":false,` +
     `"label":true,"released":false,"applied":true,"blockers":["${blocker}"]}\n`;
 
   // The worktree removal is the first mutation attempted when there is a
@@ -656,7 +656,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
   assert.equal(
     none.out,
-    '{"issue":9,"branch":"fix/9-release-ticket","worktree":"","label":true,' +
+    '{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"","worktreeRewritten":false,"label":true,' +
       '"released":false,"applied":true,"blockers":["git branch -d refused fix/9-release-ticket: ' +
       'refused by the git shim"]}\n',
     "an empty worktree field, and the receipt still whole",
