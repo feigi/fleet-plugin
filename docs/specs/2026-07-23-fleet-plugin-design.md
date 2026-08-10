@@ -378,7 +378,11 @@ $ grep -rnE '(^|[^A-Za-z0-9_./`-]):[0-9]+' docs/specs/
 which at `5cd42be` surfaces three sites the first command never reports: this
 file's `:84`, and `:149` and `:150` of the read-rules spec. #117 classified all
 161 plus those three, and re-anchored this document's nine live ones — the eight
-the first command reports, plus the `(:429)` at `:84` it does not.
+the first command reports, plus the `(:429)` at `:84` it does not. Nine is what
+was re-anchored, not what was live: four bare-numbered citations into other files
+remain here — `plugin-structure/SKILL.md:431`, exempt above as vendored, and
+`command-development/SKILL.md:564`, `.gitignore:40` and `.gitignore:49`, which
+resolve today but name no section and are left for #282.
 
 Line numbers in the **Site** column of both tables in this section, and in the
 prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
