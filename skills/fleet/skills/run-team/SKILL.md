@@ -407,7 +407,8 @@ policy, and a finding whose refuters all crashed lands there too. Hand those ove
 with the rest; never rule on them yourself. `refuted` comes back deliberately as
 well — a refutation is itself a claim, and one has been reversed on new evidence —
 so record it in the ledger's `ruled` line and hand it over only when you reverse
-it.
+it. **A 1-1 split is not a verdict** — read the votes, not the band. Three tied
+refutations were reversed and re-examined in one run; all three findings survived.
 
 **`dimensionsRun` names what ran, never what returned.** A specialist that dies
 contributes zero findings while its key stays in that list, so a dimension listed
@@ -513,6 +514,10 @@ default, so substituting `<testCmd>` with nothing leaves it no gate at all.
 > snapshot cut before your edits existed, and a refuter checked the finding's
 > claim, never your patch.
 >
+> **A test you ADD must kill its own mutant** — break what it pins, confirm it and
+> only it goes red, restore. A green suite says nothing about a new test: one pin
+> this run survived the exact mutation it was named for.
+>
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
@@ -535,8 +540,12 @@ after its verdict. When the diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
-**finisher** — a fresh small agent, not the fix-applier resumed. Its duties, in
-this order:
+**finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
+one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
+as the guarantee nothing else is inbound. Relay everything, wait for its final
+report, then dispatch. Observed — a ruling relayed after dispatch produced a new
+commit mid-audit, and the finisher correctly halted on a diverged head. Its
+duties, in this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
    it. Dirty or diverged halts the finisher *here*, before the label: it reports
@@ -810,8 +819,12 @@ vs specific finding with paths → paths win.
   not the working directory, so three agents on three snapshots still collide on
   one postgres. "I'm on my own copy" is exactly the intuition that skips the
   runner — say both, every time. See references/isolation.md.
-- **Per-member scratchpad subdirectory.** One flat namespace, generic filenames —
-  one agent overwrote a sibling's `package.json`. See references/isolation.md.
+- **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
+  outside them.** Finding ids restart at 1 every review, so two fix-appliers on
+  different PRs both reach for `unv1`; one agent overwrote a sibling's
+  `package.json`, and a probe built a git repo at the *checkout root*. Read from
+  the object store at a pinned ref, write only under your own path.
+  See references/isolation.md.
 - **IDE/harness diagnostics attribute by bare filename, with no path.** **Never
   relay a diagnostic without reproducing it in that member's specific worktree**
   (`npx tsc --noEmit` from there): probe copies carry the real tree's filenames,
