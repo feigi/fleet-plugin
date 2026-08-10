@@ -133,6 +133,25 @@ test("every spec is dropped and named — a filter that stops at the first leaks
   assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #10", "dropped #11"]);
 });
 
+test("a drop line names its pass — a cross-run grep -c must not double-count a spec dropped once", () => {
+  // Pins the message SHAPE per pass, not the superset relationship the fixture
+  // stub cannot produce (its two fixtures are deliberately disjoint — see the
+  // file header). #12 forces the labeled query empty so the fallback runs, and
+  // #13 in the fallback fixture is a second, unrelated spec dropped there —
+  // nothing is dropped by both passes here, only that each pass's own drop
+  // line is attributable to it.
+  const { stderr } = run(
+    [ticket(10, "## User Stories\n\n1. As a user…\n")],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [
+      ticket(12, "## What to build\n\nreal work\n", ["ready-for-human"]),
+      ticket(13, "## User Stories\n\n2. As a user…\n", ["ready-for-human"]),
+    ],
+  );
+  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[label:ready-for-agent\]/);
+  assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered \(fallback\)\]/);
+});
+
 test("near misses are kept — the predicate's shape is specified, not accidental", () => {
   // One fixture per dimension the regex commits to. Without these, every
   // loosening of the heading match still passes: the dropped fixture differs
