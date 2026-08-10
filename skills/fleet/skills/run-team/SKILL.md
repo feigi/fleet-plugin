@@ -160,7 +160,7 @@ isolation runner in one serial pass. Infer branch/worktree convention from
 
 **Infer `<install>` — never default to `npm install`.** A lockfile-mutating
 install in a throwaway worktree corrupts it for everyone; the script derives the
-frozen form from the lockfile and refuses to guess. See references/isolation.md.
+frozen form from the lockfile and refuses to guess.
 
 **Materialize the isolation envelope as a file, not a briefing.** The script
 writes `.worktrees/<N>-slug/agent-test` (ports derived from `<N>`, so collisions
@@ -545,7 +545,6 @@ Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
 drops `jobs`. Normal path, not only kill-recovery.
-See references/ci-and-staleness.md.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the
