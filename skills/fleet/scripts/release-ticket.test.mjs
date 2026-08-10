@@ -950,36 +950,44 @@ test("a control character in the worktree name cannot produce an unparseable pay
   assert.match(parsed.blockers[0], /—/, "multibyte text must survive the scrub");
 });
 
-test("a tab, a CR and a DEL in the worktree name round-trip rather than being scrubbed", (t) => {
+test("a BS, a tab, a FF, a CR and a DEL in the worktree name round-trip rather than being scrubbed", (t) => {
   // `branch` is `$type/$issue-$slug`, built before any git ref check runs, so
   // the same directory-name route that gets a control byte past the ref rules
   // above gets these three past it too. Unlike the byte in the case above, all
   // three now have somewhere to go: tab and CR have JSON short forms, and DEL
-  // (\177) is not a C0 byte at all, so none of the three should reach the
+  // (\177) is not a C0 byte at all, so none of the five should reach the
   // space-scrub — and none should be reported as rewritten, since the value
-  // the caller gets back IS the name on disk, byte for byte.
+  // the caller gets back IS the name on disk, byte for byte. BS (\010) and FF
+  // (\014) are here because RFC 8259 gives them short forms too (\b and \f)
+  // and the first version of this fix scrubbed both while its comment claimed
+  // no such short form existed.
   const r = repo(t);
-  const slug = "a\tb\rc\x7fd";
+  const slug = "a\tb\rc\x7fd\be\ff";
   git(r.w, "worktree", "add", "-q", "--detach", join(r.w, ".worktrees", `9-${slug}`), "origin/main");
 
   const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
   const parsed = JSON.parse(res.stdout);
-  assert.equal(parsed.branch, `fix/9-${slug}`, "tab, CR and DEL must all survive intact");
+  assert.equal(parsed.branch, `fix/9-${slug}`, "BS, tab, FF, CR and DEL must all survive intact");
   assert.equal(parsed.branchRewritten, false, "escaped or preserved, not replaced — nothing here was rewritten");
 });
 
 test("a byte with no JSON short form is replaced in the worktree name and flagged rewritten", (t) => {
+  // \013 (VT) rides along because it is the one C0 byte that LOOKS like it has
+  // a short form and does not: RFC 8259 lists \b \f \n \r \t and no \v, so
+  // narrowing the scrub set to make room for \b and \f must not take VT with
+  // it. Unescaped in a JSON string it is a parse error, so JSON.parse below is
+  // the discriminator.
   // The case two above already pins that \001 gets neutralised to a space; this
   // pins the other half of #146 — that the payload now says so, so a consumer
   // reading `branch` back cannot mistake the neutralised string for the real
   // name on disk.
   const r = repo(t);
-  const slug = "a\x02b";
+  const slug = "a\x02b\x0bc";
   git(r.w, "worktree", "add", "-q", "--detach", join(r.w, ".worktrees", `9-${slug}`), "origin/main");
 
   const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
   const parsed = JSON.parse(res.stdout);
-  assert.equal(parsed.branch, "fix/9-a b", "no short form for \\002 — still neutralised to a space");
+  assert.equal(parsed.branch, "fix/9-a b c", "no short form for \\002 or \\013 — both still neutralised to a space");
   assert.equal(parsed.branchRewritten, true, "and the payload must disclose that it was");
 });
 

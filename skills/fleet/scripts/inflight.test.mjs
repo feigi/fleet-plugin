@@ -63,6 +63,7 @@ const IDENT = {
 // hands off to the real one for every invocation it is not breaking; calling
 // `awk` from inside the shim would find the shim.
 const REAL_AWK = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+const REAL_TR = execFileSync("/bin/sh", ["-c", "command -v tr"], { encoding: "utf8" }).trim();
 
 /**
  * A branch in the bare origin, built from an empty tree straight in that repo.
@@ -91,7 +92,8 @@ function remoteBranch(bare, name) {
  * failures that used to be reported as "no remote branch".
  */
 function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
-                         detachedWorktreeUnder = null, awkFailWhenProgramHas = null }) {
+                         detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
+                         trFailWhenArgsHave = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -121,6 +123,18 @@ case "$*" in *'${awkFailWhenProgramHas}'*) exit 1 ;; esac
 exec '${REAL_AWK}' "$@"
 `);
     chmodSync(join(bin, "awk"), 0o755);
+  }
+
+  // The same shim shape for `tr`, selected by flag rather than by program text.
+  // `-d` addresses jrewritten and nothing else: the two other `tr` calls in the
+  // script are `tr '\n' ' '` inside die messages, and jstr's own is a
+  // translation with no flags at all.
+  if (trFailWhenArgsHave !== null) {
+    writeFileSync(join(bin, "tr"), `#!/bin/sh
+case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
+exec '${REAL_TR}' "$@"
+`);
+    chmodSync(join(bin, "tr"), 0o755);
   }
 
   const repo = join(root, "repo");
@@ -464,20 +478,22 @@ test("a control character in a worktree path cannot produce an unparseable paylo
   assert.deepEqual(json.hits, ["local"]);
 });
 
-test("a tab, a CR and a DEL in a worktree path round-trip rather than being scrubbed", (t) => {
-  // Same vector as the \001 case above, but the three bytes #146 gives a
-  // different treatment to: tab and CR have JSON short forms and DEL (\177) is
-  // not a C0 byte at all, so — unlike \001 — none of the three may reach the
-  // space-scrub, and the field must not be marked rewritten.
+test("a BS, a tab, a FF, a CR and a DEL in a worktree path round-trip rather than being scrubbed", (t) => {
+  // Same vector as the \001 case above, but the bytes #146 gives a different
+  // treatment to: BS, tab, FF and CR have JSON short forms (RFC 8259 \b \t \f
+  // \r) and DEL (\177) is not a C0 byte at all, so — unlike \001 — none of the
+  // five may reach the space-scrub, and the field must not be marked rewritten.
+  // BS and FF are the two the first version of this fix scrubbed anyway, under
+  // a comment claiming they had no short form.
   const { repo, env } = fixture(t, 88, {});
-  const name = "fix-88-a\tb\rc\x7fd";
+  const name = "fix-88-a\tb\rc\x7fd\be\ff";
   git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
   git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
 
   const r = spawnSync("sh", [SCRIPT, "88"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
   assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name)),
-    `tab, CR and DEL must all survive intact, got ${json.evidence.worktree}`);
+    `BS, tab, FF, CR and DEL must all survive intact, got ${json.evidence.worktree}`);
   assert.equal(json.evidence.worktreeRewritten, false, "escaped or preserved, not replaced");
   assert.equal(r.status, 1);
   assert.deepEqual(json.hits, ["local"]);
@@ -488,18 +504,39 @@ test("a byte with no JSON short form in a worktree path is replaced and flagged 
   // other half of #146 — that the payload discloses it, so a consumer reading
   // `evidence.worktree` back cannot mistake the neutralised string for the real
   // name on disk.
+  // \013 (VT) rides along: it is the C0 byte that looks like it has a short
+  // form and does not — RFC 8259 lists no \v — so narrowing the scrub set to
+  // make room for \b and \f must not take VT out with them.
   const { repo, env } = fixture(t, 66, {});
-  const name = "fix-66-c\x02x";
+  const name = "fix-66-c\x02x\x0by";
   git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
   git(repo, env, "worktree", "add", "-q", "--detach", join(repo, ".worktrees", name), "HEAD");
 
   const r = spawnSync("sh", [SCRIPT, "66"], { cwd: repo, env, encoding: "utf8" });
   const json = JSON.parse(r.stdout);
-  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name.replace("\x02", " "))),
-    `no short form for \\002 — still neutralised to a space, got ${json.evidence.worktree}`);
+  assert.ok(json.evidence.worktree.endsWith(join(".worktrees", name.replace("\x02", " ").replace("\x0b", " "))),
+    `no short form for \\002 or \\013 — both still neutralised to a space, got ${json.evidence.worktree}`);
   assert.equal(json.evidence.worktreeRewritten, true, "and the payload must disclose that it was");
   assert.equal(r.status, 1);
   assert.deepEqual(json.hits, ["local"]);
+});
+
+test("an escape that cannot run aborts rather than printing a receipt with an empty slot", (t) => {
+  // `$(jrewritten …)` used to sit directly in printf's ARGUMENT list, where the
+  // `|| die` on the printf structurally cannot reach it: a command substitution
+  // that fails contributes an EMPTY argument and printf still exits 0, so an
+  // UNQUOTED `%s` slot emits `"prRewritten":,` — malformed JSON on the happy
+  // exit path, which is the one failure mode this receipt exists to rule out.
+  // The `%s` slots inside quotes fail more quietly still, as a `""` that reads
+  // as a real empty value. Assigning first is what lets a status be read at
+  // all. Failing `tr -d` is the narrowest way in: it is jrewritten's own flag
+  // and no other call in the script passes it.
+  const { repo, env } = fixture(t, 55, { trFailWhenArgsHave: "-d" });
+
+  const r = spawnSync("sh", [SCRIPT, "55"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, `unanswerable, never a verdict; stderr: ${r.stderr}`);
+  assert.equal(r.stdout, "", "and no payload at all — half a receipt is worse than none");
+  assert.match(r.stderr, /could not escape the evidence/);
 });
 
 test("a quote in a remote branch cannot produce an unparseable payload", (t) => {

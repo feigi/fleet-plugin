@@ -14,18 +14,26 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 
 # JSON string escaping. Same helper and same pipeline as release-ticket.sh's
 # `jstr` — backslashes BEFORE quotes, because escaping the quote first turns the
-# backslash that escape just introduced into `\\` on the second pass. Tab, CR
-# and LF get the same treatment, in the same order, for the same reason: each
-# rule that introduces a backslash has to run after the one escaping backslash
-# itself, or its own backslash gets doubled right back. \177 (DEL) is not a C0
+# backslash that escape just introduced into `\\` on the second pass. The five
+# C0 bytes RFC 8259 gives a two-character short form — \010 \011 \012 \014 \015
+# (\b \t \n \f \r) — get the same treatment, in the same order, for the same
+# reason: each rule that introduces a backslash has to run after the one
+# escaping backslash itself, or its own backslash gets doubled right back. BS
+# and FF are matched as a literal byte spelled with `printf`, never as `\b` or
+# `\f`. Neither spelling matches \010, and neither fails quietly: `\b` in a BRE
+# is a zero-width word BOUNDARY to GNU sed and a literal `b` to BSD sed, so the
+# rule would insert `\b` at every word edge on one and mangle every letter `b`
+# on the other (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0
 # byte and JSON permits it unescaped, so — unlike every version of this helper
-# before #146 — it is left alone. Every other byte below \040 has no JSON short
-# form; tr still turns it into a space, and jrewritten (below) is how a caller
-# finds out that happened, since a replaced value is not the original bytes and
-# must not be treated as a real path or ref. Byte-safe for the UTF-8 in these
-# strings, whose bytes are all >= \200. tr pads the replacement with its last
-# character. (No line number: the same citation named a line that had not been
-# written yet, and #129 tracks four more that drifted.)
+# before #146 — it is left alone. Every remaining byte below \040 has no JSON
+# short form, \013 (VT) included — RFC 8259 lists exactly the five above and
+# `\v` is not among them; tr turns it into a space, and jrewritten (below) is
+# how a caller finds out that happened, since a replaced value is not the
+# original bytes and must not be treated as a real path or ref. Byte-safe for
+# the UTF-8 in these strings, whose bytes are all >= \200. tr pads the
+# replacement with its last character. (No line number: the same citation
+# named a line that had not been written yet, and #129 tracks four more that
+# drifted.)
 #
 # `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
 # runs, so a literal newline in $1 is data the LF rule can reach rather than a
@@ -38,19 +46,25 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 jstr() {
   printf '%s' "$1" \
     | sed -e ':a' -e '$!N' -e '$!ba' \
-        -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' -e 's/\n/\\n/g' \
-    | tr '\001-\010\013\014\016-\037' ' '
+        -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+        -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
+        -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
+    | tr '\001-\007\013\016-\037' ' '
 }
 
 # True iff $1 held a byte jstr/jarr had to replace rather than escape — every
-# C0 byte except \011 \012 \015 (tab, LF, CR: escaped above, never replaced)
-# and \177 (DEL: preserved, never replaced). Appending a non-deleted sentinel
-# `X` to both sides of the comparison keeps `$()`'s own trailing-newline strip
-# from reading as a rewrite that tr never made — $1 spared \012 by the escape
-# above, but a bare `\r` at the very end would trip the same trap on `\n` alone.
+# C0 byte except \010 \011 \012 \014 \015 (BS, tab, LF, FF, CR: escaped above,
+# never replaced) and \177 (DEL: preserved, never replaced). `$()` strips
+# trailing newlines off both sides, and \012 is the one byte it strips: it is
+# not in the delete set, so the same suffix comes off `raw` and `orig` and the
+# strip can neither manufacture a difference nor hide one. An `X` sentinel
+# appended to both sides stood here for that job and did nothing — measured
+# across every arrangement of these bytes, it changed no answer — and the
+# sentence defending it named a trap a trailing `\r` cannot spring, `\r` being
+# neither stripped by `$()` nor deleted by tr. Both are gone.
 jrewritten() {
-  raw=$(printf '%sX' "$1" | tr -d '\001-\010\013\014\016-\037')
-  orig=$(printf '%sX' "$1")
+  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
+  orig=$(printf '%s' "$1")
   [ "$raw" = "$orig" ] && printf false || printf true
 }
 
@@ -63,9 +77,11 @@ jrewritten() {
 # byte this function structurally never receives would be dead code standing
 # in for a restructure nobody has needed; #89 owns that class.
 jarr() {
-  sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
+  sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+      -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' \
+      -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
       -e 's/^/"/' -e 's/$/"/' \
-    | tr '\001-\010\013\014\016-\037' ' ' \
+    | tr '\001-\007\013\016-\037' ' ' \
     | paste -sd, -
 }
 # Parallel boolean array to jarr's own output, true where that line held a byte
@@ -276,8 +292,17 @@ fi
 # `*Rewritten` says which of the paired values lost bytes to the space-scrub
 # above and so is not safe to treat as the real path or ref — most concretely,
 # not safe to hand to `git diff -- <path>` in the no-undo-audit runbook step.
+# A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
+# itself: a substitution that fails contributes an EMPTY argument and printf
+# still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,
+# malformed JSON at exit 0, which is the failure the receipt exists to rule
+# out. Assigned first, each one is a simple command whose status the `&&` chain
+# can read and this `|| die` can act on.
+wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
+  && branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
+  || die "could not escape the audit fields for $branch"
 printf '{"worktree":"%s","worktreeRewritten":%s,"branch":"%s","branchRewritten":%s,"clean":%s,"stash":%s,"conflicts":[%s],"conflictsRewritten":[%s],"atRisk":[%s],"atRiskRewritten":[%s]}\n' \
-  "$(jstr "$wt")" "$(jrewritten "$wt")" "$(jstr "$branch")" "$(jrewritten "$branch")" "$clean" "$stash" \
+  "$wt_j" "$wt_rw" "$branch_j" "$branch_rw" "$clean" "$stash" \
   "$conflicts_json" "$conflicts_rewritten_json" "$at_risk_json" "$at_risk_rewritten_json" \
   || die "could not write the audit for $branch"
 exit "$rc"

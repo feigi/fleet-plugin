@@ -309,13 +309,14 @@ test("a plain conflicting path names the commits at risk", (t) => {
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
 });
 
-// #146: a tab, CR or DEL in a conflicting path used to be replaced with a
-// space, so `conflicts[]` named a file that exists nowhere on disk — this is
-// the case the ticket itself measured. Tab and CR now get JSON short forms
-// and DEL (\177) is not a C0 byte at all, so all three must round-trip, and
-// `conflictsRewritten` must say so.
-test("a conflicting path with a tab, a CR and a DEL round-trips and is not flagged rewritten", (t) => {
-  const path = "has\ttab\rcr\x7fdel.txt";
+// #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
+// with a space, so `conflicts[]` named a file that exists nowhere on disk —
+// this is the case the ticket itself measured. RFC 8259 gives short forms to
+// all four control bytes (\b \t \f \r) and DEL (\177) is not a C0 byte at
+// all, so all five must round-trip, and `conflictsRewritten` must say so. BS
+// and FF are here because the first version of this fix scrubbed them anyway.
+test("a conflicting path with a BS, a tab, a FF, a CR and a DEL round-trips and is not flagged rewritten", (t) => {
+  const path = "has\bbs\ttab\fff\rcr\x7fdel.txt";
   const c = conflictRepo(t, path);
 
   const r = audit(c);
@@ -330,13 +331,18 @@ test("a conflicting path with a tab, a CR and a DEL round-trips and is not flagg
 // unlike tab/CR/DEL, JSON has nowhere to put it — but the payload must now say
 // so, since the runbook step that pastes `conflicts[]` into a diff command must
 // skip exactly this path.
-test("a conflicting path with a byte that has no short form is replaced and flagged rewritten", (t) => {
-  const path = "has\x02bell.txt";
+// \013 (VT) rides along with \002: it is the C0 byte that looks like it has a
+// short form and does not — RFC 8259 lists no \v — so narrowing the scrub set
+// to make room for \b and \f must not take VT out with them. Unescaped in a
+// JSON string it is a parse error, so `jsonError` is the discriminator.
+test("a conflicting path with bytes that have no short form is replaced and flagged rewritten", (t) => {
+  const path = "has\x02bell\x0bvt.txt";
   const c = conflictRepo(t, path);
 
   const r = audit(c);
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
-  assert.deepEqual(r.json.conflicts, ["has bell.txt"], "no short form for \\002 — still neutralised to a space");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["has bell vt.txt"], "no short form for \\002 or \\013 — both still neutralised to a space");
   assert.deepEqual(r.json.conflictsRewritten, [true], "and the payload must disclose that it was");
 });
 
@@ -380,15 +386,15 @@ test("a quote, a backslash and a control byte in a commit subject keep the paylo
   assert.deepEqual(r.json.atRiskRewritten, [true, false], "\\001 has no JSON short form — the payload must disclose the scrub");
 });
 
-// #146: tab, CR and DEL in a commit subject get the opposite treatment from
-// \x01 above — two now have JSON short forms and the third is not a C0 byte at
-// all, so all three must round-trip in atRisk[] too, and none may flag the
-// entry as rewritten.
-test("a tab, a CR and a DEL in a commit subject round-trip in atRisk without being flagged rewritten", (t) => {
+// #146: BS, tab, FF, CR and DEL in a commit subject get the opposite treatment
+// from \x01 above — four now have JSON short forms and the fifth is not a C0
+// byte at all, so all five must round-trip in atRisk[] too, and none may flag
+// the entry as rewritten.
+test("a BS, a tab, a FF, a CR and a DEL in a commit subject round-trip in atRisk without being flagged rewritten", (t) => {
   const c = conflictRepo(t, "plain.txt");
   git(c.w, "checkout", "-q", "main");
   writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
-  git(c.w, "commit", "-q", "-am", "fix: has\ttab\rcr\x7fdel case");
+  git(c.w, "commit", "-q", "-am", "fix: has\bbs\ttab\fff\rcr\x7fdel case");
   git(c.w, "push", "-q", "origin", "main");
   git(c.w, "checkout", "-q", c.branch);
 
@@ -396,8 +402,8 @@ test("a tab, a CR and a DEL in a commit subject round-trip in atRisk without bei
   assert.equal(r.status, 0);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.ok(
-    r.json.atRisk.some((l) => l.includes("has\ttab\rcr\x7fdel case")),
-    `all three bytes must survive verbatim; got ${JSON.stringify(r.json.atRisk)}`,
+    r.json.atRisk.some((l) => l.includes("has\bbs\ttab\fff\rcr\x7fdel case")),
+    `all five bytes must survive verbatim; got ${JSON.stringify(r.json.atRisk)}`,
   );
   assert.deepEqual(r.json.atRiskRewritten, [false, false]);
 });
@@ -422,22 +428,52 @@ test("a quote in the branch and a backslash in the worktree path keep the payloa
 // `branch` cannot carry one — but `worktree` is a filesystem path, the same
 // vector as the conflicting-path cases above. Tab, CR and DEL must round-trip
 // there too, and a byte with no short form must still be replaced and flagged.
-test("a tab, a CR and a DEL in the worktree path round-trip and are not flagged rewritten", (t) => {
-  const c = repo(t, "fix/1-thing", "no-undo-audit-has\ttab\rcr\x7fdel-");
+test("a BS, a tab, a FF, a CR and a DEL in the worktree path round-trip and are not flagged rewritten", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\bbs\ttab\fff\rcr\x7fdel-");
 
   const r = audit(c);
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
-  assert.equal(r.json.worktree, c.w, "tab, CR and DEL must all survive intact");
+  assert.equal(r.json.worktree, c.w, "BS, tab, FF, CR and DEL must all survive intact");
   assert.equal(r.json.worktreeRewritten, false);
 });
 
-test("a byte with no short form in the worktree path is replaced and flagged rewritten", (t) => {
-  const c = repo(t, "fix/1-thing", "no-undo-audit-has\x02bell-");
+// The multi-line half of #146. `wt` is argv $1, a filesystem path, and a
+// directory name may hold a newline where a ref may not — so this is the one
+// input any of the three jstr copies can receive as more than one line. It is
+// what the `:a;$!N;$!ba` slurp and the `s/\n/\\n/g` rule exist for: without
+// the slurp sed cycles once per LINE and the LF rule never sees the byte, so
+// the payload carries a raw newline inside a JSON string and no parser accepts
+// it. Deleting either half left the whole suite green before this test.
+//
+// The same value cannot be driven through release-ticket.sh or inflight.sh:
+// release-ticket reaches `awk -v b="refs/heads/$branch"` first and awk refuses
+// a newline in a -v value (rc 2, before any receipt); its only other
+// interpolated message is the pair of `halt` calls that already flatten git's
+// stderr with `tr '\n' ' '`; and inflight builds every evidence string from
+// line-oriented git output. (No line numbers: #129 tracks five citations in
+// these files that have already drifted, one of them mid-review here.)
+// Their copies of the slurp are unreachable rather than unpinned; #119 owns
+// the three-copies question.
+test("a newline in the worktree path round-trips as an escaped \\n", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\nnewline-");
 
   const r = audit(c);
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
-  assert.equal(r.json.worktree, c.w.replace("\x02", " "), "no short form for \\002 — still neutralised to a space");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "the newline arrives escaped, and the path comes back byte for byte");
+  assert.equal(r.json.worktreeRewritten, false, "escaped, not replaced — \\012 is not in the scrub set");
+});
+
+test("bytes with no short form in the worktree path are replaced and flagged rewritten", (t) => {
+  // \013 (VT) alongside \002 for the same reason as the conflicting-path case:
+  // RFC 8259 has no \v, so VT must stay in the scrub set after \b and \f left it.
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\x02bell\x0bvt-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w.replace("\x02", " ").replace("\x0b", " "), "no short form for \\002 or \\013 — both still neutralised to a space");
   assert.equal(r.json.worktreeRewritten, true, "and the payload must disclose that it was");
 });
 
