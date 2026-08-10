@@ -390,6 +390,44 @@ function selectDimensions(all, stats) {
   return dims.length ? dims : all;
 }
 
+// `skills/fleet/commands/review-and-fix.md:49` documents `args.dimensions` as
+// accepting "keys or dimension objects" — but until now only objects worked:
+// a key array passed straight through and every dereference below (`d.key`,
+// `d.prompt`, `d.agentType`) came back `undefined`, with no throw and no
+// warning (#113). Resolve strings against the workflow's own catalog, and
+// check every object for the three fields the fan-out actually dereferences.
+// Anything unresolvable stops the run and names what was not recognised — a
+// misconfigured review is worse than no review, because its findings look
+// like findings.
+function resolveDimensions(override, all) {
+  // `== null` is exact where `!override` was not: only an ABSENT override
+  // falls through to the size tier. `!override` also swallowed `""`, `0` and
+  // `false`, silently trading a caller's pinned set for the heuristic one —
+  // measured on a `single-file` diff, `dimensions: ""` against a pin of
+  // ["correctness","comments","types"] ran [correctness, silent-failure]
+  // instead. Anything else non-array now reaches the throw below.
+  if (override == null) return null;
+  if (!Array.isArray(override))
+    throw new Error("review-pr: args.dimensions must be an array of keys or dimension objects");
+  const REQUIRED = ["key", "prompt", "agentType"];
+  const resolved = override.map((entry) => {
+    if (typeof entry === "string") {
+      const found = all.find((d) => d.key === entry);
+      if (!found) throw new Error(`review-pr: args.dimensions named an unknown key "${entry}"`);
+      return found;
+    }
+    const missing = REQUIRED.filter((f) => !entry || !entry[f]);
+    if (missing.length)
+      throw new Error(`review-pr: args.dimensions object is missing required field(s): ${missing.join(", ")}`);
+    return entry;
+  });
+  // An override resolving to nothing (an empty array) is an error, not a
+  // silent no-op — `[] || selectDimensions(...)` would otherwise pass `[]`
+  // through unnoticed, since an empty array is truthy.
+  if (!resolved.length) throw new Error("review-pr: args.dimensions resolved to no dimensions");
+  return resolved;
+}
+
 // --- Snapshot -------------------------------------------------------------
 // One immutable copy, cut once, read by every specialist. A snapshot cannot
 // change under a reader, which kills three distinct collision classes at once:
@@ -505,7 +543,7 @@ if (snap.diffStats) {
     log(`diff-stats unparseable (${e.message}) — full set`);
   }
 }
-const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, stats);
+const dimensions = resolveDimensions(explicitDimensions, DEFAULT_DIMENSIONS) || selectDimensions(DEFAULT_DIMENSIONS, stats);
 log(
   `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
     (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
