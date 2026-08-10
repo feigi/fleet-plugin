@@ -70,6 +70,33 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 # dropped, which is the half-release this script exists to prevent. Measured in
 # a fresh clone, where the branch really is the main checkout's HEAD.
 #
+# `worktree list --porcelain` is reading `<git-common-dir>/worktrees`, the
+# admin directory git itself writes one subdir per linked worktree into. When
+# that directory — or one entry inside it — cannot be read, git does not
+# error: it silently drops the affected entries and still exits 0 (verified,
+# git 2.50.1). `wt` and `stray` below would then read as "no worktree of
+# ours" for a claim that has one, same failure `gone` exists to stop this
+# script inferring elsewhere, applied here to the directory git itself reads
+# to answer the question. So establish the registry is actually readable
+# BEFORE trusting an absence the listing below reports — not by guarding the
+# listing's exit status, which stays 0 throughout.
+#
+# Absent entirely is fine and answers nothing here: a repo where a worktree
+# was removed and pruned (or never had one) has no `worktrees` dir at all, and
+# that emptiness is real, not a permission problem.
+common=$(git rev-parse --path-format=absolute --git-common-dir) ||
+  die "cannot resolve the git common directory"
+wtroot="$common/worktrees"
+if [ -e "$wtroot" ]; then
+  [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
+    die "worktree registry $wtroot could not be read — whether #$issue has a worktree is unknown"
+  for entry in "$wtroot"/*; do
+    [ -e "$entry" ] || continue
+    [ -r "$entry" ] && [ -x "$entry" ] ||
+      die "worktree registry entry $entry could not be read — whether #$issue has a worktree is unknown"
+  done
+fi
+
 # The path is the whole rest of the line, never $2: `worktree list --porcelain`
 # prints it raw, so any checkout living under a directory with a space in it —
 # ordinary on macOS — would otherwise be truncated at the first one.

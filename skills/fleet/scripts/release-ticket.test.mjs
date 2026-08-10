@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -917,6 +917,78 @@ test("the whole .worktrees directory deleted by hand still releases", (t) => {
   assert.equal(code, 0, "the parent going too does not make the child unanswerable");
   assert.deepEqual(json.blockers, []);
   assert.equal(json.released, true);
+});
+
+test("an unreadable worktree registry is unknown, never a release", (t) => {
+  // `.git/worktrees` is a different directory from `.worktrees` above — git's
+  // own admin dir, one subdir per linked worktree, which `worktree list
+  // --porcelain` reads to produce its listing. Unreadable, git does not error:
+  // it drops every entry it cannot read and still exits 0 (verified, git
+  // 2.50.1), so `wt` and `stray` both come back empty for a claim that plainly
+  // has one — the exact fail-open #84 exists to close.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wtroot = join(r.w, ".git", "worktrees");
+
+  chmodSync(wtroot, 0o000);
+  const { code, json, stderr } = release(r, c);
+  // Restored before the first assert, or a failure here leaves a fixture the
+  // suite's own cleanup cannot remove.
+  chmodSync(wtroot, 0o755);
+
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /worktree registry .* could not be read/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("an unreadable entry inside an otherwise-listable registry is unknown too", (t) => {
+  // The parent directory can be perfectly listable while this claim's own
+  // entry inside it is not: naming the entry only needs read+execute on the
+  // PARENT, so a plain `ls .git/worktrees` still shows it — but git cannot
+  // open the files inside to report the worktree, and drops it from the
+  // listing just as silently (verified, git 2.50.1). A check that only tests
+  // the parent misses exactly the entry that matters.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wtroot = join(r.w, ".git", "worktrees");
+  const entry = join(wtroot, readdirSync(wtroot)[0]);
+
+  chmodSync(entry, 0o000);
+  const { code, json, stderr } = release(r, c);
+  chmodSync(entry, 0o755);
+
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /worktree registry entry .* could not be read/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("a claim whose worktree was actually removed and pruned still releases", (t) => {
+  // The acceptance case the registry check must not regress, stated against
+  // the registry rather than the checkout: `git worktree remove` clears this
+  // claim's `.git/worktrees` entry along with the checkout, so once that has
+  // happened the branch is genuinely all that is left — not a permission
+  // problem in disguise — and the release must still go through.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "remove", c.wt);
+  assert.equal(
+    existsSync(join(r.w, ".git", "worktrees")),
+    false,
+    "fixture: removing the only worktree clears the registry entirely",
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.ok(
+    !git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the branch is released too",
+  );
 });
 
 test("a quote in the slug cannot produce a payload the caller fails to parse", (t) => {
