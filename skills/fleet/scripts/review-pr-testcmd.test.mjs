@@ -1,113 +1,181 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
 
-// review-pr.js tells every specialist to run `testCmd` FROM THE SNAPSHOT, and
-// the snapshot is `git archive HEAD | tar -x` — tracked files only. A default
-// naming an untracked path (it was `./agent-test`, which claim-ticket.sh writes
-// into the worktree at :110 and adds to .git/info/exclude at :166) resolves to
-// `No such file or directory` for every caller that does not pass args.testCmd,
-// and specialists reason from source instead of measuring.
+// review-pr.js used to default `testCmd` to a literal string naming THIS
+// repo's own test path — silent green everywhere else, since `worktree` is a
+// caller-supplied argument and a glob matching nothing exits 0 reporting
+// `tests 0` (#142). It is now DERIVED from the repo under review by the
+// snapshot agent (see the "derives this repository's own test command"
+// paragraph below), reusing derive-testcmd.sh — see
+// derive-testcmd.test.mjs for that script's own coverage, exercised against
+// repos that are NOT this one, which is the guard #142's acceptance
+// criteria required and an archive of this repo could not have been.
 //
-// So cut the archive and RUN the default in it. Parsing the command to predict
-// what it will do is the same bet that produced the defect — a guard that did
-// that passed `./agent-test skills/…/*.test.mjs`, treating the first token as
-// "the executable" and never checking it.
+// This file covers what remains review-pr.js's own responsibility:
+// resolveTestCmd's resolution order and refusal, the snapshot agent's prompt
+// and schema actually carrying the derivation, and the specialist prompt
+// still handing testCmd over verbatim with the 'tests 0' rule.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
-// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported for
-// this value. Reading the source couples us to the default's literal spelling —
-// a behaviour-preserving requote breaks it, but breaks LOUDLY with the message
-// below, and only ever binds the default, never a caller's args.testCmd.
-const defaultTestCmd = () => {
-  // `A` is review-pr.js's decoded `args` — it reads args once through a
-  // JSON-string guard and destructures off the result, so the binding here is
-  // `A.testCmd`, not `args.testCmd`.
-  const m = SOURCE.match(/\bA\.testCmd\s*\|\|\s*"([^"]+)"/);
-  assert.ok(m, "review-pr.js no longer has a quoted default testCmd — update this test");
-  return m[1];
-};
+// Every pin below runs against CODE, not SOURCE — the same policy, and now the
+// same stripper, as `review-pr-reads.test.mjs`. Written against raw source,
+// this file's schema-declaration pin was VACUOUS: wrapping the real
+// `testCmd: { type: "string" },` in a `/* */` block left the suite 9 pass / 0
+// fail while `additionalProperties: false` silently dropped the field at
+// runtime, breaking the very derivation #142 adds. The `^\s*` anchor those
+// pins use rejects a leading `//` and nothing else. Measured, #142 review.
+const CODE = stripComments(SOURCE);
 
-// The default's glob matches THIS file, so the run below re-enters it.
-const NESTED = "REVIEW_PR_TESTCMD_NESTED";
+// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
+// so resolveTestCmd is lifted out of the source text instead — same technique
+// as `select-dimensions.test.mjs` and `review-pr-reads.test.mjs`.
+function liftResolveTestCmd() {
+  const m = CODE.match(/^function resolveTestCmd\(explicit, snap\) \{[\s\S]*?^\}$/m);
+  assert.ok(m, "review-pr.js no longer declares resolveTestCmd(explicit, snap) at top level — update this test");
+  return new Function(`${m[0]}\nreturn resolveTestCmd;`)();
+}
+const resolveTestCmd = liftResolveTestCmd();
 
-test("the default testCmd runs from a git archive snapshot and actually runs tests", (t) => {
-  if (process.env[NESTED]) return t.skip("this is the nested run being measured");
-  // `rev-parse` walks UP, so a snapshot sitting anywhere inside another repo
-  // answers yes. Only the checkout whose toplevel IS this repo can cut an
-  // archive of it; anywhere else SKIP, which is visible in the output where a
-  // quieter fallback check would read as a pass.
-  let top;
-  try {
-    top = execFileSync("git", ["-C", REPO, "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      stdio: "pipe",
-    }).trim();
-  } catch {
-    return t.skip("not a git checkout — cannot cut an archive here");
-  }
-  if (realpathSync(top) !== realpathSync(REPO)) {
-    return t.skip("not this repo's toplevel — cannot cut an archive here");
-  }
-
-  const dir = mkdtempSync(join(tmpdir(), "review-pr-testcmd-"));
-  try {
-    const tar = join(dir, "snapshot.tar");
-    execFileSync("git", ["-C", REPO, "archive", "-o", tar, "HEAD"]);
-    execFileSync("tar", ["-x", "-f", tar, "-C", dir]);
-
-    const cmd = defaultTestCmd();
-    // `node --test` marks its children with these; inherited, the nested run
-    // emits the v8-serialized worker stream instead of the readable report —
-    // stdout arrives empty and the count below reads `tests 0`, a false red.
-    const env = { ...process.env, [NESTED]: "1" };
-    delete env.NODE_TEST_CONTEXT;
-    delete env.NODE_TEST_WORKER_ID;
-    // `shell: true` is /bin/sh, which is the shell that passes a zero-match glob
-    // through literally. zsh would error on it and hide the case being tested.
-    const r = spawnSync(cmd, { cwd: dir, shell: true, encoding: "utf8", env });
-    assert.equal(
-      r.status,
-      0,
-      `default testCmd '${cmd}' does not run in the snapshot (exit ${r.status}):\n${r.stdout}${r.stderr}`,
-    );
-    // Exit status alone is not enough, which is the whole ticket: a glob
-    // matching nothing exits 0 reporting `tests 0`, and no node flag fails a
-    // zero-test run (checked on v26.5.0). Assert on the count.
-    // Both prefixes: the default reporter is spec on a terminal and on newer
-    // node, tap when older node writes to a pipe. Pinning only `ℹ` reads a tap
-    // run — every CI run — as `tests 0`, which is this assertion's own failure
-    // message inverted: a false red claiming a silent green.
-    const ran = r.stdout.match(/^(?:ℹ|#) tests (\d+)$/m);
-    assert.ok(
-      ran && Number(ran[1]) > 0,
-      `default testCmd '${cmd}' ran no tests in the snapshot — 'tests 0' at exit 0 is a silent green:\n${r.stdout}`,
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+test("an explicit override always wins, whatever the snapshot derived", () => {
+  assert.equal(resolveTestCmd("npm test --", { testCmd: "node --test" }), "npm test --");
+  assert.equal(resolveTestCmd("npm test --", null), "npm test --");
+  assert.equal(resolveTestCmd("npm test --", { testCmdError: "refused" }), "npm test --");
 });
 
-// The prompt is what specialists actually obey, so the reading rule has to be in
-// it. Without this, a specialist that guesses a glob still reports `tests 0` as
-// a pass — the exact failure the default fix alone does not cover.
+test("no override falls back to the snapshot agent's derivation", () => {
+  assert.equal(resolveTestCmd(undefined, { testCmd: "node --test" }), "node --test");
+  assert.equal(resolveTestCmd(null, { testCmd: "npm test --" }), "npm test --");
+});
+
+// The whole point of #142: neither an override nor a derivation must REFUSE
+// the review, never fall back to a guessed default.
+test("no override and no derivation refuses, naming the snapshot agent's reason", () => {
+  assert.throws(
+    () => resolveTestCmd(undefined, { testCmdError: "HEAD has no scripts.test and no test files" }),
+    /no test command for this repository — HEAD has no scripts\.test and no test files/,
+  );
+});
+
+test("no override, no snapshot at all, and no testCmdError still refuses rather than crashing", () => {
+  assert.throws(() => resolveTestCmd(undefined, null), /no test command for this repository/);
+  assert.throws(() => resolveTestCmd(undefined, {}), /the snapshot agent did not derive one/);
+});
+
+// A falsy-but-present override (`""`) is caller error, not "no override" —
+// the `||`/truthiness check above only distinguishes explicit from absent,
+// and this pins that an empty string does NOT silently pass through as a
+// command. It falls to the snapshot the same as `undefined` would.
+test("an empty-string override is not treated as an explicit command", () => {
+  assert.equal(resolveTestCmd("", { testCmd: "node --test" }), "node --test");
+});
+
+// The function is worthless if nothing calls it — pin the CALL SITE, not
+// just the lifted copy. select-dimensions.test.mjs's #118 regression is this
+// exact defect: replacing the call with a bare default left every test above
+// green while the feature disconnected.
+test("review-pr.js actually calls resolveTestCmd once the snapshot is validated", () => {
+  assert.match(
+    CODE,
+    /^const testCmd = resolveTestCmd\(A\.testCmd, snap\);$/m,
+    "the testCmd call site changed — the derivation may be disconnected",
+  );
+  // Textually after the snapshot's own validity guard, not before — snap must
+  // be known good (or the throw above already fired) before this reads it.
+  const guardAt = CODE.indexOf("the snapshot agent returned no tree");
+  const callAt = CODE.indexOf("const testCmd = resolveTestCmd(");
+  assert.ok(guardAt !== -1 && callAt !== -1 && callAt > guardAt, "resolveTestCmd is called before snap is validated");
+});
+
+// A hardcoded default anywhere in this file is the exact regression #142
+// fixes — `A.testCmd || "<literal>"` is the shape it used to take.
+test("no hardcoded testCmd default remains", () => {
+  assert.doesNotMatch(
+    CODE,
+    /A\.testCmd\s*\|\|\s*"/,
+    "a literal testCmd default reappeared — it must come from resolveTestCmd/derive-testcmd.sh instead",
+  );
+});
+
+// The snapshot agent's return schema gains testCmd/testCmdError the same way
+// diffPath/diffLines/prHead were added: `additionalProperties: false` drops
+// an undeclared field silently, so BOTH the prompt asking for it and the
+// schema declaring it have to be pinned, or the feature disconnects in one
+// token exactly like `review-pr-reads.test.mjs:308-367` records happening to
+// the diff facts.
+test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
+  const at = CODE.indexOf("const snap = await agent(");
+  const end = CODE.indexOf("if (!snap", at);
+  assert.notEqual(at, -1, "the snapshot agent dispatch moved — update this test");
+  assert.notEqual(end, -1, "the snapshot agent's validity guard moved — update this test");
+  const snapshot = CODE.slice(at, end);
+
+  assert.match(
+    snapshot,
+    /~\/\.claude\/skills\/fleet\/scripts\/derive-testcmd\.sh \$\{worktree\} HEAD/,
+    "the snapshot agent no longer runs derive-testcmd.sh",
+  );
+  // Deriving the command is half the job — it also has to RUN where the
+  // specialists are told to run it. `git archive` carries tracked files only,
+  // so `npm test --` (the derivation's first branch, for any repo whose
+  // scripts.test invokes a node_modules binary) exits 127 in the snapshot
+  // while passing in the worktree the derivation was run against. Measured on
+  // a synthetic repo during the #142 review: worktree exit 0, archive exit 127.
+  assert.match(
+    snapshot,
+    /ln -s \$\{worktree\}\/node_modules \$\{scratch\}\/snapshot\/node_modules/,
+    "the snapshot no longer provisions node_modules — a derived `npm test --` cannot run in it",
+  );
+  // These names live inside a template literal, so each backtick is a
+  // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
+  // same idiom `review-pr-reads.test.mjs` uses for diffPath/prHead/diffLines.
+  const B = "\\\\?`";
+  assert.match(
+    snapshot,
+    new RegExp(`Report\\s+${B}testCmd${B}\\s*=\\s*its\\s+stdout\\s+ONLY\\s+if\\s+it\\s+exited\\s+0`),
+    "testCmd is not bound to the script's stdout and gated on its exit code",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`report\\s+${B}testCmdError${B}\\s*=\\s*its\\s+stderr`),
+    "testCmdError is not bound to the script's stderr on refusal",
+  );
+
+  const props = snapshot.slice(snapshot.indexOf("properties: {"), snapshot.indexOf("\n      },"));
+  for (const field of ["testCmd", "testCmdError"]) {
+    assert.match(
+      props,
+      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
+      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
+    );
+  }
+  // Both stay OUT of `required`: a network or git failure inside
+  // derive-testcmd.sh must not abort a snapshot that is otherwise good —
+  // resolveTestCmd is what turns a missing derivation into a refusal, not a
+  // required-field validation error one layer down.
+  assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
+});
+
+// The prompt is what specialists actually obey, so the reading rule has to be
+// in it. Without this, a specialist that guesses a glob still reports
+// `tests 0` as a pass — the exact failure the derivation alone does not cover.
 test("the specialist prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
   // indexOf returns -1 when absent and slice(-1) is a truthy one-character
   // string, so asserting on the slice passes with the prompt gone. Assert the
   // index — and bound the END too: unbounded, this slice ran to EOF and the
   // assertions below were satisfiable from the verifier prompt further down.
-  const at = SOURCE.indexOf("READ ONLY FROM THE SNAPSHOT");
+  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
   assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = SOURCE.indexOf("Scratch files go in", at);
+  const end = CODE.indexOf("Scratch files go in", at);
   assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = SOURCE.slice(at, end);
-  // The worked example must INTERPOLATE the default, not restate it. A
-  // hardcoded copy drifts from testCmd the moment either one changes, and a
-  // caller passing args.testCmd would be handed the wrong command.
+  const prompt = CODE.slice(at, end);
+  // The worked example must INTERPOLATE testCmd, not restate it. A hardcoded
+  // copy drifts from the resolved value the moment either one changes, and a
+  // caller passing args.testCmd (or the derivation) would be handed the wrong
+  // command.
   assert.match(
     prompt,
     /run exactly this[^\n]*\n\s*\$\{testCmd\}/,

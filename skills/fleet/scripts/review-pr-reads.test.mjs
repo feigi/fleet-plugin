@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
@@ -14,35 +15,11 @@ const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
 // Every pin below runs against CODE, not SOURCE: a declaration or a paragraph a
-// reader's eye skips must not satisfy an assertion. Both escapes were MEASURED
-// green on this file — the three diff fields wrapped in `/* */` (schema drops
-// them, `usableDiff` returns null forever, 12 pass / 0 fail), and the snapshot
-// agent's `Report \`diffPath\`` paragraph deleted and re-inserted inside a block
-// comment (same, 12 pass / 0 fail). A `^(?!\s*//)` anchor closes neither: the
-// commented-out line starts with `/*`, and per-assertion anchors have to be
-// remembered once per pin. Stripping once closes the class for every assertion
-// in this file, including ones added later.
-//
-// Line-based on purpose. A regex stripper (`/\*[\s\S]*?\*\//`) would open a
-// comment at `"node --test skills/fleet/scripts/*.test.mjs"` — a glob inside a
-// string literal — and swallow real code up to the next `*/`. Blank lines
-// rather than deleted ones, so offsets stay line-aligned with the file.
-const CODE = (() => {
-  const out = [];
-  let inBlock = false;
-  for (const line of SOURCE.split("\n")) {
-    if (inBlock) {
-      if (line.includes("*/")) inBlock = false;
-      out.push("");
-    } else if (/^\s*\/\*/.test(line)) {
-      if (!line.includes("*/")) inBlock = true;
-      out.push("");
-    } else {
-      out.push(/^\s*\/\//.test(line) ? "" : line);
-    }
-  }
-  return out.join("\n");
-})();
+// reader's eye skips must not satisfy an assertion. Stripping once closes the
+// class for every assertion in this file, including ones added later — see
+// strip-comments.mjs for the two escapes measured green without it, and for why
+// the stripper is shared rather than copied into each test file.
+const CODE = stripComments(SOURCE);
 
 // Each declaration is a top-level `function` whose body contains no line
 // starting at column 0 with `}`, so the non-greedy match ends on its own

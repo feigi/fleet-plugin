@@ -448,8 +448,10 @@ in that run the ranked one was refuted outright.
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
 workflow and to the fix-applier so both gates run one command. Omit it from the
-workflow args and `review-pr.js` defaults to that string; the fix-applier has no
-default, so substituting `<testCmd>` with nothing leaves it no gate at all.
+workflow args and `review-pr.js` now DERIVES it from the repo under review
+(#142) instead of defaulting to a fixed string — refusing outright if it
+can't; the fix-applier has no such fallback, so substituting `<testCmd>` with
+nothing leaves it no gate at all.
 
 > You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The
 > review is done and these findings are its output — do not re-review, do not

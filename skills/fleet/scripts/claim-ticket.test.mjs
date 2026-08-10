@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -330,8 +330,15 @@ test("runner: the stamp is stable across claims of the same template", () => {
 // script and the stamp must move. Copying rather than editing the real
 // script in place keeps this test from mutating the file under test.
 test("runner: the stamp changes when the template's content changes", () => {
-  const editedScript = join(mkdtempSync(join(tmpdir(), "claim-script-")), "claim-ticket.sh");
+  const scriptDir = mkdtempSync(join(tmpdir(), "claim-script-"));
+  const editedScript = join(scriptDir, "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
+  // claim-ticket.sh now derives testcmd via a sibling script, resolved
+  // relative to itself ($(dirname -- "$0")) — copy the real one alongside
+  // this edited copy so the derivation still finds it.
+  const sibling = join(scriptDir, "derive-testcmd.sh");
+  copyFileSync(join(import.meta.dirname, "derive-testcmd.sh"), sibling);
+  chmodSync(sibling, 0o755);
 
   const after = apply(SUITE, editedScript).text.match(STAMP_RE)[1];
   const before = apply(SUITE).text.match(STAMP_RE)[1];
@@ -386,9 +393,16 @@ test("runner: no scripts.test but test files present falls back to node --test",
 
 // `node --test` with zero test files exits 0. A runner that passes vacuously is
 // worse than a dead one — the review fan-out consumes it as a green suite.
+// Anchored on THIS script's own prefix, not on `pass vacuously` alone: the
+// nested derive-testcmd.sh writes its reason to a stderr that claim-ticket.sh
+// does not redirect, so the loose form is satisfied by the child's line and
+// stays green while claim-ticket's own `die` prints a bare `claim-ticket: `
+// with nothing after the colon. Anchoring is what makes the capture's `2>&1`
+// a pinned invariant rather than a promise. `.` does not cross a newline, so
+// this matches only when one line carries both.
 test("runner: no scripts.test and no test files refuses rather than passing vacuously", () => {
   const { err } = claim(repo({ "README.md": "" }));
-  assert.match(err, /pass vacuously/);
+  assert.match(err, /claim-ticket: .*pass vacuously/);
 });
 
 // The worktree is built from origin/main, so every probe must read origin/main.
