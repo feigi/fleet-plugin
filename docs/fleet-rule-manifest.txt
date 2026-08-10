@@ -2,7 +2,7 @@ name carries the `Agent` tool
 teammates cannot spawn teammates
 `subagent_type: "fork"` (inherits your whole conversation)
 Fresh context per member
-`--label ready-for-agent` mandatory
+`--require-label ready-for-agent` mandatory
 Staging, never vetting
 Never put two sequenced tickets in one wave
 never default to `npm install`

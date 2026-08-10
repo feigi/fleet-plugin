@@ -13,6 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { writeSync } from "node:fs";
+import { parseArgs } from "node:util";
 
 const NAME = "candidates";
 
@@ -31,6 +32,28 @@ const NAME = "candidates";
 function die(msg) {
   writeSync(2, `\n${NAME}: ${msg}\n`);
   process.exit(2);
+}
+
+// The accepted flag set, declared once. `parseArgs` enforces the NAMES; the
+// guards below enforce the VALUES.
+//
+// Nothing checked a flag's name until #173: an unrecognised flag was ignored,
+// so `--label ready-for-agent` — the spelling run-team's own phase 0 rule
+// carried — ran the UNFILTERED query at exit 0, the widening `--require-label`
+// exists to prevent. Only the unknown-name error is refused here; `parseArgs`
+// also rejects a missing value, and those spellings are left to `arg()` below,
+// whose refusals are #169's and say more about the harm than Node's do.
+const OPTIONS = {
+  "require-label": { type: "string" },
+  "allow-fallback": { type: "boolean" },
+  "limit": { type: "string" },
+};
+try {
+  parseArgs({ options: OPTIONS, strict: true });
+} catch (e) {
+  if (e.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+    die(`${e.message} — accepted: ${Object.keys(OPTIONS).map((f) => `--${f}`).join(", ")}`);
+  }
 }
 
 // Refuses here, once, rather than at each call site: a flag given without a

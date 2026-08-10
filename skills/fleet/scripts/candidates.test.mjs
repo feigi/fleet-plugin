@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -287,6 +287,24 @@ test("a --require-label=value refuses — indexOf cannot see the = form, so the 
   assert.equal(status, 2);
 });
 
+test("an unknown flag refuses and names it — a flag that is merely ignored runs unfiltered", () => {
+  // `--label ready-for-agent` is not an invented typo: it is what run-team's
+  // phase 0 rule said, one line under a command spelling it `--require-label`.
+  // Ignored, the label term never reaches gh, so the ready-for-human queue
+  // ships at exit 0 — the widening `--require-label` exists to prevent, reached
+  // by following this repo's own instruction.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--label", "ready-for-agent"],
+  );
+  assert.equal(queriesRun(stderr), 0);
+  assert.equal(status, 2);
+  // The flag has to be NAMED. A bare "bad arguments" leaves the caller — markdown
+  // read by a model, with no way to see the script — re-guessing its own spelling.
+  // Line-anchored, per die()'s leading newline.
+  assert.match(stderr, /^candidates: Unknown option '--label'/m);
+});
+
 test("gh output that is not an array refuses — a reduction that did not apply is not an empty queue", () => {
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
@@ -451,4 +469,42 @@ test("candidates come back oldest first, whatever order gh returned them in", ()
     ticket(7, "## What to build\n\na\n"),
   ]);
   assert.deepEqual(rows.map((r) => r.n), [7, 19, 42]);
+});
+
+// The other half of #173, and the half that produced the refused invocation
+// above: the rule a controller reads lives in another file and was pinned by
+// nothing, so it named a flag the script has never accepted.
+const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "skills", "run-team", "SKILL.md"), "utf8");
+
+// The step-1 bullet alone. A slice any wider is vacuous for this claim: the
+// command one line above the rule already spells `--require-label` correctly,
+// so a positive match anywhere in phase 0 stays green with the rule naming
+// anything at all.
+function phase0Step1() {
+  const at = RUN_TEAM.indexOf("1. **Candidate scan**");
+  assert.notEqual(at, -1, "run-team phase 0 step 1 moved — update this test");
+  const end = RUN_TEAM.indexOf("\n2. ", at);
+  assert.notEqual(end, -1, "run-team phase 0 step 2 moved — update this test");
+  return RUN_TEAM.slice(at, end);
+}
+
+test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
+  const step1 = phase0Step1();
+  // Leading backtick, so this can only be satisfied by the RULE: in the command
+  // above it, `--require-label` is preceded by a line break, not a backtick.
+  // The gap is loose enough that rewording around `mandatory` stays green and
+  // tight enough that a different flag in the rule does not.
+  assert.match(
+    step1,
+    /`--require-label ready-for-agent`[\s\S]{0,20}mandatory/,
+    "run-team's mandatory-label rule no longer names --require-label",
+  );
+  // The positive pin cannot see a SECOND sentence naming the wrong flag, which
+  // is exactly what shipped. `--require-label` does not contain `--label`, so
+  // this needs no quoting to tell them apart.
+  assert.doesNotMatch(
+    step1,
+    /--label\b/,
+    "run-team's phase 0 step 1 names `--label`, which candidates.mjs refuses",
+  );
 });

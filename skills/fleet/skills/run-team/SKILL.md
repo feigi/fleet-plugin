@@ -57,7 +57,7 @@ At start, and whenever the pool empties.
    port).
 
 1. **Candidate scan** — `~/.claude/skills/fleet/scripts/candidates.mjs
-   --require-label ready-for-agent`. **`--label ready-for-agent` mandatory, no
+   --require-label ready-for-agent`. **`--require-label ready-for-agent` mandatory, no
    fallback** — do NOT pass `--allow-fallback`. Empty means no work;
    `ready-for-human` needs a human to brainstorm first and you have no channel to
    one mid-flight.
