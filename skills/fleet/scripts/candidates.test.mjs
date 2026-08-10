@@ -133,7 +133,7 @@ test("every spec is dropped and named — a filter that stops at the first leaks
   assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #10", "dropped #11"]);
 });
 
-test("a drop line names its pass — a cross-run grep -c must not double-count a spec dropped once", () => {
+test("a drop line names its pass — an untagged drop cannot be attributed to the query it came from", () => {
   // Pins the message SHAPE per pass, not the superset relationship the fixture
   // stub cannot produce (its two fixtures are deliberately disjoint — see the
   // file header). #10 is the labeled fixture's sole entry and is a spec, so
