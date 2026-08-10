@@ -128,8 +128,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/memory-recall-on-prompt.sh",
-            "timeout": 5
+            "command": "~/.claude/hooks/memory-recall-on-prompt.sh 2>>~/.claude/recall-debug.log",
+            "timeout": 10
           }
         ]
       }
@@ -184,8 +184,10 @@
     "allow": [
       "$defaults",
       "Bash commands invoking the fleet scripts under ~/.claude/skills/fleet/scripts/ (reap.sh, claim-ticket.sh) with any args — /fleet:run-team authorizes them; each recomputes its own safety preconditions...",
-      "Bash commands running `gh pr merge <n> --merge` (never with --delete-branch) — /fleet:run-team's merge step; a merge bot re-binds ci-state green and proves ancestry before each merge, and only reviewer-labeled ready-to-merge PRs qualify."
-    ]
+      "Bash commands running `gh pr merge <n> --merge` (never with --delete-branch) — /fleet:run-team's merge step; a merge bot re-binds ci-state green and proves ancestry before each merge, and only reviewer-labeled ready-to-merge PRs qualify.",
+      "Bash commands running `git -C <worktree> push --force-with-lease origin <branch>` (never plain --force, never -q, never onto main or any default branch) — /fleet:run-team's merge step; a merge bot uses it only to land a rebase it just performed on a reviewer-labeled ready-to-merge PR branch, after no-undo-audit reports clean with zero stashes and no conflicts, with the worktree verified clean and equal to the PR head; the lease is the safety, so a denial or a lease failure means stop and report, never retry with --force."
+    ],
+    "defaultMode": "auto"
   },
   "voiceEnabled": false,
   "mcpServers": {
