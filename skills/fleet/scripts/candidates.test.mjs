@@ -23,6 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
 
@@ -523,6 +524,9 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // Flaky by nature — it races the pipe reader — so it's pinned by repeated
   // runs under Linux (this repo's CI target), not by a single local pass:
   // unfixed, 7/15 runs inverted to exit 1; fixed, 0/20 did, 1000+ msgs run.
+  // On darwin EAGAIN never fires at all — unfixed, the status assertion below
+  // caught the revert 0/15 — so a local green confirms nothing and the source
+  // pin at the end is the only gate on this platform.
   //
   // Text, not just status: this only asserts the EXIT CODE, not the refusal
   // wording. `die()`'s catch swallows the write failure to keep exit 2, so
@@ -536,6 +540,13 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   );
   assert.ok(stderr.length > 60_000, `gh stderr must exceed the buffer, got ${stderr.length}`);
   assert.equal(status, 2);
+  // The guard's SHAPE, deterministically — the assertion above is the race.
+  // Stripped first, and this is not optional: against raw source a `die()`
+  // genuinely reverted to console.error with the good shape parked in a block
+  // comment passes 375/375 (measured), because a `^…/m` anchor matches inside
+  // the comment. Dropping either half also drops the only pin on #176, which
+  // is what the refusal-text assertion this test used to carry was doing.
+  assert.match(stripComments(readFileSync(SCRIPT, "utf8")), /function die\(msg\) \{\s*try \{\s*writeSync\(2,/);
 });
 
 test("gh missing entirely is named as ENOENT — the shape that prints nothing at all", () => {

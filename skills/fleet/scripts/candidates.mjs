@@ -29,6 +29,7 @@ const NAME = "candidates";
 // separator. Every reader of this script's refusals, tests included, matches
 // them line-anchored; without this they silently stop matching under exactly
 // the large-stderr failure the writeSync is here to survive.
+//
 // The write itself can also fail: once ~64 KiB of the forwarded gh stderr
 // above is already queued on a pipe, this fd is non-blocking and the write
 // throws EAGAIN. Uncaught, that skips process.exit(2) below and the process
@@ -40,8 +41,7 @@ function die(msg) {
   try {
     writeSync(2, `\n${NAME}: ${msg}\n`);
   } catch {
-    // EAGAIN (or any other write failure): the message may be lost, but the
-    // exit code below must not be.
+    // Message may be lost; the exit code below must not be.
   }
   process.exit(2);
 }
