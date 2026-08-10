@@ -6,7 +6,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { classify, computeStats } from "./diff-stats.mjs";
+
+// `main()` runs only when this file is executed directly, so the CLI wiring is
+// unreachable from a unit test. Pinned as source text instead — see the
+// truncation test at the bottom for why it needs pinning at all.
+const CLI = readFileSync(join(import.meta.dirname, "diff-stats.mjs"), "utf8");
 
 test("classifier priority: test > code-ext > docs/config-dir", () => {
   // src is the residue
@@ -101,4 +108,40 @@ test("classify: extensionless files fall to src (fail-open residue)", () => {
 test("computeStats: loc tolerates a file missing additions/deletions", () => {
   assert.equal(computeStats([{ path: "a.ts" }]).loc, 0);
   assert.equal(computeStats([{ path: "a.ts", additions: 3 }]).loc, 3);
+});
+
+// `gh pr view --json files` pages at 100 and exits 0, so a 124-file PR arrives
+// as a fully-formed 100-file measurement with nothing contradicting it —
+// measured on microsoft/vscode#329568. `changedFiles` from the same query is the
+// only disagreement available. Absent on every normal PR: `review-pr.js` reads
+// its PRESENCE as "widen the fan-out, this list is short", so a flag set when
+// the counts agree would widen every review.
+test("computeStats: truncated is set only when gh's file list is short", () => {
+  const files = Array.from({ length: 100 }, (_, i) => ({ path: `src/f${i}.ts`, additions: 1 }));
+  assert.equal(computeStats(files, 124).truncated, 124);
+  assert.equal(computeStats(files, 100).truncated, undefined, "counts agree — a complete list is not truncated");
+  assert.equal(computeStats(files).truncated, undefined, "gh omitted changedFiles — no cap can be inferred");
+  // A short list under-reports `files` too, so nothing else in the blob can
+  // stand in for the flag.
+  assert.equal(computeStats(files, 124).files, 100);
+});
+
+// `truncated` is computed from an argument, and nothing above proves the CLI
+// ever passes one. Both tokens are needed and each disconnects the whole cap
+// detection alone: drop `changedFiles` from the query and `info.changedFiles` is
+// undefined, drop the second argument and the value never reaches computeStats.
+// Either way every PR reports as complete, `review-pr.js` keeps stamping its
+// file list "and no others", and the tests above stay green against a copy
+// nothing calls.
+test("the CLI actually asks gh for changedFiles and passes it through", () => {
+  assert.match(
+    CLI,
+    /"pr", "view", String\(pr\), "--json", "files,changedFiles"/,
+    "the gh query no longer requests changedFiles — nothing can reveal the 100-file cap",
+  );
+  assert.match(
+    CLI,
+    /computeStats\(info\.files, info\.changedFiles\)/,
+    "the CLI computes stats without the uncapped count — `truncated` is never set in production",
+  );
 });

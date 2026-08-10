@@ -214,3 +214,40 @@ test("the models log reports what was sent and does not call a vendored pin 'inh
   assert.match(m[0], /\|\| "frontmatter"/, "an unset model is reported as something other than `frontmatter`");
   assert.doesNotMatch(m[0], /"inherit"/, "the log calls an unset model `inherit`, which is false for correctness/simplify");
 });
+
+// `gh pr view --json files` pages at 100 and exits 0, so a truncated list is a
+// short MEASUREMENT, not a small PR: `loc` under-counts and `docsOnly` can be
+// true only because the src files fell off the end. Either one trims dimensions
+// off production code — the docs profile drops four. Widen, the same safe
+// direction as an unparseable blob.
+test("a truncated file list widens to the full set, whatever it profiles as", () => {
+  const docsish = computeStats(
+    [
+      { path: "docs/a.md", additions: 3, deletions: 0 },
+      { path: "docs/b.md", additions: 3, deletions: 0 },
+    ],
+    124,
+  );
+  assert.equal(docsish.docsOnly, true, "the short list really does look docs-only — that is the trap");
+  assert.equal(docsish.truncated, 124);
+  assert.equal(
+    selectDimensions(DEFAULT_DIMENSIONS, docsish).length,
+    DEFAULT_DIMENSIONS.length,
+    "a capped list was sized as a docs PR — four dimensions dropped off code gh never listed",
+  );
+  // And the widen must not fire when the list is complete, or every review runs
+  // the full set forever and the size tier is dead.
+  const complete = computeStats(
+    [
+      { path: "docs/a.md", additions: 3, deletions: 0 },
+      { path: "docs/b.md", additions: 3, deletions: 0 },
+    ],
+    2,
+  );
+  assert.equal(complete.truncated, undefined);
+  assert.deepEqual(
+    selectDimensions(DEFAULT_DIMENSIONS, complete).map((d) => d.key),
+    ["correctness", "comments"],
+    "the docs trim no longer fires on a complete docs-only list",
+  );
+});
