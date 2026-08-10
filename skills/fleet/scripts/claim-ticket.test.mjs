@@ -130,9 +130,12 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
 test("runner: a symlink to a directory runs the test files under it", () => {
   const a = apply(SUITE);
   symlinkSync("t", join(a.wt, "tlink"));
-  // `t/vendor` is the shape the `-not -path` filter cannot see: a symlink into
-  // `node_modules` under another name, so the path find prints never contains
-  // `node_modules`. The slash form does not descend it and reads 3; `find -L`
+  // `t/vendor` is the shape neither exclusion can see: a symlink into
+  // `node_modules` under another name — `-prune` matches the directory's own
+  // name and this one is called `vendor`, and the `case` guard reads the
+  // argument's spelling, which holds no `node_modules` either. Measured: it
+  // is exactly as blind as the `-not -path` filter it replaced, both legs.
+  // The slash form does not descend it and reads 3; `find -L`
   // sweeps the vendored test in and reads 4. Without this every test passes
   // under `-L`, leaving the reasoning in claim-ticket.sh as the only thing
   // between a future tidy-up and a suite resting on third-party code.
@@ -227,6 +230,63 @@ test("runner: a vendored test under a nested node_modules does not run", () => {
   // (`ℹ pass 4`) on a terminal and on newer node, tap (`# pass 4`) when older
   // node writes to a pipe, which is every CI run.
   assert.match(r.stdout, /^(?:ℹ|#) pass 4$/m);
+});
+
+// The point of `-prune` over a path filter: content under `node_modules` is
+// excluded from the run either way, so its readability cannot change the
+// verdict. An unreadable directory *in* it used to still fail `find` and trip
+// the guard above — a loud but pointless stall. Pruning skips descending
+// `node_modules` entirely, so this directory's permissions are never even
+// read. `pass 3` — the same count as the bare "t" case — pins that: the
+// locked directory is empty and is never descended, so nothing about it can
+// move the count or the status. Mutation-checked: reverting the walk to the
+// `-not -path` filter, or typoing the prune's name, fails this test.
+test("runner: an unreadable directory under node_modules no longer refuses the suite", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply(SUITE);
+  const locked = join(a.wt, "t", "node_modules", "locked");
+  mkdirSync(locked, { recursive: true });
+  chmodSync(locked, 0o000);
+  try {
+    const r = a.run("t");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
+});
+
+// Same directories, six spellings of the argument. The top-level pair alone
+// is not coverage of "a vendored argument": `-prune` fires only where the
+// walk DESCENDS through a `node_modules` dirent, so an argument at or under
+// one prunes nothing and prints every file beneath it. Measured against the
+// prune alone, the four spellings below the top level all ran their vendored
+// test and exited 0 — the vacuous vendored green this shim exists to refuse.
+// Only the `case` guard covers them, which is why every spelling is here.
+// The message is asserted too, not just the status: falling through to the
+// emptiness guard would report a deliberate exclusion as an absence and send
+// a reader after a discovery bug that does not exist.
+test("runner: a vendored directory argument refuses however it is spelled", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "node_modules", "pkg"), { recursive: true });
+  mkdirSync(join(a.wt, "t", "node_modules", "pkg"), { recursive: true });
+  writeFileSync(join(a.wt, "node_modules", "v.test.mjs"), PASSES);
+  writeFileSync(join(a.wt, "node_modules", "pkg", "v.test.mjs"), PASSES);
+  writeFileSync(join(a.wt, "t", "node_modules", "v.test.mjs"), PASSES);
+  writeFileSync(join(a.wt, "t", "node_modules", "pkg", "v.test.mjs"), PASSES);
+  for (const spelling of [
+    "node_modules",
+    "./node_modules",
+    "node_modules/pkg",
+    "t/node_modules",
+    "t/node_modules/pkg",
+    join(a.wt, "node_modules", "pkg"),
+  ]) {
+    const r = a.run(spelling);
+    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /is under node_modules — excluded from the run/, spelling);
+    assert.doesNotMatch(r.stderr, /no test files under/, spelling);
+  }
 });
 
 // Directories are only rewritten for `node --test`. Every other entrypoint is
