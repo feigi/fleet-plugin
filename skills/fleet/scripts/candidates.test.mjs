@@ -23,6 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
 
@@ -512,21 +513,40 @@ test("a failed gh query refuses without re-emitting gh's own stderr", () => {
   assert.doesNotMatch(refusal, /MARKER_ZZZ/);
 });
 
-test("the refusal survives a gh stderr larger than the pipe buffer — the case that motivated it", () => {
-  // The failure mode the fix targets, at the size it actually happens. gh's
-  // forwarded stderr is written first and die()'s line last, so with an async
-  // console.error the refusal is the FIRST thing process.exit() discards: the
-  // caller gets 64 KiB of gh noise, exit 2, and no statement of what broke.
+test("the exit code survives a gh stderr larger than the pipe buffer — the case that motivated it", () => {
+  // The failure mode the fix targets, at the size it actually happens. Once
+  // ~64 KiB of gh's forwarded stderr is already queued on a pipe, this fd is
+  // non-blocking and die()'s own writeSync can throw EAGAIN. Unfixed, that
+  // throw is uncaught: process.exit(2) never runs and the process falls
+  // through to exit 1 — "query fine, queue empty", the wrong fact (#299).
   // Under the buffer every variant passes, so the program must stay large.
+  //
+  // Flaky by nature — it races the pipe reader — so it's pinned by repeated
+  // runs under Linux (this repo's CI target), not by a single local pass:
+  // unfixed, 7/15 runs inverted to exit 1; fixed, 0/20 did, 1000+ msgs run.
+  // On darwin EAGAIN never fires at all — unfixed, the status assertion below
+  // caught the revert 0/15 — so a local green confirms nothing and the source
+  // pin at the end is the only gate on this platform.
+  //
+  // Text, not just status: this only asserts the EXIT CODE, not the refusal
+  // wording. `die()`'s catch swallows the write failure to keep exit 2, so
+  // under the exact EAGAIN this test forces, the message CAN still be lost —
+  // recovering it needs a retry loop, and #299 puts that out of scope.
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
     ["--require-label", "ready-for-agent"],
     null,
     { JQ_OVERRIDE: `${"z".repeat(100_000)}(((` },
   );
-  assert.equal(status, 2);
   assert.ok(stderr.length > 60_000, `gh stderr must exceed the buffer, got ${stderr.length}`);
-  assert.match(stderr, /^candidates: gh issue list failed/m);
+  assert.equal(status, 2);
+  // The guard's SHAPE, deterministically — the assertion above is the race.
+  // Stripped first, and this is not optional: against raw source a `die()`
+  // genuinely reverted to console.error with the good shape parked in a block
+  // comment passes 375/375 (measured), because a `^…/m` anchor matches inside
+  // the comment. Dropping either half also drops the only pin on #176, which
+  // is what the refusal-text assertion this test used to carry was doing.
+  assert.match(stripComments(readFileSync(SCRIPT, "utf8")), /function die\(msg\) \{\s*try \{\s*writeSync\(2,/);
 });
 
 test("gh missing entirely is named as ENOENT — the shape that prints nothing at all", () => {
