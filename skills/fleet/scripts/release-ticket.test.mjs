@@ -602,7 +602,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // mutates nothing.
   const wt = release(r, c, { apply: false }).json.worktree;
   const receipt = (blocker) =>
-    `{"issue":9,"branch":"fix/9-release-ticket","worktree":"${wt}",` +
+    `{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"${wt}","worktreeRewritten":false,` +
     `"label":true,"released":false,"applied":true,"blockers":["${blocker}"]}\n`;
 
   // The worktree removal is the first mutation attempted when there is a
@@ -656,7 +656,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
   assert.equal(
     none.out,
-    '{"issue":9,"branch":"fix/9-release-ticket","worktree":"","label":true,' +
+    '{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"","worktreeRewritten":false,"label":true,' +
       '"released":false,"applied":true,"blockers":["git branch -d refused fix/9-release-ticket: ' +
       'refused by the git shim"]}\n',
     "an empty worktree field, and the receipt still whole",
@@ -948,4 +948,83 @@ test("a control character in the worktree name cannot produce an unparseable pay
   assert.equal(parsed.branch, "fix/9-a b", "the control character is neutralised, not emitted raw");
   // The blockers carry an em-dash, so the scrub must be byte-safe for UTF-8.
   assert.match(parsed.blockers[0], /—/, "multibyte text must survive the scrub");
+});
+
+test("a BS, a tab, a FF, a CR and a DEL in the worktree name round-trip rather than being scrubbed", (t) => {
+  // `branch` is `$type/$issue-$slug`, built before any git ref check runs, so
+  // the same directory-name route that gets a control byte past the ref rules
+  // above gets these three past it too. Unlike the byte in the case above, all
+  // three now have somewhere to go: tab and CR have JSON short forms, and DEL
+  // (\177) is not a C0 byte at all, so none of the five should reach the
+  // space-scrub — and none should be reported as rewritten, since the value
+  // the caller gets back IS the name on disk, byte for byte. BS (\010) and FF
+  // (\014) are here because RFC 8259 gives them short forms too (\b and \f)
+  // and the first version of this fix scrubbed both while its comment claimed
+  // no such short form existed.
+  const r = repo(t);
+  const slug = "a\tb\rc\x7fd\be\ff";
+  git(r.w, "worktree", "add", "-q", "--detach", join(r.w, ".worktrees", `9-${slug}`), "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.branch, `fix/9-${slug}`, "BS, tab, FF, CR and DEL must all survive intact");
+  assert.equal(parsed.branchRewritten, false, "escaped or preserved, not replaced — nothing here was rewritten");
+});
+
+test("a byte with no JSON short form is replaced in the worktree name and flagged rewritten", (t) => {
+  // \013 (VT) rides along because it is the one C0 byte that LOOKS like it has
+  // a short form and does not: RFC 8259 lists \b \f \n \r \t and no \v, so
+  // narrowing the scrub set to make room for \b and \f must not take VT with
+  // it. Unescaped in a JSON string it is a parse error, so JSON.parse below is
+  // the discriminator.
+  // The case two above already pins that \001 gets neutralised to a space; this
+  // pins the other half of #146 — that the payload now says so, so a consumer
+  // reading `branch` back cannot mistake the neutralised string for the real
+  // name on disk.
+  const r = repo(t);
+  const slug = "a\x02b\x0bc";
+  git(r.w, "worktree", "add", "-q", "--detach", join(r.w, ".worktrees", `9-${slug}`), "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", slug, "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.branch, "fix/9-a b c", "no short form for \\002 or \\013 — both still neutralised to a space");
+  assert.equal(parsed.branchRewritten, true, "and the payload must disclose that it was");
+});
+
+test("a tab, a CR and a DEL in the worktree PATH round-trip in the worktree field too", (t) => {
+  // The two cases above only reach `branch`: a detached worktree's directory
+  // name IS the slug, so a control byte that breaks the ref also breaks the
+  // by-branch lookup and `wt` never gets set. `wt` is located by branch, not by
+  // path, so a linked worktree on a perfectly ordinary branch can still sit at
+  // a path holding these bytes — a real shape, since claim-ticket.sh's own
+  // directory name is `<issue>-<slug>` and nothing stops a slug from carrying
+  // them apart from convention.
+  const r = repo(t);
+  const branch = "fix/9-clean";
+  const name = "9-a\tb\rc\x7fd";
+  const dir = join(r.w, ".worktrees", name);
+  git(r.w, "worktree", "add", "-q", dir, "-b", branch, "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", "clean", "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  // Suffix, not the whole path: git resolves symlinks, so a /var tmpdir comes
+  // back as /private/var on macOS (measured — same reason the halt-receipt
+  // fixture above reads `wt` back from the script rather than building it).
+  assert.ok(parsed.worktree.endsWith(join(".worktrees", name)),
+    `tab, CR and DEL in the path must all survive intact, got ${parsed.worktree}`);
+  assert.equal(parsed.worktreeRewritten, false, "escaped or preserved, not replaced — nothing here was rewritten");
+});
+
+test("a byte with no JSON short form in the worktree PATH is replaced and flagged rewritten", (t) => {
+  const r = repo(t);
+  const branch = "fix/9-clean";
+  const name = "9-a\x02b";
+  const dir = join(r.w, ".worktrees", name);
+  git(r.w, "worktree", "add", "-q", dir, "-b", branch, "origin/main");
+
+  const res = spawnSync("sh", [SCRIPT, "9", "clean", "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  const parsed = JSON.parse(res.stdout);
+  assert.ok(parsed.worktree.endsWith(join(".worktrees", name.replace("\x02", " "))),
+    `no short form for \\002 — still neutralised to a space, got ${parsed.worktree}`);
+  assert.equal(parsed.worktreeRewritten, true, "and the payload must disclose that it was");
 });

@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -309,6 +309,43 @@ test("a plain conflicting path names the commits at risk", (t) => {
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
 });
 
+// #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
+// with a space, so `conflicts[]` named a file that exists nowhere on disk —
+// this is the case the ticket itself measured. RFC 8259 gives short forms to
+// all four control bytes (\b \t \f \r) and DEL (\177) is not a C0 byte at
+// all, so all five must round-trip, and `conflictsRewritten` must say so. BS
+// and FF are here because the first version of this fix scrubbed them anyway.
+test("a conflicting path with a BS, a tab, a FF, a CR and a DEL round-trips and is not flagged rewritten", (t) => {
+  const path = "has\bbs\ttab\fff\rcr\x7fdel.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the real path, byte for byte — this is what a consumer pastes into `git diff --`");
+  assert.deepEqual(r.json.conflictsRewritten, [false], "escaped or preserved, not replaced");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// The other half: a byte with no JSON short form still has to be replaced —
+// unlike tab/CR/DEL, JSON has nowhere to put it — but the payload must now say
+// so, since the runbook step that pastes `conflicts[]` into a diff command must
+// skip exactly this path.
+// \013 (VT) rides along with \002: it is the C0 byte that looks like it has a
+// short form and does not — RFC 8259 lists no \v — so narrowing the scrub set
+// to make room for \b and \f must not take VT out with them. Unescaped in a
+// JSON string it is a parse error, so `jsonError` is the discriminator.
+test("a conflicting path with bytes that have no short form is replaced and flagged rewritten", (t) => {
+  const path = "has\x02bell\x0bvt.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["has bell vt.txt"], "no short form for \\002 or \\013 — both still neutralised to a space");
+  assert.deepEqual(r.json.conflictsRewritten, [true], "and the payload must disclose that it was");
+});
+
 // `--` ends the options, not the pathspec magic, so a real file named
 // `:colon.txt` is parsed as a pathspec expression and matches nothing. Same
 // false safe as the space, reached by a different byte, and `:(literal)` is
@@ -346,6 +383,29 @@ test("a quote, a backslash and a control byte in a commit subject keep the paylo
     r.json.atRisk.some((l) => l.includes('the "quoted" back\\slash   case')),
     `the subject must survive escaping verbatim, the control byte scrubbed to a space; got ${JSON.stringify(r.json.atRisk)}`,
   );
+  assert.deepEqual(r.json.atRiskRewritten, [true, false], "\\001 has no JSON short form — the payload must disclose the scrub");
+});
+
+// #146: BS, tab, FF, CR and DEL in a commit subject get the opposite treatment
+// from \x01 above — four now have JSON short forms and the fifth is not a C0
+// byte at all, so all five must round-trip in atRisk[] too, and none may flag
+// the entry as rewritten.
+test("a BS, a tab, a FF, a CR and a DEL in a commit subject round-trip in atRisk without being flagged rewritten", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: has\bbs\ttab\fff\rcr\x7fdel case");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.ok(
+    r.json.atRisk.some((l) => l.includes("has\bbs\ttab\fff\rcr\x7fdel case")),
+    `all five bytes must survive verbatim; got ${JSON.stringify(r.json.atRisk)}`,
+  );
+  assert.deepEqual(r.json.atRiskRewritten, [false, false]);
 });
 
 // git accepts `"` in a ref name and every byte but NUL and `/` in a path
@@ -360,6 +420,61 @@ test("a quote in the branch and a backslash in the worktree path keep the payloa
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.branch, 'fix/1-say"hi');
   assert.equal(r.json.worktree, c.w);
+  assert.equal(r.json.branchRewritten, false);
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+// #146, the scalar fields: git forbids control bytes in a ref outright, so
+// `branch` cannot carry one — but `worktree` is a filesystem path, the same
+// vector as the conflicting-path cases above. Tab, CR and DEL must round-trip
+// there too, and a byte with no short form must still be replaced and flagged.
+test("a BS, a tab, a FF, a CR and a DEL in the worktree path round-trip and are not flagged rewritten", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\bbs\ttab\fff\rcr\x7fdel-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "BS, tab, FF, CR and DEL must all survive intact");
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+// The multi-line half of #146. `wt` is argv $1, a filesystem path, and a
+// directory name may hold a newline where a ref may not — so this is the one
+// input any of the three jstr copies can receive as more than one line. It is
+// what the `:a;$!N;$!ba` slurp and the `s/\n/\\n/g` rule exist for: without
+// the slurp sed cycles once per LINE and the LF rule never sees the byte, so
+// the payload carries a raw newline inside a JSON string and no parser accepts
+// it. Deleting either half left the whole suite green before this test.
+//
+// The same value cannot be driven through release-ticket.sh or inflight.sh:
+// release-ticket reaches `awk -v b="refs/heads/$branch"` first and awk refuses
+// a newline in a -v value (rc 2, before any receipt); its only other
+// interpolated message is the pair of `halt` calls that already flatten git's
+// stderr with `tr '\n' ' '`; and inflight builds every evidence string from
+// line-oriented git output. (No line numbers: #129 tracks five citations in
+// these files that have already drifted, one of them mid-review here.)
+// Their copies of the slurp are unreachable rather than unpinned; #119 owns
+// the three-copies question.
+test("a newline in the worktree path round-trips as an escaped \\n", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\nnewline-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "the newline arrives escaped, and the path comes back byte for byte");
+  assert.equal(r.json.worktreeRewritten, false, "escaped, not replaced — \\012 is not in the scrub set");
+});
+
+test("bytes with no short form in the worktree path are replaced and flagged rewritten", (t) => {
+  // \013 (VT) alongside \002 for the same reason as the conflicting-path case:
+  // RFC 8259 has no \v, so VT must stay in the scrub set after \b and \f left it.
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\x02bell\x0bvt-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w.replace("\x02", " ").replace("\x0b", " "), "no short form for \\002 or \\013 — both still neutralised to a space");
+  assert.equal(r.json.worktreeRewritten, true, "and the payload must disclose that it was");
 });
 
 // ---------------------------------------------------------------------------
@@ -597,4 +712,29 @@ test("a staged change refuses", (t) => {
   const r = audit(c);
   assert.equal(r.status, 1, "the index is not a commit — a rebase does not carry it");
   assert.equal(r.json.clean, false);
+});
+
+// The design spec's script-surface table names this script's payload field by
+// field, and #146 added four fields to it. The table went stale in the same
+// commit that added them — the fix for that is one edited row, and this is the
+// part that keeps the next one from going stale silently. Derived from a real
+// run, never from a hand-written key list: a list typed here drifts from the
+// script exactly the way the table did.
+test("the design spec's script-surface row names every field the payload actually emits", (t) => {
+  const c = repo(t);
+  const r = audit(c);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
+
+  // Word-boundary match, so `worktree` cannot be satisfied by `worktreeRewritten`
+  // sitting elsewhere in the cell — the exact substring trap that would let the
+  // four new flags be dropped again while this test stayed green.
+  const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(row));
+  assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
 });

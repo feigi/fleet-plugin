@@ -240,11 +240,33 @@ echo "$NAME: #$n taken=$taken" >&2
 # worktree path is a filename, so it carries in `\` as well, which git's ref
 # rules reject. Raw, either emits a payload no JSON parser accepts.
 #
-# The whole C0 range, not just the three whitespace ones: JSON forbids every
-# character below \040 unescaped. Byte-safe because the tr set is ASCII-only
+# Backslash first, always — escaping the quote (or a short form below) before
+# the backslash rule runs turns the backslash IT just introduced into `\\` on
+# the second pass, so every rule that adds a backslash has to come after this
+# one. The five C0 bytes RFC 8259 gives a two-character short form — \010 \011
+# \012 \014 \015 (\b \t \n \f \r) — get theirs; BS and FF are matched as a
+# literal byte spelled with `printf`, never as `\b` or `\f`. Neither spelling
+# matches \010, and neither fails quietly: `\b` in a BRE is a zero-width word
+# BOUNDARY to GNU sed and a literal `b` to BSD sed, so the rule would insert
+# `\b` at every word edge on one and mangle every letter `b` on the other
+# (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0 byte and JSON
+# permits it unescaped, so — unlike every version of this helper before #146 —
+# it is left alone. Every remaining byte below \040 has no short form, \013 (VT)
+# included: RFC 8259 lists exactly the five above and `\v` is not among them; tr
+# still turns it into a space, and jrewritten (below) is how a caller finds out
+# that happened, since a replaced value is not the original bytes and must not
+# be treated as a real path or ref. Byte-safe because the tr set is ASCII-only
 # and a multi-byte UTF-8 sequence uses no byte below \200, so nothing here can
-# split one — not because UTF-8 avoids the low bytes, which it does not: half
-# of it is ASCII. tr pads the replacement with its last character.
+# split one — not because UTF-8 avoids the low bytes, which it does not: half of
+# it is ASCII. tr pads the replacement with its last character.
+#
+# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
+# runs, so a literal newline in $1 is data the LF rule can reach rather than a
+# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
+# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
+# EOF with nothing to append and discards the pattern space instead of printing
+# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
+# `N;$!ba` prints nothing at all for a single-line value.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
 # already refused unless it is all digits — which is not the same as a valid
@@ -254,12 +276,48 @@ echo "$NAME: #$n taken=$taken" >&2
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.
-jstr() { printf '%s' "$1" | tr '\001-\037\177' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+jstr() {
+  printf '%s' "$1" \
+    | sed -e ':a' -e '$!N' -e '$!ba' \
+        -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+        -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
+        -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
+    | tr '\001-\007\013\016-\037' ' '
+}
+
+# True iff $1 held a byte jstr had to replace rather than escape — every C0
+# byte except \010 \011 \012 \014 \015 (BS, tab, LF, FF, CR: escaped above,
+# never replaced) and \177 (DEL: preserved, never replaced). `$()` strips
+# trailing newlines off both sides, and \012 is the one byte it strips: it is
+# not in the delete set, so the same suffix comes off `raw` and `orig` and the
+# strip can neither manufacture a difference nor hide one. An `X` sentinel
+# appended to both sides stood here for that job and did nothing — measured
+# across every arrangement of these bytes, it changed no answer — so it is gone
+# rather than defended.
+jrewritten() {
+  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
+  orig=$(printf '%s' "$1")
+  [ "$raw" = "$orig" ] && printf false || printf true
+}
+
+# A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
+# itself: a substitution that fails contributes an EMPTY argument and printf
+# still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,
+# malformed JSON at exit 0, which is the failure the receipt exists to rule
+# out. Assigned first, each one is a simple command whose status the `&&` chain
+# can read and this `|| die` can act on.
+pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
+  && remote_j=$(jstr "$remote") && remote_rw=$(jrewritten "$remote") \
+  && local_b_j=$(jstr "$local_b") && local_b_rw=$(jrewritten "$local_b") \
+  && wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
+  || die "could not escape the evidence for #$n"
 
 # Guarded for the same reason as the python3 call above: under `set -e` a failed
 # write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
 # rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
-printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","remote":"%s","localBranch":"%s","worktree":"%s"}}\n' \
-  "$n" "$taken" "${hits%,}" "$(jstr "$pr")" "$(jstr "$remote")" "$(jstr "$local_b")" "$(jstr "$wt")" \
+printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
+  "$n" "$taken" "${hits%,}" \
+  "$pr_j" "$pr_rw" "$remote_j" "$remote_rw" \
+  "$local_b_j" "$local_b_rw" "$wt_j" "$wt_rw" \
   || die "could not write the verdict for #$n"
 exit "$rc"
