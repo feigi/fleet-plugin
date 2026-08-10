@@ -7,7 +7,10 @@ Artifacts: `skills/fleet/skills/run-team/SKILL.md`,
 `skills/fleet/skills/sizing-a-ticket/SKILL.md`,
 `skills/fleet/scripts/candidates.mjs` (repo `feigi/claude-config`)
 
-Base: `6eb0442`. All line references verified against that commit.
+Base: `6eb0442`. Every line reference into this repo resolves at that commit —
+they address the files as they stood then, not as they stand now. The `triage`,
+`to-tickets` and `to-spec` citations point at personal skills that live outside
+this repo, so no commit here pins them.
 
 ## Problem
 
@@ -25,6 +28,12 @@ importing `next-ticket`'s row table wholesale, and that table
 together with *"one-two files"* / *"more than ~3 files"*. Intent is ambiguity;
 mechanism is size. A large, fully-decided ticket — a mechanical rename across
 eight files with acceptance criteria — is heavy by the table and excluded, forever.
+
+That step no longer exists — this design deleted it, and the deletion is recorded
+in `docs/specs/2026-07-22-run-team-agent-fleet-design.md`, in the
+**Superseded in part.** note opening *"Admissibility (2026-07-30) no longer gates
+on row size"*. It is described above as it stood at this record's base, which is
+the only state in which it can be described at all.
 
 The exclusion is also unappealable by construction. `sizing-a-ticket:25` and
 `run-team:547` both state that a thorough Agent Brief *never* promotes a heavy
