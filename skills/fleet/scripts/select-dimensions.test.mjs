@@ -36,11 +36,17 @@ function liftFromSource(name) {
     assert.ok(m, "review-pr.js no longer declares SIZE_TIER_PROFILES/selectDimensions(all, stats) as expected — update this test");
     return new Function(`${m[0]}\nreturn selectDimensions;`)();
   }
+  if (name === "resolveDimensions") {
+    const m = SOURCE.match(/^function resolveDimensions\(override, all\) \{[\s\S]*?^\}$/m);
+    assert.ok(m, "review-pr.js no longer declares resolveDimensions(override, all) at top level — update this test");
+    return new Function(`${m[0]}\nreturn resolveDimensions;`)();
+  }
   throw new Error(`liftFromSource: unknown name ${name}`);
 }
 
 const DEFAULT_DIMENSIONS = liftFromSource("DEFAULT_DIMENSIONS");
 const selectDimensions = liftFromSource("selectDimensions");
+const resolveDimensions = liftFromSource("resolveDimensions");
 
 // Drive the matrix from REAL file lists through the real classifier, not from
 // hand-written profile strings. A `diff-stats` classifier change that silently
@@ -164,15 +170,73 @@ test("only the refuter-backed dimensions carry a model downgrade", () => {
   assert.equal(models.simplify, undefined);
 });
 
-// Everything above tests a LIFTED COPY of selectDimensions. Nothing above proves
-// review-pr.js calls it: replacing the call with `explicitDimensions ||
-// DEFAULT_DIMENSIONS` left this file at 12/12 green, disconnecting the entire
-// size tier in one token. This is the only assertion that fails on that.
-test("review-pr.js actually calls selectDimensions to pick the fan-out", () => {
+// --- args.dimensions normalization (#113). `skills/fleet/commands/review-
+// and-fix.md:49` documents the override as accepting "keys or dimension
+// objects"; before this, only objects worked and a key array passed through
+// untouched, dereferencing to `undefined` prompt/agentType/scratch path with
+// no throw and no warning.
+test("no override leaves the size tier in charge", () => {
+  assert.equal(resolveDimensions(undefined, DEFAULT_DIMENSIONS), null);
+  assert.equal(resolveDimensions(null, DEFAULT_DIMENSIONS), null);
+});
+
+test("an object override behaves as it does today — passed through unchanged", () => {
+  const objs = [DEFAULT_DIMENSIONS[0], DEFAULT_DIMENSIONS[2]];
+  assert.deepEqual(resolveDimensions(objs, DEFAULT_DIMENSIONS), objs);
+});
+
+test("a key override resolves against the workflow's own dimension list", () => {
+  assert.deepEqual(
+    resolveDimensions(["correctness", "comments"], DEFAULT_DIMENSIONS),
+    [DEFAULT_DIMENSIONS[0], DEFAULT_DIMENSIONS[3]],
+  );
+});
+
+test("keys and objects can mix in the same override", () => {
+  assert.deepEqual(
+    resolveDimensions(["correctness", DEFAULT_DIMENSIONS[2]], DEFAULT_DIMENSIONS),
+    [DEFAULT_DIMENSIONS[0], DEFAULT_DIMENSIONS[2]],
+  );
+});
+
+test("an unknown key stops the run and names the key", () => {
+  assert.throws(
+    () => resolveDimensions(["not-a-real-dimension"], DEFAULT_DIMENSIONS),
+    /unknown key "not-a-real-dimension"/,
+  );
+});
+
+test("an object override missing a required field stops the run and names the field", () => {
+  assert.throws(
+    () => resolveDimensions([{ key: "x", agentType: "y" }], DEFAULT_DIMENSIONS),
+    /missing required field\(s\): prompt/,
+  );
+  // All three dereferenced fields are checked, not just one.
+  assert.throws(
+    () => resolveDimensions([{}], DEFAULT_DIMENSIONS),
+    /missing required field\(s\): key, prompt, agentType/,
+  );
+});
+
+test("an override resolving to nothing stops the run", () => {
+  assert.throws(() => resolveDimensions([], DEFAULT_DIMENSIONS), /resolved to no dimensions/);
+});
+
+test("a non-array override stops the run rather than crashing on .map", () => {
+  assert.throws(() => resolveDimensions({ key: "correctness" }, DEFAULT_DIMENSIONS), /must be an array/);
+});
+
+// Everything above tests a LIFTED COPY. Nothing above proves review-pr.js
+// wires resolveDimensions AND selectDimensions into the same call site:
+// replacing it with `explicitDimensions || DEFAULT_DIMENSIONS` left this file
+// green before (#118) by disconnecting the size tier, and a version that
+// dropped resolveDimensions here would do the same to the override
+// normalization, silently. This is the only assertion that fails on either.
+test("review-pr.js actually calls resolveDimensions, then selectDimensions, to pick the fan-out", () => {
   assert.match(
     SOURCE,
-    /^const dimensions = explicitDimensions \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
-    "the selectDimensions call site changed — every size-tier test above now pins a copy nothing runs",
+    /^const dimensions = resolveDimensions\(explicitDimensions, DEFAULT_DIMENSIONS\) \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
+    "the dimensions call site changed — override normalization and/or size-tier selection may be disconnected",
   );
 });
 
