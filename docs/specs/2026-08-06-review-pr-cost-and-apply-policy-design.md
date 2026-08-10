@@ -6,6 +6,13 @@ Ticket #211, widened during brainstorm. No commit count or head SHA here — a
 status line cannot name the commit that writes it, and the last one was stale the
 moment it landed. `git log 8a84402..` is the answer that stays true.
 
+All line references below were measured at `8a84402` and address the files as
+they stood there — not pointers into the current tree. Resolve one with
+`git show "8a84402:<path>" | sed -n '<N>p'`; keep the quotes when you paste that
+template — unquoted, zsh reads the literal `<path>` placeholder as a redirection
+and dies with a parse error before git ever runs. Once a real path is
+substituted in, quoted and unquoted behave identically.
+
 One change was made after implementation and is recorded below: the size tier
 keeps `comments` on any small diff that touches docs (Change 2). The whole-branch
 review found that mixed prose PRs — this repo's modal PR, and the category the

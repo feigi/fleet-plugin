@@ -40,9 +40,9 @@ Grep-confirmed across the three commands:
 | "Distrust negative claims hardest" | 2 | verbatim |
 | correction-ticket hunting | 2 | |
 
-`run-team` SKILL.md:426-429 already forbids this ("a duplicated rule becomes a
-contradiction"). The file violates its own rule because there was nowhere else
-to put the shared text.
+`run-team` SKILL.md's `## Fix the tooling mid-run` already forbids this ("a
+duplicated rule becomes a contradiction"). The file violates its own rule
+because there was nowhere else to put the shared text.
 
 ## Decisions
 
@@ -72,7 +72,8 @@ Three design properties compensate, and they are requirements, not style:
    pass indistinguishable from a clean result — and it is inadmissible.
 2. **Evidence on stderr.** Every script prints the commands it ran alongside its
    answer. A script that hides its working recreates the blind-obey failure
-   `run-merge-bot.md:52` warns about.
+   `run-merge-bot.md`'s `## Order, and the hold rule` warns about ("Obeying a
+   fired signal blindly stalls the queue on a non-conflict").
 3. **No caching, no state.** Every invocation re-queries. Rather than detecting
    a stale or inverted conclusion, the design removes the possibility of holding
    one.
@@ -80,9 +81,11 @@ Three design properties compensate, and they are requirements, not style:
 ### Why a plugin
 
 - `scripts/` at plugin root is the documented home for **shared utilities**
-  (`plugin-structure/SKILL.md:431`), sitting alongside `skills/<name>/scripts/`
-  (:429) for skill-private ones. This is exactly the distinction three callers
-  need, and it already exists as convention. There is no established convention
+  (`plugin-structure/SKILL.md:431`, vendored outside this repo so its numbers
+  do not rot from here), sitting alongside `skills/<name>/scripts/` for
+  skill-private ones — the same file's `### Skills` example structure gives
+  `api-testing/` its own `scripts/`. This is exactly the distinction three
+  callers need, and it already exists as convention. There is no established convention
   for `~/.claude/scripts/` — zero such directories exist anywhere in the
   installed plugin tree.
 - `${CLAUDE_PLUGIN_ROOT}` (`command-development/SKILL.md:564`) gives portable
@@ -185,16 +188,18 @@ code, stated in its own row.
 **`claim-ticket.sh`** selects the install command from the lockfile —
 `package-lock.json` → `npm ci`, `pnpm-lock.yaml` → `pnpm i --frozen-lockfile`,
 `yarn.lock` → `yarn --immutable`. No match → refuse. This converts
-`run-team` SKILL.md:78-88's "infer `<install>`, never default to `npm install`" from a
-rule the model can forget into a case statement it cannot. It also emits the
-`agent-test` runner with ports derived from `<N>` and adds it to
+`run-team` SKILL.md's `## Phase 1 — claim and isolate` rule "**Infer `<install>`
+— never default to `npm install`.**" from a rule the model can forget into a
+case statement it cannot. It also emits the `agent-test` runner with ports
+derived from `<N>` and adds it to
 `.git/info/exclude`, so the isolation envelope stops being a step the controller
 might skip.
 
 **`reap.sh`** defaults to dry-run; `--apply` deletes. Every precondition is
 recomputed inside the same invocation, because a branch list from an earlier
-call is already false — `run-team` SKILL.md:292-294 records 28 gone branches of which
-27 had been reaped by a concurrent session two calls later.
+call is already false — `run-team`'s `references/reaping.md`, under `## Why the
+reap is shaped the way it is`, records "one observed run listed 28 gone branches,
+two calls later 27 reaped by concurrent session".
 
 **`no-undo-audit.sh`** refuses rather than repairs. It runs steps 1/2/3/5 of the
 existing audit and returns the at-risk commits. Step 4 — resolution strategy —
@@ -268,7 +273,8 @@ failure being replaced is *delivery, not analysis*.
 **`claim-wave.js` was considered and cut.** Once `claim-ticket.sh` exists, a
 workflow wrapping it buys nothing — its only purpose was serialization, and one
 script invocation per ticket in a shell loop already serializes. Adding it would
-be appending where `run-team` SKILL.md:429 says cut.
+be appending where `run-team` SKILL.md's `## Fix the tooling mid-run` says
+"Cut before you append."
 
 Parse `args` defensively at the top: the `Workflow` tool can deliver `args` as a
 JSON string rather than a value.
@@ -292,7 +298,8 @@ written: `ci-state` against a green PR *and* one with a missing job;
 dry-run against the real gone-branch set; `no-undo-audit` against a live
 worktree. Proving ground is `/Users/chris/dev/agent-brain`. Ends with the
 `settings.json` Bash allowlist for the resolved script prefix — a maintainer
-edit, since `run-team` SKILL.md:423 bars members from touching `settings.json`.
+edit, since `run-team` SKILL.md's `## Fix the tooling mid-run` bars members from
+touching `settings.json` ("Never `settings.json`, permissions, or CLAUDE.md").
 
 **Plan 3 — restructure.** `SKILL.md` slimmed, five references extracted, dedup
 applied, commands pointed at scripts. Acceptance is `claude plugin details
@@ -353,6 +360,30 @@ instead of trusting it. Deliberately historical rows — describing another
 document *as it stood* — keep their numbers and name the ref those numbers were
 measured at.
 
+Sweep the whole directory for this class with:
+
+```
+$ grep -rnoE '(`|[A-Za-z0-9_./-]+):[0-9]+(-[0-9]+)?' docs/specs/
+```
+
+Run at `5cd42be` it returns 161 hits across five of the six specs. The pattern
+matches only a citation's **leading** `path:NN` — comma-chained continuations
+and bare back-references such as `(:429)` are invisible to it, and a site built
+only from those is reported zero times — so pair it with
+
+```
+$ grep -rnE '(^|[^A-Za-z0-9_./`-]):[0-9]+' docs/specs/
+```
+
+which at `5cd42be` surfaces three sites the first command never reports: this
+file's `:84`, and `:149` and `:150` of the read-rules spec. #117 classified all
+161 plus those three, and re-anchored this document's nine live ones — the eight
+the first command reports, plus the `(:429)` at `:84` it does not. Nine is what
+was re-anchored, not what was live: four bare-numbered citations into other files
+remain here — `plugin-structure/SKILL.md:431`, exempt above as vendored, and
+`command-development/SKILL.md:564`, `.gitignore:40` and `.gitignore:49`, which
+resolve today but name no section and are left for #282.
+
 Line numbers in the **Site** column of both tables in this section, and in the
 prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
 record of what was wrong, not pointers into the current files — resolve them at
@@ -385,7 +416,7 @@ fixed and is **still open**. Kept as the record of how an incomplete sweep looks
 | `next-ticket` SKILL.md:80 | **Fixed.** Named **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ended `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written would have repaired half a line. |
 | `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | **Fixed.** 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references **as measured at `a03258e^`**; both counts are **0** at `origin/main`. **Was not a dead document** — `run-team` SKILL.md still routes the reader to it from the opening prose above `## Rules that fail silently`, on the line beginning "Rationale:", so it was reachable and wrong. **This spec's own** `## Migration debt` entry, saying it "gets a pointer to this document rather than an edit", was written before anyone knew its paths would die. |
 | `workflows/review-pr.js:6` | **Fixed.** Its `whenToUse` string read "Called per-PR by `/run-team`" — user- and model-facing, rendered in the skill listing, and named a command that no longer existed in any form. The spec's "Out of scope — rewriting `review-pr.js`" did not shelter it: a one-string description fix is not a rewrite. |
-| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Still open** — only the path half was fixed. `run-team.md:NNN` no longer occurs, but the numbers were never re-resolved and none of them point at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either, and not for the reason previously given here. These numbers were measured at `eacc5cf`, where the rule already sat at `:422` under a **5**-line frontmatter — so the 4-line *command* frontmatter (`b915414`, a 232-line file that never had a `:423` at all) is not in this citation's history. Frontmatter accounts for **1** line of the 127-line move from where the rule actually sat (`:422` → `:549`), 5 → 6 between `eacc5cf` and `b1137bd`; the other **126** is body growth above it, the file going 536 → 675 lines. The `+126` above is measured against the cited `:423`, which was already one line below the rule at `eacc5cf`. No single delta repairs these — each needs re-anchoring to a fragment individually, which is **#117**. |
+| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Fixed in #117.** Here only the path half was fixed: `run-team.md:NNN` no longer occurred, but the numbers were never re-resolved and none of them pointed at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either, and not for the reason previously given here. These numbers were measured at `eacc5cf`, where the rule already sat at `:422` under a **5**-line frontmatter — so the 4-line *command* frontmatter (`b915414`, a 232-line file that never had a `:423` at all) is not in this citation's history. Frontmatter accounts for **1** line of the 127-line move from where the rule actually sat (`:422` → `:549`), 5 → 6 between `eacc5cf` and `b1137bd`; the other **126** is body growth above it, the file going 536 → 675 lines. The `+126` above is measured against the cited `:423`, which was already one line below the rule at `eacc5cf`. No single delta repaired these, so #117 re-anchored each to a fragment individually — every live citation **into `run-team` SKILL.md** from this spec now names a quoted fragment and its section, per the convention marker above. |
 
 Every figure in the `2026-07-22` spec row and the line-numbered-citation row,
 with the command that produces it (re-derived 2026-07-31, when `origin/main` was
@@ -429,11 +460,25 @@ path fragments inside `~/.claude/skills/fleet/skills/run-team/SKILL.md`, which i
 why the bare-command count is 0 while the literal substring still appears.
 
 **Also decided here:** every cross-reference to a sibling fleet component inside
-these documents is a **bare backticked name in running prose**, never a slash
-invocation — `run-team` SKILL.md:7, :38, :39, :46, :121, :123 and `next-ticket`
-SKILL.md:65, :93. That is *why* namespacing broke nothing: the model resolves
-them by description, not by literal name. It is luck rather than design, and
-Plan 3 decides deliberately whether to keep depending on it.
+`run-team` SKILL.md is a **bare backticked name in running prose**, never a slash
+invocation — its opening line naming the three components it runs as one fleet,
+and the `next-ticket` / `sizing-a-ticket` mentions in `## Phase 0 — shortlist`
+and `## Phase 2 — dispatch implementers`. Measured at `eacc5cf`, where the count
+of slash invocations is **0**:
+
+```
+$ git show "eacc5cf:skills/fleet/skills/run-team/SKILL.md" \
+    | grep -cE '(^|[ (`])/(next-ticket|review-and-fix|run-merge-bot|sizing-a-ticket)'
+0
+```
+
+`next-ticket` SKILL.md was **not** in that state, and this claim used to include
+it: the same command returns **1** there, the `**Session ends here.**` line the
+migration table above records as fixed, which invoked `/review-and-fix` and
+`/run-merge-bot` in slash form. That is *why* namespacing broke nothing **in
+`run-team`**: the model resolves those by description, not by literal name. It
+is luck rather than design, and Plan 3 decides deliberately whether to keep
+depending on it.
 
 **No open item remains.** All four items this section opened with are answered
 above.
