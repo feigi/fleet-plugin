@@ -356,3 +356,64 @@ test("the fix commit is gated on a test run, in both files", () => {
   );
   assert.match(prompt, /never `--no-verify`/i, "the fix-applier prompt no longer forbids --no-verify");
 });
+
+test("the fix-applier lead-in relays every finding, on a premise that is true", () => {
+  const leadIn = fixApplierLeadIn();
+  // The rule, not one phrasing of it — a faithful reword keeps at least one of
+  // these tied to relaying, deleting the paragraph keeps neither. Sliced to the
+  // LEAD-IN, never to the Reviewers section: section-wide, the prompt below
+  // supplies enough of this vocabulary that the pin survives the paragraph's
+  // deletion (the failure mode the two narrow slices above exist for).
+  assert.match(
+    leadIn,
+    /(every one, not the ones you rank|Paste all of them)/,
+    "the lead-in no longer tells the controller to relay every finding rather than a ranked selection",
+  );
+  // Its reason clause shipped FALSE on this branch, in a PR about not shipping
+  // false claims. The review specialists' transcripts DO exist on disk —
+  // measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one session, 33
+  // of them `pr-review-toolkit:*`. What is true is that a member cannot address
+  // them: `review-pr.js` returns `{pr, head, snapshot, dimensionsRun, survived,
+  // refuted, unverified}` — no transcript path — and the `.meta.json` sidecars
+  // carry only agentType/model/spawnDepth, so nothing maps one back to a PR or
+  // a dimension. The rule rests on unaddressability, and a member sent hunting
+  // a file it was told does not exist stops at a different place than one told
+  // it cannot be named. Positive pins cannot catch a re-inserted falsehood;
+  // only the exclusion can.
+  assert.doesNotMatch(
+    leadIn,
+    /(nothing is on disk|left no transcript|no transcript you can read|paths that cannot exist|no output file)/i,
+    "the lead-in claims the specialists' transcripts do not exist — they do; they are merely not addressable by a member",
+  );
+});
+
+test("the fix-applier's self-retrieval is scoped to its own refuters, on a premise that is true", () => {
+  const prompt = fixApplierPrompt();
+  // `tail -1 <output-file>` is correct ONLY for a refuter this member spawned.
+  // Unscoped, the member aims it at the review's specialists, gets nothing —
+  // their last record is a `tool_result`, not text, so the recipe prints an
+  // empty string — and rules the dimension unrun with the report never sent.
+  // Contiguous, not a proximity window: "this covers every specialist, not only
+  // the refuters YOU dispatch" satisfies any gap-based match and inverts the rule.
+  assert.match(
+    prompt,
+    /this covers the[\s\S]{0,40}refuters YOU dispatch, and only those/,
+    "the prompt no longer scopes self-retrieval to the refuters the fix-applier dispatched",
+  );
+  // The other half: for the review's own specialists the member asks for the
+  // TEXT. Asking for a path cannot work — nothing it holds names one.
+  assert.match(
+    prompt,
+    /ask for the text/i,
+    "the prompt no longer tells the fix-applier to ask for the finding text rather than a path",
+  );
+  // Same false premise as the lead-in pin above, in the copy the fix-applier
+  // actually reads. `no output file` is excluded as a claim of absence only —
+  // the prompt's own "the output file named in your spawn result" is a
+  // different string and stays green.
+  assert.doesNotMatch(
+    prompt,
+    /(left no transcript|no transcript you can read|no output file to fetch|nothing is on disk)/i,
+    "the prompt claims the review's specialists left no transcript — they do leave one; the member simply holds no path to it",
+  );
+});

@@ -418,6 +418,17 @@ the PR's implementer. Its prompt carries the PR number, the worktree abs path, t
 passed the workflow, and the returned `survived` / `unverified` findings
 verbatim, plus:
 
+**Verbatim means every one, not the ones you rank.** On the workflow path you are
+the *only* copy a member can reach — `agent()` returned the findings into the
+script, and the specialists' own transcripts, which do exist on disk, are not
+addressable by a member: nothing it is handed names one. Relaying a selection
+strands the rest: two fix-appliers in one run were sent 5 of 7 and 7 of 13, each
+asked for paths nothing had given it, and each reported findings as
+looked-at-by-nobody that were simply never sent. Paste all of them, and add no
+adjective — ranking an unverified `suggestion` by how sharp it reads is how a
+controller lends its own weight to a finding no refuter has touched yet. Twice
+in that run the ranked one was refuted outright.
+
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
@@ -457,11 +468,15 @@ default, so substituting `<testCmd>` with nothing leaves it no gate at all.
 > refuter you never hear from leaves the finding exactly as unchecked as it
 > arrived, so it defers like a refuted one.
 >
-> **Retrieve that report yourself; do not wait to be handed it.** On the
-> hand-dispatch path a subagent's report has surfaced to the controller rather
-> than to its dispatcher, and waiting for a relay that never comes strands the
-> finding. Its transcript is at the output file named in your spawn result, and
-> its report is the last record:
+> **Retrieve that report yourself; do not wait to be handed it — this covers the
+> refuters YOU dispatch, and only those.** The review's own specialists do leave
+> transcripts, but nothing gives you their address: the workflow had `agent()`
+> return their findings into the script, so what you are handed names no file, and
+> nothing on disk indexes a transcript by PR or dimension. Asking for their paths
+> gets you nothing; ask for the text. A report from a refuter you spawned is
+> different — it surfaces to the controller rather than to you, and waiting for a
+> relay that never comes strands the finding. Its transcript is at the output file
+> named in your spawn result, and its report is the last record:
 >
 > ```
 > tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'
