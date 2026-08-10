@@ -327,6 +327,15 @@ multi-select**, and **a judgement the evidence cannot settle**.
   refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
   not wait for an event** governs here too, not only implementer refill.
+- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
+  complete for this repo, so the CI-run-completion edge above never fires and
+  waiting for it stalls the whole PR — the same silent-stall shape #111 reported
+  before this verdict existed. Dispatch the finisher off the reviewer's final
+  verdict instead, the moment it lands. The finisher's gate is then the
+  `--declare-no-ci` declaration, not a `check` job: with it, label off the
+  reviewer's verified suite run; **without it, do not label** — report that this
+  repo has no CI configured and no declaration, and stop. Absence never reads as
+  pass. See `review-and-fix.md` step 6.
 - **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
   guard here once three or more `class=routine` PRs have been ruled since the
   last check; nothing else in the loop owns it.
@@ -546,6 +555,14 @@ Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
 drops `jobs`. Normal path, not only kill-recovery.
+
+**`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
+to gate on, and that is not a third way to skip the wait. Re-run it with
+`--declare-no-ci`: present in the payload → this repo's declared gate is the
+reviewer's own `testCmd` run, label off that. Absent → halt here, same as a
+dirty worktree: report `no CI configured, no --declare-no-ci on record` and add
+no label. An undeclared no-ci repo is indistinguishable from one whose CI is
+merely misconfigured, which is exactly the case that must never ship silently.
 
 **Correction tickets ship new wrong claims — inherited from the ticket, and
 minted in prose the ticket never asked for.** Put the check on the

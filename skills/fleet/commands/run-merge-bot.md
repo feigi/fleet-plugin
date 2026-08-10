@@ -89,6 +89,13 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Also: the newest run on a branch is frequently a label or policy workflow, not CI — `ci-state.mjs` filters by `--workflow CI` by default.
 
+   **`verdict: "no-ci"` on a `ready-to-merge` PR is not a block.** A finisher only
+   ever adds that label in a no-CI repo after confirming the caller's
+   `--declare-no-ci` declaration (see `run-team/SKILL.md`'s finisher gate) — pass
+   the same flag here, and the exit-0 gate reads correctly. Without it you'd
+   read a legitimately labeled PR as stuck red forever, off a run that will
+   never exist.
+
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
