@@ -77,15 +77,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       writeFileSync(ghPath, GH_STUB);
       chmodSync(ghPath, 0o755);
     }
-    // No `stdio` override — spawnSync's default is a real OS pipe, not a TTY,
-    // and it blocks until the child's fd closes. That is what makes `r.stderr`
-    // an honest check of the #152 warning: on a pipe, `console.error` is async
-    // and a following `process.exit()` can truncate it before the write lands
-    // (measured on candidates.mjs, PR #222/#132) — a TTY write is synchronous
-    // and would hide exactly that loss. `check`'s stderr here stays far under
-    // the ~64 KiB threshold that provokes it (tracker.error capped at 500
-    // chars, hits capped at 5, near capped at 3), so this suite cannot trip
-    // the hazard either way — but the capture path is the right one regardless.
+    // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
+    // readable at all, and `check`'s stderr stays far under the ~64 KiB pipe
+    // buffer where `console.error` + `process.exit()` starts dropping writes
+    // (measured on candidates.mjs, issue #132) — so these assertions are honest.
     const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "check", ...args, subject], {
       encoding: "utf8",
       env,
@@ -219,6 +214,10 @@ test("an open tracker issue absent from the ledger is reported, not passed as sa
   assert.equal(typeof r.json.tracker.hits[0].score, "number");
   assert.equal(r.json.verdict, "tracker-hit");
   assert.match(r.stderr, /TRACKER HIT/);
+  // Order, not just presence: the hits are listed inside the same branch that
+  // prints the count, so a careless edit can emit the summary above the rows it
+  // summarises. Nothing else pins this.
+  assert.match(r.stderr, /TRACKER HIT[\s\S]*tracker issue\(s\) match/, "every hit is listed before the line that counts them");
   assert.doesNotMatch(r.stderr, /ALREADY FILED/, "a tracker hit is not the same claim as a filed row");
 });
 

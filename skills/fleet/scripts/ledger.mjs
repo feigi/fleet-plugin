@@ -331,15 +331,16 @@ if (cmd === "check") {
   }
 
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
-  // `tracker.hits` is absent on both failure arms now — only iterate when the
-  // search actually ran.
-  for (const h of tracker.hits ?? []) {
-    console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
-  }
   if (!tracker.ok) {
     console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
     console.error(`${NAME}: not previously filed in this run's ledger — ledger-only answer, tracker unchecked`);
   } else if (tracker.hits.length) {
+    // Inside the branch that has already established `hits` is present, so no
+    // `?? []` guard is needed. The loop stays FIRST: every hit is listed before
+    // the summary that counts them, and a test pins that order.
+    for (const h of tracker.hits) {
+      console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
+    }
     console.error(`${NAME}: not in this run's filed list, but ${tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
   } else {
     console.error(`${NAME}: not previously filed; tracker search '${query}' found no related issues`);
@@ -359,7 +360,7 @@ if (cmd === "check") {
   // break `check "$s" && gh issue create` on every offline run (ruled against
   // in #152). A hit scoring 0.00 still forces 3: gh matched the issue body,
   // which the title-based score cannot see.
-  process.exit(tracker.hits?.length ? 3 : 0);
+  process.exit(verdict === "tracker-hit" ? 3 : 0);
 }
 
 die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);

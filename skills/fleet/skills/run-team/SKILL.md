@@ -858,7 +858,10 @@ those are advisory and do not change the exit code, because the same finding
 gets worded differently by whoever finds it second. **Exit 0 is not
 automatically "safe to file":** when `gh` cannot be reached the answer is
 ledger-only, and it says `TRACKER NOT CHECKED` — an issue filed by an earlier
-run is invisible to it.
+run is invisible to it. The stdout JSON names that distinction in one field:
+`verdict` is `already-filed`, `tracker-hit`, `clean` or `unverified`. The last
+two both exit 0, so `verdict` is the only thing that tells a searched-and-clean
+tracker from one that was never read.
 
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.
