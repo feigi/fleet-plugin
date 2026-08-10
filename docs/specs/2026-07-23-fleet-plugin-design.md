@@ -88,16 +88,19 @@ Three design properties compensate, and they are requirements, not style:
   callers need, and it already exists as convention. There is no established convention
   for `~/.claude/scripts/` — zero such directories exist anywhere in the
   installed plugin tree.
-- `${CLAUDE_PLUGIN_ROOT}` (`command-development/SKILL.md:564`) gives portable
+- `${CLAUDE_PLUGIN_ROOT}` (`command-development/SKILL.md`'s
+  `### CLAUDE_PLUGIN_ROOT Variable`, "an environment variable that resolves to
+  the plugin's absolute path", vendored outside this repo) gives portable
   path resolution, eliminating hardcoded `/Users/chris/...` paths inside the
   plugin.
 - One versioned unit holds commands *and* skills, so `run-merge-bot` and
   `review-and-fix` are not forced into skill shape to be packaged.
 
 **Constraint, and the mechanism that resolves it:** `plugins/` is gitignored in
-`claude-config` (`.gitignore:40`; `git ls-files plugins` returns 0), so plugin
-source cannot live at `~/.claude/plugins/fleet/` without falling outside the
-repo that is the backup and distribution mechanism.
+`claude-config` (`.gitignore`'s `plugins/` under `# Auto-managed by Claude
+Code`; `git ls-files plugins` returns 0), so plugin source cannot live at
+`~/.claude/plugins/fleet/` without falling outside the repo that is the backup
+and distribution mechanism.
 
 `claude plugin init <name>` scaffolds a plugin at **`~/.claude/skills/<name>/`**,
 which auto-loads the next session as `<name>@skills-dir`. This needs no
@@ -105,13 +108,14 @@ marketplace manifest, no `--plugin-dir` flag, and no install step. Plugin root
 is therefore `~/.claude/skills/fleet/`.
 
 **One gitignore edit is mandatory.** `skills/` is not wholesale tracked either:
-`.gitignore:49` ignores `skills/*` and re-includes individual directories by
-negation (`!skills/next-ticket/`, `!skills/sizing-a-ticket/`,
-`!skills/caveman-compress/`). Without adding `!skills/fleet/`, `git add
-skills/fleet` stages nothing and every packaging commit is silently empty — the
-same class of failure as `/clean_gone` exiting 0. Verify with `git check-ignore
--v skills/fleet` before and after. The two negations for the moved skills are
-retired once `!skills/fleet/` covers them.
+`.gitignore`'s `# Skills:` comment block ("Trailing-slash ignore blocks
+re-inclusion, so exclude contents and negate") ignores `skills/*` and
+re-includes individual directories by negation (`!skills/next-ticket/`,
+`!skills/sizing-a-ticket/`, `!skills/caveman-compress/`). Without adding
+`!skills/fleet/`, `git add skills/fleet` stages nothing and every packaging
+commit is silently empty — the same class of failure as `/clean_gone` exiting 0.
+Verify with `git check-ignore -v skills/fleet` before and after. The two
+negations for the moved skills are retired once `!skills/fleet/` covers them.
 
 **Measurement instrument:** `claude plugin details fleet` reports a component
 inventory plus projected token cost, split always-on vs on-invoke. The context
@@ -380,9 +384,10 @@ file's `:84`, and `:149` and `:150` of the read-rules spec. #117 classified all
 161 plus those three, and re-anchored this document's nine live ones — the eight
 the first command reports, plus the `(:429)` at `:84` it does not. Nine is what
 was re-anchored, not what was live: four bare-numbered citations into other files
-remain here — `plugin-structure/SKILL.md:431`, exempt above as vendored, and
-`command-development/SKILL.md:564`, `.gitignore:40` and `.gitignore:49`, which
-resolve today but name no section and are left for #282.
+survived it. Three — `command-development/SKILL.md:564`, `.gitignore:40` and
+`.gitignore:49` — resolved but named no section; #282 re-anchored each to a
+fragment and its section. `plugin-structure/SKILL.md:431` keeps its number,
+exempt above as vendored.
 
 Line numbers in the **Site** column of both tables in this section, and in the
 prose between them, are the **pre-fix** ones, measured at `eacc5cf`. They are the
@@ -416,7 +421,7 @@ fixed and is **still open**. Kept as the record of how an incomplete sweep looks
 | `next-ticket` SKILL.md:80 | **Fixed.** Named **two** dead commands, not one — the row above quotes only `/review-and-fix`; the same line ended `→ `/run-merge-bot` merges in numeric order`. Fixing the row as written would have repaired half a line. |
 | `docs/specs/2026-07-22-run-team-agent-fleet-design.md` | **Fixed.** 4 dead `~/.claude/commands/…` paths and 7 bare `/run-team` references **as measured at `a03258e^`**; both counts are **0** at `origin/main`. **Was not a dead document** — `run-team` SKILL.md still routes the reader to it from the opening prose above `## Rules that fail silently`, on the line beginning "Rationale:", so it was reachable and wrong. **This spec's own** `## Migration debt` entry, saying it "gets a pointer to this document rather than an edit", was written before anyone knew its paths would die. |
 | `workflows/review-pr.js:6` | **Fixed.** Its `whenToUse` string read "Called per-PR by `/run-team`" — user- and model-facing, rendered in the skill listing, and named a command that no longer existed in any form. The spec's "Out of scope — rewriting `review-pr.js`" did not shelter it: a one-string description fix is not a rewrite. |
-| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Fixed in #117.** Here only the path half was fixed: `run-team.md:NNN` no longer occurred, but the numbers were never re-resolved and none of them pointed at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either, and not for the reason previously given here. These numbers were measured at `eacc5cf`, where the rule already sat at `:422` under a **5**-line frontmatter — so the 4-line *command* frontmatter (`b915414`, a 232-line file that never had a `:423` at all) is not in this citation's history. Frontmatter accounts for **1** line of the 127-line move from where the rule actually sat (`:422` → `:549`), 5 → 6 between `eacc5cf` and `b1137bd`; the other **126** is body growth above it, the file going 536 → 675 lines. The `+126` above is measured against the cited `:423`, which was already one line below the rule at `eacc5cf`. No single delta repaired these, so #117 re-anchored each to a fragment individually — every live citation **into `run-team` SKILL.md** from this spec now names a quoted fragment and its section, per the convention marker above. |
+| Every **live** line-numbered citation into `run-team` SKILL.md from **this** spec (the pre-fix ones in the tables of this section are exempt — see the marker above) | **Fixed in #117.** Here only the path half was fixed: `run-team.md:NNN` no longer occurred, but the numbers were never re-resolved and none of them pointed at their claimed content. The offsets are **not uniform** and were never **+2**. The worked example this row used to give — the Plan 2 instruction citing the `settings.json` prohibition at `:423` — is off by **+126**: that rule is the **Scope** paragraph of `## Fix the tooling mid-run`, reading "Never `settings.json`, permissions, or CLAUDE.md — a member asking for those is laundering". The claimed "28 gone branches" figure has **no match in `run-team` SKILL.md at all** — it moved into that skill's `references/reaping.md`, which still carries it verbatim ("one observed run listed 28 gone branches, two calls later 27 reaped by concurrent session"), so this citation lost its target rather than never having had one. The stated cause does not carry the rot either, and not for the reason previously given here. These numbers were measured at `eacc5cf`, where the rule already sat at `:422` under a **5**-line frontmatter — so the 4-line *command* frontmatter (`b915414`, a 232-line file that never had a `:423` at all) is not in this citation's history. Frontmatter accounts for **1** line of the 127-line move from where the rule actually sat (`:422` → `:549`), 5 → 6 between `eacc5cf` and `b1137bd`; the other **126** is body growth above it, the file going 536 → 675 lines. The `+126` above is measured against the cited `:423`, which was already one line below the rule at `eacc5cf`. No single delta repaired these, so #117 re-anchored each to a fragment individually; #282 then re-anchored this file's remaining live citations, into `command-development/SKILL.md` and `.gitignore`. Every live citation in this spec now names a quoted fragment and its section, per the convention marker above — save the vendored `plugin-structure/SKILL.md:431`, exempt where it is cited. |
 
 Every figure in the `2026-07-22` spec row and the line-numbered-citation row,
 with the command that produces it (re-derived 2026-07-31, when `origin/main` was
