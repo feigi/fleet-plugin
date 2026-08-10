@@ -572,20 +572,16 @@ test("candidates come back oldest first, whatever order gh returned them in", ()
 // nothing, so it named a flag the script has never accepted.
 const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "skills", "run-team", "SKILL.md"), "utf8");
 
-// The step-1 bullet alone. A slice any wider is vacuous for this claim: the
-// command one line above the rule already spells `--require-label` correctly,
-// so a positive match anywhere in phase 0 stays green with the rule naming
-// anything at all.
-function phase0Step1() {
+test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
+  // The step-1 bullet alone. A slice any wider is vacuous for this claim: the
+  // command one line above the rule already spells `--require-label` correctly,
+  // so a positive match anywhere in phase 0 stays green with the rule naming
+  // anything at all.
   const at = RUN_TEAM.indexOf("1. **Candidate scan**");
   assert.notEqual(at, -1, "run-team phase 0 step 1 moved — update this test");
   const end = RUN_TEAM.indexOf("\n2. ", at);
   assert.notEqual(end, -1, "run-team phase 0 step 2 moved — update this test");
-  return RUN_TEAM.slice(at, end);
-}
-
-test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
-  const step1 = phase0Step1();
+  const step1 = RUN_TEAM.slice(at, end);
   // Leading backtick, so this can only be satisfied by the RULE: in the command
   // above it, `--require-label` is preceded by a line break, not a backtick.
   // The gap is loose enough that rewording around `mandatory` stays green and
