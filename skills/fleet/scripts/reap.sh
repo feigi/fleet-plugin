@@ -41,10 +41,20 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
   # that exists nowhere else.
-  if git cherry "$base" "$b" 2>/dev/null | grep -q '^+'; then
-    keep "$b" "unmerged commits"
+  #
+  # Captured, not piped: `cmd | grep -q` takes grep's exit status, never cmd's,
+  # so a `git cherry` that dies (exit 128 — one unreadable loose object is
+  # enough) prints nothing, grep sees empty input and exits 1, and "unmerged"
+  # is indistinguishable from "the probe could not answer". -D is authorized
+  # by this check and by nothing else, so an unanswerable probe must KEEP, the
+  # same fail-closed shape the worktree `status` check below already uses.
+  if ! cherry=$(git cherry "$base" "$b" 2>&1); then
+    keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
   fi
+  case $cherry in
+    *'+'*) keep "$b" "unmerged commits"; continue ;;
+  esac
 
   wt=$(git worktree list --porcelain |
        awk -v b="refs/heads/$b" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
