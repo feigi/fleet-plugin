@@ -41,6 +41,7 @@ if (!REAL_GIT) throw new Error("ledger.test.mjs setup: could not locate a `git` 
 const GH_STUB = `#!/bin/sh
 printf '%s\\n' "$@" > "$GH_ARGS_FILE"
 pwd -P > "$GH_CWD_FILE"
+printf 'GIT_DIR=%s\\nGH_REPO=%s\\n' "\${GIT_DIR-}" "\${GH_REPO-}" > "$GH_ENV_FILE"
 if [ -n "$GH_FAIL" ]; then
   echo "gh: could not authenticate to github.com (HTTP 401)" >&2
   exit 1
@@ -66,36 +67,68 @@ function ledgerText(filed) {
 // (`--file` inside a checkout, or defaultLedgerPath()'s own --git-common-dir
 // derivation) — #155 makes the tracker query bind to that repo, so a fixture
 // that is not one no longer reaches gh at all. `gitRepo: false` is its own
-// case (an explicit --file naming a path outside any repository) and `noFile`
+// case — an explicit --file naming a path outside any repository, or a
+// `noFile` run whose fixture dir is never consulted because `procCwd` points
+// the ledger resolution somewhere else entirely — and `noFile`
 // / `procCwd` exist to drive the no-`--file` documented flow, which resolves
 // its own ledger location from the spawned process's cwd rather than `--file`.
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null } = {}) {
+//
+// `ledgerDirExists: false` withholds the setup `mkdirSync` (and the ledger
+// file with it) to reproduce the state every fresh clone and worktree is in
+// before the run's first write: `.fleet/` is gitignored and created lazily by
+// save(), so the DEFAULT `true` here is a fixture that pre-creates something
+// production never has yet — and it is what hid a #155 regression from the
+// accept-pin below.
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, spawnEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
+    // Inherited git vars outrank both cwd and `-C`, and they reach here from
+    // whatever ran the suite — a git hook, `rebase --exec`, `bisect run`.
+    // Under an ambient GIT_DIR the `git init` below exits 0 and creates
+    // NOTHING in `dir`: it re-inits the directory GIT_DIR names instead, so
+    // the fixture is silently not a repository and the status assert cannot
+    // see it. Scrub them off the whole fixture, as the fleet's other
+    // fixtures already do (inflight.test.mjs), so these tests measure the
+    // code under test rather than the environment that started them.
+    // `spawnEnv` puts one back deliberately, for the test that pins the
+    // scrub ledger.mjs itself performs.
+    const baseEnv = { ...process.env };
+    delete baseEnv.GIT_DIR;
+    delete baseEnv.GIT_WORK_TREE;
     if (gitRepo) {
-      const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
+      const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env: baseEnv });
       assert.equal(init.status, 0, "test setup: git init must succeed");
+      // `git init` exiting 0 is not the same as this directory being a repo
+      // (see above) — assert the thing the fixtures actually depend on.
+      assert.ok(existsSync(join(dir, ".git")), "test setup: git init must have created a repository HERE");
     }
     const ledgerDir = noFile ? join(dir, ".fleet") : dir;
-    if (noFile) mkdirSync(ledgerDir, { recursive: true });
+    if (noFile && ledgerDirExists) mkdirSync(ledgerDir, { recursive: true });
     const file = join(ledgerDir, "ledger.md");
-    writeFileSync(file, ledgerText(filed));
+    // No directory means no ledger file either — writing one would be the very
+    // state `ledgerDirExists: false` exists to withhold.
+    if (ledgerDirExists) writeFileSync(file, ledgerText(filed));
     const fixture = join(dir, "hits.json");
     writeFileSync(fixture, JSON.stringify(hits));
     const argsFile = join(dir, "gh-argv");
     const cwdFile = join(dir, "gh-cwd");
+    const ghEnvFile = join(dir, "gh-env");
     const bin = join(dir, "bin");
     const env = {
-      ...process.env,
+      ...baseEnv,
       GH_FIXTURE: fixture,
       GH_ARGS_FILE: argsFile,
       GH_CWD_FILE: cwdFile,
+      GH_ENV_FILE: ghEnvFile,
       // PATH is replaced, not prefixed: a prefix leaves the real `gh` reachable
       // the moment the stub's own directory lookup changes, and the ENOENT test
       // would then silently start querying the live tracker. `git` still
       // resolves — it is symlinked into this same `bin` below — so this stays
       // narrow to `gh` alone.
       PATH: bin,
+      // Last, so a test can deliberately put back a var the scrub above
+      // removed — that is the whole point of the GIT_DIR pin below.
+      ...spawnEnv,
     };
     if (ghFails) env.GH_FAIL = "1";
     if (ghGarbage) env.GH_GARBAGE = "1";
@@ -130,6 +163,18 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       ghRan: existsSync(argsFile),
       ghArgv: existsSync(argsFile) ? readFileSync(argsFile, "utf8").trim().split("\n") : [],
       ghCwd: existsSync(cwdFile) ? readFileSync(cwdFile, "utf8").trim() : null,
+      // What gh saw for the two env vars that outrank the cwd it was bound to
+      // — `""` for either means ledger.mjs scrubbed it, which is the whole
+      // assertion. Read as strings, so a var that arrived unset and one that
+      // arrived empty are indistinguishable here: both are the safe state.
+      ghEnv: existsSync(ghEnvFile)
+        ? Object.fromEntries(
+          readFileSync(ghEnvFile, "utf8").trimEnd().split("\n").map((l) => {
+            const i = l.indexOf("=");
+            return [l.slice(0, i), l.slice(i + 1)];
+          }),
+        )
+        : null,
       // Resolved before the `finally` below removes `dir` — a caller that
       // realpath()s this after run() returns hits an ENOENT, not a path.
       ledgerRepoDir: realpathSync(dir),
@@ -465,7 +510,7 @@ test("the measured #114 rewording surfaces, weakly — it is the tracker query t
 
 // ---------------------------------------------------------------------------
 // #155 — the tracker query binds to the ledger's own repository, not to
-// this process's ambient cwd. `run()`'s spawned `ledger.mjs check` always
+// this process's ambient cwd. `run()`'s spawned `ledger.mjs check` by default
 // inherits the outer test-runner's cwd (this checkout), which is itself a
 // different repository from the `git init`'d fixture directory the ledger
 // lives in below — that mismatch IS the "unrelated working directory" the
@@ -499,6 +544,21 @@ test("an explicit ledger outside any git repository reports the tracker unchecke
     /WARNING — TRACKER NOT CHECKED/,
     "reuses the existing unchecked-tracker warning rather than inventing a second one",
   );
+  // Pins the repository guard itself, not merely that SOMETHING degraded.
+  // Without this the guard is an equivalent mutant: delete it and `ghCwd`
+  // becomes "", `execFileSync` throws ENOENT on `cwd: ""` into the gh catch,
+  // and every assertion above still reads green off the identical
+  // `{ok:false}` shape. Measured: 29/29 passed with the guard removed.
+  assert.match(
+    r.json.tracker.error,
+    /cannot resolve the ledger's repository/,
+    "the failure must be attributed to the repository probe, not to gh",
+  );
+  assert.match(
+    r.json.tracker.error,
+    /not a git repository/,
+    "and it must carry git's OWN reason — the probe pipes git's stderr, so this string is the only place the cause is ever seen",
+  );
 });
 
 test("the documented flow — no --file, run from inside the repo — is unchanged: tracker still gets checked", () => {
@@ -512,7 +572,51 @@ test("the documented flow — no --file, run from inside the repo — is unchang
   assert.equal(r.json.tracker.ok, true);
   assert.equal(r.json.verdict, "clean");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/, "a normal invocation must not degrade");
-  assert.doesNotMatch(r.stderr, /not inside a git repository/, "the new guard must not fire on the documented flow");
+  assert.doesNotMatch(r.stderr, /cannot resolve the ledger's repository/, "the new guard must not fire on the documented flow");
+});
+
+test("the documented flow on a FRESH clone — no --file, .fleet/ not created yet — still reaches the tracker query", () => {
+  // The accept-pin above pre-creates the ledger directory, so it cannot see
+  // this state — and this state is the normal one: `.fleet/` is gitignored
+  // (.gitignore) and created lazily by save()'s mkdirSync, so on every fresh
+  // clone or worktree it is absent until the run's first write, which `check`
+  // by definition precedes. `git -C <missing dir>` exits 128, so a probe
+  // aimed at the ledger's own directory read "no repository" and dropped the
+  // query outright — verdict clean -> unverified on the flow the fix promised
+  // to leave alone. This is the pin that fixture could not be.
+  const r = run("some distinctive subject words entirely", { noFile: true, ledgerDirExists: false });
+  assert.equal(r.ghRan, true, "a ledger directory that does not exist YET is still inside its repository");
+  assert.equal(r.json.tracker.ok, true);
+  assert.equal(r.json.verdict, "clean");
+  assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/);
+  assert.doesNotMatch(r.stderr, /cannot resolve the ledger's repository/);
+  assert.equal(r.ghCwd, r.ledgerRepoDir, "and the query is still bound to the ledger's own repository, not the runner's cwd");
+});
+
+test("an inherited GIT_DIR or GH_REPO cannot retarget the query away from the ledger's repository", () => {
+  // Binding gh's cwd does not, on its own, make the ledger and the queried
+  // tracker agree — two env vars outrank the binding, from opposite sides:
+  //
+  //   GIT_DIR/GIT_WORK_TREE outrank cwd for git, so an ambient one (a git
+  //   hook, `rebase --exec`, `bisect run`) reached both the repository probe
+  //   and gh unchanged and made gh's remote resolution answer for the other
+  //   repository.
+  //
+  //   GH_REPO is read by gh BEFORE it consults git at all, so the bound cwd
+  //   is simply ignored — and this repo's own
+  //   .github/workflows/rebase-check-refresh.yml exports it job-wide.
+  //
+  // Either way the result is `ok: true` with `hits: []` on the wrong
+  // tracker — #155 straight back through its own fix. Each assertion below
+  // pins one of the three scrubs, and each fails alone.
+  const r = run("some distinctive subject words entirely", {
+    spawnEnv: { GIT_DIR: join(tmpdir(), "ledger-no-such-git-dir"), GH_REPO: "someowner/some-other-repo" },
+  });
+  assert.equal(r.ghRan, true, "the probe must not inherit GIT_DIR either — it resolves the repo gh is bound to");
+  assert.equal(r.ghEnv.GIT_DIR, "", "gh must see no GIT_DIR, or its remote resolution outranks the bound cwd");
+  assert.equal(r.ghEnv.GH_REPO, "", "gh must see no GH_REPO, which outranks the bound cwd outright");
+  assert.equal(r.ghCwd, r.ledgerRepoDir);
+  assert.equal(r.json.verdict, "clean");
 });
 
 test("a working directory that is not a repository at all still degrades exactly as before (no --file)", () => {
@@ -523,7 +627,10 @@ test("a working directory that is not a repository at all still degrades exactly
   // through the identical `!tracker.ok` branch as the outside-any-repo case.
   const dir = mkdtempSync(join(tmpdir(), "ledger-noreop-"));
   try {
-    const r = run("some distinctive subject words entirely", { filed: [], hits: [], noFile: true, procCwd: dir });
+    // `gitRepo: false`: `procCwd` moves ledger resolution to `dir`, so the
+    // fixture's own repo and ledger are never consulted — git-initialising it
+    // would only imply it were part of what this test pins.
+    const r = run("some distinctive subject words entirely", { filed: [], hits: [], noFile: true, gitRepo: false, procCwd: dir });
     assert.equal(r.ghRan, false);
     assert.equal(r.status, 0);
     assert.equal(r.json.tracker.ok, false);
