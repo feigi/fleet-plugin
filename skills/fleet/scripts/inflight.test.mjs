@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -65,6 +65,9 @@ const IDENT = {
 // `awk` from inside the shim would find the shim.
 const REAL_AWK = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 const REAL_TR = execFileSync("/bin/sh", ["-c", "command -v tr"], { encoding: "utf8" }).trim();
+// Same reason, for the one case that shims `git` itself: the shim has to hand
+// off to the real binary, and calling `git` from inside it would find the shim.
+const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
 /**
  * A branch in the bare origin, built from an empty tree straight in that repo.
@@ -387,6 +390,301 @@ test("probe 3: the same worktree without a space in the path, as the control", (
   assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
 });
 
+// --- probe 3, degraded reads (#95).
+//
+// `for-each-ref` and `worktree list --porcelain` both exit 0 while silently
+// dropping what they cannot read, so an exit-status guard never sees it. A
+// live branch or worktree then reads as "no local branch or worktree" — the
+// wrong "free" #76 exists to rule out, one probe down. Real chmod throughout;
+// no way to fake a degraded git read other than triggering the real one.
+
+test("probe 3: an unreadable refs directory is unknown, never a free ticket", (t) => {
+  // The issue's own repro: a live branch, `chmod 000 .git/refs/heads`, and the
+  // pre-fix script answers `taken=false`.
+  const { repo, env } = fixture(t, 55, {});
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix-55-real");
+  const refsdir = join(repo, ".git", "refs", "heads");
+
+  // 0o400 (read, no execute) is what tells the guard's `&&` from an `||`: with
+  // `||` a readable-but-not-searchable directory would satisfy `-r` alone and
+  // pass. 0o000 zeroes both bits at once and cannot make that distinction, but
+  // it is the realistic fault the issue measured, so both are checked.
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(refsdir, mode);
+    const r = spawnSync("sh", [SCRIPT, "55"], { cwd: repo, env, encoding: "utf8" });
+    // Restored before the first assert, or a failure here leaves a fixture the
+    // suite's own cleanup cannot remove.
+    chmodSync(refsdir, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, at);
+    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    assert.match(r.stderr, /refs directory .* could not be read/, at);
+    assert.doesNotMatch(r.stderr, /no local branch or worktree/, at);
+  }
+});
+
+test("probe 3: an unreadable refs SUBdirectory is unknown too — every fleet branch is in one", (t) => {
+  // The case above chmods the top of `refs/heads`, and no fleet branch lives
+  // there: `claim-ticket.sh` builds `branch="$type/$issue-$slug"`, so the real
+  // ref is `refs/heads/fix/95-…`, one level down. A guard that tests only the
+  // top directory leaves the entire realistic class open — `for-each-ref` then
+  // drops the branch at rc 0 with nothing on stderr, and #95's own wrong "free"
+  // survives its own fix.
+  const { repo, env } = fixture(t, 95, {});
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/95-inflight-degraded-reads");
+  const typedir = join(repo, ".git", "refs", "heads", "fix");
+
+  // Both modes, for the reason the case above checks both: 0o000 is the
+  // realistic fault, 0o400 is the one that tells an `&&` from an `||`.
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(typedir, mode);
+    const r = spawnSync("sh", [SCRIPT, "95"], { cwd: repo, env, encoding: "utf8" });
+    // Restored before the first assert, or a failure here leaves a fixture the
+    // suite's own cleanup cannot remove.
+    chmodSync(typedir, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, at);
+    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    assert.match(r.stderr, /refs directory .* could not be read/, at);
+    assert.doesNotMatch(r.stderr, /no local branch or worktree/, at);
+  }
+
+  // The control, and it is not optional: without it a fixture that never had a
+  // findable branch would produce the same exit 2 and the case above would pass
+  // while pinning nothing. Readable, the branch IS found — so the refusal above
+  // is git being unable to look, not there being nothing to see.
+  const ok = spawnSync("sh", [SCRIPT, "95"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(ok.status, 1, "readable: the branch is found and the ticket is taken");
+  assert.match(ok.stderr, /local branches: fix\/95-inflight-degraded-reads/);
+});
+
+test("probe 3: an unreadable worktree registry is unknown, never a free ticket", (t) => {
+  // Same repro shape, aimed at `.git/worktrees` (git's own admin dir) instead
+  // of refs/heads — matches release-ticket.sh's worktree-registry check (#84).
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" }, );
+  const wtroot = join(repo, ".git", "worktrees");
+
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(wtroot, mode);
+    const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+    chmodSync(wtroot, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, at);
+    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    assert.match(r.stderr, /worktree registry .* could not be read/, at);
+  }
+});
+
+test("probe 3: an entry git cannot read INSIDE is unknown too, not just an unreadable entry", (t) => {
+  // #84 itself: naming a registry entry needs read+execute on the PARENT
+  // only, so the entry directory stays readable while the `gitdir` file git
+  // opens inside it does not. `worktree list --porcelain` drops it anyway, at
+  // rc 0 — caught here by the count, not by a permission test on the entry.
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const entries = readdirSync(join(repo, ".git", "worktrees"));
+  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+  const gitdir = join(repo, ".git", "worktrees", entries[0], "gitdir");
+
+  chmodSync(gitdir, 0o000);
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  // Restored before the first assert — a later `worktree list` (including the
+  // suite's own cleanup) would otherwise still see this claim's worktree as
+  // dropped.
+  chmodSync(gitdir, 0o644);
+
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+});
+
+test("probe 3: a repo that never had a linked worktree is still answerable and free", (t) => {
+  // The trap a naive fix falls into: refusing whenever `.git/worktrees` is
+  // simply missing, conflating "never existed" with "exists but unreadable".
+  // A vanilla repo has no such directory at all, and that absence must stay
+  // free, not become a permanent exit 2 (#95).
+  const { repo, env } = fixture(t, 8, {});
+  assert.equal(existsSync(join(repo, ".git", "worktrees")), false,
+    "fixture: no worktree has ever been linked");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+test("probe 3: something that is not a registry entry is not counted as a dropped worktree", (t) => {
+  // The count above globs the registry directory, so it sees whatever is in
+  // there — and anything that is not a directory is not a worktree
+  // registration, matching release-ticket.sh's own fix for the same trap.
+  const { repo, env } = fixture(t, 8, {});
+  mkdirSync(join(repo, ".git", "worktrees"), { recursive: true });
+  writeFileSync(join(repo, ".git", "worktrees", "stray-note"), "not a worktree\n");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+test("probe 3: a stray DIRECTORY in the registry is not a worktree git failed to report", (t) => {
+  // The case above covers a stray *file*, which the `-d` test skipped anyway.
+  // A stray *directory* is the one that bites: git ignores it, a `-d`-only
+  // count sees it (measured: git lists 2 worktrees where the count said 3),
+  // and the mismatch then turns EVERY ticket in that repo into exit 2 until a
+  // human notices. One `mkdir` under `.git/worktrees` is all it takes.
+  const { repo, env } = fixture(t, 8, {});
+  mkdirSync(join(repo, ".git", "worktrees", "stray-dir"), { recursive: true });
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+test("probe 3: a registry entry git cannot even open is unknown, not a stray to skip", (t) => {
+  // The other half of that skip, and why it tests `-x` before `gitdir`: an
+  // entry chmod'd 000 answers "no gitdir file" to precisely the same test a
+  // stray directory does. But git DROPS this one (measured: 2 listed, then 1),
+  // so skipping it as "not git's" would reinstate the silent free — the same
+  // defect one layer in from the one this whole change removes.
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const entries = readdirSync(join(repo, ".git", "worktrees"));
+  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+  const entry = join(repo, ".git", "worktrees", entries[0]);
+
+  chmodSync(entry, 0o000);
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  // Restored before the first assert, or the suite's own cleanup inherits it.
+  chmodSync(entry, 0o755);
+
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+});
+
+test("probe 3: a registry entry whose gitdir is GONE is unknown, not a stray to skip", (t) => {
+  // Why the skip tests EMPTINESS and not the absence of `gitdir`. Git drops an
+  // entry whose `gitdir` file was deleted, so keying the skip on that file
+  // waves a corrupt entry through as "not git's" and the ticket reads FREE
+  // while its checkout may still be on disk — the wrong "free" this probe
+  // exists to rule out, reintroduced one layer in. An operator's stray `mkdir`
+  // is empty; even a corrupt entry still holds git's own files (commondir,
+  // HEAD, index, logs, refs), and that is the difference the count can see.
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const entries = readdirSync(join(repo, ".git", "worktrees"));
+  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+  execFileSync("rm", [join(repo, ".git", "worktrees", entries[0], "gitdir")]);
+
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "a dropped entry is unknown, never the exit 0 that means free");
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+});
+
+test("probe 3: git listing MORE than the registry reports THAT, not an incomplete listing", (t) => {
+  // The mismatch has two directions with opposite causes, and one message
+  // cannot serve both. Fewer listed than registered is git dropping an entry
+  // it could not read. More listed than registered is the reverse — the
+  // on-disk count is the stale read, which is what a sibling agent's
+  // `git worktree add` landing between the two produces, routine in a parallel
+  // fleet. Reporting that as "the listing is incomplete" sends the operator
+  // after a permissions fault that does not exist.
+  //
+  // Shimmed rather than raced: git derives its listing FROM the registry, so
+  // the only way it outruns the count is that interleaving, and a shim pins
+  // the resulting message deterministically instead of hoping to hit a window.
+  const { repo, env, bin } = fixture(t, 8, {});
+  writeFileSync(join(bin, "git"), `#!/bin/sh
+case "$*" in
+  "worktree list --porcelain")
+    '${REAL_GIT}' "$@"
+    printf 'worktree /tmp/phantom-worktree\\nHEAD ${"0".repeat(40)}\\ndetached\\n\\n'
+    exit 0 ;;
+esac
+exec '${REAL_GIT}' "$@"
+`);
+  chmodSync(join(bin, "git"), 0o755);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 1 worktrees but only 0 registry entries were counted/);
+  assert.doesNotMatch(r.stderr, /the listing is incomplete/);
+});
+
+/**
+ * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
+ * registry, then hands off to the real binary.
+ *
+ * Shimmed rather than slept: this is the window between inflight.sh's own
+ * on-disk count and git's read of the same registry, measured at ~10ms, and a
+ * test that tries to hit it with a sleep is a flake generator. Firing on the
+ * call itself lands the mutation inside the window every time.
+ *
+ * The sentinel keeps it to one shot — the suite's own cleanup shells out to
+ * git too, and a shim that mutated on every listing would never converge.
+ * Returned so a case can assert it actually fired: a shim that silently stops
+ * matching turns this into a test of nothing.
+ */
+function registryRaceShim(bin, mutation) {
+  const fired = join(bin, "race-fired");
+  writeFileSync(join(bin, "git"), `#!/bin/sh
+case "$*" in
+  "worktree list --porcelain")
+    if [ ! -e '${fired}' ]; then
+      : > '${fired}'
+      ${mutation}
+    fi ;;
+esac
+exec '${REAL_GIT}' "$@"
+`);
+  chmodSync(join(bin, "git"), 0o755);
+  return fired;
+}
+
+test("probe 3: a sibling worktree ADD between the two reads is absorbed, not an abort", (t) => {
+  // The count and the listing are two reads at two instants, and a sibling
+  // agent's `git worktree add` landing between them makes them disagree with
+  // nothing wrong. Measured on this fleet's own shape: 1.99% of probes abort
+  // spuriously at 2 mutations/s, 56.6% under saturation. Only a disagreement
+  // that survives a re-read is evidence of a dropped entry, so one recount
+  // absorbs this while leaving the real fault (pinned above) still refusing.
+  const { repo, env, bin } = fixture(t, 8, {});
+  // A basename with no digits in it: probe 3 matches worktrees on basename, and
+  // a sibling that happened to carry the ticket number would answer "taken"
+  // here for a reason that has nothing to do with the race.
+  const sibling = join(repo, "..", "sibling-work");
+  const fired = registryRaceShim(bin,
+    `'${REAL_GIT}' worktree add -q --detach '${sibling}' HEAD >/dev/null 2>&1`);
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(r.status, 0, `a concurrent add is not an unanswerable probe: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all");
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not an abort", (t) => {
+  // The other direction, and it is the one that looks like the real fault:
+  // git lists FEWER than the count, which is exactly the shape of an entry git
+  // dropped because it could not read it. The recount is what tells a worktree
+  // that is gone from one that is merely unreadable — the former stops being
+  // registered, the latter stays.
+  const { repo, env, bin } = fixture(t, 8, { detachedWorktreeUnder: "nospace" });
+  const wt = join(repo, "..", "nospace", "fix-8-slug");
+  const fired = registryRaceShim(bin,
+    `'${REAL_GIT}' worktree remove --force '${wt}' >/dev/null 2>&1`);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(r.status, 0, `a concurrent remove is not an unanswerable probe: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all");
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
 // --- the evidence payload as JSON.
 //
 // Every probe copies a name somebody else chose straight into a JSON string
@@ -660,6 +958,26 @@ test("probe 3: a worktree filter that could not run is unknown, never free", (t)
   assert.match(r.stderr, /could not filter the worktree list for #77/);
   assert.doesNotMatch(r.stderr, /no local branch or worktree/,
     "a stage that could not run never reports 'no'");
+  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+});
+
+test("probe 3: a worktree COUNT that could not run is unknown, never a bogus tally", (t) => {
+  // The registry cross-check counts git's own listing, and that counter is a
+  // stage like any other. It used to be `grep -c '^worktree ' || true`, and
+  // that `|| true` was not optional: `grep -c` exits 1 on zero matches, which
+  // is legitimate. But it absorbed a grep that could not RUN just as happily,
+  // leaving the count empty, `$((listed - 1))` at -1, and the die blaming
+  // `git worktree list` for a tally no listing can produce. One awk, whose
+  // program contains no `exit`, needs no such case absorbed — so the status is
+  // the counter's own and reads as the failure it is.
+  const { repo, env } = fixture(t, 77, { awkFailWhenProgramHas: "{c++}",
+                                         detachedWorktreeUnder: "nospace" });
+
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /could not count the worktrees git listed for #77/);
+  assert.doesNotMatch(r.stderr, /-1 worktrees/,
+    "a counter that could not run never reports a count at all");
   assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
 });
 
