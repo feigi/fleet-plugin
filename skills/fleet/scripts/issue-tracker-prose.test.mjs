@@ -1,9 +1,16 @@
 // Pins the two rules that `docs/agents/issue-tracker.md` states nowhere else.
-// The global `CLAUDE.md` routes every agent here for issue operations, and this
-// section defines the phrase "fetch the relevant ticket" that the fleet skills
-// defer to. #79: the section reproduced the issue-read command and its bare
-// `--comments` caveat verbatim but carried neither rule, so the copy read as
-// complete while the two rules that decide WHICH TEXT WINS were absent.
+// #79: the section reproduced the issue-read command and its bare `--comments`
+// caveat verbatim but carried neither rule, so the copy read as complete while
+// the two rules that decide WHICH TEXT WINS were absent.
+//
+// Nothing in the tree routes an agent to this doc: grepping for
+// `issue-tracker` matches only this test file, and no skill file contains the
+// phrase "fetch the relevant ticket" it would defer to. The rules reach
+// agents through three SKILL.md files that each carry their own copy —
+// run-team word-for-word inside its verbatim implementer prompt, next-ticket
+// and sizing-a-ticket paraphrased. #79 brings the doc into sync with those; it
+// is the catch-up copy, not their source, so this pin keeps the doc from
+// drifting back out, nothing more.
 //
 // THE CEILING, same as fleet-tick-prose.test.mjs: these prove a phrase is
 // PRESENT. Neither can prove it is not negated by a sentence added beside it.
@@ -17,14 +24,18 @@ const TRACKER = readFileSync(join(REPO, "docs", "agents", "issue-tracker.md"), "
 
 // Sliced to this section alone. Unbounded to EOF the slice runs through the
 // wayfinding operations, and a `## Agent Brief` mention anywhere past here
-// would satisfy the assertions with the section itself deleted.
+// would satisfy the assertions with the section itself deleted. Stops at the
+// next `#` or `##` — either one closes this section — and falls back to EOF
+// rather than bailing, so a correct doc still passes once this is the last
+// section. Not `indexOf("\n## ")` alone: that runs the slice through a later
+// `# ` h1, and the rules relocated under one then read as still present.
 function fetchSection() {
   const start = '## When a skill says "fetch the relevant ticket"';
   const at = TRACKER.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const end = TRACKER.indexOf("\n## ", at + start.length);
-  assert.notEqual(end, -1, "no heading follows the fetch section — update this test");
-  return TRACKER.slice(at, end);
+  const rest = TRACKER.slice(at + start.length);
+  const next = rest.match(/\n#{1,2} /);
+  return start + (next ? rest.slice(0, next.index) : rest);
 }
 
 test("the fetch section says the Agent Brief comment outranks the issue body", () => {
