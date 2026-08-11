@@ -1079,6 +1079,13 @@ test("an unsearchable worktree is not reported as having no .git", (t) => {
   // versions refuse — and the only thing separating this fix from the bug it
   // replaces is WHICH refusal it is.
   assert.doesNotMatch(stderr, /has no \.git/, "never an absence nothing established");
+  // The positive half. Excluding one wrong wording left every OTHER wrong
+  // wording green: the linkage block below the guard was added ungated, so
+  // `cd "$wt"` fired first and this path died with "cannot resolve $wt" — the
+  // script's own invention — while the assert above still passed. Pinning WHICH
+  // die fires is what makes the `-f` gate on that block load-bearing, and it is
+  // the only assertion that fails if the gate is removed again.
+  assert.match(stderr, /cannot read the status of/, "git's own denial, not one this script invented");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });

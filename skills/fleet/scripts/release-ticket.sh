@@ -510,11 +510,13 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # (measured) — while `--show-toplevel` always answers canonical. `cd "$wt" &&
   # pwd -P` is the POSIX way to the same canonical form; no `realpath` needed,
   # and none is guaranteed to exist.
-  wt_canon=$(cd "$wt" && pwd -P) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
-  toplevel=$(git -C "$wt" rev-parse --show-toplevel) ||
-    die "cannot read the git linkage of $wt, so whether it holds uncommitted work is unknown"
-  [ "$wt_canon" = "$toplevel" ] ||
-    die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
+  if [ -f "$wt/.git" ]; then
+    wt_canon=$(cd "$wt" && pwd -P) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
+    toplevel=$(git -C "$wt" rev-parse --show-toplevel) ||
+      die "cannot read the git linkage of $wt, so whether it holds uncommitted work is unknown"
+    [ "$wt_canon" = "$toplevel" ] ||
+      die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
+  fi
 
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
