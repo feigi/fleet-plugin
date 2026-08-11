@@ -146,6 +146,47 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
   || die "$wt is not a git worktree"
 [ -z "$prefix" ] \
   || die "git answers for the repo above $wt, not $wt — cannot tell a clean worktree from a dirty one"
+
+# --show-prefix answers "is $wt the root git resolved" — for a `.git` FILE that
+# is a question about the file's own LOCATION, since that is where git starts
+# walking up from. It says nothing about "is the git-dir behind that file
+# actually $wt's". A `.git` file rewritten to name a SIBLING worktree's admin
+# dir still resolves its root to $wt (the file's location did not move) while
+# every git command below — `status` included — answers against the sibling's
+# HEAD and index. #189.
+#
+# `--git-dir` names which admin dir answered: the literal string `.git` for the
+# main worktree, whose `.git` IS the repo and has no redirection to verify —
+# the root claim above already covers it in full (measured, git 2.50.1). Any
+# other value is a linked worktree's admin dir, and every such dir carries its
+# OWN `gitdir` file, written once by `git worktree add` and never touched by
+# this script, pointing back at the worktree `.git` file it belongs to. That
+# back-pointer is the second identity claim: resolved, it must name $wt's own
+# `.git`, or the admin dir that answered belongs to some other worktree.
+#
+# This is the one place in the script that compares paths as strings — unlike
+# `--show-prefix`, there is no rc/emptiness shortcut for "do these two names
+# the same tree". `cd "$wt" && pwd -P` is the canonicalization, not
+# `--show-toplevel`: git already resolves symlinks, relative paths and (on
+# macOS) the `/tmp` -> `/private/tmp` rewrite into the back-pointer file at
+# `worktree add` time, and `pwd -P` collapses the same three on $wt's side by
+# construction, so a legitimate worktree reached through a symlinked path
+# still compares equal without $wt ever being string-matched against
+# `--show-toplevel` output (a spelling the comment above already rules out).
+gd=$(git -C "$wt" rev-parse --git-dir) || die "$wt is not a git worktree"
+case $gd in
+  .git) : ;;
+  *)
+    back=$(cat "$gd/gitdir" 2>/dev/null) \
+      || die "$gd/gitdir is missing or unreadable — cannot verify $wt's linkage"
+    back=$(printf '%s' "$back" | sed -e 's/[[:space:]]*$//')
+    wt_git=$(cd "$wt" && pwd -P)/.git \
+      || die "cannot resolve $wt's real path"
+    [ "$back" = "$wt_git" ] \
+      || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
+    ;;
+esac
+
 git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
 # A branch never pushed, a stale remote-tracking ref, or a caller who already
 # passed a name prefixed "origin/" all make this not resolve. Left unchecked,
