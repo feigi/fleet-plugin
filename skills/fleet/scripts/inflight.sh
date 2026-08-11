@@ -7,13 +7,22 @@
 # worktree can exist before anything is pushed.
 #
 # Exit 0 free, 1 taken, 2 the question could not be answered. A probe that
-# cannot answer no longer aborts the run: it is recorded unknown and the
-# other two still run, so a hit either of them already found (or still finds)
-# is never discarded by a failure elsewhere. Exit 2 from a probe failure
-# carries a payload — the same shape as 0 and 1, plus an "unknown" list
-# naming which probes could not look. Only a failure before any probe can
-# run at all (a bad argument, not being inside a git repository) still exits
-# 2 with no payload — nothing has been established yet for a payload to hold.
+# cannot answer no longer aborts the run: it is recorded unknown and the other
+# two still run. Each probe also commits a signal the moment it is established
+# rather than at its own end, so a hit is never discarded by a later failure —
+# neither one in another probe, nor one in a later stage of the probe that
+# found it. Exit 2 from a probe failure carries a payload — the same shape as
+# 0 and 1, plus an "unknown" list naming which probes could not look.
+#
+# Four failures still exit 2 with no payload at all, the four the script table
+# in docs/specs/2026-07-23-fleet-plugin-design.md lists. Three of them land
+# before anything has been established: a bad argument, not being inside a git
+# repository, and no such issue. That last one fires inside probe 1, after its
+# own `gh issue view` has already run — it is not a pre-probe check, it is the
+# premise all three probes rest on, so it abandons the run rather than
+# recording one probe's unknown. The fourth is the opposite end: an evidence
+# string or a verdict that cannot be written at all, which fails after every
+# probe has finished, with everything established and no way to say it.
 set -eu
 
 NAME=inflight
@@ -155,15 +164,25 @@ out += ["#%s %s (branch)" % (p["number"], p["state"]) for p in prs
         if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"]
 print(", ".join(out))') || { add_unknown "pr" "could not filter PR search results for #$n"; return 1; }
 
-# The `|| die` is not dead code. No *input* can reach it — the guarded python3
-# above already parses this same `$pr_json` and dies 2 on anything malformed —
-# but this is a second, separate process, so it can fail where the first
-# succeeded: a fork failure under process-table pressure is exactly what a
-# parallel fleet approaches by construction. Without the guard, `set -e` would
-# exit 1 with empty stdout, and the exit contract reads 1 as "taken" — a crash
-# rendered as a decision.
+# The fallback is not dead code. No *input* can reach it — the guarded python3
+# above already parses this same `$pr_json` and records an unknown on anything
+# malformed — but this is a second, separate process, so it can fail where the
+# first succeeded: a fork failure under process-table pressure is exactly what
+# a parallel fleet approaches by construction. Left unguarded the failure is
+# simply silent — `probe_pr` is invoked as `probe_pr || :`, which exempts its
+# whole body from `set -e`, and a failed command substitution assigns the empty
+# string rather than leaving `$raw` unset, so `set -u` never fires either.
+# Measured: the tally then prints the hole, `( full-text match(es) considered)`.
+#
+# `raw="?"` and NOT `add_unknown "pr"; return 1`, which is what stood here and
+# was wrong (#96). This count feeds nothing but the two diagnostics below: the
+# PR answer is `$pr`, which the guarded filter above already established, so a
+# tally that could not run leaves that answer entirely intact. Returning here
+# discarded an already-sufficient hit over a cosmetic number — measured exit 2
+# with `hits:[]` while `evidence.pr` read `#12 OPEN (linked)`. A stage that
+# cannot change the answer must not be able to retract it.
 raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') \
-  || { add_unknown "pr" "could not count the PR search results for #$n"; return 1; }
+  || raw="?"
 if [ -n "$pr" ]; then
   echo "    PRs for #$n: $pr   ($raw full-text match(es) considered)" >&2
   add_hit "pr"
@@ -269,7 +288,7 @@ fi
 # One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
 # last, and the `|| true` that used to close this one discarded that too, so a
 # stage that could not run produced the same empty result a free ticket
-# produces. Collapsed, the status is the filter's own and `|| die` can read it —
+# produces. Collapsed, the status is the filter's own and the guard can read it —
 # and three fewer forks is three fewer ways to fail, a fork failure under
 # process-table pressure being what a parallel fleet approaches by construction.
 #
@@ -347,7 +366,7 @@ if [ -e "$refsdir" ]; then
   # `for-each-ref` still drops the branch, so the permission has to be tested
   # rather than inferred from find's status. That status is unusable anyway —
   # find exits 1 on the very permission-denied descent that IS the detection —
-  # so the `|| die` reads head's status, the one thing here that failing means
+  # so the guard reads head's status, the one thing here that failing means
   # a crash rather than a finding.
   bad=$(find "$refsdir" -type d ! \( -exec test -r {} \; -a -exec test -x {} \; \) -print 2>/dev/null | head -1) ||
     { add_unknown "local" "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"; return 1; }
@@ -364,6 +383,22 @@ local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the local branches for #$n"; return 1; }
+
+# Commit the branch half here, where it is established — NOT at the end of the
+# probe with the worktree half (#96). Every stage between here and there can
+# fail and `return 1`: the registry read and count, `git worktree list`, the
+# listed-versus-registered compare, the worktree filter. Recording the hit down
+# there meant any one of them threw away a branch that already proves the
+# ticket taken — measured exit 2 with `hits:[]` and `unknown:["local"]` while
+# `evidence.localBranch` named `fix/77-slug` in the same payload.
+#
+# The two halves are independent answers to independent questions. A branch
+# found is found whether or not the worktree registry can be read, and the
+# probe reports the half it answered plus an unknown for the half it could not.
+if [ -n "$local_b" ]; then
+  echo "    local branches: $local_b" >&2
+  add_hit "local"
+fi
 
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
@@ -430,7 +465,7 @@ fi
 # is one awk. `grep -c` exits 1 on zero matches — legitimate, and `set -e`
 # would read it as fatal — so a `|| true` has to absorb it, and that same
 # `|| true` absorbs a grep that could not RUN AT ALL. Then the count is the
-# empty string, `$((listed - 1))` is -1, and the die below blames
+# empty string, `$((listed - 1))` is -1, and the mismatch report below blames
 # `git worktree list` for a count no listing can produce. awk needs no such
 # case separated out: the program contains no `exit`, so it returns 0 whether
 # or not anything matched and every non-zero status is a real failure.
@@ -483,11 +518,13 @@ wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
     if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the worktree list for #$n"; return 1; }
-if [ -n "$local_b" ] || [ -n "$wt" ]; then
-  [ -n "$local_b" ] && echo "    local branches: $local_b" >&2
-  [ -n "$wt" ] && echo "    worktrees: $wt" >&2
-  add_hit "local"
-else
+if [ -n "$wt" ]; then
+  echo "    worktrees: $wt" >&2
+  # `hits` is a set of probe names, not a tally, and both halves of this probe
+  # answer under the one name — so record it only if the branch half above did
+  # not already.
+  [ -n "$local_b" ] || add_hit "local"
+elif [ -z "$local_b" ]; then
   echo "    no local branch or worktree for #$n" >&2
 fi
 }
@@ -587,9 +624,12 @@ pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
   && wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
   || die "could not escape the evidence for #$n"
 
-# Guarded for the same reason as the python3 call above: under `set -e` a failed
-# write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
-# rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
+# Guarded because this runs OUTSIDE the three probe functions, where `set -e` is
+# still live and a failed write exits 1 — and the contract reads 1 as "taken", a
+# closed or full stdout rendered as a decision. `sh inflight.sh <N> >&-`
+# reproduces it. (The probe bodies cannot rely on that: each is invoked as
+# `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
+# command in one carries its own guard.)
 printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
   "$n" "$taken" "${hits%,}" "${unknown%,}" \
   "$pr_j" "$pr_rw" "$remote_j" "$remote_rw" \

@@ -65,6 +65,12 @@ const IDENT = {
 // `awk` from inside the shim would find the shim.
 const REAL_AWK = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 const REAL_TR = execFileSync("/bin/sh", ["-c", "command -v tr"], { encoding: "utf8" }).trim();
+// Same reason again, for probe 1's two python3 calls. They are addressed apart
+// by program text the way the awk shim addresses its three filters: the filter
+// call and the counting call parse the same `$pr_json` in the same probe, and
+// which one breaks is the whole difference between "the PR answer is unknown"
+// and "the diagnostic tally is unknown".
+const REAL_PYTHON3 = execFileSync("/bin/sh", ["-c", "command -v python3"], { encoding: "utf8" }).trim();
 // Same reason, for the one case that shims `git` itself: the shim has to hand
 // off to the real binary, and calling `git` from inside it would find the shim.
 const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
@@ -97,7 +103,7 @@ function remoteBranch(bare, name) {
  */
 function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
                          detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
-                         trFailWhenArgsHave = null }) {
+                         trFailWhenArgsHave = null, python3FailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
 
@@ -139,6 +145,23 @@ case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
 exec '${REAL_TR}' "$@"
 `);
     chmodSync(join(bin, "tr"), 0o755);
+  }
+
+  // The same shim shape for `python3`, selected by program text. Probe 1 forks
+  // it twice over the same `$pr_json` — once to filter the PRs into the answer,
+  // once to count the raw window for a diagnostic — and only a substring can
+  // tell those two apart. A count of invocations cannot: the two calls are the
+  // reason the fork-failure guard exists at all, and addressing "the second
+  // python3" pins a case to an ordering rather than to a stage.
+  //
+  // Exits 1 for the reason the awk shim does: it stands in for a fork that
+  // could not happen, not for a program that ran and disagreed.
+  if (python3FailWhenProgramHas !== null) {
+    writeFileSync(join(bin, "python3"), `#!/bin/sh
+case "$*" in *'${python3FailWhenProgramHas}'*) exit 1 ;; esac
+exec '${REAL_PYTHON3}' "$@"
+`);
+    chmodSync(join(bin, "python3"), 0o755);
   }
 
   const repo = join(root, "repo");
@@ -882,6 +905,15 @@ test("a nonexistent issue dies 2, distinctly from a network failure", (t) => {
   const r = inflight(999, { issueErr: err }, t);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /issue #999 does not exist in this repository/);
+  // The third payload-less exit 2, and the only one that fires from INSIDE a
+  // probe — probe 1's own `gh issue view` has already run when this die is
+  // reached. A missing issue is the premise all three probes rest on rather
+  // than one probe's failure, so it abandons the run instead of recording an
+  // unknown. Pinned here because the script's header enumerates the
+  // payload-less causes, and nothing else in this file notices if this one
+  // starts emitting a payload (measured: converting the die to
+  // `add_unknown "pr"; return 1` left the whole suite green without this line).
+  assert.equal(r.json, null, "no payload — nothing was established for one to hold");
 });
 
 test("an unreachable GitHub dies 2 without claiming the issue is missing", (t) => {
@@ -1246,8 +1278,27 @@ test("probe 2: an empty core.sshCommand falls back to plain ssh, not to an empty
 // unpinned here on purpose — the fix is probe-agnostic by construction, the
 // same `probe_X || :` shape for all three with no branching on which probe is
 // which, so a fault that broke one ordering and not its symmetric twin would
-// have to live inside one probe's own body, which that probe's existing
-// dedicated failure tests above already cover.
+// have to live inside one probe's own body.
+//
+// Which is NOT the same as those bodies being covered, and an earlier version
+// of this comment claimed it was. Measured by mutation during #406's review:
+// replacing `add_unknown …; return 1` with a silent `return 0` at six internal
+// branches — probe 1's `gh pr list failed`, `could not filter PR search
+// results` and `could not count the PR search results`, probe 3's `cannot
+// resolve the git common directory`, `could not test the refs directories
+// under` and `git worktree list failed` — left this whole file green, six
+// mutants surviving. What the tests above pin is each probe's OUTWARD answer
+// on the failures they can drive through the fixture (an unreachable GitHub, an
+// unreachable origin, an unreadable refs directory or worktree registry, a
+// filter that cannot run): the exit code, `hits` and `unknown`. Which internal
+// branch produced that answer is mostly not pinned, and per-branch coverage is
+// still open — see the issue filed from #406's review.
+//
+// The gap that mattered is closed here rather than left to that issue: #406
+// found accumulation was per-PROBE, not per-SIGNAL, so a hit already computed
+// inside a probe was still discarded when a LATER stage of that same probe
+// failed. The two same-probe cases below pin both halves of that fix, and the
+// probe-1 filter case pins one of the six branches above.
 
 test("accumulate: an open linked PR survives an unreachable origin — probe 1's hit outlives probe 2's failure", (t) => {
   const r = inflight(7, { linked: [12], prs: [pr(12, "OPEN", "fix/other-thing")], origin: "unreachable" }, t);
@@ -1265,6 +1316,68 @@ test("accumulate: a local worktree survives an unreachable origin — probe 3's 
   assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/, "the hit found after the failure is not discarded either");
   assert.deepEqual(r.json.hits, ["local"]);
   assert.deepEqual(r.json.unknown, ["remote"]);
+});
+
+// --- #406: the same discard, one level down. A hit is committed where it is
+// established, not at the end of the probe that established it.
+
+test("accumulate: a PR hit outlives a later failure in its OWN probe — the diagnostic count cannot retract it", (t) => {
+  // The counting python3 only fills in the "(N full-text match(es))" tally on
+  // stderr; `$pr` is the answer and the filter call above it already produced
+  // one. Measured with this shim before the fix: exit 2, `hits:[]`,
+  // `unknown:["pr"]`, while `evidence.pr` in the same payload read
+  // "#12 OPEN (linked)" — the proof the ticket was taken, thrown away over a
+  // number nothing decides on.
+  const r = inflight(7, {
+    linked: [12], prs: [pr(12, "OPEN", "fix/other-thing")],
+    python3FailWhenProgramHas: "len(json.load",
+  }, t);
+  assert.equal(r.code, 1, "the PR answer was established, so this is taken — not unanswerable");
+  assert.equal(r.json.taken, true);
+  assert.equal(r.json.evidence.pr, "#12 OPEN (linked)");
+  assert.deepEqual(r.json.hits, ["pr"], "the hit survives a later stage of its own probe");
+  assert.deepEqual(r.json.unknown, [], "a stage that cannot change the answer records no unknown");
+  assert.match(r.stderr, /\(\? full-text match\(es\) considered\)/,
+    "and the tally that could not run says so rather than printing a number it does not have");
+});
+
+test("accumulate: a local-branch hit outlives a later failure in its OWN probe — the worktree half", (t) => {
+  // Built by hand, and NOT `detachedWorktreeUnder`: that option is detached
+  // precisely so no local branch exists, which is the reason every registry-
+  // failure test above asserts `hits: []` and none of them could catch this.
+  // Here the branch is the hit and the worktree filter is the later failure.
+  const { repo, env } = fixture(t, 77, { awkFailWhenProgramHas: "substr($0,10)" });
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/77-slug");
+
+  // Measured before the fix: exit 2, `hits:[]`, `unknown:["local"]`, with
+  // `evidence.localBranch` naming `fix/77-slug` in the same payload.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1, "the branch alone is sufficient — taken, not unanswerable");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.taken, true);
+  assert.equal(json.evidence.localBranch, "fix/77-slug");
+  assert.deepEqual(json.hits, ["local"], "recorded once, at the half that answered");
+  assert.deepEqual(json.unknown, ["local"],
+    "and the half that could not look is still named — a hit outranks it, it is not erased by it");
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "the probe found one, so it never reports finding none");
+});
+
+test("probe 1: a PR filter that could not run is unknown, never free", (t) => {
+  // The filter is the stage the count above is not: it produces `$pr`, the PR
+  // answer itself, so its failure genuinely leaves the question unanswered.
+  // One of the six branches the preamble above names as unpinned — a silent
+  // `return 0` here reads as "no PR is about #7" and frees a taken ticket.
+  const r = inflight(7, {
+    linked: [12], prs: [pr(12, "OPEN", "fix/other-thing")],
+    python3FailWhenProgramHas: "seg = re.compile",
+  }, t);
+  assert.equal(r.code, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /could not filter PR search results for #7/);
+  assert.doesNotMatch(r.stderr, /no PR is about/, "a stage that could not run never reports 'no'");
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.unknown, ["pr"]);
 });
 
 test("accumulate: all three probes unanswerable is exit 2 WITH a payload naming all three", (t) => {
