@@ -148,6 +148,16 @@ SH
 IFS='
 '
 set -f
+# A bare invocation (zero arguments) must run the same suite the emit guard
+# above certified, not node's own default discovery. \`for arg do\` with no
+# \`in\` clause iterates "\$@" — on an empty argv the loop body never runs, so
+# both the expansion and its zero-match refusal are skipped and the runner
+# falls straight through to \`exec node --test "\$@"\` below with an empty
+# "\$@": node's own discovery, which does not recognise the \`.spec.\` form
+# or the \`x\` variants of the extensions this shim matches. Routing it
+# through "." here gives it the same expansion, the same test-file shape, and
+# the same node_modules prune as every other invocation. (#97)
+[ \$# -gt 0 ] || set -- .
 for arg do
   shift
   if [ -d "\$arg" ]; then

@@ -291,6 +291,84 @@ test("runner: a vendored directory argument refuses however it is spelled", () =
   }
 });
 
+// #97: a bare invocation must go through the same expansion as an explicit
+// ".", not fall through to node's own default discovery. `for arg do` with no
+// `in` clause iterates "$@", so on an empty argv the loop body never ran and
+// the runner fell straight to bare `node --test`. Mixing a `.spec.` file into
+// the plain SUITE is what makes `pass 7` discriminate: SUITE alone is *not* a
+// counter-example, since node's own default discovery happens to match every
+// `.test.mjs` name in it too — a fixture that pinned "6" against SUITE would
+// stay green under the pre-fix bare `node --test` and prove nothing.
+test("runner: a bare invocation runs the same suite as an explicit \".\"", () => {
+  const a = apply({ ...SUITE, "t/d.spec.mjs": PASSES });
+  const dot = a.run(".");
+  assert.equal(dot.status, 0, dot.stdout + dot.stderr);
+  assert.match(dot.stdout, /^(?:ℹ|#) pass 7$/m);
+  const bare = a.run();
+  assert.equal(bare.status, 0, bare.stdout + bare.stderr);
+  assert.match(bare.stdout, /^(?:ℹ|#) pass 7$/m);
+});
+
+// The sharpest edge of #97: node's own default discovery does not recognise
+// the `.spec.` form, so a repo whose only test file uses it went green over
+// zero tests run under the pre-fix bare invocation. This is the exact
+// fixture from the issue's own repro.
+test("runner: a bare invocation runs .spec. files, which node's own discovery does not", () => {
+  const r = apply({ "t/a.spec.mjs": PASSES }).run();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// A repo with zero test files anywhere never reaches this runner at all —
+// derive-testcmd.sh refuses at emit time before a runner is written, pinned
+// by "runner: no scripts.test and no test files refuses rather than passing
+// vacuously" below. Nothing about that guard changes here — and where the two
+// disagree, they disagree safely: the emit guard greps `git ls-tree`, which
+// excludes neither `node_modules` nor symlinks, while this walk prunes the
+// first and `-type f` drops the second. A repo whose only committed test files
+// are vendored or symlinked therefore does reach the runner, and gets the
+// emptiness guard's `no test files under .` at exit 1 — a loud refusal, never
+// a vacuous pass. Pinned here rather than asserted: the block above used to
+// claim this state was unreachable, and the only `no test files under` pins in
+// the file were an explicit directory argument and two `doesNotMatch`. Vendored
+// is the cheaper of the two shapes to build — the symlink one needs a mode
+// 120000 entry that `apply()` cannot express — and both end in the same guard.
+// Pre-fix this is the vacuous green #97 exists to refuse: node's own discovery
+// skips `node_modules`, finds nothing, and exits 0 over `tests 0`.
+test("runner: a bare invocation refuses a repo whose only test files are vendored", () => {
+  const r = apply({ "node_modules/pkg/v.test.mjs": PASSES }).run();
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /no test files under \./);
+});
+
+// The blocker named in the issue body (defaulting to "." would sweep vendored
+// tests) was discharged by #109's node_modules exclusion before this landed.
+// Confirm the defaulted path actually goes through that prune rather than
+// bypassing it some other way.
+// Both fixture choices carry the pin; neither is decoration. The `.spec.`
+// file is what makes the count discriminate #97 — SUITE alone reads `pass 6`
+// under the pre-fix bare `node --test` too, since node's own discovery
+// matches every `.test.mjs` name in it and already skips node_modules, so a
+// fixture pinning "6" here is exactly the hollow one the comment above
+// warns about. And the vendored file is NESTED rather than sitting at the
+// worktree root because node refuses an argv entry whose relative path
+// starts with `node_modules/`, dropping it silently while the rest of argv
+// resolves (#100). At the root that refusal stands in for the prune:
+// measured with the prune deleted, a root-level fixture still reads
+// `pass 7` and still exits 0, so the assertion cannot tell this shim's walk
+// from node's own behaviour. Nested, only the prune keeps the file out.
+// `pass 7` rather than `pass 8`, over a vendored test that fails on
+// purpose, is what says it ran.
+test("runner: a bare invocation excludes vendored tests under node_modules", () => {
+  const a = apply({ ...SUITE, "t/d.spec.mjs": PASSES });
+  const vendor = join(a.wt, "t", "node_modules");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), 'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n');
+  const r = a.run();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m);
+});
+
 // Directories are only rewritten for `node --test`. Every other entrypoint is
 // somebody else's runner, and vitest and jest take a directory as a filter
 // against their own naming conventions, which need not be this regex.
