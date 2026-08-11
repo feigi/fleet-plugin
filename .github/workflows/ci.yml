@@ -78,6 +78,13 @@ jobs:
       # .nvmrc is the single source of truth for the target runtime — the one
       # the suite is developed and run against — so a version bump is a
       # one-file edit instead of a literal drifting out of sync here.
+      #
+      # This commit itself moves CI from the latest 22.x LTS (what the old
+      # `node-version: 22` pin floated to on every run) to 26.5.0, the version
+      # the suite is developed against. Tradeoff: patch pickup is no longer
+      # automatic — an exact .nvmrc pin doesn't float the way `node-version: 22`
+      # did, so a patch bump (e.g. picking up a security release) is now a
+      # deliberate one-file edit here.
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
