@@ -160,14 +160,42 @@ test("near misses are kept — the predicate's shape is specified, not accidenta
   // One fixture per dimension the regex commits to. Without these, every
   // loosening of the heading match still passes: the dropped fixture differs
   // from a ticket in all of them at once, so it discriminates none.
+  //
+  // #65: nesting depth (`### User Stories`) moved OUT of this list — it is no
+  // longer a near miss, see the depth test below — and the split-heading
+  // fixture moved IN, replacing it as the dimension this list now pins.
   const { rows } = run([
-    ticket(1, "### User Stories\n\nnested under an h2\n"),
     ticket(2, "## user stories\n\nlowercase\n"),
     ticket(3, "##User Stories\n\nno separating space\n"),
     ticket(4, "## User Stories (draft)\n\ntrailing text\n"),
     ticket(5, "Mentions ## User Stories mid-line, not a heading.\n"),
+    // #65: the marker alone on its line, heading text starting the next —
+    // `\s` spans the newline so this used to read as the same heading. Kept
+    // is the fixed behaviour; `dropped #6` in a future run is the regression.
+    ticket(6, "##\nUser Stories\n\nmarker and text on separate lines\n"),
   ]);
-  assert.deepEqual(rows.map((r) => r.n), [1, 2, 3, 4, 5]);
+  assert.deepEqual(rows.map((r) => r.n), [2, 3, 4, 5, 6]);
+});
+
+test("the signature heading is detected at any depth of two or more — #65", () => {
+  // to-spec's own <spec-template> is flat — every heading in it is `##` — so
+  // this costs nothing against real to-spec output. It closes a leak: a spec
+  // hand-nested or reformatted under a parent heading used to read as an
+  // ordinary ticket, the only line of defence stepped over silently. `####`
+  // pins that the predicate is unbounded above depth two, not merely widened
+  // to cover exactly three.
+  const { rows, stderr } = run([
+    ticket(1, "### User Stories\n\nnested one level deeper\n"),
+    ticket(7, "#### User Stories\n\nnested deeper still\n"),
+    ticket(8, "## What to build\n\nx\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.n), [8]);
+  assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #1", "dropped #7"]);
+});
+
+test("trailing whitespace after the heading text still matches", () => {
+  const { rows } = run([ticket(9, "## User Stories   \n\n1. As a user…\n")]);
+  assert.deepEqual(rows.map((r) => r.n), []);
 });
 
 // Dependency-scan tests (#58). The forms below are the ones to-tickets
@@ -346,6 +374,36 @@ test(
     // `JQ_BIN` plumb would leave this test green having never reached gojq.
     // Keep the `\u00a0` escape: a literal NBSP does not survive being copied.
     assert.deepEqual(deps("Blocked by:\u00a0#12\n"), []);
+  },
+);
+
+// #65: the spec predicate's two decisions, checked against gojq specifically.
+// Both are plain ASCII (`#`, `[ \t]`), so unlike the dependency scan above
+// neither is expected to diverge between engines — this exists to confirm
+// that, not because a divergence was found; RE2 and Oniguruma read `#{2,}`
+// and a horizontal-only class the same way.
+test(
+  "the spec predicate holds under gojq — depth widened, split heading not spanned",
+  { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" },
+  () => {
+    const extraEnv = { JQ_BIN: GOJQ };
+    // #9 is the body under test; #999 keeps the queue non-empty either way, so
+    // a passing run always exits 0 and #9's presence/absence in rows is what
+    // reads the verdict — dropSpecs strips the `spec` field from surviving rows.
+    const isDroppedAsSpec = (body) => {
+      const r = run(
+        [ticket(9, body), ticket(999, "## What to build\n\nx\n")],
+        undefined,
+        null,
+        extraEnv,
+      );
+      assert.equal(r.status, 0, r.stderr);
+      return !r.rows.some((row) => row.n === 9);
+    };
+    assert.equal(isDroppedAsSpec("## User Stories\n\n1. As a user…\n"), true);
+    assert.equal(isDroppedAsSpec("### User Stories\n\nnested one level deeper\n"), true);
+    assert.equal(isDroppedAsSpec("##\nUser Stories\n\nsplit across lines\n"), false);
+    assert.equal(isDroppedAsSpec("## User Stories (draft)\n\ntrailing text\n"), false);
   },
 );
 

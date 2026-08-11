@@ -195,7 +195,7 @@ const JQ =
   '  | unique;\n' +
   '\n' +
   '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
-  ' spec:((.body//"")|test("(?m)^##\\\\s+User Stories\\\\s*$")),\n' +
+  ' spec:((.body//"")|test("(?m)^#{2,}[ \\\\t]+User Stories[ \\\\t]*$")),\n' +
   ' d:((.body//"")|depnums)}]\n';
 
 function query(label) {
@@ -297,6 +297,21 @@ function refuseIfCapped(rows, description) {
 // ticket quoting `## User Stories` inside a fenced block is dropped too. Not
 // worth a fence parser: every drop is logged by number, so a false positive is
 // loud rather than silent.
+//
+// #65: two shapes the predicate leaves undecided by accident, now decided.
+// Depth is `#{2,}`, not `##` — matches at two or more `#`, not exactly two.
+// to-spec's own `<spec-template>` is flat (`## Problem Statement`, `##
+// Solution`, `## User Stories`, `## Implementation Decisions` — nothing
+// nests), so widening costs nothing against real to-spec output. It closes a
+// leak: a spec hand-nested or reformatted under a parent heading (`###
+// User Stories`) used to read as an ordinary ticket. The asymmetry decides
+// it even where a real to-spec body would never trigger it — a leaked spec
+// is silent and expensive (a member implements a whole spec as one ticket),
+// a false drop is loud (logged by number, `[unfiltered]`/`[label:…]`
+// tagged). The separator between marker and text is `[ \t]+` — horizontal
+// whitespace only, not `\s+` — so a heading can never span a line break: a
+// body whose line is exactly `##` with `User Stories` starting the next
+// line no longer reads as the same heading.
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase
