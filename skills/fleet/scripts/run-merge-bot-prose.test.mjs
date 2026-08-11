@@ -39,3 +39,42 @@ test("step 4 says a failed removal must be reported, never swallowed", () => {
 test("the drop runs only after the merge is confirmed, never before", () => {
   assert.match(step4(), /call this only after the merge is confirmed/);
 });
+
+// #303: on `unknown` the runbook used to send the operator to `git stash list`
+// alone, which is empty at rc 0 in two of the three states that produce
+// `unknown` (measured: `chmod 000` on `refs/stash`, and on `logs/refs/stash`).
+// Sliced to the audit section, same discipline as step4(): it pins the text to
+// the section that has to carry it, so a later paragraph naming `refs/stash`
+// somewhere else in the doc can never stand in for this one.
+function noUndoAudit() {
+  const start = "## No-undo audit (before every rebase)";
+  const at = DOC.indexOf(start);
+  assert.notEqual(at, -1, `'${start}' moved — update this test`);
+  const rest = DOC.slice(at + start.length);
+  const end = rest.indexOf("**4. Take `main`'s side wholesale");
+  assert.notEqual(end, -1, "the audit section's end marker moved — update this test");
+  return rest.slice(0, end);
+}
+
+// THE CEILING: presence of the instruction, not its correctness. The paths are
+// pinned as written — `--git-common-dir`, not `.git/` — because a linked
+// worktree's `.git` is a file and `.git/refs/stash` reaches nothing there.
+test("the `unknown` path sends the operator to both stash files, via the common dir", () => {
+  assert.match(noUndoAudit(), /On `unknown` do not stop at that list: two of its three causes leave it empty at rc 0/);
+  assert.match(noUndoAudit(), /c=\$\(git rev-parse --git-common-dir\)/);
+  assert.match(noUndoAudit(), /ls -l "\$c"\/refs\/stash "\$c"\/logs\/refs\/stash`/);
+  assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash`/);
+});
+
+// `----------` alone is under-inclusive: an unreadable logs/refs DIRECTORY
+// (`chmod 000 .git/logs/refs`) produces the same `unknown`, but `ls` fails
+// before it prints a mode column — `ls: .git/logs/refs/stash: Permission
+// denied`, with `refs/stash` beside it at a healthy `-rw-r--r--`. Both halves
+// of the tell are pinned, or the second silently rots back out.
+test("the fault tell covers a Permission denied from `ls`, not only a `----------` mode", () => {
+  assert.match(noUndoAudit(), /a mode of `----------` on either, or a `Permission denied` from `ls` itself, is the fault,/);
+});
+
+test("the `unknown` path warns that a missing refs/stash file is not an empty stash", () => {
+  assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
+});
