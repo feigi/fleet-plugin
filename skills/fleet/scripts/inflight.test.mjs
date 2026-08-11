@@ -964,7 +964,10 @@ for (const shell of ["sh", "bash"]) {
       "never `true`: nothing examined the bytes, so nothing may claim they were replaced");
     assert.equal(json.evidence.localBranch, null,
       "nulled with its own rewritten flag — a string whose rewritten status is unknown is not the original bytes");
-    assert.match(r.stderr, /could not render the localBranch evidence.*as JSON/);
+    // Names the escaper, not just the field: jstr rendered `fix-66-thing`
+    // perfectly here, so a message pointing at it would send a debugger to the
+    // half that worked.
+    assert.match(r.stderr, /could not render the localBranch evidence for #66 as JSON \(jrewritten\)/);
   });
 }
 
@@ -995,7 +998,9 @@ test("under sh, an escaper that cannot escape at all nulls its field rather than
   assert.equal(json.evidence.localBranchRewritten, null,
     "nulled alongside its string: a rewritten flag about bytes no escaper could render says nothing");
   assert.equal(json.evidence.pr, "", "empty fields never reach the broken tr at all");
-  assert.match(r.stderr, /could not render the localBranch evidence.*as JSON/);
+  // The other escaper named — the mirror of the case above, and the pair is
+  // what makes the name worth printing at all.
+  assert.match(r.stderr, /could not render the localBranch evidence for #66 as JSON \(jstr\)/);
 });
 
 test("a quote in a remote branch cannot produce an unparseable payload", (t) => {

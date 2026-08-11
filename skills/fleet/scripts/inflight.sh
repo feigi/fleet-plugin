@@ -26,7 +26,10 @@
 # cannot be rendered is NOT one of the four (#120): the verdict is already
 # correct at that point, and a formatter breaking must not retract it — that
 # field is emitted as JSON null instead, on the payload the verdict already
-# earned.
+# earned. With one gap, jstr's own `sed` stage: the pipeline reports only
+# `tr`'s status, so a `sed` that fails is never noticed and its field still
+# renders as "" — the same value "found nothing" uses — with no null and no
+# stderr line (#119, measured).
 set -eu
 
 NAME=inflight
@@ -647,23 +650,43 @@ jrewritten() {
 # The verdict — $taken, $hits, $rc — is already correct by this point; a
 # formatter that broke AFTER a real answer was established must not convert
 # that answer into "unanswerable". So a field jstr or jrewritten could not
-# render becomes JSON `null` — never `""`, which already means "this probe
+# render becomes JSON `null` — not `""`, which already means "this probe
 # looked and found nothing" — and the run continues to the payload it earned,
-# at the verdict's own exit code. Sets $ev / $rw for the caller to capture;
-# not `local` because nothing here uses it past the next two lines.
-render_evidence() {
-  if ev=$(jstr "$2") && rw=$(jrewritten "$2"); then
-    ev="\"$ev\""
+# at the verdict's own exit code. The one case that still reaches `""` is the
+# `sed` mask the header names (#119): this function never learns it happened.
+#
+# The message names the escaper, not just the field, because the two fail
+# independently: jstr can render a string perfectly while jrewritten cannot
+# say whether any byte was replaced (break `tr -d` alone and that is exactly
+# what happens). Naming only the field sends a debugger to whichever of the
+# two it guesses.
+#
+# Accumulates into $evidence rather than handing back a pair per field — the
+# trailing-comma-then-trim idiom `add_hit` and `add_unknown` already use above
+# — so each field name is spelled once instead of three times. $ev/$rw/$why
+# are scratch: not `local` because /bin/sh has no such builtin, and nothing
+# reads them outside this function.
+evidence=""
+add_evidence() {
+  why=""
+  if ! ev=$(jstr "$2"); then
+    why=jstr
+  elif ! rw=$(jrewritten "$2"); then
+    why=jrewritten
   else
+    ev="\"$ev\""
+  fi
+  if [ -n "$why" ]; then
     ev=null
     rw=null
-    echo "$NAME: could not render the $1 evidence for #$n as JSON — reported as null" >&2
+    echo "$NAME: could not render the $1 evidence for #$n as JSON ($why) — reported as null" >&2
   fi
+  evidence="${evidence}\"$1\":$ev,\"$1Rewritten\":$rw,"
 }
-render_evidence pr "$pr"; pr_ev=$ev pr_rw=$rw
-render_evidence remote "$remote"; remote_ev=$ev remote_rw=$rw
-render_evidence localBranch "$local_b"; local_b_ev=$ev local_b_rw=$rw
-render_evidence worktree "$wt"; wt_ev=$ev wt_rw=$rw
+add_evidence pr "$pr"
+add_evidence remote "$remote"
+add_evidence localBranch "$local_b"
+add_evidence worktree "$wt"
 
 # Guarded because this runs OUTSIDE the three probe functions, where `set -e` is
 # still live and a failed write exits 1 — and the contract reads 1 as "taken", a
@@ -672,13 +695,12 @@ render_evidence worktree "$wt"; wt_ev=$ev wt_rw=$rw
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
 # command in one carries its own guard.)
 #
-# The four evidence slots are unquoted `%s`, unlike every other string slot in
-# this printf: `render_evidence` above hands back either a value already
-# wrapped in its own quotes or the bare word `null`, so the format string must
-# not wrap it again.
-printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":%s,"prRewritten":%s,"remote":%s,"remoteRewritten":%s,"localBranch":%s,"localBranchRewritten":%s,"worktree":%s,"worktreeRewritten":%s}}\n' \
-  "$n" "$taken" "${hits%,}" "${unknown%,}" \
-  "$pr_ev" "$pr_rw" "$remote_ev" "$remote_rw" \
-  "$local_b_ev" "$local_b_rw" "$wt_ev" "$wt_rw" \
+# The evidence slot is an unquoted `%s`, unlike every other string slot in this
+# printf, and it now carries the object's keys as well as its values:
+# `add_evidence` above emits each value already wrapped in its own quotes or as
+# the bare word `null`, so the format string must not wrap it again. Same
+# reason `hits` and `unknown` are unquoted, and the same `${…%,}` trim.
+printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{%s}}\n' \
+  "$n" "$taken" "${hits%,}" "${unknown%,}" "${evidence%,}" \
   || die "could not write the verdict for #$n"
 exit "$rc"
