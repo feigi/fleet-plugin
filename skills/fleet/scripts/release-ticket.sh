@@ -470,11 +470,11 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # having looked at it. The -d gate above does not reach it (the directory is
   # there) and neither does the status die below (git succeeded).
   #
-  # Existence, NOT "points at this worktree", which is deliberately not claimed:
-  # a .git naming a gitdir whose core.worktree is some other directory passes
-  # this and still answers about that other tree at rc 0 (measured). Stopped
-  # downstream by `worktree remove` today, and left to its own ticket rather
-  # than widened into here.
+  # Existence is not enough on its own: a .git naming a gitdir whose
+  # core.worktree is some OTHER directory is a well-formed regular file too, and
+  # git then answers happily about that other tree at rc 0 (measured, #135). The
+  # block below closes that — this one only establishes the file is there to
+  # examine.
   #
   # `-f` and not `-e`: an empty `.git` DIRECTORY leaks exactly like an absent
   # one — git walks up and reports the parent at rc 0 — and -e is true for it
@@ -490,6 +490,34 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # asserting an absence nothing established (measured: chmod 644 on the worktree
   # makes -f false with the .git sitting right there).
   [ -f "$wt/.git" ] || [ ! -x "$wt" ] || die "$wt has no .git file, so whether it holds uncommitted work is unknown"
+
+  # Now establish the linkage points BACK at $wt, not merely that it exists.
+  # Gated on -f rather than "we didn't just die": an unsearchable $wt fails -f
+  # too, and this block must not run for it — `cd "$wt"` would fail differently
+  # from git's own denial, replacing the "Permission denied" the status die
+  # below is there to preserve with a message this script invented instead.
+  #
+  # `git -C "$wt" rev-parse --show-toplevel` answers with the linkage's own idea
+  # of $wt's working tree, canonicalised — comparing it against $wt itself is
+  # what closes the class (#74, #115, #135's own repro: a hand-written .git
+  # naming a gitdir whose core.worktree is elsewhere makes this comparison
+  # mismatch, refusing before the status below is ever believed).
+  #
+  # $wt must be canonicalised too, or this false-refuses a HEALTHY worktree:
+  # `worktree list --porcelain` echoes the admin file's recorded path verbatim,
+  # and that path can legitimately be non-canonical — reached through a
+  # directory that was a plain dir at `worktree add` time and is a symlink now
+  # (measured) — while `--show-toplevel` always answers canonical. `cd "$wt" &&
+  # pwd -P` is the POSIX way to the same canonical form; no `realpath` needed,
+  # and none is guaranteed to exist.
+  if [ -f "$wt/.git" ]; then
+    wt_canon=$(cd "$wt" && pwd -P) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
+    toplevel=$(git -C "$wt" rev-parse --show-toplevel) ||
+      die "cannot read the git linkage of $wt, so whether it holds uncommitted work is unknown"
+    [ "$wt_canon" = "$toplevel" ] ||
+      die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
+  fi
+
   # Same reason: folded-in stderr would be counted as uncommitted changes.
   if ! dirty=$(git -C "$wt" status --porcelain); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"

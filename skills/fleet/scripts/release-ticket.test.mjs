@@ -1079,6 +1079,13 @@ test("an unsearchable worktree is not reported as having no .git", (t) => {
   // versions refuse — and the only thing separating this fix from the bug it
   // replaces is WHICH refusal it is.
   assert.doesNotMatch(stderr, /has no \.git/, "never an absence nothing established");
+  // The positive half. Excluding one wrong wording left every OTHER wrong
+  // wording green: the linkage block below the guard was added ungated, so
+  // `cd "$wt"` fired first and this path died with "cannot resolve $wt" — the
+  // script's own invention — while the assert above still passed. Pinning WHICH
+  // die fires is what makes the `-f` gate on that block load-bearing, and it is
+  // the only assertion that fails if the gate is removed again.
+  assert.match(stderr, /cannot read the status of/, "git's own denial, not one this script invented");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
@@ -1334,4 +1341,60 @@ test("a byte with no JSON short form in the worktree PATH is replaced and flagge
   assert.ok(parsed.worktree.endsWith(join(".worktrees", name.replace("\x02", " "))),
     `no short form for \\002 — still neutralised to a space, got ${parsed.worktree}`);
   assert.equal(parsed.worktreeRewritten, true, "and the payload must disclose that it was");
+});
+
+test("a .git linkage naming another repository's worktree refuses instead of leaking that repo's clean status", (t) => {
+  // #135's own repro: a hand-written .git naming a gitdir whose core.worktree is
+  // some OTHER directory is a well-formed regular file, so the existence guard
+  // above passes, and `git -C "$wt" status --porcelain` then answers about THAT
+  // tree at rc 0 — "this claim is clean" derived from a repository the claim
+  // never touched, with its own uncommitted files sitting untouched in $wt.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  const other = join(r.w, "..", "other");
+  mkdirSync(other);
+  git(other, "init", "-q", "-b", "main");
+  commit(other, "root", "root\n");
+  git(other, "config", "core.worktree", other);
+  rmSync(join(c.wt, ".git"));
+  writeFileSync(join(c.wt, ".git"), `gitdir: ${join(other, ".git")}\n`);
+  assert.equal(
+    git(c.wt, "status", "--porcelain"),
+    "",
+    "fixture: the leaked answer really is an empty one",
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation, not halted after the delete refused");
+  assert.match(stderr, /does not point at .*\/9-release-ticket/, "names the mismatch, not just 'unknown'");
+  assert.match(stderr, /whether it holds uncommitted work is unknown/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("a healthy worktree reached through a symlinked parent still releases normally", (t) => {
+  // The false refusal the widened linkage guard must not introduce: `worktree
+  // list --porcelain` echoes the admin file's recorded path verbatim, and that
+  // recorded path is legitimately non-canonical once a directory that was a
+  // plain dir at `worktree add` time is later replaced by a symlink to its own
+  // former self — `.worktrees` moved aside, then symlinked back to where it was.
+  // `git rev-parse --show-toplevel` and `cd $wt && pwd -P` both resolve through
+  // the symlink to the same physical place (measured), so this must release
+  // exactly as it would without the symlink — not the permanent exit 2 this
+  // script has already been fixed twice to stop producing.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const worktreesDir = join(r.w, ".worktrees");
+  const realDir = join(r.w, ".worktrees-real");
+  renameSync(worktreesDir, realDir);
+  symlinkSync(realDir, worktreesDir);
+
+  const { code, json } = release(r, c);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
 });
