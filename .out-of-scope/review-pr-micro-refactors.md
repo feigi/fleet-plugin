@@ -30,7 +30,9 @@ there no default here?", which the header does not.
 A related trap worth knowing before proposing anything module-level in this file:
 `review-pr-testcmd.test.mjs` lifts `resolveTestCmd` out of the source *text* by regex and
 evals the function body alone, so a `const` declared beside the function is a
-`ReferenceError` at lift time. Measured at 365 → 363 passing.
+`ReferenceError` at lift time. Measured: the tests that reach the reference go red — two
+if the `const` is read only in the throw branch, all five calling tests if it is read
+above the guards.
 
 ## Prior requests
 
