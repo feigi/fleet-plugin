@@ -6,7 +6,14 @@
 # can exist with its branch deleted, a branch can exist with no PR yet, and a
 # worktree can exist before anything is pushed.
 #
-# Exit 0 free, 1 taken, 2 the question could not be answered.
+# Exit 0 free, 1 taken, 2 the question could not be answered. A probe that
+# cannot answer no longer aborts the run: it is recorded unknown and the
+# other two still run, so a hit either of them already found (or still finds)
+# is never discarded by a failure elsewhere. Exit 2 from a probe failure
+# carries a payload — the same shape as 0 and 1, plus an "unknown" list
+# naming which probes could not look. Only a failure before any probe can
+# run at all (a bad argument, not being inside a git repository) still exits
+# 2 with no payload — nothing has been established yet for a payload to hold.
 set -eu
 
 NAME=inflight
@@ -20,6 +27,24 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
 hits=""
 add_hit() { hits="${hits}\"$1\","; echo "    HIT: $1" >&2; }
+
+# A probe that cannot answer records itself here instead of dying. Same
+# shape as `hits`, same trailing-comma-then-trim pattern at the end. The
+# message is printed exactly as `die` used to print it — only the exit is
+# gone — so every existing diagnostic string below still reads the same on
+# stderr, and a caller grepping for one is unaffected by this change.
+unknown=""
+add_unknown() { unknown="${unknown}\"$1\","; echo "$NAME: $2" >&2; }
+
+# Evidence defaults. A probe that fails leaves its own field empty rather
+# than unset — `set -u` would otherwise abort the payload assembly at the
+# bottom for a probe that never got the chance to fill it in, and empty is
+# already what "found nothing" looks like in this field, disambiguated by
+# `unknown` rather than by the field itself.
+pr=""
+remote=""
+local_b=""
+wt=""
 
 # Probe 1 — a PR that is actually ABOUT this ticket.
 #
@@ -36,6 +61,7 @@ add_hit() { hits="${hits}\"$1\","; echo "    HIT: $1" >&2; }
 # which PRs close this issue — it returns [] for 41 and [396] for 393, both
 # correct. Then add branch-segment matching as a second signal, because a PR can
 # exist before anyone writes a closing keyword.
+probe_pr() {
 echo "\$ gh issue view $n --json closedByPullRequestsReferences,url" >&2
 # URLs, not bare numbers. A closing reference may live in another repository
 # (`Closes owner/repo#N` is legal, which is why the node carries `repository`),
@@ -59,9 +85,19 @@ if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq 
   # does not exist" sends the reader after the wrong thing. Exit is 2 either way.
   case "$err" in
     *"Could not resolve to an "[Ii]"ssue"*|*"NOT_FOUND"*)
+      # Terminal, not accumulated: a nonexistent issue is not a probe that
+      # could not look, it is the premise every probe depends on being false.
+      # Nothing has been established, so this stays a hard die like the
+      # precondition checks above it — the other two probes would have
+      # nothing meaningful to search for either.
       die "issue #$n does not exist in this repository" ;;
     *)
-      die "gh issue view $n failed, so #$n's PR links are unknown: $(printf '%s' "$err" | tr '\n' ' ')" ;;
+      # Unlike the branch above, this IS a probe that could not look — a
+      # network blip, an auth failure, a renamed repository. Record it and
+      # let probes 2 and 3 still run rather than discarding whatever they
+      # might find.
+      add_unknown "pr" "gh issue view $n failed, so #$n's PR links are unknown: $(printf '%s' "$err" | tr '\n' ' ')"
+      return 1 ;;
   esac
 fi
 rm -f /tmp/.inflight.$$
@@ -73,7 +109,8 @@ echo "\$ gh pr list --state all --search $n --json number,state,headRefName,url"
 if ! pr_json=$(gh pr list --state all --search "$n" --limit 100 \
                  --json number,state,headRefName,url 2>/tmp/.inflight.$$); then
   err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
-  die "gh pr list failed, so whether #$n is taken is unknown: $(printf '%s' "$err" | tr '\n' ' ')"
+  add_unknown "pr" "gh pr list failed, so whether #$n is taken is unknown: $(printf '%s' "$err" | tr '\n' ' ')"
+  return 1
 fi
 rm -f /tmp/.inflight.$$
 
@@ -116,7 +153,7 @@ for url in filter(None, linked[1:]):
                    else "%s#%s %s (linked)" % (repo, num, s))
 out += ["#%s %s (branch)" % (p["number"], p["state"]) for p in prs
         if seg.search(p.get("headRefName") or "") and p.get("state") == "OPEN"]
-print(", ".join(out))') || die "could not filter PR search results for #$n"
+print(", ".join(out))') || { add_unknown "pr" "could not filter PR search results for #$n"; return 1; }
 
 # The `|| die` is not dead code. No *input* can reach it — the guarded python3
 # above already parses this same `$pr_json` and dies 2 on anything malformed —
@@ -126,15 +163,21 @@ print(", ".join(out))') || die "could not filter PR search results for #$n"
 # exit 1 with empty stdout, and the exit contract reads 1 as "taken" — a crash
 # rendered as a decision.
 raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') \
-  || die "could not count the PR search results for #$n"
+  || { add_unknown "pr" "could not count the PR search results for #$n"; return 1; }
 if [ -n "$pr" ]; then
   echo "    PRs for #$n: $pr   ($raw full-text match(es) considered)" >&2
   add_hit "pr"
 else
   echo "    no PR is about #$n ($raw full-text match(es) were all incidental)" >&2
 fi
+}
+# `|| :` is what makes this probe's own failure non-fatal to the run: `set -e`
+# would otherwise treat `probe_pr` returning 1 as fatal exactly the way a bare
+# failing command is, which is precisely the abort this whole change removes.
+probe_pr || :
 
 # Probe 2 — a remote branch carrying the number as its own path segment.
+probe_remote() {
 echo "\$ git ls-remote --heads origin" >&2
 # The lookup runs on its own, never inside the filter below. A pipeline reports
 # its LAST command's status, so an `ls-remote` that exited 128 used to arrive
@@ -220,7 +263,8 @@ base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
 if ! heads=$(GIT_TERMINAL_PROMPT=0 \
     GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
     git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin); then
-  die "git ls-remote failed, so whether #$n has a remote branch is unknown"
+  add_unknown "remote" "git ls-remote failed, so whether #$n has a remote branch is unknown"
+  return 1
 fi
 # One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
 # last, and the `|| true` that used to close this one discarded that too, so a
@@ -237,13 +281,15 @@ remote=$(printf '%s\n' "$heads" | LC_ALL=C awk -v n="$n" '
   { ref = $2; sub("^refs/heads/", "", ref)
     if (ref ~ "(^|[/-])" n "([-/]|$)") { out = out sep ref; sep = "," } }
   END { printf "%s", out }') ||
-  die "could not filter the remote branches for #$n"
+  { add_unknown "remote" "could not filter the remote branches for #$n"; return 1; }
 if [ -n "$remote" ]; then
   echo "    remote branches: $remote" >&2
   add_hit "remote-branch"
 else
   echo "    no remote branch for #$n" >&2
 fi
+}
+probe_remote || :
 
 # Probe 3 — a local worktree or branch.
 #
@@ -266,8 +312,9 @@ fi
 # independent of git's own read would catch that, roughly doubling this
 # probe's cost, for a fault that usually breaks much else first; out of scope
 # for #95.
+probe_local() {
 common=$(git rev-parse --path-format=absolute --git-common-dir) ||
-  die "cannot resolve the git common directory"
+  { add_unknown "local" "cannot resolve the git common directory"; return 1; }
 
 refsdir="$common/refs/heads"
 # Absent is fine and answers nothing here: `git init` creates this directory,
@@ -293,7 +340,7 @@ if [ -e "$refsdir" ]; then
   # guard that reads correct under one and blind under the other is not a
   # guard.) The pair covers the starting point, find covers below it.
   [ -r "$refsdir" ] && [ -x "$refsdir" ] ||
-    die "refs directory $refsdir could not be read — whether #$n has a local branch is unknown"
+    { add_unknown "local" "refs directory $refsdir could not be read — whether #$n has a local branch is unknown"; return 1; }
   # `-exec test` rather than find's own `-readable`/`-executable`, which are GNU
   # extensions absent from BSD find. `-type d` alone is not enough either: a
   # subdirectory at 400 is readable enough for find to enter and exit 0 while
@@ -303,19 +350,20 @@ if [ -e "$refsdir" ]; then
   # so the `|| die` reads head's status, the one thing here that failing means
   # a crash rather than a finding.
   bad=$(find "$refsdir" -type d ! \( -exec test -r {} \; -a -exec test -x {} \; \) -print 2>/dev/null | head -1) ||
-    die "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"
+    { add_unknown "local" "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"; return 1; }
   [ -z "$bad" ] ||
-    die "refs directory $bad could not be read — whether #$n has a local branch is unknown"
+    { add_unknown "local" "refs directory $bad could not be read — whether #$n has a local branch is unknown"; return 1; }
 fi
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
-  die "git for-each-ref failed, so whether #$n has a local branch is unknown"
+  add_unknown "local" "git for-each-ref failed, so whether #$n has a local branch is unknown"
+  return 1
 fi
 # One awk, for the reason probe 2's filter is one: a short refname is the whole
 # line, so the match is on $0.
 local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
   END { printf "%s", out }') ||
-  die "could not filter the local branches for #$n"
+  { add_unknown "local" "could not filter the local branches for #$n"; return 1; }
 
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
@@ -339,7 +387,7 @@ count_registry() {
   registered=0
   [ -e "$wtroot" ] || return 0
   [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
-    die "worktree registry $wtroot could not be read — whether #$n has a worktree is unknown"
+    { add_unknown "local" "worktree registry $wtroot could not be read — whether #$n has a worktree is unknown"; return 1; }
   for entry in "$wtroot"/*; do
     [ -d "$entry" ] || continue
     # Skip only an EMPTY directory. That is an operator's stray `mkdir`, which
@@ -363,15 +411,17 @@ count_registry() {
     if [ -x "$entry" ] && [ -z "$(ls -A "$entry" 2>/dev/null)" ]; then continue; fi
     registered=$((registered + 1))
   done
+  return 0
 }
-count_registry
+count_registry || return 1
 
 # Match on the worktree's basename, not its full path — matching the whole
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
 # a sibling directory named with digits), matching every ticket.
 if ! worktrees=$(git worktree list --porcelain); then
-  die "git worktree list failed, so whether #$n has a worktree is unknown"
+  add_unknown "local" "git worktree list failed, so whether #$n has a worktree is unknown"
+  return 1
 fi
 # The main worktree is always listed first and has no registry entry of its
 # own, hence the -1.
@@ -385,7 +435,7 @@ fi
 # case separated out: the program contains no `exit`, so it returns 0 whether
 # or not anything matched and every non-zero status is a real failure.
 listed=$(printf '%s\n' "$worktrees" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
-  die "could not count the worktrees git listed for #$n"
+  { add_unknown "local" "could not count the worktrees git listed for #$n"; return 1; }
 linked=$((listed - 1))
 # Recount before refusing. The two reads happen at different instants, and the
 # gap is not theoretical: measured at ~10ms (two independent methods agreeing —
@@ -401,7 +451,7 @@ linked=$((listed - 1))
 # recount window — measured 1.99% → 0.00% at λ = 2/s, 56.6% → 1.29% saturated.
 # A real dropped entry is a standing state, not a moment, so it survives the
 # recount and still refuses (verified: #84's unreadable `gitdir` still aborts).
-[ "$linked" -eq "$registered" ] || count_registry
+[ "$linked" -eq "$registered" ] || count_registry || return 1
 # Name the direction actually observed. The two disagreements have opposite
 # causes and send the reader to opposite places, so one message cannot serve
 # both: FEWER listed than registered is git silently dropping an entry it could
@@ -411,9 +461,11 @@ linked=$((listed - 1))
 # parallel fleet is routine rather than exotic. Calling that "the listing is
 # incomplete" sends an operator hunting a permissions fault that is not there.
 if [ "$linked" -lt "$registered" ]; then
-  die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+  add_unknown "local" "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+  return 1
 elif [ "$linked" -gt "$registered" ]; then
-  die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
+  add_unknown "local" "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
+  return 1
 fi
 
 # substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
@@ -430,7 +482,7 @@ wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
   /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
     if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
   END { printf "%s", out }') ||
-  die "could not filter the worktree list for #$n"
+  { add_unknown "local" "could not filter the worktree list for #$n"; return 1; }
 if [ -n "$local_b" ] || [ -n "$wt" ]; then
   [ -n "$local_b" ] && echo "    local branches: $local_b" >&2
   [ -n "$wt" ] && echo "    worktrees: $wt" >&2
@@ -438,10 +490,19 @@ if [ -n "$local_b" ] || [ -n "$wt" ]; then
 else
   echo "    no local branch or worktree for #$n" >&2
 fi
+}
+probe_local || :
 
 if [ -n "$hits" ]; then
+  # A hit outranks an unknown: the disjunction is monotone, so one sufficient
+  # "yes" answers the question regardless of what any other probe could not
+  # determine. This is the accumulate half of the fix — it is checked first,
+  # unconditionally, however many probes above returned 1.
   taken=true
   rc=1
+elif [ -n "$unknown" ]; then
+  taken=false
+  rc=2
 else
   taken=false
   rc=0
@@ -529,8 +590,8 @@ pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
 # Guarded for the same reason as the python3 call above: under `set -e` a failed
 # write exits 1, and the contract reads 1 as "taken" — a closed or full stdout
 # rendered as a decision. `sh inflight.sh <N> >&-` reproduces it.
-printf '{"issue":%s,"taken":%s,"hits":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
-  "$n" "$taken" "${hits%,}" \
+printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
+  "$n" "$taken" "${hits%,}" "${unknown%,}" \
   "$pr_j" "$pr_rw" "$remote_j" "$remote_rw" \
   "$local_b_j" "$local_b_rw" "$wt_j" "$wt_rw" \
   || die "could not write the verdict for #$n"

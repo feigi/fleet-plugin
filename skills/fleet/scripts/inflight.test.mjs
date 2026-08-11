@@ -337,7 +337,10 @@ test("probe 2: an unreachable origin is an unknown answer, never a 'no remote br
   assert.equal(r.code, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
   assert.doesNotMatch(r.stderr, /no remote branch/);
-  assert.equal(r.json, null, "an unanswered probe emits no verdict to parse");
+  // #96: exit 2 from a probe failure now carries a payload — "unanswered"
+  // stopped meaning "no verdict to parse" once probes stopped aborting the run.
+  assert.deepEqual(r.json.hits, [], "nothing else ran that could have found a hit here");
+  assert.deepEqual(r.json.unknown, ["remote"]);
 });
 
 // Not a synthetic non-zero exit: this is the plain "no origin configured" a
@@ -346,7 +349,8 @@ test("probe 2: an origin that is not configured at all is unknown, not free", (t
   const r = inflight(8, { origin: "none" }, t);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
-  assert.equal(r.json, null);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.unknown, ["remote"]);
 });
 
 // The opposite direction. This one passed before the fix too, which is the
@@ -419,7 +423,9 @@ test("probe 3: an unreadable refs directory is unknown, never a free ticket", (t
 
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
     assert.equal(r.status, 2, at);
-    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    const json = JSON.parse(r.stdout);
+    assert.deepEqual(json.hits, [], `no probe found a hit, ${at}`);
+    assert.deepEqual(json.unknown, ["local"], `#96: exit 2 now carries a payload naming the probe, ${at}`);
     assert.match(r.stderr, /refs directory .* could not be read/, at);
     assert.doesNotMatch(r.stderr, /no local branch or worktree/, at);
   }
@@ -448,7 +454,9 @@ test("probe 3: an unreadable refs SUBdirectory is unknown too — every fleet br
 
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
     assert.equal(r.status, 2, at);
-    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    const json = JSON.parse(r.stdout);
+    assert.deepEqual(json.hits, [], `no probe found a hit, ${at}`);
+    assert.deepEqual(json.unknown, ["local"], `#96: exit 2 now carries a payload naming the probe, ${at}`);
     assert.match(r.stderr, /refs directory .* could not be read/, at);
     assert.doesNotMatch(r.stderr, /no local branch or worktree/, at);
   }
@@ -475,7 +483,9 @@ test("probe 3: an unreadable worktree registry is unknown, never a free ticket",
 
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
     assert.equal(r.status, 2, at);
-    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    const json = JSON.parse(r.stdout);
+    assert.deepEqual(json.hits, [], `no probe found a hit, ${at}`);
+    assert.deepEqual(json.unknown, ["local"], `#96: exit 2 now carries a payload naming the probe, ${at}`);
     assert.match(r.stderr, /worktree registry .* could not be read/, at);
   }
 });
@@ -498,7 +508,9 @@ test("probe 3: an entry git cannot read INSIDE is unknown too, not just an unrea
   chmodSync(gitdir, 0o644);
 
   assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
   assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
 });
 
@@ -560,7 +572,9 @@ test("probe 3: a registry entry git cannot even open is unknown, not a stray to 
   chmodSync(entry, 0o755);
 
   assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
   assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
 });
 
@@ -579,7 +593,9 @@ test("probe 3: a registry entry whose gitdir is GONE is unknown, not a stray to 
 
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "a dropped entry is unknown, never the exit 0 that means free");
-  assert.equal(r.stdout.trim(), "");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
   assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
 });
 
@@ -609,7 +625,9 @@ exec '${REAL_GIT}' "$@"
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
   assert.match(r.stderr, /git listed 1 worktrees but only 0 registry entries were counted/);
   assert.doesNotMatch(r.stderr, /the listing is incomplete/);
 });
@@ -922,7 +940,8 @@ test("probe 2: a remote-branch filter that could not run is unknown, never free"
   assert.equal(r.code, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr, /could not filter the remote branches for #42/);
   assert.doesNotMatch(r.stderr, /no remote branch/, "a stage that could not run never reports 'no'");
-  assert.equal(r.json, null, "an unanswered probe emits no verdict to parse");
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.unknown, ["remote"], "#96: exit 2 now carries a payload naming the probe");
 });
 
 test("probe 3: a local-branch filter that could not run is unknown, never free", (t) => {
@@ -939,7 +958,9 @@ test("probe 3: a local-branch filter that could not run is unknown, never free",
   assert.match(r.stderr, /could not filter the local branches for #42/);
   assert.doesNotMatch(r.stderr, /no local branch or worktree/,
     "a stage that could not run never reports 'no'");
-  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
 });
 
 test("probe 3: a worktree filter that could not run is unknown, never free", (t) => {
@@ -958,7 +979,9 @@ test("probe 3: a worktree filter that could not run is unknown, never free", (t)
   assert.match(r.stderr, /could not filter the worktree list for #77/);
   assert.doesNotMatch(r.stderr, /no local branch or worktree/,
     "a stage that could not run never reports 'no'");
-  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
 });
 
 test("probe 3: a worktree COUNT that could not run is unknown, never a bogus tally", (t) => {
@@ -978,7 +1001,9 @@ test("probe 3: a worktree COUNT that could not run is unknown, never a bogus tal
   assert.match(r.stderr, /could not count the worktrees git listed for #77/);
   assert.doesNotMatch(r.stderr, /-1 worktrees/,
     "a counter that could not run never reports a count at all");
-  assert.equal(r.stdout.trim(), "", "an unanswered probe emits no verdict to parse");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
 });
 
 // --- the substring guard, across all three filters at once.
@@ -1204,4 +1229,89 @@ test("probe 2: an empty core.sshCommand falls back to plain ssh, not to an empty
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
   assertBoundOptions(log);
+});
+
+// --- #96: accumulate rather than abort. A probe that cannot answer used to
+// `die` immediately, discarding a sufficient hit any other probe had already
+// found (or would still find) — the whole point of the three probes being a
+// monotone disjunction. Now each records itself unknown and the run
+// continues; hits still win outright, and exit 2 carries a payload naming
+// which probes could not look, so "exit 2" stops meaning "no stdout at all".
+//
+// Both directions of the hit-survives-a-later-failure pair are pinned below,
+// with probe 2 (remote, via the already-supported `origin: "unreachable"`)
+// as the probe that fails in each: probe 1 finding a hit before probe 2 dies,
+// and probe 3 finding one after. The other four orderings ((pr, local),
+// (remote, pr), (remote, local), (local, pr) as hit/fail pairs) are left
+// unpinned here on purpose — the fix is probe-agnostic by construction, the
+// same `probe_X || :` shape for all three with no branching on which probe is
+// which, so a fault that broke one ordering and not its symmetric twin would
+// have to live inside one probe's own body, which that probe's existing
+// dedicated failure tests above already cover.
+
+test("accumulate: an open linked PR survives an unreachable origin — probe 1's hit outlives probe 2's failure", (t) => {
+  const r = inflight(7, { linked: [12], prs: [pr(12, "OPEN", "fix/other-thing")], origin: "unreachable" }, t);
+  assert.equal(r.code, 1, "the PR hit alone is sufficient — taken, not unanswerable");
+  assert.equal(r.json.taken, true);
+  assert.equal(r.json.evidence.pr, "#12 OPEN (linked)", "the hit found before the failure is not discarded");
+  assert.deepEqual(r.json.hits, ["pr"]);
+  assert.deepEqual(r.json.unknown, ["remote"], "the probe that could not look is named, not silently dropped");
+});
+
+test("accumulate: a local worktree survives an unreachable origin — probe 3's hit outlives probe 2's failure", (t) => {
+  const r = inflight(77, { detachedWorktreeUnder: "nospace", origin: "unreachable" }, t);
+  assert.equal(r.code, 1, "the worktree hit alone is sufficient — taken, not unanswerable");
+  assert.equal(r.json.taken, true);
+  assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/, "the hit found after the failure is not discarded either");
+  assert.deepEqual(r.json.hits, ["local"]);
+  assert.deepEqual(r.json.unknown, ["remote"]);
+});
+
+test("accumulate: all three probes unanswerable is exit 2 WITH a payload naming all three", (t) => {
+  const { repo, env } = fixture(t, 999, {
+    issueErr: "dial tcp: lookup api.github.com: no such host", origin: "unreachable",
+  });
+  const refsdir = join(repo, ".git", "refs", "heads");
+  chmodSync(refsdir, 0o000);
+  const r = spawnSync("sh", [SCRIPT, "999"], { cwd: repo, env, encoding: "utf8" });
+  // Restored before the first assert, or a failure here leaves a fixture the
+  // suite's own cleanup cannot remove.
+  chmodSync(refsdir, 0o755);
+
+  assert.equal(r.status, 2);
+  assert.notEqual(r.stdout.trim(), "", "exit 2 from a probe failure now carries a payload");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.taken, false);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown.slice().sort(), ["local", "pr", "remote"],
+    "every probe that could not answer is named, not just the first one to fail");
+});
+
+test("accumulate: a genuinely free ticket still exits 0, with an empty unknown list", (t) => {
+  const r = inflight(8, {}, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.taken, false);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.unknown, [], "nothing failed, so nothing is unknown");
+});
+
+// --- #96: the accumulate change must not manufacture a payload where none
+// existed before. Nothing has been established yet for either of these —
+// no probe has run — so both stay a hard, payload-less exit 2 exactly as
+// before.
+
+test("accumulate: a bad argument is still refused before any probe runs, with no payload", (t) => {
+  const r = spawnSync("sh", [SCRIPT, "abc"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
+  assert.match(r.stderr, /issue must be a number/);
+});
+
+test("accumulate: outside a git repository is still refused before any probe runs, with no payload", (t) => {
+  const outside = mkdtempSync(join(tmpdir(), "inflight-not-a-repo-"));
+  t.after(() => execFileSync("rm", ["-rf", outside]));
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: outside, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
+  assert.match(r.stderr, /not inside a git repository/);
 });
