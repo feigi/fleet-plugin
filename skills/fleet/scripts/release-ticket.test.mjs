@@ -919,6 +919,106 @@ test("the whole .worktrees directory deleted by hand still releases", (t) => {
   assert.equal(json.released, true);
 });
 
+test("an unreadable worktree registry is unknown, never a release", (t) => {
+  // `.git/worktrees` is a different directory from `.worktrees` above — git's
+  // own admin dir, one subdir per linked worktree, which `worktree list
+  // --porcelain` reads to produce its listing. Unreadable, git does not error:
+  // it drops every entry it cannot read and still exits 0 (verified, git
+  // 2.50.1), so `wt` and `stray` both come back empty for a claim that plainly
+  // has one — the exact fail-open #84 exists to close.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wtroot = join(r.w, ".git", "worktrees");
+
+  // 0o000 is the realistic fault. 0o400 is what tells the guard's `&&` from an
+  // `||`: read-without-execute satisfies one half, and under `||` the guard
+  // would pass — 0o000 alone zeroes both bits at once and cannot distinguish
+  // them. The count check downstream does not cover this: with the registry
+  // unreadable its glob finds nothing, so zero-on-disk AGREES with the empty
+  // listing git returns for the same reason, and only this guard is left.
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(wtroot, mode);
+    const { code, json, stderr } = release(r, c);
+    // Restored before the first assert, or a failure here leaves a fixture the
+    // suite's own cleanup cannot remove.
+    chmodSync(wtroot, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(code, 2, at);
+    assert.equal(json, null, `refused before any mutation, ${at}`);
+    assert.match(stderr, /worktree registry .* could not be read/, at);
+    assert.deepEqual(r.calls(), [], `and the tracker is never asked, ${at}`);
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, `nothing may be touched, ${at}`);
+  }
+});
+
+test("an entry git cannot read INSIDE is unknown too, not just an unreadable entry", (t) => {
+  // #84 itself, and the case a permission test on the entry cannot reach:
+  // naming an entry needs read+execute on the PARENT only, so this claim's
+  // entry directory stays readable, executable and `ls`-able while the
+  // `gitdir` file git opens inside it does not. `worktree list --porcelain`
+  // drops the worktree and still exits 0 (verified, git 2.50.1) — so `wt` and
+  // `stray` come back empty for a claim that has one, the branch is deleted as
+  // unclaimed, and the member's uncommitted work is orphaned on disk.
+  //
+  // Which file git needs is git's business and changes between versions, so
+  // the check does not guess: it counts entries on disk against the listing.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const gitdir = join(r.w, ".git", "worktrees", `9-release-ticket`, "gitdir");
+
+  chmodSync(gitdir, 0o000);
+  const { code, json, stderr } = release(r, c);
+  // Restored before the first assert — `artefacts` below runs `worktree list`
+  // itself, and would read this claim's own worktree as absent while git still
+  // cannot open the file.
+  chmodSync(gitdir, 0o644);
+
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("something that is not a registry entry is not counted as a dropped worktree", (t) => {
+  // The count above globs the registry directory, so it sees whatever is in
+  // there — and anything that is not a directory is not a worktree
+  // registration. Counted, it would outnumber the listing and refuse every
+  // release of every ticket with an "incomplete listing" naming a file that
+  // reads fine — until someone works out that `git worktree prune` deletes it.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "stray-note"), "not a worktree\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+});
+
+test("a claim whose worktree was actually removed and pruned still releases", (t) => {
+  // The acceptance case the registry check must not regress, stated against
+  // the registry rather than the checkout: `git worktree remove` clears this
+  // claim's `.git/worktrees` entry along with the checkout, so once that has
+  // happened the branch is genuinely all that is left — not a permission
+  // problem in disguise — and the release must still go through.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "remove", c.wt);
+  assert.equal(
+    existsSync(join(r.w, ".git", "worktrees")),
+    false,
+    "fixture: removing the only worktree clears the registry entirely",
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "all three are released");
+});
+
 test("a quote in the slug cannot produce a payload the caller fails to parse", (t) => {
   // <slug> and <type> reach the JSON, as does git's own stderr, so a single `"`
   // used to emit output that JSON.parse rejects — after the delete, with the
