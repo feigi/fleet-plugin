@@ -26,9 +26,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
@@ -157,6 +157,27 @@ function nestedWorktree(t, branch = "fix/9-nested") {
   git(w, "push", "-q", "-u", "origin", branch);
   writeFileSync(join(w, "precious.txt"), "work that exists nowhere else\n");
   return { parent: c.w, w, branch };
+}
+
+/**
+ * `nestedWorktree` plus a SECOND linked worktree under the same parent,
+ * named `8-y` to match the ticket's own repro. `sibling` is where it lives;
+ * `siblingAdmin` is its admin dir — the thing #189's spoof names in place of
+ * $wt's own.
+ */
+function nestedWorktreePair(t) {
+  const c = nestedWorktree(t);
+  const sibling = join(c.parent, ".worktrees", "8-y");
+  git(c.parent, "worktree", "add", "-q", "-b", "fix/8-sibling", sibling);
+  git(sibling, "push", "-q", "-u", "origin", "fix/8-sibling");
+  // Asked of git itself, not built with `join`: on macOS `tmpdir()` sits under
+  // a `/var` that is itself a symlink to `/private/var`, and git's own
+  // `--git-dir` answers with the resolved form. A hand-joined path would
+  // still WORK if spoofed into a `.git` file — the filesystem resolves either
+  // spelling — but comparing it against a later `--git-dir` call in a test
+  // assertion needs the same spelling git itself produces.
+  const siblingAdmin = git(sibling, "rev-parse", "--git-dir");
+  return { ...c, sibling, siblingAdmin };
 }
 
 // The payload is parsed here rather than at the call site: "the audit passed and
@@ -738,6 +759,228 @@ test("an intact linked worktree, whose .git is a file, still passes", (t) => {
   const r = audit(c);
   assert.equal(r.status, 0, `a linked worktree is the fleet's own shape; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.clean, true);
+});
+
+// The same worktree, reached through a symlinked path. `--show-toplevel`
+// resolves the symlink away and would make this look identical to the case
+// above by construction — the reason the linkage guard never string-compares
+// against it (see the comment ahead of the guard itself).
+test("an intact linked worktree, reached through a symlinked path, still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const link = `${c.w}-symlink`;
+  symlinkSync(c.w, link);
+  t.after(() => rmSync(link, { force: true }));
+
+  const r = audit({ w: link, branch: c.branch });
+  assert.equal(r.status, 0, `a symlinked path to a real worktree must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// ---------------------------------------------------------------------------
+// #189: whose ADMIN DIR answered, not just whose ROOT git resolved. A `.git`
+// FILE takes its root from the file's own location, so a `.git` rewritten to
+// name a SIBLING worktree's admin dir still passes --show-prefix — the root
+// is genuinely $wt — while status is computed against the sibling's HEAD and
+// index. Every case below refuses via `die`, exit 2, no payload: the guard
+// establishes identity BEFORE the audit runs, same as the --show-prefix block
+// above it, never a warning printed alongside a "clean" answer.
+// ---------------------------------------------------------------------------
+
+test("a .git file naming a sibling worktree's admin dir is refused, never clean — the ticket's repro", (t) => {
+  const c = nestedWorktreePair(t);
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  // The ticket's leak needs more than an empty prefix: `status` is computed
+  // against the sibling's INDEX, but the WORKING TREE stays $wt's own files
+  // on disk (a `.git` file redirects the git-dir, not the work-tree). Content
+  // collision is what makes that read clean — the sibling commits the exact
+  // bytes $wt already has sitting there uncommitted.
+  writeFileSync(join(c.sibling, "precious.txt"), readFileSync(join(c.w, "precious.txt")));
+  git(c.sibling, "add", "precious.txt");
+  git(c.sibling, "commit", "-q", "-m", "precious.txt, committed here and only here");
+  writeFileSync(join(c.w, ".git"), `gitdir: ${c.siblingAdmin}\n`);
+  // The spoof still resolves a root of $wt and a foreign, CLEAN HEAD/index —
+  // the exact leak the ticket measured, reproduced before asserting the fix.
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the root claim must still admit, or this pins nothing new");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: the sibling's HEAD must read clean, or this is the old leak by a different name");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /names another worktree's admin dir/);
+});
+
+test("a .git file naming a sibling's admin dir by a RELATIVE gitdir: path is refused the same way", (t) => {
+  const c = nestedWorktreePair(t);
+  // Relative to $wt/.git's own directory, i.e. $wt itself — same shape git
+  // itself resolves relative gitdir: lines against. Both ends have to be
+  // canonical (git's own, via --show-toplevel) or the /private/var symlink
+  // macOS's tmpdir sits under makes `relative` count the wrong number of
+  // `../` segments — a mismatch `git` itself never has, since it resolves
+  // both sides the same way before comparing.
+  const wCanonical = git(c.w, "rev-parse", "--show-toplevel");
+  const relPath = relative(wCanonical, c.siblingAdmin);
+  writeFileSync(join(c.w, ".git"), `gitdir: ${relPath}\n`);
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), c.siblingAdmin, "fixture: git must resolve the relative spoof to the sibling admin dir, or this pins nothing new");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+});
+
+// The same spoof, spelled as a SYMLINK instead of a `gitdir:` file. It is not a
+// variant of the test above but a separate code path: `rev-parse --git-dir`
+// answers the bare `.git` for this shape — the same string a main checkout
+// answers — so a guard that reads that string as "the main worktree, nothing to
+// verify" skips the linkage check entirely and admits the leak at exit 0.
+// Measured on git 2.50.1, and measured admitted by the first spelling of this
+// PR's own guard.
+test("a .git SYMLINKED to a sibling worktree's admin dir is refused, never clean", (t) => {
+  const c = nestedWorktreePair(t);
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  writeFileSync(join(c.sibling, "precious.txt"), readFileSync(join(c.w, "precious.txt")));
+  git(c.sibling, "add", "precious.txt");
+  git(c.sibling, "commit", "-q", "-m", "precious.txt, committed here and only here");
+  rmSync(join(c.w, ".git"));
+  symlinkSync(c.siblingAdmin, join(c.w, ".git"));
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), ".git", "fixture: this spelling must still answer the bare `.git`, or it is no longer the shape that bypassed the guard");
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the root claim must still admit, or this pins nothing new");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: the sibling's HEAD must read clean, or this is the old leak by a different name");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /names another worktree's admin dir/);
+});
+
+test("an admin dir whose own gitdir back-pointer file is missing is unanswerable, never clean", (t) => {
+  const c = nestedWorktree(t);
+  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  rmSync(join(admin, "gitdir"));
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /gitdir is missing or unreadable/);
+});
+
+test("an admin dir whose own gitdir back-pointer file is unreadable is unanswerable, never clean", (t) => {
+  const c = nestedWorktree(t);
+  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  // No restore: the outer temp-dir cleanup (registered by `repo()`, and so
+  // ahead of this test's own `t.after`) force-removes the whole tree first,
+  // and deleting a file needs write access to its DIRECTORY, never to the
+  // file itself — same reasoning the existing stash-reflog fixtures above
+  // already rely on without restoring their own chmods.
+  chmodSync(join(admin, "gitdir"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+});
+
+// The false-refusal side of the same trim: a legitimate back-pointer file with
+// trailing whitespace tacked on must still compare equal, or the guard refuses
+// worktrees it has no reason to. Real git never writes trailing whitespace
+// here, but a hand-edited or copy-touched one could, and the comparison being
+// exact-string means a wrong turn on this trim is a silent over-refusal, not
+// a loud one.
+test("a back-pointer file with trailing whitespace still passes, not falsely refused", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const gitdirFile = join(admin, "gitdir");
+  writeFileSync(gitdirFile, `${readFileSync(gitdirFile, "utf8").trimEnd()}  \t\n`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `trailing whitespace on the back-pointer must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// ---------------------------------------------------------------------------
+// The ACCEPT side of the same guard. A gate on an irreversible action is as
+// wrong when it refuses a healthy checkout as when it admits a spoofed one, and
+// a suite that only feeds a refusal guard spoofs pins nothing about what it must
+// still answer for. Every shape below is one `git` itself produces, and each
+// was measured REFUSED (exit 2, no payload) by the first spelling of this
+// guard. The intact-linked-worktree and symlinked-path cases above, and every
+// `repo(t)` test in this file (a plain main checkout), are the rest of the set.
+// ---------------------------------------------------------------------------
+
+// `--git-dir` answers the bare `.git` here too, exactly as it does for the
+// sibling-admin-dir SYMLINK spoof above — so this is the pair that shows the
+// guard discriminates on whose admin dir answered rather than on that string:
+// same `--git-dir` answer, opposite verdict.
+test("a .git symlinked to the worktree's OWN admin dir still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  rmSync(join(c.w, ".git"));
+  symlinkSync(admin, join(c.w, ".git"));
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), ".git", "fixture: this must be the same `--git-dir` answer the spoof gives, or the pair proves nothing");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a .git symlinked to its own admin dir must pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// git writes the back-pointer RELATIVE, not absolute, whenever
+// `worktree.useRelativePaths` is set — per-repo config, or `git worktree add
+// --relative-paths` per invocation. Written here by hand rather than by that
+// flag, in the exact spelling git produces (relative to the admin dir, which is
+// what git resolves it against): the flag and the config both arrived in git
+// 2.48, and a fixture that needs them stops covering anything, silently and
+// green, on any older git the suite is run under.
+test("a RELATIVE back-pointer still passes, not read as another worktree's admin dir", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  writeFileSync(join(admin, "gitdir"), "../../../.worktrees/9-x/.git\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a relative back-pointer must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// Neither shape below is a linked worktree, so neither admin dir carries a
+// `gitdir` back-pointer to check — and "has no back-pointer" is not "belongs to
+// another worktree". Both are `.git` FILES redirecting to a git dir elsewhere,
+// which is what makes them land in the same guard as #189's spoof; both are
+// DIRTY, so a pass here is the audit actually answering (exit 1, `clean:false`)
+// rather than a refusal wearing a fail-safe exit code.
+test("a submodule checkout is audited, not refused for carrying no back-pointer", (t) => {
+  const c = repo(t);
+  const sub = repo(t, "fix/2-sub", "no-undo-audit-sub-");
+  git(c.w, "-c", "protocol.file.allow=always", "submodule", "add", "-q", git(sub.w, "remote", "get-url", "origin"), "sub");
+  const w = join(c.w, "sub");
+  writeFileSync(join(w, "dirt.txt"), "uncommitted, inside a submodule\n");
+
+  const r = audit({ w, branch: "main" });
+  assert.equal(r.status, 1, `a dirty submodule must report dirty, not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+test("a --separate-git-dir clone is audited, not refused for carrying no back-pointer", (t) => {
+  const c = repo(t);
+  const w = `${c.w}-sgd`;
+  execFileSync("git", ["clone", "-q", "--separate-git-dir", `${w}.git`, git(c.w, "remote", "get-url", "origin"), w], { env: ENV });
+  writeFileSync(join(w, "dirt.txt"), "uncommitted, in a --separate-git-dir clone\n");
+
+  const r = audit({ w, branch: "main" });
+  assert.equal(r.status, 1, `a dirty --separate-git-dir clone must report dirty, not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+// Named in #189 alongside the spoof: not this ticket's mechanism (git refuses
+// before the linkage guard even runs, same as a deleted `.git`), but the same
+// enumerate pass that found the spoof named it too, so it is pinned here
+// rather than assumed.
+test("a dangling .git symlink is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+  symlinkSync("/nonexistent-target-189", join(c.w, ".git"));
+
+  refusedAsUnknownBeforeAnySay(c);
 });
 
 // ---------------------------------------------------------------------------
