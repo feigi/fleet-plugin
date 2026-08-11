@@ -94,3 +94,150 @@ export function formatLines(rows) {
   const w = Math.max(...rows.map((r) => r.role.length));
   return rows.map((r) => `${r.role.padEnd(w)} ${r.actual}/${r.target} → ${r.action}   (${r.detail})`);
 }
+
+// --------------------------------------------------------------------------
+// I/O. Everything below runs only as a CLI — importing this file must never
+// parse argv or touch the network, or the pure half stops being unit-testable.
+
+import { execFileSync, spawnSync } from "node:child_process";
+import { writeSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+
+const NAME = "fleet-tick";
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+// Open PRs read per tick. At exactly this many the list may be truncated and
+// nothing in the result says so, so it refuses — "no silent caps", same rule
+// candidates.mjs enforces on its own query.
+const PR_LIMIT = 200;
+
+// writeSync, not console.error: on a pipe process.stderr.write is async and the
+// process.exit below discards whatever is still queued, so the refusal is the
+// first thing lost — measured in this repo (#176).
+function die(msg) {
+  try {
+    writeSync(2, `\n${NAME}: ${msg}\n`);
+  } catch {
+    // Message may be lost; the exit code must not be.
+  }
+  process.exit(2);
+}
+
+const OPTIONS = {
+  implementers: { type: "string" },
+  reviewers: { type: "string" },
+  "merge-bots": { type: "string" },
+  pool: { type: "string" },
+  "implementer-cap": { type: "string" },
+  "reviewer-cap": { type: "string" },
+};
+
+function counts() {
+  let values;
+  try {
+    ({ values } = parseArgs({ options: OPTIONS }));
+  } catch (e) {
+    // Unconditional catch, deliberately — parseArgs throws on the FIRST
+    // offending argument, so dropping any error code disables the guard for
+    // every argv where something else comes earlier.
+    die(`${e.message} — accepted: ${Object.keys(OPTIONS).map((f) => `--${f}`).join(", ")}`);
+  }
+
+  const int = (name, dflt) => {
+    const raw = values[name];
+    if (raw === undefined) {
+      if (dflt !== undefined) return dflt;
+      die(
+        `--${name} is required. Live member counts and the pool are the CONTROLLER's state: ` +
+        `the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. ` +
+        `There is no safe default — 0 would dispatch a full cap off a forgotten flag, the cap would hold forever, ` +
+        `and both are silent.`,
+      );
+    }
+    // Regex, not Number(): `Number("")` is 0 and `Number.isInteger(0)` is true,
+    // so `--pool ""` — the shape an unset shell variable produces — would read
+    // as a genuine, empty pool.
+    if (!/^\d+$/.test(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
+    return Number(raw);
+  };
+  const cap = (name, dflt) => {
+    const n = int(name, dflt);
+    // run-team's invariant, enforced where the number enters rather than where
+    // it is used: <= 5 implementers, <= 5 reviewers, <= 1 merge bot.
+    if (n < 1 || n > 5) die(`--${name} must be between 1 and 5 (run-team's member cap), got ${n}`);
+    return n;
+  };
+  return {
+    implLive: int("implementers"), reviewerLive: int("reviewers"), mergeBotLive: int("merge-bots"),
+    pool: int("pool"), implCap: cap("implementer-cap", 2), reviewerCap: cap("reviewer-cap", 5),
+  };
+}
+
+// Review backlog and merge queue, by label, from one read. A failed read is not
+// an empty pipeline: backlog 0 + merge-queue 0 is a plausible tick, so printing
+// it off a failed query is the silent stall this script exists to end.
+function prState() {
+  let out;
+  try {
+    out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
+      "--json", "number,labels"], { encoding: "utf8" });
+  } catch (e) {
+    // Never interpolates e.stderr or e.message: execFileSync already forwarded
+    // the child's stderr to ours, and Node builds e.message out of it, so
+    // either one emits every byte a second time (#176).
+    die(`gh pr list failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not an empty queue`);
+  }
+  let prs;
+  try {
+    prs = JSON.parse(out);
+  } catch (e) {
+    die(`could not parse gh pr list output as JSON: ${e.message}`);
+  }
+  if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number" || !Array.isArray(p.labels))) {
+    die("gh pr list did not return {number,labels} rows");
+  }
+  if (prs.length === PR_LIMIT) {
+    die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
+  }
+  const mergeQueue = prs.filter((p) => p.labels.some((l) => l && l.name === "ready-to-merge")).length;
+  // Everything else open is queued for review or under review. Deliberately
+  // label-derived and nothing more: which of them a reviewer has already
+  // claimed is controller state, and over-counting here holds the refill —
+  // the #3 failure — so this stays the one number a controller can audit at a
+  // glance from `gh pr list`.
+  return { mergeQueue, reviewBacklog: prs.length - mergeQueue };
+}
+
+// Supply, from candidates.mjs — the same shortlist phase 0 uses, so the tick
+// and the maintainer count the same queue.
+function supply() {
+  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"),
+    "--require-label", "ready-for-agent"], { encoding: "utf8" });
+  // stdio defaults to pipe, so candidates' per-candidate stderr — up to
+  // --limit lines of it — is captured and dropped rather than billed to the
+  // controller's context. Only the failure paths below say anything.
+  if (r.error) die(`candidates.mjs did not run: ${r.error.code ?? r.error.message} — supply unknown`);
+  if (r.status === 1) return 0; // its documented "query fine, queue empty"
+  if (r.status !== 0) die(`candidates.mjs exited ${r.status} — supply unknown, and unknown is not zero`);
+  let rows;
+  try {
+    rows = JSON.parse(r.stdout);
+  } catch (e) {
+    die(`could not parse candidates.mjs output — supply unknown: ${e.message}`);
+  }
+  if (!Array.isArray(rows)) die("candidates.mjs did not return an array — supply unknown");
+  return rows.length;
+}
+
+function main() {
+  const c = counts();
+  // Both reads happen before anything prints: a partial tick is worse than no
+  // tick, because half a reconcile still reads like a reconcile.
+  const { mergeQueue, reviewBacklog } = prState();
+  for (const line of formatLines(reconcile({ ...c, ...{ mergeQueue, reviewBacklog }, supply: supply() }))) {
+    console.log(line);
+  }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();

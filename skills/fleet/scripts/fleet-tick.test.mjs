@@ -147,3 +147,164 @@ test("formatLines prints role, actual/target and the ACTION on one line each", (
   assert.match(lines[0], /^implementers\s+0\/2 → DISPATCH 1\b/);
   assert.match(lines[2], /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/);
 });
+
+// ---------------------------------------------------------------------------
+// The CLI half. What is pinned here is the CONTRACT #3 left open: live member
+// counts and the pool arrive as required args (no source in the repo can be
+// trusted for them), everything else the script reads for itself, and every
+// failed read refuses rather than degrading into a number.
+
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
+
+// Answers both reads the tick makes: `gh pr list` for backlog/merge-queue, and
+// the `gh issue list --jq …` that candidates.mjs makes on its behalf. The issue
+// branch execs the real jq with the expression gh was handed, so candidates.mjs
+// runs for real underneath rather than being mocked away — supply is the one
+// number this script does not compute itself.
+const GH_STUB = `#!/bin/sh
+case "$1 $2" in
+  "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "issue list")
+    [ -n "$ISSUE_FAIL" ] && { echo "boom" >&2; exit 1; }
+    expr=""
+    while [ $# -gt 0 ]; do
+      case "$1" in --jq) shift; expr="$1" ;; esac
+      shift
+    done
+    exec jq -c "$expr" "$FIXTURE_ISSUES" ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+`;
+
+const pr = (number, labels = []) => ({ number, labels: labels.map((name) => ({ name })) });
+const issue = (number) => ({
+  number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "",
+});
+
+function runCli(args, { prs = [], issues = [], env: extraEnv = {} } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-tick-"));
+  const gh = join(dir, "gh");
+  writeFileSync(gh, GH_STUB);
+  chmodSync(gh, 0o755);
+  const prFixture = join(dir, "prs.json");
+  const issueFixture = join(dir, "issues.json");
+  writeFileSync(prFixture, JSON.stringify(prs));
+  writeFileSync(issueFixture, JSON.stringify(issues));
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env, PATH: `${dir}:${process.env.PATH}`,
+      FIXTURE_PRS: prFixture, FIXTURE_ISSUES: issueFixture, ...extraEnv,
+    },
+  });
+  rmSync(dir, { recursive: true, force: true });
+  return r;
+}
+
+const LIVE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1"];
+
+test("CLI: a missing live count refuses rather than defaulting", () => {
+  // The whole contract in one assertion. A default here is the bug: 0 would
+  // dispatch a full cap off a forgotten flag, cap would hold forever, and
+  // neither says anything on the way past.
+  for (const drop of ["--implementers", "--reviewers", "--merge-bots", "--pool"]) {
+    const args = LIVE.filter((a, i) => a !== drop && LIVE[i - 1] !== drop);
+    const r = runCli(args, { prs: [] });
+    assert.equal(r.status, 2, `dropping ${drop} should refuse`);
+    assert.match(r.stderr, new RegExp(`${drop.slice(2)}.*required`, "s"));
+    assert.equal(r.stdout.trim(), "", `dropping ${drop} must print no reconcile line`);
+  }
+});
+
+test("CLI: a live count that is not a non-negative integer refuses", () => {
+  for (const bad of ["x", "-1", "1.5", ""]) {
+    const r = runCli(["--implementers", bad, "--reviewers", "0", "--merge-bots", "0", "--pool", "1"]);
+    assert.equal(r.status, 2, `'${bad}' should refuse`);
+  }
+});
+
+test("CLI: a flag given no value at all refuses", () => {
+  const r = runCli(["--reviewers", "0", "--merge-bots", "0", "--pool", "1", "--implementers"]);
+  assert.equal(r.status, 2);
+});
+
+test("CLI: an unrecognised flag refuses instead of being ignored", () => {
+  const r = runCli([...LIVE, "--implementor-cap", "3"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /accepted:/);
+});
+
+test("CLI: a cap outside run-team's invariant refuses", () => {
+  assert.equal(runCli([...LIVE, "--implementer-cap", "6"]).status, 2);
+  assert.equal(runCli([...LIVE, "--reviewer-cap", "6"]).status, 2);
+  assert.equal(runCli([...LIVE, "--implementer-cap", "0"]).status, 2);
+});
+
+test("CLI: a failed gh read refuses — it is not an empty backlog", () => {
+  const r = runCli(LIVE, { env: { PR_FAIL: "1" } });
+  assert.equal(r.status, 2);
+  // The harm being pinned is not the exit code but the line that must NOT have
+  // been printed: backlog 0 + merge-queue 0 is a perfectly plausible tick, and
+  // an unread pipeline printed as an idle one is the silent stall again.
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /gh pr list/);
+});
+
+test("CLI: a failed supply read refuses — unknown supply is not zero supply", () => {
+  const r = runCli(["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0"],
+    { env: { ISSUE_FAIL: "1" } });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /supply/);
+});
+
+test("CLI: a PR list at the limit refuses rather than serving a truncated one", () => {
+  const prs = Array.from({ length: 200 }, (_, i) => pr(i + 1));
+  const r = runCli(LIVE, { prs });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /truncated|capped/i);
+});
+
+test("CLI: a drained implementer queue with pool and a merge queue prints all three ACTIONs", () => {
+  const r = runCli(LIVE, { prs: [pr(1, ["ready-to-merge"])], issues: [issue(9)] });
+  assert.equal(r.status, 0);
+  const lines = r.stdout.trim().split("\n");
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^implementers\s+0\/2 → DISPATCH 1\b/);
+  assert.match(lines[1], /^reviewers\s+0\/5 → IDLE OK\b/);
+  assert.match(lines[2], /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/);
+});
+
+test("CLI: review backlog and merge queue are derived from open PRs by label", () => {
+  const prs = [pr(1, ["ready-to-merge"]), pr(2, ["ready-to-merge"]), pr(3), pr(4)];
+  const r = runCli(LIVE, { prs, issues: [issue(9)] });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /review-backlog=2/);
+  assert.match(r.stdout, /merge-queue=2/);
+  // Backlog 2 is the gate, so the pool must not be spent.
+  assert.match(r.stdout, /^implementers\s+0\/2 → HOLD\b/m);
+});
+
+test("CLI: supply comes from candidates.mjs and drives the pool-0 branches", () => {
+  const empty = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0"];
+  const one = runCli(empty, { prs: [], issues: [issue(9)] });
+  assert.equal(one.status, 0);
+  assert.match(one.stdout, /supply=1/);
+  assert.match(one.stdout, /RE-SHORTLIST \+ SUGGEST \/triage/);
+
+  const none = runCli(empty, { prs: [], issues: [] });
+  assert.equal(none.status, 0);
+  assert.match(none.stdout, /supply=0/);
+  assert.match(none.stdout, /SUGGEST \/triage/);
+
+  const many = runCli(empty, { prs: [], issues: [issue(9), issue(10), issue(11)] });
+  assert.equal(many.status, 0);
+  assert.match(many.stdout, /supply=3/);
+  assert.match(many.stdout, /^implementers\s+0\/2 → RE-SHORTLIST\s{2}/m);
+});
