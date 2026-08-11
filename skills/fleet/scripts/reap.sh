@@ -31,6 +31,9 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 
 reaped=""
 kept=""
+# $1 and $2 are spliced raw into the payload: a `"` or `\` in either — a branch
+# name may legally carry one — still emits unparseable JSON. Pre-dates this
+# script's cherry fix and is shared with the other fleet scripts; tracked as #119.
 keep() { kept="${kept}{\"branch\":\"$1\",\"reason\":\"$2\"}," ; echo "    KEEP $1 — $2" >&2; }
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
@@ -41,7 +44,26 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
   # that exists nowhere else.
-  if git cherry "$base" "$b" 2>/dev/null | grep -q '^+'; then
+  #
+  # Captured, not piped: `cmd | grep -q` takes grep's exit status, never cmd's,
+  # so a `git cherry` that dies (exit 128 — one unreadable loose object is
+  # enough) prints nothing, grep sees empty input and exits 1 — the identical
+  # verdict a genuinely clean cherry produces, so "merged" is indistinguishable
+  # from "the probe could not answer". An unmerged branch is never the ambiguous
+  # one: its `+` line makes grep exit 0 and always keeps. -D is authorized by
+  # this check and by nothing else, so an unanswerable probe must KEEP, the
+  # same fail-closed shape the worktree `status` check below already uses.
+  if ! cherry=$(git cherry "$base" "$b" 2>&1); then
+    keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
+    continue
+  fi
+  # A `+` only at line start is a commit. $cherry holds stderr too — 2>&1 above,
+  # so the failure reason can carry git's own words — and an unanchored match
+  # reads a `+` anywhere in a diagnostic as a commit line, keeping a branch that
+  # is merged. This pipe is safe where the one it replaces was not: it consumes
+  # a variable, never git, and git's status was already taken on the line above,
+  # so grep's is the only status left to take. Anchored like release-ticket.sh's.
+  if printf '%s\n' "$cherry" | grep -q '^+'; then
     keep "$b" "unmerged commits"
     continue
   fi
