@@ -10,8 +10,12 @@ const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 // Build a repo whose origin/main holds `files`. `local` is written to the
 // working tree afterwards WITHOUT committing — that is how a checkout diverges
 // from the ref the worktree is actually built from.
-function repo(files, local = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "claim-"));
+// `parent` is where the repo itself is created. It matters because the runner
+// judges an argument by where its resolution diverges from the runner's OWN
+// location, so a `node_modules` component in the repo's own ancestry is part of
+// what the guard has to ignore — and only a fixture built under one can pin it.
+function repo(files, local = {}, parent = tmpdir()) {
+  const dir = mkdtempSync(join(parent, "claim-"));
   const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe" });
   git("init", "-q");
   git("config", "user.email", "t@t");
@@ -50,8 +54,8 @@ const pkg = (o) => JSON.stringify(o);
 // The runner is what members actually invoke, so it is what gets asserted on.
 // `script` defaults to the real one; pass a copy to claim from a different
 // template.
-function apply(files, script = SCRIPT) {
-  const dir = repo(files);
+function apply(files, script = SCRIPT, parent = tmpdir()) {
+  const dir = repo(files, {}, parent);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const r = spawnSync("sh", [script, "42", "slug", "fix", "--apply"], {
@@ -139,7 +143,7 @@ test("runner: a symlink to a directory runs the test files under it", () => {
   // `t/vendor` is the shape neither exclusion can see: a symlink into
   // `node_modules` under another name — `-prune` matches the directory's own
   // name and this one is called `vendor`, and the `case` guard reads the
-  // argument's spelling, which holds no `node_modules` either. Measured: it
+  // argument, which neither spells nor resolves into one. Measured: it
   // is exactly as blind as the `-not -path` filter it replaced, both legs.
   // The slash form does not descend it and reads 3; `find -L`
   // sweeps the vendored test in and reads 4. Without this every test passes
@@ -155,6 +159,140 @@ test("runner: a symlink to a directory runs the test files under it", () => {
   // fixture grows. 3 is `t/`'s own two files plus the one under `t/nested/`,
   // so a `find` capped at one level reads as a red here too.
   assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
+});
+
+// #186: the argument itself is a symlink whose TARGET lies inside a vendored
+// tree. Spelling can't see it — `vendlink` carries no `node_modules` in its
+// own name — and `-prune` only fires on a dirent the walk descends THROUGH
+// named `node_modules`; here the walk starts at the symlink's target,
+// already past the vendored component, so neither existing guard sees it.
+// Measured on the unfixed shim: `agent-test vendlink` exits 0 and reports
+// the vendored test as a pass — the same green-over-third-party-code #109's
+// prune exists to refuse, reached by a route neither mechanism covers.
+test("runner: a symlink whose target is inside a vendored tree refuses", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg"), join(a.wt, "vendlink"));
+  const r = a.run("vendlink");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — excluded from the run/);
+});
+
+// The false-positive class of the same fix: a symlink to a directory that
+// merely CONTAINS a vendored tree, rather than one whose own resolution ends
+// inside it, must still run that directory's own tests and still exclude the
+// real `node_modules` beneath it. Already true pre-fix (find's own prune
+// handles it once the walk is inside), and must stay true — a resolved-path
+// guard that widens into refusing every symlinked directory with
+// `node_modules` somewhere underneath would regress this ordinary case.
+test("runner: a symlink to a directory containing a vendored tree still runs its own tests", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "proj"), { recursive: true });
+  writeFileSync(join(a.wt, "proj", "ok.test.mjs"), PASSES);
+  const vendor = join(a.wt, "proj", "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(
+    join(vendor, "v.test.mjs"),
+    'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
+  );
+  symlinkSync("proj", join(a.wt, "projlink"));
+  const r = a.run("projlink");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// The vendored tree the symlink lands in need not be inside the worktree.
+// Judging the resolution RELATIVE TO THE WORKTREE ROOT passes every other test
+// in this file and still runs this one green — the resolution lands outside, so
+// there is nothing left to compare — which is #186's own class one input over.
+// Both directions are here because the cheap over-correction (refuse anything
+// resolving outside) also passes the refusal leg alone.
+test("runner: a symlink to a vendored tree outside the worktree refuses", () => {
+  const a = apply(SUITE);
+  const outside = mkdtempSync(join(tmpdir(), "outside-"));
+  const vendor = join(outside, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(vendor, join(a.wt, "extlink"));
+  const r = a.run("extlink");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — excluded from the run/);
+  const plain = join(outside, "lib");
+  mkdirSync(plain, { recursive: true });
+  writeFileSync(join(plain, "o.test.mjs"), PASSES);
+  symlinkSync(plain, join(a.wt, "oklink"));
+  const ok = a.run("oklink");
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// The opposite error, and the one that actually shipped: `pwd -P` is absolute,
+// so matching `*/node_modules/*` against it refuses on a `node_modules` in the
+// WORKTREE'S OWN ANCESTRY — which is shared with the runner and says nothing
+// about the argument. Measured on the unfixed shim: a worktree under such a
+// parent refused every directory argument, the bare invocation's implicit `.`
+// included, so the whole suite became unrunnable. No other fixture in this file
+// is built under a `node_modules` parent, so nothing else can see it.
+test("runner: a node_modules in the worktree's own ancestry refuses nothing", () => {
+  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  mkdirSync(under, { recursive: true });
+  const a = apply(SUITE, SCRIPT, under);
+  for (const [args, count] of [[[], 6], [["."], 6], [["t"], 3]]) {
+    const r = a.run(...args);
+    assert.equal(r.status, 0, `${JSON.stringify(args)}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, new RegExp(`^(?:ℹ|#) pass ${count}$`, "m"));
+  }
+  // ...and the guard still bites inside such a worktree.
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg"), join(a.wt, "vendlink"));
+  const r = a.run("vendlink");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — excluded from the run/);
+});
+
+// The guard resolves `$arg` against the process cwd, but `$root` against the
+// runner's own location, so the two are no longer the same anchor and a
+// subdirectory invocation exercises a different path than a root one. Measured:
+// anchoring the argument at `$root` instead (`cd -- "$root/$arg"`, a one-token
+// slip now that `$root` sits on the line above) is green on every OTHER test in
+// this file while reporting the vendored test as a pass from one directory down.
+// Second leg stops the fix degenerating into "refuse everything named from a
+// subdirectory"; the stderr assert is load-bearing, since status alone cannot
+// tell a refusal from a vendored test that threw.
+test("runner: the resolved-path guard resolves against the cwd, from a subdirectory too", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("..", "node_modules", "pkg"), join(a.wt, "t", "vendlink"));
+  const refused = a.runFrom("t", "vendlink");
+  assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /is under node_modules — excluded from the run/);
+  const ran = a.runFrom("t", "nested");
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.match(ran.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// The false-positive leg of the resolved-path guard. The nested-node_modules
+// test below pins `-prune`'s immunity to a `node_modules_old` lookalike, not
+// this guard's: its argument is `t`, so neither half of the composed
+// `"/$arg/ /…/"` string ever carries the lookalike and the `case` never sees
+// one. Here only the RESOLUTION does — `vlink` is clean in spelling — which is
+// the leg #186 added. Measured: relaxing the slash-bounding to `*node_modules*`
+// leaves every other test in this file green and reddens only this one.
+test("runner: a symlink resolving into a node_modules lookalike still runs", () => {
+  const a = apply(SUITE);
+  const lookalike = join(a.wt, "node_modules_old", "pkg");
+  mkdirSync(lookalike, { recursive: true });
+  writeFileSync(join(lookalike, "k.test.mjs"), PASSES);
+  symlinkSync(join("node_modules_old", "pkg"), join(a.wt, "vlink"));
+  const r = a.run("vlink");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
 });
 
 // The sharp edge. `node --test` with zero files exits 0, so an expansion that

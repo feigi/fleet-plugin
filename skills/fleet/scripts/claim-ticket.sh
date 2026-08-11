@@ -208,12 +208,51 @@ for arg do
     # by following symlinks *inside* the tree as well — sweeping in vendored
     # code reached through a symlink named anything other than
     # \`node_modules\`, which neither guard catches: the \`case\` reads the
-    # argument's own spelling and \`-prune\` the directory's own name, and a
-    # symlink named anything else carries \`node_modules\` in neither. On a
+    # argument itself — its spelling and where it resolves to — and
+    # \`-prune\` the directory's own name, and a symlink met INSIDE the walk
+    # under another name carries \`node_modules\` in neither. On a
     # cycle the platforms then disagree: GNU find exits 1,
     # which the \`||\` below reports as an unreadable directory, while BSD find
     # skips it silently. The slash settles the argument alone.
-    case "/\$arg/" in
+    # Judged by the argument's spelling OR its RESOLVED directory (#186).
+    # Spelling alone missed a symlink whose target lies inside a vendored
+    # tree — its own name carries no \`node_modules\`, and \`-prune\` below
+    # only fires on a dirent NAMED \`node_modules\` met during the walk:
+    # traversal starts at the symlink's target, so the vendored component is
+    # already behind the walk's starting point and neither mechanism ever
+    # sees it. \`cd\`+\`pwd -P\` follows the argument's own symlink (and any
+    # inside its path) to the real directory, so the test also becomes
+    # "resolves inside a vendored tree" however the caller spelled it.
+    # BOTH, because they cover disjoint inputs. \`cd\` fails on a directory
+    # \`[ -d ]\` admits but that carries no search bit, and \`\$resolved\` is
+    # then empty: the spelling is the only thing left to refuse
+    # \`node_modules/pkg\` with, and the \`case\` has to be what reports it
+    # (see above) rather than the readability message from \`find\` below.
+    # The resolution is judged from where it DIVERGES from the runner's own
+    # location, because \`pwd -P\` is absolute and a \`node_modules\` segment
+    # ABOVE the divergence is an ancestor of the runner itself — shared with
+    # it, so it says nothing about the argument. Matched absolutely, a
+    # worktree living under one refused every directory argument, including
+    # the bare invocation's implicit \`.\`. Anchoring at the worktree root
+    # instead is the opposite error: it discards every resolution that lands
+    # outside, so a symlink to a vendored tree elsewhere on disk ran green —
+    # #186's own class, one input over.
+    # \`CDPATH=\` on both: an inherited CDPATH resolves a bare relative name
+    # against a same-named directory somewhere else entirely, so the guard
+    # would judge one directory while \`find\` below — which never consults
+    # CDPATH — walks another, and the vendored suite runs green. It also
+    # stops \`cd\` echoing its target into the substitution.
+    # A symlink to a directory that merely CONTAINS a vendored tree resolves
+    # outside \`node_modules\` and passes here untouched; \`-prune\` below
+    # still excludes its vendored contents once the walk reaches them.
+    root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
+    resolved=\$(CDPATH= cd -- "\$arg" 2>/dev/null && pwd -P)
+    shared=\$root
+    while [ -n "\$shared" ]; do
+      case "\$resolved" in "\$shared"/* | "\$shared") break ;; esac
+      shared=\${shared%/*}
+    done
+    case "/\$arg/ /\${resolved#"\$shared"}/" in
       */node_modules/*) echo "agent-test: \$arg is under node_modules — excluded from the run, not missing" >&2; exit 1 ;;
     esac
     found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
