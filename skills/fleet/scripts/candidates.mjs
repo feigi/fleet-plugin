@@ -10,6 +10,18 @@
 // empty ready-for-agent queue means there is no work, not that the net should
 // widen — ready-for-human tickets need a human to brainstorm first, and an
 // unattended fleet has no channel to one.
+//
+// Exit-code contract — the whole interface for a caller that reads no
+// stderr: 0 = survivors, JSON array on stdout. 1 = the query succeeded and
+// returned no rows at all. 2 = the query broke (bad args, gh failure, a
+// reduction that did not apply, a capped result). 3 = the query succeeded,
+// returned at least one row, and every row was removed by the to-spec
+// filter — distinct from 1 so a caller such as run-team's phase 0 can say
+// "the only labeled items are specs, run to-tickets" instead of "no work"
+// (#64). Exit 3 describes the FINAL query attempt only — with
+// `--allow-fallback`, a labeled all-specs pass that falls back to a
+// genuinely empty unfiltered pass is exit 1, not 3; the drop count is never
+// carried across the two attempts.
 
 import { execFileSync } from "node:child_process";
 import { writeSync } from "node:fs";
@@ -351,8 +363,17 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // `limit` and the cap check would stop seeing a truncated list. Before the
 // emptiness test below, never after: a queue whose every row was filtered out
 // IS an empty queue — see #60. Telling that case apart from a genuinely empty
-// one, for a caller reading only the exit code, is #64 and still open.
+// one, for a caller reading only the exit code, is #64 — closed by exit 3 at
+// the foot of this file, which is what the raw count below is captured for.
+// Raw count captured just before the filter that can empty `rows` out, so
+// `allFilteredOut` below can tell "nothing came back" from "rows came back
+// and the filter ate them all". Reassigned wholesale in the fallback branch,
+// never OR'd/summed with pass 1's value — #64's edge case is exactly a pass 1
+// all-filtered (raw>0) whose fallback pass is genuinely empty (raw=0), which
+// must read as the fallback's own facts (exit 1), not a merge of the two.
+const rawCount1 = rows.length;
 rows = dropSpecs(rows, requireLabel ? `label:${requireLabel}` : "unfiltered");
+let allFilteredOut = rawCount1 > 0 && rows.length === 0;
 
 if (rows.length === 0 && allowFallback && requireLabel) {
   console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
@@ -362,7 +383,9 @@ if (rows.length === 0 && allowFallback && requireLabel) {
   // After refuseIfCapped for the same reason as above; the emptiness half does
   // not transfer, as no gate follows this one. The call must exist because the
   // fallback's rows arrive raw and nothing downstream drops a spec.
+  const rawCount2 = rows.length;
   rows = dropSpecs(rows, "unfiltered (fallback)");
+  allFilteredOut = rawCount2 > 0 && rows.length === 0;
 }
 
 // FIFO among survivors. Issue number is monotonic in creation order, so this
@@ -385,12 +408,15 @@ for (const r of rows) {
 // token cost in the controller's context.
 console.log(JSON.stringify(rows));
 
-// Exit 1 for a successful query with no survivors. The caller must be able to
-// tell "the queue is empty" from "the query broke" (2) without reading stderr.
+// Exit 1 for a successful query with no survivors, exit 3 when those zero
+// survivors are the filter's doing rather than the query's — see the
+// exit-code contract in the file header (#64). `allFilteredOut` already
+// describes only the final attempt (see above), so no further branching on
+// requireLabel/allowFallback is needed here.
 //
 // exitCode, not exit(): stdout on a pipe is async too, and process.exit() drops
 // the queued payload at the 64 KiB buffer while still reporting 0. Measured,
 // 499 rows — one under the DEFAULT --limit — arrived truncated mid-JSON at exit
 // 0, the corrupt-payload-typed-as-success this file's exit codes exist to make
 // impossible. refuseIfCapped cannot see it: that fires at exactly `limit`.
-process.exitCode = rows.length === 0 ? 1 : 0;
+process.exitCode = rows.length === 0 ? (allFilteredOut ? 3 : 1) : 0;

@@ -858,11 +858,66 @@ test("a payload past the pipe buffer arrives whole — truncated JSON must never
 test("an empty queue is exit 1, not 2 — the query worked and there is no work", () => {
   // The other half of the contract in this file's header. Every refusal above
   // pins 2; nothing pinned 1, so a change spending 2 on an empty queue — the
-  // swap the header forbids — shipped green. Verified by mutation: flipping
-  // `rows.length === 0 ? 1 : 0` to `? 2 : 0` fails this test and only this one.
+  // swap the header forbids — shipped green. Verified by mutation: flipping the
+  // `: 1` arm of `rows.length === 0 ? (allFilteredOut ? 3 : 1) : 0` to `: 2`
+  // fails this test, the #64 fallback-genuinely-empty test below, AND
+  // fleet-tick's "supply comes from candidates.mjs" — every reader of that arm,
+  // across both files. Before #64 the line read `rows.length === 0 ? 1 : 0`
+  // and this was indeed the only test that saw it; the exit-3 branch and its
+  // fallback test are what made that count stale.
   const { status, stdout } = run([], ["--require-label", "ready-for-agent"]);
   assert.equal(status, 1);
   assert.equal(stdout.trim(), "[]");
+});
+
+test("an all-filtered labeled queue with no fallback is exit 3, not 1 — the caller can tell filtered-empty from genuinely-empty (#64)", () => {
+  // No --allow-fallback, so this is a single pass: the labeled query returns
+  // rows and dropSpecs removes every one. Byte-identical to a genuinely empty
+  // queue on stdout; the exit code is the only place the two facts differ.
+  const { status, stdout } = run([
+    ticket(10, "## User Stories\n\n1. As a user…\n"),
+    ticket(11, "## Problem Statement\n\ny\n\n## User Stories\n\n2. As a user…\n"),
+  ]);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 3);
+});
+
+test("an all-filtered fallback pass is exit 3 even though the labeled pass was genuinely empty — the verdict is the fallback's own, not pass 1's (#64)", () => {
+  // Pass 1 (labeled) comes back with zero rows — genuinely empty, nothing to
+  // filter, so pass 1's own flag would be false. Pass 2 (fallback) comes back
+  // with rows and drops every one. If the two passes' flags were AND'd together
+  // instead of the fallback's replacing pass 1's outright, this would wrongly
+  // read pass 1's "false" through and report exit 1 — verified by mutation, and
+  // this is the only test in the suite that the AND breaks. OR is the
+  // complementary bug, which this test cannot see (false OR true is true
+  // either way); the test below is what pins that direction.
+  const { status, stdout, stderr } = run(
+    [],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [
+      ticket(12, "## User Stories\n\n1. As a user…\n", ["ready-for-human"]),
+      ticket(13, "## Problem Statement\n\nz\n\n## User Stories\n\n2. As a user…\n", ["ready-for-human"]),
+    ],
+  );
+  assert.match(stderr, /retrying unfiltered/);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 3);
+});
+
+test("a labeled all-specs query that falls back to a genuinely empty unfiltered query is exit 1, not 3 — pass 1's drop must not leak into pass 2's verdict (#64)", () => {
+  // The edge case the ticket names explicitly. Pass 1 (labeled) has rows and
+  // drops every one as a spec — pass 1's own flag is true. Pass 2 (fallback)
+  // comes back with no rows at all — genuinely empty, nothing to filter. If
+  // pass 1's "true" carried forward (an OR instead of a plain reassignment),
+  // this would wrongly report exit 3 for a fallback that filtered nothing.
+  const { status, stdout, stderr } = run(
+    [ticket(10, "## User Stories\n\n1. As a user…\n")],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [],
+  );
+  assert.match(stderr, /retrying unfiltered/);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 1);
 });
 
 test("candidates come back oldest first, whatever order gh returned them in", () => {

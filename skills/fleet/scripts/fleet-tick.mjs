@@ -228,10 +228,30 @@ function supply() {
   // code for a module-not-found, a syntax error or any uncaught throw — the
   // collision candidates.mjs names on its own side. So the payload decides and
   // not the code: a genuinely empty queue is the only exit 1 printing `[]`.
-  if (r.status === 1 && r.stdout.trim() === "[]") return 0;
+  //
+  // Exit 3 is that same zero supply arriving by the filter rather than the
+  // query — the survivors existed and every one was a to-spec spec (#64) — so
+  // it reports zero instead of refusing. The payload is checked on both: a
+  // supply read whose stdout is not `[]` is not a supply of zero, whatever
+  // code it carries.
+  if ((r.status === 1 || r.status === 3) && r.stdout.trim() === "[]") return 0;
   // The signal too: a candidates.mjs killed by an OOM kill leaves status null,
   // and "exited null" names nothing. Same clause the gh read above already has.
-  if (r.status !== 0) die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — supply unknown, and unknown is not zero`);
+  //
+  // Tail of the child's own stderr appended, unlike the gh read above: that one
+  // runs under execFileSync, which has already forwarded the child's stderr to
+  // ours, so interpolating there emits every byte twice (#176). Here stdio is a
+  // pipe and nothing else ever prints it, so candidates' own reason is lost and
+  // the operator is left hunting a gh/auth failure for a queue that named its
+  // cause. Bounded to the last few lines, which is not the same as suppressed:
+  // a per-candidate line CAN ride along in that tail. What the bound buys is
+  // that the ~--limit-line dump the pipe exists to keep out of the controller's
+  // context cannot arrive whole, and only ever on the way to exit 2.
+  if (r.status !== 0) {
+    const why = (r.stderr ?? "").trim().split("\n").slice(-5).join("\n");
+    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`
+      + ` — supply unknown, and unknown is not zero${why ? `\n${why}` : ""}`);
+  }
   let rows;
   try {
     rows = JSON.parse(r.stdout);
