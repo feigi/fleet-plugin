@@ -34,7 +34,9 @@ Create a GitHub issue.
 Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
 Not bare `gh issue view <N> --comments` — non-interactively that prints only the
 comments, and nothing at all when there are none, dropping the title and body
-either way, exit 0, so the loss is silent.
+either way, exit 0, so the loss is silent. The `## Agent Brief` comment is
+authoritative over the issue body. Honor its `Respec` block — it may
+explicitly rule out hypotheses the body raises.
 
 ## Wayfinding operations
 
