@@ -184,6 +184,34 @@ test("a git cherry that dies is KEPT, never reaped — an unanswerable probe aut
   assert.equal(git(w, "rev-parse", "feature/onlyhere"), sha, "the commit itself is untouched");
 });
 
+test("a `+` inside git's stderr is not a commit line — a merged branch is still reaped", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  // `git cherry` SUCCEEDS here — rc 0, no commit lines on stdout — but writes a
+  // diagnostic containing a `+` to stderr, which the capture's 2>&1 folds into
+  // the value the merge check matches. Only the line-start `+` is a commit, so
+  // this branch must still be reaped. An unanchored match keeps it forever.
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = cherry ]; then\n` +
+      `  echo "warning: unable to access '/x/c++/lib/.gitattributes'" >&2\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.equal(branchExists(w, "feature/merged"), false, "noisy stderr must not strand a merged branch");
+});
+
 // The design spec's script-surface table states this script's exit-0 contract in
 // prose, and it spent the whole life of #264 asserting the bug as the behaviour:
 // "the merged check reads a `git cherry` that failed as 'no unmerged commits'

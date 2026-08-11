@@ -57,9 +57,16 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
   fi
-  case $cherry in
-    *'+'*) keep "$b" "unmerged commits"; continue ;;
-  esac
+  # A `+` only at line start is a commit. $cherry holds stderr too — 2>&1 above,
+  # so the failure reason can carry git's own words — and an unanchored match
+  # reads a `+` anywhere in a diagnostic as a commit line, keeping a branch that
+  # is merged. This pipe is safe where the one it replaces was not: it consumes
+  # a variable, never git, and git's status was already taken on the line above,
+  # so grep's is the only status left to take. Anchored like release-ticket.sh's.
+  if printf '%s\n' "$cherry" | grep -q '^+'; then
+    keep "$b" "unmerged commits"
+    continue
+  fi
 
   wt=$(git worktree list --porcelain |
        awk -v b="refs/heads/$b" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
