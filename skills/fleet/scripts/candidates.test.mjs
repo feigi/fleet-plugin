@@ -220,6 +220,71 @@ test("d holds plain issue numbers, not matched phrase strings", () => {
   assert.equal(typeof rows[0].d[0], "number");
 });
 
+test("an open blocking section reads its list items only — a later prose ref is not a phantom blocker", () => {
+  // The section flag closes on the NEXT heading, so a `## Blocked by` that is
+  // the last heading in the body stays armed to EOF. Collecting every line
+  // there turns "None — can start immediately" plus ordinary notes into a
+  // blocker the body never declared, and the consumer (next-ticket step 2)
+  // drops the ticket without re-reading the body.
+  const { rows } = run([
+    ticket(9, "## Blocked by\n\n- None — can start immediately\n\nImplementation notes: mirror what #300 did.\n"),
+  ]);
+  assert.deepEqual(rows[0].d, []);
+});
+
+test("a fenced code sample inside an open blocking section is not swept in", () => {
+  const { rows } = run([ticket(9, "## Blocked by\n\n- #12\n\n```\ngit log #999\n```\n")]);
+  assert.deepEqual(rows[0].d, [12]);
+});
+
+test("both passes are line-local — a phrase whose ref opens the next line is not collected", () => {
+  // The removed regex's `\s+` crossed newlines and did collect these. The
+  // narrowing is deliberate (see candidates.mjs's `depnums` comment); this
+  // pins it so it stays a decision rather than drifting back by accident.
+  const { rows } = run([
+    ticket(1, "Blocked by:\n#12\n"),
+    ticket(2, "This depends on\n#5 landing first\n"),
+    ticket(3, "requires\n#7\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], []]);
+});
+
+test("'and' joins refs on an inline label line, the same as a comma", () => {
+  const { rows } = run([ticket(9, "Blocked by: #12 and #13\n")]);
+  assert.deepEqual(rows[0].d, [12, 13]);
+});
+
+test("every declarative phrase arms a heading section, not just 'Blocked by'", () => {
+  // Dropping `requires` or `depends on` from the heading alternation left the
+  // whole suite green: only `## Blocked by` was ever pinned.
+  const { rows } = run([
+    ticket(1, "## Requires\n\n- #8\n"),
+    ticket(2, "## Depends on\n\n- #9\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[8], [9]]);
+});
+
+test("an `after` HEADING arms nothing — it is narrative, not a declaration", () => {
+  // `## After the migration` / `## Before` + `## After` are ordinary ticket
+  // prose, unlike the three declarative phrases, which head a section only to
+  // declare one. A heading that really does name a blocker still resolves,
+  // through the inline pass — `after` stays in that alternation.
+  const { rows } = run([
+    ticket(1, "## After the migration\n\n- see #77 for background\n"),
+    ticket(2, "## Before\n\n- old path\n\n## After\n\n- new path short-circuits, see #12\n"),
+    ticket(3, "## After #4 lands\n\n- do the thing\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], [4]]);
+});
+
+test("the label's asterisks may close BEFORE the colon as well as after it", () => {
+  // `**Blocked by:** #12` and `**Blocked by**: #12` are both bold labels a
+  // human writes; only the first was covered, and the regex group carrying
+  // the second could be deleted with the whole suite still green.
+  const { rows } = run([ticket(9, "**Blocked by**: #12\n")]);
+  assert.deepEqual(rows[0].d, [12]);
+});
+
 // The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
 // applies `--jq` with its embedded gojq (RE2) — a different engine, and every
 // other test in this file accepts that gap rather than closing it. This one
@@ -229,14 +294,27 @@ test("d holds plain issue numbers, not matched phrase strings", () => {
 // through it instead of system jq, so the regex is checked against the exact
 // engine gh uses — not merely a same-family stand-in. No `gojq` on this
 // machine → skip, loudly, rather than silently passing on the weaker engine.
+// Answering `--version` is not the same as BEING gojq: system jq answers it
+// too, and resolving to it would run the fixtures on Oniguruma under a name
+// claiming RE2 — the silent degrade this whole check exists to refuse. gojq
+// prints `gojq 0.12.19 (rev: …)`, jq prints `jq-1.7.1-apple`.
+const isGojq = (bin) =>
+  /^gojq /.test(spawnSync(bin, ["--version"], { encoding: "utf8" }).stdout ?? "");
+
 function findGojq() {
-  for (const candidate of [process.env.GOJQ_BIN, "gojq"].filter(Boolean)) {
-    if (!spawnSync(candidate, ["--version"], { encoding: "utf8" }).error) return candidate;
-  }
-  const gopath = spawnSync("go", ["env", "GOPATH"], { encoding: "utf8" }).stdout.trim();
+  const named = process.env.GOJQ_BIN;
+  // A caller who names the binary asked for that engine. Falling back past it
+  // would run the check on something else and still report the gojq test green.
+  if (named && !isGojq(named)) throw new Error(`GOJQ_BIN=${named} is not gojq`);
+  if (named) return named;
+  if (isGojq("gojq")) return "gojq";
+  // No `go` on PATH → spawnSync fails ENOENT and `stdout` is undefined, not "".
+  // Without `?.` this throws at import, taking every test in the file with it —
+  // the opposite of the loud skip the comment above promises.
+  const gopath = spawnSync("go", ["env", "GOPATH"], { encoding: "utf8" }).stdout?.trim();
   if (!gopath) return null;
   const candidate = join(gopath, "bin", "gojq");
-  return spawnSync(candidate, ["--version"], { encoding: "utf8" }).error ? null : candidate;
+  return isGojq(candidate) ? candidate : null;
 }
 const GOJQ = findGojq();
 
@@ -245,16 +323,29 @@ test(
   { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" },
   () => {
     const extraEnv = { JQ_BIN: GOJQ };
-    assert.deepEqual(run([ticket(9, "## Blocked by\n\n- #12\n- #13\n")], undefined, null, extraEnv).rows[0].d, [12, 13]);
-    assert.deepEqual(run([ticket(9, "## Blocked by\n\n- None — can start immediately\n")], undefined, null, extraEnv).rows[0].d, []);
-    assert.deepEqual(run([ticket(9, "- A reference to #77 blocking ticket\n")], undefined, null, extraEnv).rows[0].d, []);
-    assert.deepEqual(run([ticket(9, "**Blocked by:** #12\n")], undefined, null, extraEnv).rows[0].d, [12]);
-    assert.deepEqual(run([ticket(9, "depends on #5\n")], undefined, null, extraEnv).rows[0].d, [5]);
-    assert.deepEqual(run([ticket(9, "Blocked by: #12, #13\n")], undefined, null, extraEnv).rows[0].d, [12, 13]);
-    assert.deepEqual(
-      run([ticket(9, "## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n")], undefined, null, extraEnv).rows[0].d,
-      [12],
-    );
+    // gojq REJECTING the program is the failure this test exists to catch. Read
+    // the exit status first: `rows[0]` is undefined the moment the child exits
+    // non-zero, so without this the report is `Cannot read properties of
+    // undefined (reading 'd')`, naming neither gojq nor the refusal it printed.
+    const deps = (body) => {
+      const r = run([ticket(9, body)], undefined, null, extraEnv);
+      assert.equal(r.status, 0, r.stderr);
+      return r.rows[0].d;
+    };
+    assert.deepEqual(deps("## Blocked by\n\n- #12\n- #13\n"), [12, 13]);
+    assert.deepEqual(deps("## Blocked by\n\n- None — can start immediately\n"), []);
+    assert.deepEqual(deps("- A reference to #77 blocking ticket\n"), []);
+    assert.deepEqual(deps("**Blocked by:** #12\n"), [12]);
+    assert.deepEqual(deps("depends on #5\n"), [5]);
+    assert.deepEqual(deps("Blocked by: #12, #13\n"), [12, 13]);
+    assert.deepEqual(deps("## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n"), [12]);
+    // The discriminator, and the only assertion here system jq cannot satisfy:
+    // `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a U+00A0
+    // between label and ref reduces to [12] under jq and [] under gojq. Without
+    // it every assertion above passes on either engine — deleting the STUB's
+    // `JQ_BIN` plumb would leave this test green having never reached gojq.
+    // Keep the `\u00a0` escape: a literal NBSP does not survive being copied.
+    assert.deepEqual(deps("Blocked by:\u00a0#12\n"), []);
   },
 );
 
