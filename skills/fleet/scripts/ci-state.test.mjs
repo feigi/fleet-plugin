@@ -362,3 +362,46 @@ test("`skipped` is not `passed`: a skipped job is not-green, exit 1", () => {
   assert.equal(r.payload.verdict, "not-green");
   assert.match(r.payload.reasons.join("; "), /job check is skipped, not success/);
 });
+
+// --- #169: a flag given with no value must die, never read as absent -------
+// `base`/`workflow`/`workflow-file` all read via `arg(name) || default`, so a
+// trailing flag previously fell straight through to the DEFAULT — the caller
+// asked to gate on a specific base/workflow and silently got a real verdict
+// against the wrong one instead of a refusal. Pinned as the priority site
+// (feigi's PR #167 review comment): `ci-state.mjs --pr 5 --base` used to
+// compare against `main` with no signal anything was wrong.
+
+test("trailing --base (no value) dies (exit 2) rather than silently comparing against the default base", () => {
+  const r = run(["--base"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base needs a value/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
+test("--workflow=CI form dies by name, not silently read as absent (indexOf cannot see it)", () => {
+  const r = run(["--workflow=CI"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--workflow needs a space-separated value/);
+});
+
+test("trailing --pr (no value, the entry flag itself) still dies naming the flag", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--pr needs a value/);
+});
+
+// The other two branches of the same guard: a flag eating the NEXT FLAG as its
+// value, and an explicit whitespace-only value. Deleting either clause from
+// arg() left this suite 18/18 green before these two existed.
+test("--base followed by another flag is rejected, not read as the string \"--workflow\"", () => {
+  const r = run(["--base", "--workflow", "CI"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base needs a value/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
+test("--base given a whitespace-only value dies rather than comparing against the default base", () => {
+  const r = run(["--base", "   "]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base needs a value/);
+});
