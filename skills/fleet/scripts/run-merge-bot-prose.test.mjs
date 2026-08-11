@@ -43,9 +43,9 @@ test("the drop runs only after the merge is confirmed, never before", () => {
 // #303: on `unknown` the runbook used to send the operator to `git stash list`
 // alone, which is empty at rc 0 in two of the three states that produce
 // `unknown` (measured: `chmod 000` on `refs/stash`, and on `logs/refs/stash`).
-// Sliced to the audit section for the same reason step4() is: `git stash list`
-// and `refs/stash` both appear in the audit script's own docs elsewhere in this
-// file's reach, and an unbounded match would pass with this paragraph gutted.
+// Sliced to the audit section, same discipline as step4(): it pins the text to
+// the section that has to carry it, so a later paragraph naming `refs/stash`
+// somewhere else in the doc can never stand in for this one.
 function noUndoAudit() {
   const start = "## No-undo audit (before every rebase)";
   const at = DOC.indexOf(start);
@@ -62,8 +62,8 @@ function noUndoAudit() {
 test("the `unknown` path sends the operator to both stash files, via the common dir", () => {
   assert.match(noUndoAudit(), /On `unknown` do not stop at that list: two of its three causes leave it empty at rc 0/);
   assert.match(noUndoAudit(), /c=\$\(git rev-parse --git-common-dir\)/);
-  assert.match(noUndoAudit(), /ls -l "\$c"\/refs\/stash "\$c"\/logs\/refs\/stash/);
-  assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash/);
+  assert.match(noUndoAudit(), /ls -l "\$c"\/refs\/stash "\$c"\/logs\/refs\/stash`/);
+  assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash`/);
 });
 
 test("the `unknown` path warns that a missing refs/stash file is not an empty stash", () => {
