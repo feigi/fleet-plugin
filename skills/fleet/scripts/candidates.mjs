@@ -195,7 +195,7 @@ const JQ =
   '  | unique;\n' +
   '\n' +
   '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
-  ' spec:((.body//"")|test("(?m)^#{2,}[ \\\\t]+User Stories[ \\\\t]*$")),\n' +
+  ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories\\\\s*$")),\n' +
   ' d:((.body//"")|depnums)}]\n';
 
 function query(label) {
@@ -299,7 +299,9 @@ function refuseIfCapped(rows, description) {
 // loud rather than silent.
 //
 // #65: two shapes the predicate leaves undecided by accident, now decided.
-// Depth is `#{2,}`, not `##` — matches at two or more `#`, not exactly two.
+// Depth is `#{2,6}`, not `##` — two or more `#`, not exactly two, and capped
+// where CommonMark caps an ATX heading, same as `depnums`' own `#{1,6}` above:
+// a line of seven `#` is not a heading and must not read as the signature.
 // to-spec's own `<spec-template>` is flat (`## Problem Statement`, `##
 // Solution`, `## User Stories`, `## Implementation Decisions` — nothing
 // nests), so widening costs nothing against real to-spec output. It closes a
@@ -311,7 +313,11 @@ function refuseIfCapped(rows, description) {
 // tagged). The separator between marker and text is `[ \t]+` — horizontal
 // whitespace only, not `\s+` — so a heading can never span a line break: a
 // body whose line is exactly `##` with `User Stories` starting the next
-// line no longer reads as the same heading.
+// line no longer reads as the same heading. The TRAILING class stays `\s*`:
+// `$` under `(?m)` already anchors the line end, so `\s*` there can only ever
+// eat whitespace before an anchor and can never manufacture a match — while
+// narrowing it to `[ \t]*` drops the `\r` of a CRLF body, which is what
+// GitHub's web textarea writes, and leaks that spec silently.
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase
@@ -330,7 +336,7 @@ function dropSpecs(rows, pass) {
     if (spec) {
       // "no silent caps" covers drops too — a filtered list that does not say
       // what it filtered is indistinguishable from a complete one.
-      console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (## User Stories) [${pass}]`);
+      console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (User Stories heading) [${pass}]`);
     } else {
       kept.push(rest);
     }

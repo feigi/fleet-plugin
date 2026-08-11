@@ -154,7 +154,7 @@ test("a drop from the no-label run is tagged [unfiltered] — the one pass tag n
   assert.deepEqual(rows.map((r) => r.n), [11]);
   // The closing `\]` is load-bearing: without it this is also satisfied by the
   // fallback pass's `[unfiltered (fallback)]`, the one tag already pinned above.
-  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered\]/);
+  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(User Stories heading\) \[unfiltered\]/);
 });
 test("near misses are kept — the predicate's shape is specified, not accidental", () => {
   // One fixture per dimension the regex commits to. Without these, every
@@ -173,29 +173,46 @@ test("near misses are kept — the predicate's shape is specified, not accidenta
     // `\s` spans the newline so this used to read as the same heading. Kept
     // is the fixed behaviour; `dropped #6` in a future run is the regression.
     ticket(6, "##\nUser Stories\n\nmarker and text on separate lines\n"),
+    // #65: both ends of the depth range. `#` is an ordinary ticket's h1 and the
+    // floor the regex's own name commits to — loosen `#{2,6}` to `#+` and this
+    // is what goes red. `#######` is past CommonMark's six-`#` cap, so it is not
+    // a heading at all and must not read as the signature; it pins the ceiling
+    // the way #7 below pins that the range does not stop at three.
+    ticket(10, "# User Stories\n\nan h1, not the signature depth\n"),
+    ticket(11, "####### User Stories\n\nseven hashes, past CommonMark's cap\n"),
   ]);
-  assert.deepEqual(rows.map((r) => r.n), [2, 3, 4, 5, 6]);
+  assert.deepEqual(rows.map((r) => r.n), [2, 3, 4, 5, 6, 10, 11]);
 });
 
-test("the signature heading is detected at any depth of two or more — #65", () => {
-  // to-spec's own <spec-template> is flat — every heading in it is `##` — so
-  // this costs nothing against real to-spec output. It closes a leak: a spec
-  // hand-nested or reformatted under a parent heading used to read as an
-  // ordinary ticket, the only line of defence stepped over silently. `####`
-  // pins that the predicate is unbounded above depth two, not merely widened
-  // to cover exactly three.
-  const { rows, stderr } = run([
+test("a spec heading is dropped at depth two through six, however separated and ended — #65", () => {
+  // Why the predicate widened at all — see candidates.mjs's spec-predicate
+  // comment. What this test adds is the shape of the range and its edges:
+  // `####` pins that it does not stop at three (the near-miss list above pins
+  // both ends), and #12/#9/#13 ride the same run to pin what may separate the
+  // marker from the text and what may end the line.
+  const { rows } = run([
     ticket(1, "### User Stories\n\nnested one level deeper\n"),
     ticket(7, "#### User Stories\n\nnested deeper still\n"),
+    // #65: CRLF. `$` under `(?m)` matches BEFORE the `\n`, so the line still
+    // ends in `\r` and a trailing class of `[ \t]*` cannot reach the anchor —
+    // this body stops matching and the spec leaks, silently, with nothing on
+    // stderr. GitHub's web textarea submits CRLF, so it is a real body shape,
+    // and this is the only line of defence. Narrow the trailing `\s*` and
+    // `dropped #12` is what goes missing.
+    ticket(12, "## User Stories\r\n\r\n1. As a user…\r\n"),
+    ticket(9, "## User Stories   \n\n1. As a user…\n"),
+    // #65: a TAB between marker and text. The class is `[ \t]`, but every other
+    // fixture here uses a space, so narrowing it to `[ ]` passed the whole repo
+    // suite green — the documented half was asserted in prose and pinned
+    // nowhere.
+    ticket(13, "##\tUser Stories\n\na tab between marker and text\n"),
     ticket(8, "## What to build\n\nx\n"),
   ]);
+  // #8 is a real kept ticket, so this is a POSITIVE assertion: a query that
+  // dies outright fails it too, which `deepEqual(…, [])` over a spec-only
+  // fixture could not. Every other row above must be absent, and the failure
+  // names whichever one leaked.
   assert.deepEqual(rows.map((r) => r.n), [8]);
-  assert.deepEqual(stderr.match(/dropped #\d+/g), ["dropped #1", "dropped #7"]);
-});
-
-test("trailing whitespace after the heading text still matches", () => {
-  const { rows } = run([ticket(9, "## User Stories   \n\n1. As a user…\n")]);
-  assert.deepEqual(rows.map((r) => r.n), []);
 });
 
 // Dependency-scan tests (#58). The forms below are the ones to-tickets
@@ -345,10 +362,11 @@ function findGojq() {
   return isGojq(candidate) ? candidate : null;
 }
 const GOJQ = findGojq();
+const SKIP_WITHOUT_GOJQ = { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" };
 
 test(
   "dependency forms hold under gojq, the engine gh actually applies — not only system jq",
-  { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" },
+  SKIP_WITHOUT_GOJQ,
   () => {
     const extraEnv = { JQ_BIN: GOJQ };
     // gojq REJECTING the program is the failure this test exists to catch. Read
@@ -377,14 +395,18 @@ test(
   },
 );
 
-// #65: the spec predicate's two decisions, checked against gojq specifically.
-// Both are plain ASCII (`#`, `[ \t]`), so unlike the dependency scan above
-// neither is expected to diverge between engines — this exists to confirm
-// that, not because a divergence was found; RE2 and Oniguruma read `#{2,}`
-// and a horizontal-only class the same way.
+// #65: the spec predicate's decisions, checked against gojq specifically —
+// gojq is what gh applies, so gojq is where a leak would actually happen.
+// Every fixture here is plain ASCII (`#`, `[ \t]`, `\r`), so unlike the
+// dependency scan above none is expected to diverge between engines; this
+// exists to confirm that, not because a divergence was found. The predicate's
+// trailing `\s*` is the one position that CAN diverge — `\s` is Unicode-aware
+// in Oniguruma and ASCII-only in RE2, the header comment's U+00A0 case — and
+// that divergence is unchanged by #65, so it stays pinned where it already is
+// rather than being restated here.
 test(
-  "the spec predicate holds under gojq — depth widened, split heading not spanned",
-  { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" },
+  "the spec predicate holds under gojq — depth widened, split heading not spanned, CRLF caught",
+  SKIP_WITHOUT_GOJQ,
   () => {
     const extraEnv = { JQ_BIN: GOJQ };
     // #9 is the body under test; #999 keeps the queue non-empty either way, so
@@ -400,10 +422,9 @@ test(
       assert.equal(r.status, 0, r.stderr);
       return !r.rows.some((row) => row.n === 9);
     };
-    assert.equal(isDroppedAsSpec("## User Stories\n\n1. As a user…\n"), true);
     assert.equal(isDroppedAsSpec("### User Stories\n\nnested one level deeper\n"), true);
     assert.equal(isDroppedAsSpec("##\nUser Stories\n\nsplit across lines\n"), false);
-    assert.equal(isDroppedAsSpec("## User Stories (draft)\n\ntrailing text\n"), false);
+    assert.equal(isDroppedAsSpec("## User Stories\r\n\r\n1. As a user…\r\n"), true);
   },
 );
 
@@ -454,8 +475,8 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
   // what tell pass 1's drop from pass 2's. Deliberately not a count: drops are
   // not deduplicated across passes (candidates.mjs:239, #133), so a raw
   // `grep -c 'dropped #'` reads 4 here whether or not the tags are present.
-  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(## User Stories\) \[label:ready-for-agent\]/);
-  assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(## User Stories\) \[unfiltered \(fallback\)\]/);
+  assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(User Stories heading\) \[label:ready-for-agent\]/);
+  assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(User Stories heading\) \[unfiltered \(fallback\)\]/);
   // Two queries actually RAN. The announcement above prints before the query,
   // so it pins the branch being entered, never that its answer shipped.
   assert.equal(stderr.match(/^\$ gh /gm).length, 2);
