@@ -85,9 +85,12 @@ function run(cmd, args) {
 // verdict failure, one layer further in (#269). `shape`, given, is
 // `(parsed) => string | null` — a reason the payload isn't what the caller
 // is about to read, or null when it's fine — checked here so each call site
-// declares what it expects instead of hand-rolling its own check. Matches
-// candidates.mjs:256 and ledger.mjs:338, the two siblings that already carry
-// this guard.
+// declares what it expects instead of hand-rolling its own, the way the two
+// siblings do: candidates.mjs's `!Array.isArray(rows)` and its {n,t,l,d,spec}
+// row check, ledger.mjs's "gh returned JSON that is not an issue list". Named
+// rather than cited by line, since both files move. Parity with them is
+// partial on purpose: those check the discriminating field of every row, the
+// row-level checks here refuse on object-ness alone — see the next comment.
 function runJson(cmd, args, shape) {
   const raw = run(cmd, args);
   let parsed;
@@ -104,10 +107,13 @@ function runJson(cmd, args, shape) {
 // Shared by every shape check below. The fields actually read off a row
 // (r.headSha, j.name, ...) are bare property reads, safe on any object even
 // one missing that field — undefined flows into a comparison or a String(),
-// never a throw. A `null`/array/primitive is what throws on the first read,
-// so that's what's worth refusing here, not each field's type — checking
-// e.g. a job's `conclusion` were a string would wrongly refuse a legitimate
-// in-progress job, whose conclusion is `null`.
+// never a throw. Only a `null` throws on that first read — an array, string,
+// number or boolean reads back `undefined` like any other missing field
+// (measured). Refusing all of them is still right: none is a row, and the
+// silent ones are the same failure one notch quieter, a wrong-shape reply
+// read as a field-less one. Object-ness is the refusal, not each field's
+// type — checking e.g. that a job's `conclusion` were a string would wrongly
+// refuse a legitimate in-progress job, whose conclusion is `null`.
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 const pr = arg("pr");
@@ -414,8 +420,14 @@ try {
     const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repo}/compare/${base}...${prHead}`]);
     if (cmpJson !== null) {
       const cmp = JSON.parse(cmpJson);
-      behind = cmp.behind_by;
-      vlog(`    behind_by=${behind} (status=${cmp.status})`);
+      // Shaped like every other gh read here (#269), but fail-SOFT: a compare
+      // reply without a numeric `behind_by` — a 404 body from the wrong host
+      // or base is the live case — leaves `behind` null, this block's
+      // documented unknown, instead of `undefined`, which JSON.stringify drops
+      // from the payload entirely, taking the contract below and its
+      // unknown-vlog with it. Still never dies: the probe stays advisory.
+      behind = typeof cmp?.behind_by === "number" ? cmp.behind_by : null;
+      vlog(`    behind_by=${behind} (status=${cmp?.status})`);
     }
   }
 } catch (e) {
