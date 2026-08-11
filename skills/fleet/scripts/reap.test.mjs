@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +96,28 @@ function unmergedGoneBranch(w, name, msg) {
   return sha;
 }
 
+/**
+ * A PATH dir whose `git` fails only `cherry`, matching the ticket's real repro:
+ * multi-line stderr, exit 128 (one unreadable loose object suffices in the
+ * wild). Everything else execs the real git, unshimmed.
+ */
+function cherryShim(t) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = cherry ]; then\n` +
+      `  echo "error: unable to open loose object deadbeefcafe: Permission denied" >&2\n` +
+      `  echo "fatal: revision walk setup failed" >&2\n` +
+      `  exit 128\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
 function runReap(cwd, args, envOverrides = {}) {
   const r = spawnSync("sh", [SCRIPT, ...args], {
     cwd,
@@ -141,22 +163,7 @@ test("a git cherry that dies is KEPT, never reaped — an unanswerable probe aut
   const w = repo(t);
   const sha = unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
 
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  // Fails only `git cherry`, matching the ticket's real repro: multi-line
-  // stderr, exit 128 (one unreadable loose object suffices in the wild).
-  // Everything else execs the real git, unshimmed.
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = cherry ]; then\n` +
-      `  echo "error: unable to open loose object deadbeefcafe: Permission denied" >&2\n` +
-      `  echo "fatal: revision walk setup failed" >&2\n` +
-      `  exit 128\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
+  const bin = cherryShim(t);
 
   const { code, json, stderr } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
 
@@ -175,4 +182,37 @@ test("a git cherry that dies is KEPT, never reaped — an unanswerable probe aut
 
   assert.equal(branchExists(w, "feature/onlyhere"), true, "the branch — and its only copy of the commit — must survive");
   assert.equal(git(w, "rev-parse", "feature/onlyhere"), sha, "the commit itself is untouched");
+});
+
+// The design spec's script-surface table states this script's exit-0 contract in
+// prose, and it spent the whole life of #264 asserting the bug as the behaviour:
+// "the merged check reads a `git cherry` that failed as 'no unmerged commits'
+// and reaps the branch". Fixing that is one edited row; this is the part that
+// keeps the next one from rotting silently — a reader trusting the table would
+// draw the opposite safety conclusion about a script settings.json's autoMode
+// allowlist runs unattended. Derived from a real run, never from a phrase typed
+// here: a hand-copied phrase drifts from the script exactly the way the row did.
+// Sibling pin, same table, same reason: no-undo-audit.test.mjs.
+test("the design spec's script-surface row carries the keep reason this script actually emits", (t) => {
+  const w = repo(t);
+  unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
+  const bin = cherryShim(t);
+
+  const { json } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+  // Everything up to the first colon: the label reap.sh chose, without git's
+  // own message, which is the machine's to vary and no doc can carry.
+  const label = json.kept[0].reason.split(":")[0].trim();
+  assert.match(label, /^cherry probe failed/, "fixture must reach the failed-probe keep, not some other one");
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  assert.ok(
+    row.includes(label),
+    `the spec row must quote the keep reason verbatim, and does not carry "${label}".\nrow: ${row}`,
+  );
 });
