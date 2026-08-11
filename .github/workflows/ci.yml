@@ -75,9 +75,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # .nvmrc is the single source of truth for the target runtime — the one
+      # the suite is developed and run against — so a version bump is a
+      # one-file edit instead of a literal drifting out of sync here.
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: .nvmrc
 
       # There is no build: this repo ships .mjs and .sh straight to the runtime.
       # `node --check` is the whole of it — the only thing that catches a syntax
