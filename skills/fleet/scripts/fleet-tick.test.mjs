@@ -309,6 +309,39 @@ test("CLI: a candidates.mjs that dies on its own refuses — Node exit 1 is not 
   assert.match(empty.stdout, /supply=0/);
 });
 
+test("CLI: candidates' exit 3 is a supply of 0, not an unknown one (#64)", () => {
+  // Exit 3 is "the query worked, rows came back, every one was a to-spec spec".
+  // Zero supply either way, so the tick must print it rather than refuse. The
+  // gate it goes through special-cased exit 1 alone, so an all-specs
+  // ready-for-agent queue — the case #64 exists for — fell through to the
+  // refusal and lost the WHOLE tick: main() computes supply before printing
+  // anything, so the reviewer and merge-bot rows died with it. Hence the two
+  // stdout assertions below, not just the status.
+  const allSpecs = runCli(LIVE, { candidates: `console.log("[]"); process.exitCode = 3;` });
+  assert.equal(allSpecs.status, 0);
+  assert.match(allSpecs.stdout, /supply=0/);
+  assert.equal(allSpecs.stdout.trim().split("\n").length, 3, "the whole tick must survive, not just the supply row");
+
+  // A non-`[]` payload is not a zero supply whatever code rides with it, so 3
+  // does not become a blanket "treat as empty".
+  const lying = runCli(LIVE, { candidates: `console.log("[{}]"); process.exitCode = 3;` });
+  assert.equal(lying.status, 2);
+  assert.equal(lying.stdout.trim(), "");
+  assert.match(lying.stderr, /supply unknown/);
+});
+
+test("CLI: a refusal carries candidates' own explanation, not just 'supply unknown'", () => {
+  // The reason candidates printed is the only text saying WHY, and it goes to a
+  // pipe nothing reads. Dropped, the operator is told a read failed when the
+  // read succeeded and named its own cause.
+  const r = runCli(LIVE, {
+    candidates: `console.error("dropped #10 — to-spec spec, not a ticket"); process.exitCode = 2;`,
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /supply unknown/);
+  assert.match(r.stderr, /dropped #10 — to-spec spec, not a ticket/);
+});
+
 test("CLI: a signal-killed candidates.mjs names the signal, not `exited null`", () => {
   // spawnSync leaves status null and puts the cause in signal, so a refusal
   // interpolating status alone names nothing. Fixed once at candidates.mjs's

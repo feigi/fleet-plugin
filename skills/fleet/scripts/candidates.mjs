@@ -363,7 +363,8 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // `limit` and the cap check would stop seeing a truncated list. Before the
 // emptiness test below, never after: a queue whose every row was filtered out
 // IS an empty queue — see #60. Telling that case apart from a genuinely empty
-// one, for a caller reading only the exit code, is #64 and still open.
+// one, for a caller reading only the exit code, is #64 — closed by exit 3 at
+// the foot of this file, which is what the raw count below is captured for.
 // Raw count captured just before the filter that can empty `rows` out, so
 // `allFilteredOut` below can tell "nothing came back" from "rows came back
 // and the filter ate them all". Reassigned wholesale in the fallback branch,
