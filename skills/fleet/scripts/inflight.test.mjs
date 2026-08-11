@@ -397,6 +397,14 @@ test("probe 2: a reachable origin with no matching branch still reports free", (
   assert.equal(r.code, 0);
   assert.equal(r.json.taken, false);
   assert.equal(r.json.evidence.remote, "");
+  // The disclosure bit for a field that legitimately found nothing. jrewritten
+  // short-circuits on empty input without forking `tr`, and the value it
+  // returns for that case is asserted nowhere else: every other *Rewritten
+  // assertion in this file sits on a non-empty field. So flipping the
+  // short-circuit's own `printf false` to `printf true` passes all 61 other
+  // tests — measured — and ships `"remoteRewritten":true` about a string no
+  // escaper ever looked at, which is #120's lie in a different slot.
+  assert.equal(r.json.evidence.remoteRewritten, false);
   assert.match(r.stderr, /no remote branch for #8/);
 });
 
