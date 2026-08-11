@@ -19,9 +19,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { createServer } from "node:net";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 
@@ -723,4 +724,66 @@ test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t)
     { cwd: repo, env: { ...env, LC_ALL: "en_US.UTF-8" }, encoding: "utf8" });
   assert.equal(r.status, 0, `a free ticket stays free, got: ${r.stderr}`);
   assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+// --- #92: probe 2 must never prompt and must not block indefinitely.
+//
+// Prompt suppression alone does not bound a hang: measured in the issue, a
+// stalled ssh transport blocks identically with and without
+// GIT_TERMINAL_PROMPT=0 (killed at 8s, rc 142 either way). So the case that
+// actually exercises the fix is a listener that accepts the TCP connection
+// and then says nothing back — the ssh banner exchange never completes.
+//
+// A real listener, not a shimmed binary: the fix bounds the CONNECTION, and
+// only a genuine stall proves that. It carries its own spawnSync timeout as a
+// backstop so a regression here reddens loudly instead of hanging the suite.
+test("probe 2: a transport that connects and then never answers still terminates, exit 2", async (t) => {
+  const server = createServer((socket) => { /* accept, hold open, send nothing back */ });
+  t.after(() => new Promise((res) => server.close(res)));
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  const port = server.address().port;
+
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `ssh://git@127.0.0.1:${port}/x/y.git`);
+
+  const started = Date.now();
+  // 45s: comfortably above the ~10s ConnectTimeout the fix sets (measured
+  // locally: "Connection timed out during banner exchange" at ~10.0s against
+  // this exact fixture), but far short of leaving the suite to hang on a
+  // regression that drops the bound entirely.
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8", timeout: 45_000 });
+
+  assert.notEqual(r.signal, "SIGTERM",
+    `spawnSync's own 45s backstop fired — the script's bound is gone: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+  assert.ok(Date.now() - started < 45_000, "must terminate on its own bound, not the test's backstop");
+});
+
+// The other half: a user's own configured ssh command is honoured, not
+// replaced. `GIT_SSH_COMMAND` here stands in for a command a user already set
+// (a custom identity file, a proxy) — the stub logs its own argv and exits,
+// so the case is deterministic and touches no network at all: what git
+// actually invokes is the assertion.
+test("probe 2: an existing GIT_SSH_COMMAND is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const root = dirname(repo);
+  const log = join(root, "ssh-stub.log");
+  const stub = join(root, "user-ssh-stub.sh");
+  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
+  chmodSync(stub, 0o755);
+
+  // A marker option stands in for whatever the user's own command carries —
+  // its presence in the log proves the script appended rather than replaced.
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, GIT_SSH_COMMAND: `${stub} -o UserMarker=1` }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  const invoked = readFileSync(log, "utf8");
+  assert.match(invoked, /UserMarker=1/, "the user's own configured command must survive, not be replaced");
+  for (const opt of ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=5", "ServerAliveCountMax=2"]) {
+    assert.ok(invoked.includes(opt), `bound option missing from the invoked command: ${opt}`);
+  }
 });

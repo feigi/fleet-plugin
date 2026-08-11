@@ -151,7 +151,41 @@ echo "\$ git ls-remote --heads origin" >&2
 # raw, so a folded-in host-key notice really would read as a branch, whereas the
 # awk below reduces such a line to a word no numeric segment can match. git's
 # own wording is more use on the terminal anyway.
-if ! heads=$(git ls-remote --heads origin); then
+#
+# This is the one network call in the script (probe 1 goes through `gh`, probe
+# 3 never leaves disk), and unattended it must neither prompt nor hang (#92).
+#
+# GIT_TERMINAL_PROMPT=0 covers git's own username/password prompt.
+# Unconditional, not gated on stdin being a tty: this script has a 0/1/2
+# contract, and a human with no cached credential is better served by exit 2
+# naming what is unknown than by a prompt a machine caller never answers.
+#
+# A suppressed prompt is not a bound: measured, a stalled transport blocks
+# identically with or without GIT_TERMINAL_PROMPT=0 (killed at 8s, rc 142
+# either way) — prompting and hanging are different failures. `timeout(1)`
+# would be the obvious bound but is GNU coreutils, absent by default here
+# (verified: neither `timeout` nor `gtimeout` on this host's PATH), so the
+# bound comes from git's own transport knobs.
+#
+# ssh: BatchMode=yes refuses any interactive prompt (host key, passphrase)
+# rather than hanging on one, so it doubles as prompt suppression for the ssh
+# case. ConnectTimeout bounds the TCP handshake; the ServerAlive pair bounds a
+# connection that completed the handshake and then went quiet — the stalled
+# transport measured above. 10s to connect and 2x5s of silence: generous
+# enough for a slow-but-working link, short enough that a stalled probe does
+# not hold a fleet slot for minutes. Retune here if either stops holding.
+#
+# A user's own ssh command is honoured, not replaced — options land on top of
+# whatever GIT_SSH_COMMAND or core.sshCommand already says (falling back to
+# plain "ssh"), so a configured identity file or proxy command still runs.
+#
+# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
+# that goes quiet — abort if it sits under 1000 bytes/s for 10s, the http
+# counterpart to ssh's ServerAlive pair above.
+base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
+if ! heads=$(GIT_TERMINAL_PROMPT=0 \
+    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-${base_ssh:-ssh}} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin); then
   die "git ls-remote failed, so whether #$n has a remote branch is unknown"
 fi
 # One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
