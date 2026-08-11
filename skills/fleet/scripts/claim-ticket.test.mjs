@@ -328,7 +328,18 @@ test("runner: a bare invocation runs .spec. files, which node's own discovery do
 // first and `-type f` drops the second. A repo whose only committed test files
 // are vendored or symlinked therefore does reach the runner, and gets the
 // emptiness guard's `no test files under .` at exit 1 — a loud refusal, never
-// a vacuous pass.
+// a vacuous pass. Pinned here rather than asserted: the block above used to
+// claim this state was unreachable, and the only `no test files under` pins in
+// the file were an explicit directory argument and two `doesNotMatch`. Vendored
+// is the cheaper of the two shapes to build — the symlink one needs a mode
+// 120000 entry that `apply()` cannot express — and both end in the same guard.
+// Pre-fix this is the vacuous green #97 exists to refuse: node's own discovery
+// skips `node_modules`, finds nothing, and exits 0 over `tests 0`.
+test("runner: a bare invocation refuses a repo whose only test files are vendored", () => {
+  const r = apply({ "node_modules/pkg/v.test.mjs": PASSES }).run();
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /no test files under \./);
+});
 
 // The blocker named in the issue body (defaulting to "." would sweep vendored
 // tests) was discharged by #109's node_modules exclusion before this landed.
