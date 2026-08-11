@@ -196,7 +196,7 @@ exec '${REAL_TR}' "$@"
   delete env.GIT_WORK_TREE;
   delete env.GH_ISSUE_ERR;
   if (issueErr) env.GH_ISSUE_ERR = issueErr;
-  return { repo, env };
+  return { repo, env, bin };
 }
 
 function inflight(n, opts, t) {
@@ -763,9 +763,11 @@ test("probe 2: a transport that connects and then never answers still terminates
 // The stub the next three tests share: it logs its own argv and exits, so the
 // cases are deterministic and touch no network at all — what git actually
 // invokes is the assertion.
-const sshStub = (dir) => {
-  const log = join(dir, "ssh-stub.log");
-  const stub = join(dir, "user-ssh-stub.sh");
+// Named `ssh` and dropped into the fixture's `bin` when the tier under test is
+// one where the script picks the program itself — `bin` is first on PATH.
+const sshStub = (dir, name = "user-ssh-stub.sh") => {
+  const log = join(dir, `${name}.log`);
+  const stub = join(dir, name);
   writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
   chmodSync(stub, 0o755);
   return { stub, log };
@@ -844,6 +846,43 @@ test("probe 2: a legacy GIT_SSH wrapper is honoured, with the bound options adde
 
   const r = spawnSync("sh", [SCRIPT, "8"],
     { cwd: repo, env: { ...env, GIT_SSH: stub }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
+});
+
+// The two tiers where the script names the program itself rather than
+// inheriting one. Every test above supplies its own ssh command, so none of
+// them can see a regression that leaves the program EMPTY — git would then get
+// a command line starting with `-o` and die with "-o: command not found", and
+// the suite would stay green because "could not look" is exit 2 either way.
+//
+// Nothing configured at all: the last tier of the fallback.
+test("probe 2: with no ssh command configured, plain ssh carries the bound options", (t) => {
+  const { repo, env, bin } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { log } = sshStub(bin, "ssh");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
+});
+
+// core.sshCommand SET BUT EMPTY — the case the `-n` guard exists for, and the
+// one that makes this tier irreducible to a single `$(… || echo ssh)`
+// substitution: `git config --get` exits 0 with empty output for an empty
+// value, so an exit-status test reads "configured" and hands git no program.
+// Measured, that broken form passed the whole suite before this test existed.
+test("probe 2: an empty core.sshCommand falls back to plain ssh, not to an empty program", (t) => {
+  const { repo, env, bin } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+  git(repo, env, "config", "core.sshCommand", "");
+
+  const { log } = sshStub(bin, "ssh");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
   assertBoundOptions(log);
