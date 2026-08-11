@@ -110,6 +110,14 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Exit **0** proved, **1** disproved, **2** the script could not evaluate the claim at all — the merge is unreachable from `origin/main`, is not a merge commit, or an argument does not resolve. Treat 2 as "ask a human", not as a disproof.
 
+   **Drop `in-progress` from every issue this PR closes** — the merge is the only point where the ticket number and the fact of completion are known together, and nothing else clears it:
+
+   ```bash
+   ~/.claude/skills/fleet/scripts/release-merged-claim.sh <pr> --apply
+   ```
+
+   Exit 0 done or nothing to close, **1 a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it**: a merged ticket that keeps the label is invisible the moment it is reopened. Exit 2 means the PR was not actually MERGED yet — call this only after the merge is confirmed at the top of this step.
+
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
 
 **Staleness fires *within* a wave, and it compounds.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Any behind-count handed to you at dispatch is already expired.
@@ -118,7 +126,7 @@ Measured over one three-merge wave: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / label-drop-failed-#X / blocked after the pass.
 
 ## No-undo audit (before every rebase)
 
