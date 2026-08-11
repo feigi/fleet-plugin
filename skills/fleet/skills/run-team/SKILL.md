@@ -249,8 +249,8 @@ number, worktree abs path, branch, and each of these verbatim:
 > effectively unrecoverable.
 
 > Your ticket names the cases it was written from. **Before implementing, enumerate
-> the other members of that same class and say which you cover and which you
-> deliberately leave** — a guard on one path has siblings, a predicate has other
+> every member of that class — including any the ticket names only in passing — and
+> say which you cover and which you deliberately leave** — a guard on one path has siblings, a predicate has other
 > inputs, a check on a directory has subdirectories. Fixing exactly the named
 > cases is how a fix ships without closing its own ticket.
 >
@@ -258,16 +258,19 @@ number, worktree abs path, branch, and each of these verbatim:
 > A case the body names in passing is still a named case, and enumerating from
 > first principles is how you miss it. Then ask the other half: **what can this
 > change wrongly REFUSE?** A new guard's false-positive class is not its
-> false-negative class, and a suite that only feeds it valid input pins neither.
+> false-negative class, and a suite that only feeds it valid input pins neither —
+> so leave one test behind that feeds it input it must ACCEPT.
 
 Both blocks are load-bearing, for different reasons. The enumerate-the-class block
 answers a signature measured four times in one run: each implementer fixed exactly
 the cases its ticket named and missed an adjacent one of the same class — a CRLF
 body after fixing depth and split headings, a symlinked worktree after fixing locked
 and regular-file ones, an unreadable `refs/heads/<type>/` after fixing `refs/heads`
-itself, a bracketed file path after fixing typos and vendored ones. Three of the
-four did not close their own ticket. Every one was caught by review, at review
-cost, which is 3x the implementation it was checking.
+itself, a bracketed file path after fixing typos and vendored ones. **All four
+failed to close their own ticket** — #65's acceptance criterion went unmet, and
+the other three left the named defect reachable by a sibling spelling. Every one
+was caught by review, at review cost, which runs 3-5x the implementation it
+checks.
 
 The two follow-up sentences are not padding — they are the fourth case, which
 shipped WITH the first paragraph in its prompt. It missed a shape its own ticket
