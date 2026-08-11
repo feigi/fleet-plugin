@@ -201,11 +201,16 @@ function prState() {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
   const mergeQueue = prs.filter((p) => p.labels.some((l) => l && l.name === "ready-to-merge")).length;
-  // Everything else open is queued for review or under review. Deliberately
-  // label-derived and nothing more: which of them a reviewer has already
-  // claimed is controller state, and over-counting here holds the refill —
-  // the #3 failure — so this stays the one number a controller can audit at a
-  // glance from `gh pr list`.
+  // Everything else open is queued for review or under review.
+  //
+  // ponytail: label-only backlog. A PR already reviewed, ruled and merely
+  // waiting on CI counts here too, so the gate can hold the refill EARLIER
+  // than run-team's own definition ("queued with no reviewer slot") — never
+  // later. Narrowing it needs per-PR review state, which lives in the
+  // controller's head and not in the repo. Upgrade path if the over-count is
+  // measured to throttle implementers in practice: a `--review-backlog <n>`
+  // override, on the same "the controller states what only it knows" contract
+  // as the live counts above.
   return { mergeQueue, reviewBacklog: prs.length - mergeQueue };
 }
 

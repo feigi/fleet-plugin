@@ -307,7 +307,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
   member will touch that PR, so no push is coming and nothing will wake you.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
-- **Merge-bot wave reports done** → reap merged branches and worktrees (below).
+- **Merge-bot wave reports done** → reap merged branches and worktrees (below),
+  then run the reconcile (below).
 - **The run ends, or the maintainer says drain** → release every claim that never
   became a PR (below). Nothing else in the loop fires for those.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`); the
@@ -320,7 +321,7 @@ multi-select**, and **a judgement the evidence cannot settle**.
   one only if it genuinely is. **This edge fires on the fix-applier's own push, so
   it is exactly where a ruling you still owe it is outstanding — never dispatch off
   it while you do.** Hand the ruling over, wait for the final report, then
-  dispatch (below).
+  dispatch (below). Then run the reconcile (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -343,6 +344,34 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
   guard here once three or more `class=routine` PRs have been ruled since the
   last check; nothing else in the loop owns it.
+
+**Run the reconcile on the merge-side edges.** Both edges marked above —
+**merge-bot wave reports done** and **Monitor: CI run completes** — end with one
+invocation of the executable reconcile, and you act on what it prints:
+
+```
+~/.claude/skills/fleet/scripts/fleet-tick.mjs \
+  --implementers <live> --reviewers <live> --merge-bots <live> --pool <n> \
+  [--implementer-cap 2] [--reviewer-cap 5]
+```
+
+It prints `actual/target` and an explicit ACTION for implementers, reviewers and
+the merge bot, with the whole Queue depth guard table below applied in code. The
+live counts and the pool are yours to state and it **refuses rather than
+defaulting them**: nothing in the repo records liveness — a ledger row is a
+dispatch, and that token outlives the member's death, its bail and the merge —
+so a default would turn a forgotten flag into either a dispatch past the cap or
+a permanent hold, silently. Review backlog, merge queue and supply it reads
+itself.
+
+Why these two edges: a merge cascade is a firehose of merges, CI greens and
+rebases that holds your attention on the merge side while the implementer side
+drains to 0 and stays there — 0 implementers emit no completion event, so the
+refill edge is dead. Piggybacking the level-check onto events you are already
+handling is what makes that drain visible. **It is edge-triggered, so it does
+not cover a fully drained queue with no incoming events at all** — no members
+and no open PRs means nothing wakes you, and the periodic resync that would is
+not built (#3, deferred).
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
@@ -739,6 +768,11 @@ ledger rows in the same step. See references/reaping.md.
 - **supply** — open `ready-for-agent` surviving in-flight scan and the decided?
   check. A queue of undecided tickets is zero supply.
 - **review backlog** — PRs verified and queued with no reviewer slot.
+  `fleet-tick.mjs` counts every open PR without `ready-to-merge`, which is that
+  plus the ones already under review or waiting on CI. The wider read, because
+  narrowing it needs per-PR review state that lives in your head and not in the
+  repo — so it can hold the refill earlier than the definition above, never
+  later.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
 runs 20-40, because each fans out up to six specialists. On the default path
@@ -764,12 +798,25 @@ edge-triggered loop that only refills on completion stalls silently the moment t
 queue empties, because 0 implementers emit no completion event. With pool 0 the
 table below governs — re-shortlist and ask, do not dispatch un-ticked supply.
 
+**Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
+prints per-role `actual/target` and an explicit ACTION with the backlog gate
+above and every row of the table below already applied; the merge-side edges in
+Phase 3 name the flags. The deficit is then *computed, not remembered*, which is
+the whole point: a table you must remember to consult is one you will not
+consult under a merge-side event storm, and that is how implementers reached
+0/target with pool 1 and ~57 `ready-for-agent` in supply while nobody noticed
+(#3). What follows stays here as the explanation of what the script decides —
+never as a second, hand-run copy of it.
+
 | pool | supply | action |
 |---|---|---|
 | ≥ 1 | — | dispatch from pool, silent — *unless* review backlog ≥ 2 |
 | 0 | ≥ cap | re-shortlist, ask the maintainer to tick |
-| 0 | < cap | re-shortlist **and** suggest `/triage` |
+| 0 | 0 < supply < cap | re-shortlist **and** suggest `/triage` |
 | 0 | 0 | suggest `/triage`, hold implementer slots idle |
+
+The backlog gate outranks all four rows: at backlog ≥ 2 the answer is hold, and
+re-shortlisting to enable a dispatch you are holding buys nothing.
 
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
 not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
