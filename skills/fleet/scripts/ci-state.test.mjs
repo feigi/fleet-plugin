@@ -405,3 +405,87 @@ test("--base given a whitespace-only value dies rather than comparing against th
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--base needs a value/);
 });
+
+// --- #269: parsing a gh reply is not the same as it being the right shape --
+// A reply that parses cleanly but is the wrong shape (an error object where
+// an array is expected, a run view missing its jobs) previously flowed on
+// unchecked until the first dereference threw — and an uncaught throw exits
+// 1, this script's code for "not bound-green". Each case below pins the
+// class: exit 2, naming the query and the field, before the crash site is
+// ever reached. #232's caution is why the row-level cases exist too — a
+// guard that checks the array but not its elements is itself a partial
+// guard, and jobs/runs rows are read (`j.name`, `r.headSha`) unguarded.
+
+test("PR info missing headRefOid: exit 2 naming the field, never a silent \"undefined\" verdict later", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    prView: JSON.stringify({ headRefName: BRANCH, state: "OPEN", mergeStateStatus: "CLEAN" }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /pr view/);
+  assert.match(r.stderr, /headRefOid/);
+  assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
+});
+
+test("run list returns an error object, not an array: exit 2, never the crash from runs.filter", () => {
+  // The ticket's own reproduction: gh exits 0 printing an error body where
+  // --json databaseId,headSha,... normally produces an array.
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify({ error: "rate limited" }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /run list/);
+  assert.match(r.stderr, /expected an array of runs/);
+});
+
+test("run list row is null: exit 2, never the crash reading r.headSha off null", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([null]),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /run list row 0 is not an object/);
+});
+
+test("run view missing jobs array: exit 2 naming the field, never silently read as zero jobs", () => {
+  // No `jobs` key at all — the shape an error-ish or partial run view takes.
+  // Unguarded, (view.jobs || []) silently becomes [], and the run reads as
+  // "genuinely missing its expected jobs" instead of "could not be read".
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /run view/);
+  assert.match(r.stderr, /missing jobs array/);
+});
+
+test("a job entry in the run view is null: exit 2, never the crash reading j.name off null", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ jobs: [null], attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /job entry 0 is not an object/);
+});
+
+// The false-positive class the guard must NOT create: an in-progress job's
+// `conclusion` is legitimately `null`, not a missing/wrong-shaped field. If
+// the shape check validated field types instead of just object-ness, this
+// well-formed reply would itself start being refused.
+test("in-progress job with conclusion:null is accepted — not refused as malformed shape", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({
+      jobs: [{ name: "check", status: "in_progress", conclusion: null }],
+      attempt: 1,
+      status: "in_progress",
+      conclusion: null,
+      headSha: PR_HEAD,
+    }),
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr); // not-green (still running) — never exit 2
+  assert.equal(r.payload.verdict, "not-green");
+  assert.doesNotMatch(r.stderr, /not the expected shape/);
+});

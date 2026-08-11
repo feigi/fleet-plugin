@@ -78,14 +78,37 @@ function run(cmd, args) {
 // fails OPEN: gh can exit 0 with a non-JSON body (a proxy's HTML error page is
 // the measured case) and the uncaught SyntaxError exits 1 — which in THIS
 // script is the code for not-green, so a crash renders as a CI verdict.
-function runJson(cmd, args) {
+//
+// The parse succeeding is not the shape succeeding: an error object where an
+// array of runs is expected, a run view missing its jobs, parse cleanly and
+// flow on unchecked until the first dereference throws — same exit-1-as-
+// verdict failure, one layer further in (#269). `shape`, given, is
+// `(parsed) => string | null` — a reason the payload isn't what the caller
+// is about to read, or null when it's fine — checked here so each call site
+// declares what it expects instead of hand-rolling its own check. Matches
+// candidates.mjs:256 and ledger.mjs:338, the two siblings that already carry
+// this guard.
+function runJson(cmd, args, shape) {
   const raw = run(cmd, args);
+  let parsed;
   try {
-    return JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${raw.trim().slice(0, 120)}`);
   }
+  const problem = shape?.(parsed);
+  if (problem) die(`${cmd} ${args[0]} ${args[1]} returned JSON but not the expected shape — ${problem}`);
+  return parsed;
 }
+
+// Shared by every shape check below. The fields actually read off a row
+// (r.headSha, j.name, ...) are bare property reads, safe on any object even
+// one missing that field — undefined flows into a comparison or a String(),
+// never a throw. A `null`/array/primitive is what throws on the first read,
+// so that's what's worth refusing here, not each field's type — checking
+// e.g. a job's `conclusion` were a string would wrongly refuse a legitimate
+// in-progress job, whose conclusion is `null`.
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 const pr = arg("pr");
 if (!pr) {
@@ -104,10 +127,16 @@ const workflow = arg("workflow") || "CI";
 const declareNoCi = has("declare-no-ci");
 
 // --- PR facts -------------------------------------------------------------
-const prInfo = runJson("gh", [
-  "pr", "view", String(pr),
-  "--json", "headRefName,headRefOid,state,mergeStateStatus",
-]);
+const prInfo = runJson(
+  "gh",
+  ["pr", "view", String(pr), "--json", "headRefName,headRefOid,state,mergeStateStatus"],
+  (v) => {
+    if (!isObject(v)) return "expected an object";
+    if (typeof v.headRefName !== "string" || !v.headRefName) return "missing headRefName (the branch)";
+    if (typeof v.headRefOid !== "string" || !v.headRefOid) return "missing headRefOid (the head sha)";
+    return null;
+  },
+);
 const branch = prInfo.headRefName;
 const prHead = prInfo.headRefOid;
 vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
@@ -286,13 +315,15 @@ if (noCi) {
       : `no workflows configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
   );
 } else {
-  const runs = runJson("gh", [
-    "run", "list",
-    "--branch", branch,
-    "--workflow", workflow,
-    "--limit", "30",
-    "--json", "databaseId,headSha,status,conclusion,event,createdAt",
-  ]);
+  const runs = runJson(
+    "gh",
+    ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt"],
+    (v) => {
+      if (!Array.isArray(v)) return "expected an array of runs";
+      const bad = v.findIndex((r) => !isObject(r));
+      return bad === -1 ? null : `run list row ${bad} is not an object`;
+    },
+  );
   const matching = runs
     .filter((r) => r.headSha === prHead)
     .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
@@ -304,10 +335,16 @@ if (noCi) {
     runId = chosen.databaseId;
     // Re-query the run itself. The list's conclusion is a second read from a
     // different moment; the authoritative job list is this one.
-    const view = runJson("gh", [
-      "run", "view", String(runId),
-      "--json", "jobs,attempt,status,conclusion,headSha",
-    ]);
+    const view = runJson(
+      "gh",
+      ["run", "view", String(runId), "--json", "jobs,attempt,status,conclusion,headSha"],
+      (v) => {
+        if (!isObject(v)) return "expected an object";
+        if (!Array.isArray(v.jobs)) return "missing jobs array";
+        const bad = v.jobs.findIndex((j) => !isObject(j));
+        return bad === -1 ? null : `job entry ${bad} is not an object`;
+      },
+    );
     attempt = view.attempt;
     runHeadSha = view.headSha;
     status = view.status;
