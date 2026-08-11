@@ -66,6 +66,15 @@ test("the `unknown` path sends the operator to both stash files, via the common 
   assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash`/);
 });
 
+// `----------` alone is under-inclusive: an unreadable logs/refs DIRECTORY
+// (`chmod 000 .git/logs/refs`) produces the same `unknown`, but `ls` fails
+// before it prints a mode column — `ls: .git/logs/refs/stash: Permission
+// denied`, with `refs/stash` beside it at a healthy `-rw-r--r--`. Both halves
+// of the tell are pinned, or the second silently rots back out.
+test("the fault tell covers a Permission denied from `ls`, not only a `----------` mode", () => {
+  assert.match(noUndoAudit(), /a mode of `----------` on either, or a `Permission denied` from `ls` itself, is the fault,/);
+});
+
 test("the `unknown` path warns that a missing refs/stash file is not an empty stash", () => {
   assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
 });
