@@ -224,6 +224,41 @@ for arg do
     [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
     set -- "\$@" \$files
   else
+    # find only ever sees what a directory argument expanded to; a bare file
+    # or glob argument reaches here unchecked, and node decides on its own
+    # whether to run it. The two disagree in three ways, and node's discard
+    # is silent whenever anything else in argv resolves (#100) — so each one
+    # is validated here before it can pass through, or refused loudly.
+    case "\$arg" in
+      *[*?[]*)
+        # Shell globbing is off (\`set -f\` above), so an argument like this
+        # reached the shell unexpanded on purpose — the deliberately
+        # supported quoted-glob form (\`./agent-test 't/*.test.mjs'\`). Only
+        # node can expand it, so it passes through unvalidated. The residual:
+        # a glob that matches nothing is still discarded by node silently,
+        # and this runner has no way to expand it to check, and node does
+        # not report what it ran. That is this guard's honest ceiling, not a
+        # gap in it — record it here rather than paper over it.
+        ;;
+      node_modules/*|./node_modules/*)
+        # Mirrors node's own rule rather than guessing at it: node refuses an
+        # argv entry only when its RELATIVE form starts with \`node_modules/\`
+        # — a deeper segment (\`t/node_modules/pkg/x.test.mjs\`) or an absolute
+        # path is NOT excluded and node runs it (measured, Node v26.5.0).
+        # Passing this spelling through would be the same silent drop as the
+        # typo case below, just for a different reason.
+        echo "agent-test: \$arg is under node_modules — node discards it silently, not a test failure" >&2
+        exit 1
+        ;;
+      *)
+        # A non-directory, non-glob argument that does not exist is a typo.
+        # Alone it is loud already (node's own \`Could not find\`, exit 1) —
+        # this is for the mixed case, where node drops it and runs the rest,
+        # and the runner would otherwise report a pass for a suite that
+        # never ran.
+        [ -e "\$arg" ] || { echo "agent-test: \$arg does not exist" >&2; exit 1; }
+        ;;
+    esac
     set -- "\$@" "\$arg"
   fi
 done

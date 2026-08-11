@@ -291,6 +291,73 @@ test("runner: a vendored directory argument refuses however it is spelled", () =
   }
 });
 
+// #100: node counts argv separately from the runner's own `find`, and a file
+// or glob argument reaches node with no check of its own. Node drops an
+// argument it cannot resolve and exits non-zero only when it refuses every
+// argument in argv — mixed with anything valid, the discard is silent and
+// the runner used to exit 0 having run less than it was asked. These pin the
+// three shapes node discards: a typo, a file under `node_modules`, and (the
+// one deliberately left alone) an unmatched glob.
+
+// The repro from the issue itself: alone a typo is loud (node's own
+// `Could not find`, exit 1) — mixed with a real file, node ran the one file
+// and exited 0, and the runner reported a pass for a suite that only half
+// ran. Named, not just refused: `no test files under` or a bare non-zero
+// would both send a reader after the wrong bug.
+test("runner: a typo'd path mixed with a valid one refuses and names the typo", () => {
+  const r = apply(SUITE).run("t/a.test.mjs", "t/typo.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /t\/typo\.test\.mjs does not exist/);
+});
+
+test("runner: a typo'd path alone still refuses", () => {
+  const r = apply(SUITE).run("t/typo.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /t\/typo\.test\.mjs does not exist/);
+});
+
+// #125's surviving case, per the issue's "Agent Brief": a vendored *file*
+// argument bypasses the directory branch entirely (that guard only ever sees
+// what `[ -d ]` is true for), so node — not this shim — is what would drop
+// it, and only when something else in argv resolves. Top-level, not nested
+// under `t/`: node's own exclusion fires only when the argument's RELATIVE
+// form STARTS WITH `node_modules/` (measured above, and in claim-ticket.sh's
+// own comment on the directory branch) — a deeper segment is a case node
+// runs fine and is out of scope here. Written into the worktree rather than
+// through `repo()` for the same reason as the nested node_modules test
+// above: this is what an unhoisted install produces, not something anyone
+// commits.
+test("runner: a file path under a vendored directory, mixed with a valid one, refuses", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /node_modules\/pkg\/v\.test\.mjs is under node_modules/);
+});
+
+// The deliberately preserved escape hatch: `set -f` above stops the *shell*
+// from touching this, so a literal `*` reaches the runner exactly as the
+// glob-detection guard requires — spawnSync never invokes a shell, so this
+// is the same argv a member's own shell produces for a quoted glob. Only
+// node can expand it, and here it matches real files, so it must still run
+// them rather than being refused as "does not exist".
+test("runner: a quoted glob argument still runs, unexpanded by the shell", () => {
+  const r = apply(SUITE).run("t/*.test.mjs");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
+});
+
+// A valid mix of both argument shapes the passthrough branch and the
+// directory branch each handle — neither new guard may refuse an argument
+// that was never in question.
+test("runner: a mixed argv of files and directories still runs everything", () => {
+  const r = apply(SUITE).run("t/a.test.mjs", "t/nested");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
+});
+
 // #97: a bare invocation must go through the same expansion as an explicit
 // ".", not fall through to node's own default discovery. `for arg do` with no
 // `in` clause iterates "$@", so on an empty argv the loop body never ran and
