@@ -322,21 +322,40 @@ test("runner: a bare invocation runs .spec. files, which node's own discovery do
 // A repo with zero test files anywhere never reaches this runner at all —
 // derive-testcmd.sh refuses at emit time before a runner is written, pinned
 // by "runner: no scripts.test and no test files refuses rather than passing
-// vacuously" above. Nothing about that guard changes here: "." at runtime
-// always contains at least the file(s) that made the emit guard pass.
+// vacuously" below. Nothing about that guard changes here — and where the two
+// disagree, they disagree safely: the emit guard greps `git ls-tree`, which
+// excludes neither `node_modules` nor symlinks, while this walk prunes the
+// first and `-type f` drops the second. A repo whose only committed test files
+// are vendored or symlinked therefore does reach the runner, and gets the
+// emptiness guard's `no test files under .` at exit 1 — a loud refusal, never
+// a vacuous pass.
 
 // The blocker named in the issue body (defaulting to "." would sweep vendored
-// tests) was discharged by #109's node_modules prune before this landed.
+// tests) was discharged by #109's node_modules exclusion before this landed.
 // Confirm the defaulted path actually goes through that prune rather than
 // bypassing it some other way.
+// Both fixture choices carry the pin; neither is decoration. The `.spec.`
+// file is what makes the count discriminate #97 — SUITE alone reads `pass 6`
+// under the pre-fix bare `node --test` too, since node's own discovery
+// matches every `.test.mjs` name in it and already skips node_modules, so a
+// fixture pinning "6" here is exactly the hollow one the comment above
+// warns about. And the vendored file is NESTED rather than sitting at the
+// worktree root because node refuses an argv entry whose relative path
+// starts with `node_modules/`, dropping it silently while the rest of argv
+// resolves (#100). At the root that refusal stands in for the prune:
+// measured with the prune deleted, a root-level fixture still reads
+// `pass 7` and still exits 0, so the assertion cannot tell this shim's walk
+// from node's own behaviour. Nested, only the prune keeps the file out.
+// `pass 7` rather than `pass 8`, over a vendored test that fails on
+// purpose, is what says it ran.
 test("runner: a bare invocation excludes vendored tests under node_modules", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules");
+  const a = apply({ ...SUITE, "t/d.spec.mjs": PASSES });
+  const vendor = join(a.wt, "t", "node_modules");
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), 'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n');
   const r = a.run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 6$/m);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m);
 });
 
 // Directories are only rewritten for `node --test`. Every other entrypoint is
