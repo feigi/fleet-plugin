@@ -1,0 +1,92 @@
+#!/bin/sh
+# Drop `in-progress` from every issue a merged PR closes. The merge-side half
+# of the label's lifecycle: claim-ticket.sh adds it, release-ticket.sh drops it
+# on a bail, this drops it on a merge. #170.
+#
+# Single writer, per the #170 ruling: the merge is the only moment the ticket
+# number and the fact of completion are known together, so only a PROVEN merge
+# triggers this — never reap (branches, not tickets), never a repo automation
+# (no attribution). Call this from run-merge-bot.md's step 4, after
+# prove-merge.sh, never before: `closingIssuesReferences` reflects `Closes #N`
+# syntax regardless of merge state, and the claim has not ended until the
+# merge lands.
+#
+# Dry-run by default; --apply mutates the tracker. Exit 0 done (or dry run),
+# 1 one or more removals failed — REPORT THIS, never swallow it: a merged
+# ticket that keeps the label is a future invisible ticket, 2 could not even
+# tell what this PR closes.
+set -eu
+
+NAME=release-merged-claim
+die() { echo "$NAME: $1" >&2; exit 2; }
+
+[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: release-merged-claim.sh <pr> [--apply]"
+pr=$1
+case "$pr" in ''|*[!0-9]*) die "pr must be a number, got '$pr'";; esac
+case "${2:-}" in
+  ''|--apply) ;;
+  *) die "unknown argument '$2' — the only option is --apply";;
+esac
+apply=false
+[ "${2:-}" = "--apply" ] && apply=true
+
+# MERGED, not just "closed" — a PR closed without merging must never reach the
+# loop below. Reading state before closingIssuesReferences means this refusal
+# fires before either call that follows can hand the caller anything to act on.
+echo "\$ gh pr view $pr --json state --jq .state" >&2
+if ! state=$(gh pr view "$pr" --json state --jq .state); then
+  die "gh pr view $pr failed — cannot tell whether it merged"
+fi
+[ "$state" = "MERGED" ] || die "PR #$pr is not merged (state=$state) — refusing to touch its issues"
+
+echo "\$ gh pr view $pr --json closingIssuesReferences --jq '.closingIssuesReferences[].number'" >&2
+if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); then
+  die "gh pr view $pr failed — cannot read which issues it closes"
+fi
+
+if [ -z "$issues" ]; then
+  echo "$NAME: PR #$pr closes no issues — nothing to release" >&2
+  printf '{"pr":%s,"merged":true,"issues":[],"applied":%s,"failed":[]}\n' "$pr" "$apply"
+  exit 0
+fi
+
+results=""
+failed=""
+for n in $issues; do
+  echo "\$ gh issue view $n --json labels --jq '.labels[].name'" >&2
+  if ! labels=$(gh issue view "$n" --json labels --jq '.labels[].name'); then
+    echo "    #$n: could not read labels — gh issue view failed" >&2
+    failed="${failed}${n},"
+    results="${results}{\"issue\":$n,\"hadLabel\":null,\"removed\":false},"
+    continue
+  fi
+
+  if printf '%s\n' "$labels" | grep -qx in-progress; then had=true; else had=false; fi
+  if [ "$had" = false ]; then
+    echo "    #$n: no in-progress label — already clear" >&2
+    results="${results}{\"issue\":$n,\"hadLabel\":false,\"removed\":false},"
+    continue
+  fi
+
+  if [ "$apply" = false ]; then
+    echo "    would: gh issue edit $n --remove-label in-progress" >&2
+    results="${results}{\"issue\":$n,\"hadLabel\":true,\"removed\":false},"
+    continue
+  fi
+
+  echo "\$ gh issue edit $n --remove-label in-progress" >&2
+  if gh issue edit "$n" --remove-label in-progress >/dev/null; then
+    echo "    #$n: dropped in-progress" >&2
+    results="${results}{\"issue\":$n,\"hadLabel\":true,\"removed\":true},"
+  else
+    echo "    #$n: FAILED to drop in-progress — invisible on reopen until retried" >&2
+    failed="${failed}${n},"
+    results="${results}{\"issue\":$n,\"hadLabel\":true,\"removed\":false},"
+  fi
+done
+
+printf '{"pr":%s,"merged":true,"issues":[%s],"applied":%s,"failed":[%s]}\n' \
+  "$pr" "${results%,}" "$apply" "${failed%,}"
+
+[ -z "$failed" ] || exit 1
+exit 0
