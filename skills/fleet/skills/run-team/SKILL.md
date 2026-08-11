@@ -211,6 +211,15 @@ they are gone, with only `rewrote row #N` on stderr to say so. Recover a class
 after a compaction with `ledger.mjs read` — `class=` is a raw-row field, and the
 cockpit does not parse or surface it.
 
+**Redirect `ledger.mjs read` to a file; never pipe it.** Its payload truncates at
+64 KiB on a pipe and exits 0 (#246), so a grown ledger silently loses its tail —
+`ledger.mjs read | …` returned 65536 bytes where a redirect returned 262432 in
+one run, and it is the reason `board.mjs` reported `ledger read parse failed`
+and served a blind cockpit that whole run. Every use above is a recovery path,
+so the truncation lands exactly where a lost class or a settled `ruled:` is
+unrecoverable. The same applies to the cockpit: a `board.mjs` that cannot parse
+the ledger is not a cockpit, and nothing warns you twice.
+
 **Guard: measure per PR, not per wave.** There are no implementer waves — refill
 is level-triggered, one slot at a time — so the unit is the PR. Once at least
 three `class=routine` PRs have been ruled, compare their `ruled:` outcomes in
@@ -505,6 +514,37 @@ adjective — ranking an unverified `suggestion` by how sharp it reads is how a
 controller lends its own weight to a finding no refuter has touched yet. Twice
 in that run the ranked one was refuted outright.
 
+**Scan the findings against each other for MUTUAL EXCLUSION, and rule before the
+fix-applier acts.** The fix-applier dispatches one refuter per `suggestion`, each
+blind to its siblings, so two can approve changes that cannot both land — one
+preserving a comment block another's change deletes, one keeping a binding
+another collapses. Only you hold every ruling, so only you can see the pair. Two
+runs have produced it: PR #332, and PR #404 where a refuter proved a variable
+collapse behavior-equivalent over 844 cases while its own blast-radius scan named
+the two comment blocks a *different* refuter had just established as guarding
+distinct pinned hazards. Read each refuter's blast radius against the findings you
+have already ruled on; a conflict is a **defer**, with the equivalence evidence
+recorded in the filed issue so the work is not redone. Never let both reach the
+tree and hope the diff coheres.
+
+The same scan catches a quieter shape: a finding whose **suggested fix quotes text
+another applied finding deletes**. Measured on PR #405 — `survived[5]`'s pin was
+written as `/not inside a git repository/`, wording `survived[3]` removes as
+fabricated, so applying both in the order given would have produced a pin matching
+nothing. Not mutual exclusion, and it does not conflict at the diff level; it goes
+stale and passes for the wrong reason. Ordering is the fix: apply the finding that
+changes the text before the one that asserts on it, and re-derive the assertion
+from the post-fix tree rather than from the finding.
+
+**A `refuted=false` verdict is not an instruction to apply.** It says the finding
+survived refutation, not that the change is worth making — those come apart
+exactly when the refuter confirms behavior-equivalence and simultaneously
+falsifies the finding's *reason*. In the #404 case the stated house-style premise
+was measurably false (six other non-test lines used the pattern it called
+un-idiomatic, and the finding's own grep hit a seventh it omitted) and the stated
+cost was understated. Behavior-neutral plus a false rationale is a defer, however
+clean the verdict reads.
+
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
@@ -545,6 +585,16 @@ nothing leaves it no gate at all.
 > issue body. **Apply only what survives — no report is not a survival.** A
 > refuter you never hear from leaves the finding exactly as unchecked as it
 > arrived, so it defers like a refuted one.
+>
+> **A finding's `suggested_fix` is a hypothesis, not a patch — the review never
+> ran it.** Only the claim is verified adversarially; the remedy text is unchecked.
+> Three were wrong as written in one run: a stated end state that dropped a
+> load-bearing option and measured RED, an assertion against a property the test
+> helper does not expose (`TypeError`), and an enumeration that stopped short of
+> two further stale clauses — one of them false in the *dangerous* direction. Run
+> the remedy before you commit it, and re-derive an assertion from the post-fix
+> tree rather than from the finding, since a sibling finding may edit the very
+> text it asserts on.
 >
 > **Retrieve that report yourself; do not wait to be handed it — this covers the
 > refuters YOU dispatch, and only those.** The review's own specialists do leave
