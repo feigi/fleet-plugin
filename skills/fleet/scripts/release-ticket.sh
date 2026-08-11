@@ -391,6 +391,31 @@ if [ -n "$wt" ] && [ ! -e "$wt" ] && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
 fi
 
+# `git worktree remove` refuses a locked entry outright, before it looks at the
+# directory at all — independent of whether that directory is present, gone, or
+# a stand-in file, so this has to run whenever $wt is ours, not only when -d
+# holds below. The porcelain listing already captured above (`wt_list`) names a
+# locked entry with a `locked [<reason>]` line right after its `branch` line;
+# read from there rather than a second `git worktree list` call. Without this, a
+# locked worktree cleared every blocker, the dry run predicted a release, and
+# --apply reached `git worktree remove`, which refused it (rc 128) after the
+# dirty check below had already said clean.
+wt_locked=false
+if [ -n "$wt" ]; then
+  printf '%s\n' "$wt_list" |
+    awk -v w="$wt" '/^worktree /{cur=(substr($0,10)==w)} cur&&/^locked/{f=1} END{exit !f}' &&
+    wt_locked=true
+fi
+[ "$wt_locked" = true ] && block "worktree $wt is locked — git worktree remove refuses a locked entry"
+
+# `worktree remove` validates $wt/.git before touching anything else, and a
+# regular file sitting at $wt has none — refused at rc 128 ("does not exist"),
+# measured. The dirty check below only opens when $wt IS a directory, so a
+# non-directory there cleared every guard silently and only --apply found out.
+if [ -n "$wt" ] && [ -e "$wt" ] && [ ! -d "$wt" ]; then
+  block "worktree $wt exists but is not a directory — git worktree remove will refuse it"
+fi
+
 if [ -n "$wt" ] && [ -d "$wt" ]; then
   # Establish that a .git linkage EXISTS before believing the status below.
   # Delete the .git file outright — directory and every uncommitted file still on

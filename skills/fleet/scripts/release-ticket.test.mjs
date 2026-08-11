@@ -463,6 +463,70 @@ test("the agent-test runner claim-ticket.sh writes is not dirt", (t) => {
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
 });
 
+test("a locked worktree blocks the same way in a dry run and under --apply", (t) => {
+  // #86: the dirty check only looked at whether $wt is a directory, and lock
+  // state is orthogonal to that — a locked, clean, present worktree cleared
+  // every guard, the dry run predicted "released":true, and --apply reached
+  // `git worktree remove`, which refuses a locked entry outright regardless of
+  // how clean it is.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.match(dry.json.blockers.join(" "), /is locked/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
+  assert.match(apply.json.blockers.join(" "), /is locked/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a locked worktree whose directory was removed by hand still blocks, not a mid-flight refusal", (t) => {
+  // The measured #86 repro: lock, then `rm -rf` the directory. The registration
+  // outlives the directory (same as the stray case above), so -d reads false and
+  // the old dirty check never opened at all — nothing blocked, the dry run said
+  // "released":true, and --apply's `git worktree remove` refused the locked
+  // entry (rc 128) with the directory already gone, exit 2 PARTIALLY RELEASED.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "must not predict a release git worktree remove will refuse");
+  assert.match(dry.json.blockers.join(" "), /is locked/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 #86 measured");
+  assert.match(apply.json.blockers.join(" "), /is locked/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a regular file at the worktree path blocks instead of promising a release", (t) => {
+  // The other #86 case: `git worktree remove` validates $wt/.git before
+  // touching anything else, and a plain file at $wt has none — refused at rc
+  // 128 ("does not exist"), measured. The old dirty check only opened when -d
+  // held, so a non-directory sitting at $wt cleared every guard silently and
+  // only --apply found out.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(c.wt, { recursive: true, force: true });
+  writeFileSync(c.wt, "not a worktree\n");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false);
+  assert.match(dry.json.blockers.join(" "), /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation");
+  assert.match(apply.json.blockers.join(" "), /exists but is not a directory/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.equal(readFileSync(c.wt, "utf8"), "not a worktree\n", "the stand-in file is untouched");
+});
+
 test("a dry run reports the release without performing it", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
