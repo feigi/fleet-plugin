@@ -619,7 +619,20 @@ jrewritten() {
   # Same short circuit as jstr, same reason: nothing to have rewritten, so no
   # need to ask a tool that might not be there.
   [ -n "$1" ] || { printf false; return 0; }
-  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
+  # `|| return 1` is load-bearing, not belt-and-braces. This function's last
+  # command is `[ … ] && printf false || printf true`, an AND-OR list that
+  # always exits 0, so a failed `tr` reaches the caller only by `set -e`
+  # aborting the function — and the single call site runs it inside an `if`
+  # condition, where `set -e` is exempted. Whether that exemption also reaches
+  # this assignment is the shell's own choice, and shells disagree. Measured:
+  # `dash`, Apple's `/bin/sh`, and bash 3.2.57 in POSIX/sh mode abort here,
+  # which is correct. bash 5.3 in EVERY mode — plain, invoked as `sh`, and
+  # `--posix` — plus bash 3.2.57 outside POSIX mode and zsh 5.9 all run on to
+  # the always-0 last line and hand back a confident `true` about bytes nothing
+  # ever examined. That second list covers every distro whose `/bin/sh` is bash
+  # 5.x. Returning explicitly makes the status this function's own on all of
+  # them.
+  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037') || return 1
   orig=$(printf '%s' "$1")
   [ "$raw" = "$orig" ] && printf false || printf true
 }

@@ -136,14 +136,22 @@ exec '${REAL_AWK}' "$@"
   }
 
   // The same shim shape for `tr`. `-d` addresses jrewritten and nothing else:
-  // the two other `tr` calls in the script are `tr '\n' ' '` inside die
-  // messages, and jstr's own is a translation with no flags at all — but it
-  // shares jrewritten's character class, `\013\016-\037`, so THAT substring
-  // reaches both: jrewritten's `tr -d` is its only external command, and
-  // jstr's `tr` is the last stage of its own `sed | tr` pipe, so either
-  // selector's failure is this shell's own exit status — no pipeline-status
-  // masking to route around (that flaw, in `sed`, is jstr's own and is #119's,
-  // not this file's).
+  // the two other `tr` calls in the script are `tr '\n' ' '` inside
+  // `add_unknown` messages — which deliberately do NOT die, that is the whole
+  // point of that helper — and jstr's own is a translation with no flags at
+  // all. But jstr's does share jrewritten's character class, `\013\016-\037`,
+  // so THAT substring reaches both at once: it is the selector for "neither
+  // escaper can run", while `-d` is the selector for "only jrewritten cannot".
+  //
+  // Both selectors surface as the escaper's own exit status, but not for the
+  // same reason, and only one of the two is free. jstr's `tr` is the last
+  // stage of its own `sed | tr` pipe, so the pipeline status IS tr's. jrewritten's
+  // is not: its last command is an always-0 AND-OR list, and the failure
+  // reaches the caller only because `inflight.sh` returns explicitly on it
+  // (`|| return 1`). Without that, bash and zsh hand back a confident `true`
+  // — see the both-shells test below, which is what pins it.
+  // (The remaining masking flaw, in jstr's `sed` stage, is #119's, not this
+  // file's.)
   if (trFailWhenArgsHave !== null) {
     writeFileSync(join(bin, "tr"), `#!/bin/sh
 case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
@@ -919,6 +927,75 @@ test("with a working escaper, ordinary evidence renders as a plain string, never
   assert.equal(r.status, 1);
   assert.equal(json.evidence.localBranch, "fix-66-thing");
   assert.equal(json.evidence.localBranchRewritten, false);
+});
+
+// The asymmetric half of the case above, and the only one that addresses
+// jrewritten ALONE: `-d` is a substring of `tr -d '\001-…'` and of nothing
+// else in the script, so jstr renders `fix-66-thing` perfectly and only the
+// rewritten-check breaks. Without this, the `if ev=$(jstr …) && rw=$(jrewritten …)`
+// conjunction is pinned on one operand only — measured, a mutant that drops
+// jrewritten out of the guard passed every test in this file as it stood
+// before these cases were added.
+//
+// Run under BOTH shells on purpose, and that is the load-bearing part, not
+// belt-and-braces. jrewritten's `tr` failure becomes its exit status only
+// because of its explicit `|| return 1` (see the comment on it); strip that
+// and the answer depends on which shell runs the script. `sh` cannot see the
+// difference on either platform this suite runs on — it is Apple's `/bin/sh`
+// on macOS and `dash` on CI's ubuntu, and both abort the function via `set -e`
+// whether or not the guard is there. `bash` is the one that can: measured,
+// bash 3.2.57 (macOS `/bin/bash`) and bash 5.3 both run past the failed `tr`
+// to the always-0 last line and report `localBranchRewritten: true` — a "bytes
+// were replaced" claim about a branch name holding no control bytes, with no
+// null and no stderr line at all. So a case that only ever spawns `sh` would
+// pin nothing here.
+for (const shell of ["sh", "bash"]) {
+  test(`under ${shell}, an escaper that cannot test for rewritten bytes nulls its field rather than guessing`, (t) => {
+    const { repo, env } = fixture(t, 66, { trFailWhenArgsHave: "-d" });
+    git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+    git(repo, env, "branch", "fix-66-thing");
+
+    const r = spawnSync(shell, [SCRIPT, "66"], { cwd: repo, env, encoding: "utf8" });
+    const json = JSON.parse(r.stdout);
+    assert.equal(r.status, 1, "the verdict the three probes established, unchanged");
+    assert.equal(json.taken, true);
+    assert.deepEqual(json.hits, ["local"]);
+    assert.equal(json.evidence.localBranchRewritten, null,
+      "never `true`: nothing examined the bytes, so nothing may claim they were replaced");
+    assert.equal(json.evidence.localBranch, null,
+      "nulled with its own rewritten flag — a string whose rewritten status is unknown is not the original bytes");
+    assert.match(r.stderr, /could not render the localBranch evidence.*as JSON/);
+  });
+}
+
+// The mirror: jstr's own `tr` broken while jrewritten's still runs. The two
+// invocations are distinguishable in `$*` even though they share a character
+// class — jstr's passes a second argument, so its argv ends `\037` + space,
+// while jrewritten's ends at `\037` (measured, via a tr that echoes `$*`):
+//   jstr        -> [\001-\007\013\016-\037  ]
+//   jrewritten  -> [-d \001-\007\013\016-\037]
+// so `\037 ` with the trailing space is a jstr-only selector, as `-d` is a
+// jrewritten-only one. Together the two pin the `&&`'s operands independently
+// — neither mutant that drops one call out of the guard survives both.
+//
+// One shell is enough here, unlike above: jstr's `tr` is the last stage of its
+// own pipe, so its failure IS the pipeline's status on every shell. (Its `sed`
+// stage is the one that stays masked — #119's, not this file's.)
+test("under sh, an escaper that cannot escape at all nulls its field rather than emitting a half-escaped string", (t) => {
+  const { repo, env } = fixture(t, 66, { trFailWhenArgsHave: "\\037 " });
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix-66-thing");
+
+  const r = spawnSync("sh", [SCRIPT, "66"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+  assert.equal(r.status, 1, "the verdict the three probes established, unchanged");
+  assert.equal(json.taken, true);
+  assert.deepEqual(json.hits, ["local"]);
+  assert.equal(json.evidence.localBranch, null);
+  assert.equal(json.evidence.localBranchRewritten, null,
+    "nulled alongside its string: a rewritten flag about bytes no escaper could render says nothing");
+  assert.equal(json.evidence.pr, "", "empty fields never reach the broken tr at all");
+  assert.match(r.stderr, /could not render the localBranch evidence.*as JSON/);
 });
 
 test("a quote in a remote branch cannot produce an unparseable payload", (t) => {
