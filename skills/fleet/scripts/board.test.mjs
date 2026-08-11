@@ -3,10 +3,10 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
@@ -320,8 +320,6 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
 // catches and degrades, so the board still builds and no test here touches the
 // network or this repo's live issue list. It is prepended to PATH rather than
 // replacing it, because gather() also shells out to `node`.
-const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
-
 function runBoard(sinceArgs) {
   const home = mkdtempSync(join(tmpdir(), "since-home-"));
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
@@ -338,7 +336,7 @@ function runBoard(sinceArgs) {
   const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
   mkdirSync(sub, { recursive: true });
   writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...sinceArgs], {
+  return spawnSync(process.execPath, [SCRIPT, "build", "--ledger", join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
   });
