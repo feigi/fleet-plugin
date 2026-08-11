@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -337,6 +337,31 @@ test("a stray worktree whose directory is gone names the prune that clears it", 
   );
 });
 
+test("a LOCKED stray worktree names the unlock, not a prune git silently skips", (t) => {
+  // The remedy the guard above hands out has to be one git will actually
+  // perform. `git worktree prune` SKIPS a locked entry — rc 0, nothing printed,
+  // the registration still sitting there afterwards (measured, git 2.50.1) — so
+  // naming it for a locked stray names no action the operator can take, and
+  // every later run blocks identically. That is the permanent refusal this
+  // script exists to clear, reintroduced by the remedy meant to clear it.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree unlock/, "the lock is what makes both other remedies refuse, so it is named first");
+  assert.doesNotMatch(json.blockers[0], /prune to clear the registration/, "a bare prune clears nothing here");
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  assert.ok(
+    git(r.w, "worktree", "list", "--porcelain").includes("/.worktrees/9-release-ticket\n"),
+    "the locked entry survives the blocked run: clearing it is the operator's decision",
+  );
+});
+
 test("a stray worktree the script may not stat keeps the hand-release remedy", (t) => {
   // -e is false for a directory that is gone and for one inside a prefix we may
   // not search, and only the first is an absence — the distinction the ancestor
@@ -461,6 +486,188 @@ test("the agent-test runner claim-ticket.sh writes is not dirt", (t) => {
   assert.deepEqual(json.blockers, []);
   assert.equal(code, 0);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a locked worktree blocks the same way in a dry run and under --apply", (t) => {
+  // #86: the dirty check only looked at whether $wt is a directory, and lock
+  // state is orthogonal to that — a locked, clean, present worktree cleared
+  // every guard, the dry run predicted "released":true, and --apply reached
+  // `git worktree remove`, which refuses a locked entry outright regardless of
+  // how clean it is.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.match(dry.json.blockers.join(" "), /is locked/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
+  assert.match(apply.json.blockers.join(" "), /is locked/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a locked worktree whose directory was removed by hand still blocks, not a mid-flight refusal", (t) => {
+  // The measured #86 repro: lock, then `rm -rf` the directory. The registration
+  // outlives the directory (same as the stray case above), so -d reads false and
+  // the old dirty check never opened at all — nothing blocked, the dry run said
+  // "released":true, and --apply's `git worktree remove` refused the locked
+  // entry (rc 128) with the directory already gone, exit 2 PARTIALLY RELEASED.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "must not predict a release git worktree remove will refuse");
+  assert.match(dry.json.blockers.join(" "), /is locked/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 #86 measured");
+  assert.match(apply.json.blockers.join(" "), /is locked/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a regular file at the worktree path blocks instead of promising a release", (t) => {
+  // The other #86 case: `git worktree remove` validates $wt/.git before
+  // touching anything else, and a plain file at $wt has none — refused at rc
+  // 128 ("does not exist"), measured. The old dirty check only opened when -d
+  // held, so a non-directory sitting at $wt cleared every guard silently and
+  // only --apply found out.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(c.wt, { recursive: true, force: true });
+  writeFileSync(c.wt, "not a worktree\n");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false);
+  assert.match(dry.json.blockers.join(" "), /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation");
+  assert.match(apply.json.blockers.join(" "), /exists but is not a directory/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.equal(readFileSync(c.wt, "utf8"), "not a worktree\n", "the stand-in file is untouched");
+});
+
+test("a symlink standing in for the worktree directory blocks instead of promising a release", (t) => {
+  // The shape the -e/-d pair cannot see on its own: every `test` primary except
+  // -L FOLLOWS the link, so a symlink pointing at the real worktree directory
+  // reads as present-and-a-directory, clears every blocker, and the dry run
+  // promises a release. --apply then reaches `git worktree remove`, which
+  // unregisters the entry and only THEN fails ("Not a directory") — so the
+  // receipt says the worktree was not removed for a run that had already
+  // landed something. A false receipt is worse than the refusal it reports.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = `${c.wt}-real`;
+  renameSync(c.wt, real);
+  symlinkSync(real, c.wt);
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.match(dry.json.blockers.join(" "), /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
+  assert.match(apply.json.blockers.join(" "), /exists but is not a directory/);
+  assert.equal(lstatSync(c.wt).isSymbolicLink(), true, "the symlink is untouched");
+  assert.equal(existsSync(join(real, ".git")), true, "and so is the real worktree behind it");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a dangling symlink at the worktree path blocks, not a mid-flight refusal", (t) => {
+  // The other symlink shape, and the one the guard's own comment cites: -e is
+  // false through a dangling link, so `gone` reports it established-absent and
+  // the unknown-existence die above deliberately stands down. Nothing else
+  // looked, the dry run said "released":true, and --apply got git's rc-128
+  // `validation failed, cannot remove working tree: '.../.git' does not exist`.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  rmSync(c.wt, { recursive: true, force: true });
+  symlinkSync(`${c.wt}-nowhere`, c.wt);
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "must not predict a release git worktree remove will refuse");
+  assert.match(dry.json.blockers.join(" "), /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation");
+  assert.match(apply.json.blockers.join(" "), /exists but is not a directory/);
+  assert.equal(lstatSync(c.wt).isSymbolicLink(), true, "the symlink is untouched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a real worktree directory is not mistaken for a stand-in", (t) => {
+  // The other half of the guard above: what `git worktree add` actually creates
+  // must walk through it. -L tests the final component only, and that component
+  // is always a real directory, so no fleet worktree trips the new blocker.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+
+  const dry = release(r, c, { apply: false });
+  assert.deepEqual(dry.json.blockers, [], "an ordinary claim must clear the stand-in guard");
+  assert.equal(dry.json.released, true);
+});
+
+test("a backslash in the worktree path does not make the lock probe answer `no`", (t) => {
+  // POSIX has awk process escape sequences in a `-v` assignment, so the path
+  // reached the lock probe mangled — this fixture's `back\slash` arriving as
+  // `backslash` — and could never equal what the porcelain printed. The guard
+  // then answered "not locked" for a locked worktree, which is the permissive
+  // answer, and #86's split reopened underneath the fix for it: dry run
+  // `"released":true` with no blockers, `--apply` exit 2 HALTED on git's
+  // `cannot remove a locked working tree`.
+  const r = repo(t, "back\\slash");
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.match(dry.json.blockers.join(" "), /is locked/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
+  assert.match(apply.json.blockers.join(" "), /is locked/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a lock on a SIBLING worktree is not this claim's lock", (t) => {
+  // The lock probe reads the whole porcelain listing, so the per-entry `cur`
+  // reset is the only thing standing between a sibling's `locked` line and this
+  // claim. Every other lock fixture here registers exactly one worktree, which
+  // exercises none of it: flipping the awk from "is THIS worktree locked" to
+  // "is ANY worktree locked" passes all of them and fails only this one.
+  //
+  // The sibling is 99, and the number is load-bearing. `worktree list
+  // --porcelain` orders entries LEXICOGRAPHICALLY, so a `10-other-claim` sorts
+  // BEFORE `9-release-ticket` — and against that order the mutation that
+  // matters most, a `cur` made sticky (`{if(...)cur=1}`, set but never reset),
+  // passes: the sibling's `locked` line has already gone by before anything
+  // sets the flag. Measured, 57/57 green on the sticky mutant with a `10-`
+  // sibling. 99 sorts after, which is the order that exercises the reset.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const other = claim(r.w, 99, "other-claim");
+  git(r.w, "worktree", "lock", other.wt, "--reason", "held by a review");
+
+  const dry = release(r, c, { apply: false });
+  assert.deepEqual(dry.json.blockers, [], "someone else's lock may not block this claim");
+  assert.equal(dry.json.released, true);
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.deepEqual(
+    artefacts(r, other),
+    { dir: true, worktree: true, branch: true },
+    "and the locked sibling is left exactly as it was",
+  );
 });
 
 test("a dry run reports the release without performing it", (t) => {

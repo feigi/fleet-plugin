@@ -294,6 +294,36 @@ gone() {
   [ ! -e "$1" ] && [ -x "$look" ]
 }
 
+# Is the worktree registered at $1 locked? Both remedies this script can name
+# turn on the answer, so both callers below ask: `git worktree remove` refuses a
+# locked entry outright — before it looks at the directory at all, so present,
+# gone or a stand-in makes no difference — and `git worktree prune` SKIPS one
+# silently at rc 0, printing nothing and clearing nothing (measured, git 2.50.1,
+# on a locked entry whose directory had been deleted). Handing the operator
+# either command for a locked entry names an action that cannot work, and every
+# later run then blocks identically: the permanent refusal this script exists to
+# clear.
+#
+# Read off the porcelain listing already captured above (`wt_list`) rather than a
+# second `git worktree list` call. `cur` is reset on EVERY `worktree ` line, so a
+# sibling's `locked` line can never answer for this path. A `locked [<reason>]`
+# line is matched by its prefix, since the reason is optional and rides on the
+# same line when present, and it is looked for anywhere in the record rather
+# than at a fixed offset: a DETACHED worktree has no `branch` line at all, and a
+# stray is detached by definition.
+#
+# The path goes in through the ENVIRON, not `-v`. POSIX has awk process escape
+# sequences in a `-v` assignment, so a repo living under a directory with a
+# literal backslash in it reached the program mangled — `back\slash` arriving as
+# `backslash`, measured — and could then never equal what the porcelain printed.
+# The comparison fell to "not locked", which is the permissive answer in a guard
+# whose whole job is to refuse to answer permissively. ENVIRON does no such
+# processing.
+locked() {
+  printf '%s\n' "$wt_list" |
+    P="$1" awk '/^worktree /{cur=(substr($0,10)==ENVIRON["P"])} cur&&/^locked/{f=1} END{exit !f}'
+}
+
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
 fi
@@ -316,7 +346,14 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   # else. Naming that prune hands the operator the command that does clear the
   # entry (verified, git 2.50.1: the run after it releases) and leaves the
   # discard their decision.
-  if gone "$stray"; then
+  #
+  # A LOCK outranks both, because it is what makes both refuse: prune skips a
+  # locked entry and remove rejects one, so neither remedy above is reachable
+  # until the operator unlocks. Named first for that reason, not because it is
+  # more likely.
+  if locked "$stray"; then
+    block "worktree $stray is this claim's and is locked — git worktree unlock $stray, then prune or remove it"
+  elif gone "$stray"; then
     block "worktree $stray is this claim's and its directory is gone — git worktree prune to clear the registration"
   else
     block "worktree $stray is this claim's but is not on $branch — release it by hand"
@@ -389,6 +426,38 @@ fi
 # is unknown.
 if [ -n "$wt" ] && [ ! -e "$wt" ] && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
+fi
+
+# A lock refuses independently of the directory's shape — present, gone or a
+# stand-in — so this runs whenever $wt is ours, not only when -d holds below.
+# Without it a locked worktree cleared every blocker, the dry run predicted a
+# release, and --apply reached `git worktree remove`, which refused it (rc 128)
+# after the dirty check below had already said clean. See `locked` for why the
+# answer is read off `wt_list`.
+if [ -n "$wt" ] && locked "$wt"; then
+  block "worktree $wt is locked — git worktree remove refuses a locked entry"
+fi
+
+# `worktree remove` validates $wt/.git before touching anything else, and a
+# regular file sitting at $wt has none — refused at rc 128 ("does not exist"),
+# measured. The dirty check below only opens when $wt IS a directory, so a
+# non-directory there cleared every guard silently and only --apply found out.
+#
+# -L, and it is not what the -e/-d pair already covers: every other `test`
+# primary FOLLOWS the link, so a symlink pointing at the real worktree directory
+# reads as present-and-a-directory and walked through both of them. That one is
+# the worst case in the file — `worktree remove` UNREGISTERS the entry and only
+# then fails ("Not a directory", rc 255, measured on git 2.50.1), so the run
+# halts reporting a worktree it did not remove after it had already landed
+# something. A dangling link is the other shape: -e is false through it, so
+# `gone` above calls it established-absent and the unknown-existence die stands
+# down by design, leaving this the only guard between it and git's rc-128
+# "'…/.git' does not exist" — the refusal the paragraph above was written for.
+#
+# -L tests the final component only, and `git worktree add` always creates that
+# as a real directory, so no worktree this fleet made trips it.
+if [ -n "$wt" ] && { [ -L "$wt" ] || { [ -e "$wt" ] && [ ! -d "$wt" ]; }; }; then
+  block "worktree $wt exists but is not a directory — git worktree remove will refuse it"
 fi
 
 if [ -n "$wt" ] && [ -d "$wt" ]; then
