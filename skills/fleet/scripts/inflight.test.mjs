@@ -19,9 +19,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 
@@ -195,7 +196,7 @@ exec '${REAL_TR}' "$@"
   delete env.GIT_WORK_TREE;
   delete env.GH_ISSUE_ERR;
   if (issueErr) env.GH_ISSUE_ERR = issueErr;
-  return { repo, env };
+  return { repo, env, bin };
 }
 
 function inflight(n, opts, t) {
@@ -723,4 +724,166 @@ test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t)
     { cwd: repo, env: { ...env, LC_ALL: "en_US.UTF-8" }, encoding: "utf8" });
   assert.equal(r.status, 0, `a free ticket stays free, got: ${r.stderr}`);
   assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+// --- #92: probe 2 must never prompt and must not block indefinitely.
+//
+// Prompt suppression alone does not bound a hang: measured in the issue, a
+// stalled ssh transport blocks identically with and without
+// GIT_TERMINAL_PROMPT=0 (killed at 8s, rc 142 either way). So the case that
+// actually exercises the fix is a listener that accepts the TCP connection
+// and then says nothing back — the ssh banner exchange never completes.
+//
+// A real listener, not a shimmed binary: the fix bounds the CONNECTION, and
+// only a genuine stall proves that. It carries its own spawnSync timeout as a
+// backstop so a regression here reddens loudly instead of hanging the suite.
+test("probe 2: a transport that connects and then never answers still terminates, exit 2", async (t) => {
+  const server = createServer(); // accept, hold open, send nothing back
+  t.after(() => new Promise((res) => server.close(res)));
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  const port = server.address().port;
+
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `ssh://git@127.0.0.1:${port}/x/y.git`);
+
+  const started = Date.now();
+  // 45s: comfortably above the ~10s ConnectTimeout the fix sets (measured
+  // locally: "Connection timed out during banner exchange" at ~10.0s against
+  // this exact fixture), but far short of leaving the suite to hang on a
+  // regression that drops the bound entirely.
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8", timeout: 45_000 });
+
+  assert.notEqual(r.signal, "SIGTERM",
+    `spawnSync's own 45s backstop fired — the script's bound is gone: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+  assert.ok(Date.now() - started < 45_000, "must terminate on its own bound, not the test's backstop");
+});
+
+// The stub the next three tests share: it logs its own argv and exits, so the
+// cases are deterministic and touch no network at all — what git actually
+// invokes is the assertion.
+// Named `ssh` and dropped into the fixture's `bin` when the tier under test is
+// one where the script picks the program itself — `bin` is first on PATH.
+const sshStub = (dir, name = "user-ssh-stub.sh") => {
+  const log = join(dir, `${name}.log`);
+  const stub = join(dir, name);
+  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
+  chmodSync(stub, 0o755);
+  return { stub, log };
+};
+
+// Whole words, never a substring. `"ServerAliveCountMax=25".includes("ServerAliveCountMax=2")`
+// is true, so the `.includes` form this replaced passed a bound weakened 12.5x
+// — measured, with the whole file still green, the live-hang test included
+// (that one terminates on ConnectTimeout, so it never sees the ServerAlive
+// pair either). Splitting on whitespace is exactly right for the stub's
+// `printf '%s\n' "$*"`, which is argv joined by single spaces.
+const assertBoundOptions = (log) => {
+  const words = readFileSync(log, "utf8").split(/\s+/);
+  for (const opt of ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=5", "ServerAliveCountMax=2"]) {
+    assert.ok(words.includes(opt),
+      `bound option missing from the invoked command: ${opt} — invoked as: ${words.join(" ")}`);
+  }
+  return words;
+};
+
+// The other half: a user's own configured ssh command is honoured, not
+// replaced. Three tests, one per tier of the fallback, because git's own
+// precedence is GIT_SSH_COMMAND > core.sshCommand > GIT_SSH and each tier is
+// reached only when the ones above it are unset — so one test can only ever
+// exercise one of them.
+//
+// `GIT_SSH_COMMAND` here stands in for a command a user already set (a custom
+// identity file, a proxy).
+test("probe 2: an existing GIT_SSH_COMMAND is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+
+  // A marker option stands in for whatever the user's own command carries —
+  // its presence in the log proves the script appended rather than replaced.
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, GIT_SSH_COMMAND: `${stub} -o UserMarker=1` }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  const words = assertBoundOptions(log);
+  assert.ok(words.includes("UserMarker=1"), "the user's own configured command must survive, not be replaced");
+});
+
+// The middle tier of the same fallback. Unlike GIT_SSH_COMMAND it is a git
+// config read, so a wrong key or a wrong scope would break it without breaking
+// the test above — and would ship silently, since setting GIT_SSH_COMMAND in
+// that test short-circuits `${GIT_SSH_COMMAND:-…}` before this tier is ever
+// consulted. Measured: deleting the `git config --get core.sshCommand` line
+// outright left the whole file green before this test existed.
+test("probe 2: a core.sshCommand is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+  git(repo, env, "config", "core.sshCommand", `${stub} -o UserMarker=1`);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  const words = assertBoundOptions(log);
+  assert.ok(words.includes("UserMarker=1"), "the configured command must survive, not be replaced");
+});
+
+// The last tier, and the one this probe regressed: git's precedence is
+// GIT_SSH_COMMAND > core.sshCommand > GIT_SSH, so setting GIT_SSH_COMMAND
+// unconditionally dropped a user's GIT_SSH wrapper — measured against the
+// pre-fix shape, the stub was invoked twice; with GIT_SSH_COMMAND set, never.
+// GIT_SSH names a program rather than a command line, so it carries no marker
+// option of its own: being invoked at all is the assertion.
+test("probe 2: a legacy GIT_SSH wrapper is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, GIT_SSH: stub }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
+});
+
+// The two tiers where the script names the program itself rather than
+// inheriting one. Every test above supplies its own ssh command, so none of
+// them can see a regression that leaves the program EMPTY — git would then get
+// a command line starting with `-o` and die with "-o: command not found", and
+// the suite would stay green because "could not look" is exit 2 either way.
+//
+// Nothing configured at all: the last tier of the fallback.
+test("probe 2: with no ssh command configured, plain ssh carries the bound options", (t) => {
+  const { repo, env, bin } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { log } = sshStub(bin, "ssh");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
+});
+
+// core.sshCommand SET BUT EMPTY — the case the `-n` guard exists for, and the
+// one that makes this tier irreducible to a single `$(… || echo ssh)`
+// substitution: `git config --get` exits 0 with empty output for an empty
+// value, so an exit-status test reads "configured" and hands git no program.
+// Measured, that broken form passed the whole suite before this test existed.
+test("probe 2: an empty core.sshCommand falls back to plain ssh, not to an empty program", (t) => {
+  const { repo, env, bin } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+  git(repo, env, "config", "core.sshCommand", "");
+
+  const { log } = sshStub(bin, "ssh");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
 });
