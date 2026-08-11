@@ -20,9 +20,16 @@
 # repository, and no such issue. That last one fires inside probe 1, after its
 # own `gh issue view` has already run — it is not a pre-probe check, it is the
 # premise all three probes rest on, so it abandons the run rather than
-# recording one probe's unknown. The fourth is the opposite end: an evidence
-# string or a verdict that cannot be written at all, which fails after every
-# probe has finished, with everything established and no way to say it.
+# recording one probe's unknown. The fourth is the opposite end: the verdict
+# itself cannot be written at all, which fails after every probe has finished,
+# with everything established and no way to say it. An evidence string that
+# cannot be rendered is NOT one of the four (#120): the verdict is already
+# correct at that point, and a formatter breaking must not retract it — that
+# field is emitted as JSON null instead, on the payload the verdict already
+# earned. With one gap, jstr's own `sed` stage: the pipeline reports only
+# `tr`'s status, so a `sed` that fails is never noticed and its field still
+# renders as "" — the same value "found nothing" uses — with no null and no
+# stderr line (#119, measured).
 set -eu
 
 NAME=inflight
@@ -589,6 +596,11 @@ echo "$NAME: #$n taken=$taken" >&2
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.
 jstr() {
+  # Empty in, empty out, no fork at all (#120). This is what lets a
+  # PATH-wide sed/tr outage — the failure this script measures at its own
+  # top — leave a field that legitimately found nothing untouched: that
+  # field never calls the broken tool, so it cannot observe its failure.
+  [ -n "$1" ] || return 0
   printf '%s' "$1" \
     | sed -e ':a' -e '$!N' -e '$!ba' \
         -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
@@ -607,7 +619,23 @@ jstr() {
 # across every arrangement of these bytes, it changed no answer — so it is gone
 # rather than defended.
 jrewritten() {
-  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
+  # Same short circuit as jstr, same reason: nothing to have rewritten, so no
+  # need to ask a tool that might not be there.
+  [ -n "$1" ] || { printf false; return 0; }
+  # `|| return 1` is load-bearing, not belt-and-braces. This function's last
+  # command is `[ … ] && printf false || printf true`, an AND-OR list that
+  # always exits 0, so a failed `tr` reaches the caller only by `set -e`
+  # aborting the function — and the single call site runs it inside an `if`
+  # condition, where `set -e` is exempted. Whether that exemption also reaches
+  # this assignment is the shell's own choice, and shells disagree. Measured:
+  # `dash`, Apple's `/bin/sh`, and bash 3.2.57 in POSIX/sh mode abort here,
+  # which is correct. bash 5.3 in EVERY mode — plain, invoked as `sh`, and
+  # `--posix` — plus bash 3.2.57 outside POSIX mode and zsh 5.9 all run on to
+  # the always-0 last line and hand back a confident `true` about bytes nothing
+  # ever examined. That second list covers every distro whose `/bin/sh` is bash
+  # 5.x. Returning explicitly makes the status this function's own on all of
+  # them.
+  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037') || return 1
   orig=$(printf '%s' "$1")
   [ "$raw" = "$orig" ] && printf false || printf true
 }
@@ -615,14 +643,50 @@ jrewritten() {
 # A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
 # itself: a substitution that fails contributes an EMPTY argument and printf
 # still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,
-# malformed JSON at exit 0, which is the failure the receipt exists to rule
-# out. Assigned first, each one is a simple command whose status the `&&` chain
-# can read and this `|| die` can act on.
-pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
-  && remote_j=$(jstr "$remote") && remote_rw=$(jrewritten "$remote") \
-  && local_b_j=$(jstr "$local_b") && local_b_rw=$(jrewritten "$local_b") \
-  && wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
-  || die "could not escape the evidence for #$n"
+# malformed JSON at exit 0. Assigned first, each one is a simple command whose
+# status this function can read.
+#
+# `die` is NOT the answer here (#120), unlike everywhere else in this script.
+# The verdict — $taken, $hits, $rc — is already correct by this point; a
+# formatter that broke AFTER a real answer was established must not convert
+# that answer into "unanswerable". So a field jstr or jrewritten could not
+# render becomes JSON `null` — not `""`, which already means "this probe
+# looked and found nothing" — and the run continues to the payload it earned,
+# at the verdict's own exit code. The one case that still reaches `""` is the
+# `sed` mask the header names (#119): this function never learns it happened.
+#
+# The message names the escaper, not just the field, because the two fail
+# independently: jstr can render a string perfectly while jrewritten cannot
+# say whether any byte was replaced (break `tr -d` alone and that is exactly
+# what happens). Naming only the field sends a debugger to whichever of the
+# two it guesses.
+#
+# Accumulates into $evidence rather than handing back a pair per field — the
+# trailing-comma-then-trim idiom `add_hit` and `add_unknown` already use above
+# — so each field name is spelled once instead of three times. $ev/$rw/$why
+# are scratch: not `local` because /bin/sh has no such builtin, and nothing
+# reads them outside this function.
+evidence=""
+add_evidence() {
+  why=""
+  if ! ev=$(jstr "$2"); then
+    why=jstr
+  elif ! rw=$(jrewritten "$2"); then
+    why=jrewritten
+  else
+    ev="\"$ev\""
+  fi
+  if [ -n "$why" ]; then
+    ev=null
+    rw=null
+    echo "$NAME: could not render the $1 evidence for #$n as JSON ($why) — reported as null" >&2
+  fi
+  evidence="${evidence}\"$1\":$ev,\"$1Rewritten\":$rw,"
+}
+add_evidence pr "$pr"
+add_evidence remote "$remote"
+add_evidence localBranch "$local_b"
+add_evidence worktree "$wt"
 
 # Guarded because this runs OUTSIDE the three probe functions, where `set -e` is
 # still live and a failed write exits 1 — and the contract reads 1 as "taken", a
@@ -630,9 +694,13 @@ pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
 # reproduces it. (The probe bodies cannot rely on that: each is invoked as
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
 # command in one carries its own guard.)
-printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
-  "$n" "$taken" "${hits%,}" "${unknown%,}" \
-  "$pr_j" "$pr_rw" "$remote_j" "$remote_rw" \
-  "$local_b_j" "$local_b_rw" "$wt_j" "$wt_rw" \
+#
+# The evidence slot is an unquoted `%s`, unlike every other string slot in this
+# printf, and it now carries the object's keys as well as its values:
+# `add_evidence` above emits each value already wrapped in its own quotes or as
+# the bare word `null`, so the format string must not wrap it again. Same
+# reason `hits` and `unknown` are unquoted, and the same `${…%,}` trim.
+printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{%s}}\n' \
+  "$n" "$taken" "${hits%,}" "${unknown%,}" "${evidence%,}" \
   || die "could not write the verdict for #$n"
 exit "$rc"
