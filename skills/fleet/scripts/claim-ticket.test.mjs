@@ -296,8 +296,10 @@ test("runner: a vendored directory argument refuses however it is spelled", () =
 // argument it cannot resolve and exits non-zero only when it refuses every
 // argument in argv — mixed with anything valid, the discard is silent and
 // the runner used to exit 0 having run less than it was asked. These pin the
-// three shapes node discards: a typo, a file under `node_modules`, and (the
-// one deliberately left alone) an unmatched glob.
+// shapes node discards: a typo, a file under `node_modules` however it is
+// spelled, a path holding a `[`, and (the one deliberately left alone) an
+// unmatched glob — plus the two it does NOT discard, a flag and a vendored
+// spelling node runs anyway, which the guard must not refuse in their place.
 
 // The repro from the issue itself: alone a typo is loud (node's own
 // `Could not find`, exit 1) — mixed with a real file, node ran the one file
@@ -319,22 +321,107 @@ test("runner: a typo'd path alone still refuses", () => {
 // #125's surviving case, per the issue's "Agent Brief": a vendored *file*
 // argument bypasses the directory branch entirely (that guard only ever sees
 // what `[ -d ]` is true for), so node — not this shim — is what would drop
-// it, and only when something else in argv resolves. Top-level, not nested
-// under `t/`: node's own exclusion fires only when the argument's RELATIVE
-// form STARTS WITH `node_modules/` (measured above, and in claim-ticket.sh's
-// own comment on the directory branch) — a deeper segment is a case node
-// runs fine and is out of scope here. Written into the worktree rather than
-// through `repo()` for the same reason as the nested node_modules test
-// above: this is what an unhoisted install produces, not something anyone
-// commits.
-test("runner: a file path under a vendored directory, mixed with a valid one, refuses", () => {
+// it, and only when something else in argv resolves. Written into the
+// worktree rather than through `repo()` for the same reason as the nested
+// node_modules test above: this is what an unhoisted install produces, not
+// something anyone commits.
+// Four spellings, because one is not the class. `./` is the second literal
+// form, and dropping either alternative from a prefix match would go
+// uncaught with only the first pinned. `t/../node_modules/…` is why the
+// guard resolves the argument's own directory rather than matching a prefix
+// at all: node normalizes before applying its rule, so that spelling is
+// excluded too (measured directly against node v26.5.0 — `tests 1` for a
+// two-file argv) and a literal prefix misses it. And the `*` spelling is why
+// the vendored check runs BEFORE the glob classification: a metacharacter
+// anywhere in a vendored path used to route it into the passthrough arm and
+// out of this refusal entirely.
+test("runner: a vendored file argument refuses however it is spelled", () => {
   const a = apply(SUITE);
   const vendor = join(a.wt, "node_modules", "pkg");
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /node_modules\/pkg\/v\.test\.mjs is under node_modules/);
+  for (const spelling of [
+    "node_modules/pkg/v.test.mjs",
+    "./node_modules/pkg/v.test.mjs",
+    "t/../node_modules/pkg/v.test.mjs",
+    "node_modules/pkg/*.test.mjs",
+  ]) {
+    const r = a.run("t/a.test.mjs", spelling);
+    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /is under node_modules — node discards it silently/, spelling);
+  }
+});
+
+// The other half of the same rule, and the guard against over-widening it.
+// Node's exclusion fires only when the argument's normalized RELATIVE form
+// starts with `node_modules/`: a deeper segment and an absolute path are NOT
+// excluded — node runs both and counts them, so there is no silent drop to
+// refuse and refusing them would reject argv node handles fine. `pass 2` is
+// what says the vendored file ran rather than being dropped, so borrowing
+// the directory branch's own `*/node_modules/*` pattern here reddens this.
+test("runner: the vendored file spellings node runs are not refused", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  const nested = join(a.wt, "t", "node_modules", "pkg");
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(join(nested, "n.test.mjs"), PASSES);
+  for (const spelling of [
+    "t/node_modules/pkg/n.test.mjs",
+    join(a.wt, "node_modules", "pkg", "v.test.mjs"),
+  ]) {
+    const r = a.run("t/a.test.mjs", spelling);
+    assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
+  }
+});
+
+// The issue's own second case, verbatim: "and, before PR #75's escape,
+// bracketed paths". Node globs its own argv, where a literal `[` is a bracket
+// expression that cannot match itself — so the path matches nothing, node
+// drops it, and mixed with a resolvable file that drop is silent: the runner
+// reported `pass 1` for a two-file argv and exited 0. The escape is the same
+// `sed 's/\[/[[]/g'` the directory branch already applies to find's output,
+// and asking whether the path EXISTS before reading it as a glob is what
+// gets the argument to it. Both invocations are here because they fail
+// differently without the escape: mixed goes quiet, alone exits 1 because
+// node then has nothing left to run.
+test("runner: a bracketed file argument runs, alone and mixed with a valid one", () => {
+  const a = apply(SUITE);
+  const mixed = a.run("t/a.test.mjs", "br[a]cket/g.test.mjs");
+  assert.equal(mixed.status, 0, mixed.stdout + mixed.stderr);
+  assert.match(mixed.stdout, /^(?:ℹ|#) pass 2$/m);
+  const alone = a.run("br[a]cket/g.test.mjs");
+  assert.equal(alone.status, 0, alone.stdout + alone.stderr);
+  assert.match(alone.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// A flag is not a path, and only node can judge one. Reading an argument
+// that does not exist as a typo refused every documented `node --test` flag
+// as a missing file — argv that ran fine before this guard existed, and
+// nothing else in this suite passes a flag. Node takes flag values with `=`
+// (measured: the space-separated form exits 9 at node itself), so a flag is
+// always one argv entry and passing it through cannot swallow a path. A
+// typo'd flag stays loud without this runner's help: node rejects it and
+// exits 9, which is why the last assertion insists the refusal is NOT
+// `agent-test:`-prefixed.
+test("runner: a node --test flag reaches node instead of being read as a path", () => {
+  const a = apply(SUITE);
+  for (const flag of [
+    "--test-name-pattern=ok",
+    "--test-only",
+    "--test-reporter=tap",
+    "--test-concurrency=1",
+    "--",
+  ]) {
+    const r = a.run(flag, "t/a.test.mjs");
+    assert.equal(r.status, 0, `${flag}: ${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /does not exist/, flag);
+  }
+  const typo = a.run("--test-nmae-pattern=ok", "t/a.test.mjs");
+  assert.notEqual(typo.status, 0, typo.stdout + typo.stderr);
+  assert.doesNotMatch(typo.stderr, /agent-test:/, typo.stdout + typo.stderr);
 });
 
 // The deliberately preserved escape hatch: `set -f` above stops the *shell*
