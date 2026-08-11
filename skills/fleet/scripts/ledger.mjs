@@ -319,50 +319,114 @@ if (cmd === "check") {
     // (issue #152: a consumer testing `.length` must not read this as clean).
     tracker = { ok: false, query: null, error: "subject has no distinctive terms to search for" };
   } else {
-    try {
-      const out = execFileSync(
-        "gh",
-        ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
-          "--json", "number,title,state,url"],
-        { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] },
-      );
-      // Parsing inside the try on purpose: gh can exit 0 and still print
-      // something that is not the JSON asked for. A parse failure is a failed
-      // tracker read, not a clean tracker.
-      const parsed = JSON.parse(out);
-      // Parseable is not the same as the shape asked for. Without this, a gh
-      // printing a JSON array that is not an issue list escalates to exit 3 and
-      // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
-      // that is in fact unverified. Throw into the catch below: an unreadable
-      // answer is a failed tracker read, exactly like unparseable output.
-      if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
-        throw new Error("gh returned JSON that is not an issue list");
+    // gh resolves "the repository" from the child process's cwd, which
+    // defaults to THIS process's cwd — the caller's, not the ledger's. The
+    // ledger itself is resolved from --file or defaultLedgerPath()'s
+    // --git-common-dir above; in the documented flow (no --file, run from
+    // the repo) the two agree, but an explicit --file naming a ledger
+    // outside the caller's repo diverges silently: the query searches the
+    // wrong tracker and reports a confident, empty result (#155). Bind gh's
+    // cwd to the ledger's OWN repository instead of leaving it implicit. No
+    // --repo flag needed — gh's remote-based resolution does the rest once it
+    // is pointed at the right directory, and a worktree ledger (shared .git,
+    // own working tree) still resolves to the same repo either way.
+    //
+    // cwd is not the whole story: inherited git vars outrank it, so an
+    // ambient GIT_DIR/GIT_WORK_TREE retargets BOTH the probe below and gh's
+    // own remote resolution at the other repository, and the #155
+    // confident-empty result comes straight back with `ok: true` on it.
+    // Plausible here: a git hook, `rebase --exec`, `bisect run`. Scrub them
+    // off both children — the fleet's own fixtures already do exactly this
+    // (inflight.test.mjs).
+    //
+    // GH_REPO is the same hazard one layer up, and worse: gh reads it BEFORE
+    // it ever consults git, so no amount of git-var hygiene covers it and the
+    // bound cwd is simply ignored. Measured against a live tracker with the
+    // cwd binding in place: `GH_REPO=<some other real repo>` searched that
+    // repo and returned `{"ok":true,"hits":[],"verdict":"clean"}` — #155
+    // verbatim, in the documented flow, no --file divergence needed. Not
+    // hypothetical here either: this repo's own
+    // .github/workflows/rebase-check-refresh.yml exports GH_REPO job-wide.
+    // Empty string is the documented fall-back-to-cwd value (measured — unset
+    // and "" behave alike), so this composes with cwd rather than fighting it.
+    //
+    // With all three off, the ledger and the queried tracker cannot disagree.
+    const gitEnv = { ...process.env, GH_REPO: "" };
+    delete gitEnv.GIT_DIR;
+    delete gitEnv.GIT_WORK_TREE;
+    let ledgerDir = dirname(resolve(file));
+    // `check` runs before the run's FIRST ledger write, and `.fleet/` is
+    // gitignored and created lazily by save()'s mkdirSync — so on a fresh
+    // clone or worktree the ledger's own directory does not exist yet, while
+    // `git -C` requires one that does (exit 128, "cannot change to ...").
+    // Climb to the nearest existing ancestor: same repository, and probing
+    // the missing directory instead reported every first `check` as not being
+    // in a repository and dropped the tracker query outright.
+    while (!existsSync(ledgerDir) && dirname(ledgerDir) !== ledgerDir) ledgerDir = dirname(ledgerDir);
+    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: gitEnv });
+    if (repoCheck.status !== 0) {
+      // More than one cause lands here: a ledger path genuinely outside any
+      // repository, but also git missing entirely (spawn ENOENT, so `status`
+      // is null and `null !== 0`), a dubious-ownership refusal, an unreadable
+      // `.git` gitfile. Do not name one of them — carry git's own reason,
+      // because this call leaves stdio at the default pipe, so git's stderr
+      // reaches no terminal and this string is the only place the cause is
+      // ever seen (the same call the gh catch below makes, #176). Capped for
+      // the same reason too: it ships on stdout inside `tracker.error`.
+      //
+      // Either way there is no repository for the query to bind to — the same
+      // state as this process's own cwd not being a repo, which already
+      // degrades via the generic `!tracker.ok` branch below. Reuse that: no
+      // gh invocation, no separate "unchecked" shape.
+      const why = String(repoCheck.error ? repoCheck.error.message : repoCheck.stderr || "").trim().slice(0, 500);
+      tracker = { ok: false, query, error: `cannot resolve the ledger's repository (${ledgerDir})${why ? `: ${why}` : ""}` };
+    } else {
+      const ghCwd = repoCheck.stdout.trim();
+      try {
+        const out = execFileSync(
+          "gh",
+          ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
+            "--json", "number,title,state,url"],
+          { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"], cwd: ghCwd, env: gitEnv },
+        );
+        // Parsing inside the try on purpose: gh can exit 0 and still print
+        // something that is not the JSON asked for. A parse failure is a failed
+        // tracker read, not a clean tracker.
+        const parsed = JSON.parse(out);
+        // Parseable is not the same as the shape asked for. Without this, a gh
+        // printing a JSON array that is not an issue list escalates to exit 3 and
+        // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
+        // that is in fact unverified. Throw into the catch below: an unreadable
+        // answer is a failed tracker read, exactly like unparseable output.
+        if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
+          throw new Error("gh returned JSON that is not an issue list");
+        }
+        const hits = parsed
+          .map((h) => ({
+            number: h.number, title: h.title || "", state: h.state, url: h.url,
+            score: round2(overlap(scored, scoreTokens(h.title || ""))),
+          }))
+          .sort((a, b) => b.score - a.score);
+        tracker = { ok: true, query, hits };
+      } catch (e) {
+        // Every gh failure lands here — no network, no auth, rate limit, gh not
+        // installed (ENOENT), a timeout, unparseable output. None of them may
+        // produce a bare "safe to file": that is the same fail-open class the
+        // --git-common-dir resolution above already closed once. Degrade to the
+        // ledger-only answer and say so.
+        // Capped, and deliberately still carrying the stderr — the opposite call
+        // from the fleet's other gh catches (#176). Those omit it because
+        // execFileSync forwarded the child's bytes to our stderr already, so
+        // interpolating emits them twice; this call sets `stdio`, which turns
+        // that forwarding OFF, so this string is the only place the cause is
+        // ever seen. What it must not be is unbounded: it lands in
+        // `tracker.error`, which ships on stdout as part of a machine-parsed
+        // contract, and a megabyte of gh stderr inside a JSON field is a payload
+        // problem wherever the forwarding argument lands.
+        // `hits` omitted here too, same reason as the no-terms branch above:
+        // the search never ran, so there is no empty result to report.
+        tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
       }
-      const hits = parsed
-        .map((h) => ({
-          number: h.number, title: h.title || "", state: h.state, url: h.url,
-          score: round2(overlap(scored, scoreTokens(h.title || ""))),
-        }))
-        .sort((a, b) => b.score - a.score);
-      tracker = { ok: true, query, hits };
-    } catch (e) {
-      // Every gh failure lands here — no network, no auth, rate limit, gh not
-      // installed (ENOENT), a timeout, unparseable output. None of them may
-      // produce a bare "safe to file": that is the same fail-open class the
-      // --git-common-dir resolution above already closed once. Degrade to the
-      // ledger-only answer and say so.
-      // Capped, and deliberately still carrying the stderr — the opposite call
-      // from the fleet's other gh catches (#176). Those omit it because
-      // execFileSync forwarded the child's bytes to our stderr already, so
-      // interpolating emits them twice; this call sets `stdio`, which turns
-      // that forwarding OFF, so this string is the only place the cause is
-      // ever seen. What it must not be is unbounded: it lands in
-      // `tracker.error`, which ships on stdout as part of a machine-parsed
-      // contract, and a megabyte of gh stderr inside a JSON field is a payload
-      // problem wherever the forwarding argument lands.
-      // `hits` omitted here too, same reason as the no-terms branch above:
-      // the search never ran, so there is no empty result to report.
-      tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
     }
   }
 
