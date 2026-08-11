@@ -213,7 +213,22 @@ for arg do
     # cycle the platforms then disagree: GNU find exits 1,
     # which the \`||\` below reports as an unreadable directory, while BSD find
     # skips it silently. The slash settles the argument alone.
-    case "/\$arg/" in
+    # Judged by the argument's RESOLVED directory, not its spelling (#186).
+    # Matching \$arg's own text missed a symlink whose target lies inside a
+    # vendored tree — its own name carries no \`node_modules\`, and
+    # \`-prune\` below only fires on a dirent NAMED \`node_modules\` met
+    # during the walk: traversal starts at the symlink's target, so the
+    # vendored component is already behind the walk's starting point and
+    # neither mechanism ever sees it. \`cd\`+\`pwd -P\` follows the
+    # argument's own symlink (and any inside its path) to the real directory
+    # first, so the test becomes "resolves inside a vendored tree" however
+    # the caller spelled it — the same property a bare relative
+    # \`node_modules/pkg\` already satisfied (#125). A symlink to a directory
+    # that merely CONTAINS a vendored tree resolves outside \`node_modules\`
+    # and passes here untouched; \`-prune\` below still excludes its
+    # vendored contents once the walk reaches them.
+    resolved=\$(cd "\$arg" 2>/dev/null && pwd -P)
+    case "/\$resolved/" in
       */node_modules/*) echo "agent-test: \$arg is under node_modules — excluded from the run, not missing" >&2; exit 1 ;;
     esac
     found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }

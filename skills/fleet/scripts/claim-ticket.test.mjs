@@ -157,6 +157,48 @@ test("runner: a symlink to a directory runs the test files under it", () => {
   assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
 });
 
+// #186: the argument itself is a symlink whose TARGET lies inside a vendored
+// tree. Spelling can't see it — `vendlink` carries no `node_modules` in its
+// own name — and `-prune` only fires on a dirent the walk descends THROUGH
+// named `node_modules`; here the walk starts at the symlink's target,
+// already past the vendored component, so neither existing guard sees it.
+// Measured on the unfixed shim: `agent-test vendlink` exits 0 and reports
+// the vendored test as a pass — the same green-over-third-party-code #109's
+// prune exists to refuse, reached by a route neither mechanism covers.
+test("runner: a symlink whose target is inside a vendored tree refuses", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg"), join(a.wt, "vendlink"));
+  const r = a.run("vendlink");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — excluded from the run/);
+});
+
+// The false-positive class of the same fix: a symlink to a directory that
+// merely CONTAINS a vendored tree, rather than one whose own resolution ends
+// inside it, must still run that directory's own tests and still exclude the
+// real `node_modules` beneath it. Already true pre-fix (find's own prune
+// handles it once the walk is inside), and must stay true — a resolved-path
+// guard that widens into refusing every symlinked directory with
+// `node_modules` somewhere underneath would regress this ordinary case.
+test("runner: a symlink to a directory containing a vendored tree still runs its own tests", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "proj"), { recursive: true });
+  writeFileSync(join(a.wt, "proj", "ok.test.mjs"), PASSES);
+  const vendor = join(a.wt, "proj", "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(
+    join(vendor, "v.test.mjs"),
+    'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
+  );
+  symlinkSync("proj", join(a.wt, "projlink"));
+  const r = a.run("projlink");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
 // The sharp edge. `node --test` with zero files exits 0, so an expansion that
 // matched nothing and shrugged would smuggle back the vacuous pass the emit
 // guard refuses — this time past it, at run time.
