@@ -37,9 +37,41 @@ the apply/commit rules. If they read as absolute to someone re-deriving this fin
 narrowing that wording is a fine change on its own. Deleting the duplicated blocks is
 not.
 
-Keep regardless of any future edit here: the `<testCmd>` substitution lead-in and the
-"read your refuter's report yourself" block. Both are fleet-only and have no counterpart
-in `review-and-fix.md`.
+Two further lines in `SKILL.md` are the ones a re-derivation will actually reach, and
+neither is scoped the way those two are. Its self-correction **Triggers** list names "A
+caller has to restate what the callee should say itself" — this duplication, listed as a
+trigger to go fix the instruction. And its **Shape — lean, or it rots** paragraph states
+the rule flatly: "Prefer moving text to adding it, and delete the copy you superseded; a
+duplicated rule becomes a contradiction."
+
+Neither reaches this case on a literal reading. The Trigger fires where a callee fails
+to say what it should and the caller compensates; here `review-and-fix.md` states the
+rules in full, and the prompt repeats them because the fix-applier's own steps skip the
+read — not because the callee is deficient. The Shape rule turns on supersession: "the
+copy you superseded" is the one left behind once its replacement landed, and neither
+file supersedes the other. Both are read, by different agents, on different paths, and
+`review-path-default.test.mjs` reads both and asserts against each. `2c88aa2` is the
+worked example — its subject is "the refuter's one instruction that makes it a refuter
+was in one file only", and it closed that gap by adding the missing copy to the second
+file, in the same commit, rather than by collapsing the two.
+
+Both lines also sit under `## Fix the tooling mid-run`, whose **Scope** paragraph limits
+that section to defects *this run produced* in commands and skills *this run invoked*.
+That does not exempt these two files — the fleet invokes both — but it does make the
+Trigger a prompt to diagnose a live failure, not a standing audit criterion to re-derive
+this finding from.
+
+Keep regardless of any future edit here: the `<testCmd>` substitution lead-in, which is
+genuinely fleet-only and has no counterpart in `review-and-fix.md`.
+
+The "read your refuter's report yourself" block is a keep for the opposite reason. It is
+not fleet-only — it restates `review-and-fix.md`'s **Specialists** rule near-verbatim,
+down to the `tail -1 <output-file>` command, "Never read the whole file" and the "~15
+pinged in one run, 0 retrieved" measurement. `SKILL.md` says so itself, immediately
+after the block: "This is `review-and-fix.md`'s **Specialists** rule; it reaches you
+here because the steps that point at it are the ones you skip." The fleet copy narrows
+it to the refuters the fix-applier itself dispatches. So it belongs with the deliberate
+duplication above, not against it — and editing either copy means editing both.
 
 ## Prior requests
 
