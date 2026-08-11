@@ -250,9 +250,10 @@ number, worktree abs path, branch, and each of these verbatim:
 
 > Your ticket names the cases it was written from. **Before implementing, enumerate
 > every member of that class — including any the ticket names only in passing — and
-> say which you cover and which you deliberately leave** — a guard on one path has siblings, a predicate has other
-> inputs, a check on a directory has subdirectories. Fixing exactly the named
-> cases is how a fix ships without closing its own ticket.
+> say which you cover and which you deliberately leave** — a guard on one path
+> has siblings, a predicate has other inputs, a check on a directory has
+> subdirectories. Fixing exactly the named cases is how a fix ships without
+> closing its own ticket.
 >
 > Build that list from **the ticket's own prose first**, then from the mechanism.
 > A case the body names in passing is still a named case, and enumerating from
@@ -261,22 +262,23 @@ number, worktree abs path, branch, and each of these verbatim:
 > false-negative class, and a suite that only feeds it valid input pins neither —
 > so leave one test behind that feeds it input it must ACCEPT.
 
-Both blocks are load-bearing, for different reasons. The enumerate-the-class block
-answers a signature measured four times in one run: each implementer fixed exactly
-the cases its ticket named and missed an adjacent one of the same class — a CRLF
-body after fixing depth and split headings, a symlinked worktree after fixing locked
-and regular-file ones, an unreadable `refs/heads/<type>/` after fixing `refs/heads`
-itself, a bracketed file path after fixing typos and vendored ones. **All four
-failed to close their own ticket** — #65's acceptance criterion went unmet, and
-the other three left the named defect reachable by a sibling spelling. Every one
-was caught by review, at review cost, which runs 3-5x the implementation it
-checks.
+Each rule in that block is load-bearing, for a different reason.
+**Enumerate-and-declare** answers a signature measured four times in one run:
+each implementer fixed exactly the cases its ticket named and missed an adjacent
+one of the same class — a CRLF body after fixing depth and split headings, a
+symlinked worktree after fixing locked and regular-file ones, an unreadable
+`refs/heads/<type>/` after fixing `refs/heads` itself, a bracketed file path
+after fixing typos and vendored ones. **All four failed to close their own
+ticket** — #65's acceptance criterion went unmet, and the other three left the
+named defect reachable by a sibling spelling. Every one was caught by review, at
+review cost, which runs 3-5x the implementation it checks.
 
-The two follow-up sentences are not padding — they are the fourth case, which
-shipped WITH the first paragraph in its prompt. It missed a shape its own ticket
-named in passing, because it enumerated from the mechanism instead of the text;
-and it introduced a regression refusing every `node --test` flag, because it
-enumerated what the guard should catch and never what it could wrongly refuse.
+**Prose-first** and **wrongly-REFUSE** are not padding — they are the fourth
+case, which shipped with **enumerate-and-declare** already in its prompt. It
+missed a shape its own ticket named in passing, because it enumerated from the
+mechanism instead of the text; and it introduced a regression refusing every
+`node --test` flag, because it enumerated what the guard should catch and never
+what it could wrongly refuse.
 
 The commit-incrementally block is not optional. A member that goes idle mid-task
 leaves its diff only in the worktree, and the controller cannot reap, replace,
