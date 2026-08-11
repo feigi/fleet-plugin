@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { createServer } from "node:net";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
@@ -738,7 +738,7 @@ test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t)
 // only a genuine stall proves that. It carries its own spawnSync timeout as a
 // backstop so a regression here reddens loudly instead of hanging the suite.
 test("probe 2: a transport that connects and then never answers still terminates, exit 2", async (t) => {
-  const server = createServer((socket) => { /* accept, hold open, send nothing back */ });
+  const server = createServer(); // accept, hold open, send nothing back
   t.after(() => new Promise((res) => server.close(res)));
   await new Promise((res) => server.listen(0, "127.0.0.1", res));
   const port = server.address().port;
@@ -760,20 +760,45 @@ test("probe 2: a transport that connects and then never answers still terminates
   assert.ok(Date.now() - started < 45_000, "must terminate on its own bound, not the test's backstop");
 });
 
+// The stub the next three tests share: it logs its own argv and exits, so the
+// cases are deterministic and touch no network at all — what git actually
+// invokes is the assertion.
+const sshStub = (dir) => {
+  const log = join(dir, "ssh-stub.log");
+  const stub = join(dir, "user-ssh-stub.sh");
+  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
+  chmodSync(stub, 0o755);
+  return { stub, log };
+};
+
+// Whole words, never a substring. `"ServerAliveCountMax=25".includes("ServerAliveCountMax=2")`
+// is true, so the `.includes` form this replaced passed a bound weakened 12.5x
+// — measured, with the whole file still green, the live-hang test included
+// (that one terminates on ConnectTimeout, so it never sees the ServerAlive
+// pair either). Splitting on whitespace is exactly right for the stub's
+// `printf '%s\n' "$*"`, which is argv joined by single spaces.
+const assertBoundOptions = (log) => {
+  const words = readFileSync(log, "utf8").split(/\s+/);
+  for (const opt of ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=5", "ServerAliveCountMax=2"]) {
+    assert.ok(words.includes(opt),
+      `bound option missing from the invoked command: ${opt} — invoked as: ${words.join(" ")}`);
+  }
+  return words;
+};
+
 // The other half: a user's own configured ssh command is honoured, not
-// replaced. `GIT_SSH_COMMAND` here stands in for a command a user already set
-// (a custom identity file, a proxy) — the stub logs its own argv and exits,
-// so the case is deterministic and touches no network at all: what git
-// actually invokes is the assertion.
+// replaced. Three tests, one per tier of the fallback, because git's own
+// precedence is GIT_SSH_COMMAND > core.sshCommand > GIT_SSH and each tier is
+// reached only when the ones above it are unset — so one test can only ever
+// exercise one of them.
+//
+// `GIT_SSH_COMMAND` here stands in for a command a user already set (a custom
+// identity file, a proxy).
 test("probe 2: an existing GIT_SSH_COMMAND is honoured, with the bound options added on top", (t) => {
   const { repo, env } = fixture(t, 8, { origin: "none" });
   git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
 
-  const root = dirname(repo);
-  const log = join(root, "ssh-stub.log");
-  const stub = join(root, "user-ssh-stub.sh");
-  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
-  chmodSync(stub, 0o755);
+  const { stub, log } = sshStub(repo);
 
   // A marker option stands in for whatever the user's own command carries —
   // its presence in the log proves the script appended rather than replaced.
@@ -781,9 +806,45 @@ test("probe 2: an existing GIT_SSH_COMMAND is honoured, with the bound options a
     { cwd: repo, env: { ...env, GIT_SSH_COMMAND: `${stub} -o UserMarker=1` }, encoding: "utf8" });
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
-  const invoked = readFileSync(log, "utf8");
-  assert.match(invoked, /UserMarker=1/, "the user's own configured command must survive, not be replaced");
-  for (const opt of ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=5", "ServerAliveCountMax=2"]) {
-    assert.ok(invoked.includes(opt), `bound option missing from the invoked command: ${opt}`);
-  }
+  const words = assertBoundOptions(log);
+  assert.ok(words.includes("UserMarker=1"), "the user's own configured command must survive, not be replaced");
+});
+
+// The middle tier of the same fallback. Unlike GIT_SSH_COMMAND it is a git
+// config read, so a wrong key or a wrong scope would break it without breaking
+// the test above — and would ship silently, since setting GIT_SSH_COMMAND in
+// that test short-circuits `${GIT_SSH_COMMAND:-…}` before this tier is ever
+// consulted. Measured: deleting the `git config --get core.sshCommand` line
+// outright left the whole file green before this test existed.
+test("probe 2: a core.sshCommand is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+  git(repo, env, "config", "core.sshCommand", `${stub} -o UserMarker=1`);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  const words = assertBoundOptions(log);
+  assert.ok(words.includes("UserMarker=1"), "the configured command must survive, not be replaced");
+});
+
+// The last tier, and the one this probe regressed: git's precedence is
+// GIT_SSH_COMMAND > core.sshCommand > GIT_SSH, so setting GIT_SSH_COMMAND
+// unconditionally dropped a user's GIT_SSH wrapper — measured against the
+// pre-fix shape, the stub was invoked twice; with GIT_SSH_COMMAND set, never.
+// GIT_SSH names a program rather than a command line, so it carries no marker
+// option of its own: being invoked at all is the assertion.
+test("probe 2: a legacy GIT_SSH wrapper is honoured, with the bound options added on top", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, GIT_SSH: stub }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  assertBoundOptions(log);
 });

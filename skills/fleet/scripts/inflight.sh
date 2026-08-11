@@ -169,22 +169,56 @@ echo "\$ git ls-remote --heads origin" >&2
 #
 # ssh: BatchMode=yes refuses any interactive prompt (host key, passphrase)
 # rather than hanging on one, so it doubles as prompt suppression for the ssh
-# case. ConnectTimeout bounds the TCP handshake; the ServerAlive pair bounds a
-# connection that completed the handshake and then went quiet — the stalled
-# transport measured above. 10s to connect and 2x5s of silence: generous
-# enough for a slow-but-working link, short enough that a stalled probe does
-# not hold a fleet slot for minutes. Retune here if either stops holding.
+# case.
+#
+# ConnectTimeout is the option that bounds the stalled transport measured
+# above: it gates the banner exchange, not only the TCP handshake, so a peer
+# that accepts the connection and then never speaks is cut off at
+# ConnectTimeout. Measured against that exact case (OpenSSH_10.2p1, the
+# accept-then-silent listener the test at inflight.test.mjs uses) — both
+# options set: "Connection timed out during banner exchange" at 10.0s;
+# ConnectTimeout alone, ServerAlive dropped: 10.0s, identical; ServerAlive
+# alone, ConnectTimeout dropped: still running at 30s, killed from outside.
+# ServerAlive keepalives only ride an established transport, and here that
+# transport never comes up, so they contribute nothing to this case. Their job
+# is the session that gets past banner and authentication and only then goes
+# quiet, which nothing here exercises.
+#
+# 10s to connect and 2x5s of silence: generous enough for a slow-but-working
+# link, short enough that a stalled probe does not hold a fleet slot for
+# minutes. Retune here if either stops holding — but retune the right one: the
+# accept-then-silent case rides on ConnectTimeout alone, so shortening
+# ServerAlive does not tighten it and dropping ConnectTimeout removes it.
 #
 # A user's own ssh command is honoured, not replaced — options land on top of
-# whatever GIT_SSH_COMMAND or core.sshCommand already says (falling back to
-# plain "ssh"), so a configured identity file or proxy command still runs.
+# whatever GIT_SSH_COMMAND, core.sshCommand or GIT_SSH already says (falling
+# back to plain "ssh"), so a configured identity file or proxy command still
+# runs. All three, because git's own precedence is GIT_SSH_COMMAND >
+# core.sshCommand > GIT_SSH: setting GIT_SSH_COMMAND here without consulting
+# GIT_SSH would silently drop a wrapper the user had working before this
+# probe was bounded at all.
 #
 # http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
-# that goes quiet — abort if it sits under 1000 bytes/s for 10s, the http
-# counterpart to ssh's ServerAlive pair above.
+# that goes quiet — abort if it sits under 1000 bytes/s for 10s.
+#
+# It bounds a transfer already under way and nothing before one, so it is a
+# weaker bound than the ssh side, not a counterpart to it. Measured against the
+# same accept-then-silent listener: a plain http origin aborts at 10.0s
+# ("Operation too slow"), but an https one never starts a transfer at all — the
+# TLS handshake does not complete, so the timer never arms and ls-remote ran
+# past 120s. A dropped SYN costs curl's own 75s default on either scheme, and
+# git exposes no connect knob to shorten it (`git help config` lists only these
+# two http timing keys; http.connectTimeout does not exist). So an https origin
+# can still hold a fleet slot the way #92 describes. Closing that needs a bound
+# outside git — background the call and kill it — which is #346, not another -c.
 base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
+# GIT_SSH is a program PATH, not a command line, so it is quoted rather than
+# pasted raw: git runs GIT_SSH_COMMAND through a shell, which would otherwise
+# split a path containing spaces into a program and its arguments.
+[ -n "$base_ssh" ] || base_ssh="${GIT_SSH:+\"$GIT_SSH\"}"
+[ -n "$base_ssh" ] || base_ssh=ssh
 if ! heads=$(GIT_TERMINAL_PROMPT=0 \
-    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-${base_ssh:-ssh}} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
+    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
     git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin); then
   die "git ls-remote failed, so whether #$n has a remote branch is unknown"
 fi
