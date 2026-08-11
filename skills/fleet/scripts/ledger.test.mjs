@@ -12,12 +12,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
+
+// #155's fix resolves the ledger's own repository with a real `git`
+// subprocess (both here in test setup and inside ledger.mjs itself), so PATH
+// cannot simply be reduced to the stub's directory the way `gh` alone used
+// to allow — `git` has to stay reachable too. Resolved once, symlinked into
+// every fixture's `bin/` below, which keeps `gh` exactly as isolated as
+// before (real PATH never reaches it) while `git` still resolves.
+const REAL_GIT = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+if (!REAL_GIT) throw new Error("ledger.test.mjs setup: could not locate a `git` binary on PATH");
 
 // `printf '%s\n' "$@"` before any early exit: the argv record has to survive the
 // failure paths too, or the "what query did gh receive" assertions can only run
@@ -31,6 +40,7 @@ const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 // JSON.stringify produces.
 const GH_STUB = `#!/bin/sh
 printf '%s\\n' "$@" > "$GH_ARGS_FILE"
+pwd -P > "$GH_CWD_FILE"
 if [ -n "$GH_FAIL" ]; then
   echo "gh: could not authenticate to github.com (HTTP 401)" >&2
   exit 1
@@ -51,27 +61,46 @@ function ledgerText(filed) {
 // `hits` is what the gh stub prints; `gh: false` removes gh from PATH entirely
 // (the "gh not installed" case, which throws ENOENT rather than exiting non-zero
 // — a different code path from an auth failure and worth its own coverage).
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [] } = {}) {
+//
+// `gitRepo` defaults true because that is what every real ledger location is
+// (`--file` inside a checkout, or defaultLedgerPath()'s own --git-common-dir
+// derivation) — #155 makes the tracker query bind to that repo, so a fixture
+// that is not one no longer reaches gh at all. `gitRepo: false` is its own
+// case (an explicit --file naming a path outside any repository) and `noFile`
+// / `procCwd` exist to drive the no-`--file` documented flow, which resolves
+// its own ledger location from the spawned process's cwd rather than `--file`.
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
-    const file = join(dir, "ledger.md");
+    if (gitRepo) {
+      const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore" });
+      assert.equal(init.status, 0, "test setup: git init must succeed");
+    }
+    const ledgerDir = noFile ? join(dir, ".fleet") : dir;
+    if (noFile) mkdirSync(ledgerDir, { recursive: true });
+    const file = join(ledgerDir, "ledger.md");
     writeFileSync(file, ledgerText(filed));
     const fixture = join(dir, "hits.json");
     writeFileSync(fixture, JSON.stringify(hits));
     const argsFile = join(dir, "gh-argv");
+    const cwdFile = join(dir, "gh-cwd");
     const bin = join(dir, "bin");
     const env = {
       ...process.env,
       GH_FIXTURE: fixture,
       GH_ARGS_FILE: argsFile,
+      GH_CWD_FILE: cwdFile,
       // PATH is replaced, not prefixed: a prefix leaves the real `gh` reachable
       // the moment the stub's own directory lookup changes, and the ENOENT test
-      // would then silently start querying the live tracker.
+      // would then silently start querying the live tracker. `git` still
+      // resolves — it is symlinked into this same `bin` below — so this stays
+      // narrow to `gh` alone.
       PATH: bin,
     };
     if (ghFails) env.GH_FAIL = "1";
     if (ghGarbage) env.GH_GARBAGE = "1";
     mkdirSync(bin, { recursive: true });
+    symlinkSync(REAL_GIT, join(bin, "git"));
     if (gh) {
       const ghPath = join(bin, "gh");
       writeFileSync(ghPath, GH_STUB);
@@ -81,9 +110,11 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     // readable at all, and `check`'s stderr stays far under the ~64 KiB pipe
     // buffer where `console.error` + `process.exit()` starts dropping writes
     // (measured on candidates.mjs, issue #132) — so these assertions are honest.
-    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "check", ...args, subject], {
+    const scriptArgs = noFile ? ["check", ...args, subject] : ["--file", file, "check", ...args, subject];
+    const r = spawnSync(process.execPath, [SCRIPT, ...scriptArgs], {
       encoding: "utf8",
       env,
+      cwd: procCwd || (noFile ? dir : undefined),
     });
     let json = null;
     try {
@@ -98,6 +129,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       json,
       ghRan: existsSync(argsFile),
       ghArgv: existsSync(argsFile) ? readFileSync(argsFile, "utf8").trim().split("\n") : [],
+      ghCwd: existsSync(cwdFile) ? readFileSync(cwdFile, "utf8").trim() : null,
+      // Resolved before the `finally` below removes `dir` — a caller that
+      // realpath()s this after run() returns hits an ENOENT, not a path.
+      ledgerRepoDir: realpathSync(dir),
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -426,4 +461,75 @@ test("the measured #114 rewording surfaces, weakly — it is the tracker query t
   assert.ok(r.json.near.length >= 1, "the filed row should still be offered for the caller to judge");
   assert.match(r.json.near[0].row, /^#114 /);
   assert.ok(r.json.near[0].score > 0);
+});
+
+// ---------------------------------------------------------------------------
+// #155 — the tracker query binds to the ledger's own repository, not to
+// this process's ambient cwd. `run()`'s spawned `ledger.mjs check` always
+// inherits the outer test-runner's cwd (this checkout), which is itself a
+// different repository from the `git init`'d fixture directory the ledger
+// lives in below — that mismatch IS the "unrelated working directory" the
+// acceptance criteria call for, no second fixture repo needed.
+// ---------------------------------------------------------------------------
+
+test("an explicit ledger inside a repository targets that ledger's repository, not the caller's cwd", () => {
+  const r = run("some distinctive subject words entirely", { filed: [], hits: [] });
+  assert.equal(r.ghRan, true);
+  assert.equal(
+    r.ghCwd,
+    r.ledgerRepoDir,
+    "gh must run from the ledger's own repository, not from wherever ledger.mjs's own process happened to start",
+  );
+  assert.notEqual(
+    r.ghCwd,
+    realpathSync(process.cwd()),
+    "sanity: the test runner's own cwd is a different repository from the fixture — otherwise this test cannot tell the fix from the bug it fixes",
+  );
+});
+
+test("an explicit ledger outside any git repository reports the tracker unchecked, same shape as any other unread tracker", () => {
+  const r = run("some distinctive subject words entirely", { filed: [], hits: [], gitRepo: false });
+  assert.equal(r.ghRan, false, "no repository to bind to means gh is never invoked at all");
+  assert.equal(r.status, 0, "an unreadable tracker must never block filing — same exit-code contract as every other degrade");
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "hits stays absent, not [], on this arm too");
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(
+    r.stderr,
+    /WARNING — TRACKER NOT CHECKED/,
+    "reuses the existing unchecked-tracker warning rather than inventing a second one",
+  );
+});
+
+test("the documented flow — no --file, run from inside the repo — is unchanged: tracker still gets checked", () => {
+  // defaultLedgerPath() resolves `.fleet/ledger.md` from --git-common-dir when
+  // no --file is given; `noFile` + `procCwd` drive that path instead of
+  // --file. This is the "must ACCEPT" pin: a normal invocation must not start
+  // reporting the tracker as unchecked just because #155 added a repository
+  // check to the diverging arm.
+  const r = run("some distinctive subject words entirely", { filed: [], hits: [], noFile: true });
+  assert.equal(r.ghRan, true, "the documented flow must still reach the tracker query");
+  assert.equal(r.json.tracker.ok, true);
+  assert.equal(r.json.verdict, "clean");
+  assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/, "a normal invocation must not degrade");
+  assert.doesNotMatch(r.stderr, /not inside a git repository/, "the new guard must not fire on the documented flow");
+});
+
+test("a working directory that is not a repository at all still degrades exactly as before (no --file)", () => {
+  // defaultLedgerPath()'s own pre-existing fallback: --git-common-dir fails,
+  // so it warns and returns a cwd-relative path — which #155 leaves alone
+  // (out of scope: changing ledger path resolution). The tracker query then
+  // finds no repository either, for the same underlying reason, and degrades
+  // through the identical `!tracker.ok` branch as the outside-any-repo case.
+  const dir = mkdtempSync(join(tmpdir(), "ledger-noreop-"));
+  try {
+    const r = run("some distinctive subject words entirely", { filed: [], hits: [], noFile: true, procCwd: dir });
+    assert.equal(r.ghRan, false);
+    assert.equal(r.status, 0);
+    assert.equal(r.json.tracker.ok, false);
+    assert.match(r.stderr, /could not resolve --git-common-dir/, "defaultLedgerPath()'s own existing warning still fires");
+    assert.match(r.stderr, /WARNING — TRACKER NOT CHECKED/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

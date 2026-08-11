@@ -319,50 +319,73 @@ if (cmd === "check") {
     // (issue #152: a consumer testing `.length` must not read this as clean).
     tracker = { ok: false, query: null, error: "subject has no distinctive terms to search for" };
   } else {
-    try {
-      const out = execFileSync(
-        "gh",
-        ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
-          "--json", "number,title,state,url"],
-        { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] },
-      );
-      // Parsing inside the try on purpose: gh can exit 0 and still print
-      // something that is not the JSON asked for. A parse failure is a failed
-      // tracker read, not a clean tracker.
-      const parsed = JSON.parse(out);
-      // Parseable is not the same as the shape asked for. Without this, a gh
-      // printing a JSON array that is not an issue list escalates to exit 3 and
-      // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
-      // that is in fact unverified. Throw into the catch below: an unreadable
-      // answer is a failed tracker read, exactly like unparseable output.
-      if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
-        throw new Error("gh returned JSON that is not an issue list");
+    // gh resolves "the repository" from the child process's cwd, which
+    // defaults to THIS process's cwd — the caller's, not the ledger's. The
+    // ledger itself is resolved from --file or defaultLedgerPath()'s
+    // --git-common-dir above; in the documented flow (no --file, run from
+    // the repo) the two agree, but an explicit --file naming a ledger
+    // outside the caller's repo diverges silently: the query searches the
+    // wrong tracker and reports a confident, empty result (#155). Bind gh's
+    // cwd to the ledger's OWN repository instead of leaving it implicit, so
+    // the two can never disagree. No --repo flag needed — gh's remote-based
+    // resolution does the rest once it is pointed at the right directory,
+    // and a worktree ledger (shared .git, own working tree) still resolves
+    // to the same repo either way.
+    const ledgerDir = dirname(resolve(file));
+    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+    if (repoCheck.status !== 0) {
+      // A ledger path outside any git repository has no repository for the
+      // query to bind to — same state as this process's own cwd not being a
+      // repo, which already degrades via the generic `!tracker.ok` branch
+      // below. Reuse that: no gh invocation, no separate "unchecked" shape.
+      tracker = { ok: false, query, error: `ledger path is not inside a git repository (${ledgerDir})` };
+    } else {
+      const ghCwd = repoCheck.stdout.trim();
+      try {
+        const out = execFileSync(
+          "gh",
+          ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
+            "--json", "number,title,state,url"],
+          { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"], cwd: ghCwd },
+        );
+        // Parsing inside the try on purpose: gh can exit 0 and still print
+        // something that is not the JSON asked for. A parse failure is a failed
+        // tracker read, not a clean tracker.
+        const parsed = JSON.parse(out);
+        // Parseable is not the same as the shape asked for. Without this, a gh
+        // printing a JSON array that is not an issue list escalates to exit 3 and
+        // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
+        // that is in fact unverified. Throw into the catch below: an unreadable
+        // answer is a failed tracker read, exactly like unparseable output.
+        if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
+          throw new Error("gh returned JSON that is not an issue list");
+        }
+        const hits = parsed
+          .map((h) => ({
+            number: h.number, title: h.title || "", state: h.state, url: h.url,
+            score: round2(overlap(scored, scoreTokens(h.title || ""))),
+          }))
+          .sort((a, b) => b.score - a.score);
+        tracker = { ok: true, query, hits };
+      } catch (e) {
+        // Every gh failure lands here — no network, no auth, rate limit, gh not
+        // installed (ENOENT), a timeout, unparseable output. None of them may
+        // produce a bare "safe to file": that is the same fail-open class the
+        // --git-common-dir resolution above already closed once. Degrade to the
+        // ledger-only answer and say so.
+        // Capped, and deliberately still carrying the stderr — the opposite call
+        // from the fleet's other gh catches (#176). Those omit it because
+        // execFileSync forwarded the child's bytes to our stderr already, so
+        // interpolating emits them twice; this call sets `stdio`, which turns
+        // that forwarding OFF, so this string is the only place the cause is
+        // ever seen. What it must not be is unbounded: it lands in
+        // `tracker.error`, which ships on stdout as part of a machine-parsed
+        // contract, and a megabyte of gh stderr inside a JSON field is a payload
+        // problem wherever the forwarding argument lands.
+        // `hits` omitted here too, same reason as the no-terms branch above:
+        // the search never ran, so there is no empty result to report.
+        tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
       }
-      const hits = parsed
-        .map((h) => ({
-          number: h.number, title: h.title || "", state: h.state, url: h.url,
-          score: round2(overlap(scored, scoreTokens(h.title || ""))),
-        }))
-        .sort((a, b) => b.score - a.score);
-      tracker = { ok: true, query, hits };
-    } catch (e) {
-      // Every gh failure lands here — no network, no auth, rate limit, gh not
-      // installed (ENOENT), a timeout, unparseable output. None of them may
-      // produce a bare "safe to file": that is the same fail-open class the
-      // --git-common-dir resolution above already closed once. Degrade to the
-      // ledger-only answer and say so.
-      // Capped, and deliberately still carrying the stderr — the opposite call
-      // from the fleet's other gh catches (#176). Those omit it because
-      // execFileSync forwarded the child's bytes to our stderr already, so
-      // interpolating emits them twice; this call sets `stdio`, which turns
-      // that forwarding OFF, so this string is the only place the cause is
-      // ever seen. What it must not be is unbounded: it lands in
-      // `tracker.error`, which ships on stdout as part of a machine-parsed
-      // contract, and a megabyte of gh stderr inside a JSON field is a payload
-      // problem wherever the forwarding argument lands.
-      // `hits` omitted here too, same reason as the no-terms branch above:
-      // the search never ran, so there is no empty result to report.
-      tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
     }
   }
 
