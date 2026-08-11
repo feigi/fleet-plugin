@@ -249,11 +249,34 @@ fi
 #
 # Same guard shape as probe 2, and it catches the same class: a lookup that
 # could not run at all (git missing, a fork failure, an unreadable packed-refs,
-# which exits 128). Know its ceiling, though — it does NOT catch git's own
-# degraded reads, which exit 0 with output missing. Measured: an unreadable
-# refs/heads prints nothing at rc 0, and a broken worktree admin file is skipped
-# at rc 0. Those still answer "no" without having looked, and only git can fix
-# it. The guard is the floor, not the whole answer.
+# which exits 128). That is the floor, not the whole answer: git's own
+# degraded reads exit 0 with output silently missing, which no exit-status
+# guard can see. Measured (#95): `chmod 000` on refs/heads or on the worktree
+# admin dir, and both lookups below report nothing, at rc 0, for a ticket that
+# has a live branch or worktree — the same wrong "free" #76 exists to rule out,
+# one probe down. Establish each storage was readable before trusting an empty
+# result from it — the same rule release-ticket.sh:73 already applies to its
+# own worktree-registry read (#84) — absence must be established, never
+# inferred.
+#
+# Ceiling, left open on purpose: a single loose ref git skips as corrupt
+# (`warning: ignoring broken ref refs/heads/x`, still rc 0) passes a
+# directory-level read+execute test — the directory is fine, one file inside
+# it is not — so it stays undetected. Only counting refs against a source
+# independent of git's own read would catch that, roughly doubling this
+# probe's cost, for a fault that usually breaks much else first; out of scope
+# for #95.
+common=$(git rev-parse --path-format=absolute --git-common-dir) ||
+  die "cannot resolve the git common directory"
+
+refsdir="$common/refs/heads"
+# Absent is fine and answers nothing here: `git init` creates this directory,
+# but an unusual ref backend (e.g. reftable) may not, and that is storage this
+# check does not reach either way.
+if [ -e "$refsdir" ]; then
+  [ -r "$refsdir" ] && [ -x "$refsdir" ] ||
+    die "refs directory $refsdir could not be read — whether #$n has a local branch is unknown"
+fi
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
   die "git for-each-ref failed, so whether #$n has a local branch is unknown"
 fi
@@ -263,6 +286,28 @@ local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
   END { printf "%s", out }') ||
   die "could not filter the local branches for #$n"
+
+# The worktree registry's check is a different shape from the one above, on
+# purpose — matching release-ticket.sh:73-113 (#84) rather than inventing a
+# second convention. A directory-level read+execute test alone is not enough
+# here: naming a registry entry needs read+execute on the PARENT only, so a
+# `gitdir` file chmod'd 000 INSIDE one entry passes every test on the entry
+# itself while `worktree list --porcelain` still drops it, at rc 0 (measured,
+# #84). Count registry entries on disk against what git reported instead —
+# that catches a silent drop whichever file inside the entry was unreadable.
+wtroot="$common/worktrees"
+registered=0
+if [ -e "$wtroot" ]; then
+  [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
+    die "worktree registry $wtroot could not be read — whether #$n has a worktree is unknown"
+  # A registry entry is a directory; anything else in here is not git's and
+  # must not be counted as a worktree git failed to report.
+  for entry in "$wtroot"/*; do
+    [ -d "$entry" ] || continue
+    registered=$((registered + 1))
+  done
+fi
+
 # Match on the worktree's basename, not its full path — matching the whole
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
@@ -270,6 +315,13 @@ local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
 if ! worktrees=$(git worktree list --porcelain); then
   die "git worktree list failed, so whether #$n has a worktree is unknown"
 fi
+# The main worktree is always listed first and has no registry entry of its
+# own, hence the -1. `grep -c` exits 1 on zero matches, which `set -e` would
+# read as fatal, hence the `|| true`.
+listed=$(printf '%s\n' "$worktrees" | grep -c '^worktree ' || true)
+[ "$((listed - 1))" -eq "$registered" ] ||
+  die "git listed $((listed - 1)) worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+
 # substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
 # the porcelain prints the path raw, so a checkout under a directory with a
 # space in it — plain enough on macOS — truncates at the space and the ticket

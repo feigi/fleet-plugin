@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -385,6 +385,108 @@ test("probe 3: the same worktree without a space in the path, as the control", (
   const r = inflight(77, { detachedWorktreeUnder: "nospace" }, t);
   assert.equal(r.code, 1);
   assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
+});
+
+// --- probe 3, degraded reads (#95).
+//
+// `for-each-ref` and `worktree list --porcelain` both exit 0 while silently
+// dropping what they cannot read, so an exit-status guard never sees it. A
+// live branch or worktree then reads as "no local branch or worktree" — the
+// wrong "free" #76 exists to rule out, one probe down. Real chmod throughout;
+// no way to fake a degraded git read other than triggering the real one.
+
+test("probe 3: an unreadable refs directory is unknown, never a free ticket", (t) => {
+  // The issue's own repro: a live branch, `chmod 000 .git/refs/heads`, and the
+  // pre-fix script answers `taken=false`.
+  const { repo, env } = fixture(t, 55, {});
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix-55-real");
+  const refsdir = join(repo, ".git", "refs", "heads");
+
+  // 0o400 (read, no execute) is what tells the guard's `&&` from an `||`: with
+  // `||` a readable-but-not-searchable directory would satisfy `-r` alone and
+  // pass. 0o000 zeroes both bits at once and cannot make that distinction, but
+  // it is the realistic fault the issue measured, so both are checked.
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(refsdir, mode);
+    const r = spawnSync("sh", [SCRIPT, "55"], { cwd: repo, env, encoding: "utf8" });
+    // Restored before the first assert, or a failure here leaves a fixture the
+    // suite's own cleanup cannot remove.
+    chmodSync(refsdir, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, at);
+    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    assert.match(r.stderr, /refs directory .* could not be read/, at);
+    assert.doesNotMatch(r.stderr, /no local branch or worktree/, at);
+  }
+});
+
+test("probe 3: an unreadable worktree registry is unknown, never a free ticket", (t) => {
+  // Same repro shape, aimed at `.git/worktrees` (git's own admin dir) instead
+  // of refs/heads — matches release-ticket.sh's worktree-registry check (#84).
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" }, );
+  const wtroot = join(repo, ".git", "worktrees");
+
+  for (const mode of [0o000, 0o400]) {
+    chmodSync(wtroot, mode);
+    const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+    chmodSync(wtroot, 0o755);
+
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, at);
+    assert.equal(r.stdout.trim(), "", `refused before any verdict is printed, ${at}`);
+    assert.match(r.stderr, /worktree registry .* could not be read/, at);
+  }
+});
+
+test("probe 3: an entry git cannot read INSIDE is unknown too, not just an unreadable entry", (t) => {
+  // #84 itself: naming a registry entry needs read+execute on the PARENT
+  // only, so the entry directory stays readable while the `gitdir` file git
+  // opens inside it does not. `worktree list --porcelain` drops it anyway, at
+  // rc 0 — caught here by the count, not by a permission test on the entry.
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const entries = readdirSync(join(repo, ".git", "worktrees"));
+  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+  const gitdir = join(repo, ".git", "worktrees", entries[0], "gitdir");
+
+  chmodSync(gitdir, 0o000);
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  // Restored before the first assert — a later `worktree list` (including the
+  // suite's own cleanup) would otherwise still see this claim's worktree as
+  // dropped.
+  chmodSync(gitdir, 0o644);
+
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+});
+
+test("probe 3: a repo that never had a linked worktree is still answerable and free", (t) => {
+  // The trap a naive fix falls into: refusing whenever `.git/worktrees` is
+  // simply missing, conflating "never existed" with "exists but unreadable".
+  // A vanilla repo has no such directory at all, and that absence must stay
+  // free, not become a permanent exit 2 (#95).
+  const { repo, env } = fixture(t, 8, {});
+  assert.equal(existsSync(join(repo, ".git", "worktrees")), false,
+    "fixture: no worktree has ever been linked");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+test("probe 3: something that is not a registry entry is not counted as a dropped worktree", (t) => {
+  // The count above globs the registry directory, so it sees whatever is in
+  // there — and anything that is not a directory is not a worktree
+  // registration, matching release-ticket.sh's own fix for the same trap.
+  const { repo, env } = fixture(t, 8, {});
+  mkdirSync(join(repo, ".git", "worktrees"), { recursive: true });
+  writeFileSync(join(repo, ".git", "worktrees", "stray-note"), "not a worktree\n");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).taken, false);
 });
 
 // --- the evidence payload as JSON.
