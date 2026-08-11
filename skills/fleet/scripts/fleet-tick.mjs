@@ -129,8 +129,10 @@ const OPTIONS = {
   reviewers: { type: "string" },
   "merge-bots": { type: "string" },
   pool: { type: "string" },
-  "implementer-cap": { type: "string" },
-  "reviewer-cap": { type: "string" },
+  // Defaults here, not threaded through int(): declared this way they still
+  // go through the guard below, where a hand-passed default went round it.
+  "implementer-cap": { type: "string", default: "2" },
+  "reviewer-cap": { type: "string", default: "5" },
 };
 
 function counts() {
@@ -144,10 +146,9 @@ function counts() {
     die(`${e.message} — accepted: ${Object.keys(OPTIONS).map((f) => `--${f}`).join(", ")}`);
   }
 
-  const int = (name, dflt) => {
+  const int = (name) => {
     const raw = values[name];
     if (raw === undefined) {
-      if (dflt !== undefined) return dflt;
       die(
         `--${name} is required. Live member counts and the pool are the CONTROLLER's state: ` +
         `the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. ` +
@@ -161,8 +162,8 @@ function counts() {
     if (!/^\d+$/.test(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
     return Number(raw);
   };
-  const cap = (name, dflt) => {
-    const n = int(name, dflt);
+  const cap = (name) => {
+    const n = int(name);
     // run-team's invariant, enforced where the number enters rather than where
     // it is used: <= 5 implementers, <= 5 reviewers, <= 1 merge bot.
     if (n < 1 || n > 5) die(`--${name} must be between 1 and 5 (run-team's member cap), got ${n}`);
@@ -170,7 +171,7 @@ function counts() {
   };
   return {
     implLive: int("implementers"), reviewerLive: int("reviewers"), mergeBotLive: int("merge-bots"),
-    pool: int("pool"), implCap: cap("implementer-cap", 2), reviewerCap: cap("reviewer-cap", 5),
+    pool: int("pool"), implCap: cap("implementer-cap"), reviewerCap: cap("reviewer-cap"),
   };
 }
 
@@ -223,8 +224,14 @@ function supply() {
   // --limit lines of it — is captured and dropped rather than billed to the
   // controller's context. Only the failure paths below say anything.
   if (r.error) die(`candidates.mjs did not run: ${r.error.code ?? r.error.message} — supply unknown`);
-  if (r.status === 1) return 0; // its documented "query fine, queue empty"
-  if (r.status !== 0) die(`candidates.mjs exited ${r.status} — supply unknown, and unknown is not zero`);
+  // Exit 1 is candidates' documented "query fine, queue empty" AND Node's own
+  // code for a module-not-found, a syntax error or any uncaught throw — the
+  // collision candidates.mjs names on its own side. So the payload decides and
+  // not the code: a genuinely empty queue is the only exit 1 printing `[]`.
+  if (r.status === 1 && r.stdout.trim() === "[]") return 0;
+  // The signal too: a candidates.mjs killed by an OOM kill leaves status null,
+  // and "exited null" names nothing. Same clause the gh read above already has.
+  if (r.status !== 0) die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — supply unknown, and unknown is not zero`);
   let rows;
   try {
     rows = JSON.parse(r.stdout);
@@ -240,7 +247,7 @@ function main() {
   // Both reads happen before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.
   const { mergeQueue, reviewBacklog } = prState();
-  for (const line of formatLines(reconcile({ ...c, ...{ mergeQueue, reviewBacklog }, supply: supply() }))) {
+  for (const line of formatLines(reconcile({ ...c, mergeQueue, reviewBacklog, supply: supply() }))) {
     console.log(line);
   }
 }

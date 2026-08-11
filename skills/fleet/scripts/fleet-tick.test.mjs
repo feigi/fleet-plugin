@@ -26,7 +26,11 @@ test("implementers: drained queue with pool and no backlog dispatches", () => {
 });
 
 test("implementers: dispatch is capped by the pool, not just the deficit", () => {
-  const r = row(state({ implLive: 0, pool: 1, implCap: 5 }), "implementers");
+  // supply is deliberately LARGE and the pool deliberately short of the
+  // deficit: that is #3's own shape, and the table calls row 1 silent for it.
+  // At supply 0 this case cannot tell a bare DISPATCH from one that also
+  // suggests re-shortlisting, so the exact-equality below would pin nothing.
+  const r = row(state({ implLive: 0, pool: 1, implCap: 5, supply: 57 }), "implementers");
   assert.equal(r.action, "DISPATCH 1");
 });
 
@@ -79,7 +83,6 @@ test("implementers: over cap still refuses, and the row shows the overshoot", ()
 test("implementers: pool 0, supply >= cap re-shortlists without suggesting triage", () => {
   const r = row(state({ pool: 0, supply: 2, implCap: 2 }), "implementers");
   assert.equal(r.action, "RE-SHORTLIST");
-  assert.doesNotMatch(r.action, /triage/);
 });
 
 test("implementers: pool 0, 0 < supply < cap re-shortlists AND suggests triage", () => {
@@ -155,7 +158,7 @@ test("formatLines prints role, actual/target and the ACTION on one line each", (
 // failed read refuses rather than degrading into a number.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -187,8 +190,12 @@ const issue = (number) => ({
   number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "",
 });
 
-function runCli(args, { prs = [], issues = [], env: extraEnv = {} } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "fleet-tick-"));
+function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } = {}) {
+  // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
+  // placed under the unresolved path never runs its own main(), since
+  // import.meta.url resolves the symlink and process.argv[1] does not. It exits
+  // 0 having printed nothing — the same shape as a passing tick.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-")));
   const gh = join(dir, "gh");
   writeFileSync(gh, GH_STUB);
   chmodSync(gh, 0o755);
@@ -196,7 +203,16 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {} } = {}) {
   const issueFixture = join(dir, "issues.json");
   writeFileSync(prFixture, JSON.stringify(prs));
   writeFileSync(issueFixture, JSON.stringify(issues));
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+  // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
+  // means running a copy of the script out of the stub dir. It imports nothing
+  // but node builtins, so the copy behaves as the original.
+  let script = SCRIPT;
+  if (candidates !== undefined) {
+    script = join(dir, "fleet-tick.mjs");
+    writeFileSync(script, readFileSync(SCRIPT));
+    writeFileSync(join(dir, "candidates.mjs"), candidates);
+  }
+  const r = spawnSync(process.execPath, [script, ...args], {
     encoding: "utf8",
     env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`,
@@ -224,8 +240,14 @@ test("CLI: a missing live count refuses rather than defaulting", () => {
 
 test("CLI: a live count that is not a non-negative integer refuses", () => {
   for (const bad of ["x", "-1", "1.5", ""]) {
-    const r = runCli(["--implementers", bad, "--reviewers", "0", "--merge-bots", "0", "--pool", "1"]);
+    // The `=` form, not `--implementers -1`: given a space, parseArgs rejects a
+    // leading dash as ambiguous BEFORE the guard runs, so status 2 alone is
+    // satisfied by the parser and the negative case pins nothing. The stderr
+    // match is what holds every case to this script's own reason for refusing.
+    const r = runCli([`--implementers=${bad}`, "--reviewers", "0", "--merge-bots", "0", "--pool", "1"]);
     assert.equal(r.status, 2, `'${bad}' should refuse`);
+    assert.match(r.stderr, /--implementers must be a non-negative integer/,
+      `'${bad}' must refuse for the guard's reason, not the parser's`);
   }
 });
 
@@ -262,6 +284,39 @@ test("CLI: a failed supply read refuses — unknown supply is not zero supply", 
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /supply/);
+});
+
+test("CLI: a candidates.mjs that dies on its own refuses — Node exit 1 is not an empty queue", () => {
+  // The collision this pins: Node exits 1 for a module-not-found, a syntax
+  // error and any uncaught throw, and candidates.mjs uses that same code for
+  // "query fine, queue empty". Read as the latter, a supply read that never
+  // ran prints supply=0 and the exact #3 stall line at exit 0 — this script
+  // reporting the stall it exists to end. Only the payload separates them.
+  for (const [what, body] of [
+    ["an uncaught throw", `throw new Error("boom");`],
+    ["a syntax error", "const x = ;"],
+  ]) {
+    const r = runCli(LIVE, { candidates: body });
+    assert.equal(r.status, 2, `${what} must refuse`);
+    assert.equal(r.stdout.trim(), "", `${what} must print no reconcile line`);
+    assert.match(r.stderr, /supply unknown/, `${what} must say supply is unknown`);
+  }
+
+  // …and the benign exit 1 still reads as an empty queue, or the fix above
+  // would have bought the refusal by breaking the case it must keep.
+  const empty = runCli(LIVE, { candidates: `console.log("[]"); process.exitCode = 1;` });
+  assert.equal(empty.status, 0);
+  assert.match(empty.stdout, /supply=0/);
+});
+
+test("CLI: a signal-killed candidates.mjs names the signal, not `exited null`", () => {
+  // spawnSync leaves status null and puts the cause in signal, so a refusal
+  // interpolating status alone names nothing. Fixed once at candidates.mjs's
+  // own gh read and reintroduced here; this is the pin that was missing.
+  const r = runCli(LIVE, { candidates: `process.kill(process.pid, "SIGKILL");` });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /killed by SIGKILL/);
 });
 
 test("CLI: a PR list at the limit refuses rather than serving a truncated one", () => {
