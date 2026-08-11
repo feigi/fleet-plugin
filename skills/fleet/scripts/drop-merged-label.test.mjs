@@ -1,8 +1,10 @@
-// Regression gate for release-merged-claim.sh, the merge-side half of the
-// `in-progress` label's lifecycle (#170): claim-ticket.sh adds it,
-// release-ticket.sh drops it on a bail, this drops it on a merge.
+// Regression gate for drop-merged-label.sh, the merge-triggered third step in
+// the claim lifecycle (#170) — neither CONTEXT.md's Release (a claim that
+// never became a PR) nor its Reap (branches and worktrees): claim-ticket.sh
+// adds the label, release-ticket.sh drops it on a bail, this drops it on a
+// merge.
 //
-// Zero deps: `node --test skills/fleet/scripts/release-merged-claim.test.mjs`.
+// Zero deps: `node --test skills/fleet/scripts/drop-merged-label.test.mjs`.
 // No git repo needed — the script never touches git, only `gh`, so `gh` is the
 // only thing stubbed, on PATH.
 //
@@ -18,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCRIPT = fileURLToPath(new URL("./release-merged-claim.sh", import.meta.url));
+const SCRIPT = fileURLToPath(new URL("./drop-merged-label.sh", import.meta.url));
 
 /**
  * A `gh` stub on PATH answering the four calls this script makes, tuned per
@@ -74,7 +76,7 @@ exit 0
 }
 
 function mktemp(t) {
-  const root = mkdtempSync(join(tmpdir(), "release-merged-claim-"));
+  const root = mkdtempSync(join(tmpdir(), "drop-merged-label-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -118,7 +120,7 @@ test("a PR that is not merged is refused, not silently skipped", (t) => {
   assert.equal(code, 2);
   assert.match(stderr, /not merged \(state=CLOSED\)/);
   // Never reaches the closingIssuesReferences call — a closed-not-merged PR
-  // has no claim to release, so nothing past state should ever run.
+  // is nothing this script may touch, so nothing past state should ever run.
   assert.ok(!s.calls().some((c) => c.includes("closingIssuesReferences")));
 });
 

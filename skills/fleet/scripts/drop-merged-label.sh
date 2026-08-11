@@ -1,7 +1,10 @@
 #!/bin/sh
-# Drop `in-progress` from every issue a merged PR closes. The merge-side half
-# of the label's lifecycle: claim-ticket.sh adds it, release-ticket.sh drops it
-# on a bail, this drops it on a merge. #170.
+# Drop `in-progress` from every issue a merged PR closes. claim-ticket.sh adds
+# the label, release-ticket.sh drops it on a bail (CONTEXT.md's Release: "a
+# claim that never became" a PR). This is neither Release nor Reap
+# (CONTEXT.md's Reap is branches and worktrees, not the label) — a third,
+# merge-triggered step in the claim lifecycle CONTEXT.md does not yet name.
+# #170.
 #
 # Single writer, per the #170 ruling: the merge is the only moment the ticket
 # number and the fact of completion are known together, so only a PROVEN merge
@@ -17,10 +20,10 @@
 # tell what this PR closes.
 set -eu
 
-NAME=release-merged-claim
+NAME=drop-merged-label
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: release-merged-claim.sh <pr> [--apply]"
+[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: drop-merged-label.sh <pr> [--apply]"
 pr=$1
 case "$pr" in ''|*[!0-9]*) die "pr must be a number, got '$pr'";; esac
 case "${2:-}" in
@@ -45,7 +48,7 @@ if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssu
 fi
 
 if [ -z "$issues" ]; then
-  echo "$NAME: PR #$pr closes no issues — nothing to release" >&2
+  echo "$NAME: PR #$pr closes no issues — nothing to drop" >&2
   printf '{"pr":%s,"merged":true,"issues":[],"applied":%s,"failed":[]}\n' "$pr" "$apply"
   exit 0
 fi
