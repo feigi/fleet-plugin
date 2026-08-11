@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
 
@@ -183,4 +184,57 @@ test("CLI: --ledger=path form dies by name, not silently read as absent", () => 
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger=/tmp/x"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--ledger needs a space-separated value/);
+});
+
+// The other two branches of the same guard, neither of which the tests above
+// reach: a flag eating the NEXT FLAG as its value (mutating away
+// `value.startsWith("--")` left board/ci-state/diff-stats 100% green), and an
+// explicit empty/whitespace value (`value.trim() === ""` was unpinned in all
+// four scripts simultaneously). Both die before any gh call.
+test("CLI: --ledger followed by another flag is rejected, not read as the string \"--prev\"", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger", "--prev", "x"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--ledger needs a value/);
+});
+
+test("CLI: --ledger given an empty value dies rather than falling back to the default ledger", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger", ""], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--ledger needs a value/);
+});
+
+// #169 review: a --port we cannot use falls back to 8123, and the bind error
+// used to name that substituted default as if the caller had chosen it — it
+// told someone who DID pass --port to "pass --port <n>", pointing them at a
+// port they never named. PATH is stripped to an empty dir so every gh/git/node
+// child fails fast into tryRun's catch; the tick degrades and serve() still
+// reaches listen(). Offline, ~50ms.
+const serveArgs = (args) => [SCRIPT, "serve", ...args];
+const serveOpts = () => ({
+  cwd: mkdtempSync(join(tmpdir(), "board-serve-")),
+  env: { ...process.env, PATH: mkdtempSync(join(tmpdir(), "board-nobin-")) },
+  encoding: "utf8",
+  timeout: 20000,
+});
+
+test("CLI: serve marks 8123 as the default in the bind error when --port could not be used", async () => {
+  const blocker = createServer();
+  // 8123 just has to be held by SOMEONE — us, or whatever already had it.
+  await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--port", "abc"]), serveOpts());
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /port 8123 \(default\) in use/);
+  } finally { blocker.close(() => {}); }
+});
+
+test("CLI: serve does NOT call a port the caller really passed a default", async () => {
+  const blocker = createServer();
+  const port = await new Promise((res) => blocker.listen(0, () => res(blocker.address().port)));
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--port", String(port)]), serveOpts());
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, new RegExp(`port ${port} in use`));
+    assert.doesNotMatch(r.stderr, /\(default\)/);
+  } finally { blocker.close(() => {}); }
 });

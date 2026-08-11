@@ -2,9 +2,9 @@
 // rather than being read as absent or silently consumed as the following
 // flag's own value.
 //
-// `--a`/`--b` given trailing were already caught by `if (!a || !b) die(...)`
-// below — `undefined` is falsy — so pr-overlap.mjs was never a silent-
-// widening site the way ci-state.mjs's `--base`/`--workflow` were (see
+// `--a`/`--b` given trailing were already caught by pr-overlap.mjs's own
+// `if (!a || !b) die(...)` guard — `undefined` is falsy — so it was never a
+// silent-widening site the way ci-state.mjs's `--base`/`--workflow` were (see
 // feigi's PR #167 review comment). What was NOT caught: `--a` given `--b` as
 // its "value" (`pr-overlap.mjs --a --b 5`) — `a` becomes the string "--b",
 // passes the falsy check, and only failed later as a confusing `gh pr diff
@@ -32,4 +32,12 @@ test("CLI: --a=5 form dies by name, not silently read as absent", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--a=5", "--b", "6"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--a needs a space-separated value/);
+});
+
+// `value.trim() === ""` was the one clause of the guard no test in any of the
+// four scripts reached — it could be deleted from all four at once, green.
+test("CLI: --a given a whitespace-only value dies naming the flag", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", "   ", "--b", "6"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--a needs a value/);
 });

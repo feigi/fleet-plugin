@@ -308,7 +308,13 @@ export function createBoardServer(dir) {
 }
 
 export async function serve({ ledgerFile, port, interval, open } = {}) {
-  port = Number(port ?? arg("port")) || 8123;
+  // A --port we cannot use (absent, or not a number) falls back to 8123. Keep
+  // which of the two it was: naming the substituted default bare in the bind
+  // error below reads as "the port you asked for is taken" and sends a caller
+  // who DID pass --port hunting a process on a port they never chose (#169
+  // review). Rejecting the bad value outright is #366, not this.
+  const portGiven = Number(port ?? arg("port")) || null;
+  port = portGiven ?? 8123;
   interval = Number(interval ?? arg("interval")) || 15;
   open = open ?? has("open");
   const { computeBoard } = await import("./compute-board.mjs");
@@ -338,7 +344,7 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
     if (open) tryRun("open", [`http://localhost:${port}/`]);
   });
   server.on("error", (e) => die(e.code === "EADDRINUSE"
-    ? `port ${port} in use — pass --port <n>` : e.message));
+    ? `port ${port}${portGiven ? "" : " (default)"} in use — pass --port <n>` : e.message));
 
   const stop = () => {
     clearInterval(timer);

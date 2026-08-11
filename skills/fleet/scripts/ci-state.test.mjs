@@ -389,3 +389,19 @@ test("trailing --pr (no value, the entry flag itself) still dies naming the flag
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--pr needs a value/);
 });
+
+// The other two branches of the same guard: a flag eating the NEXT FLAG as its
+// value, and an explicit whitespace-only value. Deleting either clause from
+// arg() left this suite 18/18 green before these two existed.
+test("--base followed by another flag is rejected, not read as the string \"--workflow\"", () => {
+  const r = run(["--base", "--workflow", "CI"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base needs a value/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
+test("--base given a whitespace-only value dies rather than comparing against the default base", () => {
+  const r = run(["--base", "   "]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base needs a value/);
+});

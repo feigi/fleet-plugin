@@ -9,14 +9,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { classify, computeStats } from "./diff-stats.mjs";
 
 // `main()` runs only when this file is executed directly, so the CLI wiring is
 // unreachable from a unit test. Pinned as source text instead — see the
 // truncation test at the bottom for why it needs pinning at all.
-const CLI = readFileSync(join(import.meta.dirname, "diff-stats.mjs"), "utf8");
-const SCRIPT = fileURLToPath(new URL("./diff-stats.mjs", import.meta.url));
+const SCRIPT = join(import.meta.dirname, "diff-stats.mjs");
+const CLI = readFileSync(SCRIPT, "utf8");
 
 test("classifier priority: test > code-ext > docs/config-dir", () => {
   // src is the residue
@@ -164,4 +163,19 @@ test("CLI: --pr=5 form dies by name, not silently read as absent", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--pr=5"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--pr needs a space-separated value/);
+});
+
+// The other two branches of the same guard. `--pr` is this script's only flag,
+// so the next-flag case needs an unknown one to collide with — the guard is on
+// the value's shape, not on the following flag being real.
+test("CLI: --pr followed by another flag is rejected, not consumed as the PR ref", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--pr needs a value/);
+});
+
+test("CLI: --pr given an empty value dies naming the flag", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", ""], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--pr needs a value/);
 });
