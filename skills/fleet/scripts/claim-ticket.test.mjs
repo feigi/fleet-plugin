@@ -72,6 +72,10 @@ function apply(files, script = SCRIPT) {
     wt,
     text: readFileSync(join(wt, "agent-test"), "utf8"),
     run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
+    // The same runner invoked from a subdirectory. Node resolves argv against
+    // the cwd, so where a member stands is part of what an argument means.
+    runFrom: (sub, ...args) =>
+      spawnSync(join(wt, "agent-test"), args, { cwd: join(wt, sub), encoding: "utf8", env }),
   };
 }
 
@@ -375,6 +379,30 @@ test("runner: the vendored file spellings node runs are not refused", () => {
     assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
   }
+});
+
+// Node's exclusion is anchored at the cwd its arguments are relative to —
+// that is what "relative form" means, and it is what separates mirroring the
+// rule from matching a prefix. The two fixture files below swap verdicts on
+// nothing but where the runner is invoked from: at the worktree root
+// `node_modules/pkg/v.test.mjs` is the dropped one and `t/node_modules/…`
+// runs, while from inside `t/` the polarity inverts — `node_modules/pkg/…`
+// now names the nested file and is dropped, `../node_modules/pkg/…` names
+// the root one and runs. Measured against node itself, both ways. A guard
+// anchored at the worktree root rather than the cwd gets both backwards and
+// no other test in this file would see it.
+test("runner: the vendored rule is anchored at the cwd, as node's is", () => {
+  const a = apply(SUITE);
+  for (const p of ["node_modules/pkg", "t/node_modules/pkg"]) {
+    mkdirSync(join(a.wt, p), { recursive: true });
+    writeFileSync(join(a.wt, p, "v.test.mjs"), PASSES);
+  }
+  const refused = a.runFrom("t", "a.test.mjs", "node_modules/pkg/v.test.mjs");
+  assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /is under node_modules — node discards it silently/);
+  const ran = a.runFrom("t", "a.test.mjs", "../node_modules/pkg/v.test.mjs");
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.match(ran.stdout, /^(?:ℹ|#) pass 2$/m);
 });
 
 // The issue's own second case, verbatim: "and, before PR #75's escape,
