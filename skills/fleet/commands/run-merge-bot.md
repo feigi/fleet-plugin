@@ -113,7 +113,7 @@ For each labeled PR clearing the hold rule, lowest first:
    **Drop `in-progress` from every issue this PR closes** — the merge is the only point where the ticket number and the fact of completion are known together, and nothing else clears it:
 
    ```bash
-   ~/.claude/skills/fleet/scripts/release-merged-claim.sh <pr> --apply
+   ~/.claude/skills/fleet/scripts/drop-merged-label.sh <pr> --apply
    ```
 
    Exit 0 done or nothing to close, **1 a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it**: a merged ticket that keeps the label is invisible the moment it is reopened. Exit 2 means the PR was not actually MERGED yet — call this only after the merge is confirmed at the top of this step.

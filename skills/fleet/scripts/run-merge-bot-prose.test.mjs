@@ -5,7 +5,7 @@
 //
 // THE CEILING: this proves the phrase is PRESENT in step 4. It cannot prove
 // the rule is not negated by a sentence added beside it, and it does not run
-// the step — release-merged-claim.test.mjs owns the script's own behavior.
+// the step — drop-merged-label.test.mjs owns the script's own behavior.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -29,7 +29,7 @@ function step4() {
 
 test("step 4 drops in-progress from every issue the merged PR closes", () => {
   assert.match(step4(), /Drop `in-progress` from every issue this PR closes/);
-  assert.match(step4(), /release-merged-claim\.sh <pr> --apply/);
+  assert.match(step4(), /drop-merged-label\.sh <pr> --apply/);
 });
 
 test("step 4 says a failed removal must be reported, never swallowed", () => {
