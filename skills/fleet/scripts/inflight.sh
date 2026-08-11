@@ -274,8 +274,38 @@ refsdir="$common/refs/heads"
 # but an unusual ref backend (e.g. reftable) may not, and that is storage this
 # check does not reach either way.
 if [ -e "$refsdir" ]; then
+  # Two tests, and neither covers the other's case — measured, both directions.
+  #
+  # The builtin pair below tests only the top of refs/heads, and NO fleet branch
+  # lives there: claim-ticket.sh builds `branch="$type/$issue-$slug"`, so the
+  # loose ref is `refs/heads/fix/95-…` and the directory that goes unreadable is
+  # `refs/heads/fix`, one level down. `chmod 000` there leaves refs/heads itself
+  # at 755, the pair passes, and `for-each-ref` drops the branch at rc 0 with
+  # nothing on stderr — the wrong "free" this whole change exists to stop,
+  # surviving inside its own fix. Distinct from the broken-ref ceiling below:
+  # there git warns, here it is silent.
+  #
+  # So `find` walks the subdirectories. It does not replace the pair, because
+  # BSD `find` — the one `sh` resolves on macOS, /usr/bin/find — never evaluates
+  # the expression for a starting point it cannot open: `refs/heads` at 000 or
+  # 400 yields a stderr error and NOTHING on stdout, exactly as a healthy tree
+  # does. (`bfs`, which may shadow it on an interactive PATH, does print it. A
+  # guard that reads correct under one and blind under the other is not a
+  # guard.) The pair covers the starting point, find covers below it.
   [ -r "$refsdir" ] && [ -x "$refsdir" ] ||
     die "refs directory $refsdir could not be read — whether #$n has a local branch is unknown"
+  # `-exec test` rather than find's own `-readable`/`-executable`, which are GNU
+  # extensions absent from BSD find. `-type d` alone is not enough either: a
+  # subdirectory at 400 is readable enough for find to enter and exit 0 while
+  # `for-each-ref` still drops the branch, so the permission has to be tested
+  # rather than inferred from find's status. That status is unusable anyway —
+  # find exits 1 on the very permission-denied descent that IS the detection —
+  # so the `|| die` reads head's status, the one thing here that failing means
+  # a crash rather than a finding.
+  bad=$(find "$refsdir" -type d ! \( -exec test -r {} \; -a -exec test -x {} \; \) -print 2>/dev/null | head -1) ||
+    die "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"
+  [ -z "$bad" ] ||
+    die "refs directory $bad could not be read — whether #$n has a local branch is unknown"
 fi
 if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
   die "git for-each-ref failed, so whether #$n has a local branch is unknown"
@@ -288,25 +318,47 @@ local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   die "could not filter the local branches for #$n"
 
 # The worktree registry's check is a different shape from the one above, on
-# purpose — matching release-ticket.sh:73-113 (#84) rather than inventing a
-# second convention. A directory-level read+execute test alone is not enough
+# purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
+# than a second invented convention — but the two copies have since diverged
+# and this comment no longer claims they match: the stray-directory skip, the
+# awk counter, the direction split and the recount below all landed here first
+# and are still open against that copy (#395).
+#
+# A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
 # `gitdir` file chmod'd 000 INSIDE one entry passes every test on the entry
 # itself while `worktree list --porcelain` still drops it, at rc 0 (measured,
 # #84). Count registry entries on disk against what git reported instead —
 # that catches a silent drop whichever file inside the entry was unreadable.
 wtroot="$common/worktrees"
-registered=0
-if [ -e "$wtroot" ]; then
+# A function because the count is taken twice — see the recount below. Absent
+# entirely is fine and answers nothing here: a repo that never had a linked
+# worktree has no registry directory at all, and that emptiness is real, not a
+# permission problem.
+count_registry() {
+  registered=0
+  [ -e "$wtroot" ] || return 0
   [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
     die "worktree registry $wtroot could not be read — whether #$n has a worktree is unknown"
-  # A registry entry is a directory; anything else in here is not git's and
-  # must not be counted as a worktree git failed to report.
   for entry in "$wtroot"/*; do
     [ -d "$entry" ] || continue
+    # A registry entry is a directory holding a `gitdir` file — that file is
+    # what git resolves the worktree through, and its absence is what separates
+    # an entry from an operator's stray `mkdir`. A stray FILE was already
+    # skipped above; a stray DIRECTORY was not, and counting one fails this
+    # probe closed forever, on every ticket in the repo, over something git is
+    # right to ignore (measured: git lists 2, the bare `-d` loop counted 3).
+    #
+    # `-x` first, and the order is the whole point: an entry chmod'd 000
+    # answers "no gitdir" to exactly the same test a stray does, and that one
+    # git really does drop (measured: 2 listed, then 1). Unsearchable, so we
+    # cannot tell → count it and let the mismatch below fire. Searchable and
+    # carrying no gitdir → not git's, skip it.
+    if [ -x "$entry" ] && [ ! -f "$entry/gitdir" ]; then continue; fi
     registered=$((registered + 1))
   done
-fi
+}
+count_registry
 
 # Match on the worktree's basename, not its full path — matching the whole
 # absolute path would false-hit on any checkout whose directory happens to
@@ -316,11 +368,47 @@ if ! worktrees=$(git worktree list --porcelain); then
   die "git worktree list failed, so whether #$n has a worktree is unknown"
 fi
 # The main worktree is always listed first and has no registry entry of its
-# own, hence the -1. `grep -c` exits 1 on zero matches, which `set -e` would
-# read as fatal, hence the `|| true`.
-listed=$(printf '%s\n' "$worktrees" | grep -c '^worktree ' || true)
-[ "$((listed - 1))" -eq "$registered" ] ||
-  die "git listed $((listed - 1)) worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+# own, hence the -1.
+#
+# awk, not `grep -c … || true`, for exactly the reason probe 2's filter above
+# is one awk. `grep -c` exits 1 on zero matches — legitimate, and `set -e`
+# would read it as fatal — so a `|| true` has to absorb it, and that same
+# `|| true` absorbs a grep that could not RUN AT ALL. Then the count is the
+# empty string, `$((listed - 1))` is -1, and the die below blames
+# `git worktree list` for a count no listing can produce. awk needs no such
+# case separated out: the program contains no `exit`, so it returns 0 whether
+# or not anything matched and every non-zero status is a real failure.
+listed=$(printf '%s\n' "$worktrees" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
+  die "could not count the worktrees git listed for #$n"
+linked=$((listed - 1))
+# Recount before refusing. The two reads happen at different instants, and the
+# gap is not theoretical: measured at ~10ms (two independent methods agreeing —
+# the fork+exec of git, which is almost the whole cost of `worktree list`, and
+# the observed hit rate under churn). A sibling agent's `git worktree add` or
+# `remove` landing in it makes the counts disagree with nothing wrong, which in
+# THIS fleet is routine rather than exotic: measured 1.99% of probes aborting
+# spuriously at λ = 2 mutations/s, 56.6% under saturation.
+#
+# One recount closes it rather than moving it: a mutation between the first
+# count and git's read is already reflected in git's own figure, so the second
+# count agrees with it. Escaping still needs a SECOND mutation inside the
+# recount window — measured 1.99% → 0.00% at λ = 2/s, 56.6% → 1.29% saturated.
+# A real dropped entry is a standing state, not a moment, so it survives the
+# recount and still refuses (verified: #84's unreadable `gitdir` still aborts).
+[ "$linked" -eq "$registered" ] || count_registry
+# Name the direction actually observed. The two disagreements have opposite
+# causes and send the reader to opposite places, so one message cannot serve
+# both: FEWER listed than registered is git silently dropping an entry it could
+# not read, which is the fault this whole check exists to catch. MORE listed
+# than registered is the opposite — the on-disk count is the stale read, a
+# sibling agent's `git worktree add` having landed between the two, which in a
+# parallel fleet is routine rather than exotic. Calling that "the listing is
+# incomplete" sends an operator hunting a permissions fault that is not there.
+if [ "$linked" -lt "$registered" ]; then
+  die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+elif [ "$linked" -gt "$registered" ]; then
+  die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
+fi
 
 # substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
 # the porcelain prints the path raw, so a checkout under a directory with a
