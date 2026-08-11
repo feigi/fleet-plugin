@@ -6,7 +6,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
+
+const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
 // mapCi regression gate — pins the ci-state verdict mapping, incl. the two paths
 // an "empty repo" live test cannot reach: a completed not-green run → red, and a
@@ -160,4 +164,23 @@ test("a prose turn whose content is a STRING does not throw", () => {
 
 test("gatherSpend returns null rather than throwing when the dir is unreadable", () => {
   assert.equal(gatherSpend({ dir: join(tmpdir(), "definitely-not-here-12345") }), null);
+});
+
+// #169: `arg()` is CLI-internal (not exported), so this pins the trailing-flag
+// refusal at the process boundary. `ledger`/`prev`/`spend-since`/`port`/
+// `interval` all read via `arg(n) || default` or `?? `, so a trailing flag
+// previously fell straight through to the default in total silence —
+// `--spend-since` with nothing after it silently widened the spend panel to
+// all-time; `--ledger` with nothing after it silently read the wrong file.
+// Dies before any gh call, so no PATH stub is needed here.
+test("CLI: trailing --ledger (no value) dies (exit 2) rather than silently falling back to the default ledger", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--ledger needs a value/);
+});
+
+test("CLI: --ledger=path form dies by name, not silently read as absent", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger=/tmp/x"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--ledger needs a space-separated value/);
 });

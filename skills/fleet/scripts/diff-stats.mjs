@@ -110,9 +110,22 @@ function die(msg) {
   process.exit(2);
 }
 
+// `--pr` is the only flag read here, and the `if (!pr) die(...)` below already
+// catches a trailing `--pr` — `undefined` is falsy — so this was never a
+// silent-widening site the way ci-state.mjs's was. This makes the refusal
+// explicit and immediate, naming the flag, instead of falling through to the
+// generic usage message. `--pr=5` is caught too: `indexOf` cannot see it, so
+// it previously fell through to the same generic message rather than a clear
+// "needs a value" (#169).
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
-  return i === -1 ? null : process.argv[i + 1];
+  if (i === -1) {
+    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+    return null;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+  return value;
 }
 
 function run(cmd, args) {

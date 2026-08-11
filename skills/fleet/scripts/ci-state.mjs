@@ -28,9 +28,24 @@ function die(msg) {
   process.exit(2);
 }
 
+// A flag given with no value must never read as the flag being absent.
+// `base`/`workflow`/`workflow-file` below all fall back with `||`, so a
+// trailing `--base` (nothing after it) previously read as omitted and
+// silently compared against the DEFAULT base — `ci-state.mjs --pr 5 --base`
+// gave a real, wrong verdict at exit 0/1 with no refusal. That is the
+// fail-open class #61 fixed in candidates.mjs, reached here because THIS is
+// the verdict the fleet gates on (#169). `--flag=value` is caught too:
+// `indexOf` cannot see it, so it would otherwise read as absent and hit the
+// same fallback.
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
-  return i === -1 ? null : process.argv[i + 1];
+  if (i === -1) {
+    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+    return null;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+  return value;
 }
 
 // --quiet suppresses the diagnostic stream (command echoes, per-job/per-field

@@ -14,7 +14,24 @@ import { createServer } from "node:http";
 const NAME = "board";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const die = (m) => { console.error(`${NAME}: ${m}`); process.exit(2); };
-const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? null : process.argv[i + 1]; };
+// A flag given with no value must never read as the flag being absent.
+// `ledger`/`prev`/`spend-since`/`port`/`interval` are all read with `||`/`??`
+// fallbacks, so a trailing flag previously substituted a default in total
+// silence — `--spend-since` with nothing after it silently widened the spend
+// panel to all-time instead of the requested window, and `--ledger` with
+// nothing after it silently read the DEFAULT ledger file instead of the one
+// asked for. Same fail-open class as #61 (#169). `--flag=value` is caught
+// too: `indexOf` cannot see it.
+const arg = (n) => {
+  const i = process.argv.indexOf(`--${n}`);
+  if (i === -1) {
+    if (process.argv.some((a) => a.startsWith(`--${n}=`))) die(`--${n} needs a space-separated value, not --${n}=`);
+    return null;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${n} needs a value`);
+  return value;
+};
 const has = (n) => process.argv.includes(`--${n}`);
 
 // Every external read is wrapped: a failure returns null and the caller keeps a

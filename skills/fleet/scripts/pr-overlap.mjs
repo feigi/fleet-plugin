@@ -26,9 +26,21 @@ function die(msg) {
   process.exit(2);
 }
 
+// `--a`/`--b` given trailing already died via `if (!a || !b)` below —
+// `undefined` is falsy — so this was never a silent-widening site. But `--a`
+// given with `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT caught:
+// `a` becomes the string "--b", passes the falsy check, and only fails later
+// as a confusing `gh pr diff --b` error. Reject it here, by name, instead
+// (#169). `--a=5` is caught too: `indexOf` cannot see it.
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
-  return i === -1 ? null : process.argv[i + 1];
+  if (i === -1) {
+    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+    return null;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+  return value;
 }
 
 const a = arg("a");
