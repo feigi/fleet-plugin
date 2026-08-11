@@ -31,9 +31,10 @@ copies pinned rather than for deleting one.
 prompt sent once per reviewed PR. Against that, a skimmed read that misses the apply
 policy or the commit gate costs a whole review cycle.
 
-The convention lines that appear to contradict this — the "pointer" wording and the "do
-not restate it" bullet — are scoped to CI facts and specialist tree isolation, not to
-the apply/commit rules. If they read as absolute to someone re-deriving this finding,
+The convention lines that appear to contradict this — the pointer-form wording
+(`review-and-fix.md` states them; the prompt only has to say they apply) and the "do not
+restate it" bullet — are scoped to CI facts and specialist tree isolation, not to the
+apply/commit rules. If they read as absolute to someone re-deriving this finding,
 narrowing that wording is a fine change on its own. Deleting the duplicated blocks is
 not.
 
