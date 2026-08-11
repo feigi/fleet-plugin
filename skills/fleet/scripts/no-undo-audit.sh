@@ -155,37 +155,77 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # every git command below — `status` included — answers against the sibling's
 # HEAD and index. #189.
 #
-# `--git-dir` names which admin dir answered: the literal string `.git` for the
-# main worktree, whose `.git` IS the repo and has no redirection to verify —
-# the root claim above already covers it in full (measured, git 2.50.1). Any
-# other value is a linked worktree's admin dir, and every such dir carries its
-# OWN `gitdir` file, written once by `git worktree add` and never touched by
-# this script, pointing back at the worktree `.git` file it belongs to. That
-# back-pointer is the second identity claim: resolved, it must name $wt's own
-# `.git`, or the admin dir that answered belongs to some other worktree.
+# So the second claim is asked separately: which git dir answered, and which
+# worktree does THAT dir belong to. Never keyed on the string `--git-dir`
+# returns without `--path-format=absolute`: that is the literal `.git` for a
+# main checkout AND — measured, git 2.50.1 — for a LINKED worktree whose `.git`
+# is a SYMLINK to another worktree's admin dir, so a guard exempting `.git` as
+# "the main worktree, nothing to verify" exempts the #189 spoof spelled as a
+# symlink instead of a `gitdir:` file. Absolute, and compared as paths: the one
+# place in the script that compares paths, because unlike `--show-prefix` there
+# is no rc/emptiness shortcut for "do these two name the same tree".
 #
-# This is the one place in the script that compares paths as strings — unlike
-# `--show-prefix`, there is no rc/emptiness shortcut for "do these two names
-# the same tree". `cd "$wt" && pwd -P` is the canonicalization, not
-# `--show-toplevel`: git already resolves symlinks, relative paths and (on
-# macOS) the `/tmp` -> `/private/tmp` rewrite into the back-pointer file at
-# `worktree add` time, and `pwd -P` collapses the same three on $wt's side by
-# construction, so a legitimate worktree reached through a symlinked path
-# still compares equal without $wt ever being string-matched against
-# `--show-toplevel` output (a spelling the comment above already rules out).
-gd=$(git -C "$wt" rev-parse --git-dir) || die "$wt is not a git worktree"
-case $gd in
-  .git) : ;;
-  *)
-    back=$(cat "$gd/gitdir" 2>/dev/null) \
-      || die "$gd/gitdir is missing or unreadable — cannot verify $wt's linkage"
-    back=$(printf '%s' "$back" | sed -e 's/[[:space:]]*$//')
-    wt_git=$(cd "$wt" && pwd -P)/.git \
-      || die "cannot resolve $wt's real path"
-    [ "$back" = "$wt_git" ] \
-      || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
-    ;;
-esac
+# `pwd -P` puts all three in ONE spelling. Only `$wt` needs it to be correct
+# today: it arrives as the caller typed it — relative (`claim-ticket.sh:26`), or
+# through a symlink — and never goes through git, while git's
+# `--path-format=absolute` answers came back already resolved on every shape
+# measured, symlinked `$wt` and symlinked `.git` included (measured: dropping
+# `pwd -P` from `common` alone changes no verdict, git 2.50.1). It is on `$gd`
+# and `common` as insurance, and the reason to apply that insurance to BOTH or
+# neither is that a spelling difference between them is not a false refusal on
+# one shape but on every main checkout. `--show-toplevel` remains the spelling
+# to avoid, for the reason the comment above gives.
+#
+# `--git-common-dir` is what says which shape $gd is. A LINKED worktree gets
+# its own per-worktree admin dir, so $gd differs from the common dir, and every
+# such dir carries its OWN `gitdir` file, written by `git worktree add` and
+# never touched by this script, pointing back at the worktree `.git` it belongs
+# to. Resolved against the admin dir — git's own base for it, and git writes it
+# RELATIVE, not absolute, whenever `worktree.useRelativePaths` is set — its
+# directory must be $wt. Every other shape answers with the common dir itself:
+# a main checkout, a submodule, a `--separate-git-dir` clone. There $gd IS the
+# repo and has no back-pointer to read, so identity is where it sits — a git
+# dir named `.git` belongs to its parent directory, and a `.git` redirected at
+# the enclosing repo's own `.git` is caught by exactly that.
+#
+# Ceiling: a git dir that IS the common dir and is NOT named `.git` — a
+# submodule's `.git/modules/<name>`, a `--separate-git-dir` target — records
+# nothing naming its worktree (measured: no `gitdir`, no `core.worktree`), so
+# there is nothing here to verify and the root claim above stands alone for it.
+# Admitted rather than refused: git's own linkage for those is one-directional
+# by construction, and refusing turned two healthy checkouts into "ask a human"
+# for having no record to check. The residual is a `.git` redirected at a
+# FOREIGN repo of that shape, which no `git worktree add` can produce.
+# `core.worktree` redirection is not that residual and is not left open here:
+# the `--show-prefix` claim above already refuses it (measured, #189).
+#
+# Both rev-parse calls keep a `|| die` the comment above says can never fire,
+# for one reason the retired gate did not have: their job is to produce a path,
+# not an rc. `set -e` does abort the script on a failed command substitution
+# (measured: rc 128), so an unguarded one cannot reach the compare with an empty
+# variable — but it would exit 128, and 128 is not one of the three verdicts
+# this script's callers read. The `cd`/`pwd -P` lines below are left bare for
+# the same measurement: unreachable, and `set -e` stops them regardless.
+gd=$(git -C "$wt" rev-parse --path-format=absolute --git-dir) \
+  || die "git will not name the git dir answering for $wt — cannot verify its linkage"
+common=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir) \
+  || die "git will not name $wt's common git dir — cannot verify its linkage"
+gd=$(cd "$gd" && pwd -P)
+common=$(cd "$common" && pwd -P)
+wt_real=$(cd "$wt" && pwd -P)
+if [ "$gd" != "$common" ]; then
+  back=$(cat "$gd/gitdir" 2>/dev/null) \
+    || die "$gd/gitdir is missing or unreadable — cannot verify $wt's linkage"
+  back=${back%"${back##*[![:space:]]}"}
+  owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P) \
+    || die "$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage"
+  [ "$owner" = "$wt_real" ] \
+    || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
+else
+  owner=${gd%/.git}
+  [ "$owner" = "$gd" ] || [ "$owner" = "$wt_real" ] \
+    || die "$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one"
+fi
 
 git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
 # A branch never pushed, a stale remote-tracking ref, or a caller who already
