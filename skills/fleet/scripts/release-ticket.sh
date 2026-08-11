@@ -72,28 +72,42 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 #
 # `worktree list --porcelain` is reading `<git-common-dir>/worktrees`, the
 # admin directory git itself writes one subdir per linked worktree into. When
-# that directory — or one entry inside it — cannot be read, git does not
-# error: it silently drops the affected entries and still exits 0 (verified,
-# git 2.50.1). `wt` and `stray` below would then read as "no worktree of
-# ours" for a claim that has one, same failure `gone` exists to stop this
-# script inferring elsewhere, applied here to the directory git itself reads
-# to answer the question. So establish the registry is actually readable
-# BEFORE trusting an absence the listing below reports — not by guarding the
-# listing's exit status, which stays 0 throughout.
+# that directory — or any file git needs inside one of its entries — cannot be
+# read, git does not error: it silently drops the affected entries and still
+# exits 0 (verified, git 2.50.1). `wt` and `stray` below would then read as "no
+# worktree of ours" for a claim that has one — the same absent-vs-unreadable
+# confusion `gone` keeps this script out of elsewhere, applied by hand here
+# because the question is about a directory git reads, not about a path this
+# script stats. So establish the listing is COMPLETE before trusting an absence
+# it reports — not by guarding its exit status, which stays 0 throughout.
+#
+# Do not try to predict which reads git needs: stat'ing each entry directory is
+# one level too shallow, because naming an entry needs read+execute on the
+# PARENT only. `chmod 000` on the `gitdir` FILE inside an entry passes every
+# permission test this script could make on the entry itself and still drops
+# the worktree from the listing — measured, and that is #84 unclosed. Count
+# instead: one registry entry on disk per linked worktree, against what git
+# reported. A mismatch is a silent drop, whichever file inside was unreadable.
 #
 # Absent entirely is fine and answers nothing here: a repo where a worktree
 # was removed and pruned (or never had one) has no `worktrees` dir at all, and
-# that emptiness is real, not a permission problem.
+# that emptiness is real, not a permission problem — zero entries against the
+# main worktree alone is a match, so the release goes through.
 common=$(git rev-parse --path-format=absolute --git-common-dir) ||
   die "cannot resolve the git common directory"
 wtroot="$common/worktrees"
+registered=0
 if [ -e "$wtroot" ]; then
+  # The parent needs its own check even so, and this is not redundant with the
+  # count: unreadable, the glob below expands to nothing, and zero-on-disk would
+  # AGREE with the empty listing git returns for the same reason.
   [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
     die "worktree registry $wtroot could not be read — whether #$issue has a worktree is unknown"
+  # A registry entry is a directory; anything else in here is not git's and must
+  # not be counted as a worktree git failed to report.
   for entry in "$wtroot"/*; do
-    [ -e "$entry" ] || continue
-    [ -r "$entry" ] && [ -x "$entry" ] ||
-      die "worktree registry entry $entry could not be read — whether #$issue has a worktree is unknown"
+    [ -d "$entry" ] || continue
+    registered=$((registered + 1))
   done
 fi
 
@@ -101,6 +115,14 @@ fi
 # prints it raw, so any checkout living under a directory with a space in it —
 # ordinary on macOS — would otherwise be truncated at the first one.
 wt_list=$(git worktree list --porcelain)
+
+# The main worktree is always listed first and has no registry entry of its own,
+# so it is the one the count subtracts. `grep -c` exits 1 on zero matches, which
+# `set -e` would take as fatal here, hence the `|| true`.
+listed=$(printf '%s\n' "$wt_list" | grep -c '^worktree ' || true)
+[ "$((listed - 1))" -eq "$registered" ] ||
+  die "git listed $((listed - 1)) worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+
 wt=$(printf '%s\n' "$wt_list" |
      awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}')
 main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}')
@@ -191,8 +213,9 @@ jrewritten() {
 # malformed JSON at exit 0, which is the failure the receipt exists to rule
 # out. Assigned first, each one is a simple command whose status the `&&` chain
 # can read and this `|| die` can act on.
-# `branch` is settled at :48 from argv and `wt` at :77, both before any
-# receipt below can print, so the four fields are escaped once here.
+# `branch` is settled from argv at the top and `wt` from the worktree listing
+# above, both before any receipt below can print, so the four fields are escaped
+# once here.
 branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
   && wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
   || die "could not escape the receipt fields for #$issue"
