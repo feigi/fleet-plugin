@@ -289,12 +289,16 @@ const serveOpts = () => ({
   timeout: 20000,
 });
 
-test("CLI: serve marks 8123 as the default in the bind error when --port could not be used", async () => {
+// #366 hardened argPort(): a garbage --port now dies before ever reaching
+// listen(), so it can no longer stand in for "--port not given at all" here.
+// This test now drives the true absent case; the garbage case moved to the
+// numeric-guard tests below.
+test("CLI: serve marks 8123 as the default in the bind error when --port was not given", async () => {
   const blocker = createServer();
   // 8123 just has to be held by SOMEONE — us, or whatever already had it.
   await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
   try {
-    const r = spawnSync(process.execPath, serveArgs(["--port", "abc"]), serveOpts());
+    const r = spawnSync(process.execPath, serveArgs([]), serveOpts());
     assert.equal(r.status, 2);
     assert.match(r.stderr, /port 8123 \(default\) in use/);
   } finally { blocker.close(() => {}); }
@@ -309,4 +313,41 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
     assert.match(r.stderr, new RegExp(`port ${port} in use`));
     assert.doesNotMatch(r.stderr, /\(default\)/);
   } finally { blocker.close(() => {}); }
+});
+
+// #366: `Number(x) || default` treated a non-numeric --port/--interval exactly
+// like an absent one — silently substituting the default with no refusal.
+// These pin the refusal itself, before listen() is ever reached.
+test("CLI: serve refuses a non-numeric --port by name, not silently substituting the default", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "abc"]), serveOpts());
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
+test("CLI: serve refuses an out-of-range or non-integer --port", () => {
+  for (const v of ["-1", "70000", "1.5"]) {
+    const r = spawnSync(process.execPath, serveArgs(["--port", v]), serveOpts());
+    assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
+    assert.match(r.stderr, /--port wants an integer 0-65535/, `for ${v}: ${r.stderr}`);
+  }
+});
+
+// The named case that must NOT be refused: listen(0) binds an ephemeral port,
+// a real use, and 0 is falsy — the exact value the old `|| null` idiom lost.
+// serve() only exits on SIGINT/SIGTERM once bound, so a timeout here is the
+// expected shape of success; the refusal this guards against dies with
+// status 2 almost instantly and never reaches listen() at all.
+test("CLI: serve accepts --port 0 (ephemeral bind) rather than refusing it", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
+  assert.notEqual(r.status, 2, r.stderr);
+  assert.doesNotMatch(r.stderr, /--port wants/);
+  assert.match(r.stderr, /cockpit on http:\/\/localhost:0/);
+});
+
+test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {
+  for (const v of ["abc", "0", "-5"]) {
+    const r = spawnSync(process.execPath, serveArgs(["--interval", v]), serveOpts());
+    assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`--interval wants seconds > 0, got ${v}`), `for ${v}: ${r.stderr}`);
+  }
 });

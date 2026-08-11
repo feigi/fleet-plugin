@@ -40,6 +40,29 @@ const arg = (n) => {
 };
 const has = (n) => process.argv.includes(`--${n}`);
 
+// #366: `Number(x) || default` treated a garbage --port/--interval exactly
+// like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
+// default with no refusal. Same silent-fallback class as arg()'s own comment
+// above and #361's --spend-since guard. `interval` is read from argv in two
+// places (serve(), and gather()'s build payload); both call argInterval() so
+// the check lives once, not as two copies that can drift apart. Neither
+// guard runs on an already-typed value a caller passed in-process — arg()
+// only fires when the caller falls through to reading raw argv.
+function argPort() {
+  const raw = arg("port");
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) die(`--port wants an integer 0-65535, got ${raw}`);
+  return n; // 0 is a real value — listen(0) binds an ephemeral port
+}
+function argInterval() {
+  const raw = arg("interval");
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) die(`--interval wants seconds > 0, got ${raw}`);
+  return n;
+}
+
 // Every external read is wrapped: a failure returns null and the caller keeps a
 // last-known value. Partial board beats a crashed loop or a false alarm.
 function tryRun(cmd, args) {
@@ -371,7 +394,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     }
   }
   const spend = gatherSpend({ sinceMs });
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
 async function main() {
@@ -403,14 +426,16 @@ export function createBoardServer(dir) {
 }
 
 export async function serve({ ledgerFile, port, interval, open } = {}) {
-  // A --port we cannot use (absent, or not a number) falls back to 8123. Keep
-  // which of the two it was: naming the substituted default bare in the bind
-  // error below reads as "the port you asked for is taken" and sends a caller
-  // who DID pass --port hunting a process on a port they never chose (#169
-  // review). Rejecting the bad value outright is #366, not this.
-  const portGiven = Number(port ?? arg("port")) || null;
+  // A --port we cannot use (absent) falls back to 8123. Keep which of the two
+  // it was: naming the substituted default bare in the bind error below reads
+  // as "the port you asked for is taken" and sends a caller who DID pass
+  // --port hunting a process on a port they never chose (#169 review). A
+  // GIVEN-but-invalid value is refused outright by argPort(), never reaches
+  // here — and `??`, not `||`, is what lets a caller-chosen 0 survive as
+  // portGiven instead of reading as falsy and silently becoming 8123 (#366).
+  const portGiven = port ?? argPort();
   port = portGiven ?? 8123;
-  interval = Number(interval ?? arg("interval")) || 15;
+  interval = interval ?? argInterval() ?? 15;
   open = open ?? has("open");
   const { computeBoard } = await import("./compute-board.mjs");
   const stateDir = ".fleet";
