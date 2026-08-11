@@ -366,7 +366,26 @@ test("term selection: erasing CI/PR is a stated ceiling, not something this issu
   assert.equal(queryOf(r), "merged red but");
 });
 
-test("term selection: a modal survives when it is not what displaced the pick", () => {
+test("term selection: the >= 3 floor itself is pinned, in both directions", () => {
+  // The header above claims a floor change must red one of these. It did not:
+  // the subject in the ceiling test is invariant under the floor, because `ci`
+  // and `pr` lose the longest-first top-3 cut to `merged`/`red`/`but` whether
+  // the floor is 3, 2 or 1 — so the whole block was vacuous for the one knob
+  // #153 names ("`>= 3` -> `>= 1` currently reds no test").
+  //
+  // This subject is not invariant: it has exactly two content words at length
+  // >= 3, so the third slot is EMPTY at the real floor and gets filled by the
+  // short `gh` the moment the floor drops. Measured on the pipeline: "fails
+  // cap" at 3, "fails cap gh" at both 2 and 1 — the assertion reds on any
+  // loosening, and a tightening to >= 4 drops `cap` and reds it too.
+  //
+  // `contentWords` in ledger.mjs is the single definition of that floor, so
+  // this one pin reaches the scoring path as well as the query path.
+  const r = run("gh CI cap fails", { filed: [] });
+  assert.equal(queryOf(r), "fails cap");
+});
+
+test("term selection: a modal is dropped, but the freed slot goes to another long generic word", () => {
   // "should" is still excluded by the widened STOP, but the freed slot goes
   // to another long generic word ("drops"), not to the short, genuinely
   // distinctive "cap" or "near"/"miss" — the same longest-first ceiling as

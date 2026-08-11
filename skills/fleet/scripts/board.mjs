@@ -131,9 +131,17 @@ export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
 // Newest *.jsonl mtime in a subagents dir, 0 if it holds none. A dir whose
 // transcripts are all unreadable loses to one that is readable, which is the
 // behaviour we want when picking "the live session".
+//
+// The scan is wrapped for the same reason the per-file stat below is. This runs
+// once per CANDIDATE, so an uncaught throw here does not just lose one dir — it
+// escapes findSubagentsDir's try and turns the whole lookup into { error },
+// blacking out every readable session over one bad sibling. Scoring 0 is what
+// the comment above already promises: a dir we cannot read simply loses.
 function newestTranscriptMs(dir) {
+  let names;
+  try { names = readdirSync(dir); } catch { return 0; }
   let newest = 0;
-  for (const f of readdirSync(dir)) {
+  for (const f of names) {
     if (!f.endsWith(".jsonl")) continue;
     try { newest = Math.max(newest, statSync(join(dir, f)).mtimeMs); } catch { /* raced away */ }
   }
@@ -203,6 +211,13 @@ function readAgent(file, metaFile) {
 // the board gathers every ~15s and a line repeating at that rate just trains the
 // eye to ignore it.
 let warnedNoSpendDir = false;
+// Same rule, per transcript: a file that is broken is broken every tick, and at
+// the default 15s interval three of them are 720 lines an hour. Keyed on the
+// FULL PATH, not the bare filename — gatherSpend re-resolves its dir on every
+// tick, so a bare-filename key would silence a genuinely different broken file
+// living under a second session directory. The count still reaches the browser
+// every tick via `skipped`, which is the channel that matters here.
+const warnedSkips = new Set();
 
 // Scope is the SESSION directory, which is the closest thing to a run boundary
 // that actually exists on disk — one Claude Code session, one folder.
@@ -254,7 +269,10 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         toolTables.push(attributeTools(a.entries));
       } catch (e) {
         skipped++;
-        console.error(`${NAME}: skipping ${f}: ${e.message}`);
+        if (!warnedSkips.has(file)) {
+          warnedSkips.add(file);
+          console.error(`${NAME}: skipping ${f}: ${e.message}`);
+        }
       }
     }
     if (!agents.length) return skipped ? { error: `all ${skipped} transcripts unreadable` } : null;
@@ -269,7 +287,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // are not.
     const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
-    return { ...spend, tools, attributedPct, skipped, since: sinceMs ?? null };
+    return { ...spend, tools, attributedPct, skipped, since: sinceMs };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
@@ -326,10 +344,24 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   // natural mistake of passing seconds instead of milliseconds, produced a panel
   // that rendered confidently over the WHOLE session while the operator believed
   // it was scoped to one run. That is the same silent-zero failure the comment
-  // on gatherSpend describes; the default was removed and the footgun left in.
+  // on gatherSpend describes; an earlier pass removed the `|| null` default but
+  // left the footgun, and the guard below is what actually closes it.
+  //
+  // Gate on PRESENCE, not on the value: `arg()` yields undefined for a trailing
+  // `--spend-since`, and `sinceRaw == null` read that as "flag absent", so the
+  // guard never fired. And on RANGE, not just finiteness: a seconds-magnitude
+  // epoch (~1.7e9) is finite, so the very mistake named above sailed through,
+  // counted every agent, and shipped its own bogus value into board.json's
+  // `since`. 1e12 ms is 2001-09-09, below any real run; a future boundary
+  // matches nothing at all.
   const sinceRaw = arg("spend-since");
-  const sinceMs = sinceRaw == null ? null : Number(sinceRaw);
-  if (sinceRaw != null && !Number.isFinite(sinceMs)) die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
+  let sinceMs = null;
+  if (has("spend-since")) {
+    sinceMs = Number(sinceRaw);
+    if (!Number.isFinite(sinceMs) || sinceMs < 1e12 || sinceMs > Date.now()) {
+      die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
+    }
+  }
   const spend = gatherSpend({ sinceMs });
   return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
 }

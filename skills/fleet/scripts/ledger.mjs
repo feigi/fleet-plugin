@@ -234,15 +234,17 @@ if (cmd === "check") {
   const STOP = new Set((
     "the a an of to in is it its and or for on with that this from at by " +
     "should would could can may might must will shall ought " +
-    "not no never cannot nor " +
+    "not never cannot nor " +
     "still already now then soon yet always once again when while before after until since"
   ).split(" "));
-  const scoreTokens = (s) =>
-    new Set(
-      norm(s).split(/\s+/)
-        .filter((t) => t.length >= 3 && !STOP.has(t))
-        .map((t) => t.replace(/s$/, "")),
-    );
+  // One pipeline, two callers. The scoring path and the query path filter on the
+  // same floor and the same stoplist, and writing that expression out twice is
+  // what let them drift — the coupling test below pins that they agree, and a
+  // single definition is what makes the pin structural rather than hopeful.
+  // It is also the only place the `>= 3` floor exists, so one mutation reaches
+  // both consumers.
+  const contentWords = (s) => norm(s).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t));
+  const scoreTokens = (s) => new Set(contentWords(s).map((t) => t.replace(/s$/, "")));
   // Overlap coefficient (shared / smaller set), not Jaccard. A filed row carries
   // a source tag like `(review-pr-108)` and other metadata the checked subject
   // can never contain, so the union is dominated by tokens with no chance of
@@ -304,7 +306,7 @@ if (cmd === "check") {
   // norm() has already stripped punctuation, which is also what keeps a subject
   // containing `is:open` or `file.mjs:164` from smuggling a qualifier into the
   // search and silently changing what was searched for.
-  const terms = [...new Set(norm(subject).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t)))]
+  const terms = [...new Set(contentWords(subject))]
     .sort((a, b) => b.length - a.length)
     .slice(0, 3);
   const query = terms.join(" ");

@@ -136,19 +136,15 @@ test("finish-<n> agentType classifies as finisher — the controller's actual na
   // ...and the `^` has to be a real anchor: `finish-` mid-string is not a
   // finisher. Without this, dropping the anchor leaves the case above green.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Rework the finish-label docs" }), "other");
+  // A two-ticket finisher is dispatched as `finish-<n>-<m>`, so the pattern has
+  // to match on the prefix rather than on a `finish-<digits>` shape. Its
+  // description carries no finisher word either, for the same reason as above.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-424-425", description: "Apply reviewer findings for PR 424 and 425" }), "finisher");
 });
 
 test("missing meta never throws — a transcript with no sibling .meta.json still counts", () => {
   assert.equal(classifyRole(undefined), "other");
   assert.equal(classifyRole({}), "other");
-});
-
-test("finishers are named finish-<n>, not 'finish pr' — the real convention classifies", () => {
-  // Regression: /finish pr|finisher/ matched neither the agentType `finish-436`
-  // nor the description `Finish-label #436`, so 28 of 52 real finishers on this
-  // machine landed in `other`, quietly deflating every other role's share.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-436", description: "Finish-label #436" }), "finisher");
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-424-425", description: "Finisher: label #424" }), "finisher");
 });
 
 test("implementers classify off agentType, which is where `impl-` actually appears", () => {

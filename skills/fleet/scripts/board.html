@@ -102,8 +102,15 @@ function renderSpend(sp) {
     host.append(el("div", "spend-wrap", "spend unavailable: " + sp.error));
     return;
   }
-  // Zeroes would read as "this run was free", a worse lie than absence.
-  if (!sp.totals || !sp.totals.cacheWrite) return;
+  // Zeroes would read as "this run was free", a worse lie than absence — but a
+  // skipped count is not a zero, and hiding it here re-created the exact
+  // conflation this panel exists to remove: "3 of 4 transcripts unreadable"
+  // rendered identically to "nothing yet". stderr does not cover it (see
+  // above), so the note goes out on its own, without the zeroed two-column body.
+  if (!sp.totals || !sp.totals.cacheWrite) {
+    if (sp.skipped) host.append(el("div", "spend-wrap", `${sp.skipped} transcripts skipped; no spend recorded yet`));
+    return;
+  }
 
   const wrap = el("div", "spend-wrap");
   const hd = el("div", "spend-hd");

@@ -162,9 +162,11 @@ export function computeBoard(inputs) {
     queue: { pool, supply: pool, reviewBacklog },
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
-    // Telemetry, not pipeline state: null whenever the transcripts are unreadable
-    // or this run has produced none yet. The UI hides the panel rather than
-    // rendering zeroes, which would read as "this run was free".
+    // Telemetry, not pipeline state: null when this run has produced no
+    // transcripts yet, `{ error }` when they cannot be read. Those are
+    // deliberately not the same value — the UI hides the panel on null rather
+    // than rendering zeroes, which would read as "this run was free", and shows
+    // the error, which is a bug the operator has to act on.
     spend: inputs.spend ?? null,
     attention,
   };

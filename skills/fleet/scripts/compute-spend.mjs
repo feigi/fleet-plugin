@@ -89,10 +89,9 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
   // 100 and the run looked cheaper than it was. Latent while classifyRole only
   // emits known roles; it fails by under-reporting the moment one is added to
   // the classifier and not to this array.
-  const roles = [...byRole.keys()]
-    .map((role) => ({ role, ...byRole.get(role) }))
-    .filter((r) => r.agents > 0)
-    .map((r) => ({ ...r, pct: share(r.cacheWrite) }))
+  const roles = [...byRole.entries()]
+    .filter(([, b]) => b.agents > 0)
+    .map(([role, b]) => ({ role, ...b, pct: share(b.cacheWrite) }))
     .sort((a, b) => b.cacheWrite - a.cacheWrite);
 
   const top = [...agents]

@@ -3,10 +3,10 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
@@ -109,17 +109,50 @@ test("session ranking uses transcript mtime, not directory mtime", () => {
   // so a session that spawned all its agents early lost to a newer, idle one —
   // and since the cockpit starts before the first agent spawns, that was the
   // common case at run start. The board would show a PREVIOUS run's spend.
+  //
+  // The two rankings only disagree when the newest DIRECTORY is not the one
+  // holding the newest TRANSCRIPT, so the fixture has to build exactly that and
+  // nothing weaker. Creating the busy dir's transcript LAST — the shape this
+  // test had before — bumps that dir's own mtime as a side effect, so both
+  // rankings then pick `busy` for different reasons and the test stayed green
+  // with the fix fully reverted. Stamp all four times explicitly, files before
+  // dirs: creating a file is the one operation that moves its parent's mtime,
+  // and rewriting an existing file's mtime does not.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
   const proj = join(home, ".claude", "projects", "-x");
-  const busy = join(proj, "aaaa", "subagents");   // created first, still active
-  const idle = join(proj, "bbbb", "subagents");   // created later, then nothing
+  const busy = join(proj, "aaaa", "subagents");   // spawned its agents early, still appending
+  const idle = join(proj, "bbbb", "subagents");   // spawned one last agent, then went quiet
   mkdirSync(busy, { recursive: true });
   mkdirSync(idle, { recursive: true });
+  writeFileSync(join(busy, "agent-b.jsonl"), "");
   writeFileSync(join(idle, "agent-i.jsonl"), "");
+  utimesSync(join(busy, "agent-b.jsonl"), new Date(9000), new Date(9000)); // newest TRANSCRIPT
   utimesSync(join(idle, "agent-i.jsonl"), new Date(1000), new Date(1000));
-  writeFileSync(join(busy, "agent-b.jsonl"), ""); // appended most recently
+  utimesSync(busy, new Date(1000), new Date(1000));
+  utimesSync(idle, new Date(9000), new Date(9000));                        // newest DIRECTORY
 
   assert.equal(findSubagentsDir(home, "/x"), busy);
+});
+
+test("one unreadable session directory loses the ranking instead of sinking the lookup", () => {
+  // Regression: newestTranscriptMs' readdirSync sat outside its per-file try and
+  // inside findSubagentsDir's, so one bad sibling turned the WHOLE lookup into
+  // { error } and the board rendered "spend unavailable" over a perfectly
+  // readable live session — a blackout where the per-file catch beside it
+  // already chose degradation. A candidate we cannot read must score 0 and lose.
+  //
+  // `subagents` as a regular FILE rather than a chmod 000 dir: ENOTDIR is the
+  // same uncaught throw and, unlike a permission bit, it still throws when the
+  // suite runs as root.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  const good = join(proj, "aaaa", "subagents");
+  mkdirSync(good, { recursive: true });
+  mkdirSync(join(proj, "bbbb"), { recursive: true });
+  writeFileSync(join(proj, "bbbb", "subagents"), "not a directory");
+  writeFileSync(join(good, "agent-a.jsonl"), "");
+
+  assert.equal(findSubagentsDir(home, "/x"), good);
 });
 
 test("one unreadable transcript does not take the whole panel down", () => {
@@ -276,4 +309,83 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
     assert.match(r.stderr, new RegExp(`port ${port} in use`));
     assert.doesNotMatch(r.stderr, /\(default\)/);
   } finally { blocker.close(() => {}); }
+});
+
+// ── the --spend-since trust boundary ──────────────────────────────────────────
+// gather() reads process.argv directly and die()s with process.exit(2), so it
+// cannot be called in-process the way gatherSpend() is — which is why this
+// validation shipped with no coverage at all. Drive the real CLI instead.
+//
+// The stub `gh` fails on every call: each gh read goes through tryRun, which
+// catches and degrades, so the board still builds and no test here touches the
+// network or this repo's live issue list. It is prepended to PATH rather than
+// replacing it, because gather() also shells out to `node`.
+const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
+
+function runBoard(sinceArgs) {
+  const home = mkdtempSync(join(tmpdir(), "since-home-"));
+  // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
+  // is a symlink to /private/var, and the child's process.cwd() reports the
+  // RESOLVED form. Encoding the unresolved one puts the fixture at a path
+  // findSubagentsDir never looks in, and the panel comes back { error }.
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "since-cwd-")));
+  const bin = mkdtempSync(join(tmpdir(), "since-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "gh"), 0o755);
+  // findSubagentsDir() defaults to $HOME and cwd, so the fixture has to sit
+  // where the encoding puts it — encodeProjectDir is the same function under
+  // test above, which is why the path is built with it rather than by hand.
+  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...sinceArgs], {
+    cwd, encoding: "utf8",
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+  });
+}
+
+test("--spend-since rejects a seconds-magnitude epoch — the mistake its own comment names", () => {
+  // The motivating bug, and the one a finiteness-only guard cannot see: a
+  // seconds value is perfectly finite, so it passed, filtered nothing out, and
+  // produced a whole-session panel that reported itself as scoped — shipping
+  // the bogus number into board.json's `since`, where nothing downstream could
+  // tell. 1e12 ms is 2001-09-09, so every seconds-magnitude epoch is below it.
+  const r = runBoard(["--spend-since", String(Math.floor(Date.now() / 1000))]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--spend-since wants epoch milliseconds/);
+});
+
+test("--spend-since rejects garbage, zero, negative and a boundary in the future", () => {
+  // A future boundary matches nothing at all, which renders as an empty panel
+  // rather than as the operator error it is.
+  for (const v of ["yesterday", "0", "-1", String(Date.now() + 86_400_000)]) {
+    const r = runBoard(["--spend-since", v]);
+    assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
+    assert.match(r.stderr, /--spend-since wants epoch milliseconds/);
+  }
+});
+
+test("--spend-since with the value omitted fails, rather than reading as 'no filter at all'", () => {
+  // The flag as the last argv: arg() yields undefined and the guard's old
+  // `sinceRaw == null` read that as "flag absent" — exit 0, whole session,
+  // no stderr. Gating on has() is what closes it.
+  const r = runBoard(["--spend-since"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--spend-since/);
+});
+
+test("a valid epoch-ms --spend-since survives the guard and reaches the payload", () => {
+  // The leg that stops the guard from being merely strict. `since` is also the
+  // only field downstream can read to tell a scoped panel from an unscoped one,
+  // so it has to arrive, not just be accepted.
+  const since = Date.now() - 3_600_000;
+  const r = runBoard(["--spend-since", String(since)]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).spend.since, since);
+});
+
+test("no --spend-since at all is not an error — the panel is simply unscoped", () => {
+  const r = runBoard([]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).spend.since, null);
 });
