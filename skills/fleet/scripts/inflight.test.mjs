@@ -564,6 +564,25 @@ test("probe 3: a registry entry git cannot even open is unknown, not a stray to 
   assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
 });
 
+test("probe 3: a registry entry whose gitdir is GONE is unknown, not a stray to skip", (t) => {
+  // Why the skip tests EMPTINESS and not the absence of `gitdir`. Git drops an
+  // entry whose `gitdir` file was deleted, so keying the skip on that file
+  // waves a corrupt entry through as "not git's" and the ticket reads FREE
+  // while its checkout may still be on disk — the wrong "free" this probe
+  // exists to rule out, reintroduced one layer in. An operator's stray `mkdir`
+  // is empty; even a corrupt entry still holds git's own files (commondir,
+  // HEAD, index, logs, refs), and that is the difference the count can see.
+  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const entries = readdirSync(join(repo, ".git", "worktrees"));
+  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+  execFileSync("rm", [join(repo, ".git", "worktrees", entries[0], "gitdir")]);
+
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "a dropped entry is unknown, never the exit 0 that means free");
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+});
+
 test("probe 3: git listing MORE than the registry reports THAT, not an incomplete listing", (t) => {
   // The mismatch has two directions with opposite causes, and one message
   // cannot serve both. Fewer listed than registered is git dropping an entry

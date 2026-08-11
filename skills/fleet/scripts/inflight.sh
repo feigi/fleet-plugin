@@ -342,19 +342,25 @@ count_registry() {
     die "worktree registry $wtroot could not be read — whether #$n has a worktree is unknown"
   for entry in "$wtroot"/*; do
     [ -d "$entry" ] || continue
-    # A registry entry is a directory holding a `gitdir` file — that file is
-    # what git resolves the worktree through, and its absence is what separates
-    # an entry from an operator's stray `mkdir`. A stray FILE was already
-    # skipped above; a stray DIRECTORY was not, and counting one fails this
-    # probe closed forever, on every ticket in the repo, over something git is
-    # right to ignore (measured: git lists 2, the bare `-d` loop counted 3).
+    # Skip only an EMPTY directory. That is an operator's stray `mkdir`, which
+    # git ignores — and counting one fails this probe closed forever, on every
+    # ticket in the repo, over something git is right to ignore (measured: git
+    # lists 2, a bare `-d` count said 3). A stray FILE was already skipped by
+    # the `-d` above; a stray directory was not.
     #
-    # `-x` first, and the order is the whole point: an entry chmod'd 000
-    # answers "no gitdir" to exactly the same test a stray does, and that one
-    # git really does drop (measured: 2 listed, then 1). Unsearchable, so we
-    # cannot tell → count it and let the mismatch below fire. Searchable and
-    # carrying no gitdir → not git's, skip it.
-    if [ -x "$entry" ] && [ ! -f "$entry/gitdir" ]; then continue; fi
+    # Emptiness, NOT the absence of a `gitdir` file, and the difference is a
+    # wrong "free": git drops an entry whose `gitdir` was deleted, so keying the
+    # skip on that file waves the entry through as "not git's" and the ticket
+    # reads free while its checkout may still be on disk (measured: rc 0,
+    # `taken=false`). A corrupt entry still holds git's own files — commondir,
+    # HEAD, index, logs, refs — so emptiness separates it from a stray and the
+    # missing `gitdir` does not.
+    #
+    # `-x` first, and the order is the whole point: an entry chmod'd 000 reads
+    # as empty to the same test, and git drops that one too (measured: 2
+    # listed, then 1). Unsearchable, so we cannot tell → count it and let the
+    # mismatch below fire.
+    if [ -x "$entry" ] && [ -z "$(ls -A "$entry" 2>/dev/null)" ]; then continue; fi
     registered=$((registered + 1))
   done
 }
