@@ -306,9 +306,11 @@ gone() {
 #
 # Read off the porcelain listing already captured above (`wt_list`) rather than a
 # second `git worktree list` call. `cur` is reset on EVERY `worktree ` line, so a
-# sibling's `locked` line can never answer for this path, and `locked` is looked
-# for anywhere in the record rather than at a fixed offset: a DETACHED worktree
-# has no `branch` line at all, and a stray is detached by definition.
+# sibling's `locked` line can never answer for this path. A `locked [<reason>]`
+# line is matched by its prefix, since the reason is optional and rides on the
+# same line when present, and it is looked for anywhere in the record rather
+# than at a fixed offset: a DETACHED worktree has no `branch` line at all, and a
+# stray is detached by definition.
 #
 # The path goes in through the ENVIRON, not `-v`. POSIX has awk process escape
 # sequences in a `-v` assignment, so a repo living under a directory with a
