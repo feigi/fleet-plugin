@@ -52,8 +52,9 @@ export function classifyRole(meta) {
   return "other";
 }
 
-// Roles in report order — review side first, because that is where the spend is
-// and burying it under alphabetical ordering hides the finding.
+// Seeds the rollup buckets and breaks ties in the report, which is otherwise
+// sorted by spend — so this is not the order the UI shows. Review roles lead so
+// that at equal spend they still read first.
 export const ROLE_ORDER = [
   "specialist", "reviewer", "implementer", "merge-bot", "sizing", "memory", "finisher", "other",
 ];
@@ -81,10 +82,16 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
   // NaN in the UI — an empty board is a normal state at run start.
   const share = (n) => (totals.cacheWrite > 0 ? (n / totals.cacheWrite) * 100 : 0);
 
-  const roles = ROLE_ORDER
-    .map((role) => ({ role, ...byRole.get(role) }))
-    .filter((r) => r.agents > 0)
-    .map((r) => ({ ...r, pct: share(r.cacheWrite) }))
+  // Report every bucket that collected something, not just the known ones. The
+  // accumulator above happily creates a bucket for a role outside ROLE_ORDER,
+  // but mapping over ROLE_ORDER dropped it from the table while its tokens
+  // stayed in `totals` — so the percentage column silently stopped summing to
+  // 100 and the run looked cheaper than it was. Latent while classifyRole only
+  // emits known roles; it fails by under-reporting the moment one is added to
+  // the classifier and not to this array.
+  const roles = [...byRole.entries()]
+    .filter(([, b]) => b.agents > 0)
+    .map(([role, b]) => ({ role, ...b, pct: share(b.cacheWrite) }))
     .sort((a, b) => b.cacheWrite - a.cacheWrite);
 
   const top = [...agents]

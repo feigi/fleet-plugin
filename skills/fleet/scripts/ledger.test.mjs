@@ -104,6 +104,12 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
   }
 }
 
+// The term-selection tests need the exact --search string gh received, not
+// just whether it ran.
+function queryOf(r) {
+  return r.ghArgv[r.ghArgv.indexOf("--search") + 1];
+}
+
 const FILED_114 =
   "#114 fleet-plugin-design Non-zero column written from intent — audit 11 rows (review-pr-108)";
 const FILED_131 = "#131 run-merge-bot.md exit-2 documentation gap in the merge loop";
@@ -324,6 +330,89 @@ test("the search query carries at most three sanitised terms and no qualifiers",
   const subjectWords = "candidates mjs 164 is open states the opposite of its code".split(" ");
   for (const t of terms) assert.ok(subjectWords.includes(t), `term '${t}' is not from the subject`);
   assert.ok(r.ghArgv.includes("--state") && r.ghArgv.includes("all"), "closed issues are duplicates too");
+});
+
+// ---------------------------------------------------------------------------
+// Term selection (issue #153). Exact-equality pins, not <=3/subset checks —
+// this is the regression gate the issue says did not exist: change the
+// stoplist, the >= 3 floor, the sort, or the top-3 cut and one of these must
+// go red. Each subject is one of the four the issue measured, kept verbatim
+// so the pin is against the reported defect, not a paraphrase of it.
+// ---------------------------------------------------------------------------
+
+test("term selection: a subject with no modal/negation/temporal noise is unchanged by the widened stoplist", () => {
+  // Ceiling, stated: longest-first still prefers long ordinary words over a
+  // short distinctive one. "postgres" (8) loses to "connection" (10) and its
+  // near-tied neighbours regardless of the stoplist — none of the displacing
+  // words are modal/negation/temporal, so widening STOP cannot reach this
+  // case. Frequency weighting is the named, not-attempted upgrade path.
+  const r = run("postgres connection pooling exhausted under sustained load", { filed: [] });
+  assert.equal(queryOf(r), "connection exhausted sustained");
+});
+
+test("term selection: a modal and a negation no longer outrank the subject's content words", () => {
+  const r = run("the guard should never fail open on a fork", { filed: [] });
+  assert.equal(queryOf(r), "guard fail open", "was 'should guard never' before #153 widened STOP");
+});
+
+test("term selection: erasing CI/PR is a stated ceiling, not something this issue fixes", () => {
+  // "CI" and "PR" are still dropped by the >= 3 floor — lowering it is
+  // explicitly out of scope (#153: it interacts with the whole stoplist and
+  // has no gate of its own). Widening STOP with a temporal ("still") is not
+  // enough on its own either: "but" is ordinary generic length-3 filler, not
+  // a modal/negation/temporal, so it is deliberately left unstopped and still
+  // wins the third slot.
+  const r = run("CI is red but the PR still merged", { filed: [] });
+  assert.equal(queryOf(r), "merged red but");
+});
+
+test("term selection: the >= 3 floor itself is pinned, in both directions", () => {
+  // The header above claims a floor change must red one of these. It did not:
+  // the subject in the ceiling test is invariant under the floor, because `ci`
+  // and `pr` lose the longest-first top-3 cut to `merged`/`red`/`but` whether
+  // the floor is 3, 2 or 1 — so the whole block was vacuous for the one knob
+  // #153 names ("`>= 3` -> `>= 1` currently reds no test").
+  //
+  // This subject is not invariant: it has exactly two content words at length
+  // >= 3, so the third slot is EMPTY at the real floor and gets filled by the
+  // short `gh` the moment the floor drops. Measured on the pipeline: "fails
+  // cap" at 3, "fails cap gh" at both 2 and 1 — the assertion reds on any
+  // loosening, and a tightening to >= 4 drops `cap` and reds it too.
+  //
+  // `contentWords` in ledger.mjs is the single definition of that floor, so
+  // this one pin reaches the scoring path as well as the query path.
+  const r = run("gh CI cap fails", { filed: [] });
+  assert.equal(queryOf(r), "fails cap");
+});
+
+test("term selection: a modal is dropped, but the freed slot goes to another long generic word", () => {
+  // "should" is still excluded by the widened STOP, but the freed slot goes
+  // to another long generic word ("drops"), not to the short, genuinely
+  // distinctive "cap" or "near"/"miss" — the same longest-first ceiling as
+  // the postgres case above, left honestly unfixed.
+  const r = run("the near-miss cap silently drops rows that should have surfaced", { filed: [] });
+  assert.equal(queryOf(r), "silently surfaced drops", "was 'silently surfaced should' before #153 widened STOP");
+});
+
+test("term selection: near-miss scoring shares the same widened stoplist", () => {
+  // scoreTokens() and the tracker query terms both filter through STOP. Two
+  // subjects that use DIFFERENT modal/negation words ("should never" vs.
+  // "could still") share no raw token subset — isMatch() correctly misses —
+  // but must score as a full 1.0 near-miss once both sides' noise words drop
+  // out, or the widened stoplist is only reaching term selection, not scoring.
+  const r = run("the fix should never fail open on merge", { filed: ["#9 the fix could still fail open on merge"] });
+  assert.equal(r.json.found, false, "raw token sets differ (should/never vs could/still) — not a subset match");
+  assert.equal(r.json.near[0].score, 1, "'should'/'never'/'could'/'still' must not count as shared content words");
+});
+
+test("a tracker search returning zero hits reports what was established, not a clean bill", () => {
+  // #153's ceiling paragraph: a searched-and-empty tracker is not the same
+  // claim as "no related issues" — the query is a 3-term heuristic that can
+  // itself be why nothing came back.
+  const r = run("postgres connection pooling exhausted under sustained load", { filed: [], hits: [] });
+  assert.equal(r.json.verdict, "clean", "the JSON contract from #152 is unchanged — only the prose changes");
+  assert.match(r.stderr, /returned no matches/);
+  assert.doesNotMatch(r.stderr, /found no related issues/, "must not assert the tracker itself is clean");
 });
 
 test("the measured #114 rewording surfaces, weakly — it is the tracker query that catches this class", () => {

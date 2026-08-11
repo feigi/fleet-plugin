@@ -29,9 +29,11 @@ A **live cockpit**: a browser board, refreshed while a wave runs, that shows
 every ticket's pipeline stage as a kanban flow with an **attention strip** pinned
 on top that surfaces only the exceptions needing a human. It must be:
 
-- **Decoupled from the controller.** The board is a pure function of
+- **Decoupled from the controller.** Pipeline state is a pure function of
   `ledger + GitHub`. It survives controller compaction or death — the controller
-  launches it once and never feeds it again.
+  launches it once and never feeds it again. (The `spend` panel adds a third,
+  read-only input — the local transcript tree under `~/.claude/projects`. It is
+  telemetry only: it can populate or omit `spend`, never move a ticket.)
 - **Zero new failure mode in the event loop.** run-team adds exactly one
   background launch in phase 0; it never has to "remember to update the board."
 - **In the plugin's established style.** Node scripts + `gh`, no build step,
@@ -124,8 +126,9 @@ rejected "controller pushes" fidelity through the durable channel the controller
 *already writes*. The controller drops a cause-token into the ledger row it
 already rewrites — `KILLED`, `BLOCKED`, `SHA-OFF-BRANCH` — and `computeBoard`
 reads the *cause*. Until a token exists, that ticket simply surfaces as **stale**.
-No new write path, no coupling to controller liveness. Board stays
-`f(ledger, gh)` in every tier.
+No new write path, no coupling to controller liveness. Pipeline state stays
+`f(ledger, gh)` in every tier; only the side-car `spend` telemetry reads a third
+source, and it can never move a ticket.
 
 ## board.json — the model (shape)
 
@@ -148,7 +151,21 @@ No new write path, no coupling to controller liveness. Board stays
     }
   ],
   "filed": [{ "issue": 351, "subject": "…" }],
-  "attention": [ /* the subset of tickets with a non-empty flags, most-severe first */ ]
+  "attention": [ /* the subset of tickets with a non-empty flags, most-severe first */ ],
+
+  // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.
+  // null when this session has spawned no agents yet (panel hidden);
+  // { "error": "…" } when the transcripts could not be read (panel says so).
+  "spend": {
+    "totals": { "agents": 86, "cacheWrite": 0, "cacheRead": 0, "output": 0, "maxCtx": 0 },
+    "roles": [ { "role": "specialist", "agents": 42, "cacheWrite": 0, "pct": 47 } ],
+    "tools": [ { "tool": "Bash", "calls": 1974, "resultChars": 0, "cacheWrite": 0, "pct": 69 } ],
+    "top":   [ { "label": "…", "role": "specialist", "cacheWrite": 0, "maxCtx": 0, "pct": 0 } ],
+    "reviewPct": 84,        // specialists + reviewers, share of cache_creation
+    "attributedPct": 48,    // share of cache-write the tool table explains; never 100
+    "skipped": 0,           // transcripts that could not be read this tick
+    "since": null           // --spend-since epoch-ms, when the caller scoped the run
+  }
 }
 ```
 

@@ -218,13 +218,33 @@ if (cmd === "check") {
   // and the singular fold only sharpen a ranking, but folding them into
   // isMatch() would widen what counts as ALREADY FILED — the one behaviour
   // here that callers gate on and that must not move.
-  const STOP = new Set("the a an of to in is it its and or for on with that this from at by".split(" "));
-  const scoreTokens = (s) =>
-    new Set(
-      norm(s).split(/\s+/)
-        .filter((t) => t.length >= 3 && !STOP.has(t))
-        .map((t) => t.replace(/s$/, "")),
-    );
+  // Widened for #153: modals, negations and temporals ("should", "never",
+  // "still"...) are noise words that are never the subject's distinctive
+  // term, yet the old, shorter list let them survive to outrank one — "the
+  // guard should never fail open on a fork" picked "should guard never" over
+  // content words a reader would actually search for. Measured zero fallout:
+  // this file's suite is unchanged by the widening (see the "term selection"
+  // tests). Two adjacent ideas were considered and rejected, not attempted
+  // here: preferring identifier-shaped tokens (`CI`, `gh`) over long ordinary
+  // words — but norm() below has already stripped the punctuation that would
+  // mark a token as an identifier, so that needs a different pipeline, not a
+  // different stoplist — and real frequency weighting, which stays the named
+  // upgrade path until something measured demands it. Neither would be
+  // reachable by widening a stoplist anyway.
+  const STOP = new Set((
+    "the a an of to in is it its and or for on with that this from at by " +
+    "should would could can may might must will shall ought " +
+    "not never cannot nor " +
+    "still already now then soon yet always once again when while before after until since"
+  ).split(" "));
+  // One pipeline, two callers. The scoring path and the query path filter on the
+  // same floor and the same stoplist, and writing that expression out twice is
+  // what let them drift — the coupling test below pins that they agree, and a
+  // single definition is what makes the pin structural rather than hopeful.
+  // It is also the only place the `>= 3` floor exists, so one mutation reaches
+  // both consumers.
+  const contentWords = (s) => norm(s).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t));
+  const scoreTokens = (s) => new Set(contentWords(s).map((t) => t.replace(/s$/, "")));
   // Overlap coefficient (shared / smaller set), not Jaccard. A filed row carries
   // a source tag like `(review-pr-108)` and other metadata the checked subject
   // can never contain, so the union is dominated by tokens with no chance of
@@ -267,10 +287,26 @@ if (cmd === "check") {
   // distinctive identifiers like `CI` or `gh`; upgrade to a real frequency
   // weighting if the query starts missing.
   //
+  // #153 widened STOP (above) to stop modals/negations/temporals from
+  // outranking real content words, and stops there — this is a pin, not a
+  // retune. Two things it deliberately leaves broken: longest-first still
+  // prefers a long ordinary word over a short distinctive one ("postgres"
+  // still loses to "exhausted"/"sustained"; "cap" still loses to
+  // "silently"/"surfaced"), because fixing that is the frequency-weighting
+  // upgrade above, not a stoplist edit; and the >= 3 filter still erases `CI`
+  // and `PR` outright, because norm() has already destroyed the punctuation
+  // that would mark them as identifiers worth keeping short — a different
+  // pipeline, not a different stoplist or a lower floor (lowering it
+  // interacts with every one of these and had no test of its own until this
+  // issue added one). A tracker search that returns nothing is reported
+  // below as "no matches for this query", not as "no related issues" — a
+  // three-term heuristic query coming up empty establishes that the query
+  // found nothing, not that the tracker has nothing.
+  //
   // norm() has already stripped punctuation, which is also what keeps a subject
   // containing `is:open` or `file.mjs:164` from smuggling a qualifier into the
   // search and silently changing what was searched for.
-  const terms = [...new Set(norm(subject).split(/\s+/).filter((t) => t.length >= 3 && !STOP.has(t)))]
+  const terms = [...new Set(contentWords(subject))]
     .sort((a, b) => b.length - a.length)
     .slice(0, 3);
   const query = terms.join(" ");
@@ -343,7 +379,13 @@ if (cmd === "check") {
     }
     console.error(`${NAME}: not in this run's filed list, but ${tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
   } else {
-    console.error(`${NAME}: not previously filed; tracker search '${query}' found no related issues`);
+    // Not "found no related issues" — that asserts the tracker has nothing,
+    // when all that is actually established is that a ${terms.length}-term
+    // heuristic query came back empty (#153). A query built from a few
+    // longest-surviving words can miss the very issue it should have found
+    // (see the STOP comment above); "no matches for this query" says what was
+    // established and leaves the rest unclaimed.
+    console.error(`${NAME}: not previously filed; tracker search '${query}' (${terms.length} term${terms.length === 1 ? "" : "s"}) returned no matches — not a certification the tracker has nothing on this`);
   }
   // Named explicitly so a consumer does not have to reconstruct it from
   // `tracker.ok` plus `tracker.hits` — issue #152. `!tracker.ok` short-circuits

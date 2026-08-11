@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // The cockpit's I/O layer. `build` gathers ledger + gh + CI state, calls the
 // pure computeBoard(), and prints board.json. `serve` (below) loops build,
-// atomic-writes .fleet/board.json, and serves board.html. The board is a pure
-// function of ledger + GitHub — it never depends on the controller feeding it.
+// atomic-writes .fleet/board.json, and serves board.html. The board never
+// depends on the controller feeding it.
+//
+// Pipeline state is a pure function of ledger + GitHub. The spend panel adds a
+// THIRD input that is neither — the local Claude Code transcript tree under
+// ~/.claude/projects — so the "f(ledger, gh)" property no longer covers the
+// whole model. It is telemetry, kept strictly to the side: it can only ever
+// populate or omit `spend`, never change a ticket's stage.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
@@ -83,31 +89,63 @@ export function mapCi(ciJson) {
 // Where this session's subagent transcripts live: Claude Code writes them to
 // ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/.
 //
-// The encoding replaces `/` AND `.` with `-`, so /Users/x/.claude encodes to
-// `-Users-x--claude` (double dash), not `-Users-x-.claude`. Replacing only
-// slashes silently missed every cwd containing a dot — including this repo,
-// which is what the fleet skills themselves run out of, so the panel never
-// rendered here at all. The miss is invisible by construction: a wrong path
-// just fails existsSync and returns null, which looks exactly like "no data".
-//
-// The session uuid is not knowable from here, so take the most recently modified
-// one — during a run that is always the live session. Null on any surprise: the
-// cockpit must degrade to "no spend panel", never crash a tick over telemetry.
+// The encoding replaces every non-alphanumeric character with `-`, so
+// /Users/x/.claude encodes to `-Users-x--claude` (double dash), not
+// `-Users-x-.claude`. Replacing only slashes silently missed every cwd
+// containing a dot — including this repo, which is what the fleet skills
+// themselves run out of, so the panel never rendered here at all. The miss is
+// invisible by construction: a wrong path just fails existsSync and returns
+// null, which looks exactly like "no data".
 export function encodeProjectDir(cwd) {
-  return cwd.replace(/[/.]/g, "-");
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
+// The session uuid is not knowable from here, so take the most recently active
+// one. Rank on the newest TRANSCRIPT mtime, not on the subagents directory's
+// own: a directory's mtime moves when an entry is created or removed, never
+// when a file inside it is appended to. Ranking on the directory therefore
+// tracked the last agent SPAWN rather than the last agent activity — and since
+// the cockpit launches in run-team phase 0, before the first agent spawns, the
+// live session has no subagents dir yet and a PREVIOUS session won. The board
+// would render a prior run's spend as this run's, then silently switch when the
+// first agent landed. That is the one failure mode here that produces
+// confidently wrong numbers rather than no numbers.
+//
+// Returns { error } when the project dir cannot be resolved at all — a bug that
+// never fixes itself — and null when it resolves but holds no sessions yet,
+// which is normal at run start. Collapsing those two into one bare null is what
+// hid the encoding bug above.
 export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
   try {
     const projects = join(home, ".claude", "projects", encodeProjectDir(cwd));
-    if (!existsSync(projects)) return null;
+    if (!existsSync(projects)) return { error: `no transcript dir for cwd ${cwd} (looked in ${projects})` };
     const cands = readdirSync(projects)
       .map((s) => join(projects, s, "subagents"))
       .filter((d) => existsSync(d))
-      .map((d) => ({ d, m: statSync(d).mtimeMs }))
+      .map((d) => ({ d, m: newestTranscriptMs(d) }))
       .sort((a, b) => b.m - a.m);
     return cands.length ? cands[0].d : null;
-  } catch { return null; }
+  } catch (e) { return { error: `transcript lookup failed: ${e.message}` }; }
+}
+
+// Newest *.jsonl mtime in a subagents dir, 0 if it holds none. A dir whose
+// transcripts are all unreadable loses to one that is readable, which is the
+// behaviour we want when picking "the live session".
+//
+// The scan is wrapped for the same reason the per-file stat below is. This runs
+// once per CANDIDATE, so an uncaught throw here does not just lose one dir — it
+// escapes findSubagentsDir's try and turns the whole lookup into { error },
+// blacking out every readable session over one bad sibling. Scoring 0 is what
+// the comment above already promises: a dir we cannot read simply loses.
+function newestTranscriptMs(dir) {
+  let names;
+  try { names = readdirSync(dir); } catch { return 0; }
+  let newest = 0;
+  for (const f of names) {
+    if (!f.endsWith(".jsonl")) continue;
+    try { newest = Math.max(newest, statSync(join(dir, f)).mtimeMs); } catch { /* raced away */ }
+  }
+  return newest;
 }
 
 // Read one agent transcript into the shape the pure module wants. Single pass —
@@ -169,6 +207,18 @@ function readAgent(file, metaFile) {
   return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
 }
 
+// Warn at most once per process. Errors reach the browser too (see below), but
+// the board gathers every ~15s and a line repeating at that rate just trains the
+// eye to ignore it.
+let warnedNoSpendDir = false;
+// Same rule, per transcript: a file that is broken is broken every tick, and at
+// the default 15s interval three of them are 720 lines an hour. Keyed on the
+// FULL PATH, not the bare filename — gatherSpend re-resolves its dir on every
+// tick, so a bare-filename key would silence a genuinely different broken file
+// living under a second session directory. The count still reaches the browser
+// every tick via `skipped`, which is the channel that matters here.
+const warnedSkips = new Set();
+
 // Scope is the SESSION directory, which is the closest thing to a run boundary
 // that actually exists on disk — one Claude Code session, one folder.
 //
@@ -179,41 +229,61 @@ function readAgent(file, metaFile) {
 // explicit option for the one case the session scope cannot cover: a single
 // session that spans two fleet runs, where the caller knows the boundary and the
 // board does not.
-// Warn at most once per process. "Could not resolve the transcript directory"
-// and "this run has no transcripts yet" both render as a hidden panel, and the
-// first is a bug while the second is normal — the path-encoding bug above sat
-// unnoticed precisely because nothing distinguished them. Once, not per tick:
-// the board gathers every ~15s and a repeating line would just train the eye
-// to ignore it.
-let warnedNoSpendDir = false;
-
+//
+// Three returns, deliberately distinct — collapsing them into one bare null is
+// what let the path-encoding bug live: `{ error }` is a bug the operator must
+// act on and the UI shows it; `null` is the normal "nothing yet" and the UI
+// hides the panel; a model object is data.
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
-    if (!dir) {
+    if (dir && dir.error) {
       if (!warnedNoSpendDir) {
         warnedNoSpendDir = true;
-        console.error(`${NAME}: no subagent transcripts under ~/.claude/projects/${encodeProjectDir(process.cwd())}/ — spend panel hidden`);
+        console.error(`${NAME}: ${dir.error}`);
       }
-      return null;
+      return { error: dir.error };
     }
+    if (!dir) return null; // resolved, but this session has spawned no agents yet
 
     const agents = [];
     const toolTables = [];
+    let skipped = 0;
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
       const file = join(dir, f);
-      // Filter on the transcript's own mtime, not on any timestamp inside it —
-      // an agent that ran before this run is simply not this run's cost.
-      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
-      const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
-      agents.push({
-        label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
-        role: classifyRole(a.meta),
-        cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
-      });
-      toolTables.push(attributeTools(a.entries));
+      // One unreadable transcript must not take the whole panel down with it.
+      // The file-level equivalent of the torn-line skip below: a transcript can
+      // vanish between readdir and read while an agent is being cleaned up, and
+      // losing every other agent's numbers over it would be a blackout, not
+      // degradation.
+      try {
+        // Filter on the transcript's own mtime, not on any timestamp inside it —
+        // an agent that ran before this run is simply not this run's cost.
+        if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
+        const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
+        // Both halves computed before either is recorded, so `skipped++` below
+        // always means "this transcript contributed nothing" — which is what the
+        // UI's "N transcripts skipped" claims. Pushing the agent first would let
+        // a throw from the tool half bill the agent AND count it as skipped.
+        // Unreachable today: nothing readAgent emits can make attributeTools
+        // throw, and readAgent's own throws land here before anything is pushed.
+        // Ordering, not a guard — keep it if this block is edited again.
+        const tools = attributeTools(a.entries);
+        agents.push({
+          label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
+          role: classifyRole(a.meta),
+          cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
+        });
+        toolTables.push(tools);
+      } catch (e) {
+        skipped++;
+        if (!warnedSkips.has(file)) {
+          warnedSkips.add(file);
+          console.error(`${NAME}: skipping ${f}: ${e.message}`);
+        }
+      }
     }
-    if (!agents.length) return null;
+    if (!agents.length) return skipped ? { error: `all ${skipped} transcripts unreadable` } : null;
     const spend = computeSpend({ agents, topN });
     const tools = mergeTools(toolTables);
     // What fraction of cache_creation the tool table actually explains. It is
@@ -225,10 +295,12 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // are not.
     const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
-    return { ...spend, tools, attributedPct, since: sinceMs ?? null };
+    return { ...spend, tools, attributedPct, skipped, since: sinceMs };
   } catch (e) {
+    // A real bug, not an empty run — say so rather than hiding the panel, which
+    // is what turned the last type surprise in here into "no panel appeared".
     console.error(`${NAME}: spend read failed: ${e.message}`);
-    return null;
+    return { error: e.message };
   }
 }
 
@@ -275,7 +347,30 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
   }
 
-  const spend = gatherSpend({ sinceMs: Number(arg("spend-since")) || null });
+  // Operator input at a trust boundary, so it fails loud. `Number(x) || null`
+  // silently turned every bad value into "no filter at all": a typo, or the
+  // natural mistake of passing seconds instead of milliseconds, produced a panel
+  // that rendered confidently over the WHOLE session while the operator believed
+  // it was scoped to one run. That is the same silent-zero failure the comment
+  // on gatherSpend describes; an earlier pass removed the `|| null` default but
+  // left the footgun, and the guard below is what actually closes it.
+  //
+  // Gate on PRESENCE, not on the value: `arg()` yields undefined for a trailing
+  // `--spend-since`, and `sinceRaw == null` read that as "flag absent", so the
+  // guard never fired. And on RANGE, not just finiteness: a seconds-magnitude
+  // epoch (~1.7e9) is finite, so the very mistake named above sailed through,
+  // counted every agent, and shipped its own bogus value into board.json's
+  // `since`. 1e12 ms is 2001-09-09, below any real run; a future boundary
+  // matches nothing at all.
+  const sinceRaw = arg("spend-since");
+  let sinceMs = null;
+  if (has("spend-since")) {
+    sinceMs = Number(sinceRaw);
+    if (!Number.isFinite(sinceMs) || sinceMs < 1e12 || sinceMs > Date.now()) {
+      die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
+    }
+  }
+  const spend = gatherSpend({ sinceMs });
   return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? (Number(arg("interval")) || 15) };
 }
 
@@ -290,7 +385,7 @@ async function main() {
     return;
   }
   if (cmd === "serve") { await serve({ ledgerFile }); return; }
-  die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open]");
+  die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open] [--spend-since <epoch-ms>]");
 }
 
 import { copyFileSync, mkdirSync } from "node:fs";
