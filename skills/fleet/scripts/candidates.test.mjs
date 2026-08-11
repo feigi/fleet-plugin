@@ -865,6 +865,56 @@ test("an empty queue is exit 1, not 2 — the query worked and there is no work"
   assert.equal(stdout.trim(), "[]");
 });
 
+test("an all-filtered labeled queue with no fallback is exit 3, not 1 — the caller can tell filtered-empty from genuinely-empty (#64)", () => {
+  // No --allow-fallback, so this is a single pass: the labeled query returns
+  // rows and dropSpecs removes every one. Byte-identical to a genuinely empty
+  // queue on stdout; the exit code is the only place the two facts differ.
+  const { status, stdout, rows } = run([
+    ticket(10, "## User Stories\n\n1. As a user…\n"),
+    ticket(11, "## Problem Statement\n\ny\n\n## User Stories\n\n2. As a user…\n"),
+  ]);
+  assert.equal(rows.length, 0);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 3);
+});
+
+test("an all-filtered fallback pass is exit 3 even though the labeled pass was genuinely empty — the verdict is the fallback's own, not pass 1's (#64)", () => {
+  // Pass 1 (labeled) comes back with zero rows — genuinely empty, nothing to
+  // filter, so pass 1's own flag would be false. Pass 2 (fallback) comes back
+  // with rows and drops every one. If the two passes' flags were OR'd/AND'd
+  // together instead of the fallback's replacing pass 1's outright, this
+  // would wrongly read pass 1's "false" through and report exit 1.
+  const { status, stdout, stderr, rows } = run(
+    [],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [
+      ticket(12, "## User Stories\n\n1. As a user…\n", ["ready-for-human"]),
+      ticket(13, "## Problem Statement\n\nz\n\n## User Stories\n\n2. As a user…\n", ["ready-for-human"]),
+    ],
+  );
+  assert.match(stderr, /retrying unfiltered/);
+  assert.equal(rows.length, 0);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 3);
+});
+
+test("a labeled all-specs query that falls back to a genuinely empty unfiltered query is exit 1, not 3 — pass 1's drop must not leak into pass 2's verdict (#64)", () => {
+  // The edge case the ticket names explicitly. Pass 1 (labeled) has rows and
+  // drops every one as a spec — pass 1's own flag is true. Pass 2 (fallback)
+  // comes back with no rows at all — genuinely empty, nothing to filter. If
+  // pass 1's "true" carried forward (an OR instead of a plain reassignment),
+  // this would wrongly report exit 3 for a fallback that filtered nothing.
+  const { status, stdout, stderr, rows } = run(
+    [ticket(10, "## User Stories\n\n1. As a user…\n")],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [],
+  );
+  assert.match(stderr, /retrying unfiltered/);
+  assert.equal(rows.length, 0);
+  assert.equal(stdout.trim(), "[]");
+  assert.equal(status, 1);
+});
+
 test("candidates come back oldest first, whatever order gh returned them in", () => {
   // gh defaults to created-desc, so newest-first is the realistic input.
   const { rows } = run([
