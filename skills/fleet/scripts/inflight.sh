@@ -20,9 +20,13 @@
 # repository, and no such issue. That last one fires inside probe 1, after its
 # own `gh issue view` has already run — it is not a pre-probe check, it is the
 # premise all three probes rest on, so it abandons the run rather than
-# recording one probe's unknown. The fourth is the opposite end: an evidence
-# string or a verdict that cannot be written at all, which fails after every
-# probe has finished, with everything established and no way to say it.
+# recording one probe's unknown. The fourth is the opposite end: the verdict
+# itself cannot be written at all, which fails after every probe has finished,
+# with everything established and no way to say it. An evidence string that
+# cannot be rendered is NOT one of the four (#120): the verdict is already
+# correct at that point, and a formatter breaking must not retract it — that
+# field is emitted as JSON null instead, on the payload the verdict already
+# earned.
 set -eu
 
 NAME=inflight
@@ -589,6 +593,11 @@ echo "$NAME: #$n taken=$taken" >&2
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.
 jstr() {
+  # Empty in, empty out, no fork at all (#120). This is what lets a
+  # PATH-wide sed/tr outage — the failure this script measures at its own
+  # top — leave a field that legitimately found nothing untouched: that
+  # field never calls the broken tool, so it cannot observe its failure.
+  [ -n "$1" ] || return 0
   printf '%s' "$1" \
     | sed -e ':a' -e '$!N' -e '$!ba' \
         -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
@@ -607,6 +616,9 @@ jstr() {
 # across every arrangement of these bytes, it changed no answer — so it is gone
 # rather than defended.
 jrewritten() {
+  # Same short circuit as jstr, same reason: nothing to have rewritten, so no
+  # need to ask a tool that might not be there.
+  [ -n "$1" ] || { printf false; return 0; }
   raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
   orig=$(printf '%s' "$1")
   [ "$raw" = "$orig" ] && printf false || printf true
@@ -615,14 +627,30 @@ jrewritten() {
 # A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
 # itself: a substitution that fails contributes an EMPTY argument and printf
 # still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,
-# malformed JSON at exit 0, which is the failure the receipt exists to rule
-# out. Assigned first, each one is a simple command whose status the `&&` chain
-# can read and this `|| die` can act on.
-pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
-  && remote_j=$(jstr "$remote") && remote_rw=$(jrewritten "$remote") \
-  && local_b_j=$(jstr "$local_b") && local_b_rw=$(jrewritten "$local_b") \
-  && wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
-  || die "could not escape the evidence for #$n"
+# malformed JSON at exit 0. Assigned first, each one is a simple command whose
+# status this function can read.
+#
+# `die` is NOT the answer here (#120), unlike everywhere else in this script.
+# The verdict — $taken, $hits, $rc — is already correct by this point; a
+# formatter that broke AFTER a real answer was established must not convert
+# that answer into "unanswerable". So a field jstr or jrewritten could not
+# render becomes JSON `null` — never `""`, which already means "this probe
+# looked and found nothing" — and the run continues to the payload it earned,
+# at the verdict's own exit code. Sets $ev / $rw for the caller to capture;
+# not `local` because nothing here uses it past the next two lines.
+render_evidence() {
+  if ev=$(jstr "$2") && rw=$(jrewritten "$2"); then
+    ev="\"$ev\""
+  else
+    ev=null
+    rw=null
+    echo "$NAME: could not render the $1 evidence for #$n as JSON — reported as null" >&2
+  fi
+}
+render_evidence pr "$pr"; pr_ev=$ev pr_rw=$rw
+render_evidence remote "$remote"; remote_ev=$ev remote_rw=$rw
+render_evidence localBranch "$local_b"; local_b_ev=$ev local_b_rw=$rw
+render_evidence worktree "$wt"; wt_ev=$ev wt_rw=$rw
 
 # Guarded because this runs OUTSIDE the three probe functions, where `set -e` is
 # still live and a failed write exits 1 — and the contract reads 1 as "taken", a
@@ -630,9 +658,14 @@ pr_j=$(jstr "$pr") && pr_rw=$(jrewritten "$pr") \
 # reproduces it. (The probe bodies cannot rely on that: each is invoked as
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
 # command in one carries its own guard.)
-printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":"%s","prRewritten":%s,"remote":"%s","remoteRewritten":%s,"localBranch":"%s","localBranchRewritten":%s,"worktree":"%s","worktreeRewritten":%s}}\n' \
+#
+# The four evidence slots are unquoted `%s`, unlike every other string slot in
+# this printf: `render_evidence` above hands back either a value already
+# wrapped in its own quotes or the bare word `null`, so the format string must
+# not wrap it again.
+printf '{"issue":%s,"taken":%s,"hits":[%s],"unknown":[%s],"evidence":{"pr":%s,"prRewritten":%s,"remote":%s,"remoteRewritten":%s,"localBranch":%s,"localBranchRewritten":%s,"worktree":%s,"worktreeRewritten":%s}}\n' \
   "$n" "$taken" "${hits%,}" "${unknown%,}" \
-  "$pr_j" "$pr_rw" "$remote_j" "$remote_rw" \
-  "$local_b_j" "$local_b_rw" "$wt_j" "$wt_rw" \
+  "$pr_ev" "$pr_rw" "$remote_ev" "$remote_rw" \
+  "$local_b_ev" "$local_b_rw" "$wt_ev" "$wt_rw" \
   || die "could not write the verdict for #$n"
 exit "$rc"
