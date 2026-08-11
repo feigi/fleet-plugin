@@ -211,14 +211,23 @@ they are gone, with only `rewrote row #N` on stderr to say so. Recover a class
 after a compaction with `ledger.mjs read` — `class=` is a raw-row field, and the
 cockpit does not parse or surface it.
 
-**Redirect `ledger.mjs read` to a file; never pipe it.** Its payload truncates at
-64 KiB on a pipe and exits 0 (#246), so a grown ledger silently loses its tail —
-`ledger.mjs read | …` returned 65536 bytes where a redirect returned 262432 in
-one run, and it is the reason `board.mjs` reported `ledger read parse failed`
-and served a blind cockpit that whole run. Every use above is a recovery path,
-so the truncation lands exactly where a lost class or a settled `ruled:` is
-unrecoverable. The same applies to the cockpit: a `board.mjs` that cannot parse
-the ledger is not a cockpit, and nothing warns you twice.
+**Redirect `ledger.mjs read` to a file; never pipe it.** On a pipe its payload
+truncates and it still exits 0 (#246), so a grown ledger silently loses its tail
+— that is why `board.mjs` reported `ledger read parse failed` and served a blind
+cockpit that whole run. **The cut is a pipe-buffer boundary, not a fixed
+ceiling**, so never write a byte count into a check. What survives is whatever
+the kernel accepted before `process.exit(0)` abandoned the async write: measured
+on one 506 KB ledger that a redirect delivers whole and parses, every pipe
+consumer — `execFileSync` (what `board.mjs` uses), `| wc -c`, `| cat > f` — cut
+at exactly 65536 bytes, and that same `| cat > f` returned 131072, one further
+buffer, on 5 of 55 runs. So the amount is a race with the consumer's draining,
+not a constant. None of it parsed; all of it exited 0. Assert that the payload
+**did not parse** — a test pinning 65536 passes only until the drain wins that
+race. Measure bytes, not `String.length`, if you check at all: the same 65536-byte
+prefix reads as 64456 through `readFileSync(…, "utf8").length`, because a `·` in
+a row is two bytes and one UTF-16 unit. Every use above is a recovery path, so the
+truncation lands exactly where a lost class or a settled `ruled:` is
+unrecoverable, and nothing warns you twice.
 
 **Guard: measure per PR, not per wave.** There are no implementer waves — refill
 is level-triggered, one slot at a time — so the unit is the PR. Once at least
@@ -515,26 +524,42 @@ controller lends its own weight to a finding no refuter has touched yet. Twice
 in that run the ranked one was refuted outright.
 
 **Scan the findings against each other for MUTUAL EXCLUSION, and rule before the
-fix-applier acts.** The fix-applier dispatches one refuter per `suggestion`, each
-blind to its siblings, so two can approve changes that cannot both land — one
-preserving a comment block another's change deletes, one keeping a binding
-another collapses. Only you hold every ruling, so only you can see the pair. Two
-runs have produced it: PR #332, and PR #404 where a refuter proved a variable
-collapse behavior-equivalent over 844 cases while its own blast-radius scan named
-the two comment blocks a *different* refuter had just established as guarding
-distinct pinned hazards. Read each refuter's blast radius against the findings you
-have already ruled on; a conflict is a **defer**, with the equivalence evidence
-recorded in the filed issue so the work is not redone. Never let both reach the
-tree and hope the diff coheres.
+conflicting change reaches the tree.** Refuters are blind to their siblings, so
+two can approve changes that cannot both land — one preserving a comment block
+another's change deletes, one keeping a binding another collapses. Only you hold
+every ruling, so only you can see the pair. Two runs have produced it: PR #332,
+and PR #404 where a refuter proved a variable collapse behavior-equivalent over
+844 cases while its own blast-radius scan named the two comment blocks a
+*different* refuter had just established as guarding distinct pinned hazards.
+
+The scan's two inputs arrive at different times, so run it twice. **Before you
+dispatch anything**, group the findings by `file:line` and by whether one's fix
+undoes another's — that is in the findings' own text, which you hold for every
+band. **Then as each refuter report lands**, read its blast radius against what
+you have already ruled on: the workflow's own refuters return their votes with
+the findings, and a report from one the fix-applier spawned surfaces to you, so
+that half arrives mid-flight rather than before dispatch. The deadline is the
+tree, not the dispatch.
+
+**A conflicting pair goes to a SINGLE refuter, briefed with both claims.** That
+is what settled #332's — one refuter tested the two against each other and ruled
+*"B wins: A's premise is false"*, where two independent refuters would each have
+approved their own side, which is how the pair arises at all. **Defer only when
+no single refuter can settle it**, with the equivalence evidence recorded in the
+filed issue so the work is not redone; that was the right call in the #404 case,
+where the refuter had also falsified the finding's own rationale. Never let both
+reach the tree and hope the diff coheres.
 
 The same scan catches a quieter shape: a finding whose **suggested fix quotes text
 another applied finding deletes**. Measured on PR #405 — `survived[5]`'s pin was
 written as `/not inside a git repository/`, wording `survived[3]` removes as
-fabricated, so applying both in the order given would have produced a pin matching
+fabricated, so applying both **as written** would have produced a pin matching
 nothing. Not mutual exclusion, and it does not conflict at the diff level; it goes
-stale and passes for the wrong reason. Ordering is the fix: apply the finding that
-changes the text before the one that asserts on it, and re-derive the assertion
-from the post-fix tree rather than from the finding.
+stale and passes for the wrong reason. **Re-deriving is the fix:** never copy a
+pin out of a finding, derive the assertion from the post-fix tree. Ordering is
+what makes that possible rather than a second remedy — apply the finding that
+changes the text before the one that asserts on it, and the tree you have to
+derive from exists.
 
 **A `refuted=false` verdict is not an instruction to apply.** It says the finding
 survived refutation, not that the change is worth making — those come apart
@@ -581,8 +606,11 @@ nothing leaves it no gate at all.
 > > RUNNING something — compile it, run the test, apply the mutation. Do not
 > > reason your way to agreement.
 >
-> Survives → apply it. Refuted → defer and file it, and say the refutation in the
-> issue body. **Apply only what survives — no report is not a survival.** A
+> Survives → apply it, with one hold: if its refuter reports a blast radius
+> touching lines another finding also changes, report that to the controller and
+> wait for a ruling before applying — only the controller holds every finding, so
+> only it can see that the two cannot both land. Refuted → defer and file it, and
+> say the refutation in the issue body. **Apply only what survives — no report is not a survival.** A
 > refuter you never hear from leaves the finding exactly as unchecked as it
 > arrived, so it defers like a refuted one.
 >
