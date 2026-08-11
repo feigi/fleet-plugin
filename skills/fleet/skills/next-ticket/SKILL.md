@@ -50,8 +50,10 @@ Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (meas
 `#N — <title> — <why now: adjacent to current branch, or nothing>`
 
 FIFO. Never rank by size — that axis is gone. Never by "unblocks #X" either:
-step 2 already dropped anything with an open blocker, so everything here is free
-to start. "Adjacent to current branch" survives because solo session has one
+step 2 already dropped anything with an open blocker named in the body — heading,
+bold-label, or inline form (#58) — so everything here is free to start unless the
+blocker lives only in a native sub-issue/dependency link, which the scan does not
+read. "Adjacent to current branch" survives because solo session has one
 worktree; means nothing to the fleet, whose members each get their own.
 
 Ask which. **Wait for answer.** Maintainer says taken → drop, re-suggest.

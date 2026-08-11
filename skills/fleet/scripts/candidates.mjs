@@ -134,10 +134,51 @@ if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without
 
 const EXCLUDE =
   "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info";
+// `d` walks the body line by line rather than one regex over the whole
+// string, because RE2 (gojq's engine — gh applies `--jq` with gojq, not the
+// system jq this file's own tests stub; see #63) has no lookahead, so
+// "capture every ref up to the next heading" cannot be expressed as a single
+// pattern. A heading line (`^#{1,6}\s`) toggles a running "inside a blocking
+// section" flag on when its text names one of the four phrases, off at ANY
+// following heading (blocking or not) — that is the `## Blocked by` + list
+// form to-tickets publishes. Independently, any line — inside a section or
+// not — carrying the phrase (optionally `**bold**` and/or `:`-suffixed,
+// to-tickets' local-file template writes `**Blocked by:**`) followed by one
+// or more `#N` refs on that same line is read too — the existing inline
+// phrasings (`depends on #5`) are a bold-less, colon-less instance of this
+// same match. A ref elsewhere in the body — not under a heading section, not
+// after a label — is not collected: neither pass reaches it. Verified
+// against real gojq (`go install github.com/itchyny/gojq/cmd/gojq@v0.12.19`)
+// on every form in candidates.test.mjs's dependency-forms fixtures, not only
+// the system jq the STUB there execs.
 const JQ =
-  '[.[]|{n:.number,t:.title,l:[.labels[].name],' +
-  'spec:((.body//"")|test("(?m)^##\\\\s+User Stories\\\\s*$")),' +
-  'd:[(.body//""|scan("(?i)(?:depends on|blocked by|requires|after)\\\\s+#\\\\d+"))]}]';
+  'def depnums:\n' +
+  '  (. // "") as $body\n' +
+  '  | ($body | split("\\n")) as $lines\n' +
+  '  | (reduce $lines[] as $line (\n' +
+  '      {insec: false, nums: []};\n' +
+  '      ($line | test("(?i)^#{1,6}\\\\s+(depends on|blocked by|requires|after)\\\\b")) as $bh\n' +
+  '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
+  '      | (if $any then $bh else .insec end) as $nextsec\n' +
+  '      | {\n' +
+  '          insec: $nextsec,\n' +
+  '          nums: (\n' +
+  '            .nums\n' +
+  '            + (if $nextsec then [$line | scan("#\\\\d+")] else [] end)\n' +
+  '            + [ $line\n' +
+  '                | scan("(?i)\\\\*{0,2}(?:depends on|blocked by|requires|after)\\\\*{0,2}:?\\\\*{0,2}\\\\s*(#\\\\d+(?:\\\\s*(?:,|and)?\\\\s*#\\\\d+)*)")\n' +
+  '                | .[0]\n' +
+  '                | scan("#\\\\d+")\n' +
+  '              ]\n' +
+  '          )\n' +
+  '        }\n' +
+  '    )).nums\n' +
+  '  | map(ltrimstr("#") | tonumber)\n' +
+  '  | unique;\n' +
+  '\n' +
+  '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
+  ' spec:((.body//"")|test("(?m)^##\\\\s+User Stories\\\\s*$")),\n' +
+  ' d:((.body//"")|depnums)}]\n';
 
 function query(label) {
   const search = label ? `${EXCLUDE} label:${label}` : EXCLUDE;
@@ -289,9 +330,11 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 // needs no extra field and no query semantics. Dependencies do not rank —
 // blocked tickets are dropped by the CONSUMER reading `d` (run-team step 2 /
 // next-ticket step 2), not here, and to-tickets publishes chains blockers-first
-// so lower numbers are the blockers anyway. Note that drop under-fires: the `d`
-// scan misses to-tickets' `## Blocked by` heading form and native sub-issue
-// links, so blocked tickets do reach this sort — see #58.
+// so lower numbers are the blockers anyway. `d` now covers every body form
+// to-tickets publishes — heading + list, bold/inline label, the original bare
+// phrasings — see #58. It still does not read GitHub's native sub-issue or
+// dependency links, which are not in the body at all; a chain wired only
+// through those reaches this sort with an empty `d` regardless.
 rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {

@@ -64,7 +64,7 @@ case " $search " in
   *\\ label:*) ;;
   *) [ -n "$FIXTURE_UNFILTERED" ] && fixture="$FIXTURE_UNFILTERED" ;;
 esac
-exec jq -c "$expr" "$fixture"
+exec "\${JQ_BIN:-jq}" -c "$expr" "$fixture"
 `;
 
 function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null, extraEnv = {}) {
@@ -169,6 +169,94 @@ test("near misses are kept — the predicate's shape is specified, not accidenta
   ]);
   assert.deepEqual(rows.map((r) => r.n), [1, 2, 3, 4, 5]);
 });
+
+// Dependency-scan tests (#58). The forms below are the ones to-tickets
+// actually publishes — see candidates.mjs's `depnums` comment — not the bare
+// inline phrasings the OLD regex covered alone.
+
+test("a Blocked-by heading with bulleted refs yields every number, not just the first", () => {
+  const { rows } = run([ticket(9, "## Blocked by\n\n- #12\n- #13\n")]);
+  assert.deepEqual(rows[0].d, [12, 13]);
+});
+
+test("None — can start immediately under a heading yields no dependencies", () => {
+  const { rows } = run([ticket(9, "## Blocked by\n\n- None — can start immediately\n")]);
+  assert.deepEqual(rows[0].d, []);
+});
+
+test("a reference in unrelated prose, not under a blocking declaration, is not a dependency", () => {
+  const { rows } = run([ticket(9, "- A reference to #77 blocking ticket\n")]);
+  assert.deepEqual(rows[0].d, []);
+});
+
+test("the bold-label form yields its number — to-tickets' local-file template writes this, not the issue template", () => {
+  const { rows } = run([ticket(9, "**Blocked by:** #12\n")]);
+  assert.deepEqual(rows[0].d, [12]);
+});
+
+test("the original bare inline phrasings still work, now reduced to numbers rather than matched phrase text", () => {
+  const { rows } = run([
+    ticket(1, "depends on #5\n"),
+    ticket(2, "blocked by #99 inline form\n"),
+    ticket(3, "requires #3\n"),
+    ticket(4, "after #4\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[5], [99], [3], [4]]);
+});
+
+test("several references on one inline label line are all found, not just the first", () => {
+  const { rows } = run([ticket(9, "Blocked by: #12, #13\n")]);
+  assert.deepEqual(rows[0].d, [12, 13]);
+});
+
+test("a heading section ends at the NEXT heading, blocking or not — a ref past it is not swept in", () => {
+  const { rows } = run([ticket(9, "## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n")]);
+  assert.deepEqual(rows[0].d, [12]);
+});
+
+test("d holds plain issue numbers, not matched phrase strings", () => {
+  const { rows } = run([ticket(9, "depends on #5\n")]);
+  assert.deepEqual(rows[0].d, [5]);
+  assert.equal(typeof rows[0].d[0], "number");
+});
+
+// The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
+// applies `--jq` with its embedded gojq (RE2) — a different engine, and every
+// other test in this file accepts that gap rather than closing it. This one
+// closes it for the dependency scan specifically, since #58 asks for it by
+// name: when a real `gojq` binary is reachable (`go install
+// github.com/itchyny/gojq/cmd/gojq@latest`), the STUB runs the fixtures
+// through it instead of system jq, so the regex is checked against the exact
+// engine gh uses — not merely a same-family stand-in. No `gojq` on this
+// machine → skip, loudly, rather than silently passing on the weaker engine.
+function findGojq() {
+  for (const candidate of [process.env.GOJQ_BIN, "gojq"].filter(Boolean)) {
+    if (!spawnSync(candidate, ["--version"], { encoding: "utf8" }).error) return candidate;
+  }
+  const gopath = spawnSync("go", ["env", "GOPATH"], { encoding: "utf8" }).stdout.trim();
+  if (!gopath) return null;
+  const candidate = join(gopath, "bin", "gojq");
+  return spawnSync(candidate, ["--version"], { encoding: "utf8" }).error ? null : candidate;
+}
+const GOJQ = findGojq();
+
+test(
+  "dependency forms hold under gojq, the engine gh actually applies — not only system jq",
+  { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" },
+  () => {
+    const extraEnv = { JQ_BIN: GOJQ };
+    assert.deepEqual(run([ticket(9, "## Blocked by\n\n- #12\n- #13\n")], undefined, null, extraEnv).rows[0].d, [12, 13]);
+    assert.deepEqual(run([ticket(9, "## Blocked by\n\n- None — can start immediately\n")], undefined, null, extraEnv).rows[0].d, []);
+    assert.deepEqual(run([ticket(9, "- A reference to #77 blocking ticket\n")], undefined, null, extraEnv).rows[0].d, []);
+    assert.deepEqual(run([ticket(9, "**Blocked by:** #12\n")], undefined, null, extraEnv).rows[0].d, [12]);
+    assert.deepEqual(run([ticket(9, "depends on #5\n")], undefined, null, extraEnv).rows[0].d, [5]);
+    assert.deepEqual(run([ticket(9, "Blocked by: #12, #13\n")], undefined, null, extraEnv).rows[0].d, [12, 13]);
+    assert.deepEqual(
+      run([ticket(9, "## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n")], undefined, null, extraEnv).rows[0].d,
+      [12],
+    );
+  },
+);
 
 test("the cap is checked before specs are dropped — filtering first hides truncation", () => {
   // The ordering candidates.mjs calls load-bearing. Swap the two and this is
