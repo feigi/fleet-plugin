@@ -261,12 +261,20 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         // an agent that ran before this run is simply not this run's cost.
         if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
         const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
+        // Both halves computed before either is recorded, so `skipped++` below
+        // always means "this transcript contributed nothing" — which is what the
+        // UI's "N transcripts skipped" claims. Pushing the agent first would let
+        // a throw from the tool half bill the agent AND count it as skipped.
+        // Unreachable today: nothing readAgent emits can make attributeTools
+        // throw, and readAgent's own throws land here before anything is pushed.
+        // Ordering, not a guard — keep it if this block is edited again.
+        const tools = attributeTools(a.entries);
         agents.push({
           label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
           role: classifyRole(a.meta),
           cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
         });
-        toolTables.push(attributeTools(a.entries));
+        toolTables.push(tools);
       } catch (e) {
         skipped++;
         if (!warnedSkips.has(file)) {
