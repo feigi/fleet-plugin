@@ -403,13 +403,11 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   // old `else` then told the operator the worktree was on some OTHER branch,
   // which is false: it is on this one, and git simply could not say so.
   //
-  // Four routes measured (git 2.50.1) to the identical porcelain shape — the
-  // null object id with no `branch` line: chmod 000 on the admin HEAD,
-  // garbage content in it, a dangling symlink in its place, and a directory
-  // in its place. Garbage content is the fixture here — no permission bits,
-  // no symlink, and it reproduces the exact signature any of the four
-  // produces. The other three are named, not built — see `unresolved_head`
-  // in release-ticket.sh.
+  // Garbage content is the fixture here — no permission bits, no symlink —
+  // and it reproduces the exact porcelain shape all four broken-HEAD routes
+  // produce: the null object id with no `branch` line. The four, and why only
+  // this one is built, are enumerated at `unresolved_head` in
+  // release-ticket.sh.
   //
   // No checkout call: this worktree never left the branch claim-ticket.sh put
   // it on. Only its admin HEAD file is broken.
@@ -475,10 +473,7 @@ test("an unborn-branch stray worktree is not swept into the unresolved-HEAD arm"
   assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "a real branch line means git resolved this one fine");
   assert.match(json.blockers[0], /is not on fix\/9-release-ticket/);
   assert.equal(code, 1);
-  assert.ok(
-    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
-    "the claim's own branch survives untouched",
-  );
+  assert.equal(artefacts(r, c).branch, true, "the claim's own branch survives untouched");
 });
 
 test("a SIBLING's unresolvable HEAD is not this claim's unresolvable HEAD", (t) => {
