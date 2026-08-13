@@ -289,12 +289,16 @@ const serveOpts = () => ({
   timeout: 20000,
 });
 
-test("CLI: serve marks 8123 as the default in the bind error when --port could not be used", async () => {
+// #366 hardened argPort(): a garbage --port now dies before ever reaching
+// listen(), so it can no longer stand in for "--port not given at all" here.
+// This test now drives the true absent case; the garbage case moved to the
+// numeric-guard tests below.
+test("CLI: serve marks 8123 as the default in the bind error when --port was not given", async () => {
   const blocker = createServer();
   // 8123 just has to be held by SOMEONE — us, or whatever already had it.
   await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
   try {
-    const r = spawnSync(process.execPath, serveArgs(["--port", "abc"]), serveOpts());
+    const r = spawnSync(process.execPath, serveArgs([]), serveOpts());
     assert.equal(r.status, 2);
     assert.match(r.stderr, /port 8123 \(default\) in use/);
   } finally { blocker.close(() => {}); }
@@ -309,4 +313,75 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
     assert.match(r.stderr, new RegExp(`port ${port} in use`));
     assert.doesNotMatch(r.stderr, /\(default\)/);
   } finally { blocker.close(() => {}); }
+});
+
+// #366: `Number(x) || default` treated a non-numeric --port/--interval exactly
+// like an absent one — silently substituting the default with no refusal.
+// These pin the refusal itself, before listen() is ever reached.
+test("CLI: serve refuses a non-numeric --port by name, not silently substituting the default", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "abc"]), serveOpts());
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
+test("CLI: serve refuses an out-of-range or non-integer --port", () => {
+  for (const v of ["-1", "70000", "1.5"]) {
+    const r = spawnSync(process.execPath, serveArgs(["--port", v]), serveOpts());
+    assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
+    assert.match(r.stderr, /--port wants an integer 0-65535/, `for ${v}: ${r.stderr}`);
+  }
+});
+
+// The named case that must NOT be refused: listen(0) binds an ephemeral port,
+// a real use, and 0 is falsy — the exact value the old `|| null` idiom lost.
+// serve() only exits on SIGINT/SIGTERM once bound, so a timeout here is the
+// expected shape of success; the refusal this guards against dies with
+// status 2 almost instantly and never reaches listen() at all.
+//
+// Accepting 0 is only half of it: the announced URL has to be one the operator
+// can open. Echoing the REQUESTED port printed http://localhost:0 — reachable
+// by nothing — while the board sat on the kernel's pick, so pin that the
+// number announced is the one bound, not the one asked for (#435 review).
+test("CLI: serve accepts --port 0 (ephemeral bind) and announces the port it actually bound", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
+  assert.notEqual(r.status, 2, r.stderr);
+  assert.doesNotMatch(r.stderr, /--port wants/);
+  const announced = r.stderr.match(/cockpit on http:\/\/localhost:(\d+)/);
+  assert.ok(announced, `no cockpit line: ${r.stderr}`);
+  assert.notEqual(announced[1], "0", `announced the requested port, not the bound one: ${r.stderr}`);
+});
+
+test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {
+  for (const v of ["abc", "0", "-5"]) {
+    const r = spawnSync(process.execPath, serveArgs(["--interval", v]), serveOpts());
+    assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`--interval wants seconds > 0 and <= 2147483, got ${v}`), `for ${v}: ${r.stderr}`);
+  }
+});
+
+// Both boundaries, both flags — an untested edge is an edge a later mutation
+// walks straight through: `n > 65535` weakened to `n >= 65535` (rejecting the
+// legal maximum port) survived the whole suite (#435 review). 65535 may well
+// be free here and may not, so pin the ABSENCE of the refusal rather than a
+// successful bind: an occupied port dies with "port 65535 in use", a rejected
+// one with "--port wants", and only the second is this guard's doing.
+test("CLI: serve accepts the maximum legal --port 65535 and refuses 65536", () => {
+  const ok = spawnSync(process.execPath, serveArgs(["--port", "65535", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
+  assert.doesNotMatch(ok.stderr, /--port wants/, ok.stderr);
+  const over = spawnSync(process.execPath, serveArgs(["--port", "65536"]), serveOpts());
+  assert.equal(over.status, 2, over.stderr);
+  assert.match(over.stderr, /--port wants an integer 0-65535, got 65536/);
+});
+
+// The interval ceiling is setInterval's, so pin it where it bites: at the max
+// the timer must be armed normally, one second past it the flag is refused.
+// Without the ceiling, 2147484s becomes a 1ms tick and the rebuild loop spins
+// on gh instead of sleeping ~25 days — announced only by Node's own warning.
+test("CLI: serve arms the maximum --interval 2147483 without overflowing, and refuses 2147484", () => {
+  const ok = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "2147483"]), { ...serveOpts(), timeout: 2000 });
+  assert.doesNotMatch(ok.stderr, /--interval wants/, ok.stderr);
+  assert.doesNotMatch(ok.stderr, /TimeoutOverflowWarning/, ok.stderr);
+  const over = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "2147484"]), serveOpts());
+  assert.equal(over.status, 2, over.stderr);
+  assert.match(over.stderr, /--interval wants seconds > 0 and <= 2147483, got 2147484/);
 });
