@@ -38,7 +38,13 @@ const arg = (n) => {
   if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${n} needs a value`);
   return value;
 };
-const has = (n) => process.argv.includes(`--${n}`);
+// A boolean flag written --name=value must refuse, not read as absent — same
+// fail-open class as arg()'s `=` guard above, but boolean-specific wording:
+// there is no value to take, so "needs a space-separated value" would lie (#364).
+const has = (n) => {
+  if (process.argv.some((a) => a.startsWith(`--${n}=`))) die(`--${n} is a boolean flag, not --${n}=`);
+  return process.argv.includes(`--${n}`);
+};
 
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the

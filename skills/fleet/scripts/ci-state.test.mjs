@@ -384,6 +384,45 @@ test("--workflow=CI form dies by name, not silently read as absent (indexOf cann
   assert.match(r.stderr, /--workflow needs a space-separated value/);
 });
 
+// #364: has() used exact argv.includes, so a boolean flag written --name=value
+// (in ANY form the value takes) silently read as absent — dropping the
+// caller's declared no-CI opt-out with no signal. The wording has to say
+// "boolean flag", distinct from arg()'s "needs a space-separated value" above:
+// a boolean has no value to give in the first place.
+for (const v of ["=true", "=false", "="]) {
+  test(`--declare-no-ci${v} dies as a boolean flag, never silently read as absent`, () => {
+    const r = run([`--declare-no-ci${v}`]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--declare-no-ci is a boolean flag, not --declare-no-ci=/);
+    assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  });
+}
+
+for (const v of ["=true", "=false", "="]) {
+  test(`--quiet${v} dies as a boolean flag, never silently read as absent`, () => {
+    const r = run([`--quiet${v}`]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--quiet is a boolean flag, not --quiet=/);
+    assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  });
+}
+
+// The control: the new `=` guard must not touch the bare spelling. --quiet has
+// no coverage elsewhere (--declare-no-ci's bare form is already pinned above,
+// by its effect on verdict/exit code) — pinned here by ITS effect instead:
+// vlog's command echoes vanish from stderr, though the same gh calls still ran
+// (r.log is written by the stub itself, unconditionally).
+test("--quiet still reads as present in its bare spelling — the = refusal is not a blanket one", () => {
+  const loud = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(loud.status, 0, loud.stdout + loud.stderr);
+  assert.match(loud.stderr, /\$ gh pr view/);
+
+  const quiet = run(["--quiet"], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
+  assert.doesNotMatch(quiet.stderr, /\$ gh pr view/);
+  assert.match(quiet.log, /pr view/, "gh still ran despite the quieter stderr");
+});
+
 test("trailing --pr (no value, the entry flag itself) still dies naming the flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--pr"], { encoding: "utf8" });
   assert.equal(r.status, 2);

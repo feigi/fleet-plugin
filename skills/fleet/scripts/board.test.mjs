@@ -385,3 +385,28 @@ test("CLI: serve arms the maximum --interval 2147483 without overflowing, and re
   assert.equal(over.status, 2, over.stderr);
   assert.match(over.stderr, /--interval wants seconds > 0 and <= 2147483, got 2147484/);
 });
+
+// #364: has() used exact argv.includes, so a boolean flag written --open=value
+// (in any form the value takes) silently read as absent. Boolean-specific
+// wording, distinct from arg()'s "needs a space-separated value" above: a
+// boolean has no value to give. Dies before listen(), same as the port/interval
+// guards above — nothing this reaches ever shells out.
+for (const v of ["=true", "=false", "="]) {
+  test(`CLI: serve refuses --open${v} as a boolean flag, not silently read as absent`, () => {
+    const r = spawnSync(process.execPath, serveArgs([`--open${v}`]), serveOpts());
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--open is a boolean flag, not --open=/);
+  });
+}
+
+// The control: the new `=` guard must not touch the bare spelling, and absence
+// must still read as absent. Observable effect is tryRun("open", …) firing —
+// PATH is stripped to an empty dir (serveOpts), so the attempt itself fails
+// ENOENT and shows up on stderr rather than actually opening a browser.
+test("CLI: serve --open (bare) still reads as present; without it, nothing tries to open", () => {
+  const opened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open"]), { ...serveOpts(), timeout: 2000 });
+  assert.match(opened.stderr, /open http:\/\/localhost:\d+\/ failed/, opened.stderr);
+
+  const notOpened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
+  assert.doesNotMatch(notOpened.stderr, /open http:\/\/localhost:\d+\/ failed/, notOpened.stderr);
+});
