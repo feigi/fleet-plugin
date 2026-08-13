@@ -407,6 +407,20 @@ for (const v of ["=true", "=false", "="]) {
   });
 }
 
+// Position, not just spelling — and run()'s fixed `--pr 42` prepend does NOT
+// supply it: a fixed prepend gives a FIXED offset, so every case in both loops
+// above lands its flag at process.argv[4] and a guard narrowed to that one
+// index passes all six. Robustness needs the flag at DIFFERENT offsets across
+// cases (#462 review); this is the only case that supplies one. --declare-no-ci
+// is the flag worth spending it on: read as absent, it drops the caller's
+// opt-out and the gate answers on a suite nobody ran.
+test("--declare-no-ci=true dies behind another flag too, not only at the front of argv", () => {
+  const r = run(["--quiet", "--declare-no-ci=true"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--declare-no-ci is a boolean flag, not --declare-no-ci=/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
 // The control: the new `=` guard must not touch the bare spelling. --quiet has
 // no coverage elsewhere (--declare-no-ci's bare form is already pinned above,
 // by its effect on verdict/exit code) — pinned here by ITS effect instead:

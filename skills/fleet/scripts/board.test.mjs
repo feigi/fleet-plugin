@@ -399,6 +399,23 @@ for (const v of ["=true", "=false", "="]) {
   });
 }
 
+// Position, not just spelling: `serve` is fixed and every case in the loop
+// above passes its flag alone, so all three land at exactly process.argv[3] —
+// and a guard narrowed to that one index passes all three. Measured (#462
+// review): has() rewritten to `process.argv[3].startsWith(...)` kept this file
+// green at 34/34 while `serve --port 0 --interval 3600 --open=true` started
+// the server, dropped the flag in silence and never opened a browser — #364
+// itself, alive under a green suite. The real invocation always carries
+// --port/--interval, so pin the flag where an operator actually types it.
+// The MESSAGE is the load-bearing assertion, not `status`: spawnSync reports
+// status 2 on a timeout too, so a serve left running would satisfy the code
+// alone.
+test("CLI: serve refuses --open=true behind other flags, not only as the first argument", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open=true"]), { ...serveOpts(), timeout: 2000 });
+  assert.match(r.stderr, /--open is a boolean flag, not --open=/, r.stderr);
+  assert.equal(r.status, 2, r.stderr);
+});
+
 // The control: the new `=` guard must not touch the bare spelling, and absence
 // must still read as absent. Observable effect is tryRun("open", …) firing —
 // PATH is stripped to an empty dir (serveOpts), so the attempt itself fails
