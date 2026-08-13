@@ -470,7 +470,6 @@ test("an unborn-branch stray worktree is not swept into the unresolved-HEAD arm"
 
   const { code, json } = release(r, c);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
-  assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "a real branch line means git resolved this one fine");
   assert.match(json.blockers[0], /is not on fix\/9-release-ticket/);
   assert.equal(code, 1);
   assert.equal(artefacts(r, c).branch, true, "the claim's own branch survives untouched");
@@ -507,6 +506,30 @@ test("a SIBLING's unresolvable HEAD is not this claim's unresolvable HEAD", (t) 
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /is not on fix\/9-release-ticket/);
   assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "the unreadable HEAD is the sibling's — this claim's resolved fine");
+  assert.equal(code, 1);
+});
+
+test("a LOCKED stray with a corrupt HEAD still names the unlock", (t) => {
+  // Arm precedence between the top two, which nothing else reaches. The one
+  // other locked-stray fixture leaves HEAD readable and `rmSync`s the
+  // directory, so `unresolved_head` is false there and the ordering is never
+  // exercised; hoisting the HEAD arm above `locked` reds only the GONE test,
+  // because that mutation jumps `gone` as well. Measured: gating the lock arm
+  // on `! unresolved_head` survives the whole suite without this fixture.
+  //
+  // The lock has to win. `git worktree prune` SKIPS a locked entry at rc 0 and
+  // `remove` rejects one, so every remedy stays unreachable until the operator
+  // unlocks — telling them to go repair a HEAD file first is the two-round-trip
+  // version of the refusal this script exists to clear.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree unlock/);
+  assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "the lock is what blocks both remedies, whatever HEAD says");
   assert.equal(code, 1);
 });
 
