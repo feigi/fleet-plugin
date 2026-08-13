@@ -229,22 +229,43 @@ a row is two bytes and one UTF-16 unit. Every use above is a recovery path, so t
 truncation lands exactly where a lost class or a settled `ruled:` is
 unrecoverable, and nothing warns you twice.
 
-**Guard: measure per PR, not per wave.** There are no implementer waves — refill
-is level-triggered, one slot at a time — so the unit is the PR. Once at least
-three `class=routine` PRs have been ruled, compare their `ruled:` outcomes in
-`ledger.mjs read` against the top-tier PRs above them, and the implementer-vs-review
-split in `board.mjs build`'s `.spend.roles`. Per-`impl-<N>` spend is not
-available: `.spend.top` labels agents by their Agent-call `description`, not
-their member name.
+**Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
+refill is level-triggered, so there are no implementer waves. **Append one row to
+`docs/metrics/tier-outcomes.tsv` when you rule each PR's review** (that file's
+header carries the column meanings). That append is the whole duty; the guard
+fires on the accumulated file, across runs, not on the run in front of you.
 
-The risk is not shipped bugs, it is economic. Reviews run 3-5x *longer* than
-implementation (Red flags, below), so one extra fix-round costs a wave slot and
-eats the saving the cheaper implementer made. Findings climb, or the implementer
-share does → revert **`class=routine`** to top tier, never the rule wholesale.
+**Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
+difficulty swamps the tier effect — a gojq parity harness and a two-statement
+shell reorder are not comparable units. Finding-counts are not comparable either:
+`selectDimensions` trims the fan-out by diff profile, so one PR fields 29 agents
+over six dimensions and its sibling fields 8 over three. And the fleet is not
+stationary — this prompt gets edited mid-run when a defect earns it. Hence a
+binary outcome per PR, accumulating, rather than a per-run verdict.
 
-The first run under this rule has no baseline — every routine PR in it is a
-sonnet PR. The guard cannot fire until a run that mixes both, or until a prior
-run's numbers are on hand. Say that; never read its silence as a pass.
+**The comparison the old text asked for cannot work, and this is the load-bearing
+part.** It said to compare routine PRs against "the top-tier PRs above them". But
+`class` and `tier` are perfectly confounded by the dispatch rule: routine always
+runs `sonnet`, correction always runs top tier. So that comparison is
+routine-at-sonnet vs correction-at-top-tier, and those classes fail in different
+ways by construction — corrections ship false claims in prose, routines ship
+incomplete or regressing code. It measures class, not tier. A run that "mixes
+both" does not fix it. **Only a same-class comparison across tiers is
+informative**, and the rule forbids producing one, since no routine ticket ever
+runs at top tier. Getting an answer needs a deliberate control — some
+`class=routine` tickets dispatched at top tier — which is a change to the tiering
+rule and therefore the maintainer's call, not yours.
+
+The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
+than implementation (Red flags, below), so one extra fix-round costs a wave slot
+and eats the saving the cheaper implementer made. `closed_own_ticket` trending
+`no`, or the implementer share in `board.mjs build`'s `.spend.roles` climbing →
+revert **`class=routine`** to top tier, never the rule wholesale. Per-`impl-<N>`
+spend is not available: `.spend.top` labels agents by their Agent-call
+`description`, not their member name.
+
+**Never read the guard's silence as a pass** — and never read a single run's rows
+as its verdict.
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
