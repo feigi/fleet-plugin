@@ -57,6 +57,8 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Hold `pre` and `post` — step 4's proof needs both. `UNPROCESSABLE: There are no new commits on the base branch` means it was already current; shouldn't happen here since you only call this when behind, but if it does, `pre` and `post` are simply equal. This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
 
+   **A worktree for this branch, if one exists, goes stale here** — the API rebased the remote, not your checkout. Expected, not a divergence. To prove it holds nothing unique, `git cherry origin/<branch> HEAD` from the worktree — **not** `git cherry origin/main HEAD`: `main` never contained this PR's commits before the merge either, so it reads `+` for all of them regardless of staleness and proves nothing (measured, feigi/claude-config#149).
+
    **Two, and only two, reasons this can't be used:** a real conflict, or `allow_update_branch` off on the repo. Both are whole-branch failures — GitHub's rebase replays every commit or none, no partial credit. Either → the fallback below, not a retry.
 
    **Fallback (server-side rebase unavailable).** Rebase locally, for verification only — this rebase never needs to reach the remote. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout.

@@ -108,6 +108,17 @@ test("step 1 falls back to a local, unpushed rebase when the server-side path ca
   assert.match(step1(), /Report this path as `rebase-fallback-#<pr>`/);
 });
 
+// #408: a controller once told its merge bot to prove a post-rebase stale
+// worktree safe with `git cherry origin/main HEAD` — trivially `+` for any
+// unmerged PR, since main never had the PR's commits merged rebase or not.
+// Measured directly (two local clones, one simulating the server-side rebase
+// the other never sees) before writing this: origin/<branch> reads `-`
+// (nothing unique), origin/main reads `+` on the identical stale HEAD.
+test("step 1 names the correct upstream for proving a post-rebase worktree stale but safe", () => {
+  assert.match(step1(), /`git cherry origin\/<branch> HEAD`/);
+  assert.match(step1(), /\*\*not\*\* `git cherry origin\/main HEAD`/);
+});
+
 test("step 4 expects the fallback path to disprove, not to silently count as proved", () => {
   assert.match(step4(), /A `rebase-fallback-#<pr>` merge is expected to disprove here/);
   assert.match(step4(), /never as `proved`/);
