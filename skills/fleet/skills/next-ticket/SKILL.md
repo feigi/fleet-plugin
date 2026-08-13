@@ -95,7 +95,7 @@ Closes #N"
 
 ## Red flags
 
-- "I'll pull all bodies and filter in my head" → server-side `--search` + `--jq`; bodies for shortlist only. `candidates.mjs` already does it.
+- "I'll pull all bodies and filter in my head" → `--search` narrows server-side, `--jq` reduces inside `gh`; bodies for shortlist only. `candidates.mjs` already does it.
 - "I'll inline the `gh` query instead of calling `candidates.mjs`" → don't. A hand-copied duplicate drifts: the copy that lived here missed the to-spec drop and the FIFO sort for a full release, so the solo path shortlisted specs newest-first while the fleet path did neither.
 - "Label says ready-for-agent, so it's free" → run step 3.
 - "I'll run the three probes inline instead of the script" → don't. Bare `gh pr list --search "<N>"` is a full-text match, so nearly every ticket reads as taken and free work gets skipped silently and permanently; a branch regex demanding a delimiter on both sides misses `fix/<N>` and `<N>-slug`; grepping a worktree's full path false-hits when a parent directory carries the digits. `inflight.sh` handles all three and shows its measurements.
