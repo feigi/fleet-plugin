@@ -46,16 +46,29 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 For each labeled PR clearing the hold rule, lowest first:
 
-1. If the PR is behind `origin/main`, update it **server-side first**: `gh pr update-branch <pr> --rebase`. That's an API call, not a push — no local git command runs, so the force-push classifier denial this step used to hit (`git push --force-with-lease`, no `autoMode.allow` entry, judged and intermittently denied per invocation) never enters. The call is async; poll for the head to move:
+1. If the PR is behind `origin/main`, update it **server-side first**: `gh pr update-branch <pr> --rebase`. That's an API call, not a push — no local git command runs, so the force-push classifier denial this step used to hit (`git push --force-with-lease`, judged and intermittently denied per invocation — 2 allowed / 2 denied on byte-identical invocations in one session; `settings.json` has since gained an `autoMode.allow` entry for exactly that command, so adding one is not the missing fix) never enters. The call is async; poll for the head to move:
 
    ```bash
    pre=$(gh pr view <pr> --json headRefOid -q .headRefOid)
-   gh pr update-branch <pr> --rebase
-   until [ "$(gh pr view <pr> --json headRefOid -q .headRefOid)" != "$pre" ]; do sleep 5; done
-   post=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+   out=$(gh pr update-branch <pr> --rebase 2>&1); rc=$?
+   post=$pre
+   if [ "$rc" -eq 0 ]; then
+     for _ in $(seq 1 60); do                 # 5 min cap, never an unbounded `until`
+       post=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+       [ "$post" != "$pre" ] && break
+       sleep 5
+     done
+   fi
+   printf 'rc=%s pre=%s post=%s\n%s\n' "$rc" "$pre" "$post" "$out"
    ```
 
-   Hold `pre` and `post` — step 4's proof needs both. `UNPROCESSABLE: There are no new commits on the base branch` means it was already current; shouldn't happen here since you only call this when behind, but if it does, `pre` and `post` are simply equal. This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
+   **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the three outcomes off `rc` and `post`:
+
+   - `rc=0` and `post != pre` → the rebase landed. Hold `pre` and `post`, step 4's proof needs both.
+   - Non-zero `rc` carrying `UNPROCESSABLE: There are no new commits on the base branch` → it was already current, so `pre` and `post` are simply equal. Shouldn't happen here since you only call this when behind.
+   - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
+
+   This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
 
    **A worktree for this branch, if one exists, goes stale here** — the API rebased the remote, not your checkout. Expected, not a divergence. To prove it holds nothing unique, `git cherry origin/<branch> HEAD` from the worktree — **not** `git cherry origin/main HEAD`: `main` never contained this PR's commits before the merge either, so it reads `+` for all of them regardless of staleness and proves nothing (measured, feigi/claude-config#149).
 
@@ -75,6 +88,8 @@ For each labeled PR clearing the hold rule, lowest first:
    - **Worktree behind, or no worktree at all** → not a divergence. Rebase from the remote head (`git fetch` first) and say which you used.
 
    Run the **no-undo audit**, then before merging: diff `origin/main...HEAD` hunk by hunk — nothing but this PR's own change may appear — suite green on the rebased head, and `gh pr view <pr> --json mergeable,mergeStateStatus` reading `MERGEABLE`/`CLEAN` with the label still present, re-checked at the merge instant. Step 4 then merges whatever is actually on the remote — the pre-rebase head, since nothing here was pushed — content-equivalent to what you just verified, not graph-identical to it. Report this path as `rebase-fallback-#<pr>` with the reason; see step 4 for why its proof comes back disproved on purpose.
+
+   **A repo that gates on currency cannot merge from this path — and this one does.** The fallback leaves the remote head behind `origin/main` on purpose, which is the exact condition `rebase-check` fails on: `.github/workflows/ci.yml` checks out `pull_request.head.sha` and exits 1 when the merge-base is not the base tip. It is an expected job, so `ci-state.mjs` reports non-green, step 3's gate never opens, and `mergeStateStatus` cannot read `CLEAN` either. The four checks above are still the honest verification of the *content*, but they do not clear that gate. So here the fallback **ends without merging**: report `rebase-fallback-#<pr>` as blocked and hand it back — choosing between resolving the conflict and turning `allow_update_branch` on is a human's call. Step 4's merge is reachable from this path only where no expected job gates on currency.
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
 

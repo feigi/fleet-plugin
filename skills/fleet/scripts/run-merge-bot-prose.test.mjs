@@ -80,10 +80,13 @@ test("the `unknown` path warns that a missing refs/stash file is not an empty st
 });
 
 // #149: step 1 used to rebase locally and `git push --force-with-lease`,
-// denied unpredictably by the auto-mode classifier (no `autoMode.allow` entry
-// for it) — sometimes stranding a rebased head that never reached the remote,
-// so `gh pr merge` landed the stale one. Step 1 now rebases server-side first:
-// an API call, not a push, so the classifier is never consulted for it.
+// denied unpredictably by the auto-mode classifier — 2 allowed / 2 denied on
+// byte-identical invocations in one session — sometimes stranding a rebased
+// head that never reached the remote, so `gh pr merge` landed the stale one.
+// settings.json has carried an `autoMode.allow` entry for that exact command
+// since 1dadc5d, so adding one is not the fix for a denial here; the classifier
+// judges per invocation. Step 1 now rebases server-side first: an API call, not
+// a push, so the classifier is never consulted for it.
 //
 // THE CEILING: same as step4() above — presence, not correctness, and not
 // that the fallback runs the way it's written.
@@ -124,6 +127,9 @@ test("step 4 expects the fallback path to disprove, not to silently count as pro
   assert.match(step4(), /never as `proved`/);
 });
 
+// Bounded to the Report line itself. An unbounded whole-file match is the
+// vacuous pin this file's header forbids: the token surviving anywhere else in
+// the doc would mask its removal from the vocabulary list.
 test("the report vocabulary includes rebase-fallback", () => {
-  assert.match(DOC, /rebase-fallback-#X/);
+  assert.match(DOC, /^Report merged [^\n]*rebase-fallback-#X/m);
 });
