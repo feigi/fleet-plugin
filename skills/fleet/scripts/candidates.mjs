@@ -329,9 +329,19 @@ function refuseIfCapped(rows, description) {
 // body whose line is exactly `##` with `User Stories` starting the next
 // line no longer reads as the same heading. The TRAILING class stays `\s*`:
 // `$` under `(?m)` already anchors the line end, so `\s*` there can only ever
-// eat whitespace before an anchor and can never manufacture a match — while
-// narrowing it to `[ \t]*` drops the `\r` of a CRLF body, which is what
-// GitHub's web textarea writes, and leaks that spec silently.
+// eat whitespace before an anchor and can never make a line that is NOT the
+// signature read as one — while narrowing it to `[ \t]*` drops the `\r` of a
+// CRLF body, which is what GitHub's web textarea writes, and leaks that spec
+// silently. That class is also the predicate's one engine-divergent position:
+// the depth, the separator and the literal text are all explicit ASCII, so
+// `\s` is the only part whose meaning changes with the engine — Oniguruma
+// reads it Unicode-aware, RE2 as `[\t\n\f\r ]`. A heading padded with U+00A0
+// — or any whitespace outside that set, ASCII vertical tab included — is a
+// spec under the system jq the suite execs and NOT one under the gojq gh
+// applies, so in production dropSpecs never fires and the spec ships as a
+// claimable ticket: the same split the dependency scan above carries, failing
+// the same direction. Pinned against real gojq in candidates.test.mjs; making
+// the class explicit is #383's call, not this comment's.
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase

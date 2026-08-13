@@ -5,16 +5,20 @@
 //
 // candidates.mjs applies its reduction through gh's `--jq`, so the stub below
 // runs the same expression gh would have received — under the system jq it
-// execs, not the gojq gh embeds and applies in its own process. The spec
-// predicate is under test; the ENGINE is not, and the live predicate already
-// turns on the difference: `\s` and `\d` are Unicode-aware in jq's Oniguruma
-// and ASCII-only in Go's RE2, so a `## User Stories` padded with U+00A0 is a
-// spec here and NOT one under gh, where dropSpecs is the only line of defence
-// (#204). Nothing announces that: a pattern gojq rejects outright at least
-// exits non-zero, but a class that merely matches differently leaves this
-// suite green either way. Stubbing gh to return already-reduced JSON would
-// leave the jq expression — which is where the spec predicate actually lives —
-// completely untested.
+// execs by default, not the gojq gh embeds and applies in its own process.
+// Both predicates are under test that way; the ENGINE itself is under test
+// only where a real gojq binary is reachable (`findGojq()` below) — the
+// dependency scan since #331, the spec predicate since #204. `\s` and `\d`
+// are Unicode-aware in jq's Oniguruma and ASCII-only in Go's RE2, so on some
+// inputs — a `## User Stories` heading padded with trailing U+00A0, a
+// dependency ref separated from its label by U+00A0 — the two engines
+// disagree, and gojq's answer is production's: gh applies gojq, not jq, so
+// dropSpecs is the only line of defence against what gojq actually decides.
+// A pattern gojq rejects outright at least exits non-zero; a class that
+// merely matches differently would leave this suite green on jq alone, which
+// is what the gated gojq tests below exist to catch. Stubbing gh to return
+// already-reduced JSON would leave the jq expression — which is where both
+// predicates actually live — completely untested.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -397,13 +401,20 @@ test(
 
 // #65: the spec predicate's decisions, checked against gojq specifically —
 // gojq is what gh applies, so gojq is where a leak would actually happen.
-// Every fixture here is plain ASCII (`#`, `[ \t]`, `\r`), so unlike the
-// dependency scan above none is expected to diverge between engines; this
-// exists to confirm that, not because a divergence was found. The predicate's
-// trailing `\s*` is the one position that CAN diverge — `\s` is Unicode-aware
-// in Oniguruma and ASCII-only in RE2, the header comment's U+00A0 case — and
-// that divergence is unchanged by #65, so it stays pinned where it already is
-// rather than being restated here.
+// The first three fixtures are plain ASCII (`#`, `[ \t]`, `\r`), so none of
+// them is expected to diverge between engines; they exist to confirm that,
+// not because a divergence was found — space, tab and `\r` are all `\s` in
+// both engines. The predicate's trailing `\s*` is #65's own doing: b4739c8
+// widened it back from `[ \t]*` so a CRLF line's `\r` still reaches the
+// anchor, which is the only reason the third fixture matches at all — narrow
+// that class and the CRLF assertion is what reds. It is also the one
+// position that CAN diverge: `\s` is Unicode-aware in Oniguruma and
+// `[\t\n\f\r ]` in RE2 — not every ASCII whitespace, a vertical tab
+// diverges too — so a heading padded with trailing U+00A0 is a spec under jq
+// and not under gojq, and in production that spec leaks as a claimable
+// ticket rather than being dropped. #204 adds that case below as the
+// discriminator, closing for THIS predicate the gap #331 already closed for
+// the dependency scan's — see this file's header.
 test(
   "the spec predicate holds under gojq — depth widened, split heading not spanned, CRLF caught",
   SKIP_WITHOUT_GOJQ,
@@ -425,6 +436,18 @@ test(
     assert.equal(isDroppedAsSpec("### User Stories\n\nnested one level deeper\n"), true);
     assert.equal(isDroppedAsSpec("##\nUser Stories\n\nsplit across lines\n"), false);
     assert.equal(isDroppedAsSpec("## User Stories\r\n\r\n1. As a user…\r\n"), true);
+    // The discriminator, and the only assertion here system jq cannot
+    // satisfy: `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a
+    // trailing U+00A0 after the heading text reduces to spec:true under jq
+    // and spec:false under gojq. Without it every assertion above passes on
+    // either engine — deleting the STUB's `JQ_BIN` plumb would leave this
+    // test green having never reached gojq. `false` is gojq's answer, i.e.
+    // production's — NOT a ruling that a heading padded with U+00A0 should
+    // read as a ticket rather than a spec; #383 owns that question and may
+    // flip it. Keep the `\u00a0` escape: a literal NBSP does not survive
+    // being copied, and has already produced a false refutation of a correct
+    // finding in this repo (#200).
+    assert.equal(isDroppedAsSpec("## User Stories\u00a0\n\nx\n"), false);
   },
 );
 
