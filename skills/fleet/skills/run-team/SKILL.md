@@ -249,6 +249,11 @@ run's numbers are on hand. Say that; never read its silence as a pass.
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
 
+> **You are an unattended fleet member.** No maintainer is reachable, no user
+> will answer you, and no approval gate will ever clear for you. Report to the
+> controller and to nobody else. Where a skill offers a maintainer-present step
+> and an unattended one, yours is the unattended one.
+
 > You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
@@ -280,7 +285,19 @@ number, worktree abs path, branch, and each of these verbatim:
 > false-negative class, and a suite that only feeds it valid input pins neither —
 > so leave one test behind that feeds it input it must ACCEPT.
 
-Each rule in that block is load-bearing, for a different reason.
+> Run `sizing-a-ticket` for the process path and proceed on **either row** —
+> heavy is never a bail reason, and that skill owns the fleet's heavy-row entry
+> point, whose condition you are. A brief that will not support a plan is the
+> undecided case: bail and name the cause, never a heavy row. Selection and
+> claiming are already done (`next-ticket` steps 1-5), so you start at
+> `next-ticket` **step 6**, which is that sizing run.
+>
+> Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with
+> `Closes #N` in the body and exactly one release label — `patch`/`minor`/`major`,
+> the *label*, not the branch *type*. Report the PR number and head SHA to the
+> controller, then exit. Never apply `ready-to-merge`, never merge.
+
+Each rule in the enumerate-and-declare block is load-bearing, for a different reason.
 **Enumerate-and-declare** answers a signature measured four times in one run:
 each implementer fixed exactly the cases its ticket named and left an adjacent
 one of the same class broken — a CRLF body **broken by** the fix for depth and
@@ -304,16 +321,18 @@ or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exact
 what decides whether a replacement redoes or destroys work. Observed twice in
 one run.
 
-A member that does not bail runs `sizing-a-ticket` for the process path and
-proceeds on **either row** — heavy is never a bail reason, and that skill owns
-the fleet's heavy-row entry point. A brief that will not support a plan is the
-undecided case: bail and demote, never a heavy row. Selection and claiming are
-done; the member starts there.
+**The identity block is what makes `sizing-a-ticket`'s fleet entry reachable.**
+That skill conditions its heavy-row entry on the reader being a fleet member; a
+reader that takes itself for a solo session gets `superpowers:brainstorming`
+instead, whose `<HARD-GATE>` withholds every implementation action until a human
+partner approves — approval no unattended member can obtain, so it parks rather
+than fails. Nothing else you carry says what the member is: the word *controller*
+reaches it only as an aside about where its uncommitted diff is invisible. The
+conditions stay in that skill either way — a solo session still runs the
+interactive path, and this block is what puts a member on the other side of them.
 
-Then `next-ticket` **step 7** (rebase, re-run tests, push, `gh pr create` with
-`Closes #N` and one release label — `patch`/`minor`/`major`, the *label* not the
-branch *type*), report PR number and head SHA, exit. Never labels
-`ready-to-merge`, never merges.
+A member that bails demotes nothing itself; demotion by cause is yours
+(**Implementer bails before implementing**).
 
 ## Phase 3 — event loop
 
