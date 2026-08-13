@@ -122,11 +122,11 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
 done
 
 # Payload first, prune after (#265): `git worktree prune` used to be the last
-# command of the AND-OR list below, so under `set -eu` ITS OWN failure — not
-# just a false `[ apply = true ]` — reached -e and aborted the script before
-# this printf ever ran, after the branches above were already deleted. The
-# caller lost the only record of what happened. Printing first means that
-# record survives regardless of what the prune does.
+# command of the guard below — an AND-OR list then — so under `set -eu` ITS
+# OWN failure, not just a false `[ apply = true ]`, reached -e and aborted the
+# script before this printf ever ran, after the branches above were already
+# deleted. The caller lost the only record of what happened. Printing first
+# means that record survives regardless of what the prune does.
 printf '{"applied":%s,"reaped":[%s],"kept":[%s]}\n' \
   "$apply" "${reaped%,}" "${kept%,}"
 
