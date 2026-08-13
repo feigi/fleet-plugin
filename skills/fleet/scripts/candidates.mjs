@@ -3,7 +3,9 @@
 // needs.
 //
 // Never fetches raw bodies for the whole list — they are ~97% of the payload.
-// The body is reduced server-side to dependency references only.
+// The body is reduced to dependency references by `gh`, which applies `--jq`
+// in its own process — so this file checks the rows it gets back rather than
+// assuming the reduction applied.
 //
 // The label policy is a FLAG, not prose. `next-ticket` may drop a required
 // label and retry when the result is empty; the fleet must not, because an
