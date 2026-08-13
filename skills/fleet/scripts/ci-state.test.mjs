@@ -389,28 +389,21 @@ test("--workflow=CI form dies by name, not silently read as absent (indexOf cann
 // caller's declared no-CI opt-out with no signal. The wording has to say
 // "boolean flag", distinct from arg()'s "needs a space-separated value" above:
 // a boolean has no value to give in the first place.
-for (const v of ["=true", "=false", "="]) {
-  test(`--declare-no-ci${v} dies as a boolean flag, never silently read as absent`, () => {
-    const r = run([`--declare-no-ci${v}`]);
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /--declare-no-ci is a boolean flag, not --declare-no-ci=/);
-    assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
-  });
-}
-
-for (const v of ["=true", "=false", "="]) {
-  test(`--quiet${v} dies as a boolean flag, never silently read as absent`, () => {
-    const r = run([`--quiet${v}`]);
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /--quiet is a boolean flag, not --quiet=/);
-    assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
-  });
+for (const flag of ["declare-no-ci", "quiet"]) {
+  for (const v of ["=true", "=false", "="]) {
+    test(`--${flag}${v} dies as a boolean flag, never silently read as absent`, () => {
+      const r = run([`--${flag}${v}`]);
+      assert.equal(r.status, 2);
+      assert.match(r.stderr, new RegExp(`--${flag} is a boolean flag, not --${flag}=`));
+      assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+    });
+  }
 }
 
 // Position, not just spelling — and run()'s fixed `--pr 42` prepend does NOT
-// supply it: a fixed prepend gives a FIXED offset, so every case in both loops
-// above lands its flag at process.argv[4] and a guard narrowed to that one
-// index passes all six. Robustness needs the flag at DIFFERENT offsets across
+// supply it: a fixed prepend gives a FIXED offset, so all six cases in the
+// loop above land their flag at process.argv[4] and a guard narrowed to that
+// one index passes every one of them. Robustness needs the flag at DIFFERENT offsets across
 // cases (#462 review); this is the only case that supplies one. --declare-no-ci
 // is the flag worth spending it on: read as absent, it drops the caller's
 // opt-out and the gate answers on a suite nobody ran.

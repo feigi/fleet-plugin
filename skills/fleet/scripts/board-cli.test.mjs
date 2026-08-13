@@ -82,6 +82,18 @@ test("--spend-since with the value omitted fails, rather than reading as 'no fil
   assert.match(r.stderr, /--spend-since/);
 });
 
+// #364 gave has() a boolean-specific refusal, and gather() calls has() on
+// --spend-since — a flag that TAKES a value. The wording stays correct only
+// because arg("spend-since") runs one line earlier and dies first; swap the two
+// and the operator is told to drop a value the flag requires. Nothing pinned
+// that order, so this does: measured, the reorder turns this message into
+// "--spend-since is a boolean flag" while the rest of the suite stays green.
+test("--spend-since=123 is refused as a value flag, not misreported as a boolean one", () => {
+  const r = runBoard(["--spend-since=123"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--spend-since needs a space-separated value/);
+});
+
 test("a valid epoch-ms --spend-since survives the guard and reaches the payload", () => {
   // The leg that stops the guard from being merely strict. `since` is also the
   // only field downstream can read to tell a scoped panel from an unscoped one,

@@ -342,13 +342,18 @@ test("CLI: serve refuses an out-of-range or non-integer --port", () => {
 // can open. Echoing the REQUESTED port printed http://localhost:0 — reachable
 // by nothing — while the board sat on the kernel's pick, so pin that the
 // number announced is the one bound, not the one asked for (#435 review).
-test("CLI: serve accepts --port 0 (ephemeral bind) and announces the port it actually bound", () => {
+test("CLI: serve accepts --port 0 (ephemeral bind), announces the port it actually bound, and opens nothing unasked", () => {
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
   assert.notEqual(r.status, 2, r.stderr);
   assert.doesNotMatch(r.stderr, /--port wants/);
   const announced = r.stderr.match(/cockpit on http:\/\/localhost:(\d+)/);
   assert.ok(announced, `no cockpit line: ${r.stderr}`);
   assert.notEqual(announced[1], "0", `announced the requested port, not the bound one: ${r.stderr}`);
+  // …and the ABSENT half of #364's has() control rides this spawn rather than
+  // paying for a second one byte-identical to it: no --open was passed, so
+  // nothing may try to open. The --open test below carries the present half,
+  // and explains why a failed tryRun("open", …) surfaces on stderr at all.
+  assert.doesNotMatch(r.stderr, /open http:\/\/localhost:\d+\/ failed/, r.stderr);
 });
 
 test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {
@@ -416,14 +421,13 @@ test("CLI: serve refuses --open=true behind other flags, not only as the first a
   assert.equal(r.status, 2, r.stderr);
 });
 
-// The control: the new `=` guard must not touch the bare spelling, and absence
-// must still read as absent. Observable effect is tryRun("open", …) firing —
-// PATH is stripped to an empty dir (serveOpts), so the attempt itself fails
-// ENOENT and shows up on stderr rather than actually opening a browser.
-test("CLI: serve --open (bare) still reads as present; without it, nothing tries to open", () => {
+// The control: the new `=` guard must not touch the bare spelling. Observable
+// effect is tryRun("open", …) firing — PATH is stripped to an empty dir
+// (serveOpts), so the attempt itself fails ENOENT and shows up on stderr
+// rather than actually opening a browser. The other half of the control —
+// absence still reading as absent — is asserted on the --port 0 test above,
+// whose spawn is byte-identical to the one this would otherwise repeat.
+test("CLI: serve --open (bare) still reads as present, not swallowed by the `=` guard", () => {
   const opened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open"]), { ...serveOpts(), timeout: 2000 });
   assert.match(opened.stderr, /open http:\/\/localhost:\d+\/ failed/, opened.stderr);
-
-  const notOpened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
-  assert.doesNotMatch(notOpened.stderr, /open http:\/\/localhost:\d+\/ failed/, notOpened.stderr);
 });
