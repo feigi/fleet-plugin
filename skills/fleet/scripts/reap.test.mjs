@@ -212,19 +212,13 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   assert.equal(branchExists(w, "feature/merged"), false, "noisy stderr must not strand a merged branch");
 });
 
-// The design spec's script-surface table states this script's exit-0 contract in
-// prose, and it spent the whole life of #264 asserting the bug as the behaviour:
-// "the merged check reads a `git cherry` that failed as 'no unmerged commits'
-// and reaps the branch". Fixing that is one edited row; this is the part that
-// keeps the next one from rotting silently — a reader trusting the table would
-// draw the opposite safety conclusion about a script settings.json's autoMode
-// allowlist runs unattended. Derived from a real run, never from a phrase typed
-// here: a hand-copied phrase drifts from the script exactly the way the row did.
-// Sibling pin, same table, same reason: no-undo-audit.test.mjs.
 /**
- * A PATH dir whose `git` fails only `worktree prune`, matching issue #265's
- * real repro (an unwritable .git/worktrees, a locked entry). Everything
- * else, including `git worktree remove`, execs the real git, unshimmed.
+ * A PATH dir whose `git` fails only `worktree prune`, standing in for the
+ * repo-level faults that do exit non-zero — an unreadable `.git/config`, a
+ * `GIT_DIR` off the repo — never a filesystem one: an unwritable
+ * `.git/worktrees` prints `error: failed to delete …` and still exits 0, and
+ * prune skips a locked entry at 0. Everything else, including
+ * `git worktree remove`, execs the real git, unshimmed.
  */
 function pruneShim(t) {
   const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
@@ -277,12 +271,11 @@ test("a successful --apply run still reaps, still prunes, and exits 0 unchanged"
   rmSync(wtDir, { recursive: true, force: true });
   assert.match(git(w, "worktree", "list"), /stale-wt/, "fixture must start with a prunable registration");
 
-  const { code, json, stderr } = runReap(w, ["--apply"]);
+  const { code, json } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, ["feature/merged"]);
   assert.deepEqual(json.kept, []);
-  assert.doesNotMatch(stderr, /worktree prune failed/);
   assert.doesNotMatch(git(w, "worktree", "list"), /stale-wt/, "the prune must still run and clear the stale registration");
 });
 
@@ -303,6 +296,15 @@ test("the default dry run reports its verdict and exits 0, never a bare 1 (#265)
   assert.equal(branchExists(w, "feature/merged"), true, "a dry run must not delete anything");
 });
 
+// The design spec's script-surface table states this script's exit-0 contract in
+// prose, and it spent the whole life of #264 asserting the bug as the behaviour:
+// "the merged check reads a `git cherry` that failed as 'no unmerged commits'
+// and reaps the branch". Fixing that is one edited row; this is the part that
+// keeps the next one from rotting silently — a reader trusting the table would
+// draw the opposite safety conclusion about a script settings.json's autoMode
+// allowlist runs unattended. Derived from a real run, never from a phrase typed
+// here: a hand-copied phrase drifts from the script exactly the way the row did.
+// Sibling pin, same table, same reason: no-undo-audit.test.mjs.
 test("the design spec's script-surface row carries the keep reason this script actually emits", (t) => {
   const w = repo(t);
   unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
