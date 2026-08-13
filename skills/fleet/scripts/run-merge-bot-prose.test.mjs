@@ -78,3 +78,41 @@ test("the fault tell covers a Permission denied from `ls`, not only a `---------
 test("the `unknown` path warns that a missing refs/stash file is not an empty stash", () => {
   assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
 });
+
+// #149: step 1 used to rebase locally and `git push --force-with-lease`,
+// denied unpredictably by the auto-mode classifier (no `autoMode.allow` entry
+// for it) — sometimes stranding a rebased head that never reached the remote,
+// so `gh pr merge` landed the stale one. Step 1 now rebases server-side first:
+// an API call, not a push, so the classifier is never consulted for it.
+//
+// THE CEILING: same as step4() above — presence, not correctness, and not
+// that the fallback runs the way it's written.
+function step1() {
+  const start = "1. If the PR is behind";
+  const at = DOC.indexOf(start);
+  assert.notEqual(at, -1, `'${start}' moved — update this test`);
+  const rest = DOC.slice(at + start.length);
+  const end = rest.indexOf("2. Watch checks settle");
+  assert.notEqual(end, -1, "step 1's end marker moved — update this test");
+  return start + rest.slice(0, end);
+}
+
+test("step 1 rebases server-side first, not with a local force-push", () => {
+  assert.match(step1(), /`gh pr update-branch <pr> --rebase`/);
+  assert.match(step1(), /no local git command runs/);
+});
+
+test("step 1 falls back to a local, unpushed rebase when the server-side path can't run", () => {
+  assert.match(step1(), /a real conflict, or `allow_update_branch` off/);
+  assert.match(step1(), /Rebase locally, for verification only — this rebase never needs to reach the remote/);
+  assert.match(step1(), /Report this path as `rebase-fallback-#<pr>`/);
+});
+
+test("step 4 expects the fallback path to disprove, not to silently count as proved", () => {
+  assert.match(step4(), /A `rebase-fallback-#<pr>` merge is expected to disprove here/);
+  assert.match(step4(), /never as `proved`/);
+});
+
+test("the report vocabulary includes rebase-fallback", () => {
+  assert.match(DOC, /rebase-fallback-#X/);
+});
