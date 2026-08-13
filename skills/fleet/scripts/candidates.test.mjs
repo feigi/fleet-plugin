@@ -409,8 +409,10 @@ test(
 // anchor, which is the only reason the third fixture matches at all — narrow
 // that class and the CRLF assertion is what reds. It is also the one
 // position that CAN diverge: `\s` is Unicode-aware in Oniguruma and
-// ASCII-only in RE2, so a heading padded with trailing U+00A0 is a spec
-// under jq and not under gojq. #204 adds that case below as the
+// `[\t\n\f\r ]` in RE2 — not every ASCII whitespace, a vertical tab
+// diverges too — so a heading padded with trailing U+00A0 is a spec under jq
+// and not under gojq, and in production that spec leaks as a claimable
+// ticket rather than being dropped. #204 adds that case below as the
 // discriminator, closing for THIS predicate the gap #331 already closed for
 // the dependency scan's — see this file's header.
 test(
