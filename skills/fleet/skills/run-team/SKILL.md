@@ -710,10 +710,19 @@ heavy job is in `failure`** (the heavy diff-validating suites — not the
 fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
-as the guarantee nothing else is inbound. Relay everything, wait for its final
-report, then dispatch. Observed — a ruling relayed after dispatch produced a new
-commit mid-audit, and the finisher correctly halted on a diverged head. Its
-duties, in this order:
+as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
+member's last message** — anything you have decided that it has not received,
+including a ruling you have since **withdrawn or reversed**. A withdrawal you
+recorded only in the ledger is undelivered: the member still holds the original
+and will act on it. Relay everything — reversals too — then dispatch.
+
+**A final report is not proof the member stopped.** Observed twice: a ruling
+relayed after dispatch produced a new commit mid-audit, and a fix-applier that
+reported "nothing outstanding" resumed on a ledger-only withdrawal and was
+cycling mutants through the worktree when the finisher audited it. Both finishers
+correctly halted. Note what that costs to detect: two reads of the same worktree
+a minute apart showed *different* mutants, so a member's report and any single
+`git status` are each valid only at their instant. Its duties, in this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
    it. Dirty or diverged halts the finisher *here*, before the label: it reports
