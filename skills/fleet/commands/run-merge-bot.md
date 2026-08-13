@@ -46,18 +46,50 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 For each labeled PR clearing the hold rule, lowest first:
 
-1. Rebase onto `origin/main`; push `--force-with-lease` if it moved. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout. Confirm the head, then run the **no-undo audit**.
+1. If the PR is behind `origin/main`, update it **server-side first**: `gh pr update-branch <pr> --rebase`. That's an API call, not a push — no local git command runs, so the force-push classifier denial this step used to hit (`git push --force-with-lease`, judged and intermittently denied per invocation — 2 allowed / 2 denied on byte-identical invocations in one session; `settings.json` has since gained an `autoMode.allow` entry for exactly that command, so adding one is not the missing fix) never enters. The call is async; poll for the head to move:
 
-   **Confirm the worktree head *is* the reviewed remote PR head before the audit** — the audit runs every substantive check against `origin/<branch>` and never reads the worktree HEAD, so its exit 0 says nothing about the commit you are about to rebase:
+   ```bash
+   pre=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+   out=$(gh pr update-branch <pr> --rebase 2>&1); rc=$?
+   post=$pre
+   if [ "$rc" -eq 0 ]; then
+     for _ in $(seq 1 60); do                 # 5 min cap, never an unbounded `until`
+       post=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+       [ "$post" != "$pre" ] && break
+       sleep 5
+     done
+   fi
+   printf 'rc=%s pre=%s post=%s\n%s\n' "$rc" "$pre" "$post" "$out"
+   ```
+
+   **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the three outcomes off `rc` and `post`:
+
+   - `rc=0` and `post != pre` → the rebase landed. Hold `pre` and `post`, step 4's proof needs both.
+   - Non-zero `rc` carrying `UNPROCESSABLE: There are no new commits on the base branch` → it was already current, so `pre` and `post` are simply equal. Shouldn't happen here since you only call this when behind.
+   - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
+
+   This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
+
+   **A worktree for this branch, if one exists, goes stale here** — the API rebased the remote, not your checkout. Expected, not a divergence. To prove it holds nothing unique, `git cherry origin/<branch> HEAD` from the worktree — **not** `git cherry origin/main HEAD`: `main` never contained this PR's commits before the merge either, so it reads `+` for all of them regardless of staleness and proves nothing (measured, feigi/claude-config#149).
+
+   **Two, and only two, reasons this can't be used:** a real conflict, or `allow_update_branch` off on the repo. Both are whole-branch failures — GitHub's rebase replays every commit or none, no partial credit. Either → the fallback below, not a retry.
+
+   **Fallback (server-side rebase unavailable).** Rebase locally, for verification only — this rebase never needs to reach the remote. The branch usually lives in a worktree (`git worktree list`) — rebase there, not the main checkout.
+
+   **Confirm the worktree head *is* the reviewed remote PR head before rebasing** — a mismatch means the rebase would carry an unreviewed local commit into the merge:
 
    ```bash
    git -C <worktree> rev-parse HEAD
    gh pr view <pr> --json headRefOid -q .headRefOid    # -q, or you compare a SHA to JSON
    ```
 
-   - **Equal** → proceed to the audit.
-   - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that the audit (clean tree) passes and your rebase carries into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
+   - **Equal** → proceed.
+   - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that a clean-tree audit passes and your rebase would carry into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
    - **Worktree behind, or no worktree at all** → not a divergence. Rebase from the remote head (`git fetch` first) and say which you used.
+
+   Run the **no-undo audit**, then before merging: diff `origin/main...HEAD` hunk by hunk — nothing but this PR's own change may appear — suite green on the rebased head, and `gh pr view <pr> --json mergeable,mergeStateStatus` reading `MERGEABLE`/`CLEAN` with the label still present, re-checked at the merge instant. Step 4 then merges whatever is actually on the remote — the pre-rebase head, since nothing here was pushed — content-equivalent to what you just verified, not graph-identical to it. Report this path as `rebase-fallback-#<pr>` with the reason; see step 4 for why its proof comes back disproved on purpose.
+
+   **A repo that gates on currency cannot merge from this path — and this one does.** The fallback leaves the remote head behind `origin/main` on purpose, which is the exact condition `rebase-check` fails on: `.github/workflows/ci.yml` checks out `pull_request.head.sha` and exits 1 when the merge-base is not the base tip. It is an expected job, so `ci-state.mjs` reports non-green, step 3's gate never opens, and `mergeStateStatus` cannot read `CLEAN` either. The four checks above are still the honest verification of the *content*, but they do not clear that gate. So here the fallback **ends without merging**: report `rebase-fallback-#<pr>` as blocked and hand it back — choosing between resolving the conflict and turning `allow_update_branch` on is a human's call. Step 4's merge is reachable from this path only where no expected job gates on currency.
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching. A stale `rebase-check` failure usually means step 1 has not landed; `integration` and `mutation` skip behind it.
 
@@ -110,6 +142,8 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Exit **0** proved, **1** disproved, **2** the script could not evaluate the claim at all — the merge is unreachable from `origin/main`, is not a merge commit, or an argument does not resolve. Treat 2 as "ask a human", not as a disproof.
 
+   **A `rebase-fallback-#<pr>` merge is expected to disprove here.** Step 1's fallback never lands a rebased head on the remote, so `pre == post` and `headWasCurrent` reads false — `prove-merge.sh` exits **1**, correctly (`prove-merge.test.mjs`'s `ATTACK: un-rebased head that merged cleanly still proves false` pins exactly this shape). That is the honest answer, not a script fault. Report the merge as **argued** — backed by the fallback's four checks — and never as `proved`; a merge whose ancestry was not proved is never reported as proved.
+
    **Drop `in-progress` from every issue this PR closes** — the merge is the only point where the ticket number and the fact of completion are known together, and nothing else clears it:
 
    ```bash
@@ -126,7 +160,7 @@ Measured over one three-merge wave: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / label-drop-failed-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / label-drop-failed-#X / rebase-fallback-#X / blocked after the pass.
 
 ## No-undo audit (before every rebase)
 
