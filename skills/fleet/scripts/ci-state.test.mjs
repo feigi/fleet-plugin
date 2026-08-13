@@ -450,8 +450,9 @@ test("run list row is null: exit 2, never the crash reading r.headSha off null",
 
 test("run view missing jobs array: exit 2 naming the field, never silently read as zero jobs", () => {
   // No `jobs` key at all — the shape an error-ish or partial run view takes.
-  // Unguarded, (view.jobs || []) silently becomes [], and the run reads as
-  // "genuinely missing its expected jobs" instead of "could not be read".
+  // This guard is now the only thing between that and `view.jobs.map(...)`:
+  // drop it and the read throws, and an uncaught throw exits 1 — "could not
+  // be read" rendered as a CI verdict, the whole #269 class.
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
     runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),

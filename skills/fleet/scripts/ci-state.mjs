@@ -355,7 +355,7 @@ if (noCi) {
     runHeadSha = view.headSha;
     status = view.status;
     conclusion = view.conclusion;
-    jobs = (view.jobs || []).map((j) => ({
+    jobs = view.jobs.map((j) => ({
       name: j.name,
       status: j.status,
       conclusion: j.conclusion ?? null,
