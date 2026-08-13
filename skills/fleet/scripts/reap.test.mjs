@@ -286,6 +286,23 @@ test("a successful --apply run still reaps, still prunes, and exits 0 unchanged"
   assert.doesNotMatch(git(w, "worktree", "list"), /stale-wt/, "the prune must still run and clear the stale registration");
 });
 
+// The other half of the same guard, and the half no test had: the default
+// mode runs no prune at all, but the guard is the script's last statement, so
+// the guard's SHAPE decides the dry run's exit status. Every other test here
+// passes --apply, which is exactly how an AND-OR form regressed this path from
+// 0 to a bare 1 under a fully green suite (#265).
+test("the default dry run reports its verdict and exits 0, never a bare 1 (#265)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const { code, json } = runReap(w, []);
+
+  assert.equal(code, 0, "a dry run with nothing to report must exit 0, not the -e default of 1");
+  assert.equal(json.applied, false);
+  assert.deepEqual(json.reaped, ["feature/merged"], "a dry run still reports what it would reap");
+  assert.equal(branchExists(w, "feature/merged"), true, "a dry run must not delete anything");
+});
+
 test("the design spec's script-surface row carries the keep reason this script actually emits", (t) => {
   const w = repo(t);
   unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");

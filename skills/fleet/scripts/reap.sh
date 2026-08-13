@@ -130,9 +130,13 @@ done
 printf '{"applied":%s,"reaped":[%s],"kept":[%s]}\n' \
   "$apply" "${reaped%,}" "${kept%,}"
 
-# `[ ]` here is not the list's last command (the braced group is), so a false
-# test is exempt from -e the same way every other guard in this script is.
-# `git worktree prune` itself is no longer the last command either — `die` is
-# — so its failure can't reach -e and surface as a bare exit 1. It refuses
-# loudly on 2 instead, same as every other failure this script can name.
-[ "$apply" = true ] && { git worktree prune || die "git worktree prune failed"; }
+# An `if`, not `[ ... ] && { ... }`: with the printf moved above it this guard
+# is the script's LAST command, and an AND-OR list whose test is false has
+# status 1 — which would become the script's own exit status and regress the
+# default dry run from 0 to a bare, verdictless 1, the very failure this fix
+# exists to remove. An `if` with no `else` exits 0 when its condition is false.
+# The prune's own failure reaches `die`, never -e, so it refuses loudly on 2
+# like every other failure this script can name.
+if [ "$apply" = true ]; then
+  git worktree prune || die "git worktree prune failed"
+fi
