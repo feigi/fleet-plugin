@@ -221,6 +221,71 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
 // allowlist runs unattended. Derived from a real run, never from a phrase typed
 // here: a hand-copied phrase drifts from the script exactly the way the row did.
 // Sibling pin, same table, same reason: no-undo-audit.test.mjs.
+/**
+ * A PATH dir whose `git` fails only `worktree prune`, matching issue #265's
+ * real repro (an unwritable .git/worktrees, a locked entry). Everything
+ * else, including `git worktree remove`, execs the real git, unshimmed.
+ */
+function pruneShim(t) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = worktree ] && [ "$2" = prune ]; then\n` +
+      `  echo "fatal: unable to prune worktrees: permission denied" >&2\n` +
+      `  exit 1\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+// #265: `git worktree prune` used to be the last command of an AND-OR list
+// after the branch loop, so under `set -eu` its own failure — not just a
+// false `[ apply = true ]` — reached -e and aborted the script before the
+// payload printed, after the branches above were already deleted. The
+// caller lost the only record of what had happened, at exit 1: the code the
+// fleet's script contract reserves for a verdict, from a script with none.
+test("a failing `git worktree prune` still prints the payload and refuses on 2, never 1 (#265)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const bin = pruneShim(t);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+  assert.equal(code, 2, "a failing prune must refuse loudly on 2, never fall through to the -e default of 1");
+  assert.ok(json, "the payload must still print even though the prune below it failed");
+  assert.deepEqual(json.reaped, ["feature/merged"], "branches already deleted must still be recorded");
+  assert.deepEqual(json.kept, []);
+  assert.match(stderr, /git worktree prune/, "the refusal must name the command that failed");
+});
+
+// Accept-side control for the fix above: a run where nothing fails must be
+// completely unchanged — same payload shape, exit 0, and the prune must
+// still actually run (not just get skipped to dodge the -e trap).
+test("a successful --apply run still reaps, still prunes, and exits 0 unchanged", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  // A worktree whose directory is gone but whose registration survives until
+  // `git worktree prune` runs — proof the prune still executes post-fix.
+  const wtDir = join(w, "..", "stale-wt");
+  git(w, "worktree", "add", "-q", "-b", "scratch/stale", wtDir, "main");
+  rmSync(wtDir, { recursive: true, force: true });
+  assert.match(git(w, "worktree", "list"), /stale-wt/, "fixture must start with a prunable registration");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(stderr, /worktree prune failed/);
+  assert.doesNotMatch(git(w, "worktree", "list"), /stale-wt/, "the prune must still run and clear the stale registration");
+});
+
 test("the design spec's script-surface row carries the keep reason this script actually emits", (t) => {
   const w = repo(t);
   unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
