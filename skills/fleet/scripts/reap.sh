@@ -121,7 +121,22 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
   reaped="${reaped}\"$b\","
 done
 
-[ "$apply" = true ] && git worktree prune
-
+# Payload first, prune after (#265): `git worktree prune` used to be the last
+# command of the guard below — an AND-OR list then — so under `set -eu` ITS
+# OWN failure, not just a false `[ apply = true ]`, reached -e and aborted the
+# script before this printf ever ran, after the branches above were already
+# deleted. The caller lost the only record of what happened. Printing first
+# means that record survives regardless of what the prune does.
 printf '{"applied":%s,"reaped":[%s],"kept":[%s]}\n' \
   "$apply" "${reaped%,}" "${kept%,}"
+
+# An `if`, not `[ ... ] && { ... }`: with the printf moved above it this guard
+# is the script's LAST command, and an AND-OR list whose test is false has
+# status 1 — which would become the script's own exit status and regress the
+# default dry run from 0 to a bare, verdictless 1, the very failure this fix
+# exists to remove. An `if` with no `else` exits 0 when its condition is false.
+# The prune's own failure reaches `die`, never -e, so it refuses loudly on 2
+# like every other failure this script can name.
+if [ "$apply" = true ]; then
+  git worktree prune || die "git worktree prune failed"
+fi

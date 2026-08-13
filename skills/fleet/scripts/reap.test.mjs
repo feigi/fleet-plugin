@@ -212,6 +212,90 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   assert.equal(branchExists(w, "feature/merged"), false, "noisy stderr must not strand a merged branch");
 });
 
+/**
+ * A PATH dir whose `git` fails only `worktree prune`, standing in for the
+ * repo-level faults that do exit non-zero — an unreadable `.git/config`, a
+ * `GIT_DIR` off the repo — never a filesystem one: an unwritable
+ * `.git/worktrees` prints `error: failed to delete …` and still exits 0, and
+ * prune skips a locked entry at 0. Everything else, including
+ * `git worktree remove`, execs the real git, unshimmed.
+ */
+function pruneShim(t) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = worktree ] && [ "$2" = prune ]; then\n` +
+      `  echo "fatal: unable to prune worktrees: permission denied" >&2\n` +
+      `  exit 1\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+// #265: `git worktree prune` used to be the last command of an AND-OR list
+// after the branch loop, so under `set -eu` its own failure — not just a
+// false `[ apply = true ]` — reached -e and aborted the script before the
+// payload printed, after the branches above were already deleted. The
+// caller lost the only record of what had happened, at exit 1: the code the
+// fleet's script contract reserves for a verdict, from a script with none.
+test("a failing `git worktree prune` still prints the payload and refuses on 2, never 1 (#265)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const bin = pruneShim(t);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+  assert.equal(code, 2, "a failing prune must refuse loudly on 2, never fall through to the -e default of 1");
+  assert.ok(json, "the payload must still print even though the prune below it failed");
+  assert.deepEqual(json.reaped, ["feature/merged"], "branches already deleted must still be recorded");
+  assert.deepEqual(json.kept, []);
+  assert.match(stderr, /git worktree prune/, "the refusal must name the command that failed");
+});
+
+// Accept-side control for the fix above: a run where nothing fails must be
+// completely unchanged — same payload shape, exit 0, and the prune must
+// still actually run (not just get skipped to dodge the -e trap).
+test("a successful --apply run still reaps, still prunes, and exits 0 unchanged", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  // A worktree whose directory is gone but whose registration survives until
+  // `git worktree prune` runs — proof the prune still executes post-fix.
+  const wtDir = join(w, "..", "stale-wt");
+  git(w, "worktree", "add", "-q", "-b", "scratch/stale", wtDir, "main");
+  rmSync(wtDir, { recursive: true, force: true });
+  assert.match(git(w, "worktree", "list"), /stale-wt/, "fixture must start with a prunable registration");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(git(w, "worktree", "list"), /stale-wt/, "the prune must still run and clear the stale registration");
+});
+
+// The other half of the same guard, and the half no test had: the default
+// mode runs no prune at all, but the guard is the script's last statement, so
+// the guard's SHAPE decides the dry run's exit status. Every other test here
+// passes --apply, which is exactly how an AND-OR form regressed this path from
+// 0 to a bare 1 under a fully green suite (#265).
+test("the default dry run reports its verdict and exits 0, never a bare 1 (#265)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const { code, json } = runReap(w, []);
+
+  assert.equal(code, 0, "a dry run with nothing to report must exit 0, not the -e default of 1");
+  assert.equal(json.applied, false);
+  assert.deepEqual(json.reaped, ["feature/merged"], "a dry run still reports what it would reap");
+  assert.equal(branchExists(w, "feature/merged"), true, "a dry run must not delete anything");
+});
+
 // The design spec's script-surface table states this script's exit-0 contract in
 // prose, and it spent the whole life of #264 asserting the bug as the behaviour:
 // "the merged check reads a `git cherry` that failed as 'no unmerged commits'
