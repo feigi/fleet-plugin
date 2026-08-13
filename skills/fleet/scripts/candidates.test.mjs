@@ -403,13 +403,16 @@ test(
 // gojq is what gh applies, so gojq is where a leak would actually happen.
 // The first three fixtures are plain ASCII (`#`, `[ \t]`, `\r`), so none of
 // them is expected to diverge between engines; they exist to confirm that,
-// not because a divergence was found — #65 left the predicate's separator
-// engine-portable and only widened depth/CRLF handling, neither of which
-// touches `\s`. The trailing `\s*` position is the one that CAN diverge:
-// `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a heading
-// padded with trailing U+00A0 is a spec under jq and not under gojq. #204
-// adds that case below as the discriminator, closing for THIS predicate the
-// gap #331 already closed for the dependency scan's — see this file's header.
+// not because a divergence was found — space, tab and `\r` are all `\s` in
+// both engines. The predicate's trailing `\s*` is #65's own doing: b4739c8
+// widened it back from `[ \t]*` so a CRLF line's `\r` still reaches the
+// anchor, which is the only reason the third fixture matches at all — narrow
+// that class and the CRLF assertion is what reds. It is also the one
+// position that CAN diverge: `\s` is Unicode-aware in Oniguruma and
+// ASCII-only in RE2, so a heading padded with trailing U+00A0 is a spec
+// under jq and not under gojq. #204 adds that case below as the
+// discriminator, closing for THIS predicate the gap #331 already closed for
+// the dependency scan's — see this file's header.
 test(
   "the spec predicate holds under gojq — depth widened, split heading not spanned, CRLF caught",
   SKIP_WITHOUT_GOJQ,
