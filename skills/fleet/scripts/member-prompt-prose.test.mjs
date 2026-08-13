@@ -14,6 +14,16 @@ import { join } from "node:path";
 // So the pin is on LOCATION, not vocabulary. Moving these words back out into
 // prose IS the defect, and every word would still be somewhere in the file — a
 // pin that only searched the section would stay green through the whole bug.
+//
+// Known ceiling, measured against this file's 6 tests. These are PRESENCE pins
+// over a slice, which covers the location half and only that half: moving the
+// identity lines back out of the `>` quoting fails the suite (pass 5, fail 1),
+// but a sentence APPENDED inside a block that contradicts a pinned one does
+// not — a carve-out after the identity block, or a conditional permission
+// after `Never apply ready-to-merge`, each leaves all 6 green. Left open on
+// purpose: asserting the absence of arbitrary natural-language negation is
+// unbounded, and a word blacklist ("unless", "except") buys a false-positive
+// trap on ordinary prose rather than the guarantee.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 const SIZING = readFileSync(join(REPO, "skills", "fleet", "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
@@ -78,11 +88,14 @@ test("the handoff names its destination, and a light-row member cannot read it a
 
   // `next-ticket` steps 1-5 are selection and claiming; step 6 is the sizing run.
   // The pre-fix text said "the member starts there" with no antecedent, and two
-  // reviewing specialists bound it differently.
+  // reviewing specialists bound it differently. So match the number together
+  // with the action beside it: bare presence checks for "step 6" and "step 7"
+  // BOTH stay green when the two numbers are swapped, and a member reading that
+  // runs the PR steps at the sizing checkpoint and vice versa.
   assert.match(
     blocks,
-    /`next-ticket` \*\*step 6\*\*/,
-    "the handoff no longer names step 6 — its destination is a pronoun again",
+    /`next-ticket` \*\*step 6\*\*, which is that sizing run/,
+    "step 6 is no longer bound to the sizing run — its destination is a pronoun again, or the number now names another step",
   );
   // The wrong binding, and the one that bites: the nearest place-like phrase was
   // the heavy-row entry point, which would send a LIGHT-row member to plan-writing.
@@ -95,7 +108,11 @@ test("the handoff names its destination, and a light-row member cannot read it a
 
 test("the PR handoff reaches the member verbatim, including what it must never do", () => {
   const blocks = memberBlocks();
-  assert.match(blocks, /`next-ticket` \*\*step 7\*\*/, "the PR step is no longer carried verbatim");
+  assert.match(
+    blocks,
+    /`next-ticket` \*\*step 7\*\*: rebase, re-run tests, push/,
+    "step 7 is no longer bound to the rebase/push/PR action — the PR step is not carried verbatim, or the number now names another step",
+  );
   assert.match(blocks, /`Closes #N`/, "the member is not told to close its issue from the PR body");
   assert.match(
     blocks,
