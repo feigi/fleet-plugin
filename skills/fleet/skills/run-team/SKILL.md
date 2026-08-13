@@ -284,6 +284,24 @@ number, worktree abs path, branch, and each of these verbatim:
 > change wrongly REFUSE?** A new guard's false-positive class is not its
 > false-negative class, and a suite that only feeds it valid input pins neither —
 > so leave one test behind that feeds it input it must ACCEPT.
+>
+> **Both halves above are about the bug class. The third is about YOUR EDIT:
+> enumerate what your change newly does, not only what the code already did
+> wrong.** Moving, reordering or wrapping a statement has effects the ticket
+> never mentions — the last command of a script sets its exit status, a
+> relocated line changes what `set -e` covers, a hoisted guard changes what runs
+> first. **Ask which of the ticket's own acceptance criteria your restructuring
+> could newly violate, and test that path.** Measured: #265 required "no path in
+> the script exits 1", and the fix for it moved a guard to the file's end,
+> regressing the default dry run from exit 0 to exit 1 — the ticket's exact
+> defect, relocated onto the path nobody tested. The implementer had enumerated
+> every exit-1 path and declared two it was leaving; all of them were
+> pre-existing, and none was the one its own edit created.
+>
+> **Then check the suite can even see the mode you changed.** That regression
+> shipped under 616 green tests because all eight call sites passed the same
+> flag, so the default mode had no test at all. A green suite is evidence only
+> about the paths it exercises.
 
 > Run `sizing-a-ticket` for the process path and proceed on **either row** —
 > heavy is never a bail reason, and that skill owns the fleet's heavy-row entry
@@ -686,6 +704,15 @@ nothing leaves it no gate at all.
 > (measured). A green suite says nothing about a new test: one pin this run
 > survived the exact mutation it was named for.
 >
+> **Report LAST, and only once nothing can still change.** A report you have
+> sent **pins that SHA** for the controller, which dispatches a finisher against
+> it. If a further instruction arrives after you have reported, reply saying the
+> SHA is moving *before* you touch the tree again — do not silently do the work
+> and re-report. Measured: three members in one run sent a final report and kept
+> working; one had its worktree audited mid-mutation, another handed over a SHA
+> that was two commits stale, and a finisher dispatched on either would have
+> halted on a diverged head.
+>
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
@@ -700,11 +727,9 @@ merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 
 **The fix-applier pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
-rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
-push, report the SHA, stop — and that a report already sent **pins that SHA**, so
-resuming on new information means messaging you *before* touching the tree again.
-Observed once: a finisher halted on a tree the reviewer had legitimately re-edited
-after its verdict. When the diff-validating `check` job is green **and no
+rebuilds a 100k-token context for nothing the Monitor lacks. The prompt block
+above carries the report-last rule; you do not have to restate it. When the
+diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
