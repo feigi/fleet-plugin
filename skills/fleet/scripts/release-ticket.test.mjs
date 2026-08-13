@@ -481,6 +481,40 @@ test("an unborn-branch stray worktree is not swept into the unresolved-HEAD arm"
   );
 });
 
+test("a SIBLING's unresolvable HEAD is not this claim's unresolvable HEAD", (t) => {
+  // `unresolved_head` reads the whole porcelain listing, so the per-entry `cur`
+  // reset is the only thing standing between a sibling's broken HEAD and this
+  // claim. Every other fixture for this arm registers exactly one worktree,
+  // which exercises none of it: making `cur` sticky (`{if(...)cur=1}`, set but
+  // never reset), or dropping the `cur&&` guard off `nullhead=1`, leaves every
+  // other fixture in this file green and reds only this one (measured, both).
+  //
+  // The sibling is 99, and the number is load-bearing for the same reason it is
+  // in "a lock on a SIBLING worktree is not this claim's lock": `worktree list
+  // --porcelain` orders entries LEXICOGRAPHICALLY, so a `10-` sibling sorts
+  // BEFORE `9-release-ticket` and its lines have already gone by before
+  // anything sets the flag. 99 sorts after, which is the order that exercises
+  // the reset.
+  //
+  // The direction is chosen for the same reason: the claim is genuinely
+  // detached (a real sha, no `branch` line) and the SIBLING is the one whose
+  // admin HEAD is garbage. Both mutants then answer TRUE for this claim off the
+  // sibling's null OID — asserting a HEAD fault about a worktree whose HEAD is
+  // fine — where the honest answer is the ordinary branch mismatch the `else`
+  // exists for.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  claim(r.w, 99, "other-claim");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  writeFileSync(join(r.w, ".git", "worktrees", "99-other-claim", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /is not on fix\/9-release-ticket/);
+  assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "the unreadable HEAD is the sibling's — this claim's resolved fine");
+  assert.equal(code, 1);
+});
+
 test("a stray worktree taken out by rm -rf .worktrees still names the prune", (t) => {
   // The stray half of the guard reaching the WALK, not just the one-level lookup.
   // `rm -rf .worktrees` is how this usually happens and it takes the parent along

@@ -329,8 +329,8 @@ locked() {
 # same porcelain shape — the null object id with no `branch` line: `chmod 000`
 # on it, garbage content in it, a dangling symlink in its place, or a
 # directory in its place (measured, git 2.50.1). The fixture below reproduces
-# only the first two (no permission bits, no symlink); the other two are named
-# here rather than built.
+# only the second — garbage content, no permission bits and no symlink; the
+# other three are named here rather than built.
 #
 # BOTH conditions, never one alone. The null OID alone is also an UNBORN
 # branch (`git worktree add --orphan`) — that one carries a real `branch`
