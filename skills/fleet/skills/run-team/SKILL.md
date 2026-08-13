@@ -297,7 +297,8 @@ number, worktree abs path, branch, and each of these verbatim:
 > the *label*, not the branch *type*. Report the PR number and head SHA to the
 > controller, then exit. Never apply `ready-to-merge`, never merge.
 
-Each rule in the enumerate-and-declare block is load-bearing, for a different reason.
+Each rule in the enumerate-and-declare block is load-bearing, for a different
+reason.
 **Enumerate-and-declare** answers a signature measured four times in one run:
 each implementer fixed exactly the cases its ticket named and left an adjacent
 one of the same class broken — a CRLF body **broken by** the fix for depth and
@@ -326,10 +327,10 @@ That skill conditions its heavy-row entry on the reader being a fleet member; a
 reader that takes itself for a solo session gets `superpowers:brainstorming`
 instead, whose `<HARD-GATE>` withholds every implementation action until a human
 partner approves — approval no unattended member can obtain, so it parks rather
-than fails. Nothing else you carry says what the member is: the word *controller*
-reaches it only as an aside about where its uncommitted diff is invisible. The
-conditions stay in that skill either way — a solo session still runs the
-interactive path, and this block is what puts a member on the other side of them.
+than fails. Nothing else you carry says what the member is — an incidental
+mention of the controller is not a statement that the reader is one of its
+members. That skill keeps its condition, so a solo session still runs the
+interactive path; this block is what puts a member on the fleet side of it.
 
 A member that bails demotes nothing itself; demotion by cause is yours
 (**Implementer bails before implementing**).
