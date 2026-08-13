@@ -630,6 +630,21 @@ test("an unknown flag refuses and names it — a flag that is merely ignored run
 // and the one no other test in this file covers. All four must refuse before
 // any query — `status` alone is not enough, since exit 2 is also what a broken
 // query produces after gh has already run.
+//
+// Rows 2 and 4 no longer reach parseArgs at all: #364 gave has() its own `=`
+// guard, evaluated when `allowFallback` is assigned — above and long before
+// the parseArgs call below — so the boolean case now dies with has()'s own
+// boolean-specific wording (distinct from arg()'s "needs a space-separated
+// value", since a boolean has no value to take), never Node's "does not take
+// an argument". That does NOT make `ERR_PARSE_ARGS_INVALID_OPTION_VALUE` dead
+// here, and an earlier draft of this comment claimed it did: arg()'s own `=`
+// guard is indexOf-gated, firing only when the bare spelling is absent, so a
+// REPEATED string flag whose later occurrence carries no value sails past both
+// guards into parseArgs — measured, `--limit 5 --limit` raises exactly that
+// code, with Node's wording (#462 review). The catch stays unconditional for
+// that reason among others. The loop still refuses before any query and still
+// names the offending flag, which is the property that matters; only the
+// source moved.
 for (const [what, args, refusal] of [
   [
     "a bare positional",
@@ -639,7 +654,7 @@ for (const [what, args, refusal] of [
   [
     "a boolean flag handed a =value",
     ["--allow-fallback=true"],
-    /^candidates: Option '--allow-fallback' does not take an argument/m,
+    /^candidates: --allow-fallback is a boolean flag, not --allow-fallback=/m,
   ],
   [
     "an unknown flag behind a positional",
@@ -649,7 +664,7 @@ for (const [what, args, refusal] of [
   [
     "an unknown flag behind a =value boolean",
     ["--allow-fallback=true", "--label", "ready-for-agent"],
-    /^candidates: Option '--allow-fallback' does not take an argument/m,
+    /^candidates: --allow-fallback is a boolean flag, not --allow-fallback=/m,
   ],
 ]) {
   test(`${what} refuses before any query — every parseArgs error is a refusal, not just the unknown-name one`, () => {
@@ -663,26 +678,31 @@ for (const [what, args, refusal] of [
   });
 }
 
-// `--allow-fallback=true` is silently IGNORED rather than merely unchecked:
-// `has()` compares exactly, so the `=` form never matches and the fallback is
-// disabled without a word. The fixtures below are the arrangement that shows
-// it — the labeled query comes back empty and the unfiltered one has a row —
-// so the flag is the only thing standing between exit 1 and exit 0. Measured
-// on the code-testing version, `--allow-fallback=true` here exited 1 ("queue
-// empty, query fine") for a run that never applied the flag it was handed,
-// while the space-separated spelling exited 0 off the fallback. `notEqual(1)`
-// is therefore the load-bearing assertion, not decoration: it is the exact
-// code the ignored form produced.
-test("--allow-fallback=true never reaches the fallback — a flag has() cannot see must refuse, not be dropped", () => {
-  const { status, stderr } = run(
-    [],
-    ["--require-label", "nonexistent", "--allow-fallback=true"],
-    [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
-  );
-  assert.equal(queriesRun(stderr), 0);
-  assert.notEqual(status, 1);
-  assert.equal(status, 2);
-});
+// Pre-#364, `--allow-fallback=<value>` was silently IGNORED rather than merely
+// unchecked: `has()` compared exactly, so no `=` form ever matched and the
+// fallback was disabled without a word. The fixtures below are the arrangement
+// that showed it — the labeled query comes back empty and the unfiltered one
+// has a row — so the flag was the only thing standing between exit 1 and exit
+// 0. Measured on the pre-fix version, all three spellings here exited 1
+// ("queue empty, query fine") for a run that never applied the flag it was
+// handed, while the space-separated spelling exited 0 off the fallback.
+// `notEqual(1)` is the load-bearing assertion, not decoration: it pins the
+// exact wrong code the ignored form used to produce, now unreachable — has()
+// refuses this argv outright, before `allowFallback` is even assigned. All
+// three spellings are the ones the ticket's acceptance criteria name.
+for (const v of ["=true", "=false", "="]) {
+  test(`--allow-fallback${v} refuses outright, rather than being silently dropped and falling through`, () => {
+    const { status, stderr } = run(
+      [],
+      ["--require-label", "nonexistent", `--allow-fallback${v}`],
+      [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
+    );
+    assert.equal(queriesRun(stderr), 0);
+    assert.notEqual(status, 1);
+    assert.equal(status, 2);
+    assert.match(stderr, /^candidates: --allow-fallback is a boolean flag, not --allow-fallback=/m);
+  });
+}
 
 // The control for the test above. Without it, "refuses the = form" is equally
 // satisfied by a guard that refuses `--allow-fallback` in every spelling, which

@@ -384,6 +384,52 @@ test("--workflow=CI form dies by name, not silently read as absent (indexOf cann
   assert.match(r.stderr, /--workflow needs a space-separated value/);
 });
 
+// #364: has() used exact argv.includes, so a boolean flag written --name=value
+// (in ANY form the value takes) silently read as absent — dropping the
+// caller's declared no-CI opt-out with no signal. The wording has to say
+// "boolean flag", distinct from arg()'s "needs a space-separated value" above:
+// a boolean has no value to give in the first place.
+for (const flag of ["declare-no-ci", "quiet"]) {
+  for (const v of ["=true", "=false", "="]) {
+    test(`--${flag}${v} dies as a boolean flag, never silently read as absent`, () => {
+      const r = run([`--${flag}${v}`]);
+      assert.equal(r.status, 2);
+      assert.match(r.stderr, new RegExp(`--${flag} is a boolean flag, not --${flag}=`));
+      assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+    });
+  }
+}
+
+// Position, not just spelling — and run()'s fixed `--pr 42` prepend does NOT
+// supply it: a fixed prepend gives a FIXED offset, so all six cases in the
+// loop above land their flag at process.argv[4] and a guard narrowed to that
+// one index passes every one of them. Robustness needs the flag at DIFFERENT offsets across
+// cases (#462 review); this is the only case that supplies one. --declare-no-ci
+// is the flag worth spending it on: read as absent, it drops the caller's
+// opt-out and the gate answers on a suite nobody ran.
+test("--declare-no-ci=true dies behind another flag too, not only at the front of argv", () => {
+  const r = run(["--quiet", "--declare-no-ci=true"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--declare-no-ci is a boolean flag, not --declare-no-ci=/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
+// The control: the new `=` guard must not touch the bare spelling. --quiet has
+// no coverage elsewhere (--declare-no-ci's bare form is already pinned above,
+// by its effect on verdict/exit code) — pinned here by ITS effect instead:
+// vlog's command echoes vanish from stderr, though the same gh calls still ran
+// (r.log is written by the stub itself, unconditionally).
+test("--quiet still reads as present in its bare spelling — the = refusal is not a blanket one", () => {
+  const loud = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(loud.status, 0, loud.stdout + loud.stderr);
+  assert.match(loud.stderr, /\$ gh pr view/);
+
+  const quiet = run(["--quiet"], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
+  assert.doesNotMatch(quiet.stderr, /\$ gh pr view/);
+  assert.match(quiet.log, /pr view/, "gh still ran despite the quieter stderr");
+});
+
 test("trailing --pr (no value, the entry flag itself) still dies naming the flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--pr"], { encoding: "utf8" });
   assert.equal(r.status, 2);

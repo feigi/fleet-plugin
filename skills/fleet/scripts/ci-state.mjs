@@ -54,7 +54,13 @@ function arg(name) {
 // none of that stream is acted on — `reasons` already names every failing job,
 // and the exit code already encodes green/not-green. die() and the one-line
 // verdict summary still print, so a caller loses nothing it decides on.
-const has = (name) => process.argv.includes(`--${name}`);
+// A boolean flag written --name=value must refuse, not read as absent — same
+// fail-open class as arg()'s `=` guard above, but boolean-specific wording:
+// there is no value to take, so "needs a space-separated value" would lie (#364).
+const has = (name) => {
+  if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
+  return process.argv.includes(`--${name}`);
+};
 const quiet = has("quiet");
 const vlog = (...a) => {
   if (!quiet) console.error(...a);
