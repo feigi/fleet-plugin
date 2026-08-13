@@ -324,6 +324,36 @@ locked() {
     P="$1" awk '/^worktree /{cur=(substr($0,10)==ENVIRON["P"])} cur&&/^locked/{f=1} END{exit !f}'
 }
 
+# Did git fail to resolve $1's HEAD, rather than find it genuinely detached or
+# on some other branch? Four ways an admin HEAD file breaks all produce the
+# same porcelain shape — the null object id with no `branch` line: `chmod 000`
+# on it, garbage content in it, a dangling symlink in its place, or a
+# directory in its place (measured, git 2.50.1). The fixture below reproduces
+# only the first two (no permission bits, no symlink); the other two are named
+# here rather than built.
+#
+# BOTH conditions, never one alone. The null OID alone is also an UNBORN
+# branch (`git worktree add --orphan`) — that one carries a real `branch`
+# line, so admitting it here would refuse a healthy worktree the moment it
+# exists. The absent `branch` line alone is also a genuine DETACHED checkout —
+# that one carries a real sha, not the null OID, so admitting it here would
+# swallow the ordinary case the `else` below exists for.
+#
+# Not `detached`: git prints that line on TWO of the four broken shapes above
+# (the dangling symlink and the directory-in-HEAD's-place both got it,
+# measured) as well as on a genuine detached checkout, so its presence is not
+# evidence of a real detached checkout and its absence is not evidence of this
+# fault either. A guard keyed on it instead of on `branch` misclassifies half
+# of what it exists to catch.
+unresolved_head() {
+  printf '%s\n' "$wt_list" |
+    P="$1" awk '
+      /^worktree /{cur=(substr($0,10)==ENVIRON["P"])}
+      cur&&/^HEAD 0+$/{nullhead=1}
+      cur&&/^branch /{hasbranch=1}
+      END{exit !(nullhead && !hasbranch)}'
+}
+
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
 fi
@@ -351,10 +381,20 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   # locked entry and remove rejects one, so neither remedy above is reachable
   # until the operator unlocks. Named first for that reason, not because it is
   # more likely.
+  #
+  # UNRESOLVED HEAD outranks the branch-mismatch else, but not the two above:
+  # a lock still makes every remedy unreachable regardless of what HEAD says,
+  # and a gone directory still means prune regardless of what HEAD says — this
+  # fault is only interesting while there is a directory and no lock to talk
+  # about. Below it, the `else` — this arm's whole reason to exist is that the
+  # `else` cannot tell "genuinely on some other branch" from "git could not
+  # tell", and asserts the former for both.
   if locked "$stray"; then
     block "worktree $stray is this claim's and is locked — git worktree unlock $stray, then prune or remove it"
   elif gone "$stray"; then
     block "worktree $stray is this claim's and its directory is gone — git worktree prune to clear the registration"
+  elif unresolved_head "$stray"; then
+    block "worktree $stray is this claim's but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand"
   else
     block "worktree $stray is this claim's but is not on $branch — release it by hand"
   fi

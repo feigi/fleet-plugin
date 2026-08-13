@@ -395,6 +395,92 @@ test("a stray worktree the script may not stat keeps the hand-release remedy", (
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
 
+test("a stray worktree whose HEAD git could not resolve blocks without claiming a branch mismatch", (t) => {
+  // A fourth way into the same `else`, distinct from the two above: the
+  // worktree is sitting on exactly the claim's branch, present and readable,
+  // but git could not resolve its admin HEAD file — so the branch lookup that
+  // finds `wt` comes back empty and this worktree reads as `stray` too. The
+  // old `else` then told the operator the worktree was on some OTHER branch,
+  // which is false: it is on this one, and git simply could not say so.
+  //
+  // Four routes measured (git 2.50.1) to the identical porcelain shape — the
+  // null object id with no `branch` line: chmod 000 on the admin HEAD,
+  // garbage content in it, a dangling symlink in its place, and a directory
+  // in its place. Garbage content is the fixture here — no permission bits,
+  // no symlink, and it reproduces the exact signature any of the four
+  // produces. The other three are named, not built — see `unresolved_head`
+  // in release-ticket.sh.
+  //
+  // No checkout call: this worktree never left the branch claim-ticket.sh put
+  // it on. Only its admin HEAD file is broken.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+  // Anchored against the exact branch-mismatch phrase, not a shared word: this
+  // message and the `else`'s both end "... by hand", so a bare /by hand/ check
+  // would pass whichever one fired.
+  assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — git just could not tell");
+  assert.doesNotMatch(json.blockers[0], /release it by hand/, "distinct message from the branch-mismatch else");
+  assert.doesNotMatch(json.blockers[0], /prune/, "not the directory-gone remedy either");
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  assert.deepEqual(
+    artefacts(r, c),
+    { dir: true, worktree: false, branch: true },
+    "`artefacts().worktree` keys on the branch LINE, which the corrupt HEAD removed — the directory and branch both survive untouched",
+  );
+});
+
+test("a stray worktree whose directory is gone still gets the prune remedy, even with an unresolvable HEAD", (t) => {
+  // Arm order is locked, then gone, then unresolved-HEAD, then the
+  // branch-mismatch else. This worktree qualifies for both of the middle two
+  // — its directory is gone AND its admin HEAD is corrupted — and gone must
+  // keep winning: the unresolved-HEAD fault is only interesting while there
+  // is still a directory to talk about, and prune is right regardless of
+  // what HEAD says.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree prune/, "the directory-gone remedy outranks the HEAD one");
+  assert.doesNotMatch(json.blockers[0], /could not read its HEAD/);
+  assert.equal(code, 1);
+});
+
+test("an unborn-branch stray worktree is not swept into the unresolved-HEAD arm", (t) => {
+  // A null object id is not by itself evidence git could not resolve HEAD: an
+  // unborn branch (`git worktree add --orphan`) is a legitimate null OID that
+  // DOES carry a `branch` line (measured, git 2.50.1). Sweeping it in would
+  // refuse a healthy worktree the moment it is created, before it holds a
+  // single commit — the false-positive class this arm must not open.
+  //
+  // Same directory, different branch: an orphan worktree cannot be added onto
+  // an existing ref, so the claim's branch survives untouched and this is a
+  // plain branch-mismatch case wearing a null OID.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "remove", "--force", c.wt);
+  git(r.w, "worktree", "add", "-q", "--orphan", "-b", "orphan-9", c.wt);
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.doesNotMatch(json.blockers[0], /could not read its HEAD/, "a real branch line means git resolved this one fine");
+  assert.match(json.blockers[0], /is not on fix\/9-release-ticket/);
+  assert.equal(code, 1);
+  assert.ok(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the claim's own branch survives untouched",
+  );
+});
+
 test("a stray worktree taken out by rm -rf .worktrees still names the prune", (t) => {
   // The stray half of the guard reaching the WALK, not just the one-level lookup.
   // `rm -rf .worktrees` is how this usually happens and it takes the parent along
