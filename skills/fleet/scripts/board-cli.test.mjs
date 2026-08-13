@@ -98,21 +98,21 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
   assert.equal(JSON.parse(r.stdout).spend.since, null);
 });
 
-// #366: the SECOND --interval read site. gather()'s own arg("interval")
-// fallback — reached only through `build`, after the same gh reads as
-// --spend-since above — is distinct from serve()'s (pinned in board.test.mjs)
-// and a fix there alone would leave this one still silently defaulting.
+// #366: the SECOND --interval read site. gather()'s own argInterval() fallback
+// — reached only through `build`, after the same gh reads as --spend-since
+// above — is distinct from serve()'s (pinned in board.test.mjs) and a fix
+// there alone would leave this one still silently defaulting.
 test("build: --interval abc is refused, not silently read as the 15s default", () => {
   const r = runBoard(["--interval", "abc"]);
   assert.equal(r.status, 2, r.stderr);
-  assert.match(r.stderr, /--interval wants seconds > 0, got abc/);
+  assert.match(r.stderr, /--interval wants seconds > 0 and <= 2147483, got abc/);
 });
 
-test("build: --interval 0 and a negative value are both refused", () => {
-  for (const v of ["0", "-5"]) {
+test("build: --interval 0, a negative value and an over-range value are all refused", () => {
+  for (const v of ["0", "-5", "3000000"]) {
     const r = runBoard(["--interval", v]);
     assert.equal(r.status, 2, `expected exit 2 for ${v}: ${r.stderr}`);
-    assert.match(r.stderr, /--interval wants seconds > 0/);
+    assert.match(r.stderr, /--interval wants seconds > 0 and <= 2147483/);
   }
 });
 

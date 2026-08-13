@@ -55,11 +55,18 @@ function argPort() {
   if (!Number.isInteger(n) || n < 0 || n > 65535) die(`--port wants an integer 0-65535, got ${raw}`);
   return n; // 0 is a real value — listen(0) binds an ephemeral port
 }
+// Bounded at BOTH ends, like argPort(). The ceiling is setInterval's 32-bit
+// millisecond delay: hand it more and Node clamps the delay to 1ms with only a
+// TimeoutOverflowWarning, so `--interval 3000000` (34 days) turns the rebuild
+// loop into a spin loop shelling out to gh hundreds of times a second — the
+// inverse of what was asked, announced by nothing the board prints (#435
+// review). 2147483647ms / 1000, floored, is the last WHOLE second that fits;
+// the ceiling is a hair under that in fractional seconds, which nobody types.
 function argInterval() {
   const raw = arg("interval");
   if (raw == null) return null;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) die(`--interval wants seconds > 0, got ${raw}`);
+  if (!Number.isFinite(n) || n <= 0 || n > 2147483) die(`--interval wants seconds > 0 and <= 2147483, got ${raw}`);
   return n;
 }
 
@@ -431,8 +438,12 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   // as "the port you asked for is taken" and sends a caller who DID pass
   // --port hunting a process on a port they never chose (#169 review). A
   // GIVEN-but-invalid value is refused outright by argPort(), never reaches
-  // here — and `??`, not `||`, is what lets a caller-chosen 0 survive as
-  // portGiven instead of reading as falsy and silently becoming 8123 (#366).
+  // here. `??` over `||` is shape, not a guarantee: #366 is scoped to the argv
+  // path, where `port` is always undefined and the two operators are
+  // identical, and the one place that reads portGiven as a yes/no rather than
+  // for its value — the bind error below — truthiness-tests it, so a
+  // caller-passed 0 would read as the default there regardless. Nothing pins
+  // the difference; do not cite it as one.
   const portGiven = port ?? argPort();
   port = portGiven ?? 8123;
   interval = interval ?? argInterval() ?? 15;
@@ -460,8 +471,14 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
 
   const server = createBoardServer(stateDir);
   server.listen(port, () => {
-    console.error(`${NAME}: cockpit on http://localhost:${port}  (interval ${interval}s)`);
-    if (open) tryRun("open", [`http://localhost:${port}/`]);
+    // Announce the port we GOT, not the one we asked for. They differ for the
+    // one value #366 newly permits: listen(0) binds an ephemeral port, so
+    // echoing the request prints — and --opens — http://localhost:0, which
+    // reaches nothing while the board sits on a port nobody was told (#435
+    // review). address() is only populated once listening, hence in here.
+    const bound = server.address().port;
+    console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
+    if (open) tryRun("open", [`http://localhost:${bound}/`]);
   });
   server.on("error", (e) => die(e.code === "EADDRINUSE"
     ? `port ${port}${portGiven ? "" : " (default)"} in use — pass --port <n>` : e.message));
