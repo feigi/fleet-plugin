@@ -11,13 +11,14 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
+import { makeDie } from "./arg.mjs";
 
 const NAME = "ledger";
 
-function die(msg) {
-  console.error(`${NAME}: ${msg}`);
-  process.exit(2);
-}
+// die() shared with the other fleet scripts (writeSync-based, pipe-safe —
+// see arg.mjs for the #176/#328/#363 rationale). arg()/has() are NOT shared
+// here: this file splices flags out of argv with its own wording (#362).
+const die = makeDie(NAME);
 
 // There is ONE ledger per run, and it lives in the main checkout. Members run
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not

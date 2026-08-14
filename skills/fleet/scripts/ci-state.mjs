@@ -12,41 +12,22 @@
 // re-query at the moment of decision, which is what this script is for.
 
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, writeSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { makeDie, makeArg, makeHas } from "./arg.mjs";
 
 const NAME = "ci-state";
 
-// writeSync, not console.error: stderr on a pipe is async and the exit below
-// discards what is still queued, so a large forwarded child stderr swallows
-// this line — the refusal is queued last and dropped first (#176). It also
-// survives --quiet, which is the mode the controller's CI Monitor polls in.
-// The leading newline is load-bearing: writeSync goes straight to the fd while
-// the forwarded child stderr is still draining through the stream, so without
-// it this text lands mid-line and stops matching line-anchored readers.
-function die(msg) {
-  writeSync(2, `\n${NAME}: ${msg}\n`);
-  process.exit(2);
-}
-
-// A flag given with no value must never read as the flag being absent.
+// die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
+// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
 // `base`/`workflow`/`workflow-file` below all fall back with `||`, so a
-// trailing `--base` (nothing after it) previously read as omitted and
-// silently compared against the DEFAULT base — `ci-state.mjs --pr 5 --base`
-// gave a real, wrong verdict at exit 0/1 with no refusal. That is the
-// fail-open class #61 fixed in candidates.mjs, reached here because THIS is
-// the verdict the fleet gates on (#169). `--flag=value` is caught too:
-// `indexOf` cannot see it, so it would otherwise read as absent and hit the
-// same fallback.
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i === -1) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
-    return null;
-  }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
-  return value;
-}
+// trailing `--base` (nothing after it) used to read as omitted and silently
+// compare against the DEFAULT base — `ci-state.mjs --pr 5 --base` gave a
+// real, wrong verdict at exit 0/1 with no refusal, reached here because THIS
+// is the verdict the fleet gates on. die() also has to survive --quiet,
+// which is the mode the controller's CI Monitor polls in.
+const die = makeDie(NAME);
+const arg = makeArg(die);
+const has = makeHas(die);
 
 // --quiet suppresses the diagnostic stream (command echoes, per-job/per-field
 // lines) and drops the raw job list from the payload. The controller's CI
@@ -54,13 +35,6 @@ function arg(name) {
 // none of that stream is acted on — `reasons` already names every failing job,
 // and the exit code already encodes green/not-green. die() and the one-line
 // verdict summary still print, so a caller loses nothing it decides on.
-// A boolean flag written --name=value must refuse, not read as absent — same
-// fail-open class as arg()'s `=` guard above, but boolean-specific wording:
-// there is no value to take, so "needs a space-separated value" would lie (#364).
-const has = (name) => {
-  if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
-  return process.argv.includes(`--${name}`);
-};
 const quiet = has("quiet");
 const vlog = (...a) => {
   if (!quiet) console.error(...a);

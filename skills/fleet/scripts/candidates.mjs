@@ -26,77 +26,19 @@
 // carried across the two attempts.
 
 import { execFileSync } from "node:child_process";
-import { writeSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { makeDie, makeArg, makeHas } from "./arg.mjs";
 
 const NAME = "candidates";
 
-// writeSync, not console.error. On a pipe — which is every caller that captures
-// this script — process.stderr.write is ASYNC, and the process.exit below
-// discards whatever is still queued. gh's forwarded stderr goes first and this
-// line goes last, so the refusal is the first thing dropped: measured, a 70 KB
-// gh stderr swallowed it entirely and the caller saw exit 2 with no cause.
-//
-// The leading newline is load-bearing, not formatting. writeSync goes straight
-// to the fd while the forwarded stderr is still draining through the stream, so
-// this text lands wherever the child's output happens to be — mid-line, with no
-// separator. Every reader of this script's refusals, tests included, matches
-// them line-anchored; without this they silently stop matching under exactly
-// the large-stderr failure the writeSync is here to survive.
-//
-// The write itself can also fail: once ~64 KiB of the forwarded gh stderr
-// above is already queued on a pipe, this fd is non-blocking and the write
-// throws EAGAIN. Uncaught, that skips process.exit(2) below and the process
-// falls through to Node's default exit 1 — the code this file reserves for
-// "query fine, queue empty". #299: measured, a full stderr pipe turned this
-// exit 2 into exit 1. The exit code is the contract; recovering the refusal
-// TEXT as well needs a retry loop and is explicitly out of scope here.
-function die(msg) {
-  try {
-    writeSync(2, `\n${NAME}: ${msg}\n`);
-  } catch {
-    // Message may be lost; the exit code below must not be.
-  }
-  process.exit(2);
-}
-
-// Refuses here, once, rather than at each call site: a flag given without a
-// value yields `undefined`, and every caller reads a falsy result as "the flag
-// was absent" — `--limit` falls back to 500 past its own positive-integer
-// guard, and `--require-label` runs the UNFILTERED query at exit 0, the exact
-// widening `--allow-fallback` gates. Both are the malformed invocation reading
-// as a successful one that this file's exit codes exist to tell apart.
-//
-// Four spellings reach that one harm, so all four are refused here: no value,
-// an empty or blank value (`--require-label "$LABEL"` with the var unset), a
-// value that is itself a `--flag`, and the `--flag=value` form `indexOf` cannot
-// see. The last two are the interesting ones. Rejecting a `--`-prefixed value
-// does forfeit a real capability — GitHub permits a label named `--watch`, and
-// `denoland/deno` has one — but no caller passes a variable label, this repo
-// has no such label, and refusing loudly beats resolving it to the unfiltered
-// query. `--flag=value` is otherwise invisible: `indexOf` misses it, `arg()`
-// reports the flag absent, and the caller widens exactly as if it were.
-//
-// Neither caller is a hand-typed CLI — both are markdown read by a model — so
-// a malformed invocation is more plausible here than the shape of this guard
-// suggests.
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i === -1) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
-    return null;
-  }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
-  return value;
-}
-// A boolean flag written --name=value must refuse, not read as absent — same
-// fail-open class as arg()'s `=` guard above, but boolean-specific wording:
-// there is no value to take, so "needs a space-separated value" would lie (#364).
-const has = (name) => {
-  if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
-  return process.argv.includes(`--${name}`);
-};
+// die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
+// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
+// Neither of THIS file's two callers is a hand-typed CLI — both are markdown
+// read by a model — so a malformed invocation is more plausible here than
+// the shared guard's shape alone suggests.
+const die = makeDie(NAME);
+const arg = makeArg(die);
+const has = makeHas(die);
 
 const requireLabel = arg("require-label");
 const allowFallback = has("allow-fallback");

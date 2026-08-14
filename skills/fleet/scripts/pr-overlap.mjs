@@ -10,38 +10,21 @@
 // bad usage, or a query failed.
 
 import { execFileSync } from "node:child_process";
-import { writeSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { makeDie, makeArg } from "./arg.mjs";
 
 const NAME = "pr-overlap";
 
-// writeSync, not console.error: stderr on a pipe is async and the exit below
-// discards what is still queued, so a large forwarded child stderr swallows
-// this line — the refusal is queued last and dropped first (#176). The leading
-// newline is load-bearing: writeSync goes straight to the fd while the stream
-// is still draining, so without it this text lands mid-line inside the child's
-// output and stops matching every line-anchored reader.
-function die(msg) {
-  writeSync(2, `\n${NAME}: ${msg}\n`);
-  process.exit(2);
-}
-
-// `--a`/`--b` given trailing already died via `if (!a || !b)` below —
-// `undefined` is falsy — so this was never a silent-widening site. But `--a`
-// given with `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT caught:
-// `a` becomes the string "--b", passes the falsy check, and only fails later
-// as a confusing `gh pr diff --b` error. Reject it here, by name, instead
-// (#169). `--a=5` is caught too: `indexOf` cannot see it.
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i === -1) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
-    return null;
-  }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
-  return value;
-}
+// die()/arg() shared with the other fleet scripts — see arg.mjs for the
+// fail-open (#61/#169) and pipe-safety (#176/#328) rationale. `--a`/`--b`
+// given trailing already died via `if (!a || !b)` below — `undefined` is
+// falsy — so this file was never a silent-widening site on its own. But
+// `--a` given `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT
+// caught that way: `a` becomes the string "--b", passes the falsy check, and
+// only failed later as a confusing `gh pr diff --b` error — the shared arg()
+// rejects it here, by name, instead.
+const die = makeDie(NAME);
+const arg = makeArg(die);
 
 const a = arg("a");
 const b = arg("b");

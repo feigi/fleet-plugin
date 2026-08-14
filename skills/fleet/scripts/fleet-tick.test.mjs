@@ -164,6 +164,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
+const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 
 // Answers both reads the tick makes: `gh pr list` for backlog/merge-queue, and
 // the `gh issue list --jq …` that candidates.mjs makes on its behalf. The issue
@@ -205,11 +206,15 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } 
   writeFileSync(issueFixture, JSON.stringify(issues));
   // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
   // means running a copy of the script out of the stub dir. It imports nothing
-  // but node builtins, so the copy behaves as the original.
+  // but node builtins beyond die() from ./arg.mjs (#367), so that copy has to
+  // ride along too or the copy fails to resolve it at startup — an uncaught
+  // MODULE_NOT_FOUND, exit 1, exactly the collision this file's own die()
+  // tests below exist to catch.
   let script = SCRIPT;
   if (candidates !== undefined) {
     script = join(dir, "fleet-tick.mjs");
     writeFileSync(script, readFileSync(SCRIPT));
+    writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
     writeFileSync(join(dir, "candidates.mjs"), candidates);
   }
   const r = spawnSync(process.execPath, [script, ...args], {

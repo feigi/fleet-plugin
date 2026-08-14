@@ -13,38 +13,24 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
+import { makeDie, makeArg, makeHas } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 
 const NAME = "board";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const die = (m) => { console.error(`${NAME}: ${m}`); process.exit(2); };
-// A flag given with no value must never read as the flag being absent.
+// die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
+// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
+const die = makeDie(NAME);
+const arg = makeArg(die);
+const has = makeHas(die);
 // `ledger`/`prev`/`spend-since`/`port`/`interval` are all read with `||`/`??`
 // fallbacks, so a trailing flag previously substituted a default in total
 // silence — `--spend-since` with nothing after it silently widened the spend
 // panel to all-time instead of the requested window, and `--ledger` with
 // nothing after it silently read the DEFAULT ledger file instead of the one
-// asked for. Same fail-open class as #61 (#169). `--flag=value` is caught
-// too: `indexOf` cannot see it.
-const arg = (n) => {
-  const i = process.argv.indexOf(`--${n}`);
-  if (i === -1) {
-    if (process.argv.some((a) => a.startsWith(`--${n}=`))) die(`--${n} needs a space-separated value, not --${n}=`);
-    return null;
-  }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${n} needs a value`);
-  return value;
-};
-// A boolean flag written --name=value must refuse, not read as absent — same
-// fail-open class as arg()'s `=` guard above, but boolean-specific wording:
-// there is no value to take, so "needs a space-separated value" would lie (#364).
-const has = (n) => {
-  if (process.argv.some((a) => a.startsWith(`--${n}=`))) die(`--${n} is a boolean flag, not --${n}=`);
-  return process.argv.includes(`--${n}`);
-};
+// asked for.
 
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the

@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
+const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 
 const STUB = `#!/bin/sh
 # Stand-in for \`gh issue list … --jq <expr>\`. Applies the expression gh was
@@ -847,7 +848,14 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // comment passes 375/375 (measured), because a `^…/m` anchor matches inside
   // the comment. Dropping either half also drops the only pin on #176, which
   // is what the refusal-text assertion this test used to carry was doing.
-  assert.match(stripComments(readFileSync(SCRIPT, "utf8")), /function die\(msg\) \{\s*try \{\s*writeSync\(2,/);
+  //
+  // #367 moved die() into arg.mjs's makeDie() — candidates.mjs's own source no
+  // longer contains the try/catch shape, so a lift pin against SCRIPT alone
+  // would now test a module nothing here calls (a source text-lift pin tests
+  // a COPY). Two pins instead: the SHAPE lives in arg.mjs, and this file's own
+  // call site is what wires it in, so a revert of either one goes red.
+  assert.match(stripComments(readFileSync(ARG_MODULE, "utf8")), /function die\(msg\) \{\s*try \{\s*writeSync\(2,/);
+  assert.match(stripComments(readFileSync(SCRIPT, "utf8")), /const die = makeDie\(NAME\);/);
 });
 
 test("gh missing entirely is named as ENOENT — the shape that prints nothing at all", () => {
