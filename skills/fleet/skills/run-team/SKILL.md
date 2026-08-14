@@ -785,7 +785,9 @@ a minute apart showed *different* mutants, so a member's report and any single
    it. Dirty or diverged halts the finisher *here*, before the label: it reports
    what it found and labels nothing. A finisher that verifies the dirt is
    harmless and labels anyway has substituted the rule's purpose for the rule,
-   and you find out at merge time.
+   and you find out at merge time. **Give it the two-cause block below,
+   verbatim** — a bare SHA mismatch names no cause, and the halt report needs
+   one.
 2. **Confirm every deferral is filed as an issue** — not parked as a comment on
    the PR's *own* source issue, which the PR's `Closes #N` buries on merge.
    Caught once at seven findings. A comment on an existing *follow-up* issue is
@@ -793,7 +795,27 @@ a minute apart showed *different* mutants, so a member's report and any single
    it or halt, never label over it.
 3. Add `ready-to-merge`.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
-   halted on.
+   halted on — cause and evidence, below, never a bare "head moved".
+
+A halt at step 1 has exactly two causes, reading identical from a bare SHA
+mismatch. Give the finisher this verbatim, so it derives the cause itself
+instead of asking anyone:
+
+> Worktree differs from your pin, or from what you last read. Before you halt,
+> decide which of two things happened — both cheap, both self-checkable:
+>
+> - **Live editor.** `git status --porcelain` is dirty. Sample `git diff --stat`
+>   twice, a minute apart — diffstat growing means someone is still writing.
+>   Halt, name `live editor`, report both samples.
+> - **Rebase.** `git status --porcelain` is clean, head still differs from your
+>   pin. `git reflog` in the worktree: a `reset`/rebase entry near the move, not
+>   a plain `commit`, means the branch replayed onto a new base — its own
+>   commits unchanged, content-identical, just a new parent. Halt, name
+>   `rebase`, report the reflog line.
+>
+> Either cause halts, always — you never verify the dirt is harmless and label
+> over it, and a rebase is not a fast-forward you get to accept. Naming the
+> cause makes the halt cheap to resolve, never a reason to skip it.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
@@ -883,6 +905,15 @@ is live:
 
 Neither belongs in a workflow-path prompt: there `agent()` returns into the
 script, no relay ever occurs, and a rule to wait for one strands every finding.
+
+**Same receipts gate the finisher dispatch** — dispatch only once every
+specialist report you know landed for this PR is relayed, none unrelayed. The
+reviewer applies findings and pushes as each relay lands, so an
+unrelayed report is exactly as inbound as a fix-applier ruling you haven't sent
+(above) — dispatch past it and you pin a SHA the reviewer is about to move past.
+Vacuous on the workflow path: `agent()` already returned every report before
+you had a tree to dispatch a finisher against, so nothing is ever outstanding
+there.
 
 ### Merge bot
 
