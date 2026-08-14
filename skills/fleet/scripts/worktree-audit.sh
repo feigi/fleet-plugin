@@ -98,6 +98,30 @@ while IFS="$(printf '\t')" read -r wt br; do
       # path and branch name too (#119-shaped), not one this fix opens.
       files=$(printf '%s\n' "$status_out" | awk 'NF{
         p=substr($0,4)
+        # A rename/copy line is `<src> -> <dst>`; emit the DESTINATION only —
+        # the source path no longer exists, so reporting it names a file that
+        # is not there. Gate on the X status byte (R/C), never on a literal
+        # " -> ": a filename may legally hold one, and splitting on that emits
+        # two broken halves of a name git never split. git C-quotes any path
+        # holding a space — measured, git 2.51 — so an UNQUOTED src cannot
+        # contain the delimiter, while a QUOTED one can and ends at its own
+        # unescaped closing quote, which the scan below finds. Reading the
+        # whole rename line as one path put the quotes git had already added
+        # inside the pair added below: one such file made the WHOLE payload
+        # unparseable, taking every other worktree entry down with it (#82).
+        if (substr($0,1,1) ~ /[RC]/) {
+          if (substr(p,1,1) == "\"") {
+            for (i=2; i<=length(p); i++) {
+              c=substr(p,i,1)
+              if (c=="\\") i++
+              else if (c=="\"") break
+            }
+            if (substr(p,i+1,4) == " -> ") p=substr(p,i+5)
+          } else {
+            i=index(p," -> ")
+            if (i) p=substr(p,i+4)
+          }
+        }
         if (substr(p,1,1) != "\"") p = "\"" p "\""
         print p
       }' | paste -sd, -)

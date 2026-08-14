@@ -70,8 +70,8 @@ function addWorktree(w, name, base = "origin/main") {
   return wt;
 }
 
-function runAudit(cwd, envOverrides = {}) {
-  const r = spawnSync("sh", [SCRIPT], { cwd, env: { ...ENV, ...envOverrides }, encoding: "utf8" });
+function runAudit(cwd) {
+  const r = spawnSync("sh", [SCRIPT], { cwd, env: ENV, encoding: "utf8" });
   return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
 }
 
@@ -117,6 +117,33 @@ test("a dirty file whose own name holds a space is not truncated", (t) => {
   const { json } = runAudit(w);
   const e = entryFor(json, wt);
   assert.deepEqual(e.dirtyFiles, ["a b.txt"]);
+});
+
+test("a staged rename reports its destination and leaves the payload parseable", (t) => {
+  // git prints a rename as `R  <src> -> <dst>` and C-quotes either half on its
+  // own whenever it holds a space. Reading the whole line as one path wrapped
+  // the quotes git had already added inside a second pair, and the ONE bad
+  // element made the entire array unparseable — every other worktree entry
+  // destroyed with it, which is why this asserts the sibling entry too and why
+  // runAudit's JSON.parse of the full payload is the real gate here.
+  // `a -> b.txt` pins the split itself: gating on the literal " -> " instead of
+  // on the R status byte cuts that source name in half mid-path.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  writeFileSync(join(wt, "old.txt"), "x\n");
+  writeFileSync(join(wt, "a -> b.txt"), "x\n");
+  git(wt, "add", "-A");
+  commit(wt, "files to rename");
+  git(wt, "mv", "old.txt", "new name.txt");
+  git(wt, "mv", "a -> b.txt", "c.txt");
+
+  const { code, json } = runAudit(w);
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.readable, true);
+  assert.equal(e.dirty, 2);
+  assert.deepEqual(e.dirtyFiles, ["c.txt", "new name.txt"]);
+  assert.equal(entryFor(json, w).readable, true);
 });
 
 test("a genuinely deleted worktree is reported missing, with zero counts", (t) => {
