@@ -12,6 +12,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./pr-overlap.mjs", import.meta.url));
@@ -40,4 +43,27 @@ test("CLI: --a given a whitespace-only value dies naming the flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "   ", "--b", "6"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--a needs a value/);
+});
+
+// The other half of arg()'s guard: every case above is a value it must
+// REFUSE. Nothing above ever hands the script a well-formed pair, so #367's
+// shared arg() could return `undefined` for every accepted input and this
+// file would stay green. `--a 1 --b 2` must reach gh and report a verdict.
+test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict", () => {
+  const bin = mkdtempSync(join(tmpdir(), "pr-overlap-bin-"));
+  const gh = join(bin, "gh");
+  // `$3` is the PR number pr-overlap.mjs passes as `gh pr diff <pr> --name-only`.
+  writeFileSync(
+    gh,
+    '#!/bin/sh\ncase "$3" in\n  1) echo src/shared.ts ;;\n  2) echo src/shared.ts ;;\nesac\n',
+  );
+  chmodSync(gh, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(payload, { a: 1, b: 2, files: ["src/shared.ts"], modules: ["shared"], dirs: ["src"], signal: "files" });
 });
