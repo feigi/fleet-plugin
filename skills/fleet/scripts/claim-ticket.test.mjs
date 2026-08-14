@@ -823,3 +823,28 @@ test("origin/main beats the local checkout for the runner probe", () => {
   const dir = repo({ "package.json": pkg({ scripts: { test: "vitest" } }) }, { "package.json": pkg({ name: "stripped" }) });
   assert.equal(claim(dir).testcmd, "npm test --");
 });
+
+// #128: the lockfile-mutation check reads the same worktree-status hole
+// no-undo-audit.sh, reap.sh and worktree-audit.sh share. Delete the
+// worktree's own .git between `worktree add` and this check and `git -C`
+// does not fail — it walks UP to the enclosing repo and answers about THAT
+// at rc 0, which the old check would read as an untouched lockfile it never
+// actually looked at. Simulated with a shimmed `npm` standing in for an
+// install that corrupts the worktree's own linkage, whatever a real cause for
+// that would be — this guard does not get to assume a cause, only detect the
+// hole.
+test("a worktree whose .git vanishes during install refuses instead of trusting a leaked parent status", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(bin, "npm"), "#!/bin/sh\nrm -rf .git\nexit 0\n", { mode: 0o755 });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /has no \.git file — cannot verify the lockfile was not mutated/);
+});

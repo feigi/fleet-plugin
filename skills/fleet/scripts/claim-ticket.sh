@@ -105,7 +105,18 @@ else
   # command ran, and the worktree is now corrupt for everyone. Check git's exit
   # status too: a failed status prints nothing, which is byte-identical to
   # "clean" and would let this guard pass without having verified anything.
-  if ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock 2>&1); then
+  #
+  # That same guard does not cover the rc-0 form of the identical hole: delete
+  # $wt's .git outright (or empty it into a directory, or leave a dangling
+  # symlink) between the `worktree add` above and here, and `git -C` does not
+  # fail — it walks UP to the enclosing repo and answers about THAT at rc 0,
+  # which this check would read as an untouched lockfile it never actually
+  # looked at. `-f`: `git worktree add` just wrote `.git` as a regular file two
+  # lines up, so no healthy run trips this; reference shape and same reason as
+  # release-ticket.sh's own linkage guard (#128).
+  if [ ! -f "$wt/.git" ]; then
+    die "$wt has no .git file — cannot verify the lockfile was not mutated"
+  elif ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock 2>&1); then
     die "could not verify lockfile state in $wt — $dirty"
   elif [ -n "$dirty" ]; then
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"
