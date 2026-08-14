@@ -302,7 +302,29 @@ sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   stash=null
-  echo "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)" >&2
+  msg="    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)"
+  # One of those three causes is one git will name outright — the missing
+  # object, where it says `fatal: bad object refs/stash` and the line above
+  # degrades that into a three-way guess. So ask a second time, on this branch
+  # only, and let git speak for itself. Both permission cases are silent (rc 0,
+  # no stderr — measured, git 2.50.1), so `$diag` is empty there and the line
+  # comes out exactly as it did before.
+  #
+  # The counting pipeline above is deliberately left alone. Capturing stderr
+  # THERE means splitting stdout from stderr around a `wc`, a temp file on
+  # every run, and a rule for git writing to stderr while succeeding — paid on
+  # every healthy audit to serve the one path that has already decided
+  # something is wrong. Here the second call costs nothing: it runs only on a
+  # run that is already reporting a fault. #304.
+  #
+  # `2>&1 >/dev/null` in that order captures stderr and drops stdout — the list
+  # itself is not wanted, it was already counted. `|| true` is load-bearing
+  # under `set -e`: git exits 1 in exactly the state this exists for, and an
+  # unguarded substitution would abort the audit before it emits a payload,
+  # turning a report into a refusal.
+  diag=$(git -C "$wt" stash list 2>&1 >/dev/null) || true
+  if [ -n "$diag" ]; then msg="$msg — $diag"; fi
+  echo "$msg" >&2
 else
   echo "    stash entries (repo-global, not gated): $stash" >&2
 fi
