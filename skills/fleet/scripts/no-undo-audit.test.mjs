@@ -212,6 +212,24 @@ const UNKNOWN_LINE =
   "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
 
+// `$wt` is caller-supplied and reaches the operator through a step header.
+// Under `#!/bin/sh` an `echo` operand expands escapes, so a worktree whose
+// name holds `\c` truncated that header and the next stderr line landed on
+// top of it. No corrupt repo needed — which makes this a strictly more
+// reachable instance of the same hazard as the stash line's, and the reason
+// `printf` is used at both sites.
+test("a worktree path holding a backslash escape reaches the operator whole", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-back\\clue-");
+  assert.match(c.w, /back\\clue/, "fixture must actually put a `\\c` in the path");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`$ git -C ${c.w} status --porcelain`),
+    "`echo` truncates the header at the `\\c` — it must name the worktree verbatim",
+  );
+});
+
 test("a pre-existing stash does not refuse a clean worktree", (t) => {
   const c = repo(t);
   stashSomething(c.w);
@@ -318,13 +336,7 @@ test("stash entries present but refs/stash is unreadable reports unknown, not ze
 // on the old pipeline would not have caught this either. `show-ref` fails
 // here at rc 128 rather than the rc 1 that means genuinely absent, so the
 // same cross-check catches this case too.
-//
-// It is also the one state of the four where git says anything at all —
-// `fatal: bad object refs/stash`. The counting pipeline's `2>/dev/null` threw
-// that away, so the operator got the guess in place of the answer git had
-// already named (#304). Appended, never substituted: git is silent in the
-// other states, and there the generic line is all there is.
-test("a corrupted stash ref reports unknown, not zero, and passes git's diagnostic through", (t) => {
+test("a corrupted stash ref reports unknown, not zero", (t) => {
   const c = repo(t);
   stashSomething(c.w);
   const sha = git(c.w, "rev-parse", "refs/stash");
@@ -332,7 +344,24 @@ test("a corrupted stash ref reports unknown, not zero, and passes git's diagnost
 
   const r = audit(c);
   assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
-  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero — the diagnostic is stderr only");
+  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero");
+  assert.match(r.stderr, /unknown/);
+});
+
+// #304: of the states above, exactly one has git saying anything —
+// `fatal: bad object refs/stash`. The counting pipeline's `2>/dev/null` threw
+// it away, so the operator got the guess in place of the answer git had
+// already named. Appended, never substituted: in the other states git is
+// silent, and the generic line is all there is.
+test("a corrupted stash ref passes git's own diagnostic through to the operator", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the diagnostic is stderr only — the payload still says unknown");
   // The whole line, not `startsWith` plus a substring match: those two leave
   // the text between them unconstrained, so `msg="$msg$diag"` — separator
   // dropped entirely — satisfies both, as does any other joiner.

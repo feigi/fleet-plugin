@@ -239,7 +239,12 @@ git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null \
 #    turn a failed `status` into empty output and print "clean" over a dirty
 #    tree — and since the stash count stopped gating, nothing else would catch
 #    it. Unanswerable is exit 2, never exit 0. Same rule as worktree-audit.sh.
-echo "\$ git -C $wt status --porcelain" >&2
+# `printf`, not `echo`: `$wt` is a caller-supplied path, and both dash and
+# macOS sh expand escapes in an `echo` operand — a worktree named `back\clue`
+# truncates this line and the next stderr line collides with it. No corruption
+# needed, unlike the same hazard on the stash line below. Same class still live
+# at the `$porcelain`, `$conflicts` and `$at_risk` echoes; see the follow-up.
+printf '$ git -C %s status --porcelain\n' "$wt" >&2
 porcelain=$(git -C "$wt" status --porcelain) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
