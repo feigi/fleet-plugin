@@ -33,9 +33,11 @@ const NAME = "candidates";
 
 // die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
 // the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
-// Neither of THIS file's two callers is a hand-typed CLI — both are markdown
-// read by a model — so a malformed invocation is more plausible here than
-// the shared guard's shape alone suggests.
+// No caller of THIS file is a hand-typed CLI. Two are markdown re-read by a
+// model each run (next-ticket/SKILL.md, run-team/SKILL.md), which is why a
+// malformed invocation is more plausible here than the shared guard's shape
+// alone suggests — a model retypes the flags every time. The third,
+// fleet-tick.mjs's supply(), spawns it with hardcoded args that cannot drift.
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);

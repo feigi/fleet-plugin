@@ -31,6 +31,14 @@ const has = makeHas(die);
 // panel to all-time instead of the requested window, and `--ledger` with
 // nothing after it silently read the DEFAULT ledger file instead of the one
 // asked for.
+//
+// A guard only fires where the flag is actually READ, and that is not every
+// subcommand. `port` and `open` are read in serve() alone, so `build --port`
+// (trailing), `build --port abc` and `build --open=1` are all IGNORED at exit
+// 0 rather than refused (measured) — the one silent-default shape this list
+// does not close. `ledger`/`prev`/`spend-since`/`interval` are read on the
+// build path too and do refuse there. Pre-existing and not introduced here;
+// said out loud so the list above is not read as "guarded on every path".
 
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the

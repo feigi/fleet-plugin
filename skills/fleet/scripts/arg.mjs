@@ -1,8 +1,17 @@
-#!/usr/bin/env node
 // Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
-// a fix to the contract lands here once and reaches every caller.
+// a fix to the contract lands here once and reaches every caller that routes
+// through the helper it fixes.
+//
+// For die() that is all seven scripts. For the guards it is not: ledger.mjs
+// splices --file/--require-file out of argv itself, in its own wording
+// (#362), and imports makeDie alone — so arg()'s refusals below never reach
+// it, and `--file --require-file` still takes the next flag as the path,
+// leaving the duplicate-filing guard to fail open at exit 0 (measured).
+// #362 owns that parser; it is named here so this header is not read as
+// covering a caller it does not. (fleet-tick.mjs also imports makeDie alone,
+// but reads no flags at all — nothing to reach.)
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
