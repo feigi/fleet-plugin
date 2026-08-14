@@ -7,14 +7,34 @@
 # either redo finished work or destroy unfinished work.
 #
 # Read-only. Never exits non-zero for a dirty or absent worktree — that is the
-# finding, not an error. A worktree that IS present but whose git commands
-# fail (permissions, corrupt git dir) is reported readable:false with null
-# counts — never silently as ahead:0, dirty:0, which reads as "nothing here,
-# safe to discard" and is indistinguishable from a genuinely empty worktree.
+# finding, not an error. Three states, never two: present-and-readable (real
+# counts), established absent (a directory that really is not there — zero
+# counts, a measurement), or unknown (anything this script could not actually
+# look at — null counts, readable:false). A worktree that IS present but whose
+# git commands fail (permissions, corrupt git dir), one behind an unreadable
+# parent (a dropped mount, a chmod'd ancestor), and one whose .git linkage is
+# missing (git would silently answer for the ENCLOSING repo instead, rc 0) are
+# all the unknown state — none of them is ever silently ahead:0, dirty:0, which
+# reads as "nothing here, safe to discard" and is indistinguishable from a
+# genuinely empty worktree. #82, #128.
 set -eu
 
 NAME=worktree-audit
 die() { echo "$NAME: $1" >&2; exit 2; }
+
+# Is $1 established ABSENT, or merely a path this script cannot stat? A bare
+# `[ -d ]` failure is both — an unreadable parent (dropped mount, chmod'd
+# ancestor) fails it identically to a directory that was actually removed —
+# and the two must not share one report. Walk up to the nearest ancestor that
+# exists and require THAT to be searchable: only then is "not there" a
+# measurement, not a guess. Same shape and same reason as release-ticket.sh's
+# own `gone()` (not shared code — the callers differ in nothing else); named
+# there, not by line number, per #129.
+gone() {
+  look=$1
+  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+  [ ! -e "$1" ] && [ -x "$look" ]
+}
 
 base=${BASE_REF:-origin/main}
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
@@ -24,28 +44,76 @@ echo "\$ git worktree list --porcelain" >&2
 
 first=1
 printf '['
-git worktree list --porcelain | awk '/^worktree /{w=$2} /^branch /{print w"\t"$2} /^detached$/{print w"\tDETACHED"}' |
+# The worktree path is the whole rest of its line, never awk's $2:
+# `git worktree list --porcelain` prints it raw, so a checkout living under a
+# directory with a space in it — ordinary on macOS — was otherwise truncated
+# at the first one, and every consumer below given a wrong, nonexistent path.
+# The branch line's $2 stays: a ref name cannot contain a space.
+git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch /{print w"\t"$2} /^detached$/{print w"\tDETACHED"}' |
 while IFS="$(printf '\t')" read -r wt br; do
   short=${br#refs/heads/}
   if [ -d "$wt" ]; then
+    # Establish the .git linkage exists before trusting anything git says
+    # through it. Delete a worktree's .git file outright — directory and every
+    # uncommitted file still on disk — and `git -C` does not fail: it walks UP
+    # to the enclosing repo and reports THAT repo's status at rc 0, which the
+    # chain below would otherwise believe. Only a SEARCHABLE $wt lacking a
+    # `.git` regular file is a measured absence; an unsearchable $wt is left to
+    # the git commands below, which fail on their own and land in the existing
+    # unreadable branch — this must not invent a second, weaker guess for it.
+    # `.git` is a regular FILE for every linked worktree (`git worktree add`
+    # always writes one) but a DIRECTORY for the main checkout, which this
+    # script also lists and audits — unlike release-ticket.sh/reap.sh, whose
+    # `$wt` is never the main worktree by construction, so their linkage guard
+    # can stay the plain `-f` this one started as (#128 reference shape). Here
+    # it must accept both: a real git dir always has `HEAD` sitting directly in
+    # it, and an empty stand-in directory or a dangling symlink — the two
+    # shapes a broken/deleted linkage takes, and what leaks the parent's status
+    # at rc 0 — has neither. `-x "$wt"` gates it for the reason release-ticket.sh
+    # gives its own guard: an unsearchable $wt must not be misread as "no
+    # linkage established" — leave it to the git commands below, which fail on
+    # their own and land in the existing unreadable branch.
+    if [ -x "$wt" ] && [ ! -f "$wt/.git" ] && [ ! -f "$wt/.git/HEAD" ]; then
+      readable=false
+      ahead=null; dirty=null; files=""
+      echo "    UNREADABLE: $wt (no .git linkage — git would answer for the enclosing repo, not this worktree)" >&2
     # Chain on `&&`, not `|| echo 0`: a piped `wc -l` always exits 0 even when
     # the git command feeding it failed, so a fallback tacked onto the pipe
     # never fires and a permissions/corruption failure reads as "0 ahead, 0
     # dirty" — indistinguishable from a genuinely clean worktree.
-    if ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
+    elif ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
       readable=true
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')
-      files=$(printf '%s\n' "$status_out" | awk 'NF{print "\""$2"\""}' | paste -sd, -)
+      # substr, not $2: a dirty file's own name may hold a space — "XY " is
+      # always exactly three bytes in porcelain v1, so the path starts at the
+      # fourth. Same truncation as the worktree path above, one caller down.
+      # git C-quotes the path itself (wraps it in its own "…", backslash-
+      # escaped) whenever it holds a space or other unusual byte — measured,
+      # git 2.50.1 — so wrapping it in a second pair of quotes here would
+      # double-quote it into invalid JSON. Only add quotes when git did not
+      # already add its own; a filename holding a literal `"` or `\` that git's
+      # C-quoting escapes one way and JSON escaping wants another is the
+      # existing, unaddressed gap this script has always had for the worktree
+      # path and branch name too (#119-shaped), not one this fix opens.
+      files=$(printf '%s\n' "$status_out" | awk 'NF{
+        p=substr($0,4)
+        if (substr(p,1,1) != "\"") p = "\"" p "\""
+        print p
+      }' | paste -sd, -)
     else
       readable=false
       ahead=null; dirty=null; files=""
       echo "    UNREADABLE: $wt (git rev-list/status failed — treat as unknown, not empty)" >&2
     fi
-  else
+  elif gone "$wt"; then
     readable=false
     ahead=0; dirty=0; files=""
     echo "    MISSING on disk: $wt" >&2
+  else
+    readable=false
+    ahead=null; dirty=null; files=""
+    echo "    UNREADABLE: $wt (cannot tell whether it exists — an ancestor could not be read)" >&2
   fi
   echo "    $wt  branch=$short  ahead=$ahead  dirty=$dirty" >&2
   [ "$first" = 1 ] || printf ','
