@@ -285,6 +285,14 @@ fi
 #   unreadable reflog    | rc0 empty    | rc0      | unknown
 #   stash object gone    | rc1 empty    | rc128    | unknown
 #   unreadable ref file  | rc0 empty    | rc128    | unknown
+#   malformed ref file   | rc0 empty    | rc128    | unknown
+#
+# That last row is a fourth CAUSE, not a fourth signature: `printf 'not-a-sha'
+# > .git/refs/stash` is indistinguishable from a `chmod 000` on the same file —
+# same rc pair, same `show-ref` stderr, measured. So the line this branch
+# prints names three causes for four, and `ls -l` on the two files, which is
+# what the runbook sends the operator to read next, shows a healthy mode for
+# this one. Widening either is #437, not this ticket.
 #
 # rc 1 is genuine absence and nothing else, so `-ne 1` is the whole test.
 # `rev-parse --verify --quiet` cannot do this job: it returns 1 for the
@@ -303,12 +311,21 @@ git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   stash=null
   msg="    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)"
-  # One of those three causes is one git will name outright — the missing
-  # object, where it says `fatal: bad object refs/stash` and the line above
-  # degrades that into a three-way guess. So ask a second time, on this branch
-  # only, and let git speak for itself. Both permission cases are silent (rc 0,
-  # no stderr — measured, git 2.50.1), so `$diag` is empty there and the line
-  # comes out exactly as it did before.
+  # One of those causes is one git will name outright — the missing object,
+  # where it says `fatal: bad object refs/stash` and the line above degrades
+  # that into a guess across all four. So ask a second time, on this branch
+  # only, and let git speak for itself. `stash list` is silent in the other
+  # three (rc 0, no stderr — measured, git 2.50.1), so `$diag` is empty there
+  # and the line comes out exactly as it did before.
+  #
+  # CEILING: git is not silent in two of those three — only `stash list` is.
+  # `show-ref`, called above with its stderr thrown away, prints `fatal: git
+  # show-ref: bad ref refs/stash (0000000000000000000000000000000000000000)`
+  # for BOTH the unreadable and the malformed ref file: one canned line for two
+  # causes, naming a null SHA that neither ref holds. It is silent only for the
+  # unreadable reflog. Whether that wrong-but-specific line beats this
+  # right-but-vague one is #481; this change captures `stash list` and nothing
+  # else.
   #
   # The counting pipeline above is deliberately left alone. Capturing stderr
   # THERE means splitting stdout from stderr around a `wc`, a temp file on
@@ -322,9 +339,24 @@ if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   # under `set -e`: git exits 1 in exactly the state this exists for, and an
   # unguarded substitution would abort the audit before it emits a payload,
   # turning a report into a refusal.
+  #
+  # `tr` because `$diag` is not one line. A stash object that is CORRUPT
+  # rather than missing (`echo junk > .git/objects/<xx>/<rest>`) reaches this
+  # same branch — list empty at rc 0, show-ref rc 0 — and git says it in 7
+  # lines, 10 with a bad `objects/info/alternates`. Unfolded they land at
+  # column 0 in the audit's stderr, which is where only its own `$ git ...`
+  # step headers belong. `$()` has already stripped the trailing newline, so
+  # the fold adds no trailing space and the silent states still append nothing.
+  #
+  # `printf`, not `echo`: `$msg` now carries git's text under `#!/bin/sh`, and
+  # both dash and macOS sh expand escapes in an `echo` operand — a `\c` in it
+  # truncates the operator's line and swallows its newline. Reachable: with
+  # `objects/info/alternates` holding a path containing a backslash, git prints
+  # it back verbatim, `error: unable to normalize alternate object path:
+  # /no\clue/objects`.
   diag=$(git -C "$wt" stash list 2>&1 >/dev/null) || true
-  if [ -n "$diag" ]; then msg="$msg — $diag"; fi
-  echo "$msg" >&2
+  if [ -n "$diag" ]; then msg="$msg — $(printf '%s' "$diag" | tr '\n' ' ')"; fi
+  printf '%s\n' "$msg" >&2
 else
   echo "    stash entries (repo-global, not gated): $stash" >&2
 fi

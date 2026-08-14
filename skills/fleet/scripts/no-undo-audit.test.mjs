@@ -318,24 +318,13 @@ test("stash entries present but refs/stash is unreadable reports unknown, not ze
 // on the old pipeline would not have caught this either. `show-ref` fails
 // here at rc 128 rather than the rc 1 that means genuinely absent, so the
 // same cross-check catches this case too.
-test("a corrupted stash ref reports unknown, not zero", (t) => {
-  const c = repo(t);
-  stashSomething(c.w);
-  const sha = git(c.w, "rev-parse", "refs/stash");
-  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
-
-  const r = audit(c);
-  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
-  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero");
-  assert.match(r.stderr, /unknown/);
-});
-
-// #304: of the three states above, exactly one has git saying anything —
+//
+// It is also the one state of the four where git says anything at all —
 // `fatal: bad object refs/stash`. The counting pipeline's `2>/dev/null` threw
-// it away, so the operator got the three-cause guess in place of the answer
-// git had already named. Appended, never substituted: in the other two states
-// git is silent, and the generic line is all there is.
-test("a corrupted stash ref passes git's own diagnostic through to the operator", (t) => {
+// that away, so the operator got the guess in place of the answer git had
+// already named (#304). Appended, never substituted: git is silent in the
+// other states, and there the generic line is all there is.
+test("a corrupted stash ref reports unknown, not zero, and passes git's diagnostic through", (t) => {
   const c = repo(t);
   stashSomething(c.w);
   const sha = git(c.w, "rev-parse", "refs/stash");
@@ -343,17 +332,57 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
 
   const r = audit(c);
   assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
-  assert.equal(r.json.stash, null, "the diagnostic is stderr only — the payload still says unknown");
-  assert.match(stashLine(r), /bad object refs\/stash/, "git named the fault; the audit must not drop it");
-  assert.ok(stashLine(r).startsWith(UNKNOWN_LINE), "git's line is appended to the generic one, not substituted for it");
+  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero — the diagnostic is stderr only");
+  // The whole line, not `startsWith` plus a substring match: those two leave
+  // the text between them unconstrained, so `msg="$msg$diag"` — separator
+  // dropped entirely — satisfies both, as does any other joiner.
+  assert.equal(
+    stashLine(r),
+    `${UNKNOWN_LINE} — fatal: bad object refs/stash`,
+    "git named the fault; the audit must append it to the generic line, ` — ` and all, not substitute for it and not run it together",
+  );
 });
 
-// The other half of #304, and the half a careless append breaks: git says
-// nothing in either permission state, so the line must come out exactly as it
-// did before — no trailing separator, no empty parenthetical, nothing dangling
-// where the diagnostic would have gone. One test for both, because it is one
-// behaviour: an empty capture appends nothing.
-test("the states git is silent about print the unknown line unchanged", (t) => {
+// A stash object that is CORRUPT rather than missing reaches the same branch —
+// list empty at rc 0, show-ref rc 0 — but git answers in SEVEN lines there, and
+// a bad `objects/info/alternates` both adds three more and puts a backslash in
+// them. That fixture is what makes the two hazards of `msg="$msg — $diag";
+// echo "$msg"` observable at once: unfolded newlines put git's text at column 0
+// where only the audit's own `$ git ...` step headers belong, and `echo` under
+// `#!/bin/sh` eats the operator's line from the `\c` onward.
+//
+// The alternates path also makes git's LATER calls complain at column 0, which
+// is why the fold assertion below is scoped to the diagnostic's own text rather
+// than to every unindented line.
+test("a multi-line diagnostic holding a backslash arrives folded and whole", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644);
+  writeFileSync(obj, "junk\n");
+  mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
+  writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
+
+  const r = audit(c);
+  assert.equal(r.json.stash, null, "a corrupt (not missing) stash object must reach the unknown branch too");
+  assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault; the audit must not drop it");
+  assert.match(
+    stashLine(r),
+    /\/no\\clue\/objects/,
+    "`echo` expands the `\\c` and truncates the line there — the path must arrive verbatim",
+  );
+  const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
+  assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
+});
+
+// The other half of #304, and the half a careless append breaks: the `stash
+// list` this branch captures says nothing in either permission state, so the
+// line must come out exactly as it did before — no trailing separator, no
+// empty parenthetical, nothing dangling where the diagnostic would have gone.
+// One test for both, because it is one behaviour: an empty capture appends
+// nothing. Git as a whole is NOT silent in both — see the narrowing below.
+test("the states `stash list` is silent about print the unknown line unchanged", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
   for (const path of [[".git", "logs", "refs", "stash"], [".git", "refs", "stash"]]) {
     const c = repo(t);
@@ -363,7 +392,16 @@ test("the states git is silent about print the unknown line unchanged", (t) => {
     const r = audit(c);
     assert.equal(r.json.stash, null, `${path.join("/")}: fixture must reach the unknown branch`);
     assert.equal(stashLine(r), UNKNOWN_LINE, `${path.join("/")}: git said nothing, so nothing may be appended`);
-    assert.doesNotMatch(r.stderr, /fatal:|warning:/, `${path.join("/")}: git emitted no diagnostic here`);
+    // Reflog only. The `stash list` this branch captures is silent in both
+    // states, but git as a whole is not: in the `refs/stash` case the
+    // `show-ref` cross-check above prints `fatal: git show-ref: bad ref
+    // refs/stash (0000…)`, and the audit only looks silent there because that
+    // call runs under `>/dev/null 2>&1` (#481). Asserting no `fatal:` over
+    // that state would convert an unstated ceiling into an invariant, and make
+    // the follow-up edit a passing test.
+    if (path.includes("logs")) {
+      assert.doesNotMatch(r.stderr, /fatal:|warning:/, "the unreadable reflog is the one state git says nothing about at all");
+    }
   }
 });
 
