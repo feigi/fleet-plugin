@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,17 +51,40 @@ const commit = (w, msg) => {
 };
 
 /** Bare origin + working clone with one commit on main. Returns the clone dir. */
-function repo(t) {
-  const root = mkdtempSync(join(tmpdir(), "reap-"));
+function repo(t, dir = "w") {
+  // realpathSync: macOS resolves /var through /private, so a path built from
+  // the raw mkdtemp result would never string-equal what git itself reports
+  // in `worktree list --porcelain` (git canonicalises). Resolved once here,
+  // before any worktree path is derived from it.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "reap-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
-  const w = join(root, "w");
+  const w = join(root, dir);
   execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
   execFileSync("git", ["clone", "-q", origin, w], { env: ENV });
   commit(w, "root");
   git(w, "branch", "-M", "main");
   git(w, "push", "-q", "-u", "origin", "main");
   return w;
+}
+
+/**
+ * Like `mergedGoneBranch`, but the commit lands in a LINKED worktree under
+ * `.worktrees/` instead of the main checkout — reap.sh's worktree-removal
+ * path had no fixture at all before this file (a dry run and `--apply` could
+ * each mispredict the other and nothing here would notice). Returns the
+ * worktree's absolute path.
+ */
+function mergedGoneBranchWithWorktree(w, name, msg) {
+  const wt = join(w, ".worktrees", name);
+  git(w, "worktree", "add", "-q", wt, "-b", name, "main");
+  commit(wt, msg);
+  git(wt, "push", "-q", "-u", "origin", name);
+  git(w, "merge", "-q", "--no-ff", "-m", `merge ${name}`, name);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", name);
+  git(w, "fetch", "-q", "--prune", "origin");
+  return wt;
 }
 
 /**
@@ -327,4 +350,191 @@ test("the design spec's script-surface row carries the keep reason this script a
     row.includes(label),
     `the spec row must quote the keep reason verbatim, and does not carry "${label}".\nrow: ${row}`,
   );
+});
+
+// Worktree-removal coverage (#83, #128). Before this file, reap.sh's
+// worktree-removal path had NO fixture at all: a merged [gone] branch was
+// always tested without a worktree, so the dirty check, the linkage guard and
+// the absent-directory path never ran under test.
+
+test("a healthy clean worktree on a merged [gone] branch is reaped, directory and all", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  assert.ok(existsSync(wt), "fixture");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(stderr, /KEEP/);
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.equal(existsSync(wt), false, "the worktree directory itself must be removed");
+});
+
+test("a dirty worktree on an otherwise-mergeable [gone] branch is kept, not reaped", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^dirty worktree /);
+  assert.match(stderr, /KEEP feature\/merged — dirty worktree/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true, "a dirty worktree must survive untouched");
+});
+
+test("a [gone] branch whose worktree directory was deleted by hand is reaped, never kept as dirty (#83)", (t) => {
+  // The bug: `|| echo dirty` folds ANY failed status — including one that
+  // failed because the directory is not there at all — into "dirty", pinning
+  // the branch forever. A deleted worktree holds nothing to protect.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  rmSync(wt, { recursive: true, force: true });
+  assert.match(git(w, "worktree", "list"), /feature\/merged/, "fixture: the stale registration must still be listed");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"], "a directory that is not there holds no work to protect");
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.doesNotMatch(git(w, "worktree", "list"), /feature\/merged/, "the stale registration must not survive the run");
+});
+
+test("a dry run and --apply agree about a deleted worktree directory (#128)", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  rmSync(wt, { recursive: true, force: true });
+
+  const dry = runReap(w, []);
+  assert.equal(dry.code, 0);
+  assert.deepEqual(dry.json.reaped, ["feature/merged"], "a dry run must predict the same outcome --apply produces");
+  assert.deepEqual(dry.json.kept, []);
+
+  const applied = runReap(w, ["--apply"]);
+  assert.deepEqual(applied.json.reaped, ["feature/merged"]);
+});
+
+test("a [gone] branch checked out in the MAIN checkout is kept, with the reason that is true", (t) => {
+  // The enumeration does not exclude the main worktree: `worktree list
+  // --porcelain` emits a `branch refs/heads/...` line for it, so a [gone]
+  // branch checked out there binds $wt to the main checkout. Its `.git` is a
+  // DIRECTORY, so the `-f` linkage guard read it as "no .git linkage" — false;
+  // git answers about that repo correctly through it. Both halves matter and
+  // are asserted separately: the reason must be true, and the dry run must not
+  // promise a reap that `git worktree remove` and `git branch -D` both refuse.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  git(w, "checkout", "-q", "feature/merged");
+
+  const dry = runReap(w, []);
+  const applied = runReap(w, ["--apply"]);
+
+  for (const { json } of [dry, applied]) {
+    assert.deepEqual(json.reaped, []);
+    assert.equal(json.kept.length, 1);
+    assert.equal(json.kept[0].branch, "feature/merged");
+    assert.match(json.kept[0].reason, /is the main checkout/);
+    assert.doesNotMatch(json.kept[0].reason, /no \.git linkage/, "git answers correctly through a .git directory");
+  }
+  assert.deepEqual(dry.json.kept, applied.json.kept, "a dry run must predict what --apply produces");
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a worktree behind an unreadable parent is kept, never reaped as clean", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "precious.txt"), "work that exists nowhere else\n");
+  const parent = join(w, ".worktrees");
+
+  chmodSync(parent, 0o000);
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+  chmodSync(parent, 0o755);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /cannot tell whether worktree/);
+  assert.doesNotMatch(json.kept[0].reason, /dirty/, "an unanswerable probe must not be misreported as a dirty one");
+  assert.match(stderr, /KEEP feature\/merged — cannot tell whether worktree/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("a worktree whose .git file is gone is kept, never reaped as clean (#128)", (t) => {
+  // The directory EXISTS (so a bare `[ -e ]` says present) and `git -C` does
+  // not fail on a missing `.git` — it walks UP to the enclosing repo and
+  // answers about THAT at rc 0. `.worktrees/` gitignored and the parent clean
+  // makes the leaked answer empty: a positive "clean" produced without ever
+  // looking at the worktree, which the old code would have reaped on.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".worktrees/\n");
+  git(w, "add", ".gitignore");
+  git(w, "commit", "-q", "-m", "ignore the worktrees dir");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "precious.txt"), "work that exists nowhere else\n");
+  rmSync(join(wt, ".git"));
+  assert.equal(git(w, "status", "--porcelain"), "", "fixture: the leaked answer really is an empty one");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /no \.git linkage/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true, "the worktree directory and its work must survive untouched");
+  assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("a worktree whose .git is a dangling symlink is kept, never reaped as clean (#128)", (t) => {
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".worktrees/\n");
+  git(w, "add", ".gitignore");
+  git(w, "commit", "-q", "-m", "ignore the worktrees dir");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  rmSync(join(wt, ".git"));
+  symlinkSync(join(wt, "nowhere"), join(wt, ".git"));
+
+  const { json } = runReap(w, ["--apply"]);
+
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /no \.git linkage/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a repo path containing a space still finds and reaps the branch's worktree", (t) => {
+  const w = repo(t, "my repos");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(existsSync(wt), false);
+});
+
+test("a repo path containing a space still finds a dirty worktree and keeps it", (t) => {
+  const w = repo(t, "my repos");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /^dirty worktree /);
+  assert.ok(json.kept[0].reason.includes("/my repos/.worktrees/feature/merged"), json.kept[0].reason);
 });
