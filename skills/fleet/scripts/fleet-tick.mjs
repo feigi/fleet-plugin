@@ -100,10 +100,10 @@ export function formatLines(rows) {
 // parse argv or touch the network, or the pure half stops being unit-testable.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { makeDie } from "./arg.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -112,17 +112,11 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // candidates.mjs enforces on its own query.
 const PR_LIMIT = 200;
 
-// writeSync, not console.error: on a pipe process.stderr.write is async and the
-// process.exit below discards whatever is still queued, so the refusal is the
-// first thing lost — measured in this repo (#176).
-function die(msg) {
-  try {
-    writeSync(2, `\n${NAME}: ${msg}\n`);
-  } catch {
-    // Message may be lost; the exit code must not be.
-  }
-  process.exit(2);
-}
+// die() shared with the other fleet scripts (writeSync-based, pipe-safe —
+// see arg.mjs for the #176/#328/#363 rationale). This file parses its own
+// options with node:util's parseArgs rather than arg()/has() — see OPTIONS
+// below — so only die() is shared here.
+const die = makeDie(NAME);
 
 const OPTIONS = {
   implementers: { type: "string" },

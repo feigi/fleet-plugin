@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
+const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 
 const STUB = `#!/bin/sh
 # Stand-in for \`gh issue list … --jq <expr>\`. Applies the expression gh was
@@ -845,9 +846,33 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // Stripped first, and this is not optional: against raw source a `die()`
   // genuinely reverted to console.error with the good shape parked in a block
   // comment passes 375/375 (measured), because a `^…/m` anchor matches inside
-  // the comment. Dropping either half also drops the only pin on #176, which
-  // is what the refusal-text assertion this test used to carry was doing.
-  assert.match(stripComments(readFileSync(SCRIPT, "utf8")), /function die\(msg\) \{\s*try \{\s*writeSync\(2,/);
+  // the comment. Dropping this pin also drops the only pin on #176, which is
+  // what the refusal-text assertion this test used to carry was doing.
+  //
+  // #367 moved die() into arg.mjs's makeDie() — candidates.mjs's own source no
+  // longer contains the try/catch shape, so a lift pin against SCRIPT alone
+  // would now test a module nothing here calls (a source text-lift pin tests
+  // a COPY). The SHAPE is pinned here; the CALL SITE that wires it in is
+  // pinned for all seven consumers in arg.test.mjs, not here — pinning it here
+  // was vacuous: candidates.mjs can define a local console.error makeDie(),
+  // keep `const die = makeDie(NAME);` verbatim, and the suite stays green at
+  // 640/640 (measured). That line pins a NAME, not the module it resolves to.
+  //
+  // Each fragment anchored at a line start under /m — the old regex joined
+  // them with a bare `\s*` and no anchor at all. stripComments() blanks
+  // whole-line comments only (its own documented ceiling), so a trailing
+  // `code; // function die(msg) { try { writeSync(2,` survives stripping and
+  // satisfied the old regex with die() genuinely reverted (measured).
+  // Requiring each fragment at a line START refuses that — the decoy sits
+  // mid-line, and a whole-line decoy is blanked to "". `\s*^\s*` between the
+  // fragments rather than a literal `\n` on purpose: a future editor adding a
+  // comment line inside makeDie must not turn this pin red (measured — the
+  // adjacency form over-fired on exactly that). Do not terminate the lines
+  // with `$` either; that over-fires on a trailing comment (measured).
+  assert.match(
+    stripComments(readFileSync(ARG_MODULE, "utf8")),
+    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*writeSync\(2,/m,
+  );
 });
 
 test("gh missing entirely is named as ENOENT — the shape that prints nothing at all", () => {

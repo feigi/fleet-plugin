@@ -6,7 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classify, computeStats } from "./diff-stats.mjs";
@@ -178,4 +179,24 @@ test("CLI: --pr given an empty value dies naming the flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", ""], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--pr needs a value/);
+});
+
+// The other half of arg()'s guard: every case above is a value it must
+// REFUSE. Nothing above ever hands main() a well-formed value, so #367's
+// shared arg() could return `undefined` for every accepted input and this
+// file would stay green. `--pr 5` must reach gh and succeed.
+test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  const gh = join(bin, "gh");
+  writeFileSync(gh, '#!/bin/sh\necho \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n');
+  chmodSync(gh, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.pr, 5);
+  assert.equal(payload.profile, "single-file");
 });

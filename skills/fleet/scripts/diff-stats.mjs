@@ -17,8 +17,8 @@
 // this file is executed directly.
 
 import { execFileSync } from "node:child_process";
-import { writeSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { makeDie, makeArg } from "./arg.mjs";
 
 const NAME = "diff-stats";
 
@@ -99,34 +99,14 @@ export function computeStats(files, changedFiles) {
 
 // --- CLI (runs only when executed directly, never on import) ---------------
 
-// writeSync, not console.error: stderr on a pipe is async and the exit below
-// discards what is still queued, so a large forwarded child stderr swallows
-// this line — the refusal is queued last and dropped first (#176). The leading
-// newline is load-bearing: writeSync goes straight to the fd while the stream
-// is still draining, so without it this text lands mid-line inside the child's
-// output and stops matching every line-anchored reader.
-function die(msg) {
-  writeSync(2, `\n${NAME}: ${msg}\n`);
-  process.exit(2);
-}
-
-// `--pr` is the only flag read here, and the `if (!pr) die(...)` below already
-// catches a trailing `--pr` — `undefined` is falsy — so this was never a
-// silent-widening site the way ci-state.mjs's was. This makes the refusal
-// explicit and immediate, naming the flag, instead of falling through to the
-// generic usage message. `--pr=5` is caught too: `indexOf` cannot see it, so
-// it previously fell through to the same generic message rather than a clear
-// "needs a value" (#169).
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i === -1) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
-    return null;
-  }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
-  return value;
-}
+// die()/arg() shared with the other fleet scripts — see arg.mjs for the
+// fail-open (#61/#169) and pipe-safety (#176/#328) rationale. `--pr` is the
+// only flag read here, and the `if (!pr) die(...)` below already caught a
+// trailing `--pr` on its own — `undefined` is falsy — so this file was never
+// a silent-widening site the way ci-state.mjs's was; the shared arg() just
+// makes the refusal explicit and immediate, naming the flag.
+const die = makeDie(NAME);
+const arg = makeArg(die);
 
 function run(cmd, args) {
   console.error(`$ ${cmd} ${args.join(" ")}`);
