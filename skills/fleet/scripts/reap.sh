@@ -17,6 +17,19 @@ set -eu
 NAME=reap
 die() { echo "$NAME: $1" >&2; exit 2; }
 
+# Is $1 established ABSENT, or merely a path this script cannot stat? A bare
+# `[ -e ]` failure is both — an unreadable parent fails it identically to a
+# directory that was actually removed — and only the second is nothing to
+# protect. Walk up to the nearest ancestor that exists and require THAT to be
+# searchable: only then is "not there" a measurement, not a guess. Same shape
+# and same reason as release-ticket.sh's own `gone()` (not shared code — the
+# callers differ in nothing else); named there, not by line number, per #129.
+gone() {
+  look=$1
+  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+  [ ! -e "$1" ] && [ -x "$look" ]
+}
+
 apply=false
 [ "${1:-}" = "--apply" ] && apply=true
 [ $# -gt 1 ] && die "usage: reap.sh [--apply]"
@@ -68,38 +81,95 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     continue
   fi
 
+  # The path is the whole rest of the line, never awk's $2: `worktree list
+  # --porcelain` prints it raw, so a checkout living under a directory with a
+  # space in it — ordinary on macOS — was otherwise truncated at the first
+  # one, and every check below then ran against a wrong, nonexistent path.
   wt=$(git worktree list --porcelain |
-       awk -v b="refs/heads/$b" '/^worktree /{w=$2} /^branch /&&$2==b{print w}')
+       awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}')
 
   if [ -n "$wt" ]; then
-    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null || echo dirty)" ]; then
-      keep "$b" "dirty worktree $wt"
+    # Three states, never the two `|| echo dirty` used to collapse it to:
+    # present (readable decides), established absent (nothing to protect —
+    # reap.sh's OWN branches never rename their worktree away from `[gone]`,
+    # so a directory that is really not there holds no work), or cannot tell
+    # (keep — an unanswerable probe authorizes nothing, the same fail-closed
+    # direction the cherry check above already takes). `-e`/`gone` first,
+    # before any git command runs through $wt, so a genuinely deleted
+    # directory never reaches a status call that would fail on it and read as
+    # dirty forever (#83).
+    if [ -e "$wt" ]; then
+      wt_present=true
+    elif gone "$wt"; then
+      wt_present=false
+    else
+      keep "$b" "cannot tell whether worktree $wt exists"
       continue
     fi
-    # `git worktree remove` refuses on modified and untracked files, but NOT on
-    # ignored ones — it deletes those silently. In a NON-fleet worktree a precious
-    # ignored file (.env, scratch) must not vanish, so check --ignored and keep.
-    # A fleet worktree is different: claim-ticket.sh creates it under .worktrees/
-    # fresh from origin/main. Merged (cherry-clean above) + tracked-clean
-    # (--porcelain above), its ONLY ignored files are machine-generated
-    # (agent-test, node_modules, build output) — nothing precious. Since every
-    # fleet worktree carries them, keeping on ignored files would strand them all
-    # and defeat reap. Run the ignored-keep for non-fleet trees only, keyed on the
-    # .worktrees/ home (robust to an older tree that predates the agent-test marker).
-    case "$wt" in
-      */.worktrees/*) : ;;
-      *)
-        if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
-          keep "$b" "worktree $wt unreadable (git status --ignored failed)"
-          continue
-        fi
-        ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
-        if [ -n "$ignored" ]; then
-          keep "$b" "ignored files present in $wt: $ignored"
-          continue
-        fi
-        ;;
-    esac
+
+    if [ "$wt_present" = true ]; then
+      # Establish the .git linkage exists before trusting anything git says
+      # through it. Delete a worktree's .git file outright and `git -C` does
+      # not fail: it walks UP to the enclosing repo and answers about THAT at
+      # rc 0 — which the status call below would otherwise believe is this
+      # worktree's own clean status. `-f`, not `-e`: an empty `.git`
+      # directory and a dangling `.git` symlink leak the identical rc-0
+      # answer. `-x "$wt"` stands aside for the git call below when $wt
+      # itself cannot be searched, rather than guessing "no linkage" about a
+      # worktree that was never actually looked at. This `$wt` is never the
+      # main checkout — it was found by matching a `[gone]` branch above, and
+      # `git worktree add` always writes `.git` as a regular file — so unlike
+      # worktree-audit.sh this does not also need to accept a `.git`
+      # directory. Reference shape: release-ticket.sh's own linkage guard,
+      # same reason worktree-audit.sh gives its copy (#128).
+      if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
+        keep "$b" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
+        continue
+      fi
+      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
+        keep "$b" "worktree $wt could not be read"
+        continue
+      fi
+      if [ -n "$status_out" ]; then
+        keep "$b" "dirty worktree $wt"
+        continue
+      fi
+
+      # `git worktree remove` refuses on modified and untracked files, but NOT
+      # on ignored ones — it deletes those silently. In a NON-fleet worktree a
+      # precious ignored file (.env, scratch) must not vanish, so check
+      # --ignored and keep. A fleet worktree is different: claim-ticket.sh
+      # creates it under .worktrees/ fresh from origin/main. Merged
+      # (cherry-clean above) + tracked-clean (--porcelain above), its ONLY
+      # ignored files are machine-generated (agent-test, node_modules, build
+      # output) — nothing precious. Since every fleet worktree carries them,
+      # keeping on ignored files would strand them all and defeat reap. Run
+      # the ignored-keep for non-fleet trees only, keyed on the .worktrees/
+      # home (robust to an older tree that predates the agent-test marker).
+      # Gated on $wt_present: an established-absent directory has no ignored
+      # files to strand, and running this against it would read the same
+      # rc-nonzero "unreadable" it was already ruled out from being.
+      case "$wt" in
+        */.worktrees/*) : ;;
+        *)
+          if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
+            keep "$b" "worktree $wt unreadable (git status --ignored failed)"
+            continue
+          fi
+          ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
+          if [ -n "$ignored" ]; then
+            keep "$b" "ignored files present in $wt: $ignored"
+            continue
+          fi
+          ;;
+      esac
+    fi
+
+    # Reached with $wt either present-readable-clean or established absent —
+    # `git worktree remove` accepts a prunable-because-absent entry at rc 0
+    # and clears the stale registration outright (verified, git 2.50.1, same
+    # as release-ticket.sh measures for its own delete), so no separate branch
+    # is needed for the absent case.
     if [ "$apply" = true ]; then
       # No --force, ever. It refuses on modified and untracked files; the
       # ignored-file gap it does NOT cover is handled by the check above.
