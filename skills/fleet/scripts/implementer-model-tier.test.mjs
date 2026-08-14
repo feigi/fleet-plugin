@@ -40,9 +40,9 @@ function section(source, startAnchor, endAnchor, label) {
 const step4 = () =>
   section(RUN_TEAM, "4. **Read each survivor in full", "5. **Collision scan", "run-team phase 0 step 4");
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch at the tier phase 0 classed", "**Guard: measure per PR", "run-team phase 2 dispatch rule");
+  section(RUN_TEAM, "**Dispatch at the tier phase 0 classed", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
-  section(RUN_TEAM, "**Guard: measure per PR", "One named member per ticket", "run-team phase 2 tier guard");
+  section(RUN_TEAM, "**Guard: accumulate per PR", "One named member per ticket", "run-team phase 2 tier guard");
 
 test("phase 0 step 4 binds each ticket class to its tier, in the read it already pays for", () => {
   const slice = step4();
@@ -155,7 +155,7 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // "wave" everywhere else in this file means MERGE wave, so the original
   // "compare this wave against the prior wave" named two sets nobody can
   // enumerate.
-  assert.match(slice, /measure per PR, not per wave/, "the guard's unit is no longer the PR");
+  assert.match(slice, /unit is the PR/, "the guard's unit is no longer the PR");
   assert.match(
     slice,
     /no implementer waves/,
@@ -209,7 +209,7 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // guard reads clean by construction. Unstated, that silence reads as a pass.
   assert.match(
     slice,
-    /never read its silence as a pass/,
+    /never read the guard's silence as a pass/i,
     "the guard no longer warns that its first-run silence is a missing baseline, not a pass",
   );
 });

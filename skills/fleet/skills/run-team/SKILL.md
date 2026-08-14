@@ -258,9 +258,12 @@ rule and therefore the maintainer's call, not yours.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot
-and eats the saving the cheaper implementer made. `closed_own_ticket` trending
-`no`, or the implementer share in `board.mjs build`'s `.spend.roles` climbing →
-revert **`class=routine`** to top tier, never the rule wholesale. Per-`impl-<N>`
+and eats the saving the cheaper implementer made. Once the file holds at least
+three `class=routine` PRs, `closed_own_ticket` trending `no`, or the implementer
+share in `board.mjs build`'s `.spend.roles` climbing →
+revert **`class=routine`** to top tier, never the rule wholesale. That minimum is
+over the accumulated file, never one run — without it a single noisy PR reverts a
+class. Per-`impl-<N>`
 spend is not available: `.spend.top` labels agents by their Agent-call
 `description`, not their member name.
 
