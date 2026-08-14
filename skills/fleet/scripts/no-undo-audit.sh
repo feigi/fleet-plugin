@@ -10,7 +10,9 @@
 set -eu
 
 NAME=no-undo-audit
-die() { echo "$NAME: $1" >&2; exit 2; }
+# `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
+# caller-supplied path, and this is the one place they all route through.
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # JSON string escaping. Same helper and same pipeline as release-ticket.sh's
 # `jstr` — backslashes BEFORE quotes, because escaping the quote first turns the
@@ -239,17 +241,24 @@ git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null \
 #    turn a failed `status` into empty output and print "clean" over a dirty
 #    tree — and since the stash count stopped gating, nothing else would catch
 #    it. Unanswerable is exit 2, never exit 0. Same rule as worktree-audit.sh.
-# `printf`, not `echo`: `$wt` is a caller-supplied path, and both dash and
-# macOS sh expand escapes in an `echo` operand — a worktree named `back\clue`
-# truncates this line and the next stderr line collides with it. No corruption
-# needed, unlike the same hazard on the stash line below. Same class still live
-# at the `$porcelain`, `$conflicts` and `$at_risk` echoes; see the follow-up.
+# `printf`, not `echo`, here and at every other site carrying caller text.
+# This script is `#!/bin/sh`, and both dash and macOS sh expand escapes in an
+# `echo` OPERAND — `\c` truncates the line and swallows its newline, so the
+# next stderr line collides with it. `$wt` is a caller-supplied path, so a
+# worktree named `back\clue` does it with no corruption at all. Recognised:
+# `\c \t \n \b \f \r \v \\ \0`; unknown ones like `\s` pass through, which is
+# why a `back\slash` fixture reads as coverage and catches nothing.
+#
+# The other operands are safe by construction, not by luck: `$stash` is a
+# digit count or the literal `null`, and git forbids a backslash in a refname
+# (`check-ref-format` rejects it, `git branch` refuses to create it), so
+# `$base`, `$branch` and `$fork` cannot carry one.
 printf '$ git -C %s status --porcelain\n' "$wt" >&2
 porcelain=$(git -C "$wt" status --porcelain) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
   clean=false
-  echo "$porcelain" | sed 's/^/    /' >&2
+  printf '%s\n' "$porcelain" | sed 's/^/    /' >&2
 else
   clean=true
   echo "    clean" >&2
@@ -420,7 +429,7 @@ case "$conflicts" in
   *"$nl"*) die "a conflicting path contains a newline — cannot build a pathspec for it" ;;
 esac
 if [ -n "$conflicts" ]; then
-  echo "$conflicts" | sed 's/^/    conflict: /' >&2
+  printf '%s\n' "$conflicts" | sed 's/^/    conflict: /' >&2
 else
   echo "    no conflicting files" >&2
 fi
@@ -451,7 +460,7 @@ if [ -n "$conflicts" ]; then
   at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
     || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
-  [ -n "$at_risk" ] && echo "$at_risk" | sed 's/^/    at risk: /' >&2
+  [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
 fi
 at_risk_json=$(printf '%s' "$at_risk" | jarr)
 at_risk_rewritten_json=$(printf '%s' "$at_risk" | jarr_rewritten)

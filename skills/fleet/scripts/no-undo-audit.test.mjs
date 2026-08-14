@@ -230,6 +230,41 @@ test("a worktree path holding a backslash escape reaches the operator whole", (t
   );
 });
 
+// The same hazard on the refusal path. `die` interpolates `$wt` into 11 of
+// its messages and is the single place they all route through, so one `printf`
+// covers every one of them.
+test("a die message naming an unreachable worktree keeps the path whole", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-back\\clue-notarepo`;
+  mkdirSync(notARepo);
+
+  const r = audit({ w: notARepo, branch: c.branch });
+  assert.equal(r.status, 2, `a non-worktree is unanswerable, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`${notARepo} is not a git worktree`),
+    `\`echo\` truncates the refusal at the \`\\c\`; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
+// `$porcelain` carries the uncommitted file list — the audit's whole subject,
+// and the lines it prints when it REFUSES. A filename is free to hold `\c`.
+test("an uncommitted path holding a backslash escape survives the refusal listing", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "back\\clue.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, `uncommitted work must refuse; got ${r.status} ${r.stderr}`);
+  // git C-quotes a path holding a backslash, so the bytes on the wire are `\\`.
+  // `echo` collapses that pair to one, silently rewriting the quoted path into
+  // a different one — corruption rather than truncation here, but on the very
+  // line the refusal prints. `-z` turns the same quoting OFF for the conflict
+  // list below, which is why that one truncates outright instead.
+  assert.ok(
+    r.stderr.includes('?? "back\\\\clue.txt"'),
+    `the C-quoted path must keep its doubled backslash; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
 test("a pre-existing stash does not refuse a clean worktree", (t) => {
   const c = repo(t);
   stashSomething(c.w);
@@ -573,6 +608,25 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 // The \x01 rides along because git stores control bytes in a subject happily and
 // JSON forbids them unescaped — dropping the scrub leaves the payload
 // unparseable, which is this PR's own defect class one byte over.
+// `$conflicts` and `$at_risk` are the last two operands carrying caller text,
+// and `$at_risk` is the most reachable of the whole class: it holds
+// `git log --oneline` output, so an ordinary commit subject is enough — no
+// corrupt repo, no exotic filename. It is also the audit's most consequential
+// line, the commits a careless resolution deletes. One fixture pins both.
+test("a backslash escape in a conflicting path and in an at-risk subject reaches the operator whole", (t) => {
+  const c = conflictRepo(t, "back\\clue.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "back\\clue.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: the \\connection retry");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.match(r.stderr, /^    conflict: back\\clue\.txt$/m, "`echo` truncates the conflict line at the `\\c`");
+  assert.match(r.stderr, /^    at risk: \S+ fix: the \\connection retry$/m, "`echo` truncates the at-risk line at the `\\c` — an ordinary commit subject is enough to lose it");
+});
+
 test("a quote, a backslash and a control byte in a commit subject keep the payload parseable", (t) => {
   const c = conflictRepo(t, "plain.txt");
   git(c.w, "checkout", "-q", "main");
