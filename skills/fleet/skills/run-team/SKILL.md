@@ -258,12 +258,18 @@ rule and therefore the maintainer's call, not yours.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot
-and eats the saving the cheaper implementer made. Once the file holds at least
-three `class=routine` PRs, `closed_own_ticket` trending `no`, or the implementer
-share in `board.mjs build`'s `.spend.roles` climbing →
-revert **`class=routine`** to top tier, never the rule wholesale. That minimum is
-over the accumulated file, never one run — without it a single noisy PR reverts a
-class. Per-`impl-<N>`
+and eats the saving the cheaper implementer made. The revert needs a floor AND a
+trigger, and neither alone. **Floor:** the file holds at least
+three `class=routine` PRs spanning **two or more distinct `run_date`s**.
+**Trigger, read only once the floor is met:** **two or more** of those rows carry
+`closed_own_ticket` `no`, or the implementer
+share in `board.mjs build`'s `.spend.roles` is climbing →
+revert **`class=routine`** to top tier, never the rule wholesale. That floor is
+over the accumulated file, never one run — and the `run_date` half is what makes
+that literal instead of merely asserted: a PR count alone is satisfied by a
+single run's rows, which is the state this file ships in. Without the floor a
+single noisy PR reverts a class; without a `no` count, "trending" names no
+threshold and whether the guard fires is undefined. Per-`impl-<N>`
 spend is not available: `.spend.top` labels agents by their Agent-call
 `description`, not their member name.
 
@@ -432,8 +438,9 @@ multi-select**, and **a judgement the evidence cannot settle**.
   reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
   one only if it genuinely is. **This edge fires on the fix-applier's own push, so
   it is exactly where a ruling you still owe it is outstanding — never dispatch off
-  it while you do.** Hand the ruling over, wait for the final report, then
-  dispatch (below). Then run the reconcile (below).
+  it while you do.** Empty your outbox to it first — including any ruling you have
+  withdrawn or reversed — then dispatch (below); a final report is not proof it
+  stopped. Then run the reconcile (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -448,7 +455,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
   waiting for it stalls the whole PR — the same silent-stall shape #111 reported
   before this verdict existed. Dispatch the finisher off the reviewer's final
   verdict instead, the moment it lands — and, same as above, never while you still
-  owe it a ruling. The finisher's gate is then the
+  owe it a ruling — or hold anything else it has not received, a ruling you have
+  withdrawn or reversed included. The finisher's gate is then the
   `--declare-no-ci` declaration, not a `check` job: with it, label off the
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. Absence never reads as

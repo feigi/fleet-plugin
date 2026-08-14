@@ -20,4 +20,4 @@
 2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
 2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
 2026-08-13	452	265	routine	sonnet	no	yes	REGRESSION: moved guard became script's last command, default dry run 0->1 — the exact defect #265 existed to remove; 4 dimensions found it; suite 616-green because all 8 call sites passed --apply
-2026-08-13	462	364	routine	sonnet	yes	yes	added test comment claimed ERR_PARSE_ARGS_INVALID_OPTION_VALUE unreachable ("nothing downstream can raise it") — arg() is indexOf-gated, `--limit 5 --limit` raises it; separately its own --open= tests were position-vacuous (argv[3] mutant survived 34/34)
+2026-08-13	462	364	routine	sonnet	yes	yes	added test comment claimed ERR_PARSE_ARGS_INVALID_OPTION_VALUE unreachable ("nothing left downstream can raise it") — arg() is indexOf-gated, `--limit 5 --limit` raises it; separately its own --open= tests were position-vacuous (argv[3] mutant survived 34/34)
