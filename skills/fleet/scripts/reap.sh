@@ -116,33 +116,18 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       # directory and a dangling `.git` symlink leak the identical rc-0
       # answer. `-x "$wt"` stands aside for the git call below when $wt
       # itself cannot be searched, rather than guessing "no linkage" about a
-      # worktree that was never actually looked at. This `$wt` is never the
-      # main checkout — it was found by matching a `[gone]` branch above, and
-      # `git worktree add` always writes `.git` as a regular file — so unlike
-      # worktree-audit.sh this does not also need to accept a `.git`
-      # directory. Reference shape: release-ticket.sh's own linkage guard,
-      # same reason worktree-audit.sh gives its copy (#128).
-      # The main checkout reaches here, and must be answered before the
-      # linkage guard below sees it. `git worktree list --porcelain` emits a
-      # `branch refs/heads/...` line for the main worktree too, so a `[gone]`
-      # branch that is the main checkout's own current branch binds `$wt` to
-      # it — measured; the enumeration above does not exclude it. There `.git`
-      # is a DIRECTORY (a real one always holds `HEAD` directly; an empty
-      # stand-in or dangling symlink does not, which is what keeps this from
-      # matching the broken-linkage shapes), not the regular file
-      # `git worktree add` writes, so the `-f` guard below would call it "no
-      # .git linkage" — measurably false, git answers about that repo
-      # correctly through it. A reap is impossible here either way
-      # (`git worktree remove` refuses a main worktree, `git branch -D`
-      # refuses a checked-out branch), so keep and say which, in the dry run
-      # and under --apply alike — the plain `-f` guard printed a false cause,
-      # and dropping it entirely leaves the dry run promising a reap that can
-      # never happen (#82).
-      if [ -d "$wt/.git" ] && [ -f "$wt/.git/HEAD" ]; then
-        keep "$b" "worktree $wt is the main checkout — cannot remove it or delete the branch checked out in it"
-        continue
-      fi
-      if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
+      # worktree that was never actually looked at. `$wt` CAN be the main
+      # checkout: `git worktree list --porcelain` emits a `branch
+      # refs/heads/...` line for the main worktree too, so a `[gone]` branch
+      # checked out there binds `$wt` to it — measured, and the enumeration
+      # above does not exclude it. There `.git` is a DIRECTORY through which
+      # git answers correctly, so accept that shape the way worktree-audit.sh
+      # does rather than reporting a broken linkage that is not broken: a real
+      # git dir always has `HEAD` sitting directly in it, and the two shapes a
+      # deleted linkage takes — an empty stand-in directory, a dangling
+      # symlink — have neither. Reference shape: release-ticket.sh's own
+      # linkage guard, same reason worktree-audit.sh gives its copy (#128).
+      if [ -x "$wt" ] && [ ! -f "$wt/.git" ] && [ ! -f "$wt/.git/HEAD" ]; then
         keep "$b" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
