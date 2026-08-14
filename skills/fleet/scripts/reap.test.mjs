@@ -421,31 +421,29 @@ test("a dry run and --apply agree about a deleted worktree directory (#128)", (t
   assert.deepEqual(applied.json.reaped, ["feature/merged"]);
 });
 
-test("a [gone] branch in the MAIN checkout is kept for git's own reason, never a false linkage claim", (t) => {
+test("a [gone] branch checked out in the MAIN checkout is kept, with the reason that is true", (t) => {
   // The enumeration does not exclude the main worktree: `worktree list
   // --porcelain` emits a `branch refs/heads/...` line for it, so a [gone]
-  // branch checked out there binds $wt to the main checkout, whose `.git` is a
-  // DIRECTORY. The `-f`-only guard called that "no .git linkage" — false; git
-  // answers about that repo correctly through it. Accepting a real `.git` dir
-  // (one holding HEAD) hands the case to `git worktree remove`, which refuses
-  // a main worktree and supplies the true reason.
-  //
-  // Deliberately NOT pinned here: the dry run still predicts `reaped` for this
-  // branch while --apply keeps it. That asymmetry is pre-existing — it is what
-  // this branch did before #82 touched it — and is tracked separately; pinning
-  // it would cement the wrong half.
+  // branch checked out there binds $wt to the main checkout. Its `.git` is a
+  // DIRECTORY, so the `-f` linkage guard read it as "no .git linkage" — false;
+  // git answers about that repo correctly through it. Both halves matter and
+  // are asserted separately: the reason must be true, and the dry run must not
+  // promise a reap that `git worktree remove` and `git branch -D` both refuse.
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
   git(w, "checkout", "-q", "feature/merged");
 
-  const { code, json } = runReap(w, ["--apply"]);
+  const dry = runReap(w, []);
+  const applied = runReap(w, ["--apply"]);
 
-  assert.equal(code, 0);
-  assert.deepEqual(json.reaped, []);
-  assert.equal(json.kept.length, 1);
-  assert.equal(json.kept[0].branch, "feature/merged");
-  assert.match(json.kept[0].reason, /worktree remove refused/, "git's own refusal, not one this script invented");
-  assert.doesNotMatch(json.kept[0].reason, /no \.git linkage/, "git answers correctly through a .git directory");
+  for (const { json } of [dry, applied]) {
+    assert.deepEqual(json.reaped, []);
+    assert.equal(json.kept.length, 1);
+    assert.equal(json.kept[0].branch, "feature/merged");
+    assert.match(json.kept[0].reason, /is the main checkout/);
+    assert.doesNotMatch(json.kept[0].reason, /no \.git linkage/, "git answers correctly through a .git directory");
+  }
+  assert.deepEqual(dry.json.kept, applied.json.kept, "a dry run must predict what --apply produces");
   assert.equal(branchExists(w, "feature/merged"), true);
 });
 
