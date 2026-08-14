@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -833,6 +833,37 @@ test("origin/main beats the local checkout for the runner probe", () => {
 // install that corrupts the worktree's own linkage, whatever a real cause for
 // that would be — this guard does not get to assume a cause, only detect the
 // hole.
+// The other half of the same guard: `-f` is false for a `.git` that is absent
+// AND for one this process may not stat, so an install that leaves $wt
+// unsearchable was reported as a deletion — sending whoever cleans up (a
+// created worktree, a created branch and an in-progress label are left behind)
+// after a `.git` file that is sitting right there. Both refusals exit 2; only
+// the stated cause differs, which is exactly what triage reads.
+test("an unsearchable worktree refuses with git's own denial, never an absence nothing established", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // Runs with cwd=$wt, so this strips the search bit off the worktree itself
+  // and leaves .git entirely intact — the discriminating input.
+  writeFileSync(join(bin, "npm"), "#!/bin/sh\nchmod 000 .\nexit 0\n", { mode: 0o755 });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  // Before the first assert: a red must not strand a directory nothing can
+  // remove.
+  chmodSync(join(dir, ".worktrees", "42-slug"), 0o755);
+
+  assert.equal(r.status, 2);
+  assert.doesNotMatch(r.stderr, /has no \.git file/, "the .git file was never deleted, only made unreachable");
+  assert.match(r.stderr, /could not verify lockfile state/);
+  assert.match(r.stderr, /Permission denied/, "git's own denial, not one this script invented");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug", ".git")), true);
+});
+
 test("a worktree whose .git vanishes during install refuses instead of trusting a leaked parent status", () => {
   const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
