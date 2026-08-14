@@ -202,6 +202,69 @@ const audit = ({ w, branch }, env = ENV) => {
 /** `atRisk` with the abbreviated SHA stripped, so a test can pin the exact set. */
 const subjects = (r) => r.json.atRisk.map((l) => l.replace(/^\S+ /, ""));
 
+/**
+ * The audit's own stash line, pulled out of stderr whole. Pinned as a literal
+ * rather than a substring match: #304 appends git's diagnostic to this line,
+ * and the thing that must not happen is a separator appended with nothing
+ * after it — which every `/unknown/` match above would still pass.
+ */
+const UNKNOWN_LINE =
+  "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)";
+const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
+
+// `$wt` is caller-supplied and reaches the operator through a step header.
+// Under `#!/bin/sh` an `echo` operand expands escapes, so a worktree whose
+// name holds `\c` truncated that header and the next stderr line landed on
+// top of it. No corrupt repo needed — which makes this a strictly more
+// reachable instance of the same hazard as the stash line's, and the reason
+// `printf` is used at both sites.
+test("a worktree path holding a backslash escape reaches the operator whole", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-back\\clue-");
+  assert.match(c.w, /back\\clue/, "fixture must actually put a `\\c` in the path");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`$ git -C ${c.w} status --porcelain`),
+    "`echo` truncates the header at the `\\c` — it must name the worktree verbatim",
+  );
+});
+
+// The same hazard on the refusal path. `die` interpolates `$wt` into 11 of
+// its messages and is the single place they all route through, so one `printf`
+// covers every one of them.
+test("a die message naming an unreachable worktree keeps the path whole", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-back\\clue-notarepo`;
+  mkdirSync(notARepo);
+
+  const r = audit({ w: notARepo, branch: c.branch });
+  assert.equal(r.status, 2, `a non-worktree is unanswerable, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`${notARepo} is not a git worktree`),
+    `\`echo\` truncates the refusal at the \`\\c\`; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
+// `$porcelain` carries the uncommitted file list — the audit's whole subject,
+// and the lines it prints when it REFUSES. A filename is free to hold `\c`.
+test("an uncommitted path holding a backslash escape survives the refusal listing", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "back\\clue.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, `uncommitted work must refuse; got ${r.status} ${r.stderr}`);
+  // git C-quotes a path holding a backslash, so the bytes on the wire are `\\`.
+  // `echo` collapses that pair to one, silently rewriting the quoted path into
+  // a different one — corruption rather than truncation here, but on the very
+  // line the refusal prints. `-z` turns the same quoting OFF for the conflict
+  // list below, which is why that one truncates outright instead.
+  assert.ok(
+    r.stderr.includes('?? "back\\\\clue.txt"'),
+    `the C-quoted path must keep its doubled backslash; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
 test("a pre-existing stash does not refuse a clean worktree", (t) => {
   const c = repo(t);
   stashSomething(c.w);
@@ -318,6 +381,92 @@ test("a corrupted stash ref reports unknown, not zero", (t) => {
   assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero");
   assert.match(r.stderr, /unknown/);
+});
+
+// #304: of the states above, exactly one has git saying anything —
+// `fatal: bad object refs/stash`. The counting pipeline's `2>/dev/null` threw
+// it away, so the operator got the guess in place of the answer git had
+// already named. Appended, never substituted: in the other states git is
+// silent, and the generic line is all there is.
+test("a corrupted stash ref passes git's own diagnostic through to the operator", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the diagnostic is stderr only — the payload still says unknown");
+  // The whole line, not `startsWith` plus a substring match: those two leave
+  // the text between them unconstrained, so `msg="$msg$diag"` — separator
+  // dropped entirely — satisfies both, as does any other joiner.
+  assert.equal(
+    stashLine(r),
+    `${UNKNOWN_LINE} — fatal: bad object refs/stash`,
+    "git named the fault; the audit must append it to the generic line, ` — ` and all, not substitute for it and not run it together",
+  );
+});
+
+// A stash object that is CORRUPT rather than missing reaches the same branch —
+// list empty at rc 0, show-ref rc 0 — but git answers in SEVEN lines there, and
+// a bad `objects/info/alternates` both adds three more and puts a backslash in
+// them. That fixture is what makes the two hazards of `msg="$msg — $diag";
+// echo "$msg"` observable at once: unfolded newlines put git's text at column 0
+// where only the audit's own `$ git ...` step headers belong, and `echo` under
+// `#!/bin/sh` eats the operator's line from the `\c` onward.
+//
+// The alternates path also makes git's LATER calls complain at column 0, which
+// is why the fold assertion below is scoped to the diagnostic's own text rather
+// than to every unindented line.
+test("a multi-line diagnostic holding a backslash arrives folded and whole", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644);
+  writeFileSync(obj, "junk\n");
+  mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
+  writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
+
+  const r = audit(c);
+  assert.equal(r.json.stash, null, "a corrupt (not missing) stash object must reach the unknown branch too");
+  assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault; the audit must not drop it");
+  assert.match(
+    stashLine(r),
+    /\/no\\clue\/objects/,
+    "`echo` expands the `\\c` and truncates the line there — the path must arrive verbatim",
+  );
+  const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
+  assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
+});
+
+// The other half of #304, and the half a careless append breaks: the `stash
+// list` this branch captures says nothing in either permission state, so the
+// line must come out exactly as it did before — no trailing separator, no
+// empty parenthetical, nothing dangling where the diagnostic would have gone.
+// One test for both, because it is one behaviour: an empty capture appends
+// nothing. Git as a whole is NOT silent in both — see the narrowing below.
+test("the states `stash list` is silent about print the unknown line unchanged", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  for (const path of [[".git", "logs", "refs", "stash"], [".git", "refs", "stash"]]) {
+    const c = repo(t);
+    stashSomething(c.w);
+    chmodSync(join(c.w, ...path), 0o000);
+
+    const r = audit(c);
+    assert.equal(r.json.stash, null, `${path.join("/")}: fixture must reach the unknown branch`);
+    assert.equal(stashLine(r), UNKNOWN_LINE, `${path.join("/")}: git said nothing, so nothing may be appended`);
+    // Reflog only. The `stash list` this branch captures is silent in both
+    // states, but git as a whole is not: in the `refs/stash` case the
+    // `show-ref` cross-check above prints `fatal: git show-ref: bad ref
+    // refs/stash (0000…)`, and the audit only looks silent there because that
+    // call runs under `>/dev/null 2>&1` (#481). Asserting no `fatal:` over
+    // that state would convert an unstated ceiling into an invariant, and make
+    // the follow-up edit a passing test.
+    if (path.includes("logs")) {
+      assert.doesNotMatch(r.stderr, /fatal:|warning:/, "the unreadable reflog is the one state git says nothing about at all");
+    }
+  }
 });
 
 // The count stays reported-only, even at "unknown" — the dirty check is the
@@ -459,6 +608,25 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 // The \x01 rides along because git stores control bytes in a subject happily and
 // JSON forbids them unescaped — dropping the scrub leaves the payload
 // unparseable, which is this PR's own defect class one byte over.
+// `$conflicts` and `$at_risk` are the last two operands carrying caller text,
+// and `$at_risk` is the most reachable of the whole class: it holds
+// `git log --oneline` output, so an ordinary commit subject is enough — no
+// corrupt repo, no exotic filename. It is also the audit's most consequential
+// line, the commits a careless resolution deletes. One fixture pins both.
+test("a backslash escape in a conflicting path and in an at-risk subject reaches the operator whole", (t) => {
+  const c = conflictRepo(t, "back\\clue.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "back\\clue.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: the \\connection retry");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.match(r.stderr, /^    conflict: back\\clue\.txt$/m, "`echo` truncates the conflict line at the `\\c`");
+  assert.match(r.stderr, /^    at risk: \S+ fix: the \\connection retry$/m, "`echo` truncates the at-risk line at the `\\c` — an ordinary commit subject is enough to lose it");
+});
+
 test("a quote, a backslash and a control byte in a commit subject keep the payload parseable", (t) => {
   const c = conflictRepo(t, "plain.txt");
   git(c.w, "checkout", "-q", "main");
