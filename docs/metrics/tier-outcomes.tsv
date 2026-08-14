@@ -1,0 +1,23 @@
+# One row per implementer PR, appended when the controller rules its review.
+# Purpose: the tier guard cannot be answered inside one run — n is 2-3 PRs, ticket
+# difficulty swamps the tier effect, and finding-counts are not comparable across
+# PRs because selectDimensions trims the fan-out by diff profile. So accumulate
+# instead of concluding.
+#
+# READ THIS BEFORE COMPARING ROWS. class and tier are perfectly confounded by the
+# current rule: routine always dispatches at sonnet, correction always at top.
+# So a routine-vs-correction comparison measures class, not tier, and cannot
+# answer the tier question. Only a same-class comparison across tiers is
+# informative, and producing one requires deliberately dispatching some routine
+# tickets at top tier as a control.
+#
+# closed_own_ticket  no  = review found a defect leaving this ticket's OWN stated
+#                          acceptance criteria unmet, or reintroducing its defect
+# minted_false_claim yes = the diff added a factual claim (comment/doc/test name)
+#                          that measured false, beyond any inherited from the ticket
+#
+# run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note
+2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
+2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
+2026-08-13	452	265	routine	sonnet	no	yes	REGRESSION: moved guard became script's last command, default dry run 0->1 — the exact defect #265 existed to remove; 4 dimensions found it; suite 616-green because all 8 call sites passed --apply
+2026-08-13	462	364	routine	sonnet	yes	yes	added test comment claimed ERR_PARSE_ARGS_INVALID_OPTION_VALUE unreachable ("nothing left downstream can raise it") — arg() is indexOf-gated, `--limit 5 --limit` raises it; separately its own --open= tests were position-vacuous (argv[3] mutant survived 34/34)

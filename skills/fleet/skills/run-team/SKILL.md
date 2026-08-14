@@ -229,22 +229,52 @@ a row is two bytes and one UTF-16 unit. Every use above is a recovery path, so t
 truncation lands exactly where a lost class or a settled `ruled:` is
 unrecoverable, and nothing warns you twice.
 
-**Guard: measure per PR, not per wave.** There are no implementer waves — refill
-is level-triggered, one slot at a time — so the unit is the PR. Once at least
-three `class=routine` PRs have been ruled, compare their `ruled:` outcomes in
-`ledger.mjs read` against the top-tier PRs above them, and the implementer-vs-review
-split in `board.mjs build`'s `.spend.roles`. Per-`impl-<N>` spend is not
-available: `.spend.top` labels agents by their Agent-call `description`, not
-their member name.
+**Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
+refill is level-triggered, so there are no implementer waves. **Append one row to
+`docs/metrics/tier-outcomes.tsv` when you rule each PR's review** (that file's
+header carries the column meanings). That append is the whole duty; the guard
+fires on the accumulated file, across runs, not on the run in front of you.
 
-The risk is not shipped bugs, it is economic. Reviews run 3-5x *longer* than
-implementation (Red flags, below), so one extra fix-round costs a wave slot and
-eats the saving the cheaper implementer made. Findings climb, or the implementer
-share does → revert **`class=routine`** to top tier, never the rule wholesale.
+**Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
+difficulty swamps the tier effect — a gojq parity harness and a two-statement
+shell reorder are not comparable units. Finding-counts are not comparable either:
+`selectDimensions` trims the fan-out by diff profile, so one PR fields 29 agents
+over six dimensions and its sibling fields 8 over three. And the fleet is not
+stationary — this prompt gets edited mid-run when a defect earns it. Hence a
+binary outcome per PR, accumulating, rather than a per-run verdict.
 
-The first run under this rule has no baseline — every routine PR in it is a
-sonnet PR. The guard cannot fire until a run that mixes both, or until a prior
-run's numbers are on hand. Say that; never read its silence as a pass.
+**The comparison the old text asked for cannot work, and this is the load-bearing
+part.** It said to compare routine PRs against "the top-tier PRs above them". But
+`class` and `tier` are perfectly confounded by the dispatch rule: routine always
+runs `sonnet`, correction always runs top tier. So that comparison is
+routine-at-sonnet vs correction-at-top-tier, and those classes fail in different
+ways by construction — corrections ship false claims in prose, routines ship
+incomplete or regressing code. It measures class, not tier. A run that "mixes
+both" does not fix it. **Only a same-class comparison across tiers is
+informative**, and the rule forbids producing one, since no routine ticket ever
+runs at top tier. Getting an answer needs a deliberate control — some
+`class=routine` tickets dispatched at top tier — which is a change to the tiering
+rule and therefore the maintainer's call, not yours.
+
+The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
+than implementation (Red flags, below), so one extra fix-round costs a wave slot
+and eats the saving the cheaper implementer made. The revert needs a floor AND a
+trigger, and neither alone. **Floor:** the file holds at least
+three `class=routine` PRs spanning **two or more distinct `run_date`s**.
+**Trigger, read only once the floor is met:** **two or more** of those rows carry
+`closed_own_ticket` `no`, or the implementer
+share in `board.mjs build`'s `.spend.roles` is climbing →
+revert **`class=routine`** to top tier, never the rule wholesale. That floor is
+over the accumulated file, never one run — and the `run_date` half is what makes
+that literal instead of merely asserted: a PR count alone is satisfied by a
+single run's rows, which is the state this file ships in. Without the floor a
+single noisy PR reverts a class; without a `no` count, "trending" names no
+threshold and whether the guard fires is undefined. Per-`impl-<N>`
+spend is not available: `.spend.top` labels agents by their Agent-call
+`description`, not their member name.
+
+**Never read the guard's silence as a pass** — and never read a single run's rows
+as its verdict.
 
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
@@ -284,6 +314,24 @@ number, worktree abs path, branch, and each of these verbatim:
 > change wrongly REFUSE?** A new guard's false-positive class is not its
 > false-negative class, and a suite that only feeds it valid input pins neither —
 > so leave one test behind that feeds it input it must ACCEPT.
+>
+> **Both halves above are about the bug class. The third is about YOUR EDIT:
+> enumerate what your change newly does, not only what the code already did
+> wrong.** Moving, reordering or wrapping a statement has effects the ticket
+> never mentions — the last command of a script sets its exit status, a
+> relocated line changes what `set -e` covers, a hoisted guard changes what runs
+> first. **Ask which of the ticket's own acceptance criteria your restructuring
+> could newly violate, and test that path.** Measured: #265 required "no path in
+> the script exits 1", and the fix for it moved a guard to the file's end,
+> regressing the default dry run from exit 0 to exit 1 — the ticket's exact
+> defect, relocated onto the path nobody tested. The implementer had enumerated
+> every exit-1 path and declared two it was leaving; all of them were
+> pre-existing, and none was the one its own edit created.
+>
+> **Then check the suite can even see the mode you changed.** That regression
+> shipped under 616 green tests because all eight call sites passed the same
+> flag, so the default mode had no test at all. A green suite is evidence only
+> about the paths it exercises.
 
 > Run `sizing-a-ticket` for the process path and proceed on **either row** —
 > heavy is never a bail reason, and that skill owns the fleet's heavy-row entry
@@ -390,8 +438,9 @@ multi-select**, and **a judgement the evidence cannot settle**.
   reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
   one only if it genuinely is. **This edge fires on the fix-applier's own push, so
   it is exactly where a ruling you still owe it is outstanding — never dispatch off
-  it while you do.** Hand the ruling over, wait for the final report, then
-  dispatch (below). Then run the reconcile (below).
+  it while you do.** Empty your outbox to it first — including any ruling you have
+  withdrawn or reversed — then dispatch (below); a final report is not proof it
+  stopped. Then run the reconcile (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -406,7 +455,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
   waiting for it stalls the whole PR — the same silent-stall shape #111 reported
   before this verdict existed. Dispatch the finisher off the reviewer's final
   verdict instead, the moment it lands — and, same as above, never while you still
-  owe it a ruling. The finisher's gate is then the
+  owe it a ruling — or hold anything else it has not received, a ruling you have
+  withdrawn or reversed included. The finisher's gate is then the
   `--declare-no-ci` declaration, not a `check` job: with it, label off the
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. Absence never reads as
@@ -686,6 +736,15 @@ nothing leaves it no gate at all.
 > (measured). A green suite says nothing about a new test: one pin this run
 > survived the exact mutation it was named for.
 >
+> **Report LAST, and only once nothing can still change.** A report you have
+> sent **pins that SHA** for the controller, which dispatches a finisher against
+> it. If a further instruction arrives after you have reported, reply saying the
+> SHA is moving *before* you touch the tree again — do not silently do the work
+> and re-report. Measured: three members in one run sent a final report and kept
+> working; one had its worktree audited mid-mutation, another handed over a SHA
+> that was two commits stale, and a finisher dispatched on either would have
+> halted on a diverged head.
+>
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
@@ -700,20 +759,27 @@ merge. `review-and-fix.md` states them; the prompt only has to say they apply.
 
 **The fix-applier pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
-rebuilds a 100k-token context for nothing the Monitor lacks. Tell it: apply fixes,
-push, report the SHA, stop — and that a report already sent **pins that SHA**, so
-resuming on new information means messaging you *before* touching the tree again.
-Observed once: a finisher halted on a tree the reviewer had legitimately re-edited
-after its verdict. When the diff-validating `check` job is green **and no
+rebuilds a 100k-token context for nothing the Monitor lacks. The prompt block
+above carries the report-last rule; you do not have to restate it. When the
+diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
-as the guarantee nothing else is inbound. Relay everything, wait for its final
-report, then dispatch. Observed — a ruling relayed after dispatch produced a new
-commit mid-audit, and the finisher correctly halted on a diverged head. Its
-duties, in this order:
+as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
+member's last message** — anything you have decided that it has not received,
+including a ruling you have since **withdrawn or reversed**. A withdrawal you
+recorded only in the ledger is undelivered: the member still holds the original
+and will act on it. Relay everything — reversals too — then dispatch.
+
+**A final report is not proof the member stopped.** Observed twice: a ruling
+relayed after dispatch produced a new commit mid-audit, and a fix-applier that
+reported "nothing outstanding" resumed on a ledger-only withdrawal and was
+cycling mutants through the worktree when the finisher audited it. Both finishers
+correctly halted. Note what that costs to detect: two reads of the same worktree
+a minute apart showed *different* mutants, so a member's report and any single
+`git status` are each valid only at their instant. Its duties, in this order:
 
 1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
    it. Dirty or diverged halts the finisher *here*, before the label: it reports
