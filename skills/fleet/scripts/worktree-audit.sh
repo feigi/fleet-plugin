@@ -21,6 +21,12 @@ set -eu
 
 NAME=worktree-audit
 die() { echo "$NAME: $1" >&2; exit 2; }
+# One unknown state, one place: null counts, readable:false, one reason. Four
+# branches below reach it and differ in nothing but that reason, so a fifth
+# added later cannot half-set the quadruple and emit a record whose counts
+# contradict its own `readable` field. The MISSING branch stays spelled out —
+# it is the one state with non-null counts, and looking different is the point.
+unknown() { readable=false; ahead=null; dirty=null; files=""; echo "    UNREADABLE: $wt ($1)" >&2; }
 
 # Is $1 established ABSENT, or merely a path this script cannot stat? A bare
 # `[ -d ]` failure is both — an unreadable parent (dropped mount, chmod'd
@@ -63,10 +69,12 @@ while IFS="$(printf '\t')" read -r wt br; do
     # unreadable branch — this must not invent a second, weaker guess for it.
     # `.git` is a regular FILE for every linked worktree (`git worktree add`
     # always writes one) but a DIRECTORY for the main checkout, which this
-    # script also lists and audits — unlike release-ticket.sh/reap.sh, whose
-    # `$wt` is never the main worktree by construction, so their linkage guard
-    # can stay the plain `-f` this one started as (#128 reference shape). Here
-    # it must accept both: a real git dir always has `HEAD` sitting directly in
+    # script also lists and audits. reap.sh reaches the main checkout too —
+    # `git worktree list --porcelain` emits a `branch refs/heads/...` line for
+    # it, so a `[gone]` branch checked out there binds reap.sh's own `$wt` to
+    # it — and handles that shape explicitly before its own `-f` linkage guard
+    # (#128 reference shape) rather than by construction. Here the guard itself
+    # must accept both: a real git dir always has `HEAD` sitting directly in
     # it, and an empty stand-in directory or a dangling symlink — the two
     # shapes a broken/deleted linkage takes, and what leaks the parent's status
     # at rc 0 — has neither. `-x "$wt"` gates it for the reason release-ticket.sh
@@ -74,9 +82,7 @@ while IFS="$(printf '\t')" read -r wt br; do
     # linkage established" — leave it to the git commands below, which fail on
     # their own and land in the existing unreadable branch.
     if [ -x "$wt" ] && [ ! -f "$wt/.git" ] && [ ! -f "$wt/.git/HEAD" ]; then
-      readable=false
-      ahead=null; dirty=null; files=""
-      echo "    UNREADABLE: $wt (no .git linkage — git would answer for the enclosing repo, not this worktree)" >&2
+      unknown "no .git linkage — git would answer for the enclosing repo, not this worktree"
     # Chain on `&&`, not `|| echo 0`: a piped `wc -l` always exits 0 even when
     # the git command feeding it failed, so a fallback tacked onto the pipe
     # never fires and a permissions/corruption failure reads as "0 ahead, 0
@@ -126,18 +132,25 @@ while IFS="$(printf '\t')" read -r wt br; do
         print p
       }' | paste -sd, -)
     else
-      readable=false
-      ahead=null; dirty=null; files=""
-      echo "    UNREADABLE: $wt (git rev-list/status failed — treat as unknown, not empty)" >&2
+      unknown "git rev-list/status failed — treat as unknown, not empty"
     fi
   elif gone "$wt"; then
     readable=false
     ahead=0; dirty=0; files=""
     echo "    MISSING on disk: $wt" >&2
+  elif [ -e "$wt" ]; then
+    # `-d` false does not mean "not there". A registered worktree path replaced
+    # by a regular file, a symlink to one, or a FIFO is all three still LISTED
+    # by git (with its `branch` line, so this loop still sees it) and reads
+    # perfectly — measured, all three land here. Saying an ancestor could not
+    # be read about a path whose every ancestor was read sends a debugger at
+    # permissions that are fine. Safe after `gone`, never before: `gone()`
+    # requires `[ ! -e "$1" ]`, so reaching here with `-e` true means it
+    # already answered false. The state is the same unknown either way — only
+    # the reported cause differs.
+    unknown "exists but is not a directory"
   else
-    readable=false
-    ahead=null; dirty=null; files=""
-    echo "    UNREADABLE: $wt (cannot tell whether it exists — an ancestor could not be read)" >&2
+    unknown "cannot tell whether it exists — an ancestor could not be read"
   fi
   echo "    $wt  branch=$short  ahead=$ahead  dirty=$dirty" >&2
   [ "$first" = 1 ] || printf ','

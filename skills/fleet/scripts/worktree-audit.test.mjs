@@ -243,6 +243,27 @@ test("a worktree whose .git is a dangling symlink is unknown, never clean", (t) 
   assert.match(stderr, /UNREADABLE: .*no \.git linkage/);
 });
 
+test("a worktree path that is a file, not a directory, is unknown — and says so", (t) => {
+  // git still LISTS a registered worktree whose directory was replaced by a
+  // regular file, branch line and all, so this loop still sees it. `-d` is
+  // false and `gone()` is false (the path plainly exists), which lands it in
+  // the final else — whose reason blamed an ancestor that read fine. The
+  // state is right either way; the cause was not. Same class, measured: a
+  // symlink to a file and a FIFO land here too.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  rmSync(wt, { recursive: true, force: true });
+  writeFileSync(wt, "not a directory\n");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.deepEqual(e, { worktree: wt, branch: "fix/9-x", ahead: null, dirty: null, dirtyFiles: [], readable: false });
+  assert.match(stderr, /UNREADABLE: .*exists but is not a directory/);
+  assert.doesNotMatch(stderr, /ancestor could not be read/, "no ancestor failed to read here");
+  assert.doesNotMatch(stderr, /MISSING/, "the path is plainly there — this is unknown, not absent");
+});
+
 test("a repo path containing a space does not truncate the worktree it reads", (t) => {
   const w = repo(t, "my repos");
   const wt = addWorktree(w, "fix/9-x");
