@@ -680,9 +680,11 @@ nothing leaves it no gate at all.
 > > `git show`/`git archive` at a pinned ref read fine anywhere. Chain the
 > > directory change into the command, `cd "$D" && git …`, never
 > > `cd "$D"; git …`, so a failed `cd` cannot leave a `git` command running in
-> > the checkout — and before any `git init`/`git commit` in a fixture, assert
-> > `git rev-parse --show-toplevel` equals your scratch path, not the
-> > repository.
+> > the checkout — and bracket a fixture's own git with
+> > `git rev-parse --show-toplevel`: before `git init` it must NOT resolve to
+> > the repository, and a fresh scratch dir's `fatal: not a git repository`
+> > (exit 128) is the pass, not a failure; before any `git commit` it must
+> > equal your scratch path.
 >
 > Survives → apply it, with one hold: if its refuter reports a blast radius
 > touching lines another finding also changes, report that to the controller and
