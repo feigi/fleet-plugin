@@ -418,7 +418,10 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
 // being added here — that was ruled out on the issue. If the gap is ever
 // closed for real, this test goes red and whoever closed it deletes it
 // deliberately; that is the point, not a regression.
-test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins \"a remaining ceiling\" named beside the stash-counting pipeline, issue #306", (t) => {
+test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins a known ceiling, not desired behaviour, #306", (t) => {
+  // The citation above is an anchor, not decoration: the phrase it sends the
+  // next reader to grep for has to still be in the script.
+  assert.match(readFileSync(SCRIPT, "utf8"), /a remaining ceiling/, "no-undo-audit.sh no longer names the ceiling this test cites by phrase");
   const c = repo(t);
   stashSomething(c.w, "h1.txt");
   stashSomething(c.w, "h2.txt");
@@ -443,8 +446,10 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
 
   const r = audit(c);
   assert.equal(r.status, 0, `a truncated reflog must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.stash, 2, "known-wrong: the true count is 3, and this pins the undercount printing as exact rather than `unknown`");
   assert.doesNotMatch(r.stderr, /unknown/, "the cross-check misses this state, which is the whole ceiling");
+  assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
