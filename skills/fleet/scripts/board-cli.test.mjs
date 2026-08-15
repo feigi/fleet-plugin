@@ -137,11 +137,18 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // ── #363: the pipe-race that motivated this file's --spend-since rig ──────────
 //
 // Same reason this file exists at all (see header): the --spend-since guard
-// fires only AFTER gather()'s gh reads, and tryRun() (board.mjs) forwards
-// each gh child's stderr straight through — no `stdio` override, so it
-// inherits board.mjs's own fd 2. That is the exact shape #363 is about: a
-// single child dumping enough bytes into a PIPED stderr can fill it before
-// board.mjs ever gets to write its own refusal.
+// fires only AFTER gather()'s gh reads, and tryRun() (board.mjs) runs each
+// one through `execFileSync(cmd, args, { encoding: "utf8" })`. With no
+// `stdio` option that CAPTURES the child's stderr and re-emits it through
+// board.mjs's OWN process.stderr — the child never touches an inherited
+// fd 2. So the write that has to clear the pipe before die() can land is
+// board.mjs's own, and on a pipe that is an async stream write: whatever is
+// still queued when process.exit() runs is discarded.
+//
+// Measured, both shapes, each parent flooding 200,000 B and then exiting,
+// read by a spawn() reader identical to runBoardFlooded's — tryRun's
+// no-stdio form delivers 65,536 B, while stdio [..., "inherit"], which is
+// what actually inherits fd 2, delivers all 200,000.
 //
 // #367 fixed the write itself (writeSync, not console.error — see arg.mjs),
 // but nothing drove the race that motivated it. This does, and it is the
@@ -150,14 +157,11 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // not the message vanishing), is racy by its own account (its comment: "7/15
 // unfixed runs inverted"), and says darwin never fires it at all.
 //
-// The child's stderr is read here through Node's ordinary Readable stream —
-// the same path a real caller's piped stderr (a log file, `tee`, an agent
-// controller reading a pipe) actually goes through. Measured on this machine,
-// against a die() reverted to console.error: once a single forwarded write
-// clears the 65,536 B pipe capacity the refusal is dropped every run and
-// delivered stderr caps at exactly 65,536 B (at 66,000, 200,000 and
-// 2,000,000 alike). The shipped writeSync die() delivers 65,599 B at every
-// one of those sizes — the same cap plus the refusal.
+// Driven through this test's own rig, against a die() reverted to
+// console.error: the refusal is dropped every run and delivered stderr caps
+// at exactly 65,536 B, at 66,000 / 200,000 / 2,000,000 alike. The shipped
+// writeSync die() delivers 65,599 B at every one of those sizes — the same
+// cap plus the refusal.
 //
 // Darwin-only, and skipped elsewhere rather than left to pass silently: the
 // loss above was measured on darwin and nowhere else, so a green run on
@@ -165,15 +169,14 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // coverage. The platform gate below is the only gate.
 const IS_DARWIN = process.platform === "darwin";
 
-// A real `head -c` burst, not a hand-rolled Node writer: this is what a real
-// forwarded child (gh, git) looks like from board.mjs's side — an ordinary
-// process writing straight to its inherited fd 2, no non-blocking games on
-// its own end. Any single forwarded write past the 65,536 B cap triggers the
-// loss, and delivered bytes stop there however much larger the flood is
-// (measured: identical delivered length at 200,000 and at 2,000,000), so the
-// size only has to clear that cap — the headroom above it buys nothing and
-// costs nothing. It is a named constant because the guard below is tied to
-// it: de-tune one and the other goes red rather than quietly vacuous.
+// The stub has one job: make board.mjs's re-emission of this output a single
+// write bigger than the pipe can hold. `head -c` rather than a hand-rolled
+// Node writer so the bytes come off an ordinary child, as gh's do. Any size
+// past the 65,536 B capacity does it, and they all behave identically —
+// measured on the fixed build, 66,000 / 200,000 / 2,000,000 each deliver
+// 65,599 B — so the headroom above the cap buys nothing and costs nothing.
+// Named, because the guard below is tied to it: de-tune one and the other
+// goes red instead of quietly vacuous.
 const FLOOD_BYTES = 200_000;
 const FLOOD_GH_STUB = `#!/bin/sh\nyes F | head -c ${FLOOD_BYTES} >&2\nexit 0\n`;
 
@@ -204,19 +207,18 @@ test(
   { skip: IS_DARWIN ? false : "async pipe-write loss (#363) is darwin-only — a green run here is not coverage" },
   async () => {
     const r = await runBoardFlooded();
-    // The flood must have OVERRUN the pipe rather than been delivered whole,
-    // or this test passes against the pre-#367 bug too: below the cap every
-    // byte gets through, the refusal along with it, and all three assertions
-    // here go green under the very defect they exist to catch (measured
-    // against a console.error die(): at 22,000 B, 66,188 delivered and the
-    // refusal present).
+    // The flood must have OVERRUN the pipe, not arrived whole — and tied to
+    // FLOOD_BYTES this is exact rather than a heuristic: gather() re-emits
+    // three of these, so delivering even the FIRST one intact already puts
+    // r.stderr at >= FLOOD_BYTES. Landing below it means the first re-write
+    // was cut short, which is the loss this test exists for.
     //
-    // Tied to FLOOD_BYTES, not to a literal 65,536: r.stderr covers all
-    // three of gather()'s gh calls, so a literal cap-sized floor passes on
-    // three sub-cap floods summing over it — the band this guard used to
-    // fail open across. Both real outcomes sit far below FLOOD_BYTES
-    // (measured: 65,536 under the mutant, 65,599 fixed), and any de-tuning
-    // that lets the flood through pushes the total above it.
+    // A literal 65,536 floor fails open instead, because r.stderr sums all
+    // three calls: three sub-cap floods total past it while every one of
+    // them arrives complete, refusal included. Measured against a
+    // console.error die() at 22,000 B — 66,188 delivered, refusal PRESENT,
+    // all three assertions here green under the very bug they pin. The real
+    // outcomes sit far below FLOOD_BYTES (65,536 mutant, 65,599 fixed).
     assert.ok(
       r.stderr.length < FLOOD_BYTES,
       `gh's flood must overrun the pipe, not arrive whole: got ${r.stderr.length} of ${FLOOD_BYTES}`,
