@@ -674,7 +674,15 @@ nothing leaves it no gate at all.
 >
 > > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
 > > RUNNING something — compile it, run the test, apply the mutation. Do not
-> > reason your way to agreement.
+> > reason your way to agreement. Everything you write — mutants, fixtures,
+> > scratch repos — goes under `<scratch>/pr<N>/<finding>/` and nowhere else;
+> > the checkout and any worktree are never write targets, though
+> > `git show`/`git archive` at a pinned ref read fine anywhere. Chain the
+> > directory change into the command, `cd "$D" && git …`, never
+> > `cd "$D"; git …`, so a failed `cd` cannot leave a `git` command running in
+> > the checkout — and before any `git init`/`git commit` in a fixture, assert
+> > `git rev-parse --show-toplevel` equals your scratch path, not the
+> > repository.
 >
 > Survives → apply it, with one hold: if its refuter reports a blast radius
 > touching lines another finding also changes, report that to the controller and
