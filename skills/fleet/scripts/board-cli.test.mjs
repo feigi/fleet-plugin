@@ -145,45 +145,44 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 //
 // #367 fixed the write itself (writeSync, not console.error — see arg.mjs),
 // but nothing drove the race that motivated it. This does, and it is the
-// non-flaky shape the ticket asks for, deliberately NOT candidates.test.mjs's
-// EAGAIN test (which uses spawnSync and is admittedly racy — its own comment
-// says 7/15 unfixed runs inverted). spawnSync drains the child's pipes with
-// its own tight internal poll loop, which is fast enough to avoid the loss
-// most of the time (a refuter measured a clean 209,865-byte survival that
-// way). `spawn()` below, read through Node's ordinary Readable stream (the
-// same path a real caller's piped stderr — a log file, `tee`, an agent
-// controller reading a pipe — actually goes through), is bounded by that
-// stream's highWaterMark (64 KiB) and reliably reproduces the loss instead:
-// measured on this machine, a reverted console.error-based die() drops the
-// message every run, capped at exactly 65,536 bytes received, matching the
-// 200,000 B measurement in #363's own ruling (PR #222). writeSync bypasses
-// that queue entirely — a direct fd write, not a Writable stream write — so
-// the fixed code survives the identical flood reliably too.
+// non-flaky shape the ticket asks for — deliberately NOT candidates.test.mjs's
+// EAGAIN test, which pins a different failure (the exit CODE inverting to 1,
+// not the message vanishing), is racy by its own account (its comment: "7/15
+// unfixed runs inverted"), and says darwin never fires it at all.
+//
+// The child's stderr is read here through Node's ordinary Readable stream —
+// the same path a real caller's piped stderr (a log file, `tee`, an agent
+// controller reading a pipe) actually goes through. Measured on this machine,
+// against a die() reverted to console.error: once a single forwarded write
+// clears the 65,536 B pipe capacity the refusal is dropped every run and
+// delivered stderr caps at exactly 65,536 B (at 66,000, 200,000 and
+// 2,000,000 alike). The shipped writeSync die() delivers 65,599 B at every
+// one of those sizes — the same cap plus the refusal.
 //
 // Darwin-only, and skipped elsewhere rather than left to pass silently: the
-// loss is Node's OWN documented async pipe-write behaviour for
-// process.stdout/stderr, which the Node docs and #363's ruling both scope to
-// POSIX pipes generally, but this file's own prior measurements (and #363's)
-// found it doesn't actually manifest on Linux's write path the same way — a
-// green run there would prove nothing about the fix, so it must not read as
-// coverage. See docs/agents/... no such doc; the platform gate below is the
-// only gate.
+// loss above was measured on darwin and nowhere else, so a green run on
+// another platform would prove nothing about the fix and must not read as
+// coverage. The platform gate below is the only gate.
 const IS_DARWIN = process.platform === "darwin";
 
 // A real `head -c` burst, not a hand-rolled Node writer: this is what a real
 // forwarded child (gh, git) looks like from board.mjs's side — an ordinary
 // process writing straight to its inherited fd 2, no non-blocking games on
-// its own end. 200,000 B: comfortably past both the pipe's own buffer and
-// the Readable stream's 64 KiB highWaterMark, matching #363's own reference
-// measurement so the byte count here is traceable to that thread rather than
-// picked arbitrarily.
-const FLOOD_GH_STUB = "#!/bin/sh\nyes F | head -c 200000 >&2\nexit 0\n";
+// its own end. Any single forwarded write past the 65,536 B cap triggers the
+// loss, and delivered bytes stop there however much larger the flood is
+// (measured: identical delivered length at 200,000 and at 2,000,000), so the
+// size only has to clear that cap — the headroom above it buys nothing and
+// costs nothing. It is a named constant because the guard below is tied to
+// it: de-tune one and the other goes red rather than quietly vacuous.
+const FLOOD_BYTES = 200_000;
+const FLOOD_GH_STUB = `#!/bin/sh\nyes F | head -c ${FLOOD_BYTES} >&2\nexit 0\n`;
 
-// Async spawn + immediate drain (not spawnSync — see header comment above):
-// `close` rather than `exit`, so every byte the stream ever receives is
-// captured before assertions run, not just whatever arrived by the time the
-// process exited.
-function runBoardFlooded(sinceValue) {
+// Async spawn + immediate drain: `close` rather than `exit`, so every byte
+// the stream ever receives is captured before assertions run, not just
+// whatever arrived by the time the process exited. stdout is discarded
+// rather than piped — nothing here asserts on it, and an unread pipe is one
+// more thing that can stall the child.
+function runBoardFlooded() {
   const cwd = mkdtempSync(join(tmpdir(), "since-flood-cwd-"));
   const bin = mkdtempSync(join(tmpdir(), "since-flood-bin-"));
   writeFileSync(join(bin, "gh"), FLOOD_GH_STUB);
@@ -191,13 +190,12 @@ function runBoardFlooded(sinceValue) {
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
-      [BOARD, "build", "--ledger", join(cwd, "nope.md"), "--spend-since", sinceValue],
-      { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", "pipe", "pipe"] },
+      [BOARD, "build", "--ledger", join(cwd, "nope.md"), "--spend-since", "notanumber"],
+      { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", "ignore", "pipe"] },
     );
-    let stdout = "", stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
+    let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
+    child.on("close", (status) => resolve({ status, stderr }));
   });
 }
 
@@ -205,16 +203,24 @@ test(
   "build: --spend-since's refusal survives a gh child that has already pushed past the pipe buffer, unread",
   { skip: IS_DARWIN ? false : "async pipe-write loss (#363) is darwin-only — a green run here is not coverage" },
   async () => {
-    const r = await runBoardFlooded("notanumber");
-    // The flood itself must have gone through and reached the buffer's
-    // ceiling, or this test would pass against the pre-#367 bug too
-    // (measured: dropping the gh stub down to a few hundred bytes leaves the
-    // reverted console.error die() passing here right alongside the fix).
-    // `>=`, not `>`: the exact failure this test exists for caps the
-    // received bytes at precisely 65,536 (flood only, refusal dropped) — a
-    // strict `>` here would fire on the setup check before the message/exit
-    // assertions below ever ran, masking them under the mutant (measured).
-    assert.ok(r.stderr.length >= 65_536, `gh's flood must reach the 64 KiB buffer, got ${r.stderr.length}`);
+    const r = await runBoardFlooded();
+    // The flood must have OVERRUN the pipe rather than been delivered whole,
+    // or this test passes against the pre-#367 bug too: below the cap every
+    // byte gets through, the refusal along with it, and all three assertions
+    // here go green under the very defect they exist to catch (measured
+    // against a console.error die(): at 22,000 B, 66,188 delivered and the
+    // refusal present).
+    //
+    // Tied to FLOOD_BYTES, not to a literal 65,536: r.stderr covers all
+    // three of gather()'s gh calls, so a literal cap-sized floor passes on
+    // three sub-cap floods summing over it — the band this guard used to
+    // fail open across. Both real outcomes sit far below FLOOD_BYTES
+    // (measured: 65,536 under the mutant, 65,599 fixed), and any de-tuning
+    // that lets the flood through pushes the total above it.
+    assert.ok(
+      r.stderr.length < FLOOD_BYTES,
+      `gh's flood must overrun the pipe, not arrive whole: got ${r.stderr.length} of ${FLOOD_BYTES}`,
+    );
     assert.match(r.stderr, /board: --spend-since wants epoch milliseconds, got notanumber/);
     assert.equal(r.status, 2, r.stderr.slice(-300));
   },
