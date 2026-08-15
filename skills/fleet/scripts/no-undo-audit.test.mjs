@@ -410,14 +410,15 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
 // #306: CHARACTERIZATION TEST, not a spec. The three tests above close every
 // unreadable-reflog case that fails LOUDLY enough for the `show-ref`
 // cross-check to notice. A reflog that is merely TRUNCATED — some lines
-// gone, the rest still parses — is the one case left open, named in-line as
-// "the remaining ceiling" at no-undo-audit.sh:318. This pins that known
-// undercount so a later change to the block cannot silently move it. It does
-// NOT assert desired behavior, and no detection logic is being added here —
-// that was ruled out on the issue. If the gap is ever closed for real, this
-// test goes red and whoever closed it deletes it deliberately; that is the
-// point, not a regression.
-test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins the ceiling at no-undo-audit.sh:318, issue #306", (t) => {
+// gone, the rest still parses — is the one case left open, named in-line,
+// right above the stash-counting pipeline this exercises, as "a remaining
+// ceiling" (grep the phrase rather than a line number — those drift). This
+// pins that known undercount so a later change to the block cannot silently
+// move it. It does NOT assert desired behavior, and no detection logic is
+// being added here — that was ruled out on the issue. If the gap is ever
+// closed for real, this test goes red and whoever closed it deletes it
+// deliberately; that is the point, not a regression.
+test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins \"a remaining ceiling\" named beside the stash-counting pipeline, issue #306", (t) => {
   const c = repo(t);
   stashSomething(c.w, "h1.txt");
   stashSomething(c.w, "h2.txt");
