@@ -318,17 +318,17 @@ fi
 # This does not close every unreadable reflog: one that is merely TRUNCATED —
 # some entries lost, the rest still parses — resolves the ref and returns a
 # nonempty list, so the cross-check sees no disagreement and reports the
-# (too-low) count as exact. That gap is a remaining ceiling, pinned but not
-# closed — closing it was ruled out as not worth the complexity — by #306's
-# characterization test.
+# (too-low) count as exact. That gap is a remaining ceiling. #306's
+# characterization test pins it without closing it — closing it was ruled out
+# separately as not worth the complexity.
 #
 # It is not the only shape of that ceiling. #482 measured a corrupt loose
 # object behind a non-tip stash entry: the reflog there is intact, but `stash
 # list` prints the entries it got and exits 1 (`fatal: loose object ... is
 # corrupt`) rather than failing to resolve the ref. This cross-check does not
 # capture that exit code either, so a loud failure goes silently too-low here
-# just as a quiet one does above. Filed and ruled on separately — named here
-# only so this comment stops under-describing the gap.
+# just as a quiet one does above. Filed separately and not yet triaged — named
+# here only so this comment stops under-describing the gap.
 stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
 sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
