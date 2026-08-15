@@ -407,6 +407,51 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
   );
 });
 
+// #306: CHARACTERIZATION TEST, not a spec. The three tests above close every
+// unreadable-reflog case that fails LOUDLY enough for the `show-ref`
+// cross-check to notice. A reflog that is merely TRUNCATED — some lines
+// gone, the rest still parses — is the one case left open, named in-line,
+// right above the stash-counting pipeline this exercises, as "a remaining
+// ceiling" (grep the phrase rather than a line number — those drift). This
+// pins that known undercount so a later change to the block cannot silently
+// move it. It does NOT assert desired behavior, and no detection logic is
+// being added here — that was ruled out on the issue. If the gap is ever
+// closed for real, this test goes red and whoever closed it deletes it
+// deliberately; that is the point, not a regression.
+test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins a known ceiling, not desired behaviour, #306", (t) => {
+  // The citation above is an anchor, not decoration: the phrase it sends the
+  // next reader to grep for has to still be in the script.
+  assert.match(readFileSync(SCRIPT, "utf8"), /a remaining ceiling/, "no-undo-audit.sh no longer names the ceiling this test cites by phrase");
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  stashSomething(c.w, "h3.txt");
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 3, "fixture must leave three stashes");
+
+  // Drop the oldest reflog line — one per stash push, oldest first. The
+  // remaining lines still parse, so `stash list` resolves the ref and
+  // returns a shorter-but-nonempty list instead of failing loudly.
+  const reflogPath = join(c.w, ".git", "logs", "refs", "stash");
+  const lines = readFileSync(reflogPath, "utf8").split("\n").filter(Boolean);
+  writeFileSync(reflogPath, lines.slice(1).join("\n") + "\n");
+
+  // The two conditions that make the undercount invisible to the script's own
+  // cross-check: the list call itself does not fail, and `show-ref` still
+  // finds the ref. Neither signature the three tests above rely on fires.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 0, `truncation must not make the list call itself fail; got ${list.status} ${list.stderr}`);
+  assert.equal(list.stdout.split("\n").filter(Boolean).length, 2, "fixture must leave a nonempty, undercounted list");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 0, `refs/stash must still resolve — this is why the cross-check sees no disagreement; got ${showRef.status} ${showRef.stderr}`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a truncated reflog must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, 2, "known-wrong: the true count is 3, and this pins the undercount printing as exact rather than `unknown`");
+  assert.doesNotMatch(r.stderr, /unknown/, "the cross-check misses this state, which is the whole ceiling");
+  assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
+});
+
 // A stash object that is CORRUPT rather than missing reaches the same branch —
 // list empty at rc 0, show-ref rc 0 — but git answers in SEVEN lines there, and
 // a bad `objects/info/alternates` both adds three more and puts a backslash in
