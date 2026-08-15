@@ -114,18 +114,20 @@ test("both causes are named, with evidence a finisher can gather without asking 
 
 test("a moved head still halts, always — the two causes decide what the report says, never whether it halts", () => {
   const text = causeText();
+  // ONE exact contiguous span, not two independent phrase matches. The
+  // invariant lives in the join: splicing an exception clause between
+  // "halts, always" and "you never verify the dirt is harmless" reverses the
+  // rule while leaving both phrases intact, and two separate `assert.match`
+  // calls stayed green through exactly that mutation (measured, #488 review).
+  // The tail is the explicit rejection of issue option 3 ("accept a
+  // fast-forward") — the controller ruling took options 2+4, not 3, and a
+  // finisher that treats a clean rebase as auto-approved is what triage
+  // rejected. Whitespace is already normalised by causeText(), so this is
+  // literal text, not a shape.
   assert.match(
     text,
-    /halts?,? always/i,
-    "the always-halts invariant is no longer stated in the block the finisher reads",
-  );
-  // The explicit rejection of issue option 3 ("accept a fast-forward"): the
-  // controller ruling took options 2+4, not 3, and a finisher that treats a
-  // clean rebase as auto-approved is exactly what triage rejected.
-  assert.match(
-    text,
-    /never.*label over it|never.*accept/i,
-    "nothing in the block forbids labelling over a moved head once its cause is known — the rebase cause could then read as a silent green light",
+    /Either cause halts, always — you never verify the dirt is harmless and label over it, and a rebase is not a fast-forward you get to accept\./,
+    "the always-halts invariant no longer reads verbatim in the block the finisher reads — either it's gone, or a clause was inserted into it that makes the halt conditional, or the ban on labelling over a moved head was dropped",
   );
 });
 

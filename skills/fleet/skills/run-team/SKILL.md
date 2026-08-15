@@ -810,8 +810,8 @@ instead of asking anyone:
 > - **Rebase.** `git status --porcelain` is clean, head still differs from your
 >   pin. `git reflog` in the worktree: a `reset`/rebase entry near the move, not
 >   a plain `commit`, means the branch replayed onto a new base — its own
->   commits unchanged, content-identical, just a new parent. Halt, name
->   `rebase`, report the reflog line.
+>   commits on a new parent, content-identical only on a conflict-free replay.
+>   Halt, name `rebase`, report the reflog line.
 >
 > Either cause halts, always — you never verify the dirt is harmless and label
 > over it, and a rebase is not a fast-forward you get to accept. Naming the
@@ -911,6 +911,8 @@ specialist report you know landed for this PR is relayed, none unrelayed. The
 reviewer applies findings and pushes as each relay lands, so an
 unrelayed report is exactly as inbound as a fix-applier ruling you haven't sent
 (above) — dispatch past it and you pin a SHA the reviewer is about to move past.
+Necessary, not sufficient — a reviewer re-reading its own inbox late still moves
+the head, which is what the two-cause halt block above is for.
 Vacuous on the workflow path: `agent()` already returned every report before
 you had a tree to dispatch a finisher against, so nothing is ever outstanding
 there.
