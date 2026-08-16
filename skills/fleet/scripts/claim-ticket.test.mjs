@@ -108,7 +108,16 @@ const SUITE = {
 test("runner: a directory argument runs the test files under it", () => {
   const r = apply(SUITE).run("t");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 3/);
+  // Bounded rather than line-anchored: a bare `pass 3` is a substring of
+  // `pass 3<n>` and stops discriminating once a fixture reaches 30, but a
+  // `^…$/m` anchor buys that at the cost of the line's raw edges — under a
+  // colored reporter the summary comes back SGR-wrapped (`\x1b[34mℹ pass 3…`),
+  // so it neither starts with the prefix nor ends with the digit. The reporter
+  // prefix plus a `(?!\d)` lookahead rejects `pass 30`-`pass 39` either way.
+  // Both prefixes because `node --test`'s default reporter is
+  // version-dependent — spec (`ℹ pass 3`) on newer node, tap (`# pass 3`) on
+  // older.
+  assert.match(r.stdout, /(?:ℹ|#) pass 3(?!\d)/);
 });
 
 // `set -f` and IFS only settle how the *shell* splits the expansion. Node
@@ -119,7 +128,9 @@ test("runner: a directory argument runs the test files under it", () => {
 test("runner: a directory whose path holds a glob character still runs its tests", () => {
   const r = apply(SUITE).run("br[a]cket");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 1/);
+  // Bounded, same reason as above: a bare `pass 1` is the worst offender — it
+  // matches every count whose leading digit is 1: `pass 1` itself, 10-19, 100+.
+  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
 });
 
 // The other half of the same claim: IFS pinned to a newline is what keeps a
@@ -128,7 +139,8 @@ test("runner: a directory whose path holds a glob character still runs its tests
 test("runner: a directory whose path holds a space still runs its tests", () => {
   const r = apply(SUITE).run("with space");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 1/);
+  // Bounded, same reason as the glob-character case above.
+  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
 });
 
 // Why the trailing slash, and why not `-L`: claim-ticket.sh, above `found=`.
@@ -307,7 +319,8 @@ test("runner: a directory with no test files refuses instead of exiting 0", () =
 test("runner: a file argument still works", () => {
   const r = apply(SUITE).run("t/a.test.mjs");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 1/);
+  // Bounded, same reason as the other bare `pass 1` cases above.
+  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
 });
 
 // The shell expands a glob before the runner is entered, so the glob form
@@ -318,7 +331,9 @@ test("runner: a file argument still works", () => {
 test("runner: the expanded glob form still works", () => {
   const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /pass 2/);
+  // Bounded, same reason as above: a bare `pass 2` is a substring of
+  // `pass 2<n>` and stops discriminating once a fixture reaches 20.
+  assert.match(r.stdout, /(?:ℹ|#) pass 2(?!\d)/);
 });
 
 // A subtree find cannot descend is the quiet version of the same hazard: find
