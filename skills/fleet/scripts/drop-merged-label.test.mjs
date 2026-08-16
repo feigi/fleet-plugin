@@ -115,6 +115,16 @@ test("usage: rejects a zero-padded PR number", (t) => {
   assert.deepEqual(s.calls(), [], "must refuse before calling gh at all");
 });
 
+test("usage: a bare 0 clears the numeric guard", (t) => {
+  // `0?*`, not `0*`: #121 lists `sh inflight.sh 0 -> parses` among its PASSING
+  // cases, beside `42`. A bare `0` is a valid RFC 8259 number and `$((0))` is
+  // `0`, so neither hazard the guard exists to close applies to it. Widening
+  // the arm would refuse a value the ticket's own worked example shows working.
+  const s = stub(t);
+  const { stderr } = run("0", { env: s.env() });
+  assert.doesNotMatch(stderr, /pr must be a number/);
+});
+
 test("usage: rejects an unknown second argument", (t) => {
   const s = stub(t);
   const { code, stderr } = run(9, { apply: false, env: s.env() });

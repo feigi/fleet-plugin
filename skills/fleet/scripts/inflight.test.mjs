@@ -1588,6 +1588,15 @@ test("accumulate: a zero-padded issue is refused before any probe runs, with no 
   }
 });
 
+test("accumulate: a bare 0 clears the numeric guard", (t) => {
+  // `0?*`, not `0*`: #121 lists `sh inflight.sh 0 -> parses` among its PASSING
+  // cases, beside `42`. A bare `0` is a valid RFC 8259 number and `$((0))` is
+  // `0`, so neither hazard the guard exists to close applies to it. Widening
+  // the arm would refuse a value the ticket's own worked example shows working.
+  const r = spawnSync("sh", [SCRIPT, "0"], { encoding: "utf8" });
+  assert.doesNotMatch(r.stderr, /issue must be a number/);
+});
+
 test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
   // The other half of #121's guard, and the half that would strand the fleet if
   // it were wrong: `gh` never zero-pads, so every legitimate caller passes a

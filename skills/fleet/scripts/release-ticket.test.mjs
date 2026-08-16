@@ -876,6 +876,16 @@ test("usage errors exit 2", (t) => {
   }
 });
 
+test("a bare 0 clears the numeric guard", (t) => {
+  // `0?*`, not `0*`: #121 lists `sh inflight.sh 0 -> parses` among its PASSING
+  // cases, beside `42`. A bare `0` is a valid RFC 8259 number and `$((0))` is
+  // `0`, so neither hazard the guard exists to close applies to it. Widening
+  // the arm would refuse a value the ticket's own worked example shows working.
+  const r = repo(t);
+  const zero = spawnSync("sh", [SCRIPT, "0", "slug", "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
+  assert.doesNotMatch(zero.stderr, /issue must be a number/);
+});
+
 test("a chatty but successful gh does not fake an already-dropped label", (t) => {
   // The label was read with 2>&1 and substring-matched, so gh's own upgrade
   // notice on a SUCCESSFUL call broke the match: the script deleted the worktree
