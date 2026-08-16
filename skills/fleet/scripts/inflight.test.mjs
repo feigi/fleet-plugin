@@ -1591,8 +1591,12 @@ test("accumulate: a zero-padded issue is refused before any probe runs, with no 
 test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
   // The other half of #121's guard, and the half that would strand the fleet if
   // it were wrong: `gh` never zero-pads, so every legitimate caller passes a
-  // bare number and must still be answered. A guard that over-refused would
-  // turn every real claim check into exit 2, and only this direction catches it.
+  // bare number and must still be answered. Over-refusal is not subtle — 69 of
+  // this file's 71 tests go red under a guard that refuses every digit string —
+  // so what this test adds is diagnosis, not detection: a name that says which
+  // half of the guard broke, and the file's only assertion that `issue` is
+  // emitted as a JSON number rather than a string (rewrite the verdict printf
+  // to `{"issue":"%s"` and this test alone fails).
   const r = inflight(7, {}, t);
   assert.equal(r.code, 0);
   assert.equal(r.json.issue, 7, "emitted as a JSON number, and the payload parses");
