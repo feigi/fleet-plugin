@@ -219,13 +219,14 @@ exec '${REAL_PYTHON3}' "$@"
     // worse than either answer, and a suite that hangs reports nothing at all.
     GIT_TERMINAL_PROMPT: "0",
     // The developer's own git config must not reach these cases, the way
-    // release-ticket.test.mjs:30 already shuts it out. Probe 2 only became a
-    // hard dependency of this file with the fail-closed guard — before it, a
-    // broken origin was swallowed and no config could reach it. Now
-    // `protocol.file.allow=never` (documented hardening after CVE-2022-39253)
-    // reddens most of the file, and a global `[remote "origin"] url` is worse
-    // than red: `remote.<name>.url` is multi-valued, the global entry wins, and
-    // "no matching branch" passes while pointed at somebody else's repository.
+    // release-ticket.test.mjs's GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM already
+    // shut it out. Probe 2 only became a hard dependency of this file with the
+    // fail-closed guard — before it, a broken origin was swallowed and no
+    // config could reach it. Now `protocol.file.allow=never` (documented
+    // hardening after CVE-2022-39253) reddens most of the file, and a global
+    // `[remote "origin"] url` is worse than red: `remote.<name>.url` is
+    // multi-valued, the global entry wins, and "no matching branch" passes
+    // while pointed at somebody else's repository.
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
     GH_ISSUE_JSON: JSON.stringify({
@@ -436,7 +437,7 @@ test("probe 2: a reachable origin with a matching branch still reports taken", (
 // truncates at the first space and the ticket stops matching — a wrong "free",
 // the same answer probe 2 was just stopped from inventing. The pair below is
 // one fixture differing in one character, so a red names the space and nothing
-// else. release-ticket.sh:78 already reads this field as substr($0,10).
+// else. release-ticket.sh's own awks already read this field as substr($0,10).
 
 test("probe 3: a worktree under a path with a space is still found", (t) => {
   const r = inflight(77, { detachedWorktreeUnder: "some dir" }, t);
@@ -780,7 +781,9 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
 // consumer that cannot read the evidence, not a ticket claimed twice.
 //
 // The first two are built by hand rather than through `fixture`'s options, the
-// way release-ticket.test.mjs:729 builds its own: the names are the fixture.
+// way release-ticket.test.mjs's hostile-name payload cases build their own —
+// "a quote in the slug cannot produce a payload the caller fails to parse" and
+// the three below it: the names are the fixture.
 
 // Takes the fixture's `env`, not `process.env`: that is the copy with GIT_DIR
 // and GIT_WORK_TREE deleted. Inherited, they outrank `-C`, so a suite run from
@@ -827,7 +830,8 @@ test("a quote and a backslash in a worktree path cannot produce an unparseable p
 test("a control character in a worktree path cannot produce an unparseable payload", (t) => {
   // What pins the `tr` stage; without it the two cases above stay green and a
   // raw C0 byte reaches the payload, which JSON forbids unescaped. Mirrors
-  // release-ticket.test.mjs:743.
+  // release-ticket.test.mjs's "a control character in the worktree name cannot
+  // produce an unparseable payload".
   //
   // \001 specifically, not \n: awk's record separator ends the line, so a
   // newline cannot reach `jstr` and would pin nothing here — it is lost one
@@ -1564,6 +1568,38 @@ test("accumulate: a bad argument is still refused before any probe runs, with no
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
   assert.match(r.stderr, /issue must be a number/);
+});
+
+test("accumulate: a zero-padded issue is refused before any probe runs, with no payload", (t) => {
+  // All-digits is not a JSON number — RFC 8259 forbids a leading zero — so
+  // `007` used to clear the guard, reach the verdict printf and emit
+  // `{"issue":007,…}` at exit 0: unparseable, with an exit code that gave the
+  // caller no hint (#121). The guard's `0?*` arm refuses it at the same
+  // boundary as a non-numeric argument. Normalising with `n=$((n))` instead
+  // would be worse than the bug: /bin/sh reads `007` as octal 7 and `010` as
+  // 8, silently answering about a different ticket. Two widths, because one
+  // does not pin the guard: `0?*` narrowed to `0??*` still refuses `007` and
+  // re-admits `01`, which is the same bug back.
+  for (const padded of ["007", "01"]) {
+    const r = spawnSync("sh", [SCRIPT, padded], { encoding: "utf8" });
+    assert.equal(r.status, 2, padded);
+    assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
+    assert.match(r.stderr, /issue must be a number/);
+  }
+});
+
+test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
+  // The other half of #121's guard, and the half that would strand the fleet if
+  // it were wrong: `gh` never zero-pads, so every legitimate caller passes a
+  // bare number and must still be answered. Over-refusal is not subtle — 69 of
+  // this file's 71 tests go red under a guard that refuses every digit string —
+  // so what this test adds is diagnosis, not detection: a name that says which
+  // half of the guard broke, and the file's only assertion that `issue` is
+  // emitted as a JSON number rather than a string (rewrite the verdict printf
+  // to `{"issue":"%s"` and this test alone fails).
+  const r = inflight(7, {}, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.issue, 7, "emitted as a JSON number, and the payload parses");
 });
 
 test("accumulate: outside a git repository is still refused before any probe runs, with no payload", (t) => {

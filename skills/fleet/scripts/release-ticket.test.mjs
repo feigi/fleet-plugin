@@ -864,6 +864,16 @@ test("usage errors exit 2", (t) => {
   const nine = bad("nine", "slug", "fix");
   assert.equal(nine.status, 2);
   assert.match(nine.stderr, /issue must be a number/);
+  // #121: all-digits is not a JSON number. A zero-padded `007` used to clear
+  // the numeric check and reach all three payload printfs, each emitting
+  // `{"issue":007,…}` — unparseable, at whatever exit the release earned. Two
+  // widths, because one does not pin the guard: `0?*` narrowed to `0??*` still
+  // refuses `007` and re-admits `01`, which is the same bug back.
+  for (const p of ["007", "01"]) {
+    const padded = bad(p, "slug", "fix");
+    assert.equal(padded.status, 2, p);
+    assert.match(padded.stderr, /issue must be a number/);
+  }
 });
 
 test("a chatty but successful gh does not fake an already-dropped label", (t) => {

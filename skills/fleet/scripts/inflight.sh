@@ -37,7 +37,7 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 
 [ $# -eq 1 ] || die "usage: inflight.sh <issue-number>"
 n=$1
-case "$n" in ''|*[!0-9]*) die "issue must be a number, got '$n'";; esac
+case "$n" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$n'";; esac
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
@@ -262,10 +262,10 @@ echo "\$ git ls-remote --heads origin" >&2
 # while this one cannot.
 #
 # stderr is left on stderr rather than folded into the value. That matters less
-# here than in release-ticket.sh:173, whose pushed-branch lookup tests $remote
-# raw, so a folded-in host-key notice really would read as a branch, whereas the
-# awk below reduces such a line to a word no numeric segment can match. git's
-# own wording is more use on the terminal anyway.
+# here than in release-ticket.sh's `git ls-remote --heads` pushed-branch lookup,
+# which tests $remote raw, so a folded-in host-key notice really would read as a
+# branch, whereas the awk below reduces such a line to a word no numeric segment
+# can match. git's own wording is more use on the terminal anyway.
 #
 # This is the one network call in the script (probe 1 goes through `gh`, probe
 # 3 never leaves disk), and unattended it must neither prompt nor hang (#92).
@@ -556,11 +556,11 @@ elif [ "$linked" -gt "$registered" ]; then
   return 1
 fi
 
-# substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
-# the porcelain prints the path raw, so a checkout under a directory with a
-# space in it — plain enough on macOS — truncates at the space and the ticket
-# stops matching. That is a wrong "free", the one answer this script must never
-# invent.
+# substr($0,10), never $2, exactly as release-ticket.sh's own substr($0,10) awks
+# read the same field: the porcelain prints the path raw, so a checkout under a
+# directory with a space in it — plain enough on macOS — truncates at the space
+# and the ticket stops matching. That is a wrong "free", the one answer this
+# script must never invent.
 #
 # The basename is taken in the same pass, by dropping everything through the
 # last `/`. It used to be a `basename` subshell per line, which had this defect
@@ -600,7 +600,7 @@ fi
 echo "$NAME: #$n taken=$taken" >&2
 
 # Every evidence string goes through here, the same helper and the same pipeline
-# as release-ticket.sh:115. Three of the four are names chosen elsewhere: git
+# as release-ticket.sh's jstr(). Three of the four are names chosen elsewhere: git
 # accepts a `"` in a ref, so a branch — local or remote — carries one in; a
 # worktree path is a filename, so it carries in `\` as well, which git's ref
 # rules reject. Raw, either emits a payload no JSON parser accepts.
@@ -634,10 +634,10 @@ echo "$NAME: #$n taken=$taken" >&2
 # `N;$!ba` prints nothing at all for a single-line value.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
-# already refused unless it is all digits — which is not the same as a valid
-# JSON number, since a zero-padded `007` clears that guard and still emits a
-# payload no parser accepts (#121); `$taken` is this script's own true/false,
-# and `$hits` is built only from the fixed literals `add_hit` is called with.
+# refused unless it is all digits AND unpadded (the guard's `0?*` arm), which is
+# what makes it a JSON number and not merely numeric — RFC 8259 forbids a
+# leading zero, so `007` never reaches this printf (#121); `$taken` is this
+# script's own true/false, `$hits` only the fixed literals `add_hit` is given.
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.

@@ -497,7 +497,7 @@ test("a labeled queue of only specs falls back to unfiltered — all filtered ou
   // two dropSpecs call-site labels and both lines still print, both still name
   // a real spec, and nothing else in this file notices — these two asserts are
   // what tell pass 1's drop from pass 2's. Deliberately not a count: drops are
-  // not deduplicated across passes (candidates.mjs:239, #133), so a raw
+  // not deduplicated across passes (candidates.mjs's dropSpecs, #133), so a raw
   // `grep -c 'dropped #'` reads 4 here whether or not the tags are present.
   assert.match(stderr, /dropped #10 — to-spec spec, not a ticket \(User Stories heading\) \[label:ready-for-agent\]/);
   assert.match(stderr, /dropped #13 — to-spec spec, not a ticket \(User Stories heading\) \[unfiltered \(fallback\)\]/);
@@ -561,7 +561,7 @@ test("a trailing --require-label refuses — a falsy label runs the query --allo
   const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label"]);
   // The worst of the three: query() reads a falsy label as "no label", so the
   // UNFILTERED query shipped at exit 0 — the exact widening onto ready-for-human
-  // that run-team/SKILL.md:61 withholds --allow-fallback to prevent, reached
+  // that run-team/SKILL.md's "do NOT pass `--allow-fallback`" prevents, reached
   // without the flag. Asserting the status alone would pass on a run that
   // widened and then happened to die.
   assert.equal(queriesRun(stderr), 0);

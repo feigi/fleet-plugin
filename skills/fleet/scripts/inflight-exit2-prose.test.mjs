@@ -9,16 +9,18 @@
 // checked against `inflight.sh` itself before being written down:
 //
 //   1. exit 2 from a probe failure carries the same JSON as 0 and 1 plus an
-//      `unknown[]` (inflight.sh:14-15, and the single unconditional `printf` at
-//      inflight.sh:703 that every rc reaches);
-//   2. `taken` is false on that payload (inflight.sh:548), summarizing `hits`
-//      and NOT claiming the ticket is free — so a consumer reads `unknown`;
+//      `unknown[]` (inflight.sh's header, and its single unconditional
+//      `{"issue":%s,"taken":%s,…}` printf, which every rc reaches);
+//   2. `taken` is false on that payload (its `taken=false` arms), summarizing
+//      `hits` and NOT claiming the ticket is free — so a consumer reads
+//      `unknown`;
 //   3. a hit outranks an unknown, so a non-empty `hits[]` AND a non-empty
-//      `unknown[]` is exit 1, taken (inflight.sh:540-546);
-//   4. four causes still exit 2 with no payload at all — the `die()` at
-//      inflight.sh:36, reached by a bad argument (inflight.sh:38,40), not being
-//      inside a git repository (:42), no such issue (:109), and a verdict that
-//      could not be written (:705) — so exit 2 is not assumed to parse.
+//      `unknown[]` is exit 1, taken (its `taken=true`/`rc=1` arm);
+//   4. four causes still exit 2 with no payload at all — the `die()` inflight.sh
+//      defines up top, reached by a bad argument (its usage and numeric-issue
+//      guards), not being inside a git repository, `issue #$n does not exist in
+//      this repository`, and `could not write the verdict` — so exit 2 is not
+//      assumed to parse.
 //
 // Rule 4 is the one that makes the other three safe to state: without it the
 // step would read as "exit 2 always carries a payload", which is false, and a

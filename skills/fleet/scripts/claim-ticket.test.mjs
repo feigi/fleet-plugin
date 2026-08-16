@@ -83,6 +83,21 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   };
 }
 
+test("a zero-padded issue is refused", () => {
+  // #121: `$issue` reaches a JSON number slot (`"issue":%s`), where all-digits
+  // is not enough — RFC 8259 forbids a leading zero, so `007` emitted
+  // `{"issue":007,…}` that no parser accepts. It also reaches `$((16000 +
+  // issue))`, where /bin/sh reads `010` as octal 8 and refuses `008` outright,
+  // so a padded number could silently derive another claim's ports.
+  // Two widths, because one does not pin the guard: `0?*` narrowed to `0??*`
+  // still refuses `007` and re-admits `01`, which is the same bug back.
+  for (const padded of ["007", "01"]) {
+    const r = spawnSync("sh", [SCRIPT, padded, "slug", "fix"], { cwd: tmpdir(), encoding: "utf8" });
+    assert.equal(r.status, 2, padded);
+    assert.match(r.stderr, /issue must be a number/);
+  }
+});
+
 const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
 // `root.test.mjs` exists so no assertion below can be satisfied by the argv
 // being dropped: bare `node --test` discovers the whole fixture, and every
