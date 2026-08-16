@@ -139,6 +139,46 @@ function bareConflictRepo(t, path) {
 }
 
 /**
+ * N add/add conflicts, all introduced by ONE commit on each side — the shape
+ * #148 measured: a single main commit ("MAIN COMMIT AT RISK") touching every
+ * conflicting path. Real ARG_MAX needs ~4500 ordinary-length paths to split
+ * on its own; `withSplitXargs` below forces the split at this small N
+ * instead.
+ */
+function manyConflictsOneCommit(t, n = 20) {
+  const c = repo(t);
+  const paths = Array.from({ length: n }, (_, i) => `conflict-${i}.txt`);
+  git(c.w, "checkout", "-q", "main");
+  for (const p of paths) writeFileSync(join(c.w, p), "MAIN SIDE\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  for (const p of paths) writeFileSync(join(c.w, p), "branch side\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "branch edits every file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  return c;
+}
+
+/**
+ * Shadows `xargs` on PATH with a wrapper that inserts `-s 300` ahead of
+ * whatever args the script passes, forcing the ARG_MAX split #148 describes
+ * on an ordinary small fixture instead of a ~1 MiB pathspec list — the same
+ * technique the ticket used to measure the bug. Only `xargs` is intercepted;
+ * the real binary, resolved once up front (outside the shadowed PATH, so the
+ * lookup cannot recurse into the wrapper), runs everything.
+ */
+function withSplitXargs(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-xargs-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", "command -v xargs"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "xargs"), `#!/bin/sh\nexec ${real} -s 300 "$@"\n`);
+  chmodSync(join(bin, "xargs"), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
+/**
  * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
  * fleet's own layout, and the only one where breaking the linkage is dangerous:
  * an enclosing repo is standing by to answer in the worktree's place, and being
@@ -593,6 +633,23 @@ test("a plain conflicting path names the commits at risk", (t) => {
   assert.equal(r.status, 0);
   assert.deepEqual(r.json.conflicts, ["plain.txt"]);
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// #148: above ARG_MAX, `xargs -0` runs `git log` once per batch of the
+// pathspec list, and each invocation reports every commit touching ITS OWN
+// batch — so one commit spanning several batches used to come back once per
+// batch. `withSplitXargs` forces that split at 20 files instead of the ~4500
+// real ARG_MAX needs, reproducing the ticket's own measurement (20 files, one
+// main commit, `xargs -s 300`) without a ~1 MiB fixture.
+test("a commit touching every conflicting path is named once in atRisk, even when xargs splits the pathspec list into several batches", (t) => {
+  const c = manyConflictsOneCommit(t);
+  const env = { ...ENV, PATH: withSplitXargs(t) };
+
+  const r = audit(c, env);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.conflicts.length, 20, "fixture must put every file in conflict");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "one commit, named once, not once per xargs batch");
 });
 
 // #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced

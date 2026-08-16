@@ -470,6 +470,19 @@ if [ -n "$conflicts" ]; then
   at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
     || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
+  # Above ARG_MAX (1048576 on macOS) xargs splits the pathspec list across
+  # more than one `git log` invocation, and each invocation reports every
+  # commit touching ITS OWN batch — so a commit whose changes span more than
+  # one batch is printed once per batch it lands in. Deduped on the abbreviated
+  # SHA, `--oneline`'s first field, order preserved; a no-op when xargs did not
+  # split. Kept as its own statement rather than appended to the pipe above:
+  # appended, `awk` would become the pipe's LAST command, and with no
+  # `pipefail` in POSIX sh (dash rejects `set -o pipefail` outright) the `||
+  # die` after that pipe reads awk's exit status, not git log's — silently
+  # swallowing a real git-log failure behind a trivially-successful awk pass
+  # on whatever partial output preceded it. A fresh statement over the
+  # already-captured string can't touch the `|| die` two lines up.
+  at_risk=$(printf '%s\n' "$at_risk" | awk '!seen[$1]++')
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
 fi
 at_risk_json=$(printf '%s' "$at_risk" | jarr)
