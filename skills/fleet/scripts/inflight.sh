@@ -85,9 +85,27 @@ echo "\$ gh issue view $n --json closedByPullRequestsReferences,url" >&2
 # and silently inherit its state. A URL is globally unique, so the lookup below
 # cannot mismatch. The issue's own URL rides along as the first field to name
 # the repo the search window covers — same call, no extra round-trip.
+#
+# Both `gh` calls in this probe capture stderr to this one file rather than
+# folding it in with `2>&1`: `linked`/`pr_json` above need stdout alone,
+# undisturbed by any stderr noise a successful call still emits. It used to be
+# a fixed /tmp/.inflight.$$ — guessable from the PID, and `>` follows a
+# symlink, so anything on the host that pre-plants that path pointing at a
+# file this user can write gets it truncated the instant stderr lands there
+# (#91, measured: a 37-byte victim file left at 14 bytes). mktemp's
+# unpredictable name closes the guess; the trap closes the other half — no
+# cleanup ran for an interrupt landing between the redirect and the `rm -f`
+# that only ever followed a call that finished.
+errfile=$(mktemp) || die "cannot create a temporary file to capture gh's stderr"
+trap 'rm -f "$errfile"' EXIT
+
 if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq \
-                '[.url] + [.closedByPullRequestsReferences[].url] | join(",")' 2>/tmp/.inflight.$$); then
-  err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
+                '[.url] + [.closedByPullRequestsReferences[].url] | join(",")' 2>"$errfile"); then
+  err=$(cat "$errfile" 2>/dev/null || true); rm -f "$errfile"
+  # Empty is not "gh said nothing" — it is indistinguishable from the capture
+  # itself failing (unwritable /tmp, a full filesystem), which still fails
+  # closed but used to leave the operator with nothing after the colon.
+  [ -n "$err" ] || err="cause unavailable"
   # "No such issue" and "GitHub is unreachable" are different facts and must not
   # share a message. An unattended fleet reading a network blip as "that ticket
   # does not exist" would drop real work on the floor.
@@ -116,19 +134,20 @@ if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq 
       return 1 ;;
   esac
 fi
-rm -f /tmp/.inflight.$$
+rm -f "$errfile"
 
 echo "\$ gh pr list --state all --search $n --json number,state,headRefName,url" >&2
 # Keep the cause, the way the `gh issue view` call twelve lines up does.
 # Discarding it makes rate-limited, unauthenticated and offline read alike, and
 # all three land on an operator who then has nothing to act on.
 if ! pr_json=$(gh pr list --state all --search "$n" --limit 100 \
-                 --json number,state,headRefName,url 2>/tmp/.inflight.$$); then
-  err=$(cat /tmp/.inflight.$$ 2>/dev/null || true); rm -f /tmp/.inflight.$$
+                 --json number,state,headRefName,url 2>"$errfile"); then
+  err=$(cat "$errfile" 2>/dev/null || true); rm -f "$errfile"
+  [ -n "$err" ] || err="cause unavailable"
   add_unknown "pr" "gh pr list failed, so whether #$n is taken is unknown: $(printf '%s' "$err" | tr '\n' ' ')"
   return 1
 fi
-rm -f /tmp/.inflight.$$
+rm -f "$errfile"
 
 pr=$(printf '%s' "$pr_json" | NUM="$n" LINKED="$linked" python3 -c '
 import json, os, re, sys

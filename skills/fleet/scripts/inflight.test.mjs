@@ -45,6 +45,12 @@ while [ $# -gt 0 ]; do
 done
 case "$sub" in
   "issue view")
+    # A failure with NOTHING on stderr — unlike GH_ISSUE_ERR below, which
+    # always has text. This is what the redirect itself failing looks like
+    # (unwritable /tmp, a full filesystem): gh never got to print anything,
+    # and #91's fix is what stands between that and a blank tail on the
+    # message add_unknown builds.
+    if [ -n "\${GH_ISSUE_FAIL_SILENT:-}" ]; then exit 1; fi
     if [ -n "\${GH_ISSUE_ERR:-}" ]; then printf '%s\\n' "$GH_ISSUE_ERR" >&2; exit 1; fi
     printf '%s' "$GH_ISSUE_JSON" | jq -r "$expr" ;;
   "pr list")
@@ -101,8 +107,8 @@ function remoteBranch(bare, name) {
  * able to answer probe 2 first. "unreachable" and "none" opt into the two
  * failures that used to be reported as "no remote branch".
  */
-function fixture(t, n, { linked = [], prs = [], issueErr = null, origin = "bare", remoteBranches = [],
-                         detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
+function fixture(t, n, { linked = [], prs = [], issueErr = null, issueFailSilent = false, origin = "bare",
+                         remoteBranches = [], detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
                          trFailWhenArgsHave = null, python3FailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
@@ -234,7 +240,9 @@ exec '${REAL_PYTHON3}' "$@"
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GH_ISSUE_ERR;
+  delete env.GH_ISSUE_FAIL_SILENT;
   if (issueErr) env.GH_ISSUE_ERR = issueErr;
+  if (issueFailSilent) env.GH_ISSUE_FAIL_SILENT = "1";
   return { repo, env, bin };
 }
 
@@ -1559,4 +1567,35 @@ test("accumulate: outside a git repository is still refused before any probe run
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
   assert.match(r.stderr, /not inside a git repository/);
+});
+
+// --- #91: the temp file `gh`'s stderr is captured to. Two problems, one fix:
+// a fixed /tmp/.inflight.$$ was guessable and symlink-truncatable, and a
+// capture that failed for its own reasons (unwritable /tmp, a full
+// filesystem) read back as an empty cause, indistinguishable from gh itself
+// having said nothing.
+
+test("probe 1: gh failing with nothing on stderr still names a cause, not a blank tail", (t) => {
+  // GH_ISSUE_FAIL_SILENT, not GH_ISSUE_ERR — this is what a capture that
+  // could not even write looks like, distinct from every other failure case
+  // in this file, which all have real text to report.
+  const r = inflight(8, { issueFailSilent: true }, t);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /PR links are unknown: cause unavailable/,
+    "an empty capture says so instead of trailing off after the colon");
+});
+
+test("probe 1: mktemp failing to create the capture file is a clean refusal, not a raw shell abort", (t) => {
+  // Kills two mutants at once: dropping the `|| die` guard on the mktemp call
+  // (set -e would then abort with no message and the wrong exit code), and
+  // reverting to the old fixed /tmp/.inflight.$$ path (which never calls
+  // mktemp at all, so this stub would go untouched and the run would proceed
+  // normally instead of refusing).
+  const { repo, env, bin } = fixture(t, 8, {});
+  writeFileSync(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "mktemp"), 0o755);
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "", "nothing was established — this fails before either gh call");
+  assert.match(r.stderr, /cannot create a temporary file to capture gh's stderr/);
 });
