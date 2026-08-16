@@ -859,7 +859,11 @@ minted in prose the ticket never asked for.** Put the check on the
 must have a settling command run against the tree first — the issue body is a
 lead, never a citation — and the diff must **match the ticket's stated size**,
 since added prose is where minted claims enter. No positional references (`the
-closing/second/last X`); name the thing semantically. The workflow's `comments`
+closing/second/last X`); name the thing semantically. Evidence from a run on
+**another repo** is cited by host: a github.com source as `owner/repo#N`;
+anything else (GHE, GitLab, internal) as prose naming host and repo and saying
+it cannot be settled from this repo — a bare `#N` stays bare only for this
+repo's own issues and PRs. The workflow's `comments`
 dimension checks every added assertion against the tree, including comments in
 files the diff does not touch; a fallback reviewer has to be told that *and* told
 to read each corrected sentence literally, clause by clause.

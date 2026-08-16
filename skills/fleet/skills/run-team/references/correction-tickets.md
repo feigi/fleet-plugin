@@ -14,14 +14,24 @@ Fix text **paraphrases the issue body's framing** instead of being checked claus
 
 ## Second mechanism: minted, not inherited — scope creep in the prose
 
-Second run, on a **different repo**; the numbers and test vocabulary describing it are theirs, not ours. Its PR 574 shipped **two** fresh false claims, neither traceable to the issue. Issue asked for **one clause**; PR wrote **five lines**. Both errors entered in that expansion — so comparing fix text against the issue clause cannot catch them, there being no clause to compare against.
+Second run, on **`CoCo/agent-brain`** — GHE-hosted (`bmw.ghe.com`), not github.com, so none of it can be settled from this repo; the numbers, ordinals and test vocabulary describing it are theirs, not ours. Its PR 574 shipped **two** fresh false claims, neither traceable to the issue. Issue asked for **one clause**; PR wrote **five lines**. Both errors entered in that expansion — so comparing fix text against the issue clause cannot catch them, there being no clause to compare against.
 
 Both were **positional references**: "the *closing* `report-file verification` block" (4th of 5) and "the *second* assertion is the one with teeth" (3rd). Positional refs are one of the four classes in the four-for-four finding, and they re-rot the moment anyone inserts ahead of them.
 
-Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and the test runner stops at the first failed expect — so the obvious mutation (setting the workflow step under test to `if: ${{ always() }}`) reds the named assertion and never reaches the true one, appearing to confirm the wrong claim. One mutation cannot discriminate an ordinal: PR #32 measured that `always()` reds the named assertion, and only the narrower `always() && steps.mutate.outcome == 'success'` reds the true one.
+Ordinals also **fake their own verification**: the wrong ordinal named an assertion earlier than the real one, and **a failing assertion aborts the rest of its test** (true of `node --test` + `assert.*` here, not only of their runner) — so the obvious mutation (setting the workflow step under test to `if: ${{ always() }}`) reds the named assertion and never reaches the true one, appearing to confirm the wrong claim. One mutation cannot discriminate an ordinal: PR #32 measured that `always()` reds the named assertion, and only the narrower `always() && steps.mutate.outcome == 'success'` reds the true one.
 
 Two rules for the implementer, both cheap: **match the ticket's stated size** — added prose is where minted claims enter — and **never write a positional reference** (`the closing/second/last X`); name what the thing *is*, not where it sits.
 
 ## The clause-by-clause duty
 
 Put check on **implementer**, not only reviewer: every factual claim the diff restates must have settling command run against tree first. Issue body is lead, never citation. Tell reviewers same, and to read each corrected sentence literally, asking whether every clause true under that reading — nobody hunts this unprompted, because diff "obviously" improves accuracy.
+
+## Citing evidence from another repo's run
+
+Bare `#574` reads as **this** repo's 574 — to a human and to an agent alike. Ambiguity is the whole defect; no hyperlink need be involved. Cite by host of the source:
+
+- **github.com** → `owner/repo#N`. `gh pr view N --repo owner/repo` settles it.
+- **Any other host** (GHE, GitLab, internal) → prose naming host and repo, plus explicit *cannot be settled from this repo*. Qualified form is inert there: `gh api repos/CoCo/agent-brain` returns 404, so `CoCo/agent-brain#574` would point at nothing.
+- **This repo's own issues and PRs stay bare `#N`.** Convention covers foreign evidence only; qualifying local reference is noise.
+
+Disclaimer must reach every foreign token it covers — numbers, ordinals, file names, test vocabulary — and must say unverifiable, because the clause-by-clause duty demands settling command and none exists to run. Where lesson itself is host-neutral, name behaviour generically instead of scoping it foreign: foreign-scoped lesson invites reader to discard one that does apply here.
