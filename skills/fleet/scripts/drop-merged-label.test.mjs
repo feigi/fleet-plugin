@@ -121,8 +121,9 @@ test("usage: a bare 0 clears the numeric guard", (t) => {
   // `0`, so neither hazard the guard exists to close applies to it. Widening
   // the arm would refuse a value the ticket's own worked example shows working.
   const s = stub(t);
-  const { stderr } = run("0", { env: s.env() });
+  const { code, stderr } = run("0", { env: s.env() });
   assert.doesNotMatch(stderr, /pr must be a number/);
+  assert.equal(code, 0, "0 clears the guard and runs to completion");
 });
 
 test("usage: rejects an unknown second argument", (t) => {

@@ -1593,19 +1593,20 @@ test("accumulate: a bare 0 clears the numeric guard", (t) => {
   // cases, beside `42`. A bare `0` is a valid RFC 8259 number and `$((0))` is
   // `0`, so neither hazard the guard exists to close applies to it. Widening
   // the arm would refuse a value the ticket's own worked example shows working.
-  const r = spawnSync("sh", [SCRIPT, "0"], { encoding: "utf8" });
-  assert.doesNotMatch(r.stderr, /issue must be a number/);
+  const r = inflight(0, {}, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.issue, 0, "emitted as a JSON number, and the payload parses");
 });
 
 test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
   // The other half of #121's guard, and the half that would strand the fleet if
   // it were wrong: `gh` never zero-pads, so every legitimate caller passes a
-  // bare number and must still be answered. Over-refusal is not subtle — 69 of
-  // this file's 71 tests go red under a guard that refuses every digit string —
+  // bare number and must still be answered. Over-refusal is not subtle — 70 of
+  // this file's 72 tests go red under a guard that refuses every digit string —
   // so what this test adds is diagnosis, not detection: a name that says which
-  // half of the guard broke, and the file's only assertion that `issue` is
-  // emitted as a JSON number rather than a string (rewrite the verdict printf
-  // to `{"issue":"%s"` and this test alone fails).
+  // half of the guard broke, and an assertion that `issue` is emitted as a JSON
+  // number rather than a string (rewrite the verdict printf to `{"issue":"%s"`
+  // and only this test and the bare-0 one above fail).
   const r = inflight(7, {}, t);
   assert.equal(r.code, 0);
   assert.equal(r.json.issue, 7, "emitted as a JSON number, and the payload parses");

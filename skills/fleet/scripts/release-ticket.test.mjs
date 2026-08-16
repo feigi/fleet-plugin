@@ -884,6 +884,9 @@ test("a bare 0 clears the numeric guard", (t) => {
   const r = repo(t);
   const zero = spawnSync("sh", [SCRIPT, "0", "slug", "fix"], { cwd: r.w, env: r.env(), encoding: "utf8" });
   assert.doesNotMatch(zero.stderr, /issue must be a number/);
+  // Positive, not just the absence of one string: `0` has to reach the *next*
+  // precondition, and `fix/0-slug` shows it arrived there as the issue number.
+  assert.match(zero.stderr, /no branch fix\/0-slug/);
 });
 
 test("a chatty but successful gh does not fake an already-dropped label", (t) => {
