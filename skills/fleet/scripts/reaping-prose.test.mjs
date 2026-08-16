@@ -2,9 +2,12 @@
 // preconditions at the moment of the delete. Two things are wrong with that,
 // and only the second is obvious once stated.
 //
-// The dirty check is CONDITIONAL where the other three are not: it opens inside
+// The dirty check is the CONDITIONAL one: it opens inside
 // `[ -n "$wt" ] && [ -d "$wt" ]`, so a claim whose worktree directory is
-// established absent has three preconditions recomputed, not four.
+// established absent has three preconditions recomputed, not four. (The
+// established-absent path is the only one that reaches the delete with it
+// skipped — a directory git cannot stat dies on the unknown-existence guard
+// above it, and a non-directory blocks.)
 //
 // And `git worktree remove` without `--force` is no backstop for the one it
 // skips. It gates its own clean check on the same `stat` the script's `gone`
@@ -78,7 +81,7 @@ const releaseSection = () =>
     "reaping.md",
   );
 
-test("reaping.md: the dirty check is named conditional, the other three preconditions are not", () => {
+test("reaping.md: the dirty check is named as the conditional precondition", () => {
   // Without this, "four preconditions, recomputed inside same invocation as
   // delete" reads as four checks that always run — and the claim whose worktree
   // directory is gone gets released on three.

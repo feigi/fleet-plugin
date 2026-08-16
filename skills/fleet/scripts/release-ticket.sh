@@ -567,7 +567,11 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # agent-test and excludes it, so every fleet worktree has one, and blocking on
   # it would strand every claim. `git worktree remove` deletes ignored files
   # silently and refuses on modified and untracked ones (verified, git 2.50.1) —
-  # which is this same check, recomputed by git at the moment of the delete.
+  # which is this same check, recomputed by git at the moment of the delete, and
+  # only while the directory is there. That is the header's live-directory case:
+  # git gates that refusal on the same stat this block's `-d` gate does, so on a path
+  # neither can stat it accepts the entry at rc 0 instead, and `gone` is what
+  # stands between the member's work and the delete.
   n=$(printf '%s' "$dirty" | grep -c . || true)
   [ "$n" -eq 0 ] || block "worktree $wt has $n uncommitted change(s)"
 fi

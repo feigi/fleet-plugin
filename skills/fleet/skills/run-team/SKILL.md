@@ -988,9 +988,13 @@ phase 0's in-flight probe reads a free ticket as taken next run. Same silent que
 shrink as a stale merged worktree, from the opposite end.
 
 `~/.claude/skills/fleet/scripts/release-ticket.sh <N> <slug> <type> --apply` is the
-inverse of the claim, and recomputes all four preconditions inside the same
-invocation as the delete: 0 commits ahead of `origin/main`, clean worktree, no
-unique commits (`git cherry`), no branch on `origin`. All clear → drops the label,
+inverse of the claim, and recomputes its preconditions inside the same
+invocation as the delete: 0 commits ahead of `origin/main`, no unique commits
+(`git cherry`), no branch on `origin`, and — whenever the worktree directory is
+there to read — a clean worktree. Where that directory is established absent the
+dirty check does not run at all, and `git worktree remove` is no backstop for it:
+it gates its own clean check on the same `stat`, so the script's absence
+measurement is sole arbiter there. See references/reaping.md. All clear → drops the label,
 removes the worktree without `--force`, deletes the branch with `-d`. Any one of
 them failing → it touches nothing and names the blocker. **That refusal is the
 finding, never an obstacle**: a claim carrying commits or a pushed branch is not
