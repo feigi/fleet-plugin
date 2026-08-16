@@ -98,6 +98,19 @@ test("a zero-padded issue is refused", () => {
   }
 });
 
+test("a bare 0 clears the numeric guard", () => {
+  // `0?*`, not `0*`: #121 lists `sh inflight.sh 0 -> parses` among its PASSING
+  // cases, beside `42`. A bare `0` is a valid RFC 8259 number and `$((0))` is
+  // `0`, so neither hazard the guard exists to close applies to it. Widening
+  // the arm would refuse a value the ticket's own worked example shows working.
+  const r = spawnSync("sh", [SCRIPT, "0", "slug", "fix"], { cwd: tmpdir(), encoding: "utf8" });
+  assert.doesNotMatch(r.stderr, /issue must be a number/);
+  // Positive, not just the absence of one string: `0` has to reach the *next*
+  // precondition. A refusal worded differently, or added ahead of the guard,
+  // never gets here and cannot leave this message behind.
+  assert.match(r.stderr, /not inside a git repository/);
+});
+
 const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
 // `root.test.mjs` exists so no assertion below can be satisfied by the argv
 // being dropped: bare `node --test` discovers the whole fixture, and every
