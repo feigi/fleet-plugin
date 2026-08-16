@@ -263,10 +263,9 @@ echo "\$ git ls-remote --heads origin" >&2
 #
 # stderr is left on stderr rather than folded into the value. That matters less
 # here than in release-ticket.sh's `git ls-remote --heads` pushed-branch lookup,
-# which tests $remote
-# raw, so a folded-in host-key notice really would read as a branch, whereas the
-# awk below reduces such a line to a word no numeric segment can match. git's
-# own wording is more use on the terminal anyway.
+# which tests $remote raw, so a folded-in host-key notice really would read as a
+# branch, whereas the awk below reduces such a line to a word no numeric segment
+# can match. git's own wording is more use on the terminal anyway.
 #
 # This is the one network call in the script (probe 1 goes through `gh`, probe
 # 3 never leaves disk), and unattended it must neither prompt nor hang (#92).
@@ -558,11 +557,10 @@ elif [ "$linked" -gt "$registered" ]; then
 fi
 
 # substr($0,10), never $2, exactly as release-ticket.sh's own substr($0,10) awks
-# read the same field:
-# the porcelain prints the path raw, so a checkout under a directory with a
-# space in it — plain enough on macOS — truncates at the space and the ticket
-# stops matching. That is a wrong "free", the one answer this script must never
-# invent.
+# read the same field: the porcelain prints the path raw, so a checkout under a
+# directory with a space in it — plain enough on macOS — truncates at the space
+# and the ticket stops matching. That is a wrong "free", the one answer this
+# script must never invent.
 #
 # The basename is taken in the same pass, by dropping everything through the
 # last `/`. It used to be a `basename` subshell per line, which had this defect

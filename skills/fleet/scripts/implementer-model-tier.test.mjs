@@ -162,12 +162,12 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
     "the guard no longer says why the wave is not a usable unit — it comes back otherwise",
   );
 
-  // Runnable, not merely named. `compute-spend.mjs` is a pure module: no shebang,
-  // no process.argv, no main — running it prints nothing and exits 0, which reads
-  // as "no spend recorded". `board.mjs build` emits it at `.spend`
+  // Runnable, not merely named. `compute-spend.mjs` is a pure module: no
+  // shebang, no process.argv, no main — running it prints nothing and exits 0,
+  // which reads as "no spend recorded". `board.mjs build` emits it at `.spend`
   // (compute-board.mjs's `spend: inputs.spend ?? null`). The doesNotMatch is
-  // over a verified-zero baseline
-  // and needs the positive companion above it to stay meaningful.
+  // over a verified-zero baseline and needs the positive companion above it to
+  // stay meaningful.
   assert.match(slice, /board\.mjs build/, "the guard no longer names a runnable way to read spend");
   assert.doesNotMatch(
     slice,

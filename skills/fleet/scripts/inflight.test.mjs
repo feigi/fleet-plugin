@@ -219,14 +219,14 @@ exec '${REAL_PYTHON3}' "$@"
     // worse than either answer, and a suite that hangs reports nothing at all.
     GIT_TERMINAL_PROMPT: "0",
     // The developer's own git config must not reach these cases, the way
-    // release-ticket.test.mjs's GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM already shut
-    // it out. Probe 2 only became a
-    // hard dependency of this file with the fail-closed guard — before it, a
-    // broken origin was swallowed and no config could reach it. Now
-    // `protocol.file.allow=never` (documented hardening after CVE-2022-39253)
-    // reddens most of the file, and a global `[remote "origin"] url` is worse
-    // than red: `remote.<name>.url` is multi-valued, the global entry wins, and
-    // "no matching branch" passes while pointed at somebody else's repository.
+    // release-ticket.test.mjs's GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM already
+    // shut it out. Probe 2 only became a hard dependency of this file with the
+    // fail-closed guard — before it, a broken origin was swallowed and no
+    // config could reach it. Now `protocol.file.allow=never` (documented
+    // hardening after CVE-2022-39253) reddens most of the file, and a global
+    // `[remote "origin"] url` is worse than red: `remote.<name>.url` is
+    // multi-valued, the global entry wins, and "no matching branch" passes
+    // while pointed at somebody else's repository.
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
     GH_ISSUE_JSON: JSON.stringify({
