@@ -180,7 +180,7 @@ are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
 <file-or-dir>` and nothing else — anyone who finds the worktree finds the
 runner, including grandchildren you never dispatched. A directory works too and
 expands to the test files under it; one holding none refuses rather than passing
-vacuously, so a mistyped path cannot come back green. See
+vacuously, so a mistyped file or directory path cannot come back green. See
 references/isolation.md.
 
 **A reused worktree may lack the runner.** `claim-ticket.sh` writes `agent-test`
