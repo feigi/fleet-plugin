@@ -262,7 +262,8 @@ echo "\$ git ls-remote --heads origin" >&2
 # while this one cannot.
 #
 # stderr is left on stderr rather than folded into the value. That matters less
-# here than in release-ticket.sh:173, whose pushed-branch lookup tests $remote
+# here than in release-ticket.sh's `git ls-remote --heads` pushed-branch lookup,
+# which tests $remote
 # raw, so a folded-in host-key notice really would read as a branch, whereas the
 # awk below reduces such a line to a word no numeric segment can match. git's
 # own wording is more use on the terminal anyway.
@@ -556,7 +557,8 @@ elif [ "$linked" -gt "$registered" ]; then
   return 1
 fi
 
-# substr($0,10), never $2, exactly as release-ticket.sh:78 reads the same field:
+# substr($0,10), never $2, exactly as release-ticket.sh's own substr($0,10) awks
+# read the same field:
 # the porcelain prints the path raw, so a checkout under a directory with a
 # space in it — plain enough on macOS — truncates at the space and the ticket
 # stops matching. That is a wrong "free", the one answer this script must never
@@ -600,7 +602,7 @@ fi
 echo "$NAME: #$n taken=$taken" >&2
 
 # Every evidence string goes through here, the same helper and the same pipeline
-# as release-ticket.sh:115. Three of the four are names chosen elsewhere: git
+# as release-ticket.sh's jstr(). Three of the four are names chosen elsewhere: git
 # accepts a `"` in a ref, so a branch — local or remote — carries one in; a
 # worktree path is a filename, so it carries in `\` as well, which git's ref
 # rules reject. Raw, either emits a payload no JSON parser accepts.

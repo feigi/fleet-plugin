@@ -138,7 +138,7 @@ test("phase 2 dispatches on the recorded class, and a missing class falls to the
       `phase 2 no longer spells the ledger literal for class=${cls}`,
     );
   }
-  // `row` REPLACES the line (ledger.mjs:131 `data.rows[i] = line`). Replaying a
+  // `row` REPLACES the line (ledger.mjs's `data.rows[i] = line`). Replaying a
   // two-token literal over a row carrying KILLED or → PR# drops those tokens with
   // only `rewrote row #N` on stderr.
   assert.match(
@@ -165,7 +165,8 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // Runnable, not merely named. `compute-spend.mjs` is a pure module: no shebang,
   // no process.argv, no main — running it prints nothing and exits 0, which reads
   // as "no spend recorded". `board.mjs build` emits it at `.spend`
-  // (compute-board.mjs:168). The doesNotMatch is over a verified-zero baseline
+  // (compute-board.mjs's `spend: inputs.spend ?? null`). The doesNotMatch is
+  // over a verified-zero baseline
   // and needs the positive companion above it to stay meaningful.
   assert.match(slice, /board\.mjs build/, "the guard no longer names a runnable way to read spend");
   assert.doesNotMatch(

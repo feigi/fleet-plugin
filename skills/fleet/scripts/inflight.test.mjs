@@ -219,7 +219,8 @@ exec '${REAL_PYTHON3}' "$@"
     // worse than either answer, and a suite that hangs reports nothing at all.
     GIT_TERMINAL_PROMPT: "0",
     // The developer's own git config must not reach these cases, the way
-    // release-ticket.test.mjs:30 already shuts it out. Probe 2 only became a
+    // release-ticket.test.mjs's GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM already shut
+    // it out. Probe 2 only became a
     // hard dependency of this file with the fail-closed guard — before it, a
     // broken origin was swallowed and no config could reach it. Now
     // `protocol.file.allow=never` (documented hardening after CVE-2022-39253)
@@ -436,7 +437,7 @@ test("probe 2: a reachable origin with a matching branch still reports taken", (
 // truncates at the first space and the ticket stops matching — a wrong "free",
 // the same answer probe 2 was just stopped from inventing. The pair below is
 // one fixture differing in one character, so a red names the space and nothing
-// else. release-ticket.sh:78 already reads this field as substr($0,10).
+// else. release-ticket.sh's own awks already read this field as substr($0,10).
 
 test("probe 3: a worktree under a path with a space is still found", (t) => {
   const r = inflight(77, { detachedWorktreeUnder: "some dir" }, t);
@@ -780,7 +781,9 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
 // consumer that cannot read the evidence, not a ticket claimed twice.
 //
 // The first two are built by hand rather than through `fixture`'s options, the
-// way release-ticket.test.mjs:729 builds its own: the names are the fixture.
+// way release-ticket.test.mjs's hostile-name payload cases build their own —
+// "a quote in the slug cannot produce a payload the caller fails to parse" and
+// the three below it: the names are the fixture.
 
 // Takes the fixture's `env`, not `process.env`: that is the copy with GIT_DIR
 // and GIT_WORK_TREE deleted. Inherited, they outrank `-C`, so a suite run from
@@ -827,7 +830,8 @@ test("a quote and a backslash in a worktree path cannot produce an unparseable p
 test("a control character in a worktree path cannot produce an unparseable payload", (t) => {
   // What pins the `tr` stage; without it the two cases above stay green and a
   // raw C0 byte reaches the payload, which JSON forbids unescaped. Mirrors
-  // release-ticket.test.mjs:743.
+  // release-ticket.test.mjs's "a control character in the worktree name cannot
+  // produce an unparseable payload".
   //
   // \001 specifically, not \n: awk's record separator ends the line, so a
   // newline cannot reach `jstr` and would pin nothing here — it is lost one
