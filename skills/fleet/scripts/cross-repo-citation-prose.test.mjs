@@ -8,8 +8,9 @@ import { join } from "node:path";
 // human and to an agent. Not a broken link (a repo's own markdown files link
 // nothing); a reader defect, which is why counts-not-numbers was the only
 // workaround the file had. The convention that closes it is host-split, and
-// both halves need pinning: the rule where the controller relays it, the
-// applied instance where the foreign evidence sits.
+// both halves need pinning: the rule in the Reviewers section, which the
+// controller relays to a hand-dispatched fallback reviewer, and the applied
+// instance where the foreign evidence sits.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 const CORRECTIONS = readFileSync(
@@ -20,8 +21,9 @@ const CORRECTIONS = readFileSync(
 // Slice-scoped, not whole-file: SKILL.md is 1200+ lines and a bare presence
 // check anywhere in it stays green when the text lands somewhere its reader
 // never reaches (measured before in this repo — member-prompt-prose.test.mjs
-// #172). The correction-ticket rule block is the one the controller copies
-// into an implementer's prompt.
+// #172). The correction-ticket rule block sits under `### Reviewers`, and its
+// own closing clause names the reader the controller has to relay it to: a
+// hand-dispatched fallback reviewer.
 function slice(text, startAnchor, endAnchor, what, { endsFile = false } = {}) {
   const at = text.indexOf(startAnchor);
   assert.notEqual(at, -1, `${what} start anchor ('${startAnchor}') moved — update this test`);
@@ -57,12 +59,12 @@ const conventionSection = () =>
 const secondRunSection = () =>
   flat(slice(CORRECTIONS, "## Second mechanism", "## The clause-by-clause duty", "the second-run evidence"));
 
-test("the cross-repo citation rule reaches the implementer, in the rule block the controller relays", () => {
+test("the cross-repo citation rule reaches the reviewer, in the rule block the controller relays to a fallback reviewer", () => {
   const block = correctionRuleBlock();
   assert.match(
     block,
     /another repo/i,
-    "the correction-ticket rule block no longer says anything about evidence from another repo — an implementer relayed only this block writes a bare `#N` for foreign evidence again",
+    "the correction-ticket rule block no longer says anything about evidence from another repo — a fallback reviewer relayed only this block stops catching a bare `#N` written for foreign evidence",
   );
   assert.match(
     block,
@@ -128,7 +130,7 @@ test("the ordinal-verification mechanism is named as behavior, not in the source
   const section = secondRunSection();
   assert.doesNotMatch(
     section,
-    /\bexpect\b/,
+    /\bexpects?\b/i,
     "the mechanism is scoped as foreign vocabulary again (`git grep 'expect(' HEAD` → zero hits here; this repo is `node:test` + `assert.*`), which invites a reader to discard a lesson that applies here unchanged",
   );
   assert.match(
