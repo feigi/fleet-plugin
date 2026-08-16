@@ -25,7 +25,7 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 
 [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: drop-merged-label.sh <pr> [--apply]"
 pr=$1
-case "$pr" in ''|*[!0-9]*) die "pr must be a number, got '$pr'";; esac
+case "$pr" in ''|*[!0-9]*|0?*) die "pr must be a number, got '$pr'";; esac
 case "${2:-}" in
   ''|--apply) ;;
   *) die "unknown argument '$2' — the only option is --apply";;

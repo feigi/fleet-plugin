@@ -105,6 +105,17 @@ const SUITE = {
 // a finding against the diff under review rather than against the invocation.
 // `pass 3` also pins the recursion: `t/` holds two files and `t/nested/` a
 // third, so a `find` capped at one level reads as a red here.
+test("usage: a zero-padded issue is refused", () => {
+  // #121: `$issue` reaches a JSON number slot (`"issue":%s`), where all-digits
+  // is not enough — RFC 8259 forbids a leading zero, so `007` emitted
+  // `{"issue":007,…}` that no parser accepts. It also reaches `$((16000 +
+  // issue))`, where /bin/sh reads `010` as octal 8 and refuses `008` outright,
+  // so a padded number could silently derive another claim's ports.
+  const r = spawnSync("sh", [SCRIPT, "007", "slug", "fix"], { cwd: tmpdir(), encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /issue must be a number/);
+});
+
 test("runner: a directory argument runs the test files under it", () => {
   const r = apply(SUITE).run("t");
   assert.equal(r.status, 0, r.stdout + r.stderr);

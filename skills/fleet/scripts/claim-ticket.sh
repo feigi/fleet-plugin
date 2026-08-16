@@ -20,7 +20,7 @@ type=$3
 apply=false
 [ "${4:-}" = "--apply" ] && apply=true
 
-case "$issue" in ''|*[!0-9]*) die "issue must be a number, got '$issue'";; esac
+case "$issue" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$issue'";; esac
 
 branch="$type/$issue-$slug"
 wt=".worktrees/$issue-$slug"

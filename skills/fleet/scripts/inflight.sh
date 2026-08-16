@@ -37,7 +37,7 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 
 [ $# -eq 1 ] || die "usage: inflight.sh <issue-number>"
 n=$1
-case "$n" in ''|*[!0-9]*) die "issue must be a number, got '$n'";; esac
+case "$n" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$n'";; esac
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
@@ -634,10 +634,10 @@ echo "$NAME: #$n taken=$taken" >&2
 # `N;$!ba` prints nothing at all for a single-line value.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
-# already refused unless it is all digits — which is not the same as a valid
-# JSON number, since a zero-padded `007` clears that guard and still emits a
-# payload no parser accepts (#121); `$taken` is this script's own true/false,
-# and `$hits` is built only from the fixed literals `add_hit` is called with.
+# refused unless it is all digits AND unpadded (the guard's `0?*` arm), which is
+# what makes it a JSON number and not merely numeric — RFC 8259 forbids a
+# leading zero, so `007` never reaches this printf (#121); `$taken` is this
+# script's own true/false, `$hits` only the fixed literals `add_hit` is given.
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.

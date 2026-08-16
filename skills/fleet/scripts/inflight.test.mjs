@@ -1566,6 +1566,30 @@ test("accumulate: a bad argument is still refused before any probe runs, with no
   assert.match(r.stderr, /issue must be a number/);
 });
 
+test("accumulate: a zero-padded issue is refused before any probe runs, with no payload", (t) => {
+  // All-digits is not a JSON number — RFC 8259 forbids a leading zero — so
+  // `007` used to clear the guard, reach the verdict printf and emit
+  // `{"issue":007,…}` at exit 0: unparseable, with an exit code that gave the
+  // caller no hint (#121). The guard's `0?*` arm refuses it at the same
+  // boundary as a non-numeric argument. Normalising with `n=$((n))` instead
+  // would be worse than the bug: /bin/sh reads `007` as octal 7 and `010` as
+  // 8, silently answering about a different ticket.
+  const r = spawnSync("sh", [SCRIPT, "007"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
+  assert.match(r.stderr, /issue must be a number/);
+});
+
+test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
+  // The other half of #121's guard, and the half that would strand the fleet if
+  // it were wrong: `gh` never zero-pads, so every legitimate caller passes a
+  // bare number and must still be answered. A guard that over-refused would
+  // turn every real claim check into exit 2, and only this direction catches it.
+  const r = inflight(7, {}, t);
+  assert.equal(r.code, 0);
+  assert.equal(r.json.issue, 7, "emitted as a JSON number, and the payload parses");
+});
+
 test("accumulate: outside a git repository is still refused before any probe runs, with no payload", (t) => {
   const outside = mkdtempSync(join(tmpdir(), "inflight-not-a-repo-"));
   t.after(() => execFileSync("rm", ["-rf", outside]));
