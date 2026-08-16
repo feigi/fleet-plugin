@@ -103,11 +103,15 @@ test("usage: rejects a zero-padded PR number", (t) => {
   // The same defect #121 names for `"issue":%s`, in this script's `"pr":%s`
   // slot: all-digits is not a JSON number, so `007` cleared the guard and the
   // payload emitted `{"pr":007,…}` — unparseable at exit 0. Refused before gh
-  // is reached, like every other usage error here.
+  // is reached, like every other usage error here. Two widths, because one does
+  // not pin the guard: `0?*` narrowed to `0??*` still refuses `007` and
+  // re-admits `01`, which is the same bug back.
   const s = stub(t);
-  const { code, stderr } = run("007", { env: s.env() });
-  assert.equal(code, 2);
-  assert.match(stderr, /pr must be a number/);
+  for (const padded of ["007", "01"]) {
+    const { code, stderr } = run(padded, { env: s.env() });
+    assert.equal(code, 2, padded);
+    assert.match(stderr, /pr must be a number/);
+  }
   assert.deepEqual(s.calls(), [], "must refuse before calling gh at all");
 });
 

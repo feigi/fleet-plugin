@@ -1577,11 +1577,15 @@ test("accumulate: a zero-padded issue is refused before any probe runs, with no 
   // caller no hint (#121). The guard's `0?*` arm refuses it at the same
   // boundary as a non-numeric argument. Normalising with `n=$((n))` instead
   // would be worse than the bug: /bin/sh reads `007` as octal 7 and `010` as
-  // 8, silently answering about a different ticket.
-  const r = spawnSync("sh", [SCRIPT, "007"], { encoding: "utf8" });
-  assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
-  assert.match(r.stderr, /issue must be a number/);
+  // 8, silently answering about a different ticket. Two widths, because one
+  // does not pin the guard: `0?*` narrowed to `0??*` still refuses `007` and
+  // re-admits `01`, which is the same bug back.
+  for (const padded of ["007", "01"]) {
+    const r = spawnSync("sh", [SCRIPT, padded], { encoding: "utf8" });
+    assert.equal(r.status, 2, padded);
+    assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
+    assert.match(r.stderr, /issue must be a number/);
+  }
 });
 
 test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
