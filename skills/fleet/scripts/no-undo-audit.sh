@@ -470,6 +470,27 @@ if [ -n "$conflicts" ]; then
   at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
     || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
+  # Above ARG_MAX (1048576 on macOS) xargs splits the pathspec list across
+  # more than one `git log` invocation, and each invocation reports every
+  # commit touching ITS OWN batch — so a commit whose changes span more than
+  # one batch is printed once per batch it lands in. Deduped on the abbreviated
+  # SHA, `--oneline`'s first field, keeping each commit's FIRST occurrence; a
+  # no-op when xargs did not split. Only the SET is claimed. The order that
+  # survives is the order the batches came back in, which once xargs has split
+  # is PATHSPEC order, not `git log`'s reverse-chronological one — an older
+  # commit can be listed above a newer, and nothing marks which case you are
+  # reading. Left that way deliberately: re-sorting costs a second `git log`
+  # to buy a ranking this audit does not offer, since it names the commits a
+  # resolution would eat rather than ordering them.
+  # Kept as its own statement rather than appended to the pipe above:
+  # appended, `awk` would become the pipe's LAST command, and with no
+  # `pipefail` in POSIX sh (dash rejects `set -o pipefail` outright) the `||
+  # die` after that pipe reads awk's exit status, not git log's — silently
+  # swallowing a real git-log failure behind a trivially-successful awk pass
+  # on whatever partial output preceded it. A fresh statement over the
+  # already-captured string can't touch the `|| die` two lines up.
+  at_risk=$(printf '%s\n' "$at_risk" | awk '!seen[$1]++') \
+    || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
 fi
 at_risk_json=$(printf '%s' "$at_risk" | jarr)

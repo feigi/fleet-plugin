@@ -139,6 +139,85 @@ function bareConflictRepo(t, path) {
 }
 
 /**
+ * Add/add conflicts on 20 paths, introduced on main by TWO distinct commits
+ * that INTERLEAVE through the pathspec list: the even-numbered paths come
+ * from one, the odd-numbered from the other, and the audit hands them to
+ * `git log` in sorted order. So a batch — always a contiguous run of that
+ * list — holds paths from both commits and reports both, and the
+ * concatenation across batches is `B A B A …` rather than `A A B B`.
+ *
+ * Every part of that shape is load-bearing, and one commit pinned none of it:
+ * with a single commit each batch emits the same line, so all duplicates are
+ * adjacent and a merely-ADJACENT dedupe (`uniq`) passes; interleaved, `uniq`
+ * has nothing adjacent to collapse and returns one line per batch. The two
+ * subjects share a first word so a dedupe keyed on `$2` — the subject's first
+ * word rather than `$1`, the SHA that is the actual commit identity —
+ * collapses them to one and fails. And two DISTINCT commits are what pin that
+ * the dedupe drops only true duplicates: both must survive the split.
+ *
+ * Returns `paths` so the test asserts against the fixture's own count instead
+ * of a literal repeated at the call site.
+ *
+ * Real ARG_MAX needs thousands of ordinary-length paths to split on its own —
+ * the exact figure is ambient-environment-size dependent, since xargs' budget
+ * is the limit minus the inherited environment — so `withSplitXargs` below
+ * forces the split at 20 instead.
+ */
+function manyConflictsTwoCommits(t) {
+  const c = repo(t);
+  const paths = Array.from({ length: 20 }, (_, i) => `conflict-${String(i).padStart(2, "0")}.txt`);
+  const evens = paths.filter((_, i) => i % 2 === 0);
+  const odds = paths.filter((_, i) => i % 2 === 1);
+  git(c.w, "checkout", "-q", "main");
+  for (const [subject, batch] of [["MAIN COMMIT AT RISK, even paths", evens], ["MAIN COMMIT AT RISK, odd paths", odds]]) {
+    for (const p of batch) writeFileSync(join(c.w, p), "MAIN SIDE\n");
+    git(c.w, "add", "--", ...batch);
+    git(c.w, "commit", "-q", "-m", subject);
+  }
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  for (const p of paths) writeFileSync(join(c.w, p), "branch side\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "branch edits every file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  return { ...c, paths };
+}
+
+/**
+ * Shadows `xargs` on PATH with a wrapper that inserts `-s 300` ahead of
+ * whatever args the script passes, forcing the ARG_MAX split #148 describes
+ * on an ordinary small fixture instead of a ~1 MiB pathspec list — the same
+ * technique the ticket used to measure the bug. Both wrappers resolve the real
+ * binary once up front — outside the shadowed PATH, so the lookup cannot
+ * recurse into the wrapper — and then `exec` it, so nothing else changes.
+ *
+ * `git` is shadowed too, and only to COUNT the batches: it records every
+ * invocation carrying a `:(literal)` pathspec, which is the one call xargs
+ * drives, so the count IS the number of batches. Without it the split is an
+ * unasserted side condition and the test is only conditionally a test — an
+ * xargs that clamps or ignores a small `-s` runs the whole fixture in one
+ * batch, and then every assertion below passes with the dedupe DELETED,
+ * measured end to end. `batches()` is what makes that platform fail red
+ * instead of green-on-nothing.
+ */
+function withSplitXargs(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-xargs-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const log = join(bin, "batches");
+  const shim = (name, body) => {
+    const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}exec ${real} "$@"\n`);
+    chmodSync(join(bin, name), 0o755);
+  };
+  shim("xargs", `set -- -s 300 "$@"\n`);
+  shim("git", `case " $* " in *':(literal)'*) echo x >>"${log}" ;; esac\n`);
+  return {
+    path: `${bin}:${process.env.PATH}`,
+    batches: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length - 1 : 0),
+  };
+}
+
+/**
  * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
  * fleet's own layout, and the only one where breaking the linkage is dangerous:
  * an enclosing repo is standing by to answer in the worktree's place, and being
@@ -593,6 +672,34 @@ test("a plain conflicting path names the commits at risk", (t) => {
   assert.equal(r.status, 0);
   assert.deepEqual(r.json.conflicts, ["plain.txt"]);
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// #148: above ARG_MAX, `xargs -0` runs `git log` once per batch of the
+// pathspec list, and each invocation reports every commit touching ITS OWN
+// batch — so a commit spanning several batches used to come back once per
+// batch. `withSplitXargs` forces that split at 20 files instead of the
+// thousands real ARG_MAX needs, reproducing the ticket's own measurement
+// (`xargs -s 300`) without a ~1 MiB fixture.
+//
+// Sorted, because the set is the whole claim: once xargs splits, `atRisk` is
+// the concatenation of per-batch outputs in PATHSPEC order, not `git log`'s
+// reverse-chronological one, and which commit lands first depends on how the
+// batch boundaries fall — which depends on the length of the tmpdir path.
+// Asserting the emitted order would pin the environment, not the dedupe.
+test("two commits spanning the conflicting paths are each named once in atRisk, even when xargs splits the pathspec list into several batches", (t) => {
+  const c = manyConflictsTwoCommits(t);
+  const xargs = withSplitXargs(t);
+
+  const r = audit(c, { ...ENV, PATH: xargs.path });
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.conflicts.length, c.paths.length, "fixture must put every file in conflict");
+  assert.ok(xargs.batches() > 1, `xargs must actually split — ran git log ${xargs.batches()}x, and at 1 this test passes with the dedupe deleted`);
+  assert.deepEqual(
+    subjects(r).sort(),
+    ["MAIN COMMIT AT RISK, even paths", "MAIN COMMIT AT RISK, odd paths"],
+    "each commit named once, not once per xargs batch it lands in",
+  );
 });
 
 // #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
