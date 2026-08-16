@@ -96,16 +96,46 @@ echo "\$ gh issue view $n --json closedByPullRequestsReferences,url" >&2
 # unpredictable name closes the guess; the trap closes the other half — no
 # cleanup ran for an interrupt landing between the redirect and the `rm -f`
 # that only ever followed a call that finished.
-errfile=$(mktemp) || die "cannot create a temporary file to capture gh's stderr"
-trap 'rm -f "$errfile"' EXIT
+#
+# Created ONCE and never unlinked mid-run. The intermediate `rm -f`s that used
+# to stand between the two calls handed the whole guess back: they freed a path
+# that is known by then, and the next `2>"$errfile"` re-created it at the
+# shell's umask instead of mktemp's — measured 0600 before, 0644 after — with a
+# symlink-following `>` doing the re-creating. The second call truncates the
+# same inode instead, so the path never leaves this process's hands, and the
+# trap is the single cleanup path. (The cost is narrow and deliberate: if the
+# second redirect itself fails, the readback below can report the first call's
+# stderr. A double fault, against a window open on every ordinary run.)
+if ! errfile=$(mktemp); then
+  # Probe-local, so it is recorded like any other probe that could not look.
+  # `die` here would abandon probes 2 and 3, which need neither `gh` nor this
+  # file — measured: a ticket visibly taken by a remote branch AND a worktree
+  # exited 2 with an empty payload and no hits.
+  add_unknown "pr" "could not create a temporary file to capture gh's stderr, so #$n's PR links are unknown"
+  return 1
+fi
+# `|| echo`, not a bare `rm -f`: this trap fires OUTSIDE the three probe
+# functions, where `set -e` is still live, so a failing `rm -f` exits 1 — and
+# the contract reads 1 as "taken", which would let cleanup overwrite a verdict
+# already computed and announced. The same hazard the verdict `printf` at the
+# foot of this file guards with `|| die`. `echo` returns 0, so the declared
+# status survives and the cleanup failure is still said out loud rather than
+# swallowed by a bare `|| :`.
+trap 'rm -f "$errfile" || echo "$NAME: could not remove $errfile" >&2' EXIT
+
+# One readback for both `gh` calls below, so a third capture site inherits the
+# fallback rather than having to remember to copy it. Empty is not "gh said
+# nothing" — it is indistinguishable from the capture itself failing
+# (unwritable /tmp, a full filesystem), which still fails closed but used to
+# leave the operator with nothing after the colon.
+gh_cause() {
+  err=$(cat "$errfile" 2>/dev/null || true)
+  [ -n "$err" ] || err="cause unavailable"
+}
 
 if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq \
                 '[.url] + [.closedByPullRequestsReferences[].url] | join(",")' 2>"$errfile"); then
-  err=$(cat "$errfile" 2>/dev/null || true); rm -f "$errfile"
-  # Empty is not "gh said nothing" — it is indistinguishable from the capture
-  # itself failing (unwritable /tmp, a full filesystem), which still fails
-  # closed but used to leave the operator with nothing after the colon.
-  [ -n "$err" ] || err="cause unavailable"
+  gh_cause
   # "No such issue" and "GitHub is unreachable" are different facts and must not
   # share a message. An unattended fleet reading a network blip as "that ticket
   # does not exist" would drop real work on the floor.
@@ -134,20 +164,17 @@ if ! linked=$(gh issue view "$n" --json closedByPullRequestsReferences,url --jq 
       return 1 ;;
   esac
 fi
-rm -f "$errfile"
 
 echo "\$ gh pr list --state all --search $n --json number,state,headRefName,url" >&2
-# Keep the cause, the way the `gh issue view` call twelve lines up does.
-# Discarding it makes rate-limited, unauthenticated and offline read alike, and
-# all three land on an operator who then has nothing to act on.
+# Keep the cause, through the same `gh_cause` the `gh issue view` call above
+# uses. Discarding it makes rate-limited, unauthenticated and offline read
+# alike, and all three land on an operator who then has nothing to act on.
 if ! pr_json=$(gh pr list --state all --search "$n" --limit 100 \
                  --json number,state,headRefName,url 2>"$errfile"); then
-  err=$(cat "$errfile" 2>/dev/null || true); rm -f "$errfile"
-  [ -n "$err" ] || err="cause unavailable"
+  gh_cause
   add_unknown "pr" "gh pr list failed, so whether #$n is taken is unknown: $(printf '%s' "$err" | tr '\n' ' ')"
   return 1
 fi
-rm -f "$errfile"
 
 pr=$(printf '%s' "$pr_json" | NUM="$n" LINKED="$linked" python3 -c '
 import json, os, re, sys
@@ -712,7 +739,9 @@ add_evidence worktree "$wt"
 # closed or full stdout rendered as a decision. `sh inflight.sh <N> >&-`
 # reproduces it. (The probe bodies cannot rely on that: each is invoked as
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
-# command in one carries its own guard.)
+# command in one carries its own guard.) The EXIT trap probe 1 installs is the
+# other site outside that exemption, and carries the same guard for the same
+# reason — see the `|| echo` on it.
 #
 # The evidence slot is an unquoted `%s`, unlike every other string slot in this
 # printf, and it now carries the object's keys as well as its values:

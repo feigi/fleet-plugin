@@ -45,15 +45,19 @@ while [ $# -gt 0 ]; do
 done
 case "$sub" in
   "issue view")
-    # A failure with NOTHING on stderr — unlike GH_ISSUE_ERR below, which
-    # always has text. This is what the redirect itself failing looks like
-    # (unwritable /tmp, a full filesystem): gh never got to print anything,
-    # and #91's fix is what stands between that and a blank tail on the
-    # message add_unknown builds.
-    if [ -n "\${GH_ISSUE_FAIL_SILENT:-}" ]; then exit 1; fi
-    if [ -n "\${GH_ISSUE_ERR:-}" ]; then printf '%s\\n' "$GH_ISSUE_ERR" >&2; exit 1; fi
+    # Set-ness, not non-emptiness, so ONE dial covers the whole range: an empty
+    # GH_ISSUE_ERR is a failure with NOTHING on stderr, which is also what the
+    # redirect itself failing looks like (unwritable /tmp, a full filesystem) —
+    # gh never got to print anything, and #91's fix is what stands between that
+    # and a blank tail on the message add_unknown builds.
+    if [ -n "\${GH_ISSUE_ERR+set}" ]; then printf '%s' "$GH_ISSUE_ERR" >&2; exit 1; fi
     printf '%s' "$GH_ISSUE_JSON" | jq -r "$expr" ;;
   "pr list")
+    # The same dial for probe 1's SECOND gh call. This branch had no failure
+    # mode at all, so nothing in this file could drive \`gh pr list\` to fail
+    # and the half of #91's fix landing here was unpinned — deleting it left
+    # the whole suite green (measured).
+    if [ -n "\${GH_PR_ERR+set}" ]; then printf '%s' "$GH_PR_ERR" >&2; exit 1; fi
     printf '%s' "$GH_PR_JSON" ;;
   *)
     echo "stub gh: unexpected invocation: $sub" >&2; exit 127 ;;
@@ -107,7 +111,7 @@ function remoteBranch(bare, name) {
  * able to answer probe 2 first. "unreachable" and "none" opt into the two
  * failures that used to be reported as "no remote branch".
  */
-function fixture(t, n, { linked = [], prs = [], issueErr = null, issueFailSilent = false, origin = "bare",
+function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, origin = "bare",
                          remoteBranches = [], detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
                          trFailWhenArgsHave = null, python3FailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
@@ -240,9 +244,11 @@ exec '${REAL_PYTHON3}' "$@"
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GH_ISSUE_ERR;
-  delete env.GH_ISSUE_FAIL_SILENT;
-  if (issueErr) env.GH_ISSUE_ERR = issueErr;
-  if (issueFailSilent) env.GH_ISSUE_FAIL_SILENT = "1";
+  delete env.GH_PR_ERR;
+  // `!== null`, not truthiness: "" is a case in its own right — gh failed and
+  // said nothing — not the absence of one.
+  if (issueErr !== null) env.GH_ISSUE_ERR = issueErr;
+  if (prErr !== null) env.GH_PR_ERR = prErr;
   return { repo, env, bin };
 }
 
@@ -1576,26 +1582,88 @@ test("accumulate: outside a git repository is still refused before any probe run
 // having said nothing.
 
 test("probe 1: gh failing with nothing on stderr still names a cause, not a blank tail", (t) => {
-  // GH_ISSUE_FAIL_SILENT, not GH_ISSUE_ERR — this is what a capture that
-  // could not even write looks like, distinct from every other failure case
-  // in this file, which all have real text to report.
-  const r = inflight(8, { issueFailSilent: true }, t);
+  // An empty `issueErr`, not a second knob — gh failed and printed nothing,
+  // which is also what a capture that could not even write looks like, and is
+  // distinct from every other failure case in this file, all of which have
+  // real text to report.
+  const r = inflight(8, { issueErr: "" }, t);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /PR links are unknown: cause unavailable/,
     "an empty capture says so instead of trailing off after the colon");
 });
 
-test("probe 1: mktemp failing to create the capture file is a clean refusal, not a raw shell abort", (t) => {
-  // Kills two mutants at once: dropping the `|| die` guard on the mktemp call
-  // (set -e would then abort with no message and the wrong exit code), and
-  // reverting to the old fixed /tmp/.inflight.$$ path (which never calls
-  // mktemp at all, so this stub would go untouched and the run would proceed
-  // normally instead of refusing).
-  const { repo, env, bin } = fixture(t, 8, {});
+// The same fix lands on probe 1's SECOND gh call, and both call sites now read
+// the capture back through one `gh_cause`. These two are what prove the helper
+// is wired at BOTH sites rather than only at the first: hardcoding the fallback
+// here kills the text case, dropping the fallback from the helper kills the
+// silent case (and its `gh issue view` twin above).
+test("probe 1: gh pr list failing carries its own cause into the unknown it records", (t) => {
+  const r = inflight(8, { prErr: "HTTP 403: API rate limit exceeded" }, t);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /whether #8 is taken is unknown: HTTP 403: API rate limit exceeded/,
+    "the cause is read back from the capture, not substituted for");
+  assert.deepEqual(r.json.unknown, ["pr"]);
+});
+
+test("probe 2's call: gh pr list failing with nothing on stderr still names a cause", (t) => {
+  const r = inflight(8, { prErr: "" }, t);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /whether #8 is taken is unknown: cause unavailable/,
+    "the second capture site inherits the fallback instead of re-deriving it");
+});
+
+test("probe 1: mktemp failing leaves probes 2 and 3 to answer, rather than abandoning the run", (t) => {
+  // The capture file is probe 1's own resource, so losing it is "probe 1 could
+  // not look" — not "the question cannot be answered". Probes 2 and 3 need
+  // neither gh nor the file. Measured with the `|| die` this replaces, on this
+  // very fixture: exit 2, empty stdout, both hits discarded.
+  //
+  // Still kills the mutant the die killed: reverting to the old fixed
+  // /tmp/.inflight.$$ path calls no mktemp at all, so this stub goes untouched,
+  // probe 1 succeeds and `unknown` comes back empty.
+  const { repo, env, bin } = fixture(t, 8, {
+    remoteBranches: ["fix/8-thing"], detachedWorktreeUnder: "nospace",
+  });
   writeFileSync(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "mktemp"), 0o755);
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
-  assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "", "nothing was established — this fails before either gh call");
-  assert.match(r.stderr, /cannot create a temporary file to capture gh's stderr/);
+  assert.equal(r.status, 1, "two probes still found the ticket taken");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.taken, true);
+  assert.deepEqual(json.hits, ["remote-branch", "local"],
+    "neither hit is discarded by probe 1's local resource failure");
+  assert.deepEqual(json.unknown, ["pr"], "and the probe that could not look is named");
+  assert.match(r.stderr, /could not create a temporary file to capture gh's stderr/);
+});
+
+test("cleanup that cannot remove the capture file never rewrites the verdict", (t) => {
+  // The EXIT trap runs OUTSIDE the probe bodies, where `set -e` is live, so a
+  // bare `rm -f` that fails aborts the shell with status 1 — and 1 is this
+  // script's code for "taken". Measured on the unguarded trap: this free
+  // ticket exited 1 while its own payload still said `taken:false`, and a run
+  // that should have exited 2 came back 1 as well. The verdict is computed and
+  // announced on stderr first, then overwritten by cleanup.
+  const { repo, env, bin } = fixture(t, 8, {});
+  const cap = join(bin, "..", "cap");
+  // mktemp still hands back a real 0600 file; only its DIRECTORY is made
+  // unremovable, which is what `rm -f` fails on (a read-only mount, perms
+  // changed under the run). Writing the capture is unaffected: `2>` needs
+  // permission on the file, not on the directory.
+  writeFileSync(join(bin, "mktemp"), `#!/bin/sh
+mkdir -p '${cap}' && chmod 755 '${cap}'
+f='${cap}'/cap.$$
+(umask 077; : > "$f") || exit 1
+chmod 555 '${cap}'
+printf '%s\\n' "$f"
+`);
+  chmodSync(join(bin, "mktemp"), 0o755);
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  // Restored before the first assert, or a failure here leaves a fixture the
+  // suite's own cleanup cannot remove.
+  chmodSync(cap, 0o755);
+
+  assert.equal(r.status, 0, "a free ticket stays free — cleanup does not get to speak for the verdict");
+  assert.equal(JSON.parse(r.stdout).taken, false, "and the payload the caller reads agrees with the code");
+  assert.match(r.stderr, /could not remove .*\/cap\./,
+    "the removal that failed is said out loud rather than swallowed");
 });
