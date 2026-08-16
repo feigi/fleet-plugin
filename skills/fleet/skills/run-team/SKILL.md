@@ -71,6 +71,17 @@ At start, and whenever the pool empties.
    merged or abandoned PR the `gh pr list` window covers cannot hold a ticket
    forever. A linked PR that window does *not* cover has no state to read: it
    prints `?` and still counts as taken, merged or not.
+
+   **Exit 2 is not free** — the question went unanswered, so treat it as taken
+   and say which candidate it was in the log. A probe that could not look is
+   recorded rather than aborting the run, so exit 2 from one prints the same
+   JSON as 0 and 1 plus an `unknown[]` naming the probes that could not look:
+   read `unknown`, never `taken` alone, because exit 2 says `"taken": false`,
+   which summarizes `hits` and is not a claim the ticket is free. A hit outranks
+   an unknown — a payload can carry a non-empty `hits[]` and a non-empty
+   `unknown[]` at exit 1, which is taken. Four causes print nothing at all — a
+   bad argument, not inside a git repository, no such issue, a verdict that could
+   not be written — so never assume exit 2 parses.
 4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
    --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
    answers both questions. Record the Agent Brief's `Out of scope` sequencing.
