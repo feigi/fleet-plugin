@@ -123,9 +123,10 @@ test("runner: a directory argument runs the test files under it", () => {
 test("runner: a directory whose path holds a glob character still runs its tests", () => {
   const r = apply(SUITE).run("br[a]cket");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Anchored: a bare `pass 1` is the worst offender — it matches `pass 1`,
-  // `pass 1<n>` and `pass <n>1<n>` alike. Both prefixes for the same
-  // version-dependent reporter reason as elsewhere in this file.
+  // Anchored: a bare `pass 1` is the worst offender — the literal is a prefix
+  // of every count whose leading digit is 1, so 1, 10-19 and 100+ all green it
+  // alike. Both prefixes for the same version-dependent reporter reason as
+  // elsewhere in this file.
   assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
 });
 
