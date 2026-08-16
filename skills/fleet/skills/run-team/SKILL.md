@@ -177,8 +177,11 @@ frozen form from the lockfile and refuses to guess.
 **Materialize the isolation envelope as a file, not a briefing.** The script
 writes `.worktrees/<N>-slug/agent-test` (ports derived from `<N>`, so collisions
 are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
-<file>` and nothing else — anyone who finds the worktree finds the runner,
-including grandchildren you never dispatched. See references/isolation.md.
+<file-or-dir>` and nothing else — anyone who finds the worktree finds the
+runner, including grandchildren you never dispatched. A directory works too and
+expands to the test files under it; one holding none refuses rather than passing
+vacuously, so a mistyped path cannot come back green. See
+references/isolation.md.
 
 **A reused worktree may lack the runner.** `claim-ticket.sh` writes `agent-test`
 only when it claims a *fresh* worktree. A worktree carried over from a prior run,

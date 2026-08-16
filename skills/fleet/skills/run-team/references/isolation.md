@@ -4,7 +4,7 @@ Why isolation envelope file not briefing, why private filesystem not private sta
 
 ## Materialize the isolation envelope as a file, not a briefing
 
-Env vars in prompt missed five times in one run — including briefed member, and specialist whose parent briefed but did not pass down. So `claim-ticket.sh` writes runner as file (`.worktrees/<N>-slug/agent-test`) and `.git/info/exclude`s it. Brief members with `./agent-test <file>` and nothing else: anyone who finds worktree finds runner — including grandchildren you never dispatched. Ports derive from `<N>`, so collisions impossible not discouraged — difference between safeguard and rule.
+Env vars in prompt missed five times in one run — including briefed member, and specialist whose parent briefed but did not pass down. So `claim-ticket.sh` writes runner as file (`.worktrees/<N>-slug/agent-test`) and `.git/info/exclude`s it. Brief members with `./agent-test <file-or-dir>` and nothing else: anyone who finds worktree finds runner — including grandchildren you never dispatched. A directory works too and expands to the test files under it; one holding none refuses rather than passing vacuously — appending nothing leaves argv empty, and bare `node --test` then discovers whole worktree: green for suite nobody asked for. Ports derive from `<N>`, so collisions impossible not discouraged — difference between safeguard and rule.
 
 ## Filesystem isolation is not stack isolation
 
