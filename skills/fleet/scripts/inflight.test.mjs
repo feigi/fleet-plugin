@@ -1,6 +1,6 @@
 // Regression gate for inflight.sh, the probe that decides whether a ticket is
 // already being worked on:
-// `./agent-test skills/fleet/scripts/inflight.test.mjs`.
+// `node --test skills/fleet/scripts/inflight.test.mjs`.
 //
 // The load-bearing cases are the `linked:` rows. `linked` comes from
 // `gh issue view --json closedByPullRequestsReferences`, which projects only

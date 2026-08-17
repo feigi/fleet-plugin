@@ -1,5 +1,5 @@
 // Regression gate for the reconcile tick. Zero deps:
-//   ./agent-test skills/fleet/scripts/fleet-tick.test.mjs
+//   node --test skills/fleet/scripts/fleet-tick.test.mjs
 //
 // The pure half locks the queue-depth guard table — the whole point of #3 is
 // that the table stops being prose the controller must remember, so a
