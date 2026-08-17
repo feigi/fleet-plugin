@@ -148,7 +148,11 @@ test("a sha that is not a commit in this repository is exit 2, not a negative ve
   const { code, json, stderr } = verify(w, "main", "0".repeat(40));
   assert.equal(code, 2);
   assert.equal(json, null);
-  assert.match(stderr, /is not a commit object in this repository/);
+  // Names the guard that fired, so this cannot pass on some other exit 2 — the
+  // fetch failing is also exit 2 with no stdout, which is why the code alone
+  // and an empty stdout are not enough to tell these two cases apart.
+  assert.match(stderr, /cannot resolve 0{40} to a commit in this repository/);
+  assert.match(stderr, /Not a valid object name/, "git's own diagnosis must survive to stderr");
 });
 
 // No git fixture: the argc guard fires before the script runs any git at all,

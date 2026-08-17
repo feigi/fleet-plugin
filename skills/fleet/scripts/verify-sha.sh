@@ -15,24 +15,30 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 branch=$1
 sha=$2
 
+# Nothing below silences git. Each of these is silent on its healthy path, so
+# the only stderr it can add is the diagnosis of a failure, and swallowing that
+# leaves the die message asserting a cause the script cannot know. A bad remote
+# URL and a removed remote are both "cannot fetch"; only git can say which.
 echo "\$ git fetch --quiet origin $branch" >&2
-git fetch --quiet origin "$branch" 2>/dev/null \
-  || die "cannot fetch origin/$branch — branch missing, or no network"
+git fetch --quiet origin "$branch" \
+  || die "cannot fetch origin/$branch"
 
-tip=$(git rev-parse "origin/$branch" 2>/dev/null) \
+tip=$(git rev-parse "origin/$branch") \
   || die "origin/$branch does not resolve after fetch"
 echo "    origin/$branch tip = $tip" >&2
 
 # Fail closed on an unknown object: "not reachable" and "never heard of it" are
-# different answers, and only one of them is a finding about the branch.
-git cat-file -e "${sha}^{commit}" 2>/dev/null \
-  || die "$sha is not a commit object in this repository"
+# different answers, and only one of them is a finding about the branch. The
+# message stops at what the guard observed: cat-file -e also fails on an object
+# that is present but is not a commit, and on an object store it cannot read.
+git cat-file -e "${sha}^{commit}" \
+  || die "cannot resolve $sha to a commit in this repository"
 
 # Exit 1 is the answer "no"; anything else is git failing to answer, and the one
 # distinction this script exists to make must never be read off a failure. Keep
 # the status read first in the branch — anything above it overwrites $?. git is
-# silent on a plain "no", so no 2>/dev/null here: the only stderr it can add is
-# the cause of a failure the operator needs.
+# silent on a plain "no", so the rule above costs this branch nothing: a real
+# negative still reaches the controller with no git noise attached.
 if git merge-base --is-ancestor "$sha" "origin/$branch"; then
   reachable=true
   rc=0
