@@ -26,8 +26,12 @@ const CI_AND_STALENESS = readFileSync(
   "utf8",
 );
 
-const TWO_PART = "`<run-id>:<conclusion>`";
 const THREE_PART = "`<run-id>:<attempt>:<conclusion>`";
+// Derived, never written out: spelling the broken key literally here would put
+// it back in the tree, and the sweep this ticket closes (`grep -rn 'run-id>:'
+// skills/fleet/`) is supposed to come back all-three-part. Deriving it also
+// means this file has nothing to exclude itself from the walk below for.
+const TWO_PART = THREE_PART.replace("<attempt>:", "");
 
 // Reflow-safety: markdown here hard-wraps at ~80 columns, so any of these tokens
 // can land across a line break, and a pin that only matches the unwrapped form
@@ -66,8 +70,6 @@ test("no document under skills/fleet states the two-part watcher key", () => {
   const offenders = readdirSync(FLEET, { recursive: true, withFileTypes: true })
     .filter((e) => e.isFile() && !e.parentPath.includes("node_modules"))
     .map((e) => join(e.parentPath, e.name))
-    // This file quotes the broken form to test for it, so it cannot test itself.
-    .filter((f) => f !== import.meta.filename)
     .filter((f) => flat(readFileSync(f, "utf8")).includes(TWO_PART));
   assert.deepEqual(
     offenders,
