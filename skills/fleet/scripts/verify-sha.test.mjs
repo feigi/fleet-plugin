@@ -178,8 +178,7 @@ test("a failed fetch carries git's own cause, and a bad URL no longer reads like
   }
   // Only git's line tells the two apart, which is exactly what was discarded.
   assert.match(a.stderr, /'\/nonexistent\/path\.git'/);
-  assert.doesNotMatch(b.stderr, /nonexistent/);
-  assert.notEqual(a.stderr, b.stderr, "two distinct faults must not collapse into one message");
+  assert.doesNotMatch(b.stderr, /nonexistent/, "two distinct faults must not collapse into one message");
 
   // The one cause the old list did name is still reported — now by git, and
   // precisely, so dropping the list refuses nothing it used to explain.
