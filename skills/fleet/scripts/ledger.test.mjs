@@ -644,14 +644,19 @@ test("a working directory that is not a repository at all still degrades exactly
 // The design spec's script-surface row advertised `set/filed/ruled/read`: a
 // subcommand that has never existed, and two real ones — `row` and `check` —
 // left out, `check` being the entire subject of that same row's
-// `Non-zero when` cell (#48). Derived from the script's own usage line rather
+// `Non-zero when` cell (#48). Derived from the script's own dispatch rather
 // than a hand-written list, for the reason the table proves: a list typed here
-// drifts from the script exactly the way the table did.
+// drifts from the script exactly the way the table did. Both other copies of
+// the list — the row and the usage line — are measured against that dispatch.
 test("the design spec's script-surface row admits exactly the subcommands ledger.mjs accepts", () => {
-  const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" }).stderr;
-  const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
-  assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
-  const real = alternation.split("|").sort();
+  // Read off the dispatch, not the usage line. The usage line is itself a
+  // hand-typed list, so deriving the "real" set from it compares one doc-string
+  // against another: a branch added to the dispatch without a usage edit left
+  // this pin green while the script accepted a subcommand neither the usage line
+  // nor the row named (measured). The dispatch is the only thing that decides
+  // what the script actually accepts.
+  const real = [...new Set([...readFileSync(SCRIPT, "utf8").matchAll(/cmd === "([^"]+)"/g)].map((m) => m[1]))].sort();
+  assert.ok(real.length, "ledger.mjs must still dispatch on `cmd === \"...\"`");
 
   const spec = readFileSync(
     fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
@@ -668,4 +673,12 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   // exit 2 it cannot diagnose, and a missing one hides a capability the row's
   // own neighbouring cell already documents.
   assert.deepEqual(advertised, real, `the In cell and ledger.mjs disagree on the subcommand set`);
+
+  // The usage line is the other hand-typed copy of this list — the one a caller
+  // sees on a bad invocation — so it gets pinned to the same dispatch rather
+  // than being the thing everything else is measured against.
+  const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" }).stderr;
+  const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
+  assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
+  assert.deepEqual(alternation.split("|").sort(), real, `the usage line and ledger.mjs's dispatch disagree on the subcommand set`);
 });
