@@ -1195,11 +1195,14 @@ vs specific finding with paths → paths win.
   It owns the object-store rule, the two-tree split, snapshot provisioning, and
   which suites a snapshot cannot validly run. Your only duty is to *not*
   contradict it.
-- **Filesystem isolation is not stack isolation.** The snapshot and `./agent-test`
-  solve different problems; the compose project name comes from the environment,
-  not the working directory, so three agents on three snapshots still collide on
-  one postgres. "I'm on my own copy" is exactly the intuition that skips the
-  runner — say both, every time. See references/isolation.md.
+- **Filesystem isolation is not stack isolation.** A private copy of the tree and
+  a test command solve different problems; the compose project name comes from
+  the environment, not the working directory, so three agents on three snapshots
+  still collide on one postgres. "I'm on my own copy" is exactly the intuition
+  that skips the command — say both, every time. Which command depends on the
+  audience: a member in a worktree uses `./agent-test`; a specialist on a
+  snapshot does not, and takes the one `review-and-fix.md` hands out. See
+  references/isolation.md.
 - **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
   outside them.** Finding ids restart at 1 every review, so two fix-appliers on
   different PRs both reach for `unv1`; one agent overwrote a sibling's

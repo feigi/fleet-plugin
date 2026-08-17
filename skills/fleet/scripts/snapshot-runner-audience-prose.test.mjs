@@ -23,7 +23,7 @@
 // lines take the same regexes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
@@ -59,3 +59,24 @@ for (const [name, slice] of slices) {
     assert.match(slice(), phrase("worktree uses `./agent-test`"));
   });
 }
+
+// The same contradiction in the other voice: a test file whose comment tells the
+// reader to run it with the worktree runner. A specialist reads that comment on
+// a snapshot, where the runner is not. `node --test <path>` is what most other
+// suite comments here already say, and it runs in both trees — measured on the
+// two files this replaced it in, from the worktree root and from a real
+// `git archive HEAD | tar -x` snapshot (35 and 72 tests, 0 fail, in each; the
+// snapshot carried no `agent-test`).
+//
+// The pattern is a runner invocation naming a concrete suite path, so it does
+// not hit agent-test-dir-prose.test.mjs, whose header discusses the runner as a
+// subject rather than as an instruction. It stays a REGEX with its slashes
+// escaped for a second reason: written as a plain string literal the pattern
+// occurs in this file, and the scan reports itself.
+test("no suite comment tells the reader to run it with the worktree runner", () => {
+  const dir = import.meta.dirname;
+  const offenders = readdirSync(dir)
+    .filter((f) => f.endsWith(".test.mjs"))
+    .filter((f) => /\.\/agent-test\s+skills\//.test(readFileSync(join(dir, f), "utf8")));
+  assert.deepEqual(offenders, [], `name \`node --test <path>\` instead: ${offenders.join(", ")}`);
+});
