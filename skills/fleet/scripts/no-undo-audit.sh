@@ -302,12 +302,12 @@ fi
 #   malformed ref file   | rc0 empty    | rc128    | unknown
 #   ref file DELETED     | rc0 empty    | rc1      | unknown  (reflog probe)
 #
-# That last row is a fourth CAUSE, not a fourth signature: `printf 'not-a-sha'
-# > .git/refs/stash` is indistinguishable from a `chmod 000` on the same file —
-# same rc pair, same `show-ref` stderr, measured. So the line this branch
-# prints names three causes for four, and `ls -l` on the two files, which is
-# what the runbook sends the operator to read next, shows a healthy mode for
-# this one. Widening either is #437, not this ticket.
+# The `malformed ref file` row is a fourth CAUSE, not a fourth signature:
+# `printf 'not-a-sha' > .git/refs/stash` is indistinguishable from a `chmod
+# 000` on the same file — same rc pair, same `show-ref` stderr, measured. So
+# the line this branch prints names three causes for four, and `ls -l` on the
+# two files, which is what the runbook sends the operator to read next, shows a
+# healthy mode for that row. Widening either is #437, not this ticket.
 #
 # `rev-parse --verify --quiet` cannot do this job: it returns 1 for the
 # unreadable ref FILE for the same reason the list is empty, collapsing that
@@ -315,13 +315,14 @@ fi
 # entry on the stack. A plain exit-status guard on `stash list` cannot do it
 # either, because neither reflog case fails.
 #
-# rc 1 says the REF is absent. It does not say the stash is empty, and the last
-# row above is the difference: `rm -f .git/refs/stash` leaves the reflog naming
-# commits that are still reachable, and `show-ref` answers 1 for it exactly as
-# it does for a repo that never stashed (#376). So rc 1 buys a second question
-# rather than a verdict — is the reflog gone too? Only then is `0` a claim this
-# can make. It composes with the discriminant above rather than replacing it:
-# the three states that land on rc 0/128 never reach the probe.
+# rc 1 says the REF is absent. It does not say the stash is empty, and the
+# `ref file DELETED` row is the difference: `rm -f .git/refs/stash` leaves the
+# reflog naming commits that are still reachable, and `show-ref` answers 1 for
+# it exactly as it does for a repo that never stashed (#376). So rc 1 buys a
+# second question rather than a verdict — is the reflog gone too? Only then is
+# `0` a claim this can make. It composes with the discriminant above rather
+# than replacing it: the three states that land on rc 0/128 never reach the
+# probe.
 #
 # The probe can be this blunt because git empties the reflog whenever it empties
 # the stack. `pop`, `drop`, `clear` and `update-ref -d` each REMOVE
@@ -338,11 +339,16 @@ fi
 # `--git-path` is the right question rather than `--git-common-dir` joined by
 # hand because git owns the per-worktree/common split: `logs/refs` is common,
 # `logs/HEAD` and `logs/refs/bisect` are not, and that rule is git's to change.
-# Its answer is absolute from a linked worktree and relative to `-C` from a main
-# one, hence the fix-up. A CEILING it shares with the states above: an
-# unreadable `logs/refs` DIRECTORY defeats the `-s` stat as well, and reflogs
-# disabled repo-wide (`core.logAllRefUpdates=false`) leave nothing to probe —
-# both read as absent and report `0`.
+# `--path-format=absolute` is load-bearing, not decoration: the bare answer is
+# already absolute from a linked worktree but relative to `-C` from a main one,
+# and this script runs from the CALLER's cwd, not `$wt`'s, so the relative form
+# would look for the reflog under the caller and print the confident `0` this
+# exists to remove. A CEILING it shares with the states above: an unreadable
+# `logs/refs` DIRECTORY defeats the `-s` stat exactly as absence does, so the
+# entries stay named in the reflog and the audit still reports `0` (measured).
+# `core.logAllRefUpdates=false` is NOT a second one: it suppresses the HEAD
+# reflog, but `git stash push` force-creates `logs/refs/stash` regardless, so
+# such a repo probes normally and reports `unknown` (measured, git 2.50.1).
 #
 # This does not close every unreadable reflog: one that is merely TRUNCATED —
 # some entries lost, the rest still parses — resolves the ref and returns a
@@ -369,12 +375,8 @@ git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # instead would land on `[ -s "" ]`, false, and print the confident `0`.
 stash_reflog=
 if [ "$stash" = 0 ] && [ "$sr_rc" = 1 ]; then
-  stash_reflog=$(git -C "$wt" rev-parse --git-path logs/refs/stash) \
+  stash_reflog=$(git -C "$wt" rev-parse --path-format=absolute --git-path logs/refs/stash) \
     || die "git rev-parse failed in $wt — cannot tell an emptied stash from a deleted refs/stash"
-  case $stash_reflog in
-    /*) ;;
-    *) stash_reflog="$wt/$stash_reflog" ;;
-  esac
 fi
 if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   stash=null

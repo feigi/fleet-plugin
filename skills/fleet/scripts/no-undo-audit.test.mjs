@@ -263,8 +263,11 @@ function nestedWorktreePair(t) {
 // then the caller crashed on its own stdout" is a distinct outcome from "the
 // audit refused", and a test cannot tell them apart if the parse throws inside
 // the helper that also reports the exit code.
-const audit = ({ w, branch }, env = ENV) => {
-  const r = spawnSync("sh", [SCRIPT, w, branch], { cwd: w, env, encoding: "utf8" });
+// `cwd` defaults to `$wt`, which is what every fixture predating #376 wants.
+// The real caller runs from its own directory; the cwd-independence test below
+// passes that in rather than relying on the two happening to coincide.
+const audit = ({ w, branch }, env = ENV, cwd = w) => {
+  const r = spawnSync("sh", [SCRIPT, w, branch], { cwd, env, encoding: "utf8" });
   const out = r.stdout.trim();
   let json = null;
   let jsonError = null;
@@ -544,6 +547,26 @@ test("the orphaned-reflog probe resolves against the shared gitdir, not $wt/.git
   const r = audit(c);
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null, "the reflog is one directory up, and the probe has to follow git there");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+});
+
+// Every other fixture in this file spawns the script with `cwd === $wt`, which
+// is not how it is called: `run-merge-bot.md` runs `no-undo-audit.sh <worktree>
+// <branch>` from wherever the operator's shell already sits. `--git-path`
+// answers relative to `-C` in a main checkout, so a probe that keeps that
+// answer looks for the reflog under the CALLER's cwd, finds nothing, takes the
+// accept branch and prints the confident `0` this fix exists to remove — in the
+// one invocation that actually happens. Pinned as behaviour, not mechanism: the
+// probe has to resolve from anywhere, and how the path is made absolute is
+// git's business, not this test's.
+test("the orphaned-reflog probe resolves from a cwd that is not $wt", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  rmSync(join(c.w, ".git", "refs", "stash")); // the ref file only — the reflog is untouched
+
+  const r = audit(c, ENV, tmpdir());
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the reflog is under $wt — resolved against the caller's cwd instead, it reads as absent and reports the `0` #376 removes");
   assert.equal(stashLine(r), ORPHAN_LINE);
 });
 
