@@ -122,6 +122,8 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
 //   probe AFTER the symlink -> `ls -A` counts the symlink, so a `git archive`
 //     that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in every repo that
 //     has node_modules (which is every repo the symlink exists for).
+//   guard MISSING -> the wipe is executed text, not evaluated JS, so an empty
+//     `scratch` emits `rm -rf /snapshot` and runs it.
 //   wipe MISSING (or after `tar -x`) -> `mkdir -p` never empties and `tar -x`
 //     MERGES, so a reused scratch keeps the previous run's files. Measured
 //     across two PRs sharing one scratch: reviewing prB, the snapshot held
@@ -135,6 +137,10 @@ test("the snapshot block wipes, extracts, probes, then symlinks — in that orde
   const snapshot = snapshotBlock();
   let prev = -1;
   for (const [needle, gone] of [
+    [
+      '[ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET',
+      "the empty-scratch guard is gone — the wipe below it reads `rm -rf /snapshot` on an empty interpolation",
+    ],
     ["rm -rf ${scratch}/snapshot", "the wipe is gone — `tar -x` MERGES, so a reused scratch certifies a stale tree"],
     ["mkdir -p ${scratch}/snapshot", "the mkdir is gone — `tar -x` has nowhere to extract to"],
     ["git -C ${worktree} archive HEAD", "the archive is gone — there is no snapshot to review"],

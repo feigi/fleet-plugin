@@ -509,11 +509,22 @@ phase("Snapshot");
 const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
+    [ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET; exit 1; }
     rm -rf ${scratch}/snapshot
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
     [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
     if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
+
+The guard before the wipe is not decoration: this block is EXECUTED by an
+agent's shell, not evaluated by this script, so 'scratch' being non-empty at
+interpolation time is a fact about today's caller, not about the text that runs.
+Empty, the line reads 'rm -rf /snapshot'. Testing the emitted "${scratch}"
+catches that in the shell that runs it. Note a suffix check would NOT: the
+'/snapshot' is appended literally here, so it is always present — including on
+'rm -rf /snapshot'. Ceiling: the worst reachable target is '/snapshot' (empty
+and '/' both land there), so this bounds the blast radius rather than validating
+the path in general.
 
 The wipe is not optional. 'mkdir -p' never empties and 'tar -x' MERGES into
 whatever is already there, so a reused ${scratch} hands every specialist the
