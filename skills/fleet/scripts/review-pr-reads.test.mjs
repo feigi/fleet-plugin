@@ -313,7 +313,13 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     );
   }
   // The review must survive a gh failure. These three stay out of `required`.
-  assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
+  // `pathVerified` joins path+head instead (#140) — a caller check on whether
+  // the snapshot exists, not a `gh` fact that can legitimately be absent.
+  assert.match(
+    snapshot,
+    /required:\s*\["path",\s*"head",\s*"pathVerified"\]/,
+    "required must stay path+head+pathVerified only",
+  );
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
   // Measured: deleting this paragraph outright left this file at 12 pass, 0
   // fail. The commands still run, the schema still accepts the fields, and
