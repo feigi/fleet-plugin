@@ -155,8 +155,13 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // Both stay OUT of `required`: a network or git failure inside
   // derive-testcmd.sh must not abort a snapshot that is otherwise good —
   // resolveTestCmd is what turns a missing derivation into a refusal, not a
-  // required-field validation error one layer down.
-  assert.match(snapshot, /required:\s*\["path",\s*"head"\]/, "required must stay path+head only");
+  // required-field validation error one layer down. `pathVerified` joins
+  // path+head instead (#140): unlike testCmd, its absence must abort.
+  assert.match(
+    snapshot,
+    /required:\s*\["path",\s*"head",\s*"pathVerified"\]/,
+    "required must stay path+head+pathVerified only",
+  );
 });
 
 // The prompt is what specialists actually obey, so the reading rule has to be

@@ -509,9 +509,31 @@ phase("Snapshot");
 const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
+    [ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET; exit 1; }
+    rm -rf ${scratch}/snapshot
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
+    [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
     if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
+
+The guard before the wipe is not decoration: this block is EXECUTED by an
+agent's shell, not evaluated by this script, so 'scratch' being non-empty at
+interpolation time is a fact about today's caller, not about the text that runs.
+Empty, the line reads 'rm -rf /snapshot'. Testing the emitted "${scratch}"
+catches that in the shell that runs it. Note a suffix check would NOT: the
+'/snapshot' is appended literally here, so it is always present — including on
+'rm -rf /snapshot'. Ceiling: the worst reachable target is '/snapshot' (empty
+and '/' both land there), so this bounds the blast radius rather than validating
+the path in general.
+
+The wipe is not optional. 'mkdir -p' never empties and 'tar -x' MERGES into
+whatever is already there, so a reused ${scratch} hands every specialist the
+previous run's files. Measured across two PRs sharing one scratch: the snapshot
+held files that exist on neither branch nor on main. A merged tree is non-empty
+for REAL, so SNAPSHOT_NONEMPTY passes it and \`pathVerified\` then certifies a
+tree that is partly some other commit — the exact state it exists to reject.
+Every other scratch user is namespaced ('<scratch>/pr<N>/<finding>/'); the
+snapshot alone sat at a bare path, which is why it was the one that merged.
 
 The symlink is not optional. 'git archive' carries TRACKED files only, so the
 snapshot has no node_modules — and the command derived below is 'npm test --'
@@ -519,6 +541,17 @@ for any repo whose scripts.test runs a binary from there, which exits 127 in
 the very tree specialists are told to run it in. Skip it and the derivation is
 validated where the command never runs (#142). No node_modules in the worktree,
 no symlink, nothing to report — that repo does not need one.
+
+Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY.
+Run it in the order above — BEFORE the symlink, never after. The symlink alone
+makes the directory non-empty, so a check placed below it prints
+SNAPSHOT_NONEMPTY on a totally failed 'git archive' in any repo that has
+node_modules, which is every repo the symlink exists for.
+A directory that exists but holds nothing is what a silently-failed
+'git archive | tar -x' looks like — 'git archive' failing or 'gh' auth lapsing
+leaves the pipe empty, tar extracts nothing from it, and 'mkdir -p' already made
+the directory exist regardless. This is the caller's own check on the tree it is
+about to hand every specialist, not your narration of one (#140).
 
 Verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
 diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
@@ -553,16 +586,23 @@ Then size the diff:
 Report the snapshot's absolute path, the HEAD sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
-omit diffStats entirely. Only path and head are ever required — diffStats,
-diffPath, diffLines and prHead are each omitted independently when their
-command failed. Do not modify ${worktree}.`,
+omit diffStats entirely. Only path, head and pathVerified are ever required —
+diffStats, diffPath, diffLines and prHead are each omitted independently when
+their command failed. Do not modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
       type: "object",
       additionalProperties: false,
-      required: ["path", "head"],
+      required: ["path", "head", "pathVerified"],
       properties: {
         path: { type: "string" },
         head: { type: "string" },
+        // The mechanical 'ls -A' check the shell block above runs,
+        // REQUIRED so it cannot be silently omitted the way the byte-identity
+        // 'Verify it' step above it always could — that step is narration this
+        // schema has never captured. `snapshotMissing` below is what turns a
+        // false report into a refusal: the caller checks the tree exists rather
+        // than trusting the agent said so (#140).
+        pathVerified: { type: "boolean" },
         // The verbatim single-line JSON from diff-stats.mjs stdout. Parsed by the
         // caller: routing the deterministic classifier's output through the agent
         // as one opaque blob — not six re-typed booleans — means a mangled copy
@@ -594,9 +634,24 @@ command failed. Do not modify ${worktree}.`,
 // the one thing the caller can act on — there is no tree, so there is no review.
 // The `.filter(Boolean)` guards on the review and verify agents are the same
 // rule applied where a partial result is still usable; here it is not.
-if (!snap || !snap.path || !snap.head) {
-  throw new Error("review-pr: the snapshot agent returned no tree — nothing to review");
+//
+// `pathVerified` closes a narrower gap than the two above it: `snap.path` can be
+// a well-formed, present string that names nothing on disk — a failed
+// 'git archive | tar -x' leaves the directory 'mkdir -p' already created, empty.
+// Every specialist and verifier prompt below interpolates `snap.path` unchecked,
+// so an unverified path turned "read the snapshot" into "reason from source" on
+// all six dimensions instead of one (#140). `required: [..., "pathVerified"]` on
+// the schema is what makes this a caller check rather than trust in the agent's
+// own report — the field cannot be silently omitted, only reported false.
+function snapshotMissing(snap) {
+  if (!snap || !snap.path || !snap.head) return "the snapshot agent returned no tree — nothing to review";
+  if (!snap.pathVerified)
+    return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
+  return null;
 }
+
+const missingReason = snapshotMissing(snap);
+if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
 log(`snapshot ${snap.head} at ${snap.path}`);
 
