@@ -7,11 +7,14 @@
 // For die() that is all seven scripts. For the guards it is not: ledger.mjs
 // splices --file/--require-file out of argv itself, in its own wording
 // (#362), and imports makeDie alone — so arg()'s refusals below never reach
-// it, and `--file --require-file` still takes the next flag as the path,
-// leaving the duplicate-filing guard to fail open at exit 0 (measured).
-// #362 owns that parser; it is named here so this header is not read as
-// covering a caller it does not. (fleet-tick.mjs also imports makeDie alone,
-// but reads no flags at all — nothing to reach.)
+// it. `--file --require-file` used to take the next flag as the path, leaving
+// the duplicate-filing guard to fail open at exit 0 (measured); #362 fixed
+// that IN ledger.mjs, with its own copy of the `--`-prefix rule, because the
+// splice has no equivalent here. That parser is still ledger.mjs's own — it
+// is named here so this header is not read as covering a caller it does not,
+// and so the next change to the rule below is known to need a second edit
+// there. (fleet-tick.mjs also imports makeDie alone, but reads no flags at
+// all — nothing to reach.)
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays

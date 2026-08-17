@@ -37,8 +37,11 @@ test("CLI: --a=5 form dies by name, not silently read as absent", () => {
   assert.match(r.stderr, /--a needs a space-separated value/);
 });
 
-// `value.trim() === ""` was the one clause of the guard no test in any of the
-// four scripts reached — it could be deleted from all four at once, green.
+// `value.trim() === ""` was the one clause of the guard no test reached in any
+// of the five scripts that then carried their own copy of it — board,
+// candidates, ci-state, diff-stats, pr-overlap — so it could be deleted from
+// all five at once, green. #367 has since folded those copies into arg.mjs's
+// single one, which every one of the five still routes through.
 test("CLI: --a given a whitespace-only value dies naming the flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "   ", "--b", "6"], { encoding: "utf8" });
   assert.equal(r.status, 2);

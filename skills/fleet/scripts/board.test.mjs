@@ -262,7 +262,8 @@ test("CLI: --ledger=path form dies by name, not silently read as absent", () => 
 // reach: a flag eating the NEXT FLAG as its value (mutating away
 // `value.startsWith("--")` left board/ci-state/diff-stats 100% green), and an
 // explicit empty/whitespace value (`value.trim() === ""` was unpinned in all
-// four scripts simultaneously). Both die before any gh call.
+// five scripts that then carried it — board, candidates, ci-state, diff-stats,
+// pr-overlap — simultaneously). Both die before any gh call.
 test("CLI: --ledger followed by another flag is rejected, not read as the string \"--prev\"", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger", "--prev", "x"], { encoding: "utf8" });
   assert.equal(r.status, 2);

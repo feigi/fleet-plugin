@@ -682,3 +682,170 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
   assert.deepEqual(alternation.split("|").sort(), real, `the usage line and ledger.mjs's dispatch disagree on the subcommand set`);
 });
+
+// ── The --file / --require-file parser (#362) ────────────────────────────────
+//
+// Nothing above this line reaches these guards: every test enters through
+// run(), which always builds a well-formed `--file <path>` pair, so the whole
+// suite stayed green while `--file --require-file` silently disabled the
+// duplicate-filing guard at exit 0 (measured, #362). These spawn the CLI
+// directly, the way pr-overlap.test.mjs pins its own `--a --b 5` case — the
+// identical fail-open shape, in the hand-rolled reader arg.mjs's shared arg()
+// deliberately does not reach.
+function cliFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-cli-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  // Same isolation rule the rest of this file follows: the real `gh` must
+  // never be reachable, or these assertions would ride on this repo's live
+  // issue list. `git` is symlinked in for the same reason run() does it, not
+  // because anything below needs it: every test here passes `--file`, so
+  // defaultLedgerPath() never shells out, and none reaches the tracker query
+  // that runs the second `git`. Kept so the next test added here fails on its
+  // own terms rather than silently taking defaultLedgerPath()'s cwd-relative
+  // fallback.
+  symlinkSync(REAL_GIT, join(bin, "git"));
+  const env = { ...process.env, PATH: bin };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  return { dir, env };
+}
+
+const cli = (args, env, cwd) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env, cwd });
+
+test("CLI: --file followed by --require-file is refused, not taken as the path (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const r = cli(["--file", "--require-file", "check", "dup subject"], env, dir);
+    assert.equal(r.status, 2, `--file must not swallow the next flag; got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /--file needs a path/);
+    // The harm, asserted directly rather than inferred from the exit code:
+    // the swallowed token used to become the ledger PATH, which is how
+    // --require-file — the flag whose entire job is to make a missing ledger
+    // a hard failure — went missing from the run that named it.
+    assert.doesNotMatch(r.stderr, /ledger file not found: --require-file/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --file given a whitespace-only value is refused (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const r = cli(["--file", "   ", "check", "dup subject"], env, dir);
+    assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /--file needs a path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #362's guard is additive: the trailing case already died, with its own
+// wording, and that is the one behaviour the issue's own Measured block
+// records as correct. Pinned so the new clause cannot quietly restate it.
+test("CLI: a truly trailing --file still dies with its own pre-existing message (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const r = cli(["--file"], env, dir);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--file given with no path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The other half of the guard. Every case above is input it must REFUSE, and
+// a guard that refused EVERYTHING would pass all of them — `startsWith("--")`
+// forfeits a path beginning with `--`, deliberately and in line with arg.mjs,
+// but it must not cost the far likelier neighbours: a single leading `-`, or
+// a `--` anywhere but the front.
+test("CLI: a path beginning with '-' or containing '--' is accepted and actually read (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    // Passed RELATIVE, against the spawn's cwd, so the value ledger.mjs sees
+    // genuinely begins with `-`. Handing it join(dir, ...) would begin with
+    // `/` instead and pin only the `--`-inside half — measured: a guard
+    // widened to `startsWith("-")` kept this test green until the value was
+    // relative.
+    const name = "-weird--ledger.md";
+    writeFileSync(join(dir, name), ledgerText(["#42 some distinctive filed subject words"]));
+    const r = cli(["--file", name, "check", "some distinctive filed subject words"], env, dir);
+    // Exit 1 is reachable only by loading and parsing the file at that path:
+    // it is the `already filed` branch, which matches against rows read from
+    // it. Exit 0 would mean the path was accepted but never read; exit 2
+    // would mean the guard refused it.
+    assert.equal(r.status, 1, `the odd-looking path must be accepted AND read; got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /ALREADY FILED/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --require-file's own exposure, which is NOT --file's: it takes no value, so
+// its `splice(idx, 1)` can swallow nothing. Its one way to go missing was
+// being eaten by the flag before it. This is the invocation #362 measured as
+// correct — exit 2 — next to the exit 0 the swallow produced.
+test("CLI: --require-file survives a well-formed --file and still hard-fails a missing ledger (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const r = cli(["--file", join(dir, "nope", "ledger.md"), "--require-file", "check", "dup subject"], env, dir);
+    assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /--require-file given but ledger file does not exist/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The `=` spelling, which `indexOf` cannot see at all. BOTH POSITIONS, because
+// the only one that ever failed was the one that happened to land in the
+// SUBCOMMAND slot, where `unknown subcommand` fires — a different refusal, and
+// the single sample that made the `=` form read as already-covered. Elsewhere
+// it is not refused at all: it falls through
+// to `rest` and `check`'s `rest.join(" ")` folds it into the SUBJECT, so the
+// path is lost AND the checked text is corrupted, and the answer is exit 0
+// "safe to file" for a subject this fixture's ledger has already filed. The
+// exit-1 assertion below is what makes that concrete: the same subject against
+// the same file, spelled with a space, is ALREADY FILED.
+test("CLI: --file=<path> is refused in either position, never folded into the subject (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const other = join(dir, "other-ledger.md");
+    const subject = "some distinctive filed subject words";
+    writeFileSync(other, ledgerText([`#42 ${subject}`]));
+    // The control: spelled with a space, this exact invocation reads the file
+    // and answers "already filed". Without it, exit 2 below would pin only
+    // "something refused it", not "the fail-open it replaced was real".
+    const ok = cli(["--file", other, "check", subject], env, dir);
+    assert.equal(ok.status, 1, `the space-separated control must read the file; got exit ${ok.status}\n${ok.stderr}`);
+    for (const args of [
+      [`--file=${other}`, "check", subject],
+      ["check", `--file=${other}`, subject],
+    ]) {
+      const r = cli(args, env, dir);
+      assert.equal(r.status, 2, `\`${args.join(" ")}\` must be refused; got exit ${r.status}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /--file needs a space-separated value/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --require-file's own `=` spelling. Its wording differs from --file's on
+// purpose and matches has()'s in arg.mjs: the flag takes no value, so "needs a
+// space-separated value" would be a lie. Same two positions, same reason.
+test("CLI: --require-file=<value> is refused in either position (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const missing = join(dir, "nope", "ledger.md");
+    for (const args of [
+      ["--require-file=true", "--file", missing, "check", "dup subject"],
+      ["--file", missing, "check", "--require-file=true", "dup subject"],
+    ]) {
+      const r = cli(args, env, dir);
+      assert.equal(r.status, 2, `\`${args.join(" ")}\` must be refused; got exit ${r.status}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /--require-file is a boolean flag/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
