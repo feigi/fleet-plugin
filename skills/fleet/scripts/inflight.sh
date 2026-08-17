@@ -62,6 +62,27 @@ remote=""
 local_b=""
 wt=""
 
+# The two temp files, and the ONE EXIT trap that removes them. `sh` keeps a
+# single EXIT trap, so a second `trap … EXIT` further down does not add a
+# handler — it REPLACES this one, silently leaking whatever the first was going
+# to remove. Both files are therefore declared here and cleaned here rather
+# than each probe installing its own. Declared empty, too, so the trap can run
+# under `set -u` after a `die` that fired before either was created.
+errfile=""
+wtfile=""
+# `${…:+}` so a file that was never created contributes no argument at all
+# rather than an empty one, and `rm -f` with no operands is specified to exit 0.
+#
+# `|| echo`, not a bare `rm -f`: this trap fires OUTSIDE the three probe
+# functions, where `set -e` is still live, so a failing `rm -f` exits 1 — and
+# the contract reads 1 as "taken", which would let cleanup overwrite a verdict
+# already computed and announced. The same hazard the verdict `printf` at the
+# foot of this file guards with `|| die`. `echo` returns 0, so the declared
+# status survives and the cleanup failure is still said out loud rather than
+# swallowed by a bare `|| :`.
+trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ||
+  echo "$NAME: could not remove $errfile $wtfile" >&2' EXIT
+
 # Probe 1 — a PR that is actually ABOUT this ticket.
 #
 # NOT `gh pr list --search "<N>"` on its own. That is a full-text search and is
@@ -114,14 +135,8 @@ if ! errfile=$(mktemp); then
   add_unknown "pr" "could not create a temporary file to capture gh's stderr, so #$n's PR links are unknown"
   return 1
 fi
-# `|| echo`, not a bare `rm -f`: this trap fires OUTSIDE the three probe
-# functions, where `set -e` is still live, so a failing `rm -f` exits 1 — and
-# the contract reads 1 as "taken", which would let cleanup overwrite a verdict
-# already computed and announced. The same hazard the verdict `printf` at the
-# foot of this file guards with `|| die`. `echo` returns 0, so the declared
-# status survives and the cleanup failure is still said out loud rather than
-# swallowed by a bare `|| :`.
-trap 'rm -f "$errfile" || echo "$NAME: could not remove $errfile" >&2' EXIT
+# Removal is the EXIT trap's, installed once at the top of this file — see the
+# note there on why a second `trap … EXIT` here would silently disarm it.
 
 # One readback for both `gh` calls below, so a third capture site inherits the
 # fallback rather than having to remember to copy it. Empty is not "gh said
@@ -507,8 +522,61 @@ count_registry || return 1
 # absolute path would false-hit on any checkout whose directory happens to
 # contain the ticket number as an earlier path segment (e.g. a home dir or
 # a sibling directory named with digits), matching every ticket.
-if ! worktrees=$(git worktree list --porcelain); then
-  add_unknown "local" "git worktree list failed, so whether #$n has a worktree is unknown"
+#
+# `--porcelain -z`, into a temp file rather than a command substitution. The
+# plain porcelain terminates every attribute with a newline, and a worktree
+# path may legally contain one (APFS and ext4 both allow it), so one record
+# splits into two. Measured on the plain form (#185): `…/wt/fix-66-a<LF>b`
+# reported `worktree` truncated at `…/fix-66-a`, a path not on disk; and
+# `…/wt/plain<LF>fix-33-slug` left the number on the orphaned second line,
+# where the `^worktree ` filter never looked, so #33 came back `taken=false` at
+# exit 0 with its checkout live — the one answer this script must never invent.
+# A temp file because `-z`'s separator is NUL and no shell variable can hold
+# one, and because it keeps the lookup's status readable on its own, apart from
+# the reader's below: a pipeline would report only the last stage's, so a `git`
+# that could not run at all would read as an empty listing, a wrong "free".
+if ! wtfile=$(mktemp); then
+  # Probe-local for the reason probe 1's is: `die` here would abandon a verdict
+  # probes 1 and 2 may already have established.
+  add_unknown "local" "could not create a temporary file to hold the worktree list, so whether #$n has a worktree is unknown"
+  return 1
+fi
+# Two operands, one status: the redirect is new here (the base ran this as a
+# command substitution, which had nothing to write to), so a `git` that could
+# not run and a `$wtfile` that could not be written are indistinguishable at
+# this `if`. The message names both rather than blaming git for a write it never
+# reached — the shell prints its own "Permission denied" naming the path when it
+# is the redirect, which is the half a reader can tell apart.
+if ! git worktree list --porcelain -z >"$wtfile"; then
+  add_unknown "local" "git worktree list failed, or its output could not be written to $wtfile, so whether #$n has a worktree is unknown"
+  return 1
+fi
+# NOT `awk -v RS='\0'`. That is a gawk/BWK extension, and the awk this script
+# actually runs on macOS — /usr/bin/awk, BWK awk 20200816 — does not merely
+# ignore it: it stops dead at the first NUL and reports ONE record for a
+# listing of any length. Measured, all three spellings, `-v RS='\0'`,
+# `-v RS='\000'` and `BEGIN{RS="\0"}`, every one of them `count=1`. No awk
+# program here can hold a NUL byte, so the swap has to happen before awk sees
+# the stream at all.
+#
+# One `tr` pass does it: NUL becomes the newline awk already splits on, and a
+# newline inside a path becomes \001. `tr` translates simultaneously from one
+# table, so the two mappings cannot feed each other the way two piped stages
+# would. Both awks below then read the listing unchanged.
+#
+# Ceiling, deliberate: jstr renders that \001 as a space rather than as `\n`,
+# so a path containing a newline is reported WHOLE but with the newline
+# neutralised — the treatment every C0 byte WITHOUT a JSON short form gets. Not
+# the tab in `…/fix-88-a<TAB>b`: \011 is one of the five RFC 8259 gives a short
+# form, jstr's `sed` escapes it to `\t` before this `tr` stage runs at all, and
+# jrewritten's delete set skips it — so a tab round-trips byte-identical and
+# reports `worktreeRewritten: false`, which is what the probe-3 tab case pins.
+# Swapping the byte back would restore `\n` here at the cost of corrupting the
+# opposite case — a path that really contains \001 — for a diagnostic field
+# whose verdict is already correct either way. One failure mode is better than
+# two.
+if ! worktrees=$(LC_ALL=C tr '\n\000' '\001\n' <"$wtfile"); then
+  add_unknown "local" "could not read the worktree list for #$n"
   return 1
 fi
 # The main worktree is always listed first and has no registry entry of its
@@ -566,8 +634,19 @@ fi
 # last `/`. It used to be a `basename` subshell per line, which had this defect
 # one level down: a failed fork there yields an empty first field and a silent
 # non-match, and `$(…)` discards the status that would have said so.
+#
+# `\001` counts as a separator for the MATCH, and for the match only. The `tr`
+# above turned every newline inside a path into `\001`, and `\001` is not in
+# `([-/]|$)` — so `…/wt/fix-33<LF>slug` arrives as `fix-33\001slug`, the number
+# stops matching, and a live checkout reads FREE. Measured on real repos with
+# real linked worktrees: plain porcelain `taken=true` rc 1, `--porcelain -z`
+# without this `gsub` `taken=false` rc 0 with `unknown: []` — the probe answers,
+# so nothing upstream catches it. Mapping the byte to `/` in `b` restores that
+# leaf and `…/wt/fix<LF>33-slug`, which the plain form never matched either.
+# `b` is the throwaway copy: `p` is untouched, so the evidence this probe
+# reports — and `worktreeRewritten` with it — still carries the raw bytes.
 wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
-  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
+  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b); gsub(/\001/, "/", b)
     if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the worktree list for #$n"; return 1; }
@@ -739,9 +818,9 @@ add_evidence worktree "$wt"
 # closed or full stdout rendered as a decision. `sh inflight.sh <N> >&-`
 # reproduces it. (The probe bodies cannot rely on that: each is invoked as
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
-# command in one carries its own guard.) The EXIT trap probe 1 installs is the
-# other site outside that exemption, and carries the same guard for the same
-# reason — see the `|| echo` on it.
+# command in one carries its own guard.) The EXIT trap installed once at the top
+# of this file is the other site outside that exemption, and carries the same
+# guard for the same reason — see the `|| echo` on it.
 #
 # The evidence slot is an unquoted `%s`, unlike every other string slot in this
 # printf, and it now carries the object's keys as well as its values:
