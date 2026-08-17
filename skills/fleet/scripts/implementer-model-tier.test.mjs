@@ -3,13 +3,22 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Implementers dispatch at `sonnet` unless the ticket is a correction ticket.
-// The rule is prose in one file and rots the expensive way: drop the phase-0
-// class judgement and phase 2 has nothing to read, so every member falls to the
-// default branch — no error, no crash, just the bill and a protected class
-// running cheap. Nothing outside this file catches that; the fleet never reads
-// back the model it dispatched at (board.mjs parses `message.usage` off the
-// subagent JSONL and drops `message.model` on the same line).
+// Implementers dispatch at the SESSION's tier, whatever the ticket class. The
+// `class=routine` → `sonnet` binding was reverted 2026-08-16 when the phase-2
+// guard fired, so the class now selects the correction-ticket DISCIPLINE and
+// partitions the metrics file — never a model.
+//
+// Two ways this rots, and they pull in opposite directions. (a) The binding
+// creeps back: someone re-reads the guard's rationale, sees the saving argued
+// for at length, and restores `model: "sonnet"` in one of the two places that
+// used to carry it. The negative pins below exist for that, and there are two
+// because phase 0 and phase 2 each stated the binding independently — changing
+// only one is exactly the half-revert this test failed to catch when the revert
+// was first written. (b) The class judgement is dropped as pointless now that
+// it prices nothing, taking the correction discipline with it. Nothing outside
+// this file catches either; the fleet never reads back the model it dispatched
+// at (board.mjs parses `message.usage` off the subagent JSONL and drops
+// `message.model` on the same line).
 //
 // Presence pins are not enough here. An earlier draft of these tests passed
 // with the rule INVERTED end to end — corrections at `sonnet`, everything else
@@ -40,11 +49,11 @@ function section(source, startAnchor, endAnchor, label) {
 const step4 = () =>
   section(RUN_TEAM, "4. **Read each survivor in full", "5. **Collision scan", "run-team phase 0 step 4");
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch at the tier phase 0 classed", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
+  section(RUN_TEAM, "**Dispatch every implementer at the session's tier", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
   section(RUN_TEAM, "**Guard: accumulate per PR", "One named member per ticket", "run-team phase 2 tier guard");
 
-test("phase 0 step 4 binds each ticket class to its tier, in the read it already pays for", () => {
+test("phase 0 step 4 still earns its class judgement now that the class prices nothing", () => {
   const slice = step4();
 
   // The criterion, not the label: what makes a ticket a correction ticket has
@@ -58,12 +67,33 @@ test("phase 0 step 4 binds each ticket class to its tier, in the read it already
     /bad citations(?:(?!routine)[^.])*?`class=correction`/,
     "step 4 no longer routes the correction criterion to `class=correction`",
   );
-  // The other half of the binding. `sonnet` appears three times in the file, so
-  // a bare /sonnet/ says nothing about WHICH class gets it.
+  // What the class is FOR after the revert. Without this the judgement reads as
+  // vestigial and the next compression pass deletes it — taking the correction
+  // discipline, which is the half that caught real defects, with it.
   assert.match(
     slice,
-    /`class=routine`(?:(?!correction)[^.])*?`sonnet`/,
-    "step 4 no longer routes the default class to `sonnet`",
+    /no longer selects a model tier/,
+    "step 4 no longer says the class stopped selecting a tier — the reverted binding reads as live again",
+  );
+  assert.match(
+    slice,
+    /correction-ticket\*{0,2} discipline/,
+    "step 4 no longer says what the class still selects, so the judgement reads as vestigial",
+  );
+  // THE NEGATIVE, half one of two. Restoring `class=routine` → `sonnet` here
+  // while phase 2 stays reverted is the self-contradiction the revert shipped
+  // with on its first pass: phase 0 priced the ticket, phase 2 ignored it, and
+  // nothing failed. The window spans sentences rather than one, because the
+  // stated reason for the one-sentence bound is false OF THIS SLICE: step 4
+  // holds ZERO `sonnet` occurrences, and every past-tense mention the bound was
+  // guarding against (L224, L235, L303, L304, L314) lives in the `dispatch` and
+  // `guard` slices, which this pin does not cover. Measured: under the old
+  // bound a restoration split across two sentences escaped the whole suite at
+  // 720/720; [\s\S]{0,400} reds it and leaves the clean tree green.
+  assert.doesNotMatch(
+    slice,
+    /`class=routine`[\s\S]{0,400}`sonnet`/,
+    "step 4 has re-bound `class=routine` to `sonnet` — the reverted rule is back in phase 0",
   );
   // Safe direction on a judgement with no tiebreak. The adjacent decided?
   // judgement says "Torn → surface"; this one is cheap enough to just default.
@@ -84,24 +114,48 @@ test("phase 0 step 4 binds each ticket class to its tier, in the read it already
   );
 });
 
-test("phase 2 dispatches on the recorded class, and a missing class falls to the SAFE tier", () => {
+test("phase 2 dispatches every class at the session tier, and says so with a mechanism", () => {
   const slice = dispatch();
 
-  // Both bindings, each excluding the competing class from the gap. Swapping the
-  // two rules leaves every token present and reds both of these.
+  // The rule, bound to "whatever the class" so a re-introduced per-class branch
+  // reds here rather than silently coexisting with this sentence.
   assert.match(
     slice,
-    /`class=routine` →\s*`model: "sonnet"`/,
-    "phase 2 no longer dispatches `class=routine` at `model: \"sonnet\"`",
+    /omit `model` on the Agent\s+call, whatever the class/,
+    "phase 2 no longer dispatches every class the same way — a per-class tier branch is back",
   );
-  // Anchored to the omission, not the word "inherit": the correction class gets
-  // top tier by NOT passing `model`, and "correction tickets run at top tier"
-  // with no mechanism is exactly the instruction-names-no-mechanism defect the
-  // skill's own tooling-fix triggers list calls out.
+  // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
+  // stated independently in both places, so restoring either one alone is
+  // undetectable without a pin on each. Nothing is assumed between the two
+  // tokens — not the arrow, not a verb, not the backticks around `sonnet` —
+  // because the `class=routine` → `model: "sonnet"` literal this used to require
+  // is only one spelling of the restoration. Measured: `→ `sonnet``, "now
+  // resolves to", and `model:'sonnet'` each re-bind the class in the file's own
+  // vocabulary and each walked straight through the literal form. The one
+  // legitimate statement of the binding in this slice is the past-tense revert
+  // note, exempted BY NAME rather than by narrowing the pattern back to a
+  // literal — a narrower pattern is what let the half-revert through.
+  const rebindings = slice.match(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}/g) ?? [];
+  assert.deepEqual(
+    rebindings.filter((hit) => !/was REVERTED/.test(hit)),
+    [],
+    "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
+  );
+  // The revert is dated and attributed, or the next reader takes the missing
+  // tier for an omission and helpfully restores it.
   assert.match(
     slice,
-    /`class=correction` →\s*\*\*omit `model`\*\*/,
-    "phase 2 no longer says HOW a correction ticket gets top tier — omitting `model` is the mechanism",
+    /REVERTED on 2026-08-16/,
+    "phase 2 no longer records WHEN and WHY the tier binding was removed",
+  );
+  // Anchored to the omission, not the word "inherit": the tier is obtained by
+  // NOT passing `model`, and "implementers run at the session tier" with no
+  // mechanism is exactly the instruction-names-no-mechanism defect the skill's
+  // own tooling-fix triggers list calls out.
+  assert.match(
+    slice,
+    /a member\s+dispatched with `model` set does not get it back/,
+    "phase 2 no longer says HOW the session tier is obtained — omitting `model` is the mechanism",
   );
   // The omission only reaches the session tier when the subagent type carries no
   // model of its own; two pr-review-toolkit agents in this repo pin `model: opus`
@@ -112,20 +166,31 @@ test("phase 2 dispatches on the recorded class, and a missing class falls to the
     "phase 2 states the omission mechanism without its precondition",
   );
 
-  // THE DEFAULT DIRECTION. `sonnet` is the structural complement of "correction",
-  // so absent an explicit rule a lost class dispatches cheap — stripping the tier
-  // from the one class that exists to keep it. Pin that missing → omit, and pin
-  // the negative separately: /omit `model`/ alone stays green if a later sentence
-  // adds a sonnet fallback.
+  // A lost class no longer misprices anything, but it still costs the correction
+  // discipline — so the recording rule has to survive the revert, and has to say
+  // what is actually lost or it reads as bookkeeping and gets dropped.
   assert.match(
     slice,
-    /\*\*No class recorded → omit `model`/,
-    "a missing class no longer falls back to the safe tier — it silently dispatches cheap",
+    /\*\*No class recorded → record `class=unknown`, never a guess\.\*\*/,
+    "a missing class is no longer recorded as `class=unknown` — the gap goes invisible",
   );
+  // Anchored to "still costs the", not bare: the phrase occurs TWICE in this
+  // slice — here, and incidentally in the REVERTED paragraph above ("it still
+  // governs the correction-ticket discipline"). Measured: an unanchored
+  // /correction-ticket discipline/ stayed green with this sentence's cost
+  // clause gutted, because the other copy satisfied it on its own. It pinned
+  // the phrase's existence somewhere in the slice, never the recording rule.
   assert.match(
     slice,
-    /Never\s+`sonnet`/,
-    "phase 2 no longer forbids the cheap tier on a missing class",
+    /still costs the \*\*correction-ticket discipline\*\*/,
+    "phase 2 no longer says what a lost class actually costs now that it prices nothing",
+  );
+  // Reconstructing the class from the model would resurrect the confound the
+  // revert removed, and would silently break under any future tier control.
+  assert.match(
+    slice,
+    /Never infer the class from the tier/,
+    "phase 2 no longer forbids inferring class from tier",
   );
 
   // All three ledger literals. Only `class=correction` was ever spelled, which

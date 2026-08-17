@@ -87,6 +87,24 @@ At start, and whenever the pool empties.
    answers both questions. Record the Agent Brief's `Out of scope` sequencing.
    Then judge **decided?** — never size.
 
+   **Still live?** A backlog ticket's claims rot. Before `decided?`, settle the
+   ticket's central claim against `origin/main` — never the working tree, never
+   the ticket's own line numbers, which drift. One `git show origin/main:<file>`
+   piped to `grep` does it for any ticket citing a construct, which is most of
+   them. Already fixed → close it citing the commit, do not claim it. Partly
+   fixed → say which acceptance criteria the tree already meets, and which the
+   tree now **contradicts**.
+
+   Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` ten days
+   earlier and #134's AC-2 asked for an exit code a later design (#64)
+   deliberately changed — neither commit carried a trailer back, so the tracker
+   showed both as open work. #132 cost a full claim, worktree and implementer
+   dispatch to learn this; #134 would have shipped a test asserting the opposite
+   of the shipped behaviour. The two probes that settled both took seconds.
+   **A ticket deferred from a review is a claim about a tree that has since
+   moved** — and the older the ticket, the more it has moved, so this bites
+   hardest at exactly the head of an oldest-first queue.
+
    **Decided?** Would two competent implementers, reading only this ticket, build
    materially different things? "Material" by inventory, not feel:
 
@@ -105,26 +123,28 @@ At start, and whenever the pool empties.
 
    **Class?** Second judgement off the same read, so it costs no extra tokens.
    Stale docs, wrong comments, bad citations → `class=correction`; everything
-   else → `class=routine`, which dispatches at `sonnet`. **Torn → correction**:
-   a misjudged routine is a missed saving, a misjudged correction runs the one
-   class that demonstrably ships new wrong claims at the cheaper tier.
+   else → `class=routine`. **Torn → correction**: a misjudged routine is a
+   missed saving, a misjudged correction runs the one class that demonstrably
+   ships new wrong claims.
 
-   Corrections keep the session's top tier as a **precaution, not a
-   measurement.** references/correction-tickets.md records four tickets in one
-   run each shipping a *new* wrong claim, and blames the ticket's framing and
+   **The class no longer selects a model tier** — the phase-2 guard fired on
+   2026-08-16 and every class now dispatches at the session's tier. It still
+   earns its read: it selects the **correction-ticket discipline** phase 2
+   hands the implementer (settle every restated claim against the tree, keep
+   the diff to the ticket's stated size, no positional references), it
+   partitions `docs/metrics/tier-outcomes.tsv`, and it is what any future tier
+   control would be drawn from. A row with no class is still `class=unknown`,
+   never a guess.
+
+   The correction exception was always a **precaution, not a measurement.**
+   references/correction-tickets.md records four tickets in one run each
+   shipping a *new* wrong claim, and blames the ticket's framing and
    unasked-for prose — **not** implementer capability; it measures no tier at
-   all. What it does establish is that this class fails in the reasoning
-   wrapped around a correct mechanical fix, which is what a cheaper model is
-   likeliest to add to. Price of the precaution: corrections never run
-   `sonnet`, so the guard in phase 2 can never produce evidence either way
-   about the one class it would matter most for.
+   all. That reasoning is why the discipline survives the tiering that used to
+   accompany it.
 
-   What makes `sonnet` safe for `class=routine` is the decided? judgement
-   directly above — no undecided row left open — plus specialist review,
-   adversarial verify, CI and the merge bot's post-rebase green all sitting
-   behind the implementer. Thinner than it reads on a prose-only diff, which
-   `diff-stats.mjs` gives `profile: "docs"` and the trimmed dimension set.
-   Record the class in step 6's annotation; phase 2 dispatches on it.
+   Record the class in step 6's annotation; phase 2 reads it for the
+   discipline, no longer for the tier.
 5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
    with no diff, so infer its target files from the issue body (the paths it
    names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
@@ -142,7 +162,7 @@ At start, and whenever the pool empties.
    - **excluded** — undecided, each with the decision that is missing.
 
    Annotate every survivor with its class — `correction` or `routine` — so the
-   maintainer sees which tickets are about to run at the cheaper tier before
+   maintainer sees which tickets carry the correction-ticket discipline before
    ticking them. Annotate any survivor the `Out of scope` read sequences after
    another survivor in the same list. Without that, FIFO puts a chain's members
    next to each other and two consecutive numbers read as two independent
@@ -195,20 +215,41 @@ config has no `globalSetup`, so there is no stack to collide on).
 
 ## Phase 2 — dispatch implementers
 
-**Dispatch at the tier phase 0 classed the ticket at.** `class=routine` →
-`model: "sonnet"` on the Agent call. `class=correction` → **omit `model`**,
-inheriting the session's tier; that omission is the whole mechanism, and a
-member dispatched with `model` set does not get it back. It holds only while the
+**Dispatch every implementer at the session's tier — omit `model` on the Agent
+call, whatever the class.** That omission is the whole mechanism, and a member
+dispatched with `model` set does not get it back. It holds only while the
 implementer's subagent type carries no `model:` frontmatter — an omitted `model`
 takes the *agent definition's* tier first and the session's only after.
 
-**No class recorded → omit `model`, and record `class=unknown`.** Never
-`sonnet`: the cheap tier is the structural complement of "correction", so a lost
-class silently strips protection from the one class that must keep it. Every
-path that loses it lands here — a compaction, a phase-3 refill re-entering phase
-1 then 2 without a fresh issue read, a killed member replaced from inherited
+**`class=routine` → `sonnet` was REVERTED on 2026-08-16, by the guard below
+firing.** Both halves were met on the accumulated `docs/metrics/tier-outcomes.tsv`:
+the floor (8 `class=routine` PRs spanning 3 distinct `run_date`s) and the trigger
+(2 rows carrying `closed_own_ticket` `no` — PR #452, which regressed the exact
+defect its ticket existed to remove, and PR #466, which emitted invalid JSON in
+the very payload its three tickets existed to make truthful). Per the guard's own
+wording this reverts **`class=routine`**, never the rule wholesale: phase 0 still
+records the class, it still governs the correction-ticket discipline, and it is
+still what a future control would be drawn from.
+
+**Read the counter-evidence before restoring it.** On the guard's own metric the
+split is 2 failures in 7 `routine`/`sonnet` rows against 0 in the single
+`routine`/`opus` row (PR #480) — which is n=1, not a result. Both `no` rows
+predate the revert — #452 by three days, #466 by two — and the most recent
+routine PR (#521) closed its own ticket. Every row so far, at either tier, carries
+`minted_false_claim` `yes`, so that column discriminates nothing about tier. The
+honest summary is that the guard fired on the criterion the maintainer chose in
+advance, not that the cheaper tier has been shown worse.
+
+**No class recorded → record `class=unknown`, never a guess.** Since the revert
+every class dispatches the same way, so a lost class no longer misprices a
+member — but it still costs the **correction-ticket discipline**, which phase 2
+selects on the class and which is the half that caught real defects. Every path
+that loses it lands here — a compaction, a phase-3 refill re-entering phase 1
+then 2 without a fresh issue read, a killed member replaced from inherited
 state. Writing the gap down is what makes it visible; re-read the issue to
-recover the class when the saving is worth one `gh issue view`.
+recover the class when a correction's discipline is worth one `gh issue view`.
+**Never infer the class from the tier** — that inference is what the revert
+removed, and a future control would break it again.
 
 Carry the class in the ticket's ledger row, written before dispatch like every
 other field:
@@ -257,18 +298,24 @@ over six dimensions and its sibling fields 8 over three. And the fleet is not
 stationary — this prompt gets edited mid-run when a defect earns it. Hence a
 binary outcome per PR, accumulating, rather than a per-run verdict.
 
-**The comparison the old text asked for cannot work, and this is the load-bearing
-part.** It said to compare routine PRs against "the top-tier PRs above them". But
-`class` and `tier` are perfectly confounded by the dispatch rule: routine always
-runs `sonnet`, correction always runs top tier. So that comparison is
-routine-at-sonnet vs correction-at-top-tier, and those classes fail in different
-ways by construction — corrections ship false claims in prose, routines ship
-incomplete or regressing code. It measures class, not tier. A run that "mixes
-both" does not fix it. **Only a same-class comparison across tiers is
-informative**, and the rule forbids producing one, since no routine ticket ever
-runs at top tier. Getting an answer needs a deliberate control — some
-`class=routine` tickets dispatched at top tier — which is a change to the tiering
-rule and therefore the maintainer's call, not yours.
+**Why the rows this guard fired on could not answer the tier question, and this
+is the load-bearing part.** Until the 2026-08-16 revert, `class` and `tier` were
+perfectly confounded: routine always ran `sonnet`, correction always ran top
+tier. So the comparison the file invites — routine-at-sonnet against
+correction-at-top-tier — measures **class, not tier**, because those classes fail
+in different ways by construction: corrections ship false claims in prose,
+routines ship incomplete or regressing code. A run that "mixes both" does not fix
+it. **Only a same-class comparison across tiers is informative**, and the old
+rule could not produce one, since no routine ticket ever ran at top tier. The
+file holds exactly one such row — PR #480, routine at `opus` — which is n=1, not
+a result.
+
+**So read what the guard actually established: routine tickets sometimes fail to
+close their own ticket. Not that `sonnet` caused it.** The revert is the
+pre-committed rule being honoured, not a measurement. Restoring a cheap tier —
+or answering the question properly — needs a deliberate control, some
+`class=routine` tickets dispatched at top tier, which is a change to the
+dispatch rule and therefore the maintainer's call, not yours.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot
@@ -310,6 +357,13 @@ number, worktree abs path, branch, and each of these verbatim:
 > explicitly rule out hypotheses the body raises. Read the issue **before
 > touching code**: with the repo in front of you, still undecided or needing
 > human hands you do not have → bail, name the cause, do not implement.
+
+> **Re-derive the ticket's claims against `origin/main` before implementing** —
+> not the working tree, and not the ticket's line numbers, which drift. Phase 0
+> runs a cheap version of this check, so what reaches you is what a `grep` could
+> not settle; you have the tree, so you are the backstop. Already fixed → report
+> that with the commit and do NOT invent work. An acceptance criterion the tree
+> now **contradicts** is a bail, not a thing to implement: say which, and stop.
 
 > Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 > you stop for any reason, uncommitted work is invisible to the controller and
