@@ -28,11 +28,17 @@ echo "    origin/$branch tip = $tip" >&2
 git cat-file -e "${sha}^{commit}" 2>/dev/null \
   || die "$sha is not a commit object in this repository"
 
-if git merge-base --is-ancestor "$sha" "origin/$branch" 2>/dev/null; then
+# Exit 1 is the answer "no"; anything else is git failing to answer, and the one
+# distinction this script exists to make must never be read off a failure. Keep
+# the status read first in the branch — anything above it overwrites $?. git is
+# silent on a plain "no", so no 2>/dev/null here: the only stderr it can add is
+# the cause of a failure the operator needs.
+if git merge-base --is-ancestor "$sha" "origin/$branch"; then
   reachable=true
   rc=0
   echo "    $sha IS reachable on origin/$branch" >&2
 else
+  [ $? -eq 1 ] || die "git merge-base --is-ancestor failed — cannot tell reachable from unanswerable"
   reachable=false
   rc=1
   echo "    $sha is NOT reachable on origin/$branch" >&2
