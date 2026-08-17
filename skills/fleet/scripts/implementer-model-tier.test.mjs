@@ -31,9 +31,7 @@ import { join } from "node:path";
 // phase and a neighbouring paragraph satisfies the pin on its own. Measured on
 // phase 0 — delete step 4's `**correction-ticket discipline**` sentence and the
 // pin on that phrase below stays green regardless, on step 6's "which tickets
-// carry the correction-ticket discipline" alone. Paragraph scope is also what
-// makes the guard's `/^\*\*Guard: /` expressible: it pins the slice's opening
-// characters.
+// carry the correction-ticket discipline" alone.
 //
 // `section()` is duplicated from review-path-default.test.mjs rather than
 // shared — two files, seven lines. Nothing detects drift between the copies.
@@ -93,10 +91,13 @@ test("phase 0 step 4 still earns its class judgement now that the class prices n
   // guarding against (L224, L235, L303, L304, L314) lives in the `dispatch` and
   // `guard` slices, which this pin does not cover. Measured: under the old
   // bound a restoration split across two sentences escaped the whole suite at
-  // 720/720; [\s\S]{0,400} reds it and leaves the clean tree green.
+  // 725/725; [\s\S]{0,400} reds it and leaves the clean tree green. Neither is
+  // the ORDER assumed — a restoration reading "`sonnet` is what `class=routine`
+  // tickets dispatch at" binds the class just as squarely and walks straight
+  // through the forward-only form, so both directions are scanned.
   assert.doesNotMatch(
     slice,
-    /`class=routine`[\s\S]{0,400}`sonnet`/,
+    /`class=routine`[\s\S]{0,400}`sonnet`|`sonnet`[\s\S]{0,400}`class=routine`/,
     "step 4 has re-bound `class=routine` to `sonnet` — the reverted rule is back in phase 0",
   );
   // Safe direction on a judgement with no tiebreak. The adjacent decided?
@@ -126,7 +127,7 @@ test("phase 0 step 6 still carries the phrase the slicing rationale is measured 
   const slice = section(RUN_TEAM, "6. Present survivors as a multi-select", "Never put two sequenced tickets", "run-team phase 0 step 6");
   assert.match(
     slice,
-    /which tickets carry the correction-ticket discipline/,
+    /which tickets carry the\s+\*{0,2}correction-ticket\*{0,2}\s+discipline/,
     "step 6 dropped the phrase the slicing rationale cites — re-measure and update the comment at the top of this file",
   );
 });
@@ -141,6 +142,16 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     /omit `model` on the Agent\s+call, whatever the class/,
     "phase 2 no longer dispatches every class the same way — a per-class tier branch is back",
   );
+  // The revert is dated and attributed, or the next reader takes the missing
+  // tier for an omission and helpfully restores it. Pinned BEFORE the scan
+  // below, whose exemption names this note verbatim: a reworded note has to be
+  // diagnosed as a reworded note, or the scan reports it as a restored binding
+  // and sends the reader hunting a rebinding nobody made.
+  assert.match(
+    slice,
+    /REVERTED on 2026-08-16/,
+    "phase 2 no longer records WHEN and WHY the tier binding was removed",
+  );
   // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
   // stated independently in both places, so restoring either one alone is
   // undetectable without a pin on each. Nothing is assumed between the two
@@ -151,19 +162,15 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // vocabulary and each walked straight through the literal form. The one
   // legitimate statement of the binding in this slice is the past-tense revert
   // note, exempted BY NAME rather than by narrowing the pattern back to a
-  // literal — a narrower pattern is what let the half-revert through.
-  const rebindings = slice.match(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}/g) ?? [];
+  // literal — a narrower pattern is what let the half-revert through. The ORDER
+  // is not assumed either, for the same reason the arrow is not: the mirrored
+  // sentence states the same binding and matched nothing at all.
+  const rebindings =
+    slice.match(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}|sonnet[^.]{0,120}`class=routine`[^.]{0,40}/g) ?? [];
   assert.deepEqual(
     rebindings.filter((hit) => !/was REVERTED/.test(hit)),
     [],
     "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
-  );
-  // The revert is dated and attributed, or the next reader takes the missing
-  // tier for an omission and helpfully restores it.
-  assert.match(
-    slice,
-    /REVERTED on 2026-08-16/,
-    "phase 2 no longer records WHEN and WHY the tier binding was removed",
   );
   // Anchored to the omission, not the word "inherit": the tier is obtained by
   // NOT passing `model`, and "implementers run at the session tier" with no
