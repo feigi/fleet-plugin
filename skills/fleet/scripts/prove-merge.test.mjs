@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -429,4 +429,69 @@ test("exit code tracks proved; usage errors exit 2", (t) => {
   assert.equal(usage.status, 2);
   const unknown = prove(w, head, head, "0".repeat(40));
   assert.equal(unknown.code, 2, "an unresolvable commit is an error, not a disproof");
+});
+
+test("a base ref the probe cannot answer for reports the probe failure, not a disproof", (t) => {
+  // #267. `die` inside `$(...)` exits the subshell only, and `[ ]` throws that
+  // status away — `set -e` never fires, control falls through to the outer die,
+  // and "that merge did not land" is printed for a merge-base that never
+  // answered. The honest cause prints first, but the *verdict* is the wrong one.
+  //
+  // A tree as BASE_REF is the way in, with no fault injection and no PATH shim:
+  // $base is only `rev-parse --verify`'d and never commit-checked, so a tree
+  // clears the gate and reaches the probe, where git exits 128 rather than 1.
+  // Every commit already carries one, so no file has to be written to get it.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const tree = git(w, "rev-parse", `${head}^{tree}`);
+  assert.equal(git(w, "cat-file", "-t", tree), "tree", "fixture: BASE_REF really names a tree");
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, BASE_REF: tree },
+    encoding: "utf8",
+  });
+  assert.match(r.stderr, /failed — cannot prove anything/, "fixture: the probe really did fail");
+  assert.doesNotMatch(
+    r.stderr,
+    /did not land/,
+    "a probe that could not answer must never be reported as a disproof it never established",
+  );
+  assert.equal(r.stdout.trim(), "", "a probe that did not answer emits no proof");
+  // Not the discriminator: `die` is `exit 2` unconditionally, so this held before
+  // the fix too. The stderr assertion above is what separates the two messages.
+  assert.equal(r.status, 2, "a die is exit 2 — the question was not answered, so no exit 1 for a `no`");
+
+  // The other half: the same fixture, with a base that CAN answer, must still be
+  // accepted. Assigning the probe first makes `set -e` live on this line, so a
+  // suite that only ever fed it a failing probe would not notice it aborting on
+  // a good one — the false positive that a fix for a false negative invites.
+  const { code, json } = prove(w, head, head, merge);
+  assert.equal(json.proved, true, "a merge that did land must still prove true");
+  assert.equal(code, 0);
+});
+
+test("no probe in prove-merge.sh has its status discarded by `[ ]`", () => {
+  // A cheap lint for the one spelling this file uses, not for the whole class:
+  // `test "$(...)"` and `x=$(...) || true` discard the status just as thoroughly
+  // and this regex never sees them. What closes the class is the behavioural test
+  // directly above, which is fault-agnostic; this one catches the same mistake at
+  // the spelling, before anyone has to write a fixture for it.
+  //
+  // `die` inside a substitution can only kill the subshell, so the status has to
+  // land somewhere `set -e` reads it. A bare assignment does; the word-expansion
+  // slot of `[ ]` does not. This script has no legitimate `[ "$(...)" ]`: "a
+  // proof must never read a failure as a leg it likes" is the reason is_ancestor
+  // dies at all. Split any new one into an assignment and a test, the way every
+  // is_ancestor call does.
+  const offenders = readFileSync(SCRIPT, "utf8")
+    .split("\n")
+    .map((line, i) => [i + 1, line])
+    .filter(([, line]) => !line.trimStart().startsWith("#"))
+    .filter(([, line]) => /(^|\s)\[\s/.test(line) && line.includes("$("));
+  assert.deepEqual(offenders, [], "assign the substitution to a variable first");
 });

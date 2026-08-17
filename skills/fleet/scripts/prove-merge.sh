@@ -61,7 +61,12 @@ done
 # Everything below reads structure off $merge, so an object the caller made up
 # would otherwise prove whatever it was built to prove.
 echo "\$ git merge-base --is-ancestor $merge $base" >&2
-[ "$(is_ancestor "$merge" "$base")" = true ] || die "$merge is not reachable from $base — that merge did not land"
+# Assigned first, not tested inline: `die` inside `$(...)` exits the subshell,
+# and `[ ]` discards that status, so `set -e` never fires and a probe that could
+# not answer falls through to the disproof below — a verdict never established.
+# An assignment is a simple command, so its status is the substitution's (#267).
+merge_anc=$(is_ancestor "$merge" "$base")
+[ "$merge_anc" = true ] || die "$merge is not reachable from $base — that merge did not land"
 
 pre_full=$(git rev-parse "$pre")
 post_full=$(git rev-parse "$post")
