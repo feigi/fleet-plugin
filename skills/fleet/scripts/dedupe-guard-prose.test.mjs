@@ -49,7 +49,14 @@ function between(text, from, to, what) {
 // leading spaces mid-phrase. Collapse whitespace so `\s+` spans a wrap.
 const flat = (s) => s.replace(/\s+/g, " ");
 
-const step5 = () => between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5");
+// Flattened for the same reason as the run-team slices below. review-and-fix.md
+// authors one long line per step today, so this is a no-op on the current file —
+// but every pin here is a literal phrase with spaces in it, and the moment the
+// file is wrapped, whichever pin a break happens to land inside reds on words
+// that never changed. Measured at width 100: `never a dropped finding` split and
+// reddened test 4 while 80/120/140 stayed green, i.e. the class is present in
+// all five step-5 pins and line width merely samples which one fires.
+const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
 const finisherDeferrals = () =>
   flat(between(RUN_TEAM, "**Confirm every deferral is filed as an issue**", "Add `ready-to-merge`", "run-team finisher duty 2"));
 
