@@ -298,16 +298,22 @@ test("the design spec's script-surface row names every field the payload actuall
   const row = spec.split("\n").find((l) => l.startsWith("| `worktree-audit.sh` |"));
   assert.ok(row, "the script-surface table must still carry a worktree-audit.sh row");
 
+  // Both halves read the Out cell alone, since the rest of the row legitimately
+  // names things that are not keys: scanning the whole row let the Script cell's
+  // `worktree-audit.sh` satisfy `worktree` and the `Non-zero when` prose's "a
+  // worktree that is dirty" satisfy `dirty`, so either could be dropped from the
+  // type signature with this test green — and `dirty` is one of the two fields
+  // the row got wrong (#48).
+  const out = row.split("|")[3];
+
   // Word-boundary match, so `dirty` cannot be satisfied by `dirtyFiles` sitting
   // elsewhere in the cell — the exact substring trap that would let the shorter
   // key be dropped again while this test stayed green.
-  const missing = Object.keys(e).filter((k) => !new RegExp(`\\b${k}\\b`).test(row));
+  const missing = Object.keys(e).filter((k) => !new RegExp(`\\b${k}\\b`).test(out));
   assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
 
   // The other direction: a field the row invents is as wrong as one it drops,
-  // and only this half catches `commits`. Restricted to the Out cell, since
-  // the prose of `Non-zero when` legitimately names things that are not keys.
-  const out = row.split("|")[3];
+  // and only this half catches `commits`.
   const invented = (out.match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((k) => !(k in e));
   assert.deepEqual(invented, [], `the spec row names fields the script never emits: ${invented.join(", ")}`);
 });
