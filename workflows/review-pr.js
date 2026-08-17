@@ -461,15 +461,15 @@ function selectDimensions(all, stats) {
   return dims.length ? dims : all;
 }
 
-// `skills/fleet/commands/review-and-fix.md:49` documents `args.dimensions` as
-// accepting "keys or dimension objects" — but until now only objects worked:
-// a key array passed straight through and every dereference below (`d.key`,
-// `d.prompt`, `d.agentType`) came back `undefined`, with no throw and no
-// warning (#113). Resolve strings against the workflow's own catalog, and
-// check every object for the three fields the fan-out actually dereferences.
-// Anything unresolvable stops the run and names what was not recognised — a
-// misconfigured review is worse than no review, because its findings look
-// like findings.
+// The "Specialists" section of `skills/fleet/commands/review-and-fix.md`
+// documents `args.dimensions` as accepting "keys or dimension objects" — but
+// until now only objects worked: a key array passed straight through and every
+// dereference below (`d.key`, `d.prompt`, `d.agentType`) came back `undefined`,
+// with no throw and no warning (#113). Resolve strings against the workflow's
+// own catalog, and check every object for the three fields the fan-out actually
+// dereferences. Anything unresolvable stops the run and names what was not
+// recognised — a misconfigured review is worse than no review, because its
+// findings look like findings.
 function resolveDimensions(override, all) {
   // `== null` is exact where `!override` was not: only an ABSENT override
   // falls through to the size tier. `!override` also swallowed `""`, `0` and
