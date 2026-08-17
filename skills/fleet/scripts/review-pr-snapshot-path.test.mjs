@@ -11,10 +11,9 @@ import { stripComments } from "./strip-comments.mjs";
 // specialist got `No such file or directory` on every read and reasoned from
 // source instead of measuring, on all six dimensions at once (#140).
 //
-// `snapshotMissing` is the fix: a required `pathVerified` boolean the snapshot
-// agent cannot silently omit (`additionalProperties: false` + `required`
-// already caught the sibling defect at #113/#118, same schema), read by the
-// CALLER rather than trusted from the agent's own narration of the
+// `snapshotMissing` is the fix: a `pathVerified` boolean in the snapshot
+// schema's own `required` array, so the agent cannot silently omit it — read by
+// the CALLER rather than trusted from the agent's narration of the
 // byte-identity 'Verify it' step a few lines above it in the prompt.
 //
 // review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
@@ -73,4 +72,94 @@ test("a present path that failed its existence check is refused, naming the path
 test("a snapshot that omitted pathVerified is refused, not assumed true", () => {
   const reason = snapshotMissing({ path: "/tmp/snap", head: "abc123" });
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
+});
+
+// Bound the slice at BOTH ends. `indexOf` returns -1 when absent and `slice(-1)`
+// is a truthy one-character string, so an unbounded slice satisfies its
+// assertions with the whole block deleted, and an unbounded end runs to EOF
+// where the specialist and refuter prompts can satisfy them instead — the defect
+// `review-pr-reads.test.mjs:271-282` records having shipped. Same two anchors
+// its `slice()` and `review-pr-testcmd.test.mjs:110-114` already use.
+function snapshotBlock() {
+  const at = CODE.indexOf("const snap = await agent(");
+  assert.notEqual(at, -1, "the snapshot agent dispatch moved — update this test");
+  const end = CODE.indexOf("if (!snap", at);
+  assert.notEqual(end, -1, "the snapshot agent's validity guard moved — update this test");
+  return CODE.slice(at, end);
+}
+
+// Every test above runs against the lifted `snapshotMissing`, which decides what
+// to do with `pathVerified` but never produces it. The thing that produces it is
+// two lines of review-pr.js — a shell probe and the sentence binding the field
+// to that probe's output — and neither was pinned. Delete either and
+// `required: [..., "pathVerified"]` still passes, all four tests above still
+// pass, and the agent has lost the only instruction saying what value to report:
+// `pathVerified` degrades to a boolean it invents, silently reopening #140 under
+// a green suite. That is the exact shape `review-pr-reads.test.mjs:323-329`
+// measured on the diff facts — "deleting this paragraph outright left this file
+// at 12 pass, 0 fail".
+test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its output", () => {
+  const snapshot = snapshotBlock();
+  assert.match(
+    snapshot,
+    /\[ -n "\$\(ls -A \$\{scratch\}\/snapshot\)" \] && echo SNAPSHOT_NONEMPTY \|\| echo SNAPSHOT_EMPTY/,
+    "the emptiness probe is gone — nothing mechanical stands behind pathVerified",
+  );
+  // These names live inside a template literal, so each backtick is a
+  // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
+  // idiom review-pr-reads.test.mjs and review-pr-testcmd.test.mjs already use.
+  // `\s+` spans the line wraps so a reflow of the same sentence stays green.
+  const B = "\\\\?`";
+  assert.match(
+    snapshot,
+    new RegExp(`Report\\s+${B}pathVerified${B}\\s+=\\s+true\\s+ONLY\\s+if\\s+the\\s+'ls -A'\\s+line\\s+printed\\s+SNAPSHOT_NONEMPTY`),
+    "pathVerified is no longer bound to the probe's output — the agent may report whatever it likes",
+  );
+});
+
+// The ORDER is the guard, not the probe. Measured on this PR's first pass: with
+// the probe below the symlink, `ls -A` counts the symlink, so a `git archive`
+// that extracted NOTHING still prints SNAPSHOT_NONEMPTY — in every repo that has
+// node_modules, which is every repo the symlink exists for. The probe then
+// passes on precisely the fault #140 added it to catch, and the agent reports
+// `pathVerified: true` honestly, because that is what it was told to report.
+test("the emptiness probe runs BEFORE the node_modules symlink, never after", () => {
+  const snapshot = snapshotBlock();
+  const probeAt = snapshot.indexOf('[ -n "$(ls -A ${scratch}/snapshot)" ]');
+  const symlinkAt = snapshot.indexOf("ln -s ${worktree}/node_modules");
+  assert.notEqual(probeAt, -1, "the emptiness probe moved — update this test");
+  assert.notEqual(symlinkAt, -1, "the node_modules symlink moved — update this test");
+  assert.ok(
+    probeAt < symlinkAt,
+    "the probe sits after the symlink again — the symlink alone satisfies `ls -A`, so a failed archive reports SNAPSHOT_NONEMPTY",
+  );
+});
+
+// The function is worthless if nothing calls it, and every test above tests a
+// COPY lifted from the source text: it stays green while the feature
+// disconnects. `review-pr-testcmd.test.mjs:76-79` records this exact defect for
+// resolveTestCmd and `select-dimensions.test.mjs:251-256` for the fan-out.
+// Delete the two lines below in review-pr.js and #140's refusal is dead code
+// with this whole file green.
+test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
+  assert.match(
+    CODE,
+    /^const missingReason = snapshotMissing\(snap\);$/m,
+    "the snapshotMissing call site changed — the #140 guard may be disconnected",
+  );
+  assert.match(
+    CODE,
+    /^if \(missingReason\) throw new Error\(/m,
+    "snapshotMissing's result is computed but never thrown on — the guard decides nothing",
+  );
+  // Ordering, same guardAt/callAt shape as review-pr-testcmd.test.mjs:87-90:
+  // after the schema that produces `pathVerified`, and before the first thing
+  // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
+  // for a tree that was never confirmed to exist.
+  const schemaAt = CODE.indexOf('required: ["path", "head", "pathVerified"]');
+  const callAt = CODE.indexOf("const missingReason = snapshotMissing(snap);");
+  const testCmdAt = CODE.indexOf("const testCmd = resolveTestCmd(");
+  assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");
+  assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
+  assert.ok(callAt < testCmdAt, "resolveTestCmd reads snap before the guard has cleared it");
 });

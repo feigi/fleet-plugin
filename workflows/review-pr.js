@@ -511,8 +511,8 @@ const snap = await agent(
 
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
+    [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
     if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
-    test -d ${scratch}/snapshot && [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
 
 The symlink is not optional. 'git archive' carries TRACKED files only, so the
 snapshot has no node_modules — and the command derived below is 'npm test --'
@@ -521,7 +521,11 @@ the very tree specialists are told to run it in. Skip it and the derivation is
 validated where the command never runs (#142). No node_modules in the worktree,
 no symlink, nothing to report — that repo does not need one.
 
-Report \`pathVerified\` = true ONLY if that last line printed SNAPSHOT_NONEMPTY.
+Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY.
+Run it in the order above — BEFORE the symlink, never after. The symlink alone
+makes the directory non-empty, so a check placed below it prints
+SNAPSHOT_NONEMPTY on a totally failed 'git archive' in any repo that has
+node_modules, which is every repo the symlink exists for.
 A directory that exists but holds nothing is what a silently-failed
 'git archive | tar -x' looks like — 'git archive' failing or 'gh' auth lapsing
 leaves the pipe empty, tar extracts nothing from it, and 'mkdir -p' already made
@@ -571,7 +575,7 @@ their command failed. Do not modify ${worktree}.`,
       properties: {
         path: { type: "string" },
         head: { type: "string" },
-        // The mechanical 'test -d && ls -A' check the shell block above runs,
+        // The mechanical 'ls -A' check the shell block above runs,
         // REQUIRED so it cannot be silently omitted the way the byte-identity
         // 'Verify it' step above it always could — that step is narration this
         // schema has never captured. `snapshotMissing` below is what turns a

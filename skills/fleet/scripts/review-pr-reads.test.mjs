@@ -312,6 +312,17 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
     );
   }
+  // Declared beside them, but not one of them: `pathVerified` belongs to
+  // `required`, not to the gh-failure set, so it is pinned on its own rather
+  // than folded into the loop above — whose comment, and the one below, both
+  // read "these three". Only its `required` membership was pinned when it was
+  // added (#140); `additionalProperties: false` is what makes the DECLARATION
+  // mandatory too, for every field this schema carries.
+  assert.match(
+    props,
+    /^\s*pathVerified:\s*\{\s*type:/m,
+    "pathVerified is not declared in the schema's properties — additionalProperties:false drops it",
+  );
   // The review must survive a gh failure. These three stay out of `required`.
   // `pathVerified` joins path+head instead (#140) — a caller check on whether
   // the snapshot exists, not a `gh` fact that can legitimately be absent.
@@ -376,8 +387,14 @@ test("the refuter prompt interpolates the same read rules", () => {
 });
 
 // A second declaration would let one call site silently bind a different body.
+// `snapshotMissing` joined the list at #140, where the gap was measured live:
+// a duplicate `function snapshotMissing` placed AFTER the real one left both
+// this file and review-pr-snapshot-path.test.mjs at 22/22 green, because the
+// lift regex's non-global `.match` grabs the FIRST declaration while JS runs
+// the LAST — the tests exercise the real guard while review-pr.js executes the
+// no-op. Only the duplicate-BEFORE case, the harmless one, was ever caught.
 test("each function is declared exactly once at top level", () => {
-  for (const name of ["usableDiff", "readRules"]) {
+  for (const name of ["usableDiff", "readRules", "snapshotMissing"]) {
     const hits = CODE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
     assert.equal(hits.length, 1, `${name} is declared ${hits.length} times`);
   }
