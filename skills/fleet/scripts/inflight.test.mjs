@@ -671,11 +671,15 @@ test("probe 3: git listing MORE than the registry reports THAT, not an incomplet
   // the only way it outruns the count is that interleaving, and a shim pins
   // the resulting message deterministically instead of hoping to hit a window.
   const { repo, env, bin } = fixture(t, 8, {});
+  // Selector and payload both track the `-z` listing (#185). A shim keyed on
+  // the old argument string stops matching silently and the phantom is never
+  // appended, which is a green for a case that measured nothing — the same
+  // trap `registryRaceShim`'s `fired` sentinel exists to catch.
   writeFileSync(join(bin, "git"), `#!/bin/sh
 case "$*" in
-  "worktree list --porcelain")
+  "worktree list --porcelain -z")
     '${REAL_GIT}' "$@"
-    printf 'worktree /tmp/phantom-worktree\\nHEAD ${"0".repeat(40)}\\ndetached\\n\\n'
+    printf 'worktree /tmp/phantom-worktree\\000HEAD ${"0".repeat(40)}\\000detached\\000\\000'
     exit 0 ;;
 esac
 exec '${REAL_GIT}' "$@"
@@ -709,7 +713,7 @@ function registryRaceShim(bin, mutation) {
   const fired = join(bin, "race-fired");
   writeFileSync(join(bin, "git"), `#!/bin/sh
 case "$*" in
-  "worktree list --porcelain")
+  "worktree list --porcelain -z")
     if [ ! -e '${fired}' ]; then
       : > '${fired}'
       ${mutation}
@@ -1658,11 +1662,20 @@ test("probe 2's call: gh pr list failing with nothing on stderr still names a ca
     "the second capture site inherits the fallback instead of re-deriving it");
 });
 
-test("probe 1: mktemp failing leaves probes 2 and 3 to answer, rather than abandoning the run", (t) => {
-  // The capture file is probe 1's own resource, so losing it is "probe 1 could
-  // not look" — not "the question cannot be answered". Probes 2 and 3 need
-  // neither gh nor the file. Measured with the `|| die` this replaces, on this
-  // very fixture: exit 2, empty stdout, both hits discarded.
+test("mktemp failing leaves probe 2 to answer, rather than abandoning the run", (t) => {
+  // A temp file is a probe's own resource, so losing it is "that probe could
+  // not look" — not "the question cannot be answered". Measured with the
+  // `|| die` this replaces, on this very fixture: exit 2, empty stdout, every
+  // hit discarded.
+  //
+  // TWO probes need one since #185: probe 1 captures gh's stderr, and probe 3
+  // holds the NUL-delimited worktree listing, which no shell variable can. So
+  // a broken mktemp now blinds both, and only probe 2 — which needs neither gh
+  // nor a file — still answers. That widening costs the QUEUE nothing: probe
+  // 1's unknown alone already forced exit 2 on a ticket with no hit, so a
+  // broken TMPDIR starved the queue before #185 exactly as it does after. It
+  // moves in the safe direction besides — a probe that cannot look reports
+  // unknown, never the "free" that would put two implementers on one ticket.
   //
   // Still kills the mutant the die killed: reverting to the old fixed
   // /tmp/.inflight.$$ path calls no mktemp at all, so this stub goes untouched,
@@ -1673,13 +1686,15 @@ test("probe 1: mktemp failing leaves probes 2 and 3 to answer, rather than aband
   writeFileSync(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "mktemp"), 0o755);
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
-  assert.equal(r.status, 1, "two probes still found the ticket taken");
+  assert.equal(r.status, 1, "the probe that could still look found the ticket taken");
   const json = JSON.parse(r.stdout);
   assert.equal(json.taken, true);
-  assert.deepEqual(json.hits, ["remote-branch", "local"],
-    "neither hit is discarded by probe 1's local resource failure");
-  assert.deepEqual(json.unknown, ["pr"], "and the probe that could not look is named");
+  assert.deepEqual(json.hits, ["remote-branch"],
+    "the hit from the probe that needs no temp file is not discarded");
+  assert.deepEqual(json.unknown, ["pr", "local"], "and both probes that could not look are named");
   assert.match(r.stderr, /could not create a temporary file to capture gh's stderr/);
+  assert.match(r.stderr, /could not create a temporary file to hold the worktree list/,
+    "probe 3's own message, not probe 1's reused");
 });
 
 test("cleanup that cannot remove the capture file never rewrites the verdict", (t) => {
