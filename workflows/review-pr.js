@@ -213,7 +213,9 @@ function usableDiff(snap) {
 // Text lifted into a second copy disconnects in one token; that is this repo's
 // recurring pin defect.
 //
-// `skills/fleet/commands/review-and-fix.md:47` owns the prose rationale, for the
+// The read-rule paragraph of the "Specialists" section of
+// `skills/fleet/commands/review-and-fix.md` ("`git show <sha>:<path>` is the
+// source of truth" … "Then bound the read") owns the prose rationale, for the
 // hand-dispatch path. This is the operational form for the workflow path, where
 // the premise differs: there is no live worktree to be contaminated BY, because
 // the snapshot IS the object store already materialized (the snapshot agent's
