@@ -107,7 +107,10 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   assert.match(step5(), /\*\*Run ledger\*\*/, "step 5 no longer defers the exit-code semantics to run-team's Run ledger section");
   assert.match(RUN_TEAM, /^## Run ledger$/m, "run-team no longer has a `## Run ledger` section for step 5 to cite");
   // And that section has to still carry what step 5 sends a reader there for.
-  const runLedger = between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section");
+  // Flattened like the sibling below: the slice is hard-wrapped Markdown, so an
+  // un-flattened match reds on a pure reflow — the one thing the header at the
+  // top of this file promises stays green.
+  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
   assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
@@ -118,7 +121,11 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // and neither file fails on its own when they do: each stays internally
   // coherent while an agent reading one acts on the other's contract. So the
   // numbers are pinned on BOTH sides — renumbering in either file alone reddens
-  // this, which is the only signal the split produces.
+  // the suite, which is the only signal the split produces. One test per side,
+  // though, and this is not the one holding step 5: it reads RUN_TEAM only, and
+  // the step-5 side is pinned by "step 5 tells exit 1 from exit 3" above.
+  // Measured: `exit **3**` → `exit **4**` in review-and-fix.md alone reds that
+  // test and leaves this one green; the same edit in run-team alone inverts it.
   const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
   assert.match(runLedger, /\*\*1\*\* already in this run's filed list/, "run-team no longer reads exit 1 as already filed this run — step 5 still does");
   assert.match(runLedger, /\*\*2\*\* usage\s+error/, "run-team no longer reads exit 2 as a usage error — step 5 still does");
