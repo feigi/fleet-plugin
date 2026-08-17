@@ -39,6 +39,21 @@ function defaultLedgerPath() {
 }
 
 const argv = process.argv.slice(2);
+// Both flags are read by EXACT token below (`indexOf`), so the `--flag=value`
+// spelling matches neither — and an unmatched token is not refused, it lands
+// in `rest`, where `check`'s `rest.join(" ")` folds it into the SUBJECT. That
+// loses the path AND corrupts the text being checked: measured, `check
+// --file=<other-ledger> "<subject that ledger has already filed>"` exits 0
+// "safe to file" where the space-separated form exits 1 ALREADY FILED, and
+// `--file <missing> check --require-file=true dup` exits 0 where the bare flag
+// exits 2. It failed loudly only where the token happened to land in the
+// SUBCOMMAND slot — argv[0] once the splices below have run, which a leading
+// `--file=x` does — and `unknown subcommand` is not the same refusal. That one
+// sample is why the `=` form read as already covered. So scan the whole argv.
+// Same two refusals arg.mjs gives the scripts that route through its arg() and
+// has(), in this reader's own wording (#362).
+if (argv.some((a) => a.startsWith("--file="))) die("--file needs a space-separated value, not --file=");
+if (argv.some((a) => a.startsWith("--require-file="))) die("--require-file is a boolean flag, not --require-file=");
 const fileIdx = argv.indexOf("--file");
 const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // #362: `--file` took whatever token followed it, so `--file --require-file`
@@ -52,7 +67,8 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 //
 // Refusing a `--`-prefixed value forfeits a path that legitimately begins
 // with `--`, which is the same deliberate trade arg.mjs documents for the
-// four call sites this hand-rolled reader does not route through. A single
+// five scripts that DO route through its arg() — board, candidates, ci-state,
+// diff-stats, pr-overlap — and this hand-rolled reader does not. A single
 // leading `-`, or a `--` anywhere but the front, is still a path.
 if (fileIdx !== -1 && file && (file.startsWith("--") || file.trim() === "")) die("--file needs a path");
 if (fileIdx !== -1) argv.splice(fileIdx, 2);

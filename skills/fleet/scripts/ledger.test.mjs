@@ -698,7 +698,12 @@ function cliFixture() {
   mkdirSync(bin, { recursive: true });
   // Same isolation rule the rest of this file follows: the real `gh` must
   // never be reachable, or these assertions would ride on this repo's live
-  // issue list. `git` still resolves — defaultLedgerPath() shells out to it.
+  // issue list. `git` is symlinked in for the same reason run() does it, not
+  // because anything below needs it: every test here passes `--file`, so
+  // defaultLedgerPath() never shells out, and none reaches the tracker query
+  // that runs the second `git`. Kept so the next test added here fails on its
+  // own terms rather than silently taking defaultLedgerPath()'s cwd-relative
+  // fallback.
   symlinkSync(REAL_GIT, join(bin, "git"));
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
@@ -786,6 +791,60 @@ test("CLI: --require-file survives a well-formed --file and still hard-fails a m
     const r = cli(["--file", join(dir, "nope", "ledger.md"), "--require-file", "check", "dup subject"], env, dir);
     assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
     assert.match(r.stderr, /--require-file given but ledger file does not exist/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The `=` spelling, which `indexOf` cannot see at all. BOTH POSITIONS, because
+// the only one that ever failed was the one that happened to land in the
+// SUBCOMMAND slot, where `unknown subcommand` fires — a different refusal, and
+// the single sample that made the `=` form read as already-covered. Elsewhere
+// it is not refused at all: it falls through
+// to `rest` and `check`'s `rest.join(" ")` folds it into the SUBJECT, so the
+// path is lost AND the checked text is corrupted, and the answer is exit 0
+// "safe to file" for a subject this fixture's ledger has already filed. The
+// exit-1 assertion below is what makes that concrete: the same subject against
+// the same file, spelled with a space, is ALREADY FILED.
+test("CLI: --file=<path> is refused in either position, never folded into the subject (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const other = join(dir, "other-ledger.md");
+    const subject = "some distinctive filed subject words";
+    writeFileSync(other, ledgerText([`#42 ${subject}`]));
+    // The control: spelled with a space, this exact invocation reads the file
+    // and answers "already filed". Without it, exit 2 below would pin only
+    // "something refused it", not "the fail-open it replaced was real".
+    const ok = cli(["--file", other, "check", subject], env, dir);
+    assert.equal(ok.status, 1, `the space-separated control must read the file; got exit ${ok.status}\n${ok.stderr}`);
+    for (const args of [
+      [`--file=${other}`, "check", subject],
+      ["check", `--file=${other}`, subject],
+    ]) {
+      const r = cli(args, env, dir);
+      assert.equal(r.status, 2, `\`${args.join(" ")}\` must be refused; got exit ${r.status}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /--file needs a space-separated value/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --require-file's own `=` spelling. Its wording differs from --file's on
+// purpose and matches has()'s in arg.mjs: the flag takes no value, so "needs a
+// space-separated value" would be a lie. Same two positions, same reason.
+test("CLI: --require-file=<value> is refused in either position (#362)", () => {
+  const { dir, env } = cliFixture();
+  try {
+    const missing = join(dir, "nope", "ledger.md");
+    for (const args of [
+      ["--require-file=true", "--file", missing, "check", "dup subject"],
+      ["--file", missing, "check", "--require-file=true", "dup subject"],
+    ]) {
+      const r = cli(args, env, dir);
+      assert.equal(r.status, 2, `\`${args.join(" ")}\` must be refused; got exit ${r.status}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /--require-file is a boolean flag/);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
