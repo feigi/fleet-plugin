@@ -148,7 +148,98 @@ test("a sha that is not a commit in this repository is exit 2, not a negative ve
   const { code, json, stderr } = verify(w, "main", "0".repeat(40));
   assert.equal(code, 2);
   assert.equal(json, null);
-  assert.match(stderr, /is not a commit object in this repository/);
+  // Names the guard that fired, so this cannot pass on some other exit 2 — the
+  // fetch failing is also exit 2 with no stdout, which is why the code alone
+  // and an empty stdout are not enough to tell these two cases apart.
+  assert.match(stderr, /cannot resolve 0{40} to a commit in this repository/);
+  assert.match(stderr, /Not a valid object name/, "git's own diagnosis must survive to stderr");
+});
+
+test("a failed fetch carries git's own cause, and a bad URL no longer reads like a removed remote", (t) => {
+  // #559: these two produced byte-identical output, "cannot fetch origin/main —
+  // branch missing, or no network", naming neither failure. The sha is never
+  // reached in any of these — the fetch guard fires first — so 40 zeros will do.
+  const dead = "0".repeat(40);
+
+  const badUrl = repo(t);
+  git(badUrl, "remote", "set-url", "origin", "/nonexistent/path.git");
+  const a = verify(badUrl, "main", dead);
+
+  const noRemote = repo(t);
+  git(noRemote, "remote", "remove", "origin");
+  const b = verify(noRemote, "main", dead);
+
+  for (const r of [a, b]) {
+    assert.equal(r.code, 2);
+    assert.equal(r.json, null, "no verdict for a question that was never answered");
+    assert.match(r.stderr, /cannot fetch origin\/main/);
+    assert.doesNotMatch(r.stderr, /branch missing|no network/, "the guard no longer asserts a cause it cannot know");
+    assert.match(r.stderr, /does not appear to be a git repository/, "git's own diagnosis must survive to stderr");
+  }
+  // Only git's line tells the two apart, which is exactly what was discarded.
+  assert.match(a.stderr, /'\/nonexistent\/path\.git'/);
+  assert.doesNotMatch(b.stderr, /nonexistent/, "two distinct faults must not collapse into one message");
+
+  // The one cause the old list did name is still reported — now by git, and
+  // precisely, so dropping the list refuses nothing it used to explain.
+  const c = verify(repo(t), "nosuchbranch", dead);
+  assert.equal(c.code, 2);
+  assert.match(c.stderr, /cannot fetch origin\/nosuchbranch/);
+  assert.match(c.stderr, /couldn't find remote ref nosuchbranch/);
+});
+
+test("a fetch that succeeds but leaves origin/<branch> unresolvable is exit 2 at the rev-parse guard", (t) => {
+  const w = repo(t);
+  // Real git throughout, no shim: with no fetch refspec configured, `git fetch
+  // origin main` still succeeds — into FETCH_HEAD — without updating the
+  // remote-tracking ref, so deleting that ref leaves the second guard to fire
+  // while the first passes. A shim that killed the fetch would measure the
+  // wrong failure, since that is also exit 2 with no stdout.
+  git(w, "config", "--unset", "remote.origin.fetch");
+  git(w, "update-ref", "-d", "refs/remotes/origin/main");
+
+  const { code, json, stderr } = verify(w, "main", "0".repeat(40));
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /origin\/main does not resolve after fetch/);
+  assert.match(stderr, /ambiguous argument 'origin\/main'/, "git's own diagnosis must survive to stderr");
+  assert.doesNotMatch(stderr, /cannot fetch/, "the fetch passed — this is the guard after it");
+});
+
+test("an object that is present but is not a commit is not reported as absent", (t) => {
+  const w = repo(t);
+  const tree = git(w, "rev-parse", "HEAD^{tree}");
+  const { code, json, stderr } = verify(w, "main", tree);
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /cannot resolve .+ to a commit in this repository/);
+  // The old wording asserted this object "is not a commit object in this
+  // repository". It is in this repository — git reads it and reports its real
+  // type, which is the half the guard was throwing away.
+  assert.match(stderr, /dereferences to tree type/, "git's own diagnosis must survive to stderr");
+});
+
+test("a healthy run stays quiet — the unmuted guards add nothing to stderr", (t) => {
+  const w = repo(t);
+  // Push from a second clone so `w`'s fetch has real objects to transfer: an
+  // already-up-to-date fetch would not exercise the path that could go noisy.
+  const other = join(w, "..", "other");
+  execFileSync("git", ["clone", "-q", join(w, "..", "origin.git"), other], { env: ENV });
+  const head = commit(other, "work that really landed");
+  git(other, "push", "-q", "origin", "main");
+
+  const { code, json, stderr } = verify(w, "main", head);
+  assert.equal(code, 0);
+  assert.equal(json.reachable, true);
+  // Exact, not a /fatal:/ sniff. Dropping `2>/dev/null` from three guards is
+  // only safe while all three stay silent when they succeed, and this script's
+  // stderr is read by the fleet controller. Anything git starts printing on an
+  // ordinary run shows up here as a fourth line.
+  assert.deepEqual(stderr.split("\n").filter(Boolean), [
+    "$ git fetch --quiet origin main",
+    `    origin/main tip = ${head}`,
+    `    ${head} IS reachable on origin/main`,
+  ]);
 });
 
 // No git fixture: the argc guard fires before the script runs any git at all,
