@@ -66,7 +66,30 @@ done
 [ -n "$JQ_OVERRIDE" ] && expr="$JQ_OVERRIDE"
 fixture="$FIXTURE"
 case " $search " in
-  *\\ label:*) ;;
+  *\\ label:*)
+    # GitHub ends an UNQUOTED qualifier value at the first space; every word
+    # after the first becomes a free-text term instead. Measured against the
+    # live repo 2026-08-17: \`label:ready-for-agent\` 72 open issues,
+    # \`label:ready-for-agent candidates\` 12, \`label:"ready-for-agent"\` 72.
+    # Reproduce that split or no test can tell the two forms apart — both
+    # contain \` label:\`, so the dispatch above serves the labeled fixture
+    # either way and #175 stays green while broken.
+    #
+    # Opt-in through \$LABEL_EXPECT: unset, the term is parsed and ignored, so
+    # every test written before #175 keeps exactly its old dispatch.
+    padded=" $search "
+    term=\${padded#* label:}
+    case "$term" in
+      \\"*) label=\${term#\\"}; label=\${label%%\\"*} ;;
+      *) label=\${term%% *} ;;
+    esac
+    if [ -n "$LABEL_EXPECT" ] && [ "$label" != "$LABEL_EXPECT" ]; then
+      # An empty array, not a missing one: the real query would have SUCCEEDED
+      # and matched nothing, which is the whole confusion #175 is about.
+      echo '[]' | "\${JQ_BIN:-jq}" -c "$expr"
+      exit
+    fi
+    ;;
   *) [ -n "$FIXTURE_UNFILTERED" ] && fixture="$FIXTURE_UNFILTERED" ;;
 esac
 exec "\${JQ_BIN:-jq}" -c "$expr" "$fixture"
@@ -996,6 +1019,90 @@ test("candidates come back oldest first, whatever order gh returned them in", ()
     ticket(7, "## What to build\n\na\n"),
   ]);
   assert.deepEqual(rows.map((r) => r.n), [7, 19, 42]);
+});
+
+// #175. The search term is built by interpolation, so the label's own
+// characters are read by GitHub's query parser, not carried past it. The stub
+// above models the one split that matters — an unquoted value ends at the
+// first space — so the first test below fails on the raw interpolation and
+// the second stays green either way, which is what "identically" means for
+// the label every current caller actually passes.
+
+test("a multi-word label is quoted into the search term — unquoted, every word after the first is free text (#175)", () => {
+  // The ticket's headline symptom, and the one the exit-code contract makes
+  // expensive: the query silently did not mean what was asked, matched
+  // nothing, and its empty result read as exit 1 — "the query worked and
+  // there is no work" — against a queue that was not empty. Reachable in a
+  // repo that remapped its triage labels (docs/agents/triage-labels.md invites
+  // exactly that), where the AFK-ready role can be spelled `good first issue`.
+  const { status, rows } = run(
+    [ticket(11, "## What to build\n\nx\n", ["good first issue"])],
+    ["--require-label", "good first issue"],
+    null,
+    { LABEL_EXPECT: "good first issue" },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+});
+
+test("a single-word label still resolves to itself — quoting must not disturb the only label every caller passes", () => {
+  // AC-3's other half, and the half a quoting fix can newly break: this term
+  // is what next-ticket/SKILL.md:15, run-team/SKILL.md:61 and
+  // fleet-tick.mjs:216 all send, so a change that widened or narrowed it would
+  // empty the fleet's queue at exit 1 — #175's own defect, relocated. Measured
+  // against the live repo 2026-08-17: `label:ready-for-agent` and
+  // `label:"ready-for-agent"` both return 72 open issues, so the quoting is a
+  // no-op HERE, which is a fact about GitHub's parser and not one this stub
+  // can prove. What the stub can prove is the half that would break: the term
+  // still resolves to `ready-for-agent` and nothing else.
+  const { status, rows, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { LABEL_EXPECT: "ready-for-agent" },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+  // Anchored on the `--json` that follows, so this cannot be satisfied by a
+  // term with the label plus trailing free text — the exact shape #175 is.
+  assert.match(stderr, /--search -label:in-progress[^\n]* label:"ready-for-agent" --json/);
+});
+
+test("a label with no space is quoted too — `status:ready` is a qualifier to GitHub's parser, not a label name", () => {
+  // Space is how the ticket found this, not the whole class: a `:` is
+  // search-significant with no space anywhere, and `area:docs`/`status:ready`
+  // are ordinary label vocabulary that triage-labels.md lets a repo adopt.
+  // Quoting unconditionally covers it; quoting only when /\s/ matched would
+  // not, and nothing else in this suite would notice. Behaviour cannot pin
+  // this one — the stub's parser splits on spaces, so both forms resolve the
+  // label — so the wire form is the assertion.
+  const { stderr } = run(
+    [ticket(11, "## What to build\n\nx\n", ["status:ready"])],
+    ["--require-label", "status:ready"],
+    null,
+    { LABEL_EXPECT: "status:ready" },
+  );
+  assert.match(stderr, /--search -label:in-progress[^\n]* label:"status:ready" --json/);
+});
+
+test("a label containing a double quote refuses — an unrepresentable query must not run as an empty one", () => {
+  // What the fix itself newly makes possible: the term is `label:"<value>"`,
+  // so a `"` inside the value closes it early and the remainder becomes free
+  // text — #175's defect with the quoting applied. Refuse at exit 2 ("the
+  // query broke") rather than send it, because the alternative is the fail-open
+  // this file exists to prevent: a misparsed query whose empty result is
+  // indistinguishable from an empty queue. Escaping instead was not shipped —
+  // GitHub's handling of `\"` inside a qualifier is unverified, and a guess
+  // there fails silently in exactly the direction that costs the most.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", 'say "hi"'],
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label cannot contain a double quote/m);
+  // Refuses BEFORE gh, like every other value guard: a query that cannot be
+  // built correctly must not be sent at all.
+  assert.equal(queriesRun(stderr), 0);
 });
 
 // The other half of #173, and the half that produced the refused invocation

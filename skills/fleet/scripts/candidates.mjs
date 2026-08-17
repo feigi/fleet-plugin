@@ -96,6 +96,15 @@ try {
 
 if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without --require-label");
 
+// #175's other half, and the half the fix below newly makes possible: the
+// label is QUOTED into the search term, so a `"` inside it closes that quote
+// early and the remainder becomes free text — the same misparse, with the fix
+// applied. Nothing here can represent such a label: whether GitHub honours a
+// backslash-escaped quote inside a qualifier is unverified, and a guess there
+// fails in the silent direction. Refuse instead, at exit 2 ("the query
+// broke"), rather than send a query whose empty answer would read as exit 1.
+if (requireLabel?.includes('"')) die(`--require-label cannot contain a double quote, got '${requireLabel}'`);
+
 const EXCLUDE =
   "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info";
 // `d` walks the body line by line rather than one regex over the whole
@@ -163,7 +172,23 @@ const JQ =
   ' d:((.body//"")|depnums)}]\n';
 
 function query(label) {
-  const search = label ? `${EXCLUDE} label:${label}` : EXCLUDE;
+  // The label is a VALUE in GitHub's query language, not part of its syntax,
+  // so it is quoted rather than interpolated raw (#175). Unquoted, a value
+  // ends at the FIRST SPACE and every word after it becomes a free-text term
+  // instead — measured against feigi/claude-config 2026-08-17,
+  // `label:ready-for-agent` returns 72 open issues and
+  // `label:ready-for-agent candidates` returns 12. A caller reads that
+  // narrowed result as the label's own answer, and an empty one as exit 1,
+  // "the query worked and there is no work" — against a queue that is not
+  // empty. Reachable wherever a repo remapped its triage labels, which
+  // docs/agents/triage-labels.md exists to invite.
+  //
+  // Quoted unconditionally, not only when the label contains whitespace: `:`
+  // is search-significant with no space anywhere (`status:ready`,
+  // `area:docs`), and quoting is a measured no-op on a value that needs none —
+  // `label:"ready-for-agent"` returns the same 72. Conditional quoting would
+  // narrow the fix back to the one character the ticket happened to name.
+  const search = label ? `${EXCLUDE} label:"${label}"` : EXCLUDE;
   const args = [
     "issue", "list",
     "--state", "open",
