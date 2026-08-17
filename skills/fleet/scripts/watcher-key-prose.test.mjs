@@ -14,6 +14,15 @@
 // a document that wants to show the broken form has to update this test. Neither
 // pin runs anything: ci-state.test.mjs owns `ci-state.mjs`'s behavior, and the
 // Monitor is armed by a controller reading this prose, not by code under test.
+// Accepted alongside that: a line break placed INSIDE the key token reddens the
+// positive pin with no content change, because flat() rejoins the halves with a
+// space the token does not contain. Measured on ci-and-staleness.md — textwrap
+// at widths 30/40/52/55 with break_on_hyphens=True splits `<run-id>` and reddens
+// it, while the same widths with break_on_hyphens=False, which is how this repo
+// actually wraps, never split it and stayed green. Left undefended on purpose:
+// a hyphen-seam special case in flat() buys nothing a realistic edit can reach,
+// and the split renders as `<run- id>:...`, a broken code span this pin arguably
+// SHOULD redden on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -33,11 +42,14 @@ const THREE_PART = "`<run-id>:<attempt>:<conclusion>`";
 // means this file has nothing to exclude itself from the walk below for.
 const TWO_PART = THREE_PART.replace("<attempt>:", "");
 
-// Reflow-safety: markdown here hard-wraps at ~80 columns, so any of these tokens
-// can land across a line break, and a pin that only matches the unwrapped form
-// reddens on a rewrap that changed nothing. Paragraphs are split off FIRST — the
-// bound that keeps a positive pin from being satisfied by a neighbouring
-// paragraph — and only then is whitespace inside each one flattened.
+// Reflow-safety: markdown here hard-wraps at ~80 columns, so the multi-word
+// SITES anchors below can land across a line break, and a pin that only matches
+// the unwrapped form reddens on a rewrap that changed nothing. That is what
+// flat() buys. The key tokens hold no spaces, so no space-wrapping reflow can
+// split them and flattening is a no-op for those — see THE CEILING above for
+// the break that does split one. Paragraphs are split off FIRST — the bound
+// that keeps a positive pin from being satisfied by a neighbouring paragraph —
+// and only then is whitespace inside each one flattened.
 const flat = (s) => s.replace(/\s+/g, " ").trim();
 const paragraphs = (text) => text.split(/\n\s*\n/).map(flat);
 
@@ -66,6 +78,11 @@ test("ci-and-staleness.md keys watchers on the three-part form at both of its si
 
 // Tree-wide, because the defect was a copy drifting from its original — pinning
 // only the file this ticket corrected leaves the next copy free to be made wrong.
+// "Tree-wide" is FLEET and nowhere else, deliberately: the same key restated at
+// the repo root or under docs/ goes unflagged (measured — a copy at each of
+// those two paths left this test green, while the identical string under
+// skills/fleet reddened it). Every copy #183 found lives here; widening the
+// root is a different ticket.
 test("no document under skills/fleet states the two-part watcher key", () => {
   const offenders = readdirSync(FLEET, { recursive: true, withFileTypes: true })
     .filter((e) => e.isFile() && !e.parentPath.includes("node_modules"))
