@@ -12,7 +12,7 @@ Own the CI waits
 A conclusion is not stable
 newest run on a branch is frequently
 Authorize the fan-out explicitly
-Say the specialist count
+apply the heuristic yourself
 Correction tickets ship new wrong claims
 You own the watcher, not the bot
 Every merge invalidates every other open PR
@@ -23,7 +23,7 @@ Never reap a branch a live member is on
 Reviews are the bottleneck
 Distrust negative claims hardest
 Filesystem isolation is not stack isolation
-Per-member scratchpad subdirectory
+Scratchpad paths need two levels
 IDE/harness diagnostics attribute by bare filename
 Verify every reported SHA
 Never `--delete-branch`

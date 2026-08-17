@@ -1366,9 +1366,16 @@ test("the design spec's script-surface row names every field the payload actuall
   const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
   assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
 
+  // The Out cell alone, since the rest of the row legitimately names things that
+  // are not keys: scanning the whole row let the In cell's `<worktree>` satisfy
+  // `worktree` and the `Non-zero when` prose's "the stash count is reported"
+  // satisfy `stash`, so either could be dropped from the type signature with
+  // this test green (measured, both directions).
+  const out = row.split("|")[3];
+
   // Word-boundary match, so `worktree` cannot be satisfied by `worktreeRewritten`
   // sitting elsewhere in the cell — the exact substring trap that would let the
   // four new flags be dropped again while this test stayed green.
-  const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(row));
+  const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(out));
   assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
 });

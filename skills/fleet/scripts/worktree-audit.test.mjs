@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -275,4 +275,45 @@ test("a repo path containing a space does not truncate the worktree it reads", (
   assert.equal(match.readable, true);
   assert.equal(match.dirty, 1);
   assert.deepEqual(match.dirtyFiles, ["scratch.txt"]);
+});
+
+// Sibling pin, same table, same reason: no-undo-audit.test.mjs. The design
+// spec's script-surface row for this script named `commits` — a field that has
+// never existed — and typed `dirty` as an array when it is a count, so a caller
+// reading `.dirty[0]` off the table got a number-index on an integer (#48).
+// Derived from a real run, never from a hand-written key list: a list typed
+// here drifts from the script exactly the way the table did.
+test("the design spec's script-surface row names every field the payload actually emits", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  const { json } = runAudit(w);
+  const e = entryFor(json, wt);
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `worktree-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a worktree-audit.sh row");
+
+  // Both halves read the Out cell alone, since the rest of the row legitimately
+  // names things that are not keys: scanning the whole row let the Script cell's
+  // `worktree-audit.sh` satisfy `worktree` and the `Non-zero when` prose's "a
+  // worktree that is dirty" satisfy `dirty`, so either could be dropped from the
+  // type signature with this test green — and `dirty` is one of the two fields
+  // the row got wrong (#48).
+  const out = row.split("|")[3];
+
+  // Word-boundary match, so `dirty` cannot be satisfied by `dirtyFiles` sitting
+  // elsewhere in the cell — the exact substring trap that would let the shorter
+  // key be dropped again while this test stayed green.
+  const missing = Object.keys(e).filter((k) => !new RegExp(`\\b${k}\\b`).test(out));
+  assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
+
+  // The other direction: a field the row invents is as wrong as one it drops,
+  // and only this half catches `commits`.
+  const invented = (out.match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((k) => !(k in e));
+  assert.deepEqual(invented, [], `the spec row names fields the script never emits: ${invented.join(", ")}`);
 });
