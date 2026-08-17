@@ -757,9 +757,14 @@ test("CLI: a truly trailing --file still dies with its own pre-existing message 
 test("CLI: a path beginning with '-' or containing '--' is accepted and actually read (#362)", () => {
   const { dir, env } = cliFixture();
   try {
-    const file = join(dir, "-weird--ledger.md");
-    writeFileSync(file, ledgerText(["#42 some distinctive filed subject words"]));
-    const r = cli(["--file", file, "check", "some distinctive filed subject words"], env, dir);
+    // Passed RELATIVE, against the spawn's cwd, so the value ledger.mjs sees
+    // genuinely begins with `-`. Handing it join(dir, ...) would begin with
+    // `/` instead and pin only the `--`-inside half — measured: a guard
+    // widened to `startsWith("-")` kept this test green until the value was
+    // relative.
+    const name = "-weird--ledger.md";
+    writeFileSync(join(dir, name), ledgerText(["#42 some distinctive filed subject words"]));
+    const r = cli(["--file", name, "check", "some distinctive filed subject words"], env, dir);
     // Exit 1 is reachable only by loading and parsing the file at that path:
     // it is the `already filed` branch, which matches against rows read from
     // it. Exit 0 would mean the path was accepted but never read; exit 2
