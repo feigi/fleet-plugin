@@ -70,6 +70,16 @@ test("a zero-test run is unrun, naming the command that produced no tests", () =
   assert.match(reason, /npm test --/, "the reason no longer names the command that produced no tests");
 });
 
+// ABSENT or null is the same fact as `tests: 0` — nothing ran — and it is the
+// whole reason the check is `!run.tests` rather than `run.tests === 0`. Measured
+// unpinned: the narrower comparison passed all 737 tests in the repo.
+test("a test_run that reported no count at all is unrun", () => {
+  for (const run of [{ command: "npm test --" }, { command: "npm test --", tests: null }]) {
+    const reason = unrunReason({ dimension: "tests", scope_searched: "x", findings: [], test_run: run });
+    assert.equal(typeof reason, "string", `a countless test_run (${JSON.stringify(run)}) must yield a reason`);
+  }
+});
+
 // A specialist that ignored the schema is the same fact from a different
 // cause, and must not read as covered because the field it skipped is the one
 // being tested.

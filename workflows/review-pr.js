@@ -40,17 +40,20 @@ const FINDINGS_SCHEMA = {
   // transcripts carried `Output does not match required schema`, 184 rejection
   // events in all, every one recovered by retry.
   //
-  // Read that as a DATED SAMPLE, never a standing property. Every fleet run adds
-  // transcripts, so the figures only grow — re-counted the same day they were
-  // taken, after one review, the first two read 101 and 219.
+  // RE-COUNTING THIS IS A TRAP, and it caught a reviewer of this very comment.
+  // Both strings are quoted verbatim right here, so every transcript that READS
+  // this file becomes a match: a naive grep counts its own readers and reports
+  // drift that is the observer. Excluding the reading session returns 85/184
+  // exactly. For the exhaustion string, match a DIGIT — `after [0-9]+ attempts` —
+  // because the `<n>` placeholder appears nowhere but this comment.
   //
   // The retry is BOUNDED, so this is not a zero-risk claim. Exhaustion emits
   // `Failed to provide valid structured output after <n> attempts` and `agent()`
-  // then returns null. The sample above held zero of those; the same-day re-count
-  // held 15. So exhaustion is a cause that HAPPENS, which argues for the case
-  // #138 adds rather than against it — and it is `unrunCrashed` that reports that
-  // null as unrun, NOT `unrunReason`'s falsy branch: `pipeline()` short-circuits,
-  // so a null review never reaches the verify stage to be classified there.
+  // then returns null. Real occurrences, counted that way: zero. So this branch is
+  // reasoned about rather than observed — and it is `unrunCrashed` that reports
+  // that null as unrun, NOT `unrunReason`'s falsy branch: `pipeline()` short-
+  // circuits, so a null review never reaches the verify stage to be classified
+  // there at all.
   //
   // What a required field must NOT do is demand something a specialist cannot
   // honestly answer — see `test_run`'s own `required` below.
