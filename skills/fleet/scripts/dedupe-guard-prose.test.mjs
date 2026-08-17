@@ -111,6 +111,23 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
+test("step 5's exit-code readings agree with the section it cites", () => {
+  // Step 5 cites run-team for the full semantics but states the reading of each
+  // code inline, because the agent acting on it is mid-filing and a second file
+  // read is a cost it will skip. Two copies of a number→meaning mapping drift,
+  // and neither file fails on its own when they do: each stays internally
+  // coherent while an agent reading one acts on the other's contract. So the
+  // numbers are pinned on BOTH sides — renumbering in either file alone reddens
+  // this, which is the only signal the split produces.
+  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+  assert.match(runLedger, /\*\*1\*\* already in this run's filed list/, "run-team no longer reads exit 1 as already filed this run — step 5 still does");
+  assert.match(runLedger, /\*\*2\*\* usage\s+error/, "run-team no longer reads exit 2 as a usage error — step 5 still does");
+  assert.match(runLedger, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "run-team no longer reads exit 3 as a tracker hit — step 5 still does");
+  // The exit-0 hazard is the one both files must state, not merely agree on:
+  // it is the code that reads as permission.
+  assert.match(runLedger, /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
+});
+
 test("the finisher files its own deferrals through the same guard", () => {
   // The finisher reaches `gh issue create` by a different route — auditing the
   // reviewer's deferrals and filing whatever is missing — so it is precisely
