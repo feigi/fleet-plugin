@@ -640,3 +640,32 @@ test("a working directory that is not a repository at all still degrades exactly
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The design spec's script-surface row advertised `set/filed/ruled/read`: a
+// subcommand that has never existed, and two real ones — `row` and `check` —
+// left out, `check` being the entire subject of that same row's
+// `Non-zero when` cell (#48). Derived from the script's own usage line rather
+// than a hand-written list, for the reason the table proves: a list typed here
+// drifts from the script exactly the way the table did.
+test("the design spec's script-surface row admits exactly the subcommands ledger.mjs accepts", () => {
+  const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" }).stderr;
+  const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
+  assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
+  const real = alternation.split("|").sort();
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `ledger.mjs` |"));
+  assert.ok(row, "the script-surface table must still carry a ledger.mjs row");
+
+  // The In cell leads with the subcommand alternation and only then reaches the
+  // optional flags, so everything before the first `[` is the claim under test.
+  const advertised = row.split("|")[2].replaceAll("`", "").split("[")[0].trim().split("/").map((x) => x.trim()).sort();
+
+  // Set equality, both directions: a phantom subcommand sends a caller to an
+  // exit 2 it cannot diagnose, and a missing one hides a capability the row's
+  // own neighbouring cell already documents.
+  assert.deepEqual(advertised, real, `the In cell and ledger.mjs disagree on the subcommand set`);
+});
