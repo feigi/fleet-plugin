@@ -541,8 +541,14 @@ if ! wtfile=$(mktemp); then
   add_unknown "local" "could not create a temporary file to hold the worktree list, so whether #$n has a worktree is unknown"
   return 1
 fi
+# Two operands, one status: the redirect is new here (the base ran this as a
+# command substitution, which had nothing to write to), so a `git` that could
+# not run and a `$wtfile` that could not be written are indistinguishable at
+# this `if`. The message names both rather than blaming git for a write it never
+# reached — the shell prints its own "Permission denied" naming the path when it
+# is the redirect, which is the half a reader can tell apart.
 if ! git worktree list --porcelain -z >"$wtfile"; then
-  add_unknown "local" "git worktree list failed, so whether #$n has a worktree is unknown"
+  add_unknown "local" "git worktree list failed, or its output could not be written to $wtfile, so whether #$n has a worktree is unknown"
   return 1
 fi
 # NOT `awk -v RS='\0'`. That is a gawk/BWK extension, and the awk this script
@@ -560,11 +566,15 @@ fi
 #
 # Ceiling, deliberate: jstr renders that \001 as a space rather than as `\n`,
 # so a path containing a newline is reported WHOLE but with the newline
-# neutralised — the same treatment the tab in `…/fix-88-a<TAB>b` already gets,
-# and the same one every C0 byte without a JSON short form gets. Swapping the
-# byte back would restore `\n` here at the cost of corrupting the opposite case
-# — a path that really contains \001 — for a diagnostic field whose verdict is
-# already correct either way. One failure mode is better than two.
+# neutralised — the treatment every C0 byte WITHOUT a JSON short form gets. Not
+# the tab in `…/fix-88-a<TAB>b`: \011 is one of the five RFC 8259 gives a short
+# form, jstr's `sed` escapes it to `\t` before this `tr` stage runs at all, and
+# jrewritten's delete set skips it — so a tab round-trips byte-identical and
+# reports `worktreeRewritten: false`, which is what the probe-3 tab case pins.
+# Swapping the byte back would restore `\n` here at the cost of corrupting the
+# opposite case — a path that really contains \001 — for a diagnostic field
+# whose verdict is already correct either way. One failure mode is better than
+# two.
 if ! worktrees=$(LC_ALL=C tr '\n\000' '\001\n' <"$wtfile"); then
   add_unknown "local" "could not read the worktree list for #$n"
   return 1
@@ -624,8 +634,19 @@ fi
 # last `/`. It used to be a `basename` subshell per line, which had this defect
 # one level down: a failed fork there yields an empty first field and a silent
 # non-match, and `$(…)` discards the status that would have said so.
+#
+# `\001` counts as a separator for the MATCH, and for the match only. The `tr`
+# above turned every newline inside a path into `\001`, and `\001` is not in
+# `([-/]|$)` — so `…/wt/fix-33<LF>slug` arrives as `fix-33\001slug`, the number
+# stops matching, and a live checkout reads FREE. Measured on real repos with
+# real linked worktrees: plain porcelain `taken=true` rc 1, `--porcelain -z`
+# without this `gsub` `taken=false` rc 0 with `unknown: []` — the probe answers,
+# so nothing upstream catches it. Mapping the byte to `/` in `b` restores that
+# leaf and `…/wt/fix<LF>33-slug`, which the plain form never matched either.
+# `b` is the throwaway copy: `p` is untouched, so the evidence this probe
+# reports — and `worktreeRewritten` with it — still carries the raw bytes.
 wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
-  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b)
+  /^worktree / { p = substr($0,10); b = p; sub(".*/", "", b); gsub(/\001/, "/", b)
     if (b ~ "(^|[/-])" n "([-/]|$)") { out = out sep p; sep = "," } }
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the worktree list for #$n"; return 1; }
@@ -797,9 +818,9 @@ add_evidence worktree "$wt"
 # closed or full stdout rendered as a decision. `sh inflight.sh <N> >&-`
 # reproduces it. (The probe bodies cannot rely on that: each is invoked as
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
-# command in one carries its own guard.) The EXIT trap probe 1 installs is the
-# other site outside that exemption, and carries the same guard for the same
-# reason — see the `|| echo` on it.
+# command in one carries its own guard.) The EXIT trap installed once at the top
+# of this file is the other site outside that exemption, and carries the same
+# guard for the same reason — see the `|| echo` on it.
 #
 # The evidence slot is an unquoted `%s`, unlike every other string slot in this
 # printf, and it now carries the object's keys as well as its values:

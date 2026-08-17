@@ -147,9 +147,10 @@ exec '${REAL_AWK}' "$@"
   }
 
   // The same shim shape for `tr`. `-d` addresses jrewritten and nothing else:
-  // the two other `tr` calls in the script are `tr '\n' ' '` inside
-  // `add_unknown` messages — which deliberately do NOT die, that is the whole
-  // point of that helper — and jstr's own is a translation with no flags at
+  // the other `tr` calls in the script are `tr '\n' ' '` inside `add_unknown`
+  // messages — which deliberately do NOT die, that is the whole point of that
+  // helper — probe 3's `tr '\n\000' '\001\n'`, addressed by `\000` and by
+  // nothing else in the census, and jstr's own, a translation with no flags at
   // all. But jstr's does share jrewritten's character class, `\013\016-\037`,
   // so THAT substring reaches both at once: it is the selector for "neither
   // escaper can run", while `-d` is the selector for "only jrewritten cannot".
@@ -480,6 +481,13 @@ test("probe 3: the same worktree without a space in the path, as the control", (
 //   plain<LF>fix-33-slug -> taken=false, hits=[], exit 0, checkout live
 //   fix-88-a<TAB>b       -> already whole; green before and after, by design
 //   plain<LF>worktree /x -> exit 2, "the registry read missed entries"
+//
+// One case in this block is red against the OTHER form instead, and says so in
+// its own comment: `fix-22<LF>slug` passes under the plain porcelain (rc 1) and
+// fails under `--porcelain -z` read without the matcher's `\001` mapping (rc 0,
+// a live checkout reported free). Its sibling `plain<LF>fix-33-slug` is the
+// mirror image. A suite carrying only one of the pair is green over whichever
+// spelling the other one holds — which is how it shipped that way once.
 
 test("probe 3: a newline in the worktree path does not truncate the evidence", (t) => {
   // The milder half: the number is on the FIRST line, so the verdict was
@@ -509,6 +517,32 @@ test("probe 3: a worktree whose number falls AFTER a newline is taken, never fre
   assert.equal(r.json.taken, true);
   assert.deepEqual(r.json.hits, ["local"]);
   assert.match(r.json.evidence.worktree, /\/wt\/plain fix-33-slug$/);
+});
+
+test("probe 3: a newline immediately after the number is taken, never free", (t) => {
+  // The pair to the case above, failing in the OPPOSITE direction — which is
+  // why neither covers the other, and why a `-z` rewrite carrying only the
+  // sibling shipped green over this one.
+  //
+  // `plain<LF>fix-33-slug` breaks when the record SPLITS: the number lands on
+  // the orphaned second line, where `^worktree ` never looks. This leaf breaks
+  // when the record is WHOLE: `tr` has turned the embedded newline into \001,
+  // and \001 is not in the matcher's separator class `([-/]|$)`, so
+  // `fix-22\001slug` stops matching 22 and a live checkout reads free at exit 0
+  // with `unknown: []` — the probe answering, not refusing, so nothing upstream
+  // catches it. Measured on real repos with real linked worktrees: plain
+  // porcelain rc 1, `--porcelain -z` without the matcher's `gsub` rc 0.
+  //
+  // The number sits between real `-` bytes in every other case here, which is
+  // exactly why every other case is blind to this one.
+  const r = inflight(22, { detachedWorktreeUnder: "wt", worktreeLeaf: "fix-22\nslug" }, t);
+  assert.equal(r.code, 1, `a worktree that exists must never read as free: ${r.stderr}`);
+  assert.equal(r.json.taken, true);
+  assert.deepEqual(r.json.hits, ["local"]);
+  assert.deepEqual(r.json.unknown, [], "and taken by answering, not by failing to look");
+  assert.match(r.json.evidence.worktree, /\/wt\/fix-22 slug$/);
+  assert.equal(r.json.evidence.worktreeRewritten, true,
+    "the caller is told the bytes were replaced, so it cannot take this for a real path");
 });
 
 test("probe 3: a TAB in the worktree path is delivered whole, and losslessly", (t) => {
@@ -557,6 +591,30 @@ test("probe 3: an ordinary worktree list still reports a genuinely free ticket a
   assert.equal(r.json.taken, false);
   assert.deepEqual(r.json.hits, []);
   assert.deepEqual(r.json.unknown, [], "and free by answering, not by failing to look");
+  assert.equal(r.json.evidence.worktree, "");
+});
+
+test("probe 3: a translation that cannot run refuses, rather than reading an empty listing as free", (t) => {
+  // The guard on the `tr` that makes the NUL-delimited listing readable by awk.
+  // Probe 3's other two status checks — the count and the filter — each have a
+  // case; this one shipped with none, and replacing its `add_unknown …; return
+  // 1` with a silent `return 0` left the whole suite green (measured).
+  //
+  // What it stands for is a fork that could not happen rather than a program
+  // that ran and disagreed: `tr` exits non-zero having printed nothing, `$(…)`
+  // yields the empty string, and an empty listing matches no worktree — so
+  // without the guard this repo's live `fix-77-slug` checkout reports FREE at
+  // exit 0, the one answer this script must never invent.
+  //
+  // `\000` addresses this call and no other: the two `tr '\n' ' '` calls inside
+  // `add_unknown`'s messages carry no NUL, jstr's selector is
+  // `\001-\007\013\016-\037` and jrewritten's is `-d` plus that same set.
+  const r = inflight(77, { detachedWorktreeUnder: "wt", trFailWhenArgsHave: "\\000" }, t);
+  assert.equal(r.code, 2, `a listing that could not be read is unknown, never free: ${r.stderr}`);
+  assert.equal(r.json.taken, false);
+  assert.deepEqual(r.json.hits, [], "nothing was established — this is not a hit");
+  assert.deepEqual(r.json.unknown, ["local"], "refused, rather than answering off an empty string");
+  assert.match(r.stderr, /could not read the worktree list for #77/);
   assert.equal(r.json.evidence.worktree, "");
 });
 
@@ -944,14 +1002,19 @@ test("a control character in a worktree path cannot produce an unparseable paylo
   // release-ticket.test.mjs's "a control character in the worktree name cannot
   // produce an unparseable payload".
   //
-  // \001 specifically, not \n: awk's record separator ends the line, so a
-  // newline cannot reach `jstr` and would pin nothing here — it is lost one
-  // stage earlier, splitting the record, which is #185 and still open. \t once
-  // could not either, but that was the `-F'\t'` split and the `read -r` loop
-  // eating it, and both are gone — measured, a worktree named `fix-88-a<TAB>b`
-  // used to arrive as the bare string `b`, its path cut at the tab it was
-  // joined on, and now arrives whole with the tab neutralised like any other
-  // C0 byte. \001 is the case that held before that change and after it.
+  // \001 specifically, not \n: a newline used to be lost one stage earlier,
+  // splitting the porcelain record before `jstr` could ever see it (#185). The
+  // `--porcelain -z` read above now maps it to \001 before awk runs, so a
+  // newline case arrives as this very byte and pins nothing this case does not
+  // — the probe-3 cases near the top of this file cover the split itself. \t
+  // once could not reach `jstr` either, but that was the `-F'\t'` split and the
+  // `read -r` loop eating it, and both are gone — measured, a worktree named
+  // `fix-88-a<TAB>b` used to arrive as the bare string `b`, its path cut at the
+  // tab it was joined on, and now arrives whole with the tab ESCAPED as `\t`,
+  // not neutralised: \011 is one of the five C0 bytes RFC 8259 gives a short
+  // form, so unlike \001 it round-trips byte-identical (the probe-3 tab case
+  // pins that, `worktreeRewritten: false`). \001 is the case that held before
+  // that change and after it.
   //
   // Neutralised to a space rather than escaped — the byte does not round-trip,
   // and the assertion says so rather than pretending otherwise.
@@ -1712,8 +1775,12 @@ test("accumulate: a bare 0 clears the numeric guard", (t) => {
 test("accumulate: an unpadded issue number still reaches a parseable verdict", (t) => {
   // The other half of #121's guard, and the half that would strand the fleet if
   // it were wrong: `gh` never zero-pads, so every legitimate caller passes a
-  // bare number and must still be answered. Over-refusal is not subtle — 70 of
-  // this file's 72 tests go red under a guard that refuses every digit string —
+  // bare number and must still be answered. Over-refusal is not subtle — under
+  // a guard that refuses every digit string, the only cases left standing are
+  // the two that expect a refusal anyway (`a bad argument …` and `a zero-padded
+  // issue …`); every other test in this file goes red. Stated that way rather
+  // than as a fraction, because the fraction rots on any PR that adds a test —
+  // it read "70 of 72" until #185 made it 77 of 79 (both measured) —
   // so what this test adds is diagnosis, not detection: a name that says which
   // half of the guard broke, and an assertion that `issue` is emitted as a JSON
   // number rather than a string (rewrite the verdict printf to `{"issue":"%s"`
