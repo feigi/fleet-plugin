@@ -33,10 +33,21 @@ const FINDINGS_SCHEMA = {
   // enforced by nothing, and a specialist that skips it validates clean —
   // reproducing the exact failure the description exists to prevent (#139).
   //
-  // Requiring a field is safe here and is not a drop risk: a schema forces the
-  // subagent to call a StructuredOutput tool, and validation happens at the
-  // tool-call layer, so a mismatch is RETRIED by the model rather than
-  // discarded. What it must not do is demand something a specialist cannot
+  // Requiring a field is ENFORCED, never best-effort passthrough: a schema forces
+  // the subagent to call a StructuredOutput tool, validation happens at the
+  // tool-call layer, and a mismatch is retried. Measured over
+  // `~/.claude/projects/-Users-chris--claude/*/subagents/workflows`: 85
+  // transcripts carry `Output does not match required schema`, 184 rejection
+  // events in all, every one recovered by retry.
+  //
+  // The retry is BOUNDED, so this is not a zero-risk claim. Exhaustion emits
+  // `Failed to provide valid structured output after <n> attempts` and `agent()`
+  // then returns null — which appears 0 times across those same transcripts, and
+  // which `unrunReason`'s falsy branch already reports as unrun rather than
+  // clean. The exhaustion path lands in the case #138 adds, for a different
+  // cause.
+  //
+  // What a required field must NOT do is demand something a specialist cannot
   // honestly answer — see `test_run`'s own `required` below.
   required: ["dimension", "scope_searched", "findings", "test_run"],
   properties: {
