@@ -95,7 +95,7 @@ At start, and whenever the pool empties.
    fixed → say which acceptance criteria the tree already meets, and which the
    tree now **contradicts**.
 
-   Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` six weeks
+   Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` ten days
    earlier and #134's AC-2 asked for an exit code a later design (#64)
    deliberately changed — neither commit carried a trailer back, so the tracker
    showed both as open work. #132 cost a full claim, worktree and implementer
@@ -162,7 +162,7 @@ At start, and whenever the pool empties.
    - **excluded** — undecided, each with the decision that is missing.
 
    Annotate every survivor with its class — `correction` or `routine` — so the
-   maintainer sees which tickets are about to run at the cheaper tier before
+   maintainer sees which tickets carry the correction-ticket discipline before
    ticking them. Annotate any survivor the `Out of scope` read sequences after
    another survivor in the same list. Without that, FIFO puts a chain's members
    next to each other and two consecutive numbers read as two independent
@@ -234,8 +234,8 @@ still what a future control would be drawn from.
 **Read the counter-evidence before restoring it.** On the guard's own metric the
 split is 2 failures in 7 `routine`/`sonnet` rows against 0 in the single
 `routine`/`opus` row (PR #480) — which is n=1, not a result. Both `no` rows
-predate the revert by two days, and the most recent routine PR (#521) closed its
-own ticket. Every row so far, at either tier, carries
+predate the revert — #452 by three days, #466 by two — and the most recent
+routine PR (#521) closed its own ticket. Every row so far, at either tier, carries
 `minted_false_claim` `yes`, so that column discriminates nothing about tier. The
 honest summary is that the guard fired on the criterion the maintainer chose in
 advance, not that the cheaper tier has been shown worse.

@@ -83,11 +83,16 @@ test("phase 0 step 4 still earns its class judgement now that the class prices n
   // THE NEGATIVE, half one of two. Restoring `class=routine` → `sonnet` here
   // while phase 2 stays reverted is the self-contradiction the revert shipped
   // with on its first pass: phase 0 priced the ticket, phase 2 ignored it, and
-  // nothing failed. Bounded to one sentence so an unrelated later `sonnet`
-  // (the file discusses the reverted rule in the past tense) cannot red it.
+  // nothing failed. The window spans sentences rather than one, because the
+  // stated reason for the one-sentence bound is false OF THIS SLICE: step 4
+  // holds ZERO `sonnet` occurrences, and every past-tense mention the bound was
+  // guarding against (L224, L235, L303, L304, L314) lives in the `dispatch` and
+  // `guard` slices, which this pin does not cover. Measured: under the old
+  // bound a restoration split across two sentences escaped the whole suite at
+  // 720/720; [\s\S]{0,400} reds it and leaves the clean tree green.
   assert.doesNotMatch(
     slice,
-    /`class=routine`[^.]{0,120}`sonnet`/,
+    /`class=routine`[\s\S]{0,400}`sonnet`/,
     "step 4 has re-bound `class=routine` to `sonnet` — the reverted rule is back in phase 0",
   );
   // Safe direction on a judgement with no tiebreak. The adjacent decided?
@@ -121,11 +126,20 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   );
   // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
   // stated independently in both places, so restoring either one alone is
-  // undetectable without a pin on each.
-  assert.doesNotMatch(
-    slice,
-    /`class=routine` →\s*`model: "sonnet"`/,
-    "phase 2 has re-bound `class=routine` to `model: \"sonnet\"` — the reverted rule is back",
+  // undetectable without a pin on each. Nothing is assumed between the two
+  // tokens — not the arrow, not a verb, not the backticks around `sonnet` —
+  // because the `class=routine` → `model: "sonnet"` literal this used to require
+  // is only one spelling of the restoration. Measured: `→ `sonnet``, "now
+  // resolves to", and `model:'sonnet'` each re-bind the class in the file's own
+  // vocabulary and each walked straight through the literal form. The one
+  // legitimate statement of the binding in this slice is the past-tense revert
+  // note, exempted BY NAME rather than by narrowing the pattern back to a
+  // literal — a narrower pattern is what let the half-revert through.
+  const rebindings = slice.match(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}/g) ?? [];
+  assert.deepEqual(
+    rebindings.filter((hit) => !/was REVERTED/.test(hit)),
+    [],
+    "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
   );
   // The revert is dated and attributed, or the next reader takes the missing
   // tier for an omission and helpfully restores it.
@@ -160,9 +174,15 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     /\*\*No class recorded → record `class=unknown`, never a guess\.\*\*/,
     "a missing class is no longer recorded as `class=unknown` — the gap goes invisible",
   );
+  // Anchored to "still costs the", not bare: the phrase occurs TWICE in this
+  // slice — here, and incidentally in the REVERTED paragraph above ("it still
+  // governs the correction-ticket discipline"). Measured: an unanchored
+  // /correction-ticket discipline/ stayed green with this sentence's cost
+  // clause gutted, because the other copy satisfied it on its own. It pinned
+  // the phrase's existence somewhere in the slice, never the recording rule.
   assert.match(
     slice,
-    /correction-ticket discipline/,
+    /still costs the \*\*correction-ticket discipline\*\*/,
     "phase 2 no longer says what a lost class actually costs now that it prices nothing",
   );
   // Reconstructing the class from the model would resurrect the confound the

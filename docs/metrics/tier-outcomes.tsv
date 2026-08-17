@@ -4,12 +4,17 @@
 # PRs because selectDimensions trims the fan-out by diff profile. So accumulate
 # instead of concluding.
 #
-# READ THIS BEFORE COMPARING ROWS. class and tier are perfectly confounded by the
-# current rule: routine always dispatches at sonnet, correction always at top.
-# So a routine-vs-correction comparison measures class, not tier, and cannot
-# answer the tier question. Only a same-class comparison across tiers is
-# informative, and producing one requires deliberately dispatching some routine
-# tickets at top tier as a control.
+# READ THIS BEFORE COMPARING ROWS. The dispatch rule bound class=routine to
+# sonnet until it was REVERTED on 2026-08-16; since then every class dispatches
+# at the session's tier (run-team/SKILL.md phase 2). Under the old rule class
+# and tier moved together, so a routine-vs-correction split over the rows it
+# produced measures class, not tier. This file cannot run that split anyway:
+# every row so far is class=routine, none class=correction.
+# Only a same-class comparison across tiers is informative, and the file holds
+# exactly one row off the old binding — PR #480, routine at opus, dispatched as
+# the deliberate control. That is n=1, not a result; answering the tier question
+# needs more of them, and after the revert they come from the session's own tier
+# varying rather than from the class.
 #
 # closed_own_ticket  no  = review found a defect leaving this ticket's OWN stated
 #                          acceptance criteria unmet, or reintroducing its defect
