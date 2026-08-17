@@ -289,6 +289,15 @@ const subjects = (r) => r.json.atRisk.map((l) => l.replace(/^\S+ /, ""));
  */
 const UNKNOWN_LINE =
   "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)";
+/**
+ * #376's line, and deliberately NOT the one above: there `refs/stash` is
+ * present and unreadable, here it is gone while its reflog is not. Reusing
+ * UNKNOWN_LINE would tell the operator "refs/stash is not absent" about a
+ * state whose whole shape is that it IS, and send them to `ls -l` on a file
+ * that no longer exists.
+ */
+const ORPHAN_LINE =
+  "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
 
 // `$wt` is caller-supplied and reaches the operator through a step header.
@@ -485,6 +494,93 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
     "git named the fault; the audit must append it to the generic line, ` — ` and all, not substitute for it and not run it together",
   );
 });
+
+// #376: the fourth `show-ref` state, and the only one that used to print a
+// number. The three above all leave `refs/stash` resolvable, so they land on
+// rc 0 or rc 128 and trip the `-ne 1` guard. Delete the ref FILE and leave
+// `.git/logs/refs/stash` behind and `show-ref` exits **1** — the exact rc that
+// guard defines as genuine absence — while both stash commits are still named
+// in the reflog and still reachable. `git stash list` is empty at rc 0, so
+// nothing contradicts the `0`, and `0` is the value the runbook reads as
+// nothing to look at before an irreversible rebase.
+test("a deleted refs/stash with an intact reflog reports unknown, not zero", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  rmSync(join(c.w, ".git", "refs", "stash")); // the ref file only — the reflog is untouched
+
+  // The three conditions that make this indistinguishable from an empty stash
+  // by everything the script asked before this change.
+  const reflog = readFileSync(join(c.w, ".git", "logs", "refs", "stash"), "utf8").split("\n").filter(Boolean);
+  assert.equal(reflog.length, 2, "fixture must leave both reflog entries behind");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 1, "the whole defect is this rc — the same one a genuinely empty stash gives");
+  assert.equal(git(c.w, "stash", "list"), "", "and the list agrees with it, at rc 0");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `an orphaned stash reflog is a report, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null, "two recoverable stash commits are still named in the reflog — `0` is not a claim the audit can make");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+});
+
+// The reflog path has to come from the repo's REAL gitdir. `$wt` is routinely a
+// linked worktree — the fleet's own layout, which is where this script actually
+// runs — and there `.git` is a FILE, so `$wt/.git/logs/refs/stash` reaches
+// nothing. A probe built on that path reads "no reflog", takes the accept
+// branch, and prints the same confident `0` this fix exists to remove, in the
+// one layout that matters. The stash stack is repo-global, so the entries are
+// created in the parent and seen from the worktree.
+test("the orphaned-reflog probe resolves against the shared gitdir, not $wt/.git", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt")); // this fixture is otherwise dirty, and dirty refuses at exit 1
+  stashSomething(c.parent, "h1.txt");
+  rmSync(join(c.parent, ".git", "refs", "stash"));
+
+  assert.ok(!existsSync(join(c.w, ".git", "logs", "refs", "stash")), "a naive $wt/.git path must find nothing here — that is what this test discriminates");
+  assert.ok(existsSync(join(c.parent, ".git", "logs", "refs", "stash")), "the reflog lives in the shared gitdir");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the reflog is one directory up, and the probe has to follow git there");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+});
+
+// The other half of #376, and the more expensive one to get wrong. This script
+// gates an irreversible action; an operator who sees `unknown` on every run
+// stops reading it, and then the three states above go unread too. So the
+// accept case is pinned explicitly, across every way a stack empties honestly.
+//
+// Measured, git 2.50.1: `pop`, `drop`, `clear` and `update-ref -d` each remove
+// `.git/logs/refs/stash` outright — there is no lifecycle that empties the
+// stack and leaves the reflog behind, which is why the probe can be this
+// blunt. The zero-byte row is not reachable that way; it is here because
+// `-s` and `-e` differ on exactly it, and a probe testing mere existence
+// would turn it into `unknown` for nothing.
+for (const [why, prepare] of [
+  ["never stashed at all", () => {}],
+  // `pop` restores the entry staged, so the fixture has to put the worktree
+  // back itself — the audit refuses a dirty one at exit 1 before it ever
+  // reaches the stash line.
+  ["stashed and popped", (w) => { stashSomething(w); git(w, "stash", "pop", "-q"); git(w, "rm", "-q", "-f", "h.txt"); }],
+  ["stashed and dropped", (w) => { stashSomething(w); git(w, "stash", "drop", "-q"); }],
+  ["stashed twice and cleared", (w) => { stashSomething(w, "h1.txt"); stashSomething(w, "h2.txt"); git(w, "stash", "clear"); }],
+  ["the ref deleted with update-ref, which takes the reflog with it", (w) => { stashSomething(w); git(w, "update-ref", "-d", "refs/stash"); }],
+  ["a zero-byte reflog left behind with no ref", (w) => { stashSomething(w); git(w, "stash", "clear"); mkdirSync(join(w, ".git", "logs", "refs"), { recursive: true }); writeFileSync(join(w, ".git", "logs", "refs", "stash"), ""); }],
+]) {
+  test(`an honestly empty stash still reports a confident zero — ${why}`, (t) => {
+    const c = repo(t);
+    prepare(c.w);
+    assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+    assert.equal(git(c.w, "stash", "list"), "", "fixture must leave no stash");
+
+    const r = audit(c);
+    assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+    assert.equal(r.json.stash, 0, "nothing is recoverable here — reporting `unknown` would be a worse bug than the one #376 fixes");
+    assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 0");
+  });
+}
 
 // #306: CHARACTERIZATION TEST, not a spec. The three tests above close every
 // unreadable-reflog case that fails LOUDLY enough for the `show-ref`
