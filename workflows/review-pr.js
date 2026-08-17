@@ -213,7 +213,9 @@ function usableDiff(snap) {
 // Text lifted into a second copy disconnects in one token; that is this repo's
 // recurring pin defect.
 //
-// `skills/fleet/commands/review-and-fix.md:47` owns the prose rationale, for the
+// The read-rule paragraph of the "Specialists" section of
+// `skills/fleet/commands/review-and-fix.md` ("`git show <sha>:<path>` is the
+// source of truth" … "Then bound the read") owns the prose rationale, for the
 // hand-dispatch path. This is the operational form for the workflow path, where
 // the premise differs: there is no live worktree to be contaminated BY, because
 // the snapshot IS the object store already materialized (the snapshot agent's
@@ -461,15 +463,15 @@ function selectDimensions(all, stats) {
   return dims.length ? dims : all;
 }
 
-// `skills/fleet/commands/review-and-fix.md:49` documents `args.dimensions` as
-// accepting "keys or dimension objects" — but until now only objects worked:
-// a key array passed straight through and every dereference below (`d.key`,
-// `d.prompt`, `d.agentType`) came back `undefined`, with no throw and no
-// warning (#113). Resolve strings against the workflow's own catalog, and
-// check every object for the three fields the fan-out actually dereferences.
-// Anything unresolvable stops the run and names what was not recognised — a
-// misconfigured review is worse than no review, because its findings look
-// like findings.
+// The "Specialists" section of `skills/fleet/commands/review-and-fix.md`
+// documents `args.dimensions` as accepting "keys or dimension objects" — but
+// until now only objects worked: a key array passed straight through and every
+// dereference below (`d.key`, `d.prompt`, `d.agentType`) came back `undefined`,
+// with no throw and no warning (#113). Resolve strings against the workflow's
+// own catalog, and check every object for the three fields the fan-out actually
+// dereferences. Anything unresolvable stops the run and names what was not
+// recognised — a misconfigured review is worse than no review, because its
+// findings look like findings.
 function resolveDimensions(override, all) {
   // `== null` is exact where `!override` was not: only an ABSENT override
   // falls through to the size tier. `!override` also swallowed `""`, `0` and
