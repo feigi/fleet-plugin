@@ -99,11 +99,19 @@ if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without
 // #175's other half, and the half the fix below newly makes possible: the
 // label is QUOTED into the search term, so a `"` inside it closes that quote
 // early and the remainder becomes free text — the same misparse, with the fix
-// applied. Nothing here can represent such a label: whether GitHub honours a
-// backslash-escaped quote inside a qualifier is unverified, and a guess there
-// fails in the silent direction. Refuse instead, at exit 2 ("the query
-// broke"), rather than send a query whose empty answer would read as exit 1.
-if (requireLabel?.includes('"')) die(`--require-label cannot contain a double quote, got '${requireLabel}'`);
+// applied. A `\` breaks the same term from the other side, because GitHub
+// DOES honour `\"` as an escaped quote inside a qualifier: measured against
+// feigi/claude-config 2026-08-17, negating a label no issue carries is a
+// no-op, so `-label:"zzz" label:"ready-for-agent"` returns the same count as
+// `label:"ready-for-agent"` alone — while `-label:"zzz\" label:"ready-for-agent"`
+// returns the count for `ready-for-agent` as FREE TEXT instead, the backslash
+// having eaten the closing quote and swallowed the whole following qualifier.
+// Doubling does not escape it. Here the label term is LAST, so a trailing
+// backslash leaves its value unterminated and the query answers zero rows at
+// HTTP 200, no error — #175's silent empty, with the fix applied. Neither
+// character can be represented, so refuse both at exit 2 ("the query broke")
+// rather than send a query whose empty answer would read as exit 1.
+if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot contain a double quote or a backslash, got '${requireLabel}'`);
 
 const EXCLUDE =
   "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info";
@@ -175,19 +183,26 @@ function query(label) {
   // The label is a VALUE in GitHub's query language, not part of its syntax,
   // so it is quoted rather than interpolated raw (#175). Unquoted, a value
   // ends at the FIRST SPACE and every word after it becomes a free-text term
-  // instead — measured against feigi/claude-config 2026-08-17,
-  // `label:ready-for-agent` returns 72 open issues and
-  // `label:ready-for-agent candidates` returns 12. A caller reads that
-  // narrowed result as the label's own answer, and an empty one as exit 1,
+  // instead — measured 2026-08-17, `label:ready-for-agent candidates` returns
+  // strictly fewer issues here than `label:ready-for-agent`, and on
+  // microsoft/vscode `label:help wanted` returns nothing at all where
+  // `label:"help wanted"` returns that label's real backlog. A caller reads
+  // the narrowed result as the label's own answer, and an empty one as exit 1,
   // "the query worked and there is no work" — against a queue that is not
   // empty. Reachable wherever a repo remapped its triage labels, which
-  // docs/agents/triage-labels.md exists to invite.
+  // docs/agents/triage-labels.md exists to invite. Stated as relationships
+  // rather than counts on purpose: the queue churns hourly, so a pinned digit
+  // is wrong within a day and reads as the fix having regressed.
   //
-  // Quoted unconditionally, not only when the label contains whitespace: `:`
-  // is search-significant with no space anywhere (`status:ready`,
-  // `area:docs`), and quoting is a measured no-op on a value that needs none —
-  // `label:"ready-for-agent"` returns the same 72. Conditional quoting would
-  // narrow the fix back to the one character the ticket happened to name.
+  // Quoted unconditionally, not only when the label contains whitespace —
+  // though NOT because a second character is dangerous. Space is the one
+  // character GitHub splits an unquoted value on; a `:` is inert there,
+  // measured the same day: `label:auto:logs` and `label:"auto:logs"` agree on
+  // renovatebot/renovate, as do `label:Team:Core` and `label:"Team:Core"` on
+  // elastic/kibana. The reason to quote every label is that quoting a value
+  // needing none is a measured no-op (`label:ready-for-agent` and
+  // `label:"ready-for-agent"` agree here), so one unconditional form beats a
+  // predicate that has to stay in step with GitHub's parser to stay correct.
   const search = label ? `${EXCLUDE} label:"${label}"` : EXCLUDE;
   const args = [
     "issue", "list",
