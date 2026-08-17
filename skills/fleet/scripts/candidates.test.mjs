@@ -66,9 +66,39 @@ done
 [ -n "$JQ_OVERRIDE" ] && expr="$JQ_OVERRIDE"
 fixture="$FIXTURE"
 case " $search " in
-  *\\ label:*) ;;
-  *) [ -n "$FIXTURE_UNFILTERED" ] && fixture="$FIXTURE_UNFILTERED" ;;
+  *\\ label:*)
+    # GitHub ends an UNQUOTED qualifier value at the first space; every word
+    # after the first becomes a free-text term instead. Measured against the
+    # live repo 2026-08-17: \`label:ready-for-agent candidates\` returns
+    # strictly fewer issues than \`label:ready-for-agent\`, while
+    # \`label:"ready-for-agent"\` returns exactly as many — the relationship and
+    # not the counts, which drift with the queue from hour to hour.
+    # Reproduce that split or no test can tell the two forms apart — both
+    # contain \` label:\`, so the dispatch above serves the labeled fixture
+    # either way and #175 stays green while broken.
+    #
+    # Opt-in through \$LABEL_EXPECT: unset, the term is parsed and ignored, so
+    # every test written before #175 keeps exactly its old dispatch.
+    padded=" $search "
+    term=\${padded#* label:}
+    case "$term" in
+      \\"*) label=\${term#\\"}; label=\${label%%\\"*} ;;
+      *) label=\${term%% *} ;;
+    esac
+    ;;
+  # No positive \`label:\` term at all, so nothing was parsed out. An empty
+  # \$label matches no \$LABEL_EXPECT, which is what refuses the OTHER
+  # direction of #175 — a query that dropped the qualifier outright rather
+  # than misparsing it. Only a check BELOW the case can see that: such a
+  # search never enters the arm above.
+  *) label=""; [ -n "$FIXTURE_UNFILTERED" ] && fixture="$FIXTURE_UNFILTERED" ;;
 esac
+if [ -n "$LABEL_EXPECT" ] && [ "$label" != "$LABEL_EXPECT" ]; then
+  # An empty array, not a missing one: the real query would have SUCCEEDED
+  # and matched nothing, which is the whole confusion #175 is about.
+  echo '[]' | "\${JQ_BIN:-jq}" -c "$expr"
+  exit
+fi
 exec "\${JQ_BIN:-jq}" -c "$expr" "$fixture"
 `;
 
@@ -996,6 +1026,120 @@ test("candidates come back oldest first, whatever order gh returned them in", ()
     ticket(7, "## What to build\n\na\n"),
   ]);
   assert.deepEqual(rows.map((r) => r.n), [7, 19, 42]);
+});
+
+// #175. The search term is built by interpolation, so the label's own
+// characters are read by GitHub's query parser, not carried past it. The stub
+// above models the one split that matters — an unquoted value ends at the
+// first space. Neither test below is green on both trees, but they go red for
+// different reasons. On the raw interpolation the first fails outright: the
+// term resolves to `good`, the query matches nothing, and the empty answer
+// surfaces as exit 1. The second's QUERY OUTCOME — status and rows — is
+// identical either way, which is the whole point of it: quoting the label
+// every current caller actually passes is a no-op for what comes back. Its
+// wire-form assertion is the fix-dependent half, and reds on the raw
+// interpolation exactly like the first.
+
+test("a multi-word label is quoted into the search term — unquoted, every word after the first is free text (#175)", () => {
+  // The ticket's headline symptom, and the one the exit-code contract makes
+  // expensive: the query silently did not mean what was asked, matched
+  // nothing, and its empty result read as exit 1 — "the query worked and
+  // there is no work" — against a queue that was not empty. Reachable in a
+  // repo that remapped its triage labels (docs/agents/triage-labels.md invites
+  // exactly that), where the AFK-ready role can be spelled `good first issue`.
+  const { status, rows } = run(
+    [ticket(11, "## What to build\n\nx\n", ["good first issue"])],
+    ["--require-label", "good first issue"],
+    null,
+    { LABEL_EXPECT: "good first issue" },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+});
+
+test("a single-word label still resolves to itself — quoting must not disturb the only label every caller passes", () => {
+  // AC-3's other half, and the half a quoting fix can newly break: this term
+  // is what next-ticket/SKILL.md:15, run-team/SKILL.md:61 and
+  // fleet-tick.mjs:216 all send, so a change that widened or narrowed it would
+  // empty the fleet's queue at exit 1 — #175's own defect, relocated. Measured
+  // against the live repo 2026-08-17: `label:ready-for-agent` and
+  // `label:"ready-for-agent"` return the same count, so the quoting is a no-op
+  // HERE, which is a fact about GitHub's parser and not one this stub can
+  // prove. What the stub can prove is the half that would break: the term
+  // still resolves to `ready-for-agent` and nothing else.
+  const { status, rows, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { LABEL_EXPECT: "ready-for-agent" },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+  // Anchored on the `--json` that follows, so this cannot be satisfied by a
+  // term with the label plus trailing free text — the exact shape #175 is.
+  assert.match(stderr, /--search -label:in-progress[^\n]* label:"ready-for-agent" --json/);
+});
+
+test("a label with no space is quoted too — the wire form carries every label, not only the ones a space would break", () => {
+  // What this pins is the UNIFORMITY, not a second dangerous character. Space
+  // is how the ticket found the bug and — measured 2026-08-17 — it is the only
+  // character GitHub splits an unquoted value on: `label:auto:logs` and
+  // `label:"auto:logs"` agree on renovatebot/renovate, so `status:ready` would
+  // in fact survive unquoted. The fix quotes it anyway because quoting a value
+  // that needs none is a measured no-op, and one unconditional form beats a
+  // `/\s/` predicate that has to stay in step with GitHub's parser; quoting
+  // only when /\s/ matched would pass every other test in this suite unnoticed.
+  // Behaviour cannot pin this one — the stub's parser resolves the label under
+  // either form — so the wire form is the assertion.
+  const { stderr } = run(
+    [ticket(11, "## What to build\n\nx\n", ["status:ready"])],
+    ["--require-label", "status:ready"],
+  );
+  assert.match(stderr, /--search -label:in-progress[^\n]* label:"status:ready" --json/);
+});
+
+test("a label containing a double quote refuses — an unrepresentable query must not run as an empty one", () => {
+  // What the fix itself newly makes possible: the term is `label:"<value>"`,
+  // so a `"` inside the value closes it early and the remainder becomes free
+  // text — #175's defect with the quoting applied. Refuse at exit 2 ("the
+  // query broke") rather than send it, because the alternative is the fail-open
+  // this file exists to prevent: a misparsed query whose empty result is
+  // indistinguishable from an empty queue. Escaping instead was not shipped
+  // because there is nothing to escape TO: GitHub does honour `\"` inside a
+  // qualifier, so a backslash cannot rescue a quote — it only moves the same
+  // misparse one character left, which is what the next test pins.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", 'say "hi"'],
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label cannot contain a double quote/m);
+  // Refuses BEFORE gh, like every other value guard: a query that cannot be
+  // built correctly must not be sent at all.
+  assert.equal(queriesRun(stderr), 0);
+});
+
+test("a label ending in a backslash refuses too — it eats the closing quote the fix adds", () => {
+  // The same term broken from the other side, and the side that leaves no
+  // trace. Measured against feigi/claude-config 2026-08-17: negating a label
+  // no issue carries is a no-op, so `-label:"zzz" label:"ready-for-agent"`
+  // returns the same count as `label:"ready-for-agent"` alone — but
+  // `-label:"zzz\" label:"ready-for-agent"` returns the count for
+  // `ready-for-agent` as FREE TEXT, the backslash having eaten the closing
+  // quote and swallowed the whole following qualifier. Doubling does not
+  // escape it. In the shape query() actually builds the label term comes
+  // LAST, so a trailing backslash leaves its value unterminated and the query
+  // answers zero rows at HTTP 200, no error — #175's silent empty, reached
+  // through the fix rather than around it. Without this case the widened
+  // guard is unpinned: narrowing it back to `"` alone leaves every other test
+  // in this file green.
+  const { status, stderr } = run(
+    [ticket(11, "## What to build\n\nx\n")],
+    ["--require-label", "trailing\\"],
+  );
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label cannot contain a double quote or a backslash/m);
+  assert.equal(queriesRun(stderr), 0);
 });
 
 // The other half of #173, and the half that produced the refused invocation
