@@ -117,22 +117,38 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
   );
 });
 
-// The ORDER is the guard, not the probe. Measured on this PR's first pass: with
-// the probe below the symlink, `ls -A` counts the symlink, so a `git archive`
-// that extracted NOTHING still prints SNAPSHOT_NONEMPTY — in every repo that has
-// node_modules, which is every repo the symlink exists for. The probe then
-// passes on precisely the fault #140 added it to catch, and the agent reports
-// `pathVerified: true` honestly, because that is what it was told to report.
-test("the emptiness probe runs BEFORE the node_modules symlink, never after", () => {
+// The ORDER is the guard, not the probe, and two different reorderings each
+// defeat it. Measured, both:
+//   probe AFTER the symlink -> `ls -A` counts the symlink, so a `git archive`
+//     that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in every repo that
+//     has node_modules (which is every repo the symlink exists for).
+//   wipe MISSING (or after `tar -x`) -> `mkdir -p` never empties and `tar -x`
+//     MERGES, so a reused scratch keeps the previous run's files. Measured
+//     across two PRs sharing one scratch: reviewing prB, the snapshot held
+//     prA's file. A merged tree is non-empty for REAL, so the probe cannot
+//     catch this one at all — only the wipe can.
+// Both end the same way: the agent honestly reports `pathVerified: true`,
+// because that is what it was told to report. Hence a sequence pin, not a
+// presence pin — every one of these five lines is in the right place or the
+// guard is decorative.
+test("the snapshot block wipes, extracts, probes, then symlinks — in that order", () => {
   const snapshot = snapshotBlock();
-  const probeAt = snapshot.indexOf('[ -n "$(ls -A ${scratch}/snapshot)" ]');
-  const symlinkAt = snapshot.indexOf("ln -s ${worktree}/node_modules");
-  assert.notEqual(probeAt, -1, "the emptiness probe moved — update this test");
-  assert.notEqual(symlinkAt, -1, "the node_modules symlink moved — update this test");
-  assert.ok(
-    probeAt < symlinkAt,
-    "the probe sits after the symlink again — the symlink alone satisfies `ls -A`, so a failed archive reports SNAPSHOT_NONEMPTY",
-  );
+  let prev = -1;
+  for (const [needle, gone] of [
+    ["rm -rf ${scratch}/snapshot", "the wipe is gone — `tar -x` MERGES, so a reused scratch certifies a stale tree"],
+    ["mkdir -p ${scratch}/snapshot", "the mkdir is gone — `tar -x` has nowhere to extract to"],
+    ["git -C ${worktree} archive HEAD", "the archive is gone — there is no snapshot to review"],
+    ['[ -n "$(ls -A ${scratch}/snapshot)" ]', "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
+    ["ln -s ${worktree}/node_modules", "the node_modules symlink is gone — a derived `npm test --` cannot run"],
+  ]) {
+    const at = snapshot.indexOf(needle);
+    assert.notEqual(at, -1, gone);
+    assert.ok(
+      at > prev,
+      `\`${needle}\` is out of sequence — the block must wipe, then extract, then probe, then symlink`,
+    );
+    prev = at;
+  }
 });
 
 // The function is worthless if nothing calls it, and every test above tests a

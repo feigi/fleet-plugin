@@ -509,10 +509,20 @@ phase("Snapshot");
 const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
+    rm -rf ${scratch}/snapshot
     mkdir -p ${scratch}/snapshot
     git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
     [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
     if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
+
+The wipe is not optional. 'mkdir -p' never empties and 'tar -x' MERGES into
+whatever is already there, so a reused ${scratch} hands every specialist the
+previous run's files. Measured across two PRs sharing one scratch: the snapshot
+held files that exist on neither branch nor on main. A merged tree is non-empty
+for REAL, so SNAPSHOT_NONEMPTY passes it and \`pathVerified\` then certifies a
+tree that is partly some other commit — the exact state it exists to reject.
+Every other scratch user is namespaced ('<scratch>/pr<N>/<finding>/'); the
+snapshot alone sat at a bare path, which is why it was the one that merged.
 
 The symlink is not optional. 'git archive' carries TRACKED files only, so the
 snapshot has no node_modules — and the command derived below is 'npm test --'
