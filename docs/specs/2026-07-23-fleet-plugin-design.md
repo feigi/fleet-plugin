@@ -219,11 +219,11 @@ table. Every rule with a story keeps its one-line assertion and gains a pointer.
 
 | Reference | Carries |
 |---|---|
-| `ci-and-staleness.md` | run-binding, rerun-in-place, `skipped`≠`passed`, `--limit 1`, stale-green mechanics, behind-count decay (0→2→7→10) |
+| `ci-and-staleness.md` | run-binding, rerun-in-place, `skipped`≠`passed`, `--limit 1`, stale-green mechanics, why the behind-count is the only honest signal |
 | `isolation.md` | filesystem vs stack isolation, `agent-test` rationale, scratchpad namespacing, IDE diagnostics attributing by bare filename |
-| `member-lifecycle.md` | the four-cell naming probe, fresh context, killed vs idle vs truncated, grandchild notifications, authorizing the fan-out |
+| `member-lifecycle.md` | why the name carries the `Agent` tool, fresh context, killed vs idle vs truncated, grandchild notifications, authorizing the fan-out |
 | `reaping.md` | why not `/clean_gone`, `for-each-ref` over `branch\|grep`, the `git cherry` justification for `-D`, per-branch recompute |
-| `correction-tickets.md` | the four-for-four finding, why the mechanism is the ticket's framing, the implementer's clause-by-clause duty |
+| `correction-tickets.md` | why a correction ticket ships a fresh wrong claim — inherited from the ticket, and minted in its own prose — and why the check belongs on the implementer as much as the reviewer |
 
 Stories live beside the rule they justify. There is no separate war-stories
 file: a story separated from its rule needs two lookups, and the rule reads as
@@ -240,7 +240,7 @@ arbitrary on its own — which is how rules get deleted.
 | `git reset --hard` ban | `no-undo-audit.sh` refuses · one invariant line |
 | `--delete-branch` ban | one invariant line |
 | "Distrust negative claims hardest" | `review-and-fix.md` only — it is reviewer-facing |
-| correction-ticket hunting | `references/correction-tickets.md`; both callers point at it |
+| correction-ticket hunting | `references/correction-tickets.md`; cited from `run-team` SKILL.md, restated inline in `review-and-fix.md` |
 | behind-count | `ci-state.mjs` returns it |
 
 **Deliberate asymmetry:** `run-merge-bot.md` keeps the full hold-rule prose even
@@ -538,7 +538,11 @@ So cross-document rule copies were **kept** — they are necessary redundancy
 across audiences, not the contradiction risk the "move don't duplicate" rule
 targets. That rule applies within one reader's document (assertion in SKILL,
 story in its own `references/`), which is the split that was applied. No rule was
-lost: verified against `docs/fleet-rule-manifest.txt`, all 33 patterns resolve.
+lost: every pattern in `docs/fleet-rule-manifest.txt` resolves somewhere under
+`skills/fleet/`, swept against that tree at `origin/main` `368dc67`
+(2026-08-17). Two pins had drifted off rules that were reworded rather than
+dropped, and were repointed to the surviving text — the repair `975c3d0` had
+already made for a third.
 
 ## Baseline measurement (Plan 1, 2026-07-23)
 
