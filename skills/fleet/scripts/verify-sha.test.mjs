@@ -120,10 +120,13 @@ test("a merge-base that fails rather than answers is exit 2, never reachable:fal
   // answer is `<prefix>/libexec/git-core` on macOS but `/usr/lib/git-core` on
   // Debian, where a `libexec` rewrite matches nothing and the shim execs a
   // DIRECTORY — the fetch then fails first and this test measures the wrong
-  // failure. Resolved out here, where PATH is still the real one.
+  // failure. Resolved out here, where PATH is still the real one, and quoted at
+  // the exec: a git under a path with a space word-splits otherwise, and the
+  // fetch then dies first — which still satisfies the exit-2 and null-json
+  // assertions below, so only the stderr match would catch it.
   writeFileSync(
     join(bin, "git"),
-    `#!/bin/sh\n[ "$1" = merge-base ] && { echo "error: could not parse commit deadbeef" >&2; exit 128; }\nexec ${REAL_GIT} "$@"\n`,
+    `#!/bin/sh\n[ "$1" = merge-base ] && { echo "error: could not parse commit deadbeef" >&2; exit 128; }\nexec "${REAL_GIT}" "$@"\n`,
     { mode: 0o755 },
   );
 
@@ -139,19 +142,19 @@ test("a merge-base that fails rather than answers is exit 2, never reachable:fal
 });
 
 test("a sha that is not a commit in this repository is exit 2, not a negative verdict", (t) => {
+  // repo(t)'s root commit is enough: the 40-zero sha dies at the `cat-file -e`
+  // guard before merge-base runs, so where the tip sits is unobservable here.
   const w = repo(t);
-  commit(w, "work");
-  git(w, "push", "-q", "origin", "main");
-
   const { code, json, stderr } = verify(w, "main", "0".repeat(40));
   assert.equal(code, 2);
   assert.equal(json, null);
   assert.match(stderr, /is not a commit object in this repository/);
 });
 
-test("a wrong argument count is exit 2", (t) => {
-  const w = repo(t);
-  const r = spawnSync("sh", [SCRIPT, "main"], { cwd: w, env: ENV, encoding: "utf8" });
+// No git fixture: the argc guard fires before the script runs any git at all,
+// so the cwd never has to be a repository.
+test("a wrong argument count is exit 2", () => {
+  const r = spawnSync("sh", [SCRIPT, "main"], { cwd: tmpdir(), env: ENV, encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage: verify-sha\.sh/);
 });
