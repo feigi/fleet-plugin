@@ -41,6 +41,20 @@ function defaultLedgerPath() {
 const argv = process.argv.slice(2);
 const fileIdx = argv.indexOf("--file");
 const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
+// #362: `--file` took whatever token followed it, so `--file --require-file`
+// made the FLAG the path and the splice below then ate it — `--require-file`,
+// the flag whose entire job is to turn a missing ledger into a hard failure,
+// silently absent, and the duplicate-filing check answering "safe to file" at
+// exit 0 where the correct invocation exits 2 (measured). A caller gating on
+// that exit code files the duplicate. `if (!file)` below only ever caught a
+// truly trailing `--file` — it still does, in its own wording; this guard is
+// additive.
+//
+// Refusing a `--`-prefixed value forfeits a path that legitimately begins
+// with `--`, which is the same deliberate trade arg.mjs documents for the
+// four call sites this hand-rolled reader does not route through. A single
+// leading `-`, or a `--` anywhere but the front, is still a path.
+if (fileIdx !== -1 && file && (file.startsWith("--") || file.trim() === "")) die("--file needs a path");
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
 const requireFileIdx = argv.indexOf("--require-file");
