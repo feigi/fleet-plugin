@@ -706,8 +706,10 @@ Tests: from the snapshot's root, run exactly this — copy it verbatim:
 Do not substitute a command of your own. A bare runner picks up a default config
 that tears down a shared container mid-run for every sibling; a guessed glob is
 worse, because one matching nothing still exits 0 reporting 'tests 0' — a green
-that ran nothing. Whatever you run, 'tests 0' is a FAILED run, not a pass:
-report that dimension as unrun and say the command produced no tests.
+that ran nothing. Whatever you run, report it in \`test_run\` — the command verbatim and the counts
+you saw — even when it failed or produced nothing. 'tests 0' is a FAILED run, not
+a pass: \`tests: 0\` is how this dimension gets reported unrun, and an empty
+findings list cannot say it for you.
 Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in

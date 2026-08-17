@@ -201,3 +201,44 @@ test("the returned object carries dimensionsUnrun alongside dimensionsRun", () =
   assert.match(tail, /dimensionsRun: dimensions\.map\(\(d\) => d\.key\)/, "dimensionsRun no longer reports the dispatched set");
   assert.match(tail, /dimensionsUnrun/, "the return never surfaces dimensionsUnrun — the classification dies in the script (#137, #138)");
 });
+
+// The schema field is inert unless the prompt points at it — the specialists
+// are what fill it in, and a field nothing asks for comes back absent from
+// every one of them.
+//
+// #143 records the gap this pin closes: `review-pr-testcmd.test.mjs` pins the
+// RULING (`'tests 0' is a FAILED run`) and nothing pins the FOLLOW-THROUGH, so
+// the sentence saying what to DO about a zero-test run could be deleted with
+// the suite green. This edit rewrites that sentence; pin it where it now lands.
+test("the specialist prompt names test_run as where a zero-test run gets reported", () => {
+  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
+  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
+  const end = CODE.indexOf("Scratch files go in", at);
+  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
+  const prompt = CODE.slice(at, end);
+  assert.match(prompt, /test_run/, "the prompt never names test_run, so nothing fills the field the schema requires");
+  // The instruction that matters is reporting the run that produced NOTHING. A
+  // specialist that reports only successful runs leaves `test_run` absent in
+  // exactly the case the field exists for.
+  assert.match(
+    prompt,
+    /even when it (failed|produced)|produced nothing/,
+    "the prompt no longer tells specialists to report a run that failed or produced nothing",
+  );
+});
+
+// The workflow's return shape is documented in one place a controller actually
+// reads, and this repo's recurring defect is a second copy disconnecting in one
+// token. A `dimensionsUnrun` nobody is told to read is a field nobody reads.
+test("run-team's Reviewers section documents dimensionsUnrun, not only dimensionsRun", () => {
+  const doc = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
+  assert.match(doc, /dimensionsUnrun/, "run-team/SKILL.md still documents a return shape without dimensionsUnrun");
+  // The superseded workaround must be GONE, not merely accompanied. It reads
+  // every zero-finding dimension as unrun — including one that ran clean — so
+  // leaving it in place next to the real field teaches the opposite rule.
+  assert.doesNotMatch(
+    doc,
+    /a dimension listed\s+in `dimensionsRun` with nothing in `survived`\/`refuted`\/`unverified` is \*\*unrun,\s+not clean\*\*/,
+    "run-team/SKILL.md still states the pre-#137 workaround, which marks a clean dimension unrun",
+  );
+});

@@ -399,8 +399,8 @@ test("the fix-applier lead-in relays every finding, on a premise that is true", 
   // false claims. The review specialists' transcripts DO exist on disk —
   // measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one session, 33
   // of them `pr-review-toolkit:*`. What is true is that a member cannot address
-  // them: `review-pr.js` returns `{pr, head, snapshot, dimensionsRun, survived,
-  // refuted, unverified}` — no transcript path — and the `.meta.json` sidecars
+  // them: `review-pr.js` returns `{pr, head, snapshot, dimensionsRun,
+  // dimensionsUnrun, survived, refuted, unverified}` — no transcript path — and the `.meta.json` sidecars
   // carry only agentType/model/spawnDepth, so nothing maps one back to a PR or
   // a dimension. The rule rests on unaddressability, and a member sent hunting
   // a file it was told does not exist stops at a different place than one told
