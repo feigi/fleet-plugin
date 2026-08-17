@@ -681,6 +681,13 @@ function unrunReason(review) {
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
 // that dimension finishes, rather than waiting for the slowest reviewer. There
 // is no cross-dimension dependency, so a barrier here would be pure latency.
+// Populated by the verify stage below, which is the only place a dimension's
+// raw review object is still in scope. Filled by side effect rather than
+// returned, because `reviewed` is findings — flattened, envelope gone — and
+// widening that return would change what every consumer of `survived` /
+// `refuted` / `unverified` reads.
+const dimensionsUnrun = [];
+
 const reviewed = await pipeline(
   dimensions,
   (d) =>
@@ -717,8 +724,14 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
   // Adversarial verification. Each finding faces N independent refuters biased
   // toward refusal, because a plausible-but-wrong finding costs more than a
   // missed one: it gets applied. Majority-refuted kills it.
-  (review, d) =>
-    parallel(
+  (review, d) => {
+    // BEFORE the guard below, never inside it. `review && review.findings` is
+    // the expression that reads a dead reviewer as a clean one, so a recording
+    // tucked behind it would classify every dimension except the crashed one —
+    // the only dimension #138 is about.
+    const why = unrunReason(review);
+    if (why) dimensionsUnrun.push({ dimension: d.key, reason: why });
+    return parallel(
       (review && review.findings ? review.findings : []).map((f) => () => {
         const n = verifiersFor(f.severity);
         // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
@@ -759,7 +772,8 @@ Scratch: ${scratch}/verify-${d.key}/`,
           return { ...f, dimension: d.key, verdict, votes: live };
         });
       }),
-    ),
+    );
+  },
 );
 
 const all = reviewed.flat().filter(Boolean);
@@ -777,13 +791,23 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 // `unverified` are findings the adversarial pass did not settle — a suggestion
 // that skipped it by policy, or one whose refuters all crashed — surfaced
 // separately so the caller never mistakes "not checked" for "survived".
-// `dimensionsRun` names what actually ran: a trimmed fan-out must say so, never
-// read as full coverage.
+// `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
+// fan-out must say so, never read as full coverage. It is not a coverage claim
+// on its own and never was — a specialist can be dispatched and die, or run and
+// never execute the suite — so `dimensionsUnrun` names which of those keys did
+// not cover their ground, and why. A key in the first and not the second is the
+// only thing that means covered.
+//
+// The two are siblings rather than one filtered list because they answer
+// different questions. Subtracting the unrun ones from `dimensionsRun` would
+// make a crashed dimension indistinguishable from one the size tier never
+// dispatched — this ticket set's own defect, moved one field over.
 return {
   pr,
   head: snap.head,
   snapshot: snap.path,
   dimensionsRun: dimensions.map((d) => d.key),
+  dimensionsUnrun,
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),

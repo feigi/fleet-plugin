@@ -156,3 +156,48 @@ test("test_run is declared, carries the command and count, and does not force pa
   // and a guessed count is worse than an absent one.
   assert.doesNotMatch(inner[1], /"pass"|"fail"/, "pass/fail must stay optional — see the comment above this assertion");
 });
+
+// Wiring, not classification. `unrunReason` can be correct and reach nobody:
+// the review object it reads is in scope for exactly one closure — the verify
+// stage's `(review, d)` — and `reviewed` below is findings, flattened, with the
+// per-dimension envelope already gone. If the recording is not in that closure
+// it cannot be anywhere.
+function verifyStage() {
+  const at = CODE.indexOf("(review, d) =>");
+  assert.notEqual(at, -1, "the verify stage's (review, d) closure moved — update this test");
+  const end = CODE.indexOf("const n = verifiersFor", at);
+  assert.notEqual(end, -1, "the verify stage no longer reaches verifiersFor — update this test");
+  return CODE.slice(at, end);
+}
+
+test("the verify stage records the unrun reason, and does so BEFORE the review is dereferenced", () => {
+  const stage = verifyStage();
+  const asked = stage.indexOf("unrunReason(review)");
+  assert.notEqual(asked, -1, "the verify stage never calls unrunReason — the classifier reaches nobody");
+  assert.match(stage, /dimensionsUnrun\.push/, "the verify stage never records what it classified");
+  // The ORDER is the pin, and it is #138's whole case. `review && review.findings`
+  // is the expression that treats a dead reviewer as a clean one; tucking the
+  // recording inside a `review &&` guard — or after an early return on falsy —
+  // would classify every dimension EXCEPT the crashed one, which is the only
+  // dimension this half of the ticket is about.
+  const deref = stage.indexOf("review && review.findings");
+  assert.notEqual(deref, -1, "the findings guard moved — update this test");
+  assert.ok(
+    asked < deref,
+    "unrunReason is called after the falsy-review guard, so a crashed reviewer is never classified (#138)",
+  );
+});
+
+test("the returned object carries dimensionsUnrun alongside dimensionsRun", () => {
+  assert.match(CODE, /const dimensionsUnrun = \[\]/, "dimensionsUnrun is never declared — the return would throw");
+  const at = CODE.lastIndexOf("return {");
+  assert.notEqual(at, -1, "review-pr.js no longer ends in a return literal — update this test");
+  const tail = CODE.slice(at);
+  // BOTH, adjacent. `dimensionsRun` keeps its meaning and its value — the
+  // dispatched set after the size trim — because a consumer diffing it against
+  // DEFAULT_DIMENSIONS to spot a trim would otherwise read a crashed dimension
+  // as a trimmed one: the same conflation this ticket set closes, one field over.
+  // The new list is what subtracts from it, which only works if it ships too.
+  assert.match(tail, /dimensionsRun: dimensions\.map\(\(d\) => d\.key\)/, "dimensionsRun no longer reports the dispatched set");
+  assert.match(tail, /dimensionsUnrun/, "the return never surfaces dimensionsUnrun — the classification dies in the script (#137, #138)");
+});
