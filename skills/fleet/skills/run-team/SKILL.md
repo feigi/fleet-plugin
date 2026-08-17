@@ -231,14 +231,21 @@ wording this reverts **`class=routine`**, never the rule wholesale: phase 0 stil
 records the class, it still governs the correction-ticket discipline, and it is
 still what a future control would be drawn from.
 
-**Read the counter-evidence before restoring it.** On the guard's own metric the
-split is 2 failures in 7 `routine`/`sonnet` rows against 0 in the single
-`routine`/`opus` row (PR #480) — which is n=1, not a result. Both `no` rows
-predate the revert — #452 by three days, #466 by two — and the most recent
-routine PR (#521) closed its own ticket. Every row so far, at either tier, carries
-`minted_false_claim` `yes`, so that column discriminates nothing about tier. The
-honest summary is that the guard fired on the criterion the maintainer chose in
-advance, not that the cheaper tier has been shown worse.
+**Read the counter-evidence before restoring it.** Recount from the file before
+citing it — these figures are a snapshot, not a live count, and a doc-only
+append lands a row without touching this paragraph. **As of PR #536,
+2026-08-17, 9 rows:** on the guard's own metric the split is 3 failures in 8
+`routine`/`sonnet` rows against 0 in the single `routine`/`opus` row (PR #480) —
+which is n=1, not a result. Two of the three `no` rows predate the revert —
+#452 by three days, #466 by two — but #536 postdates it and is the most recent
+routine row. It is not a post-revert reading either: it was dispatched at
+`sonnet` **in error**, by a controller session whose `SKILL.md` came from a
+checkout 57 commits stale that still carried the pre-revert rule, so it is an
+accidental sample rather than a deliberate control and does not relieve the
+class/tier confound this file exists to work around. Every row so far, at either
+tier, carries `minted_false_claim` `yes`, so that column discriminates nothing
+about tier. The honest summary is that the guard fired on the criterion the
+maintainer chose in advance, not that the cheaper tier has been shown worse.
 
 **No class recorded → record `class=unknown`, never a guess.** Since the revert
 every class dispatches the same way, so a lost class no longer misprices a
