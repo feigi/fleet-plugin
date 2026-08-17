@@ -27,9 +27,13 @@ import { join } from "node:path";
 // competing tier token excluded from the gap.
 //
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what
-// does the work. One slice per paragraph, never per phase: the phase-2 section
-// is ~90 lines and its member prompt restates enough of this vocabulary to
-// satisfy every pin below with both rules deleted.
+// does the work. One slice per paragraph, never per phase: widen a slice to its
+// phase and a neighbouring paragraph satisfies the pin on its own. Measured on
+// phase 0 — delete step 4's `**correction-ticket discipline**` sentence and the
+// pin on that phrase below stays green regardless, on step 6's "which tickets
+// carry the correction-ticket discipline" alone. Paragraph scope is also what
+// makes the guard's `/^\*\*Guard: /` expressible: it pins the slice's opening
+// characters.
 //
 // `section()` is duplicated from review-path-default.test.mjs rather than
 // shared — two files, seven lines. Nothing detects drift between the copies.
@@ -111,6 +115,19 @@ test("phase 0 step 4 still earns its class judgement now that the class prices n
     slice,
     /measures no tier at\s+all/,
     "step 4 no longer says the cited reference measures no tier — the citation reads as evidence again",
+  );
+});
+
+// The slicing rationale at the top of this file is measured on step 6's copy of
+// this phrase. Nothing else pins that copy, so losing it would leave the
+// rationale asserting a reason the tree no longer carries — which is exactly how
+// the line count it replaced went stale. Fail here instead.
+test("phase 0 step 6 still carries the phrase the slicing rationale is measured on", () => {
+  const slice = section(RUN_TEAM, "6. Present survivors as a multi-select", "Never put two sequenced tickets", "run-team phase 0 step 6");
+  assert.match(
+    slice,
+    /which tickets carry the correction-ticket discipline/,
+    "step 6 dropped the phrase the slicing rationale cites — re-measure and update the comment at the top of this file",
   );
 });
 
