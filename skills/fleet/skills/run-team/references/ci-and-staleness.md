@@ -9,9 +9,9 @@ evidence here.
 Members turn-based, cannot hold across ten-minute run — rebase, push, stop. One
 went idle three times in two minutes doing this; every re-ping told nothing I
 could not read. So controller arms second persistent Monitor over open PRs'
-latest runs, keyed `<run-id>:<conclusion>` so each terminal state fires once,
-emits behind-count with it: `success` on branch 8 behind not actionable, that
-distinction most of traffic.
+latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state
+fires once, emits behind-count with it: `success` on branch 8 behind not
+actionable, that distinction most of traffic.
 
 ## Run-binding: take the whole row from one read
 
@@ -30,10 +30,9 @@ Rerun rewrites run **in place** — `attempt` increments, dependents re-marked
 `skipped` in zero seconds, prior conclusions gone. Verified: three jobs went
 `success` → `skipped` with nothing pushed, after refresh workflow re-ran
 currency check. So never cache conclusion; key watchers on
-`<run-id>:<conclusion>`, check `attempt` before trusting one.
-`started_at == completed_at` on job means re-marked, not re-run. Nothing in
-`ci-state.mjs` cached for same reason: only safe design is re-query at moment of
-decision.
+`<run-id>:<attempt>:<conclusion>`. `started_at == completed_at` on job means
+re-marked, not re-run. Nothing in `ci-state.mjs` cached for same reason: only
+safe design is re-query at moment of decision.
 
 ## `--limit 1` hides CI
 
