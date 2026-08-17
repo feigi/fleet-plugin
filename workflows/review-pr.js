@@ -35,17 +35,22 @@ const FINDINGS_SCHEMA = {
   //
   // Requiring a field is ENFORCED, never best-effort passthrough: a schema forces
   // the subagent to call a StructuredOutput tool, validation happens at the
-  // tool-call layer, and a mismatch is retried. Measured over
+  // tool-call layer, and a mismatch is retried. Measured 2026-08-17 over
   // `~/.claude/projects/-Users-chris--claude/*/subagents/workflows`: 85
-  // transcripts carry `Output does not match required schema`, 184 rejection
+  // transcripts carried `Output does not match required schema`, 184 rejection
   // events in all, every one recovered by retry.
+  //
+  // Read that as a DATED SAMPLE, never a standing property. Every fleet run adds
+  // transcripts, so the figures only grow — re-counted the same day they were
+  // taken, after one review, the first two read 101 and 219.
   //
   // The retry is BOUNDED, so this is not a zero-risk claim. Exhaustion emits
   // `Failed to provide valid structured output after <n> attempts` and `agent()`
-  // then returns null — which appears 0 times across those same transcripts, and
-  // which `unrunReason`'s falsy branch already reports as unrun rather than
-  // clean. The exhaustion path lands in the case #138 adds, for a different
-  // cause.
+  // then returns null. The sample above held zero of those; the same-day re-count
+  // held 15. So exhaustion is a cause that HAPPENS, which argues for the case
+  // #138 adds rather than against it — and it is `unrunCrashed` that reports that
+  // null as unrun, NOT `unrunReason`'s falsy branch: `pipeline()` short-circuits,
+  // so a null review never reaches the verify stage to be classified there.
   //
   // What a required field must NOT do is demand something a specialist cannot
   // honestly answer — see `test_run`'s own `required` below.
@@ -667,9 +672,13 @@ log(
 // and this one was not.
 //
 // PURE, and kept that way on purpose: no `testCmd`, no `snap`, nothing from the
-// enclosing run. It is the only part of this seam a test can execute, since the
-// file's top-level `await` makes it unimportable and `review-pr-unrun.test.mjs`
-// has to lift this function out of the source text to run it at all.
+// enclosing run — as are `unrunEntries` and `unrunCrashed` below, for the same
+// reason. Purity is what makes this seam executable at all: the file's top-level
+// `await` leaves it unimportable, so `review-pr-unrun.test.mjs` lifts all three
+// out of the source text to run them, and a free variable would throw a
+// ReferenceError there on whichever branch read it. Everything OUTSIDE these
+// three — whether the script actually calls them — is pinned as text and cannot
+// be more than that.
 //
 // What it must NOT do is refuse a real run. An empty findings list is the
 // expected return from a specialist that ran everything and found nothing, and
@@ -688,14 +697,50 @@ function unrunReason(review) {
   return null;
 }
 
+// Zero or one entry, so both call sites can `push(...)` it with no guard of
+// their own. That shape is the point: a guard at the CALL SITE is what #138
+// shipped the first time, and a call site is the half no running test can see —
+// `unrunEntries` is executable, its callers are only ever pinned as text.
+function unrunEntries(review, dimension) {
+  const why = unrunReason(review);
+  return why ? [{ dimension, reason: why }] : [];
+}
+
+// The crashed reviewer, derived from the pipeline's OWN result instead of from
+// inside it — and the reason #138's first attempt recorded nothing at all.
+// `pipeline()` SHORT-CIRCUITS between stages: the harness runs
+// `if (result === null) break` before handing a dimension to the next stage, so
+// a reviewer that returned null never reaches the verify closure below, and a
+// recording that lives there cannot see the one case #138 is about. Read out of
+// the harness bundle, not inferred — the pre-existing `review && review.findings`
+// guard one stage down is authorial belief, and mistaking it for a contract is
+// what made this look handled.
+//
+// What the caller CAN see: one slot per dimension, in order, holding null for a
+// chain that died, so `dimensions[i]` names which one at a level the short-
+// circuit cannot reach. Both crash shapes land in that null — `agent()` returning
+// null, and a THROW, which the harness maps to the same null slot (#527).
+//
+// The `?? slot ${i}` is not defensive noise. It is the only line here that runs
+// AFTER every specialist and every refuter has finished, so a bare
+// `dimensions[i].key` throwing on a length the harness stopped guaranteeing would
+// discard a whole 20-40 minute run's findings to report a naming problem. Name
+// the slot and keep the run.
+function unrunCrashed(reviewed, dimensions) {
+  return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
+}
+
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
 // that dimension finishes, rather than waiting for the slowest reviewer. There
 // is no cross-dimension dependency, so a barrier here would be pure latency.
 
-// Populated by the verify stage below, which is the only place a dimension's
-// raw review object is still in scope. Filled by side effect rather than
-// returned, because `reviewed` is findings — flattened, envelope gone — and
+// Populated in TWO places, because neither can see what the other sees: the
+// verify stage below is the only place a dimension's raw review object is still
+// in scope (#137), and `unrunCrashed` after the pipeline returns is the only
+// place a dimension that never reached that stage is still visible at all
+// (#138). Filled by side effect rather than returned, because `reviewed` is
+// findings — flattened, envelope gone — and
 // widening that return would change what every consumer of `survived` /
 // `refuted` / `unverified` reads.
 const dimensionsUnrun = [];
@@ -739,12 +784,13 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
   // toward refusal, because a plausible-but-wrong finding costs more than a
   // missed one: it gets applied. Majority-refuted kills it.
   (review, d) => {
-    // BEFORE the guard below, never inside it. `review && review.findings` is
-    // the expression that reads a dead reviewer as a clean one, so a recording
-    // tucked behind it would classify every dimension except the crashed one —
-    // the only dimension #138 is about.
-    const why = unrunReason(review);
-    if (why) dimensionsUnrun.push({ dimension: d.key, reason: why });
+    // #137's half: a reviewer that RETURNED but ran no suite. It reaches this
+    // closure precisely because its stage-1 result was an object, so the short-
+    // circuit `unrunCrashed` exists for never fires on it. Unguarded, and BEFORE
+    // the `review && review.findings` guard below — that guard is the expression
+    // which reads a dead reviewer as a clean one, and a recording tucked behind
+    // it would classify every dimension except the one that failed.
+    dimensionsUnrun.push(...unrunEntries(review, d.key));
     return parallel(
       (review && review.findings ? review.findings : []).map((f) => () => {
         const n = verifiersFor(f.severity);
@@ -789,6 +835,9 @@ Scratch: ${scratch}/verify-${d.key}/`,
     );
   },
 );
+
+// #138's half, and it cannot be done inside the stage above — see `unrunCrashed`.
+dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
 
 const all = reviewed.flat().filter(Boolean);
 const survived = all.filter((f) => f.verdict === "survived");
