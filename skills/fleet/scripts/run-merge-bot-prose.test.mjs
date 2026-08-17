@@ -60,7 +60,7 @@ function noUndoAudit() {
 // pinned as written — `--git-common-dir`, not `.git/` — because a linked
 // worktree's `.git` is a file and `.git/refs/stash` reaches nothing there.
 test("the `unknown` path sends the operator to both stash files, via the common dir", () => {
-  assert.match(noUndoAudit(), /On `unknown` do not stop at that list: two of its three causes leave it empty at rc 0/);
+  assert.match(noUndoAudit(), /On `unknown` do not stop at that list: three of its four causes leave it empty at rc 0/);
   assert.match(noUndoAudit(), /c=\$\(git rev-parse --git-common-dir\)/);
   assert.match(noUndoAudit(), /ls -l "\$c"\/refs\/stash "\$c"\/logs\/refs\/stash`/);
   assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash`/);
@@ -77,6 +77,22 @@ test("the fault tell covers a Permission denied from `ls`, not only a `---------
 
 test("the `unknown` path warns that a missing refs/stash file is not an empty stash", () => {
   assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
+});
+
+// #376 added a fourth cause whose `ls -l` signature is the OPPOSITE of the
+// three above — the ref file is gone rather than unreadable, so neither the
+// `----------` mode nor the `Permission denied` tell fires, and an operator
+// reading only those two concludes the audit was wrong and rebases. The
+// reflog beside it is what makes the entries recoverable, so the instruction
+// has to name both halves: the signature, and that the SHAs are the recovery.
+//
+// Two matches, not one on the whole sentence, and `\s+` between the words: a
+// single literal spanning the clause reds on a pure reflow or on bolding
+// `fourth cause` in place, neither of which changes what it guards. Measured —
+// the first draft of this pin did exactly that.
+test("the fourth cause — an absent refs/stash beside a live reflog — is named with its own ls signature", () => {
+  assert.match(noUndoAudit(), /`No\s+such\s+file\s+or\s+directory`\s+for\s+`refs\/stash`\s+alone/);
+  assert.match(noUndoAudit(), /recover\s+from\s+the\s+SHAs\s+`cat`\s+prints,\s+do\s+not\s+rebase\s+over\s+it/);
 });
 
 // #149: step 1 used to rebase locally and `git push --force-with-lease`,
