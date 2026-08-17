@@ -870,7 +870,10 @@ a minute apart showed *different* mutants, so a member's report and any single
    the PR's *own* source issue, which the PR's `Closes #N` buries on merge.
    Caught once at seven findings. A comment on an existing *follow-up* issue is
    filed: that is `review-and-fix.md` step 5, not a violation. Not filed → file
-   it or halt, never label over it.
+   it or halt, never label over it — and file it the way step 5 does, through
+   `ledger.mjs check "<subject>"`, never a bare search. The finisher files last,
+   off its own read of what the reviewer left behind, so a deferral it reads as
+   unfiled may already be on the tracker under someone else's wording.
 3. Add `ready-to-merge`.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
