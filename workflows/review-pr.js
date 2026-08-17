@@ -28,13 +28,47 @@ export const meta = {
 const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["dimension", "findings"],
+  // `scope_searched` and `test_run` are required because their ABSENCE is the
+  // defect. A field documented "Required" while missing from this array is
+  // enforced by nothing, and a specialist that skips it validates clean —
+  // reproducing the exact failure the description exists to prevent (#139).
+  //
+  // Requiring a field is safe here and is not a drop risk: a schema forces the
+  // subagent to call a StructuredOutput tool, and validation happens at the
+  // tool-call layer, so a mismatch is RETRIED by the model rather than
+  // discarded. What it must not do is demand something a specialist cannot
+  // honestly answer — see `test_run`'s own `required` below.
+  required: ["dimension", "scope_searched", "findings", "test_run"],
   properties: {
     dimension: { type: "string" },
     scope_searched: {
       type: "string",
       description:
         "The exact commands/paths this pass covered. Required so a negative claim is bounded: a grep that found nothing looks identical to a grep never run.",
+    },
+    // Where the `'tests 0'` reading rule in the specialist prompt LANDS. The
+    // rule shipped without one: a specialist that obeyed it emitted an empty
+    // findings list, byte-identical to a clean pass, and the dimension's key
+    // stayed in `dimensionsRun` regardless (#137).
+    //
+    // `command` and `tests` are required and `pass`/`fail` are not, and the
+    // split is deliberate. The first two are what bounds the negative claim —
+    // a count with no command names nothing a reader can act on. The second
+    // two are not always separable from a runner's output, and an
+    // unanswerable required field is answered with a guess: a fabricated
+    // count is worse than an absent one, because it reads as measurement.
+    test_run: {
+      type: "object",
+      additionalProperties: false,
+      required: ["command", "tests"],
+      description:
+        "The test run this pass performed. Report it even when it failed or produced nothing — `tests: 0` is how a dimension gets reported unrun, and an empty findings list cannot say it.",
+      properties: {
+        command: { type: "string", description: "The command as RUN, verbatim." },
+        tests: { type: "integer", description: "Tests the run reported. 0 means the command produced none — a failed run, not a pass." },
+        pass: { type: "integer" },
+        fail: { type: "integer" },
+      },
     },
     findings: {
       type: "array",
@@ -607,6 +641,41 @@ log(
 log(
   `models sent ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "frontmatter"}`).join(" ")}`,
 );
+
+// Why a dimension did NOT cover its ground, or null when it did.
+//
+// ONE shape for two causes, because a consumer sees one fact: this dimension is
+// not covered. A reviewer that died (#138) and a reviewer that never ran the
+// suite (#137) both returned `findings: []` — byte-identical to a clean pass —
+// while the key stayed in `dimensionsRun` either way. Giving the two causes two
+// shapes is how a caller ends up handling one and missing the other.
+//
+// This is the same reasoning the verifier path applies one level down, where
+// `live.length === 0` is `unverified` rather than `survived`: a check that never
+// ran must not be read as one that passed. That case was handled deliberately
+// and this one was not.
+//
+// PURE, and kept that way on purpose: no `testCmd`, no `snap`, nothing from the
+// enclosing run. It is the only part of this seam a test can execute, since the
+// file's top-level `await` makes it unimportable and `review-pr-unrun.test.mjs`
+// has to lift this function out of the source text to run it at all.
+//
+// What it must NOT do is refuse a real run. An empty findings list is the
+// expected return from a specialist that ran everything and found nothing, and
+// `fail > 0` is a suite that ran and reported — both are clean here. Only the
+// absence of a run is unrun.
+function unrunReason(review) {
+  if (!review) return "the reviewer returned nothing — spend limit, timeout, or terminal error";
+  const run = review.test_run;
+  if (!run) return "the reviewer reported no test run at all";
+  // `!run.tests` and not `run.tests === 0`: a field the schema requires can
+  // still arrive absent or null from a producer that ignored it, and that is
+  // the same fact — nothing ran. #143 is open on widening this rule further
+  // (a count below the suite's size, or `pass 0` with everything skipped);
+  // this reads only the zero the specialist prompt already rules a failure.
+  if (!run.tests) return `\`${run.command || "the test command"}\` produced 0 tests — a failed run, not a pass`;
+  return null;
+}
 
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment

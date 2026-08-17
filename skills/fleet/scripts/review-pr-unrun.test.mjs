@@ -1,0 +1,158 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
+
+// A dimension that crashed and a dimension that ran clean returned BYTE-
+// IDENTICAL shapes: `findings: []` either way, with the key listed in
+// `dimensionsRun` regardless (#137, #138). Nothing in this suite could see
+// that mode — no test touched `FINDINGS_SCHEMA` or the verify stage's falsy-
+// review branch at all — so a green run said nothing about it. This file is
+// that missing eye.
+//
+// Every pin runs against CODE, not SOURCE: `stripComments` exists because two
+// pins in this directory were MEASURED vacuous against a field commented out
+// with `/* */` (see strip-comments.mjs). A schema pin written against raw
+// source passes with the field dead under `additionalProperties: false`.
+const REPO = join(import.meta.dirname, "..", "..", "..");
+const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const CODE = stripComments(SOURCE);
+
+// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
+// so the classifier is lifted out of the source text — the same technique
+// `review-pr-testcmd.test.mjs` uses for `resolveTestCmd`. It only works while
+// `unrunReason` stays PURE: a free variable (`testCmd`, `snap`) would throw a
+// ReferenceError here on the branch that reads it, which is a property worth
+// having anyway.
+function liftUnrunReason() {
+  const m = CODE.match(/^function unrunReason\(review\) \{[\s\S]*?^\}$/m);
+  assert.ok(m, "review-pr.js no longer declares unrunReason(review) at top level — update this test");
+  return new Function(`${m[0]}\nreturn unrunReason;`)();
+}
+const unrunReason = liftUnrunReason();
+
+// #138's case. The `review &&` guard the ticket cites proves the author already
+// expects a falsy return here — spend limit, timeout, terminal error — and the
+// `[]` it produced was indistinguishable from a clean pass.
+test("a reviewer that returned nothing is unrun, and says why it might have", () => {
+  for (const dead of [null, undefined, false, 0, ""]) {
+    const reason = unrunReason(dead);
+    assert.equal(typeof reason, "string", `a falsy review (${JSON.stringify(dead)}) must yield a reason`);
+    assert.match(reason, /returned nothing/, "the reason no longer names a reviewer that returned nothing");
+  }
+});
+
+// #137's case: the `'tests 0'` reading rule the specialist prompt already
+// states, given somewhere to land. The reason names the COMMAND, because
+// "0 tests" without it sends a reader hunting for which command produced them.
+test("a zero-test run is unrun, naming the command that produced no tests", () => {
+  const reason = unrunReason({
+    dimension: "tests",
+    scope_searched: "the whole snapshot",
+    findings: [],
+    test_run: { command: "npm test --", tests: 0, pass: 0, fail: 0 },
+  });
+  assert.equal(typeof reason, "string", "a zero-test run must yield a reason");
+  assert.match(reason, /npm test --/, "the reason no longer names the command that produced no tests");
+});
+
+// A specialist that ignored the schema is the same fact from a different
+// cause, and must not read as covered because the field it skipped is the one
+// being tested.
+test("a review reporting no test run at all is unrun", () => {
+  const reason = unrunReason({ dimension: "types", scope_searched: "src/", findings: [] });
+  assert.equal(typeof reason, "string", "a missing test_run must yield a reason");
+  assert.match(reason, /no test run/, "the reason no longer says the reviewer reported no test run");
+});
+
+// THE REFUSAL SURFACE, and the half a suite fed only broken input cannot pin.
+// A new required field and a new unrun predicate are both refusal surfaces: a
+// specialist that legitimately has nothing to report must still come back
+// clean. Marking a genuinely clean dimension unrun re-runs work that was done
+// and teaches a controller to ignore the field — the same end state as not
+// having it.
+test("a clean review with an empty findings list is NOT unrun", () => {
+  assert.equal(
+    unrunReason({
+      dimension: "silent-failure",
+      scope_searched: "grep -rn 'catch' over the diff's 4 files",
+      findings: [],
+      test_run: { command: "npm test --", tests: 12, pass: 12, fail: 0 },
+    }),
+    null,
+    "a dimension that ran the suite and found nothing is clean, not unrun",
+  );
+});
+
+// A suite with real failures RAN. Reading `fail > 0` as unrun would hide the
+// one class of test result that most needs reporting.
+test("a run with failing tests is NOT unrun", () => {
+  assert.equal(
+    unrunReason({
+      dimension: "tests",
+      scope_searched: "the snapshot's own suite",
+      findings: [{ severity: "critical", claim: "x", evidence: "y" }],
+      test_run: { command: "npm test --", tests: 14, pass: 11, fail: 3 },
+    }),
+    null,
+    "a suite that reported failures still ran",
+  );
+});
+
+// `pass`/`fail` are optional (see the schema pin below), so a run that reported
+// only a count must still come back clean rather than tripping the predicate on
+// a field it was never required to send.
+test("a run that reported tests but not pass/fail is NOT unrun", () => {
+  assert.equal(
+    unrunReason({
+      dimension: "comments",
+      scope_searched: "every added comment in the diff",
+      findings: [],
+      test_run: { command: "node --test", tests: 7 },
+    }),
+    null,
+    "an optional field's absence must not mark a real run unrun",
+  );
+});
+
+function findingsSchema() {
+  const at = CODE.indexOf("const FINDINGS_SCHEMA = {");
+  assert.notEqual(at, -1, "review-pr.js no longer declares FINDINGS_SCHEMA — update this test");
+  const end = CODE.indexOf("const VERDICT_SCHEMA", at);
+  assert.notEqual(end, -1, "VERDICT_SCHEMA no longer follows FINDINGS_SCHEMA — update this test");
+  return CODE.slice(at, end);
+}
+
+// #139: the description at `:37` called `scope_searched` **Required** while the
+// `required` array omitted it, so a specialist that skipped it validated clean —
+// reproducing the exact failure the description exists to prevent. Both halves
+// pinned, because either one alone re-opens the ticket.
+test("scope_searched is in the required array, not only in its own description", () => {
+  const schema = findingsSchema();
+  const required = schema.match(/required:\s*\[([^\]]*)\]/);
+  assert.ok(required, "FINDINGS_SCHEMA no longer has a top-level required array — update this test");
+  assert.match(required[1], /"scope_searched"/, "scope_searched is documented Required and is not in the required array (#139)");
+  assert.match(required[1], /"test_run"/, "test_run is not required, so an unrun dimension can still return a clean-looking object (#137)");
+});
+
+// `additionalProperties: false` REJECTS an undeclared field, so a `required`
+// entry whose property is not declared is worse than neither: the specialist is
+// forced to send a field the schema then drops. Both halves, one pin.
+test("test_run is declared, carries the command and count, and does not force pass/fail", () => {
+  const schema = findingsSchema();
+  const at = schema.indexOf("test_run:");
+  assert.notEqual(at, -1, "test_run is not declared in FINDINGS_SCHEMA's properties — additionalProperties:false drops it");
+  const block = schema.slice(at, schema.indexOf("findings:", at) === -1 ? undefined : schema.indexOf("findings:", at));
+  for (const field of ["command", "tests", "pass", "fail"]) {
+    assert.match(block, new RegExp(`^\\s*${field}:`, "m"), `test_run no longer declares ${field}`);
+  }
+  const inner = block.match(/required:\s*\[([^\]]*)\]/);
+  assert.ok(inner, "test_run no longer names which of its fields are required — update this test");
+  assert.match(inner[1], /"command"/, "test_run.command must be required — a count with no command bounds nothing");
+  assert.match(inner[1], /"tests"/, "test_run.tests must be required — it is the field the unrun rule reads");
+  // A runner whose output does not split pass from fail must not be forced to
+  // invent numbers: an unanswerable required field is answered with a guess,
+  // and a guessed count is worse than an absent one.
+  assert.doesNotMatch(inner[1], /"pass"|"fail"/, "pass/fail must stay optional — see the comment above this assertion");
+});
