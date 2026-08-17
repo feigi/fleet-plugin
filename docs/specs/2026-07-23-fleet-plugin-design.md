@@ -541,7 +541,7 @@ story in its own `references/`), which is the split that was applied. No rule wa
 lost: every pattern in `docs/fleet-rule-manifest.txt` resolves somewhere under
 `skills/fleet/`, swept against that tree at `origin/main` `368dc67`
 (2026-08-17). Two pins had drifted off rules that were reworded rather than
-dropped, and were repointed to the surviving text — the repair `975c3d0` had
+dropped, and were repointed to the surviving text — the repair `3db006c` had
 already made for a third.
 
 ## Baseline measurement (Plan 1, 2026-07-23)
