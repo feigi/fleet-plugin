@@ -112,7 +112,8 @@ function remoteBranch(bare, name) {
  * failures that used to be reported as "no remote branch".
  */
 function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, origin = "bare",
-                         remoteBranches = [], detachedWorktreeUnder = null, awkFailWhenProgramHas = null,
+                         remoteBranches = [], detachedWorktreeUnder = null, worktreeLeaf = null,
+                         awkFailWhenProgramHas = null,
                          trFailWhenArgsHave = null, python3FailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
@@ -208,7 +209,12 @@ exec '${REAL_PYTHON3}' "$@"
       { env: { ...process.env, ...IDENT } });
     g("commit", "-q", "--allow-empty", "-m", "x");
     mkdirSync(join(root, detachedWorktreeUnder), { recursive: true });
-    g("worktree", "add", "-q", "--detach", join(root, detachedWorktreeUnder, `fix-${n}-slug`), "HEAD");
+    // `worktreeLeaf` names the last path segment outright, for the cases whose
+    // whole subject is a byte inside it — a tab, a newline. `??`, not `||`, so
+    // a leaf may legally be "" if some case ever wants one; and the default
+    // stays the matching `fix-<n>-slug` every other case relies on.
+    const leaf = worktreeLeaf ?? `fix-${n}-slug`;
+    g("worktree", "add", "-q", "--detach", join(root, detachedWorktreeUnder, leaf), "HEAD");
   }
 
   const env = {
@@ -451,6 +457,107 @@ test("probe 3: the same worktree without a space in the path, as the control", (
   const r = inflight(77, { detachedWorktreeUnder: "nospace" }, t);
   assert.equal(r.code, 1);
   assert.match(r.json.evidence.worktree, /nospace\/fix-77-slug$/);
+});
+
+// --- probe 3, bytes inside the path that the LISTING's own framing can eat.
+//
+// The space above is eaten by awk's field splitting, one level up from these:
+// these four are eaten by the record framing itself, before any field exists.
+// `--porcelain` terminates each attribute with a newline, so a path containing
+// one splits into two records; `--porcelain -z` terminates with NUL, which no
+// path may contain, so it cannot (#185, and #89's last unmet criterion).
+//
+// The tab is here because it is the same class and was fixed one stage away:
+// PR #174 dropped a `-F'\t'` join that cut the path at the tab it had just
+// joined on, and nothing pinned the repair — the existing \001 control-byte
+// case does not reach a tab, so an edit re-introducing a tab-sensitive split
+// would re-truncate the evidence with the suite still green (#122, absorbed
+// into #89). The `-z` rewrite re-parses this listing anyway, so both pins land
+// together rather than leaving one of the pair defended by nothing.
+//
+// Verified red first, each against the plain-porcelain form (git 2.50.1):
+//   fix-66-a<LF>b        -> evidence ".../fix-66-a", a path not on disk
+//   plain<LF>fix-33-slug -> taken=false, hits=[], exit 0, checkout live
+//   fix-88-a<TAB>b       -> already whole; green before and after, by design
+//   plain<LF>worktree /x -> exit 2, "the registry read missed entries"
+
+test("probe 3: a newline in the worktree path does not truncate the evidence", (t) => {
+  // The milder half: the number is on the FIRST line, so the verdict was
+  // already right and only the reported path was cut. Wrong all the same — an
+  // operator handed ".../fix-66-a" finds nothing there.
+  const r = inflight(66, { detachedWorktreeUnder: "wt", worktreeLeaf: "fix-66-a\nb" }, t);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.taken, true);
+  // A space, not a newline: jstr neutralises every C0 byte without a JSON
+  // short form, and the swap that gets this listing past awk has already made
+  // it \001. Whole is the claim being pinned here, not byte-identical — the
+  // `b` is what the truncation dropped.
+  assert.match(r.json.evidence.worktree, /\/wt\/fix-66-a b$/,
+    "the whole leaf arrives, not the part before the newline");
+  assert.equal(r.json.evidence.worktreeRewritten, true,
+    "and the caller is told the bytes were replaced, so it cannot take this for a real path");
+});
+
+test("probe 3: a worktree whose number falls AFTER a newline is taken, never free", (t) => {
+  // The severe half, and the reason #185 outranks its own truncation sibling:
+  // the number lands on the ORPHANED second record, where the `^worktree `
+  // filter never looks, so the probe reported a live checkout as free. Exit 0
+  // is what puts two implementers on one ticket — the one answer this script
+  // must never invent.
+  const r = inflight(33, { detachedWorktreeUnder: "wt", worktreeLeaf: "plain\nfix-33-slug" }, t);
+  assert.equal(r.code, 1, "a worktree that exists must never read as free");
+  assert.equal(r.json.taken, true);
+  assert.deepEqual(r.json.hits, ["local"]);
+  assert.match(r.json.evidence.worktree, /\/wt\/plain fix-33-slug$/);
+});
+
+test("probe 3: a TAB in the worktree path is delivered whole, and losslessly", (t) => {
+  // PR #174's repair, pinned at last. Distinct from the newline pair above in
+  // its result as well as its cause: \011 is one of the five C0 bytes RFC 8259
+  // gives a short form, so jstr escapes it as `\t` rather than replacing it,
+  // and `jrewritten`'s `tr -d` set skips it. The path survives byte-identical.
+  const r = inflight(88, { detachedWorktreeUnder: "wt", worktreeLeaf: "fix-88-a\tb" }, t);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.taken, true);
+  assert.match(r.json.evidence.worktree, /\/wt\/fix-88-a\tb$/,
+    "the real tab, round-tripped through JSON — not a space and not a truncation");
+  assert.equal(r.json.evidence.worktreeRewritten, false,
+    "nothing was replaced, so the path may be taken literally");
+});
+
+test("probe 3: a newline followed by a second 'worktree ' line does not fake a registry mismatch", (t) => {
+  // The same root cause pointed at the COUNT rather than the filter, and it
+  // fails the opposite way: the orphaned record begins with `worktree `, so the
+  // count saw one listing too many, `linked > registered` fired, and the probe
+  // refused — exit 2, "the registry read missed entries git can see". A wrong
+  // refusal starves the queue as surely as a wrong "free" collides on it, and
+  // this one is self-inflicted by the parser rather than by any real fault.
+  // No `/` anywhere in the leaf, deliberately: `join` would read one as a
+  // directory boundary and the basename the filter matches on would become
+  // whatever followed it, which is a different case wearing this one's name.
+  const r = inflight(44, {
+    detachedWorktreeUnder: "wt", worktreeLeaf: "a\nworktree fix-44-slug",
+  }, t);
+  assert.equal(r.code, 1, `a path that merely looks like a record is not a mismatch: ${r.stderr}`);
+  assert.equal(r.json.taken, true);
+  assert.deepEqual(r.json.unknown, [], "the probe answered rather than refusing");
+  assert.doesNotMatch(r.stderr, /registry entries/);
+});
+
+test("probe 3: an ordinary worktree list still reports a genuinely free ticket as free", (t) => {
+  // The accept case, and it is not covered by the "never had a linked
+  // worktree" case further down: this repo HAS one, git lists it, the count
+  // matches and the filter simply does not match the number. That is the path
+  // a stricter record separator can break without breaking any reject case —
+  // a parser that reads one record as zero, or that lets `tr`'s status pass
+  // unexamined, answers "taken" for every free ticket in the repo and the
+  // fleet quietly stops claiming work. Green before #185 and after, by intent.
+  const r = inflight(55, { detachedWorktreeUnder: "wt", worktreeLeaf: "fix-99-ordinary" }, t);
+  assert.equal(r.code, 0, `a free ticket must stay free: ${r.stderr}`);
+  assert.equal(r.json.taken, false);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.unknown, [], "and free by answering, not by failing to look");
+  assert.equal(r.json.evidence.worktree, "");
 });
 
 // --- probe 3, degraded reads (#95).
