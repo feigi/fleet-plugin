@@ -622,7 +622,7 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, dimensionsRun, survived, refuted, unverified}`.
+It returns `{pr, head, snapshot, dimensionsRun, dimensionsUnrun, survived, refuted, unverified}`.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Hand those over
 with the rest; never rule on them yourself. `refuted` comes back deliberately as
@@ -631,12 +631,19 @@ so record it in the ledger's `ruled` line and hand it over only when you reverse
 it. **A 1-1 split is not a verdict** — read the votes, not the band. Three tied
 refutations were reversed and re-examined in one run; all three findings survived.
 
-**`dimensionsRun` names what ran, never what returned.** A specialist that dies
-contributes zero findings while its key stays in that list, so a dimension listed
-in `dimensionsRun` with nothing in `survived`/`refuted`/`unverified` is **unrun,
-not clean**. Re-run it, or name it unrun in the report — an absence of findings is
-not coverage. Same rule the fallback below states for a killed specialist, for
-the same reason.
+**`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
+specialist that dies, and one that never executed the suite, both contribute zero
+findings while the key stays in `dimensionsRun` — so read the two together. A key
+in `dimensionsRun` and NOT in `dimensionsUnrun` is covered; every
+`dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
+Re-run those, or name them unrun in the report — an absence of findings is not
+coverage. Same rule the fallback below states for a killed specialist, for the
+same reason.
+
+The rule this replaces — treat any dimension with nothing in
+`survived`/`refuted`/`unverified` as unrun — was the workaround for having no
+such field, and it over-refuses in the direction that costs work: a dimension
+that ran clean has nothing in those three either (#137, #138).
 
 **A throw or an empty return is a failure event, not a clean review.** It throws
 on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no

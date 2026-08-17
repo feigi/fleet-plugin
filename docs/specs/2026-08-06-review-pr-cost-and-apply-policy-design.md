@@ -387,7 +387,10 @@ Neither may be assumed. Both are cheap to measure.
 ## Invariants
 
 - Unknown, unparseable or empty diff stats widen to the full set. Trimming is only ever driven by an affirmatively-reported profile.
-- `dimensionsRun` continues to report what actually ran. A trimmed fan-out must never read as full coverage.
+- `dimensionsRun` reports the dispatched set, and a trimmed fan-out must never
+  read as full coverage. It is not a coverage claim on its own — a dispatched
+  specialist can die, or run and never execute the suite — so `dimensionsUnrun`
+  names which of those keys did not cover their ground, and why (#137, #138).
 - Refuted findings are returned, not dropped.
 - `unverified` is never treated as `survived`.
 - No dimension is dropped from `DEFAULT_DIMENSIONS`; trims are per-PR and reversible via `args.dimensions`.

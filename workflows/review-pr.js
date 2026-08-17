@@ -28,13 +28,66 @@ export const meta = {
 const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["dimension", "findings"],
+  // `scope_searched` and `test_run` are required because their ABSENCE is the
+  // defect. A field documented "Required" while missing from this array is
+  // enforced by nothing, and a specialist that skips it validates clean —
+  // reproducing the exact failure the description exists to prevent (#139).
+  //
+  // Requiring a field is ENFORCED, never best-effort passthrough: a schema forces
+  // the subagent to call a StructuredOutput tool, validation happens at the
+  // tool-call layer, and a mismatch is retried. Measured 2026-08-17 over
+  // `~/.claude/projects/-Users-chris--claude/*/subagents/workflows`: 85
+  // transcripts carried `Output does not match required schema`, 184 rejection
+  // events in all, every one recovered by retry.
+  //
+  // RE-COUNTING THIS IS A TRAP, and it caught a reviewer of this very comment.
+  // Both strings are quoted verbatim right here, so every transcript that READS
+  // this file becomes a match: a naive grep counts its own readers and reports
+  // drift that is the observer. Excluding the reading session returns 85/184
+  // exactly. For the exhaustion string, match a DIGIT — `after [0-9]+ attempts` —
+  // because the `<n>` placeholder appears nowhere but this comment.
+  //
+  // The retry is BOUNDED, so this is not a zero-risk claim. Exhaustion emits
+  // `Failed to provide valid structured output after <n> attempts` and `agent()`
+  // then returns null. Real occurrences, counted that way: zero. So this branch is
+  // reasoned about rather than observed — and it is `unrunCrashed` that reports
+  // that null as unrun, NOT `unrunReason`'s falsy branch: `pipeline()` short-
+  // circuits, so a null review never reaches the verify stage to be classified
+  // there at all.
+  //
+  // What a required field must NOT do is demand something a specialist cannot
+  // honestly answer — see `test_run`'s own `required` below.
+  required: ["dimension", "scope_searched", "findings", "test_run"],
   properties: {
     dimension: { type: "string" },
     scope_searched: {
       type: "string",
       description:
         "The exact commands/paths this pass covered. Required so a negative claim is bounded: a grep that found nothing looks identical to a grep never run.",
+    },
+    // Where the `'tests 0'` reading rule in the specialist prompt LANDS. The
+    // rule shipped without one: a specialist that obeyed it emitted an empty
+    // findings list, byte-identical to a clean pass, and the dimension's key
+    // stayed in `dimensionsRun` regardless (#137).
+    //
+    // `command` and `tests` are required and `pass`/`fail` are not, and the
+    // split is deliberate. The first two are what bounds the negative claim —
+    // a count with no command names nothing a reader can act on. The second
+    // two are not always separable from a runner's output, and an
+    // unanswerable required field is answered with a guess: a fabricated
+    // count is worse than an absent one, because it reads as measurement.
+    test_run: {
+      type: "object",
+      additionalProperties: false,
+      required: ["command", "tests"],
+      description:
+        "The test run this pass performed. Report it even when it failed or produced nothing — `tests: 0` is how a dimension gets reported unrun, and an empty findings list cannot say it.",
+      properties: {
+        command: { type: "string", description: "The command as RUN, verbatim." },
+        tests: { type: "integer", description: "Tests the run reported. 0 means the command produced none — a failed run, not a pass." },
+        pass: { type: "integer" },
+        fail: { type: "integer" },
+      },
     },
     findings: {
       type: "array",
@@ -608,10 +661,93 @@ log(
   `models sent ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "frontmatter"}`).join(" ")}`,
 );
 
+// Why a dimension did NOT cover its ground, or null when it did.
+//
+// ONE shape for two causes, because a consumer sees one fact: this dimension is
+// not covered. A reviewer that died (#138) and a reviewer that never ran the
+// suite (#137) both returned `findings: []` — byte-identical to a clean pass —
+// while the key stayed in `dimensionsRun` either way. Giving the two causes two
+// shapes is how a caller ends up handling one and missing the other.
+//
+// This is the same reasoning the verifier path applies one level down, where
+// `live.length === 0` is `unverified` rather than `survived`: a check that never
+// ran must not be read as one that passed. That case was handled deliberately
+// and this one was not.
+//
+// PURE, and kept that way on purpose: no `testCmd`, no `snap`, nothing from the
+// enclosing run — as are `unrunEntries` and `unrunCrashed` below, for the same
+// reason. Purity is what makes this seam executable at all: the file's top-level
+// `await` leaves it unimportable, so `review-pr-unrun.test.mjs` lifts all three
+// out of the source text to run them, and a free variable would throw a
+// ReferenceError there on whichever branch read it. Everything OUTSIDE these
+// three — whether the script actually calls them — is pinned as text and cannot
+// be more than that.
+//
+// What it must NOT do is refuse a real run. An empty findings list is the
+// expected return from a specialist that ran everything and found nothing, and
+// `fail > 0` is a suite that ran and reported — both are clean here. Only the
+// absence of a run is unrun.
+function unrunReason(review) {
+  if (!review) return "the reviewer returned nothing — spend limit, timeout, or terminal error";
+  const run = review.test_run;
+  if (!run) return "the reviewer reported no test run at all";
+  // `!run.tests` and not `run.tests === 0`: a field the schema requires can
+  // still arrive absent or null from a producer that ignored it, and that is
+  // the same fact — nothing ran. #143 is open on widening this rule further
+  // (a count below the suite's size, or `pass 0` with everything skipped);
+  // this reads only the zero the specialist prompt already rules a failure.
+  if (!run.tests) return `\`${run.command || "the test command"}\` produced 0 tests — a failed run, not a pass`;
+  return null;
+}
+
+// Zero or one entry, so both call sites can `push(...)` it with no guard of
+// their own. That shape is the point: a guard at the CALL SITE is what #138
+// shipped the first time, and a call site is the half no running test can see —
+// `unrunEntries` is executable, its callers are only ever pinned as text.
+function unrunEntries(review, dimension) {
+  const why = unrunReason(review);
+  return why ? [{ dimension, reason: why }] : [];
+}
+
+// The crashed reviewer, derived from the pipeline's OWN result instead of from
+// inside it — and the reason #138's first attempt recorded nothing at all.
+// `pipeline()` SHORT-CIRCUITS between stages: the harness runs
+// `if (result === null) break` before handing a dimension to the next stage, so
+// a reviewer that returned null never reaches the verify closure below, and a
+// recording that lives there cannot see the one case #138 is about. Read out of
+// the harness bundle, not inferred — the pre-existing `review && review.findings`
+// guard one stage down is authorial belief, and mistaking it for a contract is
+// what made this look handled.
+//
+// What the caller CAN see: one slot per dimension, in order, holding null for a
+// chain that died, so `dimensions[i]` names which one at a level the short-
+// circuit cannot reach. Both crash shapes land in that null — `agent()` returning
+// null, and a THROW, which the harness maps to the same null slot (#527).
+//
+// The `?? slot ${i}` is not defensive noise. It is the only line here that runs
+// AFTER every specialist and every refuter has finished, so a bare
+// `dimensions[i].key` throwing on a length the harness stopped guaranteeing would
+// discard a whole 20-40 minute run's findings to report a naming problem. Name
+// the slot and keep the run.
+function unrunCrashed(reviewed, dimensions) {
+  return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
+}
+
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
 // that dimension finishes, rather than waiting for the slowest reviewer. There
 // is no cross-dimension dependency, so a barrier here would be pure latency.
+
+// Populated in TWO places, because neither can see what the other sees: the
+// verify stage below is the only place a dimension's raw review object is still
+// in scope (#137), and `unrunCrashed` after the pipeline returns is the only
+// place a dimension that never reached that stage is still visible at all
+// (#138). Filled by side effect rather than returned, because `reviewed` is
+// findings — flattened, envelope gone — and
+// widening that return would change what every consumer of `survived` /
+// `refuted` / `unverified` reads.
+const dimensionsUnrun = [];
+
 const reviewed = await pipeline(
   dimensions,
   (d) =>
@@ -630,8 +766,10 @@ Tests: from the snapshot's root, run exactly this — copy it verbatim:
 Do not substitute a command of your own. A bare runner picks up a default config
 that tears down a shared container mid-run for every sibling; a guessed glob is
 worse, because one matching nothing still exits 0 reporting 'tests 0' — a green
-that ran nothing. Whatever you run, 'tests 0' is a FAILED run, not a pass:
-report that dimension as unrun and say the command produced no tests.
+that ran nothing. Whatever you run, report it in \`test_run\` — the command
+verbatim and the counts you saw — even when it failed or produced nothing.
+'tests 0' is a FAILED run, not a pass: \`tests: 0\` is how this dimension gets
+reported unrun, and an empty findings list cannot say it for you.
 Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
@@ -648,8 +786,15 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
   // Adversarial verification. Each finding faces N independent refuters biased
   // toward refusal, because a plausible-but-wrong finding costs more than a
   // missed one: it gets applied. Majority-refuted kills it.
-  (review, d) =>
-    parallel(
+  (review, d) => {
+    // #137's half: a reviewer that RETURNED but ran no suite. It reaches this
+    // closure precisely because its stage-1 result was an object, so the short-
+    // circuit `unrunCrashed` exists for never fires on it. Unguarded, and BEFORE
+    // the `review && review.findings` guard below — that guard is the expression
+    // which reads a dead reviewer as a clean one, and a recording tucked behind
+    // it would classify every dimension except the one that failed.
+    dimensionsUnrun.push(...unrunEntries(review, d.key));
+    return parallel(
       (review && review.findings ? review.findings : []).map((f) => () => {
         const n = verifiersFor(f.severity);
         // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
@@ -690,8 +835,12 @@ Scratch: ${scratch}/verify-${d.key}/`,
           return { ...f, dimension: d.key, verdict, votes: live };
         });
       }),
-    ),
+    );
+  },
 );
+
+// #138's half, and it cannot be done inside the stage above — see `unrunCrashed`.
+dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
 
 const all = reviewed.flat().filter(Boolean);
 const survived = all.filter((f) => f.verdict === "survived");
@@ -708,13 +857,23 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 // `unverified` are findings the adversarial pass did not settle — a suggestion
 // that skipped it by policy, or one whose refuters all crashed — surfaced
 // separately so the caller never mistakes "not checked" for "survived".
-// `dimensionsRun` names what actually ran: a trimmed fan-out must say so, never
-// read as full coverage.
+// `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
+// fan-out must say so, never read as full coverage. It is not a coverage claim
+// on its own and never was — a specialist can be dispatched and die, or run and
+// never execute the suite — so `dimensionsUnrun` names which of those keys did
+// not cover their ground, and why. A key in the first and not the second is the
+// only thing that means covered.
+//
+// The two are siblings rather than one filtered list because they answer
+// different questions. Subtracting the unrun ones from `dimensionsRun` would
+// make a crashed dimension indistinguishable from one the size tier never
+// dispatched — this ticket set's own defect, moved one field over.
 return {
   pr,
   head: snap.head,
   snapshot: snap.path,
   dimensionsRun: dimensions.map((d) => d.key),
+  dimensionsUnrun,
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),
