@@ -195,9 +195,32 @@ function newestTranscriptMs(dir) {
 // `output_tokens` is the one field that genuinely differs across a turn's lines:
 // it is a streaming snapshot, so the LARGEST value is the final one. Summing it
 // double-counts too, though only by ~1.5%.
+//
+// The meta read below is guarded by existsSync, so the UNNAMED-AGENT case never
+// enters the try — it simply leaves `meta` at {}. Everything that does reach the
+// catch is a real fault: a sidecar read torn mid-write, EACCES/EISDIR, a delete
+// racing the existsSync. Swallowing those booked the agent's whole spend as
+// `other` with nothing on stderr, which moves reviewPct — the review headline
+// compute-spend.mjs calls the one number anyone acts on. Measured on a
+// two-agent fixture: an intact reviewer sidecar gives reviewPct 80, the same
+// sidecar truncated gives 0, in silence (#325).
+//
+// Keep the {} fallback rather than rethrowing. The TRANSCRIPT is still readable,
+// so a throw would land in gatherSpend's per-file catch and drop this agent's
+// real tokens from the totals — a wrong total in place of a wrong role, and one
+// the panel would then also count as `skipped`. Warn-once per PATH, for the
+// reason warnedSkips gives below: `serve` rebuilds every ~15s, and a broken
+// sidecar is broken on every tick.
+const warnedMeta = new Set();
 function readAgent(file, metaFile) {
   let meta = {};
-  try { if (existsSync(metaFile)) meta = JSON.parse(readFileSync(metaFile, "utf8")); } catch { /* unnamed agent */ }
+  try { if (existsSync(metaFile)) meta = JSON.parse(readFileSync(metaFile, "utf8")); }
+  catch (e) {
+    if (!warnedMeta.has(metaFile)) {
+      warnedMeta.add(metaFile);
+      console.error(`${NAME}: ${metaFile} unreadable, classifying agent as "other": ${e.message}`);
+    }
+  }
 
   let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
   const entries = [];

@@ -227,6 +227,45 @@ test("a prose turn whose content is a STRING does not throw", () => {
   assert.equal(s.totals.cacheWrite, 1000);
 });
 
+// gatherSpend reports through stderr, so read console.error rather than spawning
+// the CLI — the transcript tree the CLI resolves lives under $HOME, and these
+// fixtures do not.
+function withStderr(fn) {
+  const lines = [];
+  const real = console.error;
+  console.error = (...a) => lines.push(a.join(" "));
+  try { fn(); } finally { console.error = real; }
+  return lines;
+}
+
+test("a meta.json that exists but cannot be read is reported, not swallowed", () => {
+  // #325: the catch here was labelled `/* unnamed agent */`, but existsSync
+  // already covers that case, so the only thing reaching it is a real fault —
+  // here a read torn mid-write. Measured before the fix: role "other", 0 bytes
+  // on stderr, and with a reviewer's meta torn this way reviewPct went 80 -> 0.
+  const dir = fixture(TURN);
+  writeFileSync(join(dir, "agent-x.meta.json"), '{"spawnDepth":0,"descrip');
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /agent-x\.meta\.json/);
+  // Still BOOKED, not skipped. The transcript itself is readable, so letting the
+  // fault throw would hand it to the per-file catch above and drop this agent's
+  // real tokens from the totals — a wrong total in place of a wrong role.
+  assert.equal(s.totals.cacheWrite, 1000);
+  assert.equal(s.skipped, 0);
+});
+
+test("a genuinely absent meta.json — the real unnamed agent — stays silent", () => {
+  // The false-positive half. The unnamed-agent path is the existsSync guard, and
+  // it must not start emitting a warning: every controller-dispatched agent
+  // without a sidecar would print one, every tick.
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: fixture(TURN) }); });
+  assert.deepEqual(errs, []);
+  assert.equal(s.totals.cacheWrite, 1000);
+});
+
 test("an unreadable dir reports an error rather than posing as an empty run", () => {
   // The distinction that hid the path bug: a hidden panel meant both "nothing
   // yet" and "this is broken", so the broken case never surfaced.
