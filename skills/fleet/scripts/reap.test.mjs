@@ -882,8 +882,10 @@ test("the sweep continues past a worktree-removal refusal and still reaps the br
   // The `a-`/`b-` names are load-bearing, not decoration. `git for-each-ref`
   // sorts by refname, so a healthy branch named to sort FIRST is already
   // reaped before the refusal happens and the test passes under a `break`
-  // just as happily as under a `continue` — measured: that spelling of this
-  // test survived the break mutant with all 32 green.
+  // just as happily as under a `continue`. Measured both ways on this branch,
+  // rather than carrying a count that drifts every time a test is added: under
+  // the alternative spelling the whole file stays green with the mutant in
+  // place, and under the shipped one exactly this test reds.
   const w = repo(t);
   const wt = mergedGoneBranchWithWorktree(w, "feature/a-locked", "work behind a lock");
   git(w, "worktree", "lock", wt);
