@@ -394,11 +394,19 @@ unresolved_head() {
 # Is anything at all occupying $1? Not the same question as `gone`, which asks
 # whether an absence is established; this one asks whether the path is taken.
 # `-e` alone FOLLOWS symlinks, so a DANGLING one reads as absent while it still
-# occupies the path and still fails the next `git worktree add` — and that is
-# residue this very script can leave: `git worktree remove` against a symlink
-# standing in for the worktree directory deletes the target THROUGH the link and
-# returns 0, leaving the link behind (measured, git 2.50.1). Same reason the
-# non-directory precondition below tests -L separately.
+# occupies the path and still fails the next `git worktree add` (`fatal: '...'
+# already exists`) — and that is residue this very script can leave: where a
+# symlink POINTS AT the registered worktree directory, `git worktree remove`
+# deletes that directory and returns 0, leaving the link behind and now dangling.
+# NOT the symlink standing in for the directory: that is the rc-255 row of the
+# table below, and there the target survives emptied, so `-e` alone already sees
+# it. Both measured, git 2.50.1. Same reason the non-directory precondition
+# below tests -L separately.
+#
+# Neither shape impeaches the rc-0 fast path at the removal, so nothing there
+# needs re-measuring: no shape measured returns 0 with the path git was asked to
+# delete still occupied — the dangling residue sits on the LINK, which is a
+# different path and reaches this predicate through the orphan probe.
 occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 
 # Which release outcome does $1 hold after a `git worktree remove` that refused?
@@ -753,15 +761,13 @@ else
     # appeared that the checks above did not see, so naming a cause here would
     # be a guess.
     echo "\$ git worktree remove $wt" >&2
-    rc=0
-    err=$(git worktree remove "$wt" 2>&1) || rc=$?
     # Measure on the REFUSAL only. git's two deletes are ordered, not atomic, so
     # a non-zero rc tells us a step failed and nothing about which — that is the
     # whole of #208. A zero rc is different in kind: both deletes completed, and
     # `Released` restates git's own success rather than inferring past a
     # failure. Re-measuring here would also make the happy path answerable by a
     # probe that can return Indeterminate, refusing releases that plainly worked.
-    if [ "$rc" -ne 0 ]; then
+    if ! err=$(git worktree remove "$wt" 2>&1); then
       wt_outcome=$(release_outcome "$wt")
       halt "git worktree remove refused $wt: $(printf '%s' "$err" | tr '\n' ' ')"
     fi

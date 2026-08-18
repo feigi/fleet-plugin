@@ -158,7 +158,6 @@ function orphan(r, c) {
     !git(r.w, "worktree", "list", "--porcelain").includes(c.wt),
     "fixture: the registration must really be gone, or this is just a stray",
   );
-  return c.wt;
 }
 
 /** What claim-ticket.sh leaves behind: a worktree on a fresh branch off origin/main. */
@@ -169,10 +168,10 @@ function claim(w, issue, slug, type = "fix") {
   return { branch, wt, args: [String(issue), slug, type] };
 }
 
-function release(r, c, { apply = true, env = {} } = {}) {
+function release(r, c, { apply = true, env = {}, cwd = r.w } = {}) {
   const argv = apply ? [...c.args, "--apply"] : c.args;
   const res = spawnSync("sh", [SCRIPT, ...argv], {
-    cwd: r.w,
+    cwd,
     env: r.env(env),
     encoding: "utf8",
   });
@@ -1329,6 +1328,26 @@ test("a clean claim is not mistaken for an orphaned directory", (t) => {
   assert.equal(json.released, true);
   assert.equal(code, 0);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("the orphan probe is anchored at the checkout, never at the caller's cwd", (t) => {
+  // Every other case in this file runs the script from the checkout root, where
+  // $PWD and git's own listing agree — so the anchor is unpinned there and a
+  // `main_wt=$PWD` regression stays green across the whole suite. This is the
+  // caller the script actually has: run-team releases a ticket from wherever the
+  // operator stands, routinely inside another member's worktree, where a
+  // cwd-relative ".worktrees/..." names nothing and the orphan goes unseen.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const elsewhere = claim(r.w, 10, "other-member");
+  orphan(r, c);
+
+  const { code, json } = release(r, c, { cwd: elsewhere.wt });
+
+  assert.equal(code, 1, `blocked from a foreign cwd too: ${JSON.stringify(json)}`);
+  assert.match(json.blockers[0], /has no registration/);
+  assert.match(json.blockers[0], /9-release-ticket/);
+  assert.equal(existsSync(c.wt), true, "and the orphan is still there to be inspected");
 });
 
 test("a worktree directory the script may not stat is unknown, never a release", (t) => {
