@@ -32,6 +32,30 @@
 # stderr line (#119, measured).
 set -eu
 
+# Byte semantics for the `tr`, `sed` and `awk` below. There is no `grep`: this
+# script deliberately has none, and two comments further down — "One awk, not
+# `awk | sed | grep | paste`" and "awk, not `grep -c … || true`" — are the
+# standing argument for why. `tr` splits `git worktree list --porcelain -z`,
+# flattens `gh`'s error text into a diagnostic, and scrubs control bytes inside
+# `jstr`, which `sed` shares; `awk` parses refs, branch names and worktree
+# paths. Under a UTF-8 locale BSD `tr` and `sed` exit 1 on a byte that is not
+# valid UTF-8 — `sed` emitting nothing at all, measured — while `awk` is immune,
+# byte-identical in both locales. Such a byte reaches us from a fetched tree
+# even where the local filesystem refuses to hold the name, and inside `$(...)`
+# a `tr` failure empties the cause out of the diagnostic without a trace. #582
+# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
+# list reported as a clean, confident answer.
+#
+# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
+# range or a POSIX class, so collation and case-folding — the two things
+# `LC_ALL=C` otherwise changes — have nothing here to act on.
+#
+# This completes a pin this script already started: the five `LC_ALL=C` prefixes
+# below predate it and are now redundant. Left in place — each documents the
+# hazard at its own site, and deleting them is churn this ticket did not
+# measure — but no new site needs one.
+export LC_ALL=C
+
 NAME=inflight
 die() { echo "$NAME: $1" >&2; exit 2; }
 

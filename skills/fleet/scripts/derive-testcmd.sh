@@ -15,6 +15,22 @@
 # independent copies is what drifts; see #142.
 set -eu
 
+# Byte semantics for the one byte-sensitive call below: `grep -qE
+# "$testfile_re"` over the changed file paths. There is no `tr`, `sed` or `awk`
+# in this script. Under a UTF-8 locale BSD grep silently DROPS a line holding a
+# byte that is not valid UTF-8 — measured over a three-name listing whose middle
+# entry is `b\377ad.test.mjs`: `grep -cE` with this script's own regex matches 2
+# under `en_US.UTF-8` and 3 under `C`, stderr empty either way — so such a name
+# reads as "no test files" with nothing there to notice. It reaches us from a
+# fetched tree even where the local filesystem refuses to hold the name. #582
+# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
+# list reported as a clean, confident answer.
+#
+# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
+# range or a POSIX class, so collation and case-folding — the two things
+# `LC_ALL=C` otherwise changes — have nothing here to act on.
+export LC_ALL=C
+
 NAME=derive-testcmd
 die() { echo "$NAME: $1" >&2; exit 1; }
 

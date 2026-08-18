@@ -25,6 +25,25 @@
 # establishes absence instead of inferring it.
 set -eu
 
+# Byte semantics for the `awk`, `grep`, `sed` and `tr` below — all four really
+# are here, unlike in the siblings this header was copied to. `awk` and `grep`
+# parse `git worktree list --porcelain` (worktree paths and branch names),
+# `git cherry`'s output, the dirty-file list and `gh`'s labels; `tr` flattens
+# git's own error text into a diagnostic; and `jstr`'s `sed | tr` scrubs
+# whatever string is being JSON-encoded, `$wt` included. Under a UTF-8 locale
+# BSD `tr` and `sed` exit 1 on a byte that is not valid UTF-8 — `sed` emitting
+# nothing at all, measured — and `grep` silently drops the line holding it.
+# Such a byte reaches us from a fetched tree even where the local filesystem
+# refuses to hold the name, and inside `$(...)` a `tr` failure empties the cause
+# out of the diagnostic without a trace. #582 measured the cost of leaving this
+# ambient in no-undo-audit.sh: a truncated list reported as a clean, confident
+# answer.
+#
+# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
+# range or a POSIX class, so collation and case-folding — the two things
+# `LC_ALL=C` otherwise changes — have nothing here to act on.
+export LC_ALL=C
+
 NAME=release-ticket
 die() { echo "$NAME: $1" >&2; exit 2; }
 
