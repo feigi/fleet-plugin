@@ -46,7 +46,7 @@ die() { echo "$NAME: $1" >&2; exit 2; }
 # callers differ in nothing else); named there, not by line number, per #129.
 gone() {
   look=$1
-  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; look=${look:-/}; done
   [ ! -e "$1" ] && [ -x "$look" ]
 }
 

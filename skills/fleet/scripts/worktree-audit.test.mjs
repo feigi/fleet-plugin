@@ -84,8 +84,12 @@ function addWorktree(w, name, base = "origin/main") {
  */
 function relocate(w, wt, dest) {
   const admin = join(w, ".git", "worktrees");
+  // realpathSync: git canonicalises what it writes into `gitdir`, and on macOS
+  // a tmpdir path reaches this suite as /var/... while git recorded
+  // /private/var/... — the scan matches nothing without resolving first.
+  const target = join(realpathSync(wt), ".git");
   const name = readdirSync(admin).find(
-    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(wt, ".git"),
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === target,
   );
   assert.ok(name, `fixture: no registry entry points at ${wt}`);
   writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);

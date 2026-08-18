@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,8 +120,12 @@ exit 0
  */
 function relocate(w, wt, dest) {
   const admin = join(w, ".git", "worktrees");
+  // realpathSync: git canonicalises what it writes into `gitdir`, and on macOS
+  // a tmpdir path reaches this suite as /var/... while git recorded
+  // /private/var/... — the scan matches nothing without resolving first.
+  const target = join(realpathSync(wt), ".git");
   const name = readdirSync(admin).find(
-    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(wt, ".git"),
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === target,
   );
   assert.ok(name, `fixture: no registry entry points at ${wt}`);
   writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
@@ -1360,10 +1364,19 @@ test("a worktree with no surviving ancestor below / still releases, never a perm
   // reproduce exit 2 with no JSON just as well, and asserting the pair alone
   // would pass with this guard still dying.
   assert.doesNotMatch(stderr, /cannot tell whether/, "an absent path with a searchable root is not an unknown one");
-  assert.ok(!stderr.includes(dest), "nothing may be refused about it");
   assert.equal(code, 0);
   assert.deepEqual(json.blockers, []);
   assert.equal(json.released, true);
+  assert.equal(json.worktree, dest, "the payload names the path git listed, not the one claim-ticket.sh would have written");
+  // Reaching the delete is the half exit 0 alone does not prove. The guard
+  // died BEFORE it, so a fix that merely downgraded that `die` to a warning
+  // would exit 0 here too, with the stale registration still standing and the
+  // claim reported released — the same false success from the other side.
+  assert.doesNotMatch(
+    git(r.w, "worktree", "list", "--porcelain"),
+    /nonexistent-top-level-178/,
+    "the registration must actually be gone, not merely un-refused",
+  );
 });
 
 test("an unreadable worktree registry is unknown, never a release", (t) => {

@@ -282,18 +282,23 @@ block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
 # both `prunable`, and `worktree remove` ACCEPTS a prunable-because-absent entry
 # (rc 0) where a live worktree whose .git was merely deleted it refuses — so
 # nothing downstream recomputes what this gets wrong. So walk up to the nearest
-# existing ancestor BELOW `/` and require THAT to be searchable: only then is "not
-# there" a measurement rather than a guess. The walk is what keeps `rm -rf
-# .worktrees` answerable — the parent goes with the child, and testing the
-# immediate parent alone reads its absence as unknown, which is the permanent
-# refusal both callers exist to stop producing.
+# existing ancestor, `/` included, and require THAT to be searchable: only then
+# is "not there" a measurement rather than a guess. The walk is what keeps
+# `rm -rf .worktrees` answerable — the parent goes with the child, and testing
+# the immediate parent alone reads its absence as unknown, which is the
+# permanent refusal both callers exist to stop producing.
 #
-# Below `/` and not including it: `${p%/*}` on `/x` yields the empty string rather
-# than `/`, so a path whose every ancestor below the root is gone falls out of the
-# loop on "" and answers unknown. Safe direction, unreachable for the
-# `<repo>/.worktrees/<issue>-<slug>` paths claim-ticket.sh writes, and #178 to
-# close it — stated here because the walk does not do what "nearest ancestor that
-# exists" would promise.
+# `look=${look:-/}` INSIDE the loop, and that placement is the whole of #178:
+# `${p%/*}` on `/x` yields the empty string, not `/`, so a path whose every
+# ancestor below the root is gone used to fall out on "" and answer unknown
+# about an absence the searchable root proves. The same restore written AFTER
+# the loop reads identically and is wrong — nothing enters the loop on an empty
+# `$1`, so it would rewrite that to `/` too and turn `gone ""` into
+# established-absent. Inside, it only ever rewrites what the loop just
+# truncated. gone-walk.test.mjs holds that matrix, `gone ""` included, because
+# no caller can reach it: three test the path non-empty first, and
+# worktree-audit.sh reads its own off `git worktree list`, which never emits an
+# empty one — so a caller-level suite alone cannot tell the two placements apart.
 #
 # One predicate, because both callers ask one question. Answered twice they drift,
 # and the halves of this script that protect a member's work stop agreeing about
@@ -309,7 +314,7 @@ block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
 # and `set -e` exits — rc 1, this script's own blocked-run code, and no receipt.
 gone() {
   look=$1
-  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; done
+  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; look=${look:-/}; done
   [ ! -e "$1" ] && [ -x "$look" ]
 }
 
