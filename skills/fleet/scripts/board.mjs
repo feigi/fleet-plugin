@@ -199,11 +199,12 @@ function newestTranscriptMs(dir) {
 // The meta read below is guarded by existsSync, so the UNNAMED-AGENT case never
 // enters the try — it simply leaves `meta` at {}. Everything that does reach the
 // catch is a real fault: a sidecar read torn mid-write, EACCES/EISDIR, a delete
-// racing the existsSync. Swallowing those booked the agent's whole spend as
-// `other` with nothing on stderr, which moves reviewPct — the review headline
-// compute-spend.mjs calls the one number anyone acts on. Measured on a
-// two-agent fixture: an intact reviewer sidecar gives reviewPct 80, the same
-// sidecar truncated gives 0, in silence (#325).
+// racing the existsSync, or valid JSON of the wrong SHAPE (guard below).
+// Swallowing those booked the agent's whole spend as `other` with nothing on
+// stderr, which moves reviewPct — the review headline compute-spend.mjs calls
+// the one number anyone acts on. Measured on a two-agent fixture: an intact
+// reviewer sidecar gives reviewPct 80, the same sidecar truncated gives 0, in
+// silence (#325).
 //
 // Keep the {} fallback rather than rethrowing. The TRANSCRIPT is still readable,
 // so a throw would land in gatherSpend's per-file catch and drop this agent's
@@ -214,11 +215,24 @@ function newestTranscriptMs(dir) {
 const warnedMeta = new Set();
 function readAgent(file, metaFile) {
   let meta = {};
-  try { if (existsSync(metaFile)) meta = JSON.parse(readFileSync(metaFile, "utf8")); }
+  try {
+    if (existsSync(metaFile)) {
+      // JSON.parse SUCCEEDS on `null`, a bare number, a string, an array — none
+      // of which classifyRole or `meta.description` can read. Reject the shape
+      // here, so it takes the warn path below like any other sidecar fault. Left
+      // to reach `a.meta.description`, it throws into gatherSpend's per-file
+      // catch instead, which drops this agent's real tokens, counts it
+      // `skipped`, and names the TRANSCRIPT in a fault that is the sidecar's.
+      const m = JSON.parse(readFileSync(metaFile, "utf8"));
+      if (typeof m !== "object" || m === null || Array.isArray(m))
+        throw new TypeError(`expected a JSON object, got ${m === null ? "null" : Array.isArray(m) ? "array" : typeof m}`);
+      meta = m;
+    }
+  }
   catch (e) {
     if (!warnedMeta.has(metaFile)) {
       warnedMeta.add(metaFile);
-      console.error(`${NAME}: ${metaFile} unreadable, classifying agent as "other": ${e.message}`);
+      console.error(`${NAME}: ${metaFile} unusable, classifying agent as "other": ${e.message}`);
     }
   }
 
