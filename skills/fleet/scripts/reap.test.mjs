@@ -931,17 +931,25 @@ test("a `git branch -D` failure carries git's own message, not just the label (#
   assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the failure");
 });
 
-test("a dying `git worktree list` keeps the branch and names ITS failure, never 'branch delete failed' (#391)", (t) => {
-  // A pipeline inside `$( )` takes awk's status, never git's, so a dying list
-  // produced an empty $wt: the dirty check, the ignored-files check and the
-  // removal were all skipped, flow fell through to `git branch -D`, and the
-  // payload blamed the branch delete for a failure two steps earlier — while
-  // git's `fatal:` reached the terminal and never the JSON the caller parses.
-  // Same swallow #264 fixed one branch above for `git cherry`.
+test("a dying `git worktree list` still reaps what it can, and quotes git for what it cannot (#391)", (t) => {
+  // The pipeline into awk takes awk's status, never git's, so a dying list
+  // leaves $wt empty: every check under `[ -n "$wt" ]` is skipped and flow
+  // falls through to `git branch -D`. That was #391's visible symptom — the
+  // payload blamed the branch delete for a failure two steps earlier, under a
+  // bare label, while git's own `fatal:` reached the terminal and never the
+  // JSON the caller parses.
   //
-  // This failure reaches every branch, so the sweep continuing shows up as the
-  // SECOND branch being reported at all rather than the loop stopping at the
-  // first.
+  // Fixed here as the MESSAGE change #391 asked for: the branch git refuses
+  // now carries git's reason, which names the worktree still holding it — the
+  // only thing that tells an operator which remedy applies.
+  //
+  // What is deliberately NOT changed is which branches get reaped. Measured:
+  // `git branch -D` needs no answer from the registry to delete a branch that
+  // has no worktree, so `feature/b-merged` goes exactly as it did before.
+  // Making the lookup fail closed would keep the whole sweep instead — a
+  // control-flow ruling #391 reserved for the maintainer, filed as
+  // #622. This test is the pin that a fix for it would have to move
+  // deliberately.
   const w = repo(t);
   mergedGoneBranchWithWorktree(w, "feature/a-merged", "merged work");
   mergedGoneBranch(w, "feature/b-merged", "more merged work");
@@ -954,21 +962,20 @@ test("a dying `git worktree list` keeps the branch and names ITS failure, never 
 
   const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
-  assert.equal(code, 0, "an unanswerable probe is a finding, not a script failure");
-  assert.deepEqual(json.reaped, [], "an unanswerable probe authorizes nothing");
+  assert.equal(code, 0, "a branch git refuses to delete is a finding, not a script failure");
   assert.deepEqual(
-    json.kept.map((k) => k.branch),
-    ["feature/a-merged", "feature/b-merged"],
-    "both branches must be reported — the loop keeps going past a probe it could not answer",
+    json.reaped,
+    ["feature/b-merged"],
+    "a lookup nobody could answer must not change what gets reaped — that ruling is not this ticket's",
   );
-  for (const k of json.kept) {
-    assert.match(k.reason, /worktree lookup failed/, `the reason must name the step that failed: ${k.reason}`);
-    assert.doesNotMatch(k.reason, /branch delete failed/, "the label must not blame a later step for this failure");
-    assert.match(k.reason, /worktree list exploded/, "git's own words must reach the payload");
-  }
-  assert.match(stderr, /KEEP feature\/a-merged — worktree lookup failed/);
-  assert.equal(branchExists(w, "feature/a-merged"), true, "and the branch survives the probe it could not answer");
-  assert.equal(branchExists(w, "feature/b-merged"), true);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/a-merged");
+  assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload, not just the terminal");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
+  assert.match(stderr, /KEEP feature\/a-merged — branch delete failed: /);
+  assert.equal(branchExists(w, "feature/a-merged"), true, "the branch git refused to delete survives");
+  assert.equal(branchExists(w, "feature/b-merged"), false);
 });
 
 test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {

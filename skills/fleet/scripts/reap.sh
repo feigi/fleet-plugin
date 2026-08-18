@@ -140,26 +140,22 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     continue
   fi
 
-  # Captured, not piped: a pipeline inside a command substitution takes AWK's
-  # exit status, never git's — the same swallow #264 fixed for `git cherry`
-  # above. A `git worktree list` that dies yielded an empty $wt, which skipped
-  # the whole `[ -n "$wt" ]` block below — the dirty check, the ignored-files
-  # check and the removal — and fell through to `git branch -D`, whose own
-  # refusal was then reported as "branch delete failed": a label naming the
-  # last step rather than the fault, while git's `fatal:` reached the terminal
-  # and never the payload the caller parses. An unanswerable probe authorizes
-  # nothing, the same fail-closed direction the cherry check above takes.
-  if ! wt_list=$(git worktree list --porcelain 2>&1); then
-    keep "$b" "worktree lookup failed — cannot tell whether this branch has a worktree: $(printf '%s' "$wt_list" | tr '\n' ' ')"
-    continue
-  fi
   # The path is the whole rest of the line, never awk's $2: `worktree list
   # --porcelain` prints it raw, so a checkout living under a directory with a
   # space in it — ordinary on macOS — was otherwise truncated at the first
   # one, and every check below then ran against a wrong, nonexistent path.
-  # The 2>&1 above folds git's diagnostics into $wt_list, and none of them can
-  # match these two anchors: git prefixes them `warning:`/`error:`/`fatal:`.
-  wt=$(printf '%s\n' "$wt_list" |
+  #
+  # This pipeline DOES take awk's status rather than git's, the swallow #264
+  # fixed for `git cherry` above — left deliberately. Making it fail closed is
+  # a control-flow change, not a message one: measured, a dying
+  # `git worktree list` leaves $wt empty, and a merged [gone] branch with no
+  # worktree is then reaped by `git branch -D`, which needs no answer from the
+  # registry. Keeping it instead strands every [gone] branch in the sweep, and
+  # #391's ruling was to report the state, not to change what gets reaped. The
+  # half that IS a message change is already made: a branch that does have a
+  # worktree still reaches `git branch -D` and still refuses, and that refusal
+  # now carries git's own `used by worktree at …` instead of a bare label. #622
+  wt=$(git worktree list --porcelain |
        awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}')
 
   if [ -n "$wt" ]; then
