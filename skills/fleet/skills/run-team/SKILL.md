@@ -828,6 +828,15 @@ nothing leaves it no gate at all.
 > (measured). A green suite says nothing about a new test: one pin this run
 > survived the exact mutation it was named for.
 >
+> **Commit BEFORE you mutate, and restore with `cp`, never a git discard.**
+> `git checkout -- <file>` reverts the whole file, not your mutant — so it also
+> eats uncommitted edits you made earlier, and the "clean baseline" you measure
+> next is silently the reverted file. Two members hit this in one run; one lost
+> prose edits and caught it only because a non-catch control failed. Copy the
+> file aside and copy it back. Better still, mutate a copy under
+> `<scratch>/pr<N>/mutate/` and leave the worktree untouched — that is what
+> refuters are already required to do, and it has no blast radius at all.
+>
 > **Report LAST, and only once nothing can still change.** A report you have
 > sent **pins that SHA** for the controller, which dispatches a finisher against
 > it. If a further instruction arrives after you have reported, reply saying the
