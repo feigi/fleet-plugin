@@ -227,3 +227,25 @@ test(
     assert.equal(r.status, 2, r.stderr.slice(-300));
   },
 );
+
+// #365: board.mjs's known set is the UNION over both subcommands, so every
+// name in it has to survive a run of either one. Driven on `build` because
+// runBoard already has the rig; --port/--open are read only by serve() and are
+// accepted-and-ignored here, which is the pre-existing gap board.mjs's own
+// comment names and #365 does not close.
+//
+// A name dropped from that set refuses an invocation board.mjs accepts, and
+// every other test in both board suites passes a subset — this is the only one
+// that would go red.
+test("every flag board.mjs accepts survives the unknown-flag sweep in one build", () => {
+  const r = runBoard([
+    "--prev", "nope.json",
+    "--spend-since", String(Date.now() - 3_600_000),
+    "--interval", "42",
+    "--port", "0",
+    "--open",
+  ]);
+  assert.equal(r.status, 0, `a working invocation was refused: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /unknown flag/);
+  assert.equal(JSON.parse(r.stdout).interval, 42);
+});
