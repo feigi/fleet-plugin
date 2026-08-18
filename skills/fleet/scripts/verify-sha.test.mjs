@@ -205,8 +205,9 @@ test("a failed fetch is fatal — the script stops rather than answering off a s
   // `doesNotMatch` on some later guard's message, it does not depend on which of
   // them happens to fire, or on how it is worded.
   const w = repo(t);
-  // One fixture: #565 measured a bad URL and a removed remote to be byte-identical
-  // here, and this test is about the guard's fatality, not about telling causes apart.
+  // One fixture: a bad URL and a removed remote both take this guard's `|| die`
+  // branch, differing only in git's own line — the distinction #565 pinned next
+  // door. This test is about the guard's fatality, not about telling causes apart.
   git(w, "remote", "set-url", "origin", "/nonexistent/path.git");
 
   const { code, json, stderr } = verify(w, "main", "0".repeat(40));
