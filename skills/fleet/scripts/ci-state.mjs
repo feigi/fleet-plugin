@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { makeDie, makeArg, makeHas } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
 
 const NAME = "ci-state";
 
@@ -28,6 +28,7 @@ const NAME = "ci-state";
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
+const sweep = makeSweep(die);
 
 // --quiet suppresses the diagnostic stream (command echoes, per-job/per-field
 // lines) and drops the raw job list from the payload. The controller's CI
@@ -111,6 +112,19 @@ const workflow = arg("workflow") || "CI";
 // other option here already uses, rather than a repo-committed marker file
 // that would sit uncommitted or drift stale.
 const declareNoCi = has("declare-no-ci");
+
+// #365: every flag above is read by looking for its own name, so a name
+// nothing reads was never looked for — `--basee main` left `base` on its
+// default and this file returned a real, wrong verdict at exit 0/1. That is
+// the verdict the fleet gates PR-green on. Placed below the reads, per
+// arg.mjs, so `--base --quiet` keeps #169's "--base needs a value"; still
+// above the first gh call, which is the next statement.
+//
+// The set is every name this file reads, `--workflow-file` included even
+// though its arg() call sits further down in discoverWorkflowFile()'s caller
+// — the sweep needs the NAME, not the read site. A name missing here refuses
+// a working invocation, which is worse than the bug being fixed.
+sweep(["pr", "base", "workflow", "workflow-file", "declare-no-ci", "quiet"]);
 
 // --- PR facts -------------------------------------------------------------
 const prInfo = runJson(
