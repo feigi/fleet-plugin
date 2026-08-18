@@ -160,15 +160,25 @@ for (const { script, argv, stray } of STRAYS) {
 // Written against a throwaway consumer rather than a real script so the four
 // cases are visible in one place — the real call sites are pinned by the
 // matrix above and by their own suites' accept tests.
+//
+// The probe calls sweep BEFORE arg(), which is the reverse of what the call
+// sites do, and deliberately: with arg() first it dies on `--base=main` on its
+// own, so the `=` case below asserts arg()'s behaviour and pins nothing about
+// the sweep — measured, it stayed green with the `=` split deleted. Sweep-first
+// is also the real ordering wherever the flag's own arg() runs later, which is
+// every board.mjs flag and ci-state's --workflow-file.
+//
+// The below-the-guards ordering the call sites use is not pinned here but
+// behaviourally, by diff-stats.test.mjs's `--pr --json` case: measured, hoisting
+// diff-stats.mjs's sweep above its `if (!pr)` guard turns that red.
 function runSweep(argv) {
   const dir = mkdtempSync(join(tmpdir(), "arg-sweep-unit-"));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie, makeArg, makeSweep } from "./arg.mjs";',
     'const die = makeDie("probe");',
-    'const arg = makeArg(die);',
-    'const value = arg("base");',
     'makeSweep(die)(["base", "quiet"]);',
+    'const value = makeArg(die)("base");',
     'console.log(`ok base=${value}`);',
     "",
   ].join("\n"));
