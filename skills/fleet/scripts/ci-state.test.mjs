@@ -539,8 +539,9 @@ test("in-progress job with conclusion:null is accepted — not refused as malfor
 
 // #365's other half. The sweep refuses any `--` token not in this script's
 // known set, so a name missing from that set refuses an invocation this script
-// accepts — "worse than the bug" by the ticket's own words, and invisible to
-// every test above, each of which passes a subset.
+// accepts — "worse than the bug" by the ticket's own words. Measured, dropping
+// `base` or `workflow` reddens THIS test and nothing else; the other four names
+// also redden tests above, which happen to pass them.
 //
 // So: every flag ci-state.mjs accepts, in ONE green run. --workflow-file is the
 // one that would not otherwise be here, because its arg() call sits far below
@@ -555,6 +556,5 @@ test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one inv
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
   });
   assert.equal(r.status, 0, `a working invocation was refused: ${r.stderr}`);
-  assert.doesNotMatch(r.stderr, /unknown flag/);
   assert.equal(r.payload.verdict, "green");
 });

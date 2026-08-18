@@ -116,10 +116,25 @@ export function makeHas(die) {
 // not the stray behind it. Nothing above those guards runs a query, so it is
 // still a refusal before gh.
 //
+// One deliberate exception: board.mjs sweeps ABOVE its `cmd`, for the reason
+// its own comment gives — so `board.mjs --prot 9000` names the stray rather
+// than printing the usage line for a missing subcommand. The cost is that
+// `build --ledger --bogus` gets this generic wording instead of "--ledger
+// needs a value"; both exit 2, both name a real error, both refuse before gh.
+//
 // candidates.mjs deliberately does NOT route through this. It accepts no
 // positionals, so its parseArgs (#173) additionally refuses a bare
 // `candidates.mjs ready-for-agent` — which this cannot, board.mjs's
 // subcommands being exactly that shape. Strictly stronger there; leave it.
+//
+// ledger.mjs is left out for the opposite reason: its `check`/`filed` take a
+// FREE-TEXT tail, where a `--` token is legitimately DATA — `check
+// "--require-file silently absent when value missing"` works today and is the
+// shape of issue titles in this repo — so this sweep would refuse working
+// invocations, which #365's own AC calls worse than the bug. The cost is that
+// a stray flag in that tail is still absorbed into the duplicate-filing
+// subject at exit 0. Measured, unowned since #362 closed without covering it,
+// and tracked in #584; do not close it with a bare `startsWith("--")` guard.
 export function makeSweep(die) {
   return function sweep(known) {
     for (const a of process.argv.slice(2)) {

@@ -234,9 +234,13 @@ test(
 // accepted-and-ignored here, which is the pre-existing gap board.mjs's own
 // comment names and #365 does not close.
 //
-// A name dropped from that set refuses an invocation board.mjs accepts, and
-// every other test in both board suites passes a subset — this is the only one
-// that would go red.
+// A name dropped from that set refuses an invocation board.mjs accepts. Other
+// tests pass most of these names too and redden alongside — measured, all six
+// do, so this is NOT the only row that would go red. What it adds is the WHOLE
+// set in a single run: `--prev` appears elsewhere only as the value placeholder
+// in board.test.mjs's `--ledger followed by another flag` case, incidental
+// cover a rename would remove, and a name added to the set later has exactly
+// one row obliged to carry it.
 test("every flag board.mjs accepts survives the unknown-flag sweep in one build", () => {
   const r = runBoard([
     "--prev", "nope.json",
@@ -246,6 +250,12 @@ test("every flag board.mjs accepts survives the unknown-flag sweep in one build"
     "--open",
   ]);
   assert.equal(r.status, 0, `a working invocation was refused: ${r.stderr}`);
+  // NOT subsumed by the status assertion above: gather() reaches ledger.mjs
+  // through tryRun(), which forwards the child's stderr and then swallows its
+  // failure, so a fleet sibling refusing a flag board.mjs passed it lands on
+  // this stderr at exit 0 (measured). ledger.mjs still parses --file by hand,
+  // so that skew is live, not hypothetical. ci-state.test.mjs's sibling test
+  // carried this same line and there it WAS subsumed — dropped, not forgotten.
   assert.doesNotMatch(r.stderr, /unknown flag/);
   assert.equal(JSON.parse(r.stdout).interval, 42);
 });

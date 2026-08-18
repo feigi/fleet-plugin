@@ -408,8 +408,8 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
 async function main() {
   // #365: a misspelled flag was never looked for, so `serve --prot 9000`
   // served on the default 8123 in silence. In main(), not at module scope:
-  // serve()/createBoardServer()/gather() are imported by board.test.mjs, and
-  // a module-scope sweep would read the TEST RUNNER's argv.
+  // board.test.mjs and board-cli.test.mjs both import from this module, so a
+  // module-scope sweep would read the TEST RUNNER's argv.
   //
   // One set for both subcommands, deliberately. `--port`/`--open` are read
   // only by serve() and `--prev` only by build, so `build --port 5` is

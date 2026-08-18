@@ -140,9 +140,10 @@ function main() {
   // good `--pr` (`--pr 5 --base main`), and that is what this closes.
   //
   // Inside main(), never at module scope: computeStats() is imported by
-  // review-pr's snapshot path and by this file's own tests, and a
-  // module-scope sweep would read the IMPORTER's argv. Below the guard above,
-  // so `--pr --json` keeps #169's "--pr needs a value".
+  // diff-stats.test.mjs and select-dimensions.test.mjs, and a module-scope
+  // sweep would read the IMPORTER's argv. (review-pr runs this script as a
+  // CLI subprocess with its own argv, so it is not one of those importers.)
+  // Below the guard above, so `--pr --json` keeps #169's "--pr needs a value".
   sweep(["pr"]);
 
   // Parsed through a guard, not bare. gh can exit 0 with a non-JSON body — a

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { readFileSync, writeFileSync, mkdtempSync, chmodSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -126,8 +126,7 @@ const STRAYS = [
 function stubGhBin() {
   const dir = mkdtempSync(join(tmpdir(), "arg-sweep-"));
   const receipt = join(dir, "gh-was-called");
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> ${receipt}\nexit 1\n`);
-  chmodSync(join(dir, "gh"), 0o755);
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> ${receipt}\nexit 1\n`, { mode: 0o755 });
   return { dir, receipt };
 }
 
