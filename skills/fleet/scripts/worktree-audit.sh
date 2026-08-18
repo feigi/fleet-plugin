@@ -19,6 +19,19 @@
 # genuinely empty worktree. #82, #128.
 set -eu
 
+# Byte semantics for every `tr`, `sed`, `awk` and `grep` below. Under a UTF-8
+# locale these reject or mangle a byte that is not valid UTF-8 — BSD tr exits 1
+# outright — and every one of them here is fed worktree paths and the file names
+# `git status --porcelain` prints, both parsed by `awk`, which
+# can carry such a byte from a fetched tree even where the local filesystem
+# refuses to hold the name. #582 measured the cost of leaving it ambient in
+# no-undo-audit.sh: a truncated list reported as a clean, confident answer.
+#
+# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
+# range or a POSIX class, so collation and case-folding — the two things
+# `LC_ALL=C` otherwise changes — have nothing here to act on.
+export LC_ALL=C
+
 NAME=worktree-audit
 die() { echo "$NAME: $1" >&2; exit 2; }
 # One unknown state, one place: null counts, readable:false, one reason. Four
