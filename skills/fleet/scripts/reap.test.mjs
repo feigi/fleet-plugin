@@ -1049,3 +1049,39 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
   assert.equal(branchExists(w, "feature/merged"), true);
   assert.equal(readFileSync(counter, "utf8"), "2", "fixture: the probe really was the call that got starved");
 });
+
+// Same reason as the cherry-probe pin above, and the same derivation: the
+// script-surface table is what a reader trusts about a script settings.json's
+// autoMode allowlist runs unattended, and #264 spent its whole life with that
+// table asserting the bug as the behaviour. The two state phrases are the part
+// a reader would otherwise have to guess at, so they are taken from real runs
+// rather than typed here — a hand-copied phrase drifts exactly the way the row
+// did.
+test("the design spec's script-surface row carries both refusal states this script emits (#391)", (t) => {
+  const states = ["locked", "symlink"].map((shape) => {
+    const w = repo(t, `w-${shape}`);
+    const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+    if (shape === "locked") git(w, "worktree", "lock", wt);
+    else symlinkStandIn(wt);
+
+    const { json } = runReap(w, ["--apply"]);
+    assert.equal(json.kept.length, 1, `fixture (${shape}) must reach the removal refusal`);
+    // The parenthesised state only — the path and git's message are the
+    // machine's to vary and no document can carry them.
+    const m = /^worktree remove refused \(([^)]*?)(?: —.*)?\)/.exec(json.kept[0].reason);
+    assert.ok(m, `fixture (${shape}) must produce the refusal reason: ${json.kept[0].reason}`);
+    return m[1];
+  });
+
+  assert.notEqual(states[0], states[1], "the two refusals must not report the same state");
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  for (const state of states) {
+    assert.ok(row.includes(state), `the spec row must quote the refusal state verbatim, and does not carry "${state}".\nrow: ${row}`);
+  }
+});
