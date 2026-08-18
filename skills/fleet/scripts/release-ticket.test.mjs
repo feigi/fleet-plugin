@@ -1071,8 +1071,25 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   assert.equal(none.code, 2);
   assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git worktree remove refused/);
   assert.doesNotMatch(none.stderr, /PARTIALLY/, "no part of the release landed, so none was released");
-  assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
-  assert.equal(none.out, receipt(`git worktree remove refused ${wt}: refused by the git shim`));
+  // The measured outcome, not the exit code: the shim refuses before real git
+  // runs, so the registration and the directory really are both still there and
+  // `Unreleased` is what the probe finds. The half that is a call log still
+  // reads as one — the line is deliberately uneven, because `git branch -d`
+  // lands atomically and `git worktree remove` does not.
+  assert.ok(
+    none.stderr.includes(`worktree ${wt} is Unreleased — registration and directory both still present`),
+    `the detail line must name the measured state: ${none.stderr}`,
+  );
+  assert.match(none.stderr, /branch deleted: false, in-progress: still on the issue/, "and the branch half stays a boolean");
+  assert.doesNotMatch(none.stderr, /worktree removed:/, "the worktree half is no longer a boolean");
+  assert.equal(
+    none.out,
+    receipt(
+      `git worktree remove refused ${wt}: refused by the git shim` +
+        ` — worktree ${wt} is Unreleased — registration and directory both still present`,
+    ),
+    "and the receipt carries the outcome in the blocker, the one field a caller without stderr can read",
+  );
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "and that headline is the truth");
 
   // One artefact gone and the next refused — one of the two shapes a partial
@@ -1084,8 +1101,18 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   const partial = release(r, c, { env: { GIT_FAIL: "branch -d" } });
   assert.equal(partial.code, 2);
   assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git branch -d refused/);
-  assert.match(partial.stderr, /worktree removed: true, branch deleted: false/, "the detail line agrees");
-  assert.equal(partial.out, receipt("git branch -d refused fix/9-release-ticket: refused by the git shim"));
+  assert.ok(
+    partial.stderr.includes(`worktree ${wt} is Released — registration and directory both gone`),
+    `a removal that returned 0 really did both deletes: ${partial.stderr}`,
+  );
+  assert.match(partial.stderr, /branch deleted: false, in-progress: still on the issue/, "the detail line agrees");
+  assert.equal(
+    partial.out,
+    receipt(
+      "git branch -d refused fix/9-release-ticket: refused by the git shim" +
+        ` — worktree ${wt} is Released — registration and directory both gone`,
+    ),
+  );
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: true }, "the removal really did land");
 });
 
@@ -1113,7 +1140,11 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.equal(none.code, 2);
   assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -d refused/);
   assert.doesNotMatch(none.stderr, /PARTIALLY/, "the same call site as the partial case above, and nothing landed");
-  assert.match(none.stderr, /worktree removed: false, branch deleted: false/, "the detail line agrees");
+  assert.match(none.stderr, /branch deleted: false, in-progress: still on the issue/, "the detail line agrees");
+  // No worktree line at all. `Unreleased` means registration and directory both
+  // still present, and this claim has no worktree of ours to say that about —
+  // the starting value may not be reported as a measurement that was taken.
+  assert.doesNotMatch(none.stderr, /is Unreleased/, "no state is asserted about a worktree that is not there");
   assert.equal(
     none.out,
     '{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"","worktreeRewritten":false,"label":true,' +
@@ -1126,7 +1157,8 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   const partial = release(r, c, { env: { GH_EDIT_RC: "1" } });
   assert.equal(partial.code, 2);
   assert.match(partial.stderr, /#9 PARTIALLY RELEASED — could not drop in-progress from issue 9/);
-  assert.match(partial.stderr, /worktree removed: false, branch deleted: true/, "the detail line agrees");
+  assert.match(partial.stderr, /branch deleted: true, in-progress: still on the issue/, "the detail line agrees");
+  assert.doesNotMatch(partial.stderr, /is Unreleased/, "still no worktree of ours to report a state for");
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "the branch really did go");
 });
 

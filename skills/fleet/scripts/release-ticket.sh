@@ -163,6 +163,11 @@ listed=$(printf '%s\n' "$wt_list" | grep -c '^worktree ' || true)
 wt=$(printf '%s\n' "$wt_list" |
      awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}')
 main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}')
+# The main checkout's path, and the anchor the orphan probe below reconstructs a
+# claim's directory from. Off git's own listing rather than $PWD: this script is
+# routinely run from inside a member's worktree, where a cwd-relative
+# ".worktrees/..." names nothing.
+main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit}')
 
 # claim-ticket.sh creates the worktree on this branch, but it does not stay
 # there: an interrupted rebase leaves it detached, and a member can switch it.
@@ -212,28 +217,59 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # nothing at all out of the one case where it most needs to know what happened.
 # Enumerate what landed, name the compensating action, still emit the receipt.
 #
-# The two booleans decide the headline, never the call site: the first mutation
+# WHAT LANDED decides the headline, never the call site: the first mutation
 # attempted — the worktree removal when there is one, `git branch -d` when the
-# registration is already cleared — refuses with both still false, and
-# announcing a partial release over an all-false detail line overstates exactly
-# the state this script exists to report precisely. A partial release is a
-# refusal that followed a successful mutation. Distinct again from the blocked
-# message that reports refused preconditions, which means nothing was ATTEMPTED.
+# registration is already cleared — refuses with nothing landed, and announcing
+# a partial release over that overstates exactly the state this script exists to
+# report precisely. A partial release is a refusal that followed a successful
+# mutation. Distinct again from the blocked message that reports refused
+# preconditions, which means nothing was ATTEMPTED.
 #
-# They track THIS script's successful calls, not the filesystem: `worktree
-# remove` can clear the registration and still fail to delete the directory,
-# leaving done_wt false with the registration already gone (git 2.50.1).
-done_wt=false
+# The two are NOT a matched pair, and one evenly-shaped detail line asserted
+# that they were. `git branch -d` updates a ref, which lands or does not, so a
+# boolean call log answers for it completely. `git worktree remove` has TWO
+# effects and drops them in order: it deletes the registration before the
+# directory and does not put the registration back when the directory delete
+# fails (measured, git 2.50.1). Its exit code therefore answers for neither, and
+# `nothing landed` over a cleared registration was a positive assertion that was
+# false. So `wt_outcome` carries a measured release outcome — CONTEXT.md's four
+# states — taken by `release_outcome` after the call rather than read off its rc.
+#
+# `Unreleased` to start because nothing has been attempted yet, and the line is
+# not printed at all when this claim has no worktree of ours: a state whose
+# definition is "registration and directory both still present" may not be
+# asserted about a worktree that was never there.
+wt_outcome=Unreleased
 done_branch=false
 halt() {
-  if [ "$done_wt" = true ] || [ "$done_branch" = true ]; then
+  if [ -n "$wt" ]; then
+    case $wt_outcome in
+      Unreleased) landed="registration and directory both still present";;
+      Deregistered) landed="the registration is cleared, the directory is still on disk";;
+      Released) landed="registration and directory both gone";;
+      *) landed="what the removal landed could not be measured";;
+    esac
+    wt_report="worktree $wt is $wt_outcome — $landed"
+  fi
+  # The receipt carries the outcome in the blocker string, the one field a
+  # caller that never sees stderr can read it out of. No new key: nothing in the
+  # repo parses this payload, so a field would be shape for no consumer.
+  detail=$1
+  [ -z "$wt" ] || detail="$1 — $wt_report"
+  if [ "$wt_outcome" = Deregistered ] || [ "$wt_outcome" = Released ] || [ "$done_branch" = true ]; then
     echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+  elif [ "$wt_outcome" = Indeterminate ]; then
+    # Neither headline. Asserting `nothing landed` here would be the original
+    # defect with a different trigger, and asserting a partial release would
+    # invent one; the operator is told the measurement failed instead.
+    echo "$NAME: #$issue HALTED mid-release — what landed could not be measured: $1" >&2
   else
     echo "$NAME: #$issue HALTED mid-release — nothing landed: $1" >&2
   fi
-  echo "    worktree removed: $done_wt, branch deleted: $done_branch, in-progress: still on the issue" >&2
+  [ -z "$wt" ] || echo "    $wt_report" >&2
+  echo "    branch deleted: $done_branch, in-progress: still on the issue" >&2
   echo "    the ticket still reads as taken — finish or restore it by hand" >&2
-  blocker_j=$(jstr "$1") || die "could not escape the halt blocker for #$issue"
+  blocker_j=$(jstr "$detail") || die "could not escape the halt blocker for #$issue"
   printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":%s,"released":false,"applied":true,"blockers":["%s"]}\n' \
     "$issue" "$branch_j" "$branch_rw" "$wt_j" "$wt_rw" "$has_label" "$blocker_j"
   exit 2
@@ -355,6 +391,59 @@ unresolved_head() {
       END{exit !(nullhead && !hasbranch)}'
 }
 
+# Is anything at all occupying $1? Not the same question as `gone`, which asks
+# whether an absence is established; this one asks whether the path is taken.
+# `-e` alone FOLLOWS symlinks, so a DANGLING one reads as absent while it still
+# occupies the path and still fails the next `git worktree add` — and that is
+# residue this very script can leave: `git worktree remove` against a symlink
+# standing in for the worktree directory deletes the target THROUGH the link and
+# returns 0, leaving the link behind (measured, git 2.50.1). Same reason the
+# non-directory precondition below tests -L separately.
+occupied() { [ -e "$1" ] || [ -L "$1" ]; }
+
+# Which release outcome does $1 hold after a `git worktree remove` that refused?
+# Measured, never inferred from the rc — that inference is this file's #208.
+# git drops the registration BEFORE the directory and does not restore it when
+# the directory delete fails, so one call has three landing shapes and the exit
+# code separates none of them. All measured on git 2.50.1:
+#
+#   dirty worktree                     rc 128, registration and directory kept
+#   symlink standing in for the dir    rc 255, registration CLEARED, path kept
+#   unwritable .git/worktrees          rc 255, registration and directory gone
+#
+# A FRESH listing, never `wt_list`: that one was captured before any mutation,
+# so answering from it would re-read the state this function exists to
+# re-measure. Read with the same ENVIRON-keyed awk `locked` uses, and for the
+# same reason — a `-v` assignment mangles a backslash in the path, and the
+# comparison then falls to the permissive answer.
+#
+# The tri-valued directory probe is `occupied` composed with `gone`, exactly the
+# pairing `gone`'s own contract prescribes for a caller that needs present and
+# cannot-stat apart. No second predicate and no third value inside `gone`: the
+# three copies of it are pinned byte-identical, and this file already carries
+# two answers on unreadable worktrees (#83) from a concept that got duplicated.
+#
+# Only the four named states, so the two cells CONTEXT.md has no name for are
+# not asserted: a registration that survived a directory that did not is
+# reported Indeterminate rather than squeezed into Unreleased, whose definition
+# is that BOTH are still present.
+release_outcome() {
+  if ! now=$(git worktree list --porcelain); then
+    # The listing is how the registration is read, so a listing git could not
+    # produce leaves the registration unknown — not absent.
+    echo Indeterminate
+  elif printf '%s\n' "$now" |
+       P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}'; then
+    if occupied "$1"; then echo Unreleased; else echo Indeterminate; fi
+  elif occupied "$1"; then
+    echo Deregistered
+  elif gone "$1"; then
+    echo Released
+  else
+    echo Indeterminate
+  fi
+}
+
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
 fi
@@ -398,6 +487,49 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
     block "worktree $stray is this claim's but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand"
   else
     block "worktree $stray is this claim's but is not on $branch — release it by hand"
+  fi
+fi
+
+# An Orphaned worktree directory: this claim's directory still on disk with its
+# registration already cleared. `stray` cannot see it BY CONSTRUCTION — it is
+# awk over git's registry, and there is no registration left to match — so the
+# run after a Deregistered halt found no `wt` and no `stray`, deleted the
+# branch, dropped the label and exited 0 with `"released":true,"blockers":[]`
+# over a directory that is still there. The next `claim-ticket.sh` for the slug
+# then died on it (`[ -e "$wt" ] && die`), with nothing left to explain why.
+#
+# So probe the path directly instead of through the registry, reconstructed from
+# the same `<issue>-<slug>` pairing `stray` matches on. Anchored at the main
+# checkout, since claim-ticket.sh writes `.worktrees/$issue-$slug` relative to
+# its own cwd — a claim made from anywhere but the repo root is outside this
+# probe's reach, which is a miss and never a false refusal.
+#
+# In the PRECONDITION block deliberately, not in the mutation path: here the dry
+# run predicts the refusal for free, where placed below it would report only
+# under --apply and rebuild the dry/apply asymmetry #86, #385 and #386 were
+# filed against.
+#
+# Gated on this claim having no registration of ours. With `wt` or `stray` set
+# the directory IS registered and a guard above owns it — which is what keeps a
+# healthy claim, whose worktree sits at exactly this path, from blocking here.
+#
+# The remedy is a manual removal and deliberately never `git worktree prune`:
+# prune clears registrations, and the defining property of this state is that
+# there is no registration left to clear, so naming it would hand the operator a
+# command that cannot work and every later run would block identically — the
+# permanent refusal the stray guard above describes for the mirror-image case.
+# Nor an automatic delete: a refusal is a finding to report, and nothing here
+# has inspected what is in that directory.
+#
+# Absence is ESTABLISHED by `gone`, never inferred from `occupied` alone, for
+# the reason the dirty check gives: read as "no orphan", a `.worktrees` this
+# script may not search would release the claim over one.
+if [ -z "$wt" ] && [ -z "$stray" ]; then
+  orphan="$main_wt/.worktrees/$issue-$slug"
+  if occupied "$orphan"; then
+    block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
+  elif ! gone "$orphan"; then
+    block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
   fi
 fi
 
@@ -621,10 +753,19 @@ else
     # appeared that the checks above did not see, so naming a cause here would
     # be a guess.
     echo "\$ git worktree remove $wt" >&2
-    if ! err=$(git worktree remove "$wt" 2>&1); then
+    rc=0
+    err=$(git worktree remove "$wt" 2>&1) || rc=$?
+    # Measure on the REFUSAL only. git's two deletes are ordered, not atomic, so
+    # a non-zero rc tells us a step failed and nothing about which — that is the
+    # whole of #208. A zero rc is different in kind: both deletes completed, and
+    # `Released` restates git's own success rather than inferring past a
+    # failure. Re-measuring here would also make the happy path answerable by a
+    # probe that can return Indeterminate, refusing releases that plainly worked.
+    if [ "$rc" -ne 0 ]; then
+      wt_outcome=$(release_outcome "$wt")
       halt "git worktree remove refused $wt: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
-    done_wt=true
+    wt_outcome=Released
   fi
 
   if [ "$has_branch" = true ]; then
