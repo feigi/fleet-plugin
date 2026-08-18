@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1643,4 +1643,32 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   assert.equal(json.released, true);
   assert.equal(code, 0);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+// --- #119: the escaping library this script now sources rather than carries.
+//
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. This script's contract defines 0 and 2 only, so a bare 1 is a code
+// no caller knows how to read. Worse, the guard must fire BEFORE anything is
+// deleted: an abort partway through the release is the "partially released"
+// state `halt` exists to report, and a missing file must never reach it.
+test("a missing json.sh is exit 2, before anything is deleted", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 5, "thing");
+  const lone = mkdtempSync(join(tmpdir(), "release-ticket-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "release-ticket.sh"));
+
+  const res = spawnSync("sh", [join(lone, "release-ticket.sh"), ...c.args, "--apply"], {
+    cwd: r.w, env: r.env(), encoding: "utf8",
+  });
+
+  assert.equal(res.status, 2,
+    "a missing library is a refusal, not a verdict — this script's contract has no exit 1 at all");
+  assert.match(res.stderr, /json\.sh/, "and it names the file rather than leaving the operator to guess");
+  assert.equal(res.stdout, "", "no receipt: nothing was released");
+  assert.ok(existsSync(c.wt),
+    "and the worktree is still there — the guard fires ahead of every mutation, so this is a clean refusal and not a partial release");
 });

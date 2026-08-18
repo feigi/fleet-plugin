@@ -47,6 +47,26 @@ export LC_ALL=C
 NAME=release-ticket
 die() { echo "$NAME: $1" >&2; exit 2; }
 
+
+# The escaping helpers, shared with inflight.sh and no-undo-audit.sh rather
+# than copied into each (#119). Below `export LC_ALL=C` deliberately:
+# locale-pin-prose.test.mjs requires every line above that pin to be a comment,
+# a blank, a shebang or a `set -` line, and this is none of them.
+#
+# `[ -r ]` ahead of the `.`, not `. … || die` alone. `.` is a POSIX special
+# builtin: failing to open its operand aborts a non-interactive shell outright,
+# so the `||` never runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and
+# `bash --posix` all exit 1 on a missing file with the guard unfired, dash
+# exits 2, and only bash 5.3 reaches the `||`. This script has no exit-1
+# verdict to fabricate the way inflight.sh does, but a bare 1 out of it is
+# still a code its own contract does not define. The `|| die` stays for what
+# `[ -r ]` cannot see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to act without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
+
 [ $# -ge 3 ] && [ $# -le 4 ] || die "usage: release-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
@@ -170,62 +190,12 @@ if [ "$has_branch" = false ] && [ -z "$wt" ] && [ -z "$stray" ]; then
   die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
 fi
 
-# Every string that reaches the JSON goes through here. <slug> and <type> are
-# caller-supplied and git's own stderr is quoted back verbatim, so without it a
-# single `"` or backslash anywhere emits a payload the caller cannot parse —
-# while the delete has already happened and the exit code still says success.
-#
-# Backslash first, always — escaping the quote (or a short form below) before
-# the backslash rule runs turns the backslash IT just introduced into `\\` on
-# the second pass, so every rule that adds a backslash has to come after this
-# one. The five C0 bytes RFC 8259 gives a two-character short form — \010 \011
-# \012 \014 \015 (\b \t \n \f \r) — get theirs; BS and FF are matched as a
-# literal byte spelled with `printf`, never as `\b` or `\f`. Neither spelling
-# matches \010, and neither fails quietly: `\b` in a BRE is a zero-width word
-# BOUNDARY to GNU sed and a literal `b` to BSD sed, so the rule would insert
-# `\b` at every word edge on one and mangle every letter `b` on the other
-# (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0 byte and JSON
-# permits it unescaped, so — unlike every version of this helper before #146 —
-# it is left alone. Every remaining byte below \040 has no short form, \013 (VT)
-# included: RFC 8259 lists exactly the five above and `\v` is not among them. A
-# worktree directory may carry such a byte where a branch may not (git rejects
-# them in a ref, so `stray` — matched on the directory name — is the way in); tr
-# turns it into a space, and jrewritten (below) is how a caller finds out that
-# happened, since a replaced value is not the original bytes and must not be
-# treated as a real path or ref. Byte-safe for the UTF-8 in these messages,
-# whose bytes are all >= \200. tr pads the replacement with its last character.
-#
-# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
-# runs, so a literal newline in $1 is data the LF rule can reach rather than a
-# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
-# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
-# EOF with nothing to append and discards the pattern space instead of printing
-# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
-# `N;$!ba` prints nothing at all for a single-line value.
-jstr() {
-  printf '%s' "$1" \
-    | sed -e ':a' -e '$!N' -e '$!ba' \
-        -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-        -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
-        -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
-    | tr '\001-\007\013\016-\037' ' '
-}
-
-# True iff $1 held a byte jstr had to replace rather than escape — every C0
-# byte except \010 \011 \012 \014 \015 (BS, tab, LF, FF, CR: escaped above,
-# never replaced) and \177 (DEL: preserved, never replaced). `$()` strips
-# trailing newlines off both sides, and \012 is the one byte it strips: it is
-# not in the delete set, so the same suffix comes off `raw` and `orig` and the
-# strip can neither manufacture a difference nor hide one. An `X` sentinel
-# appended to both sides stood here for that job and did nothing — measured
-# across every arrangement of these bytes, it changed no answer — so it is gone
-# rather than defended.
-jrewritten() {
-  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
-  orig=$(printf '%s' "$1")
-  [ "$raw" = "$orig" ] && printf false || printf true
-}
-
+# Every string that reaches the JSON goes through `jstr` from json.sh. <slug>
+# and <type> are caller-supplied and git's own stderr is quoted back verbatim,
+# so without it a single `"` or backslash anywhere emits a payload the caller
+# cannot parse — while the delete has already happened and the exit code still
+# says success. The rule list and its ordering live in json.sh, once, rather
+# than here and in inflight.sh and in no-undo-audit.sh (#119).
 # A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
 # itself: a substitution that fails contributes an EMPTY argument and printf
 # still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,

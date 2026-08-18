@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1640,4 +1640,30 @@ test("the design spec's script-surface row names every field the payload actuall
   // four new flags be dropped again while this test stayed green.
   const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(out));
   assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
+});
+
+// --- #119: the escaping library this script now sources rather than carries.
+//
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. This script's contract has no exit 1 at all (0 safe, 1 refused, 2
+// unanswerable — and "refused" here means a dirty worktree it actually looked
+// at), so a bare 1 out of a missing file would claim a measurement that never
+// happened. The `[ -r ]` ahead of the `.` is what makes it a 2.
+test("a missing json.sh is exit 2, not a verdict about the worktree", (t) => {
+  const c = repo(t);
+  const lone = mkdtempSync(join(tmpdir(), "no-undo-audit-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "no-undo-audit.sh"));
+
+  const r = spawnSync("sh", [join(lone, "no-undo-audit.sh"), c.w, c.branch], {
+    cwd: c.w, env: ENV, encoding: "utf8",
+  });
+
+  assert.equal(r.status, 2,
+    "a missing library is `the question could not be answered`. Exit 0 would call an unexamined worktree safe to rebase, which is the false safe this whole script exists to prevent.");
+  assert.match(r.stderr, /json\.sh/,
+    "and it names the file — this script has many exit-2 paths and the operator should not have to guess which fired");
+  assert.equal(r.stdout, "", "no payload: nothing was measured");
 });
