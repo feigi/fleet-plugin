@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,29 @@ function addWorktree(w, name, base = "origin/main") {
   const wt = join(w, ".worktrees", name);
   git(w, "worktree", "add", "-q", wt, "-b", name, base);
   return wt;
+}
+
+/**
+ * Re-point the registration for `wt` at `dest` and take the real directory away.
+ *
+ * `git worktree list --porcelain` derives the worktree path from the entry's
+ * `gitdir` file, so rewriting that file is how a fixture gets git to name a
+ * path whose FIRST component under `/` does not exist — the one shape
+ * `git worktree add` cannot produce, since it has to create the directory. In
+ * production this is the hand-added worktree outside the checkout whose
+ * ancestor chain was removed (`git worktree add /scratch/wt`, then
+ * `rm -rf /scratch`). The registry entry itself survives, so any
+ * listed-vs-registered count stays balanced.
+ */
+function relocate(w, wt, dest) {
+  const admin = join(w, ".git", "worktrees");
+  const name = readdirSync(admin).find(
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(wt, ".git"),
+  );
+  assert.ok(name, `fixture: no registry entry points at ${wt}`);
+  writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
+  rmSync(wt, { recursive: true, force: true });
+  return dest;
 }
 
 function runAudit(cwd) {
@@ -181,6 +204,26 @@ test("a worktree behind an unreadable parent is unknown, never missing or clean"
   assert.deepEqual(e, { worktree: wt, branch: "fix/9-x", ahead: null, dirty: null, dirtyFiles: [], readable: false });
   assert.match(stderr, /UNREADABLE: .*ancestor could not be read/);
   assert.doesNotMatch(stderr, /MISSING/);
+});
+
+test("a worktree with no surviving ancestor below / is MISSING, never unknown (#178)", (t) => {
+  // The escalation of the case above: there the parent could not be SEARCHED,
+  // which is genuinely unknown. Here every ancestor below `/` is absent — but
+  // `${p%/*}` on `/x` yields the empty string rather than `/`, so the walk fell
+  // out on "" and `[ -x "" ]` answered unknown about a path that is provably
+  // absent with a searchable root. Reported as UNREADABLE it sends a debugger
+  // at permissions that are fine, and hides the entry a prune would clear.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  const dest = relocate(w, wt, "/nonexistent-top-level-178/wt");
+
+  const { code, json, stderr } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, dest);
+  assert.deepEqual(e, { worktree: dest, branch: "fix/9-x", ahead: 0, dirty: 0, dirtyFiles: [], readable: false });
+  assert.match(stderr, /MISSING on disk: \/nonexistent-top-level-178\/wt/);
+  assert.doesNotMatch(stderr, /UNREADABLE/, "an absent path with a searchable root is not an unknown one");
 });
 
 test("a worktree whose .git file is gone is unknown, never clean", (t) => {

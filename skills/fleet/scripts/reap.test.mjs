@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +85,29 @@ function mergedGoneBranchWithWorktree(w, name, msg) {
   git(w, "push", "-q", "origin", "--delete", name);
   git(w, "fetch", "-q", "--prune", "origin");
   return wt;
+}
+
+/**
+ * Re-point the registration for `wt` at `dest` and take the real directory away.
+ *
+ * `git worktree list --porcelain` derives the worktree path from the entry's
+ * `gitdir` file, so rewriting that file is how a fixture gets git to name a
+ * path whose FIRST component under `/` does not exist — the one shape
+ * `git worktree add` cannot produce, since it has to create the directory. In
+ * production this is the hand-added worktree outside the checkout whose
+ * ancestor chain was removed (`git worktree add /scratch/wt`, then
+ * `rm -rf /scratch`). The registry entry itself survives, so any
+ * listed-vs-registered count stays balanced.
+ */
+function relocate(w, wt, dest) {
+  const admin = join(w, ".git", "worktrees");
+  const name = readdirSync(admin).find(
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(wt, ".git"),
+  );
+  assert.ok(name, `fixture: no registry entry points at ${wt}`);
+  writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
+  rmSync(wt, { recursive: true, force: true });
+  return dest;
 }
 
 /**
@@ -467,6 +490,31 @@ test("a worktree behind an unreadable parent is kept, never reaped as clean", (t
   assert.match(stderr, /KEEP feature\/merged — cannot tell whether worktree/);
   assert.equal(branchExists(w, "feature/merged"), true);
   assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+
+test("a worktree with no surviving ancestor below / is reaped, never kept as unanswerable (#178)", (t) => {
+  // The escalation of the case above: there the parent could not be SEARCHED,
+  // which is genuinely unknown and must keep. Here every ancestor below `/` is
+  // absent — but `${p%/*}` on `/x` yields the empty string rather than `/`, so
+  // the walk fell out on "" and `[ -x "" ]` answered unknown for a path that is
+  // provably absent with a searchable root. That kept a merged branch forever
+  // on a directory holding nothing, which is the refusal `gone` exists to end.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const dest = relocate(w, wt, "/nonexistent-top-level-178/wt");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, [], `an absent path with a searchable root is not an unknown one: ${JSON.stringify(json.kept)}`);
+  // The keep's own wording, not just an empty `kept`: any other keep reason
+  // would also leave `reaped` short, so the pair alone does not say which
+  // question was answered wrong.
+  assert.doesNotMatch(stderr, /cannot tell whether worktree/);
+  assert.ok(!stderr.includes(`dirty worktree ${dest}`), "and it is never guessed dirty either");
+  assert.equal(branchExists(w, "feature/merged"), false);
 });
 
 test("a worktree whose .git file is gone is kept, never reaped as clean (#128)", (t) => {
