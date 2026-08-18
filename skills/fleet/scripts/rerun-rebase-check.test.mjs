@@ -168,6 +168,25 @@ const BEHIND_3_CANDIDATES = {
   "jobs-103.json": jobs(203),
 };
 
+// ---- the deployment -----------------------------------------------------
+
+test("the refresh job checks out the repo before the step that runs a file from it", () => {
+  // Not a behaviour test but a deployment one, and the only kind that can
+  // catch this: `runStep` always runs the lifted block from a checked-out
+  // tree, so the whole suite stays green while the runner gets 127 on the
+  // FIRST behind PR and refreshes nothing at all. Lifting inline YAML into a
+  // repo file is a pattern here now, so the next extraction must not be able
+  // to repeat it.
+  const src = readFileSync(WORKFLOW, "utf8").split("\n");
+  const run = src.findIndex((l) => /^\s*run: \|\s*$/.test(l));
+  const checkout = src.findIndex((l) => /^\s*-\s+uses:\s*actions\/checkout(@|\s*$)/.test(l));
+  // Positive control on the anchor: without it a workflow holding no `run:`
+  // block at all would satisfy the ordering assertion vacuously.
+  assert.notEqual(run, -1, "no `run: |` block in the refresh workflow — the anchor this pins against is gone");
+  assert.notEqual(checkout, -1, "the refresh job must check out the repo — the step it runs is a file in it");
+  assert.ok(checkout < run, "the checkout must come before the step that invokes the checked-out script");
+});
+
 // ---- the fallback -------------------------------------------------------
 
 test("a rejected candidate falls back to the next one, and the accepted rerun is the one counted", (t) => {
@@ -205,6 +224,26 @@ test("a 403 that says the parent run is in progress is a skip, not a token failu
   assert.equal(r.posts.length, 3, "an in-progress 403 must not be fatal — the walk continues");
   assert.doesNotMatch(r.out, /GITHUB_TOKEN lacks/, "an in-progress rejection is not a permissions diagnosis");
   assert.match(r.summary, /1 re-run/);
+});
+
+test("a candidate whose jobs listing fails falls through to the next one", (t) => {
+  // The other fallback in the walk, and the same category as the ticket's:
+  // an unusable candidate must not end it. Omitting a jobs fixture is how the
+  // stub returns an HTTP 500, which is the only way to reach the script's
+  // `failed to list jobs` -> `continue`.
+  const fixtures = { ...BEHIND_3_CANDIDATES, "rerun-202": accept };
+  delete fixtures["jobs-101.json"];
+  const r = runStep(t, fixtures);
+
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(
+    r.posts.map((c) => c.replace(/.*actions\/jobs\//, "").replace(/\/rerun.*/, "")),
+    ["202"],
+    "a run whose jobs could not be listed must be followed by a POST to the next candidate",
+  );
+  assert.match(r.out, /failed to list jobs for run 101/, "the listing failure gets its own line, it is not swallowed");
+  assert.match(r.summary, /1 re-run/);
+  assert.match(r.summary, /no-job: 0/, "one unlistable candidate is not `no rebase-check job in any candidate run`");
 });
 
 // ---- the counter --------------------------------------------------------
@@ -307,13 +346,37 @@ test("an up-to-date PR is still a silent green that touches no run at all", (t) 
 
 test("an unexpected exit status from the script fails the step instead of vanishing", (t) => {
   // `|| STATUS=$?` disarms `set -e` for the whole call, so every status the
-  // `case` does not name has to be caught by its `*` arm. Reached here by
-  // running from a cwd where the relative script path does not resolve — 127.
-  const elsewhere = mkdtempSync(join(tmpdir(), "rerun-rebase-check-cwd-"));
-  t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
-
-  const r = runStep(t, { ...BEHIND_3_CANDIDATES, "rerun-201": accept }, { cwd: elsewhere });
+  // `case` does not name has to be caught by its `*` arm.
+  //
+  // Two PRs, not one, and that is the whole point: #7 is re-run normally, so
+  // RERAN=1 and the all-or-nothing guard at the foot of the step is silent.
+  // With a single behind PR that guard exits 1 by itself, with a diagnostic
+  // that happens to satisfy a status-plus-substring assertion — so the test
+  // passes with the `*` arm's own `exit 1` deleted, which is the silent
+  // absorption it is named for (the #574/#565 shape: a conjunction satisfied
+  // by a DOWNSTREAM guard rather than the one under test).
+  //
+  // #8's jobs payload is unparseable, so jq aborts the script under
+  // `set -euo pipefail` with 5 — a status the `case` does not name, reached
+  // without mutating anything. If a `5)` arm is ever added, this test goes red
+  // and wants a different unrouted status, not deleting.
+  const r = runStep(t, {
+    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "compare-deadbeef": "4\n",
+    "compare-cafe": "2\n",
+    "runs-deadbeef.json": RUNS_3,
+    "runs-cafe.json": JSON.stringify({ workflow_runs: [{ id: 301, conclusion: "success" }] }),
+    "jobs-101.json": jobs(201),
+    "jobs-102.json": jobs(202),
+    "jobs-103.json": jobs(203),
+    "jobs-301.json": "not json",
+    "rerun-201": accept,
+  });
 
   assert.equal(r.status, 1, r.out);
-  assert.match(r.out, /exited 127/, "an unroutable classification must name the status, not be counted as a skip");
+  assert.match(r.out, /exited 5/, "an unroutable classification must name the status, not be counted as a skip");
+  // The consequence, and the half no downstream guard can produce here: the
+  // step aborts AT #8 rather than running on to fold it into no counter at all
+  // and summarising `2 behind -> 1 re-run` as a green.
+  assert.equal(r.summary, "", "an unroutable status must abort the step, not be summarised over");
 });

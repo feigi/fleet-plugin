@@ -35,6 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The step below invokes `.github/scripts/rerun-rebase-check.sh` by
+      # repo-relative path, so the repo has to be on the runner. Nothing in the
+      # unit suite can observe this: it always runs the lifted step from a
+      # checked-out tree, so a missing checkout there is 127 on the FIRST behind
+      # PR — the `*` arm exits 1 and the workflow refreshes nothing at all.
+      - uses: actions/checkout@v5
       - name: Re-run rebase-check on stale open PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
