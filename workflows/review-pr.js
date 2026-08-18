@@ -741,19 +741,35 @@ log(
 // be more than that.
 //
 // What it must NOT do is refuse a real run. An empty findings list is the
-// expected return from a specialist that ran everything and found nothing, and
-// `fail > 0` is a suite that ran and reported — both are clean here. Only the
-// absence of a run is unrun.
+// expected return from a specialist that ran everything and found nothing, and a
+// suite that reported failures ran — neither is unrun on its own. What #143
+// widened this to is the absence of WORK, which is a different fact from the
+// absence of a run: a pass that reports no passes and no failures did none.
 function unrunReason(review) {
   if (!review) return "the reviewer returned nothing — spend limit, timeout, or terminal error";
   const run = review.test_run;
   if (!run) return "the reviewer reported no test run at all";
+  const cmd = run.command || "the test command";
   // `!run.tests` and not `run.tests === 0`: a field the schema requires can
   // still arrive absent or null from a producer that ignored it, and that is
-  // the same fact — nothing ran. #143 is open on widening this rule further
-  // (a count below the suite's size, or `pass 0` with everything skipped);
-  // this reads only the zero the specialist prompt already rules a failure.
-  if (!run.tests) return `\`${run.command || "the test command"}\` produced 0 tests — a failed run, not a pass`;
+  // the same fact — nothing ran.
+  if (!run.tests) return `\`${cmd}\` produced 0 tests — a failed run, not a pass`;
+  // `pass === 0` and not `!run.pass`, because `pass` is OPTIONAL (see
+  // `test_run`'s own `required`) and an absent count is not a zero one. The
+  // `&& !run.fail` is what keeps this off the suite that failed everything —
+  // that reports zero passes too, and it is the run that most needs reporting.
+  // `skipped` is not a declared field, so `additionalProperties: false` leaves
+  // this the only shape an all-skipped run can reach the classifier in.
+  if (run.pass === 0 && !run.fail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
+  // The CONJUNCTION, never `fail > 0` alone: a failing suite ran, and reading
+  // that as unrun is the over-refusal #137 removed. Zero findings is provably
+  // wrong only next to failures the reviewer was looking at and wrote up none of.
+  if (run.fail > 0 && !review.findings?.length)
+    return `\`${cmd}\` reported ${run.fail} failing tests and the reviewer filed no findings about them`;
+  // #143's remaining case — a count below the suite's own size, the partial-tree
+  // one — is deliberately NOT here and cannot be: this stays pure, so the size of
+  // the suite is not a fact it holds. It is a reading rule in the specialist
+  // prompt instead, where the agent that ran the command can compare the two.
   return null;
 }
 
