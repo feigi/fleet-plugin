@@ -294,11 +294,25 @@ if (cmd === "check") {
   // measured #114 rewording shares exactly one, and a threshold tuned to look
   // tidy would drop the very case this exists for. The top-3 cap, not the
   // floor, is what keeps the output short.
-  const near = data.filed
+  const NEAR_SHOWN = 3;
+  const rankedNear = data.filed
     .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
     .filter((n) => n.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+    .sort((a, b) => b.score - a.score);
+  const near = rankedNear.slice(0, NEAR_SHOWN);
+  // The cap is a display budget, and it says nothing about the rows it drops:
+  // scores tie across it routinely — measured, five rows at 1.00 with the
+  // caller shown three — so the cut is arbitrary among equals. A bare
+  // three-row list is then indistinguishable from a complete one, which is
+  // the "no silent caps" rule `candidates.mjs:279` legislates one script over
+  // (#154). It enforces that rule by refusing outright; refusing is wrong
+  // here — these rows are advisory context for a decision, not the work queue,
+  // and a single tracker hit already forces exit 3. Report the COUNT withheld
+  // and the best score among them, never the rows: printing the rows would
+  // give back the length the cap exists to take away, while the count and the
+  // top withheld score are what tell a caller whether the cut cost it
+  // anything.
+  const nearTotal = rankedNear.length;
 
   // The ledger can only see what THIS run recorded. An issue that already
   // exists on the tracker but never reached this `filed` list — filed by an
@@ -341,6 +355,12 @@ if (cmd === "check") {
     .sort((a, b) => b.length - a.length)
     .slice(0, 3);
   const query = terms.join(" ");
+  // How many tracker rows the caller is shown. gh is asked for one MORE than
+  // this (below): its list arrives with no total, so a full page and a
+  // truncated one are byte-identical, and the extra row's presence is the only
+  // truncation signal available — #154. Cheap: one row, one query, and it is
+  // ranked alongside the rest rather than discarded.
+  const TRACKER_SHOWN = 5;
   let tracker;
   if (terms.length === 0) {
     // An empty --search matches every issue in the repo, which would report
@@ -416,7 +436,7 @@ if (cmd === "check") {
       try {
         const out = execFileSync(
           "gh",
-          ["issue", "list", "--search", query, "--state", "all", "--limit", "5",
+          ["issue", "list", "--search", query, "--state", "all", "--limit", String(TRACKER_SHOWN + 1),
             "--json", "number,title,state,url"],
           { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"], cwd: ghCwd, env: gitEnv },
         );
@@ -432,13 +452,23 @@ if (cmd === "check") {
         if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
           throw new Error("gh returned JSON that is not an issue list");
         }
-        const hits = parsed
+        // Every row gh returned is validated above, the probe row included: a
+        // malformed row anywhere means the read is untrustworthy, and this
+        // degrades to `unverified`, which never turns a hit into a clean bill.
+        //
+        // Rank the whole fetched window, THEN cut. Ranking only the first five
+        // would hand back gh's own window order wearing a score order's
+        // clothes, and the probe row was fetched to be ranked, not just
+        // counted. What the cut cannot repair is that gh chose the window at
+        // all — six rows are still a window, and re-sorting one does not widen
+        // it — so `truncated` REPORTS that rather than pretending otherwise.
+        const rankedHits = parsed
           .map((h) => ({
             number: h.number, title: h.title || "", state: h.state, url: h.url,
             score: round2(overlap(scored, scoreTokens(h.title || ""))),
           }))
           .sort((a, b) => b.score - a.score);
-        tracker = { ok: true, query, hits };
+        tracker = { ok: true, query, hits: rankedHits.slice(0, TRACKER_SHOWN), truncated: rankedHits.length > TRACKER_SHOWN };
       } catch (e) {
         // Every gh failure lands here — no network, no auth, rate limit, gh not
         // installed (ENOENT), a timeout, unparseable output. None of them may
@@ -462,6 +492,9 @@ if (cmd === "check") {
   }
 
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
+  if (nearTotal > near.length) {
+    console.error(`${NAME}: ${nearTotal - near.length} further near-miss(es) not shown — highest withheld ${rankedNear[near.length].score.toFixed(2)}; the cap dropped them, not the score`);
+  }
   if (!tracker.ok) {
     console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
     console.error(`${NAME}: not previously filed in this run's ledger — ledger-only answer, tracker unchecked`);
@@ -472,7 +505,13 @@ if (cmd === "check") {
     for (const h of tracker.hits) {
       console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
     }
-    console.error(`${NAME}: not in this run's filed list, but ${tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
+    // `more than N`, never `N`: with the probe row back, the exact count is
+    // precisely what is not known, and printing `5` for it is the silent cap
+    // restated as a number (#154).
+    console.error(`${NAME}: not in this run's filed list, but ${tracker.truncated ? `more than ${TRACKER_SHOWN}` : tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
+    if (tracker.truncated) {
+      console.error(`${NAME}: the list above is CAPPED at ${TRACKER_SHOWN} — gh returned more and reports no total, so these are the best-scoring of a window gh chose, not of the tracker.`);
+    }
   } else {
     // Not "found no related issues" — that asserts the tracker has nothing,
     // when all that is actually established is that a ${terms.length}-term
@@ -487,7 +526,12 @@ if (cmd === "check") {
   // before `tracker.hits` is read, which is required: hits is absent, not `[]`,
   // on that branch.
   const verdict = !tracker.ok ? "unverified" : tracker.hits.length ? "tracker-hit" : "clean";
-  console.log(JSON.stringify({ subject, found: false, match: null, near, tracker, verdict }));
+  // `nearTotal` alongside `near`, and `tracker.truncated` alongside `hits`:
+  // both lists are capped and neither cap was previously visible from the
+  // payload a consumer parses (#154). They differ in what is knowable —
+  // the ledger is fully in hand, so the near-miss total is exact, while gh
+  // reports no total, so the tracker can only say that more exist.
+  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal, tracker, verdict }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
