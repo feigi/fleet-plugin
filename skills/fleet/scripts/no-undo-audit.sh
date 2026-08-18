@@ -11,21 +11,34 @@ set -eu
 
 # Byte semantics for every tool below, and not a stylistic pin. `tr` is
 # locale-sensitive: under a UTF-8 locale BSD tr exits 1 on a byte that is not
-# valid UTF-8, and the `tr | tr | awk` that splits merge-tree's output holds that
-# status in a pipeline's SECOND-to-last slot, where `set -e` cannot see it — the
-# pipeline's status is awk's — and where no `|| die` is watching either. A
-# conflicting path carrying such a byte truncated `conflicts` at that byte,
-# dropped every path after it, and reported `atRisk: []` at exit 0: a FALSE SAFE
-# from the one tool whose whole job is to say whether a rebase would eat a
-# commit, and precisely the outcome the comment above `conflicts=` says must be
-# exit 2 instead. Reachable only from a fetched tree — a Linux- or
-# latin-1-authored commit — since APFS refuses to hold the name locally. #582.
+# valid UTF-8, and in the `tr | tr | awk` that splits merge-tree's output it is
+# the FIRST stage that fails — measured, PIPESTATUS `1 0 0`: the first `tr`
+# exits 1 and truncates, and the second `tr` and `awk` both exit 0 on the short
+# input it handed them. So the real status sits in a non-final slot, where
+# `set -e` cannot see it — the pipeline's status is awk's — and where no
+# `|| die` is watching either. A conflicting path carrying such a byte truncated
+# `conflicts` at that byte, dropped every path after it, and reported
+# `atRisk: []` at exit 0: a FALSE SAFE from the one tool whose whole job is to
+# say whether a rebase would eat a commit, and precisely the outcome the comment
+# above `conflicts=` says must be exit 2 instead. `tr` is not the only carrier
+# here: `sed` exits 1 on the same byte and emits nothing at all, and
+# `paste -sd, -` truncates its whole output at the byte while still exiting 0.
+# `awk` alone is immune, byte-identical in both locales. Reachable only from a
+# fetched tree — a Linux- or latin-1-authored commit — since APFS refuses to
+# hold the name locally. #582.
 #
-# Global rather than per-site, unlike inflight.sh's five: nothing in this script
-# sorts, folds case, or uses a `[a-z]` range or a POSIX class, so collation and
-# case-folding — the two things `LC_ALL=C` otherwise changes — have nothing here
-# to act on. Non-ASCII paths are untouched: every scrub set below is \001-\037
-# and every byte of a multi-byte UTF-8 sequence is >= \200.
+# Global rather than per-site, unlike inflight.sh's five: this script sorts
+# nothing, folds no case, and uses a `[a-z]` range nowhere. It does hold ONE
+# POSIX class — `${back%"${back##*[![:space:]]}"}`, where the worktree-linkage
+# check trims `$gd/gitdir` — and that class IS locale-sensitive, measured: a
+# trailing NBSP is stripped under `en_US.UTF-8` and kept under `C`. Neither
+# locale can reach it here, because a `gitdir` file always ends `.git` and
+# `$(cat …)` has already eaten the trailing newline, so the last non-space byte
+# is always `t`. That one site is why this paragraph says "one, unreachable"
+# where the five sibling scripts' copies say "none" — theirs are accurate as
+# written, this one is the exception. Non-ASCII paths are untouched either way:
+# every scrub set below is \001-\037 and every byte of a multi-byte UTF-8
+# sequence is >= \200.
 export LC_ALL=C
 
 NAME=no-undo-audit

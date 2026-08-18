@@ -32,13 +32,19 @@
 # stderr line (#119, measured).
 set -eu
 
-# Byte semantics for every `tr`, `sed`, `awk` and `grep` below. Under a UTF-8
-# locale these reject or mangle a byte that is not valid UTF-8 — BSD tr exits 1
-# outright — and every one of them here is fed worktree paths, branch names and gh's
-# error text, which
-# can carry such a byte from a fetched tree even where the local filesystem
-# refuses to hold the name. #582 measured the cost of leaving it ambient in
-# no-undo-audit.sh: a truncated list reported as a clean, confident answer.
+# Byte semantics for the `tr`, `sed` and `awk` below. There is no `grep`: this
+# script deliberately has none, and two comments further down — "One awk, not
+# `awk | sed | grep | paste`" and "awk, not `grep -c … || true`" — are the
+# standing argument for why. `tr` splits `git worktree list --porcelain -z`,
+# flattens `gh`'s error text into a diagnostic, and scrubs control bytes inside
+# `jstr`, which `sed` shares; `awk` parses refs, branch names and worktree
+# paths. Under a UTF-8 locale BSD `tr` and `sed` exit 1 on a byte that is not
+# valid UTF-8 — `sed` emitting nothing at all, measured — while `awk` is immune,
+# byte-identical in both locales. Such a byte reaches us from a fetched tree
+# even where the local filesystem refuses to hold the name, and inside `$(...)`
+# a `tr` failure empties the cause out of the diagnostic without a trace. #582
+# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
+# list reported as a clean, confident answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things

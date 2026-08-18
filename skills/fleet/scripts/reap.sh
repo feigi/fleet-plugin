@@ -14,13 +14,20 @@
 # nowhere else.
 set -eu
 
-# Byte semantics for every `tr`, `sed`, `awk` and `grep` below. Under a UTF-8
-# locale these reject or mangle a byte that is not valid UTF-8 — BSD tr exits 1
-# outright — and every one of them here is fed branch names, worktree paths, and the
-# ignored-file names `git status --ignored` prints, parsed by `awk` and `grep`, which
-# can carry such a byte from a fetched tree even where the local filesystem
-# refuses to hold the name. #582 measured the cost of leaving it ambient in
-# no-undo-audit.sh: a truncated list reported as a clean, confident answer.
+# Byte semantics for the `awk`, `grep`, `tr` and `paste` below — this script
+# runs no `sed`, and the four it does run do not all see the same data. `awk`
+# parses branch names out of `git branch -vv`, worktree paths out of
+# `git worktree list --porcelain`, and the ignored-file names
+# `git status --ignored` prints; `paste -sd, -` joins those ignored names. `tr`
+# and `grep` see none of that — both process `$cherry`, `git cherry`'s output,
+# whose commit subjects git constrains to no encoding at all, which makes it
+# arguably the likeliest carrier of the four. Under a UTF-8 locale BSD `tr`
+# exits 1 on a byte that is not valid UTF-8, `grep` silently drops the line
+# holding it, and `paste` truncates its whole output at it and still exits 0;
+# `awk` is immune, measured byte-identical in both locales. Such a byte reaches
+# us from a fetched tree even where the local filesystem refuses to hold the
+# name. #582 measured the cost of leaving this ambient in no-undo-audit.sh: a
+# truncated list reported as a clean, confident answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
