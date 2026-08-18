@@ -268,40 +268,46 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       # No --force, ever. It refuses on modified and untracked files; the
       # ignored-file gap it does NOT cover is handled by the check above.
       #
-      # A non-zero exit does NOT mean the removal had no effect: git clears the
-      # admin entry before it deletes the directory, so a failure partway
-      # through leaves the registration gone and the directory on disk — the
-      # state CONTEXT.md names Deregistered, with an Orphaned worktree
-      # directory behind it. Measured here, git 2.50.1 (Apple Git-155): a
-      # locked worktree exits 128 with the registration INTACT, while a symlink
-      # standing in for the directory exits 255 with the registration CLEARED
-      # and both the symlink and its target still on disk. Reading "refused"
-      # off the exit code reports the second as though nothing had happened.
+      # A non-zero exit does NOT mean the removal had no effect. Measured here,
+      # git 2.50.1 (Apple Git-155): a locked worktree exits 128 with the
+      # registration INTACT, while a symlink standing in for the directory
+      # exits 255 with the registration CLEARED. Reading "refused" off the exit
+      # code reports the second as though nothing had happened.
       #
-      # Re-read the REGISTRY, never the filesystem: the registration is the
-      # thing that was actually measured, and #83 is already open on this
-      # script and release-ticket.sh giving different answers about an
-      # unreadable worktree — a third filesystem probe here would widen it.
-      # `gone()` above is deliberately not reused: it answers a harder question
-      # (established absence vs an unsearchable prefix) that a registry read
-      # does not have, and cannot fail the way a stat can.
+      # Re-read the REGISTRY, never the filesystem, and claim only what that
+      # read answers. The registration and the directory are INDEPENDENT facts,
+      # in both directions — measured: a peer session that finishes the same
+      # removal between this lookup and this remove clears the registration
+      # with nothing left on disk (the concurrency this script's own header
+      # documents), and `chmod 555 .git/worktrees/<id>` deletes the whole
+      # directory while the entry stays listed. So a cleared registration is no
+      # evidence of an orphan, an intact one is no evidence that nothing was
+      # removed, and naming a filesystem state nobody probed would be this
+      # ticket's own defect — a reason naming something other than what was
+      # measured — committed inside its fix. #83, reap.sh and
+      # release-ticket.sh answering an unreadable worktree in opposite
+      # directions, is closed; a third filesystem probe here would reopen
+      # exactly that ground. `gone()` above is deliberately not reused: it
+      # answers a harder question (established absence vs an unsearchable
+      # prefix) that a registry read does not have, and cannot fail the way a
+      # stat can.
       #
       # Captured, not piped: `git … | grep -q` takes grep's status, never
-      # git's — the same swallow fixed at the lookup above, which the probe
+      # git's — the same swallow fixed for `git cherry` above, which the probe
       # that reports it must not reintroduce. A registry read that itself fails
       # says so, rather than being misread as "cleared".
       #
-      # Still keep, still continue, and the directory stays where it is: one
-      # orphan must not strand the remaining branches of an unattended sweep,
-      # and a directory whose contents nobody has inspected is not this
+      # Still keep, still continue, and nothing on disk is touched either way:
+      # one refusal must not strand the remaining branches of an unattended
+      # sweep, and a directory whose contents nobody has inspected is not this
       # script's to delete.
       if ! err=$(git worktree remove "$wt" 2>&1); then
         if ! reg=$(git worktree list --porcelain 2>&1); then
           state="cannot tell whether the registration survived"
         elif printf '%s\n' "$reg" | grep -qxF "worktree $wt"; then
-          state="registration intact, nothing was removed"
+          state="registration intact"
         else
-          state="registration cleared, removal was partial — $wt is still on disk"
+          state="registration cleared"
         fi
         keep "$b" "worktree remove refused ($state): $(printf '%s' "$err" | tr '\n' ' ')"
         continue

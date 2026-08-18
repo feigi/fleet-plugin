@@ -767,7 +767,7 @@ test("a refusal that CLEARED the registration is reported as a partial removal, 
   assert.equal(json.kept[0].branch, "feature/merged");
   assert.match(
     json.kept[0].reason,
-    /registration cleared, removal was partial/,
+    /registration cleared/,
     `a refusal that unregistered the worktree must not read as a no-op: ${json.kept[0].reason}`,
   );
   assert.match(json.kept[0].reason, /Not a directory/, "git's own diagnosis must reach the payload");
@@ -805,7 +805,7 @@ test("a refusal that LEFT the registration in place is reported as such, distinc
   assert.equal(json.kept.length, 1);
   assert.match(
     json.kept[0].reason,
-    /registration intact, nothing was removed/,
+    /registration intact/,
     `a refusal that changed nothing must say so: ${json.kept[0].reason}`,
   );
   assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the two outcomes must not collapse into one reason");
@@ -816,6 +816,60 @@ test("a refusal that LEFT the registration in place is reported as such, distinc
 
   assert.match(git(w, "worktree", "list", "--porcelain"), /feature\/merged/, "the registration really did survive");
   assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a refusal whose registration a PEER cleared claims nothing about the directory (#391)", (t) => {
+  // The registry and the directory are INDEPENDENT facts, and the reason may
+  // only carry the one that was read. Shape: a concurrent session finishes the
+  // same removal between this run's lookup and its own `git worktree remove`
+  // — the concurrency reap.sh's own header documents — so the registration is
+  // cleared, our removal fails, and NOTHING is left behind. A reason that
+  // hard-codes "removal was partial — $wt is still on disk" reports an orphan
+  // that does not exist, and this ticket exists because a reason that names
+  // something other than what was measured is the defect.
+  //
+  // Neither arm above can catch that: in the symlink shape the directory
+  // happens to survive, so both stay green with the false clause in place —
+  // measured, 907/907, which is why this arm is here at all.
+  //
+  // The shim runs the PEER's removal with the real git and then returns false,
+  // so the `exec` below it runs OUR removal for real and it fails in git's own
+  // words. No permission bits, hence none of the euid-0 vacuity the `0o000`
+  // fixtures in this file have to skip around (#184).
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = remove ] && { ${REAL_GIT} worktree remove "$3" >/dev/null 2>&1; false; }`,
+    [],
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  // Both halves of the fixture, asserted before the reason is read: the peer
+  // really did finish the job, so "still on disk" would be false and
+  // "registration cleared" true.
+  assert.equal(existsSync(wt), false, "fixture: the peer's removal must leave nothing on disk");
+  assert.ok(
+    !git(w, "worktree", "list", "--porcelain").split("\n").includes(`worktree ${wt}`),
+    "fixture: the peer's removal must clear the registration",
+  );
+
+  assert.equal(code, 0, "a refusal is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(
+    json.kept[0].reason,
+    /registration cleared/,
+    `the registry is what was read, and it says cleared: ${json.kept[0].reason}`,
+  );
+  assert.doesNotMatch(
+    json.kept[0].reason,
+    /on disk|orphan|removal was partial/,
+    `nothing stat'd the directory, so the reason must claim nothing about it: ${json.kept[0].reason}`,
+  );
+  assert.match(json.kept[0].reason, /is not a working tree/, "git's own diagnosis still reaches the payload");
   assert.equal(branchExists(w, "feature/merged"), true);
 });
 
