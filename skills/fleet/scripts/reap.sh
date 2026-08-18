@@ -144,6 +144,17 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
   # --porcelain` prints it raw, so a checkout living under a directory with a
   # space in it — ordinary on macOS — was otherwise truncated at the first
   # one, and every check below then ran against a wrong, nonexistent path.
+  #
+  # This pipeline DOES take awk's status rather than git's, the swallow #264
+  # fixed for `git cherry` above — left deliberately. Making it fail closed is
+  # a control-flow change, not a message one: measured, a dying
+  # `git worktree list` leaves $wt empty, and a merged [gone] branch with no
+  # worktree is then reaped by `git branch -D`, which needs no answer from the
+  # registry. Keeping it instead strands every [gone] branch in the sweep, and
+  # #391's ruling was to report the state, not to change what gets reaped. The
+  # half that IS a message change is already made: a branch that does have a
+  # worktree still reaches `git branch -D` and still refuses, and that refusal
+  # now carries git's own `used by worktree at …` instead of a bare label. #622
   wt=$(git worktree list --porcelain |
        awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}')
 
@@ -252,7 +263,51 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     if [ "$apply" = true ]; then
       # No --force, ever. It refuses on modified and untracked files; the
       # ignored-file gap it does NOT cover is handled by the check above.
-      git worktree remove "$wt" 2>/dev/null || { keep "$b" "worktree remove refused"; continue; }
+      #
+      # A non-zero exit does NOT mean the removal had no effect. Measured here,
+      # git 2.50.1 (Apple Git-155): a locked worktree exits 128 with the
+      # registration INTACT, while a symlink standing in for the directory
+      # exits 255 with the registration CLEARED. Reading "refused" off the exit
+      # code reports the second as though nothing had happened.
+      #
+      # Re-read the REGISTRY, never the filesystem, and claim only what that
+      # read answers. The registration and the directory are INDEPENDENT facts,
+      # in both directions — measured: a peer session that finishes the same
+      # removal between this lookup and this remove clears the registration
+      # with nothing left on disk (the concurrency this script's own header
+      # documents), and `chmod 555 .git/worktrees/<id>` deletes the whole
+      # directory while the entry stays listed. So a cleared registration is no
+      # evidence of an orphan, an intact one is no evidence that nothing was
+      # removed, and naming a filesystem state nobody probed would be this
+      # ticket's own defect — a reason naming something other than what was
+      # measured — committed inside its fix. #83, reap.sh and
+      # release-ticket.sh answering an unreadable worktree in opposite
+      # directions, is closed; a third filesystem probe here would reopen
+      # exactly that ground. `gone()` above is deliberately not reused: it
+      # answers a harder question (established absence vs an unsearchable
+      # prefix) that a registry read does not have, and cannot fail the way a
+      # stat can.
+      #
+      # Captured, not piped: `git … | grep -q` takes grep's status, never
+      # git's — the same swallow fixed for `git cherry` above, which the probe
+      # that reports it must not reintroduce. A registry read that itself fails
+      # says so, rather than being misread as "cleared".
+      #
+      # Still keep, still continue, and nothing on disk is touched either way:
+      # one refusal must not strand the remaining branches of an unattended
+      # sweep, and a directory whose contents nobody has inspected is not this
+      # script's to delete.
+      if ! err=$(git worktree remove "$wt" 2>&1); then
+        if ! reg=$(git worktree list --porcelain 2>&1); then
+          state="cannot tell whether the registration survived"
+        elif printf '%s\n' "$reg" | grep -qxF "worktree $wt"; then
+          state="registration intact"
+        else
+          state="registration cleared"
+        fi
+        keep "$b" "worktree remove refused ($state): $(printf '%s' "$err" | tr '\n' ' ')"
+        continue
+      fi
     else
       echo "    would remove worktree $wt" >&2
     fi
@@ -262,7 +317,17 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     # -D is authorized by the cherry check above and by nothing else. -d would
     # refuse everything here: upstream is gone, so it compares against a
     # possibly-behind local HEAD.
-    git branch -D "$b" >/dev/null 2>&1 || { keep "$b" "branch delete failed"; continue; }
+    #
+    # `2>&1 >/dev/null`, in that order: redirections apply left to right, so
+    # stderr is bound to the capture and stdout is then dropped — git's
+    # diagnosis is kept and its confirmation line discarded. A bare "branch
+    # delete failed" names the step, never the fault; git names it outright
+    # (`error: cannot delete branch 'x' used by worktree at '…'`), and that
+    # message is the only thing that tells an operator which remedy applies.
+    if ! err=$(git branch -D "$b" 2>&1 >/dev/null); then
+      keep "$b" "branch delete failed: $(printf '%s' "$err" | tr '\n' ' ')"
+      continue
+    fi
     echo "    REAPED $b" >&2
   else
     echo "    would reap $b" >&2

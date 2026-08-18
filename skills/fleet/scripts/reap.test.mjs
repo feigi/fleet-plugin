@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -690,4 +690,458 @@ test("a missing json.sh is exit 2, before any branch is deleted", (t) => {
   assert.equal(r.stdout, "", "no payload: nothing happened");
   assert.ok(branchExists(w, "chore/landed"),
     "and the branch is still there — the guard fires ahead of every deletion, so this is a clean refusal");
+});
+
+// --- #391: the reason a keep carries, on the three calls that derived it from
+// an exit code and sent git's own diagnosis to /dev/null.
+//
+// Measured before this suite existed, by mutating each arm and re-running the
+// file: garbling the `worktree remove` reason and garbling the `branch -D`
+// reason each left all 24 tests green. Both arms were invisible.
+
+/**
+ * Put a symlink where the worktree directory was, keeping the registration
+ * pointed at the symlink's path — the shape that makes `git worktree remove`
+ * fail AFTER it has already cleared the admin entry.
+ *
+ * Measured, git 2.50.1 (Apple Git-155): rc 255,
+ * `error: failed to delete '<wt>': Not a directory`, the porcelain no longer
+ * lists the entry, and both the symlink and its target survive on disk.
+ *
+ * Chosen over a `chmod 555` parent, which produces the same deregistered state
+ * by a different route: this one reproduces as any user, needs no permission
+ * bits, and so carries none of the euid-0 vacuity the `0o000` fixtures in this
+ * file already have to skip around (#184). Every guard ahead of the removal
+ * still passes through it — `.git` is a regular file and `git -C` follows the
+ * link, so the linkage guard and the status probe both answer about the real
+ * worktree.
+ */
+function symlinkStandIn(wt) {
+  const real = `${wt}-real`;
+  renameSync(wt, real);
+  symlinkSync(real, wt);
+  return real;
+}
+
+/** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
+function failOnlyShim(t, match, stderr, code = 1) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if ${match}; then\n` +
+      stderr.map((l) => `  printf '%s\\n' ${JSON.stringify(l)} >&2\n`).join("") +
+      `  exit ${code}\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH}` });
+
+test("a refusal that CLEARED the registration is reported as a partial removal, not as a no-op (#391)", (t) => {
+  // The worst of the two: git unregistered the worktree and then failed to
+  // delete it, so the run reported `worktree remove refused` — indistinguishable
+  // from "nothing happened" — while leaving an orphaned directory behind and
+  // the branch standing as though it had been deliberately retained.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const real = symlinkStandIn(wt);
+
+  // A second registration whose path merely BEGINS with the refused one. The
+  // probe has to match a whole porcelain line, not a substring: without the
+  // anchor this entry keeps matching after the refused one is gone, and the
+  // run reports "registration intact" for a registration that was cleared —
+  // measured, an unanchored grep survived every other test here. Its branch
+  // has no upstream, so it is not [gone] and reap never touches it.
+  git(w, "worktree", "add", "-q", `${wt}-sibling`, "-b", "scratch/sibling", "main");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, "a refusal is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(
+    json.kept[0].reason,
+    /registration cleared/,
+    `a refusal that unregistered the worktree must not read as a no-op: ${json.kept[0].reason}`,
+  );
+  assert.match(json.kept[0].reason, /Not a directory/, "git's own diagnosis must reach the payload");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
+  assert.match(stderr, /KEEP feature\/merged — worktree remove refused/);
+
+  // The registration really is gone — the state the reason claims, measured.
+  // Compared whole-line, for the reason the script's own probe is: a substring
+  // test against this porcelain matches the sibling entry below and would call
+  // a cleared registration intact. (This assertion was written unanchored
+  // first, and the sibling caught it.)
+  const reg = git(w, "worktree", "list", "--porcelain").split("\n");
+  assert.ok(!reg.includes(`worktree ${wt}`), `the refused worktree's registration must be gone: ${reg.join(" | ")}`);
+  assert.ok(reg.includes(`worktree ${wt}-sibling`), "fixture: the prefix-sharing sibling must still be registered");
+  // ...and nothing on disk was removed by this script, under any path.
+  assert.ok(lstatSync(wt).isSymbolicLink(), "the stand-in symlink must survive");
+  assert.equal(existsSync(real), true, "the orphaned directory is not this script's to delete");
+  assert.equal(branchExists(w, "feature/merged"), true, "and the branch is still kept");
+});
+
+test("a refusal that LEFT the registration in place is reported as such, distinctly (#391)", (t) => {
+  // The other half, and the half the old message happened to describe
+  // correctly — asserted so the two outcomes cannot collapse back into one
+  // string. A locked worktree exits 128 with the admin entry untouched
+  // (measured, git 2.50.1). Per the brief this needs no dedicated arm: once
+  // git's stderr is quoted, the lock names itself and its own remedy.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  git(w, "worktree", "lock", wt);
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(
+    json.kept[0].reason,
+    /registration intact/,
+    `a refusal that changed nothing must say so: ${json.kept[0].reason}`,
+  );
+  assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the two outcomes must not collapse into one reason");
+  assert.match(json.kept[0].reason, /locked working tree/, "git's message names the fault and the remedy");
+  assert.match(json.kept[0].reason, /remove -f -f/, "including the remedy, which only git can supply");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's message here really is two lines — it must arrive flattened");
+  assert.match(stderr, /KEEP feature\/merged/);
+
+  assert.match(git(w, "worktree", "list", "--porcelain"), /feature\/merged/, "the registration really did survive");
+  assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a refusal whose registration a PEER cleared claims nothing about the directory (#391)", (t) => {
+  // The registry and the directory are INDEPENDENT facts, and the reason may
+  // only carry the one that was read. Shape: a concurrent session finishes the
+  // same removal between this run's lookup and its own `git worktree remove`
+  // — the concurrency reap.sh's own header documents — so the registration is
+  // cleared, our removal fails, and NOTHING is left behind. A reason that
+  // hard-codes "removal was partial — $wt is still on disk" reports an orphan
+  // that does not exist, and this ticket exists because a reason that names
+  // something other than what was measured is the defect.
+  //
+  // Neither arm above can catch that: in the symlink shape the directory
+  // happens to survive, so both stay green with the false clause in place —
+  // measured, 907/907, which is why this arm is here at all.
+  //
+  // The shim runs the PEER's removal with the real git and then returns false,
+  // so the `exec` below it runs OUR removal for real and it fails in git's own
+  // words. No permission bits, hence none of the euid-0 vacuity the `0o000`
+  // fixtures in this file have to skip around (#184).
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = remove ] && { ${REAL_GIT} worktree remove "$3" >/dev/null 2>&1; false; }`,
+    [],
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  // Both halves of the fixture, asserted before the reason is read: the peer
+  // really did finish the job, so "still on disk" would be false and
+  // "registration cleared" true.
+  assert.equal(existsSync(wt), false, "fixture: the peer's removal must leave nothing on disk");
+  assert.ok(
+    !git(w, "worktree", "list", "--porcelain").split("\n").includes(`worktree ${wt}`),
+    "fixture: the peer's removal must clear the registration",
+  );
+
+  assert.equal(code, 0, "a refusal is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(
+    json.kept[0].reason,
+    /registration cleared/,
+    `the registry is what was read, and it says cleared: ${json.kept[0].reason}`,
+  );
+  assert.doesNotMatch(
+    json.kept[0].reason,
+    /on disk|orphan|removal was partial/,
+    `nothing stat'd the directory, so the reason must claim nothing about it: ${json.kept[0].reason}`,
+  );
+  assert.match(json.kept[0].reason, /is not a working tree/, "git's own diagnosis still reaches the payload");
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("the sweep continues past a worktree-removal refusal and still reaps the branches AFTER it (#391)", (t) => {
+  // The constraint that separates this ticket's ruling from #208's: reap.sh
+  // sweeps every [gone] branch unattended in one pass, so one orphan must not
+  // strand the rest. The new registry re-read runs inside that loop, which is
+  // exactly where an added git call could introduce a bail.
+  //
+  // The `a-`/`b-` names are load-bearing, not decoration. `git for-each-ref`
+  // sorts by refname, so a healthy branch named to sort FIRST is already
+  // reaped before the refusal happens and the test passes under a `break`
+  // just as happily as under a `continue`. Measured both ways on this branch,
+  // rather than carrying a count that drifts every time a test is added: under
+  // the alternative spelling the whole file stays green with the mutant in
+  // place, and under the shipped one exactly this test reds.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/a-locked", "work behind a lock");
+  git(w, "worktree", "lock", wt);
+  mergedGoneBranch(w, "feature/b-healthy", "work that landed");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/b-healthy"], "the refusal must not strand the branches after it");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/a-locked");
+  assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the refusal");
+  assert.equal(branchExists(w, "feature/a-locked"), true);
+});
+
+test("a `git branch -D` failure carries git's own message, not just the label (#391)", (t) => {
+  // `>/dev/null 2>&1` sent the cause to the void and reported "branch delete
+  // failed". The real message names the fault outright — the shim reproduces
+  // the one measured in the wild, plus a second line, since the reason has to
+  // survive as a single JSON string.
+  //
+  // The shim is scoped to one branch, and a healthy branch sorts after it, so
+  // this also pins the other half of "the sweep continues past EITHER failure".
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/a-broken", "merged work");
+  mergedGoneBranch(w, "feature/b-healthy", "work that landed");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = branch ] && [ "$2" = -D ] && [ "$3" = feature/a-broken ]`,
+    [`error: cannot delete branch 'feature/a-broken' used by worktree at '/some/where'`, "fatal: could not update ref"],
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/b-healthy"], "a branch that was not deleted must not be reported as reaped, and the sweep goes on");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/a-broken");
+  assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload");
+  assert.match(json.kept[0].reason, /could not update ref/, "both lines, not just the first");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
+  assert.match(stderr, /KEEP feature\/a-broken — branch delete failed/);
+  assert.equal(branchExists(w, "feature/a-broken"), true);
+  assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the failure");
+});
+
+test("a dying `git worktree list` still reaps what it can, and quotes git for what it cannot (#391)", (t) => {
+  // The pipeline into awk takes awk's status, never git's, so a dying list
+  // leaves $wt empty: every check under `[ -n "$wt" ]` is skipped and flow
+  // falls through to `git branch -D`. That was #391's visible symptom — the
+  // payload blamed the branch delete for a failure two steps earlier, under a
+  // bare label, while git's own `fatal:` reached the terminal and never the
+  // JSON the caller parses.
+  //
+  // Fixed here as the MESSAGE change #391 asked for: the branch git refuses
+  // now carries git's reason, which names the worktree still holding it — the
+  // only thing that tells an operator which remedy applies.
+  //
+  // What is deliberately NOT changed is which branches get reaped. Measured:
+  // `git branch -D` needs no answer from the registry to delete a branch that
+  // has no worktree, so `feature/b-merged` goes exactly as it did before.
+  // Making the lookup fail closed would keep the whole sweep instead — a
+  // control-flow ruling #391 reserved for the maintainer, filed as
+  // #622. This test is the pin that a fix for it would have to move
+  // deliberately.
+  const w = repo(t);
+  mergedGoneBranchWithWorktree(w, "feature/a-merged", "merged work");
+  mergedGoneBranch(w, "feature/b-merged", "more merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ]`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "a branch git refuses to delete is a finding, not a script failure");
+  assert.deepEqual(
+    json.reaped,
+    ["feature/b-merged"],
+    "a lookup nobody could answer must not change what gets reaped — that ruling is not this ticket's",
+  );
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/a-merged");
+  assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload, not just the terminal");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
+  assert.match(stderr, /KEEP feature\/a-merged — branch delete failed: /);
+  assert.equal(branchExists(w, "feature/a-merged"), true, "the branch git refused to delete survives");
+  assert.equal(branchExists(w, "feature/b-merged"), false);
+});
+
+test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {
+  // These three reasons now carry text neither this repo nor its operator
+  // chose. `keep()` escapes through json.sh, which landed in #119 — before it,
+  // routing git's stderr here would have emitted a payload no parser accepts.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = branch ] && [ "$2" = -D ]`,
+    [`error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`],
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.equal(
+    json.kept[0].reason,
+    `branch delete failed: error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`,
+    "the quotes and backslashes survive as data — runReap JSON.parses stdout, so a raw splice fails before this assert",
+  );
+});
+
+test("an ordinary run's payload is byte-for-byte what it has always been (#391)", (t) => {
+  // The false-positive half. Nothing here fails, so nothing has a cause to
+  // quote and the whole payload must be unchanged — a fix that starts
+  // decorating healthy reasons is as wrong as one that reports none.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], kept: [] });
+  assert.doesNotMatch(stderr, /KEEP/);
+  assert.doesNotMatch(stderr, /registration/, "a successful removal says nothing about registrations");
+  assert.equal(existsSync(wt), false);
+});
+
+test("the dry run removes nothing, and still cannot predict a refusal (#391)", (t) => {
+  // The brief keeps this asymmetry deliberately: a dry run prints
+  // `would remove worktree $wt` WITHOUT attempting the removal, so it cannot
+  // foresee a refusal — performing it is the only way to know. This resembles
+  // the dry/apply mismatch class of #86, #385 and #386 but is not an instance
+  // of it, and the fix above must not have quietly turned it into one by
+  // teaching the dry run to probe.
+  //
+  // BOTH fixtures are load-bearing. The locked one pins the unpredicted
+  // refusal; the healthy one pins that no removal was attempted at all, and
+  // only it can. Measured: with the locked worktree alone, a dry run taught to
+  // call `git worktree remove` left this test green — the lock made the
+  // attempt fail, so the fixture could not tell an attempt from an abstention.
+  const w = repo(t);
+  const healthy = mergedGoneBranchWithWorktree(w, "feature/a-healthy", "work that landed");
+  const locked = mergedGoneBranchWithWorktree(w, "feature/b-locked", "work behind a lock");
+  git(w, "worktree", "lock", locked);
+
+  const { code, json, stderr } = runReap(w, []);
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json,
+    { applied: false, reaped: ["feature/a-healthy", "feature/b-locked"], kept: [] },
+    "the dry run still promises the reap it cannot know will be refused",
+  );
+  assert.ok(stderr.includes(`    would remove worktree ${healthy}`), `the dry run's own line is unchanged: ${stderr}`);
+  assert.ok(stderr.includes(`    would remove worktree ${locked}`));
+  assert.ok(stderr.includes("    would reap feature/a-healthy"));
+  assert.doesNotMatch(stderr, /KEEP/, "a dry run predicts no refusal — it never ran the removal");
+  assert.doesNotMatch(stderr, /registration/, "and it probes no registry either");
+
+  // Nothing was touched: directories, registrations and branches all intact.
+  assert.equal(existsSync(healthy), true, "a dry run must not remove the worktree it COULD have removed");
+  assert.equal(existsSync(locked), true);
+  const reg = git(w, "worktree", "list", "--porcelain");
+  assert.match(reg, /feature\/a-healthy/);
+  assert.match(reg, /feature\/b-locked/);
+  assert.equal(branchExists(w, "feature/a-healthy"), true);
+  assert.equal(branchExists(w, "feature/b-locked"), true);
+});
+
+test("a registry probe that itself fails is reported as unknown, never as 'cleared' (#391)", (t) => {
+  // The registration probe this fix adds is a git call of its own, and it can
+  // fail. Spelling it `git worktree list … | grep -q` would take GREP's exit
+  // status, never git's, and report a registry it never managed to read as
+  // CLEARED — this ticket's own defect, reintroduced inside its own fix, and
+  // pointed at the more alarming of the two states. Measured: that spelling
+  // survived every other test in this file.
+  //
+  // The shim starves `worktree list` only from its SECOND call onward, so the
+  // lookup at the top of the loop still finds the worktree and reaches the
+  // removal; only the post-refusal probe is denied an answer. The lock makes
+  // the removal refuse without disturbing anything, so the registration really
+  // is intact — and the point is that the script must NOT claim to know that.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  git(w, "worktree", "lock", wt);
+
+  // The counter needs its own tmpdir: `failOnlyShim` creates the shim dir
+  // itself, so the path has to exist before the match string that writes to it
+  // can be built. Putting the count in the match is what lets this reuse the
+  // helper — the match runs exactly once per `git`, ahead of the shim's single
+  // `exec`.
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -ge 2 ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(
+    json.kept[0].reason,
+    /cannot tell whether the registration survived/,
+    `an unread registry is unknown, not a measurement: ${json.kept[0].reason}`,
+  );
+  assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the alarming state must never be guessed");
+  assert.doesNotMatch(json.kept[0].reason, /registration intact/, "nor the reassuring one");
+  assert.match(json.kept[0].reason, /locked working tree/, "git's reason for the refusal still reaches the payload");
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(counter, "utf8"), "2", "fixture: the probe really was the call that got starved");
+});
+
+// Same reason as the cherry-probe pin above, and the same derivation: the
+// script-surface table is what a reader trusts about a script settings.json's
+// autoMode allowlist runs unattended, and #264 spent its whole life with that
+// table asserting the bug as the behaviour. The two state phrases are the part
+// a reader would otherwise have to guess at, so they are taken from real runs
+// rather than typed here — a hand-copied phrase drifts exactly the way the row
+// did.
+test("the design spec's script-surface row carries both refusal states this script emits (#391)", (t) => {
+  const states = ["locked", "symlink"].map((shape) => {
+    const w = repo(t, `w-${shape}`);
+    const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+    if (shape === "locked") git(w, "worktree", "lock", wt);
+    else symlinkStandIn(wt);
+
+    const { json } = runReap(w, ["--apply"]);
+    assert.equal(json.kept.length, 1, `fixture (${shape}) must reach the removal refusal`);
+    // The parenthesised state only — the path and git's message are the
+    // machine's to vary and no document can carry them.
+    const m = /^worktree remove refused \(([^)]*?)(?: —.*)?\)/.exec(json.kept[0].reason);
+    assert.ok(m, `fixture (${shape}) must produce the refusal reason: ${json.kept[0].reason}`);
+    return m[1];
+  });
+
+  assert.notEqual(states[0], states[1], "the two refusals must not report the same state");
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  for (const state of states) {
+    assert.ok(row.includes(state), `the spec row must quote the refusal state verbatim, and does not carry "${state}".\nrow: ${row}`);
+  }
 });
