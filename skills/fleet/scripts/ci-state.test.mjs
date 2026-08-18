@@ -556,5 +556,13 @@ test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one inv
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
   });
   assert.equal(r.status, 0, `a working invocation was refused: ${r.stderr}`);
+  // Live, not subsumed by the status assertion above: the behind-count block
+  // TOLERATES its children — tryRun() swallows the failure and returns null
+  // while execFileSync has already forwarded the child's stderr — so a child
+  // refusing a flag lands here at exit 0 with `behind` silently null. Matches
+  // git's "unknown option" as well as the fleet's own "unknown flag", because
+  // the tolerated children are git's: measured, a bogus flag on the `git
+  // remote get-url` call is otherwise 35/35 green.
+  assert.doesNotMatch(r.stderr, /unknown (flag|option)/);
   assert.equal(r.payload.verdict, "green");
 });
