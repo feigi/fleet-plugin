@@ -504,8 +504,10 @@ git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$
 # cannot hold NUL, so answering means keeping the whole list in a file and
 # reading it with something NUL-capable. That is available (inflight.sh already
 # shells out to python3, claim-ticket.sh to node) and is not the constraint; it
-# is a restructure bought for a filename shape nobody has produced. Upgrade
-# there if one ever turns up.
+# is a restructure bought for a filename holding a literal NEWLINE — that shape,
+# and only that one, is what nobody has produced. Upgrade there if one turns up.
+# #582 produced a different shape, an invalid-UTF-8 byte, and it needed no
+# restructure: `export LC_ALL=C` at the top of this file answers it outright.
 conflicts=$(tr '\n' '\001' <"$mt_out" | tr '\0' '\n' | awk 'NR==1{next} /^$/{exit} {print}')
 nl=$(printf '\001')
 case "$conflicts" in
