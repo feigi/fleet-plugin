@@ -131,14 +131,23 @@ test("a run with failing tests is NOT unrun", () => {
 // never reaches this classifier, so a run where every test skipped can only
 // arrive as `pass: 0` with `fail` zero or absent. Nothing passed and nothing
 // failed is no work done.
+// BOTH arms of `findings`, because this clause is findings-INDEPENDENT by
+// design and only a non-empty fixture says so. The sibling `fail > 0` clause
+// below is the one that reads `findings`; ANDing `!review.findings?.length` in
+// here too would let a specialist that reports 0 passes and 0 fails and attaches
+// one filler finding read as clean — the loophole #143 exists to close. Every
+// fixture here sent `[]`, so that mutation survived the whole suite.
 test("a run where nothing passed and nothing failed is unrun — every test skipped", () => {
-  for (const run of [
-    { command: "node --test", tests: 2, pass: 0, fail: 0 },
-    { command: "node --test", tests: 2, pass: 0 },
-  ]) {
-    const reason = unrunReason({ dimension: "tests", scope_searched: "x", findings: [], test_run: run });
-    assert.equal(typeof reason, "string", `an all-skipped run (${JSON.stringify(run)}) must yield a reason`);
-    assert.match(reason, /node --test/, "the reason no longer names the command that did no work");
+  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
+    for (const run of [
+      { command: "node --test", tests: 2, pass: 0, fail: 0 },
+      { command: "node --test", tests: 2, pass: 0 },
+    ]) {
+      const reason = unrunReason({ dimension: "tests", scope_searched: "x", findings, test_run: run });
+      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
+      assert.equal(typeof reason, "string", `an all-skipped run (${where}) must yield a reason`);
+      assert.match(reason, /node --test/, "the reason no longer names the command that did no work");
+    }
   }
 });
 
