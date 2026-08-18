@@ -52,10 +52,15 @@ base=${BASE_REF:-origin/main}
 
 echo "\$ git fetch --quiet origin" >&2
 git fetch --quiet origin || die "fetch failed — refusing to prove a merge on stale refs"
-git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+# Nothing below silences git: --quiet and 2>/dev/null discarded the only line
+# that separates the causes, and both guards are silent when they succeed.
+# --verify stays — without it a $base that names a FILE resolves and exits 0.
+git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
 
 for obj in "$pre" "$post" "$merge"; do
-  git cat-file -e "${obj}^{commit}" 2>/dev/null || die "$obj is not a commit in this repository"
+  # Stops at what the guard observed: cat-file -e also fails on an object that
+  # is present but is not a commit, and on an object store it cannot read.
+  git cat-file -e "${obj}^{commit}" || die "cannot resolve $obj to a commit in this repository"
 done
 
 # Everything below reads structure off $merge, so an object the caller made up
