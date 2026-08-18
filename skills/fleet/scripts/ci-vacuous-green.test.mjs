@@ -2,12 +2,14 @@
 //
 // `git ls-files '*.mjs' | xargs -r node --check` exits 0 on an empty match, and
 // every checker in that job prints nothing on success — so a run that checked 23
-// files and a run that checked 0 were byte-identical in the log (confirmed from
-// runner log 30629390698, zero bytes between `##[endgroup]` and the next
-// `##[group]`). `pipefail` cannot see it: the left-hand side SUCCEEDS, it just
-// succeeds with nothing. One directory rename and a step is vacuously green
-// forever. `shopt -s failglob`, which PR #157 used for the Tests step, does not
-// apply — the glob is quoted and expanded by `git ls-files`, not by the shell.
+// files and a run that checked 0 were byte-identical in the log. That last part
+// is an observation from outside this repo — GitHub Actions runner log
+// 30629390698, zero bytes between `##[endgroup]` and the next `##[group]` — and
+// no copy of that log is in this tree, so nothing here can settle it. `pipefail`
+// cannot see it either: the left-hand side SUCCEEDS, it just succeeds with
+// nothing. One directory rename and a step is vacuously green forever. `shopt -s
+// failglob`, which PR #157 used for the Tests step, does not apply — the glob is
+// quoted and expanded by `git ls-files`, not by the shell.
 //
 // Two halves, because a guard that only ever sees valid input pins neither:
 //   - REFUSE: an empty match is exit 1 and the checker never runs.
@@ -18,7 +20,10 @@
 //
 // The behavioural cases pin the script. The source assertions at the bottom pin
 // that ci.yml actually ROUTES through it: without them a step reverted to bare
-// `xargs -r` leaves this whole file green while the defect is back.
+// `xargs -r` leaves this whole file green while the defect is back. They pin
+// the routing AND the status — a step is free to route through the guard and
+// then discard the exit code it just asked for, which checks exactly as much
+// as not routing at all.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -85,6 +90,26 @@ test("populated match: runs the checker on every file, prints the count, exits 0
   assert.doesNotMatch(r.stdout, /c\.txt/, "the glob must still select");
 });
 
+test("no checker given: refuses instead of echoing the files it never checked", (t) => {
+  const dir = repo(t, { "a.mjs": "1\n" });
+
+  const r = check(dir, "*.mjs");
+
+  assert.notEqual(r.status, 0, "a glob with no checker verifies nothing and must not pass");
+  // `xargs` handed no command runs its default, `echo`, so the filenames scroll
+  // past in the log looking like a check that ran.
+  assert.doesNotMatch(r.stdout, /a\.mjs/, "xargs' default echo must not stand in for the checker");
+});
+
+test("no arguments at all: an ::error:: line, not a raw bash diagnostic", (t) => {
+  const dir = repo(t, { "a.mjs": "1\n" });
+
+  const r = check(dir);
+
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /::error::/, "every refusal has to reach the runner log as an annotation");
+});
+
 test("a checker that fails still fails the step", (t) => {
   const dir = repo(t, { "a.mjs": "1\n" });
 
@@ -126,5 +151,36 @@ test("the .js step refuses an empty match too", () => {
   // Not an xargs step — a `for` loop over `git ls-files '*.js'`, which iterates
   // zero times and exits 0 on an empty match. Same defect, different shape, so
   // it carries its own guard rather than routing through the script.
-  assert.ok(phrase("no tracked file matches *.js").test(ci), "the .js loop lost its empty-match refusal");
+  // The `exit 1` is the half that refuses: an `::error::` annotation does not
+  // fail a step by itself, so pinning the message alone would pin a step that
+  // prints the complaint and goes green anyway.
+  assert.ok(
+    phrase('no tracked file matches *.js — this check verified nothing" exit 1').test(ci),
+    "the .js loop lost its empty-match refusal",
+  );
+});
+
+test("a routed check's own exit status still reaches the job", () => {
+  const src = readFileSync(CI_YML, "utf8");
+  const routed = src
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("run:") && l.includes("check-tracked.sh"));
+
+  assert.equal(routed.length, 4, "expected four ci.yml steps to route through check-tracked.sh");
+  for (const line of routed) {
+    // Unflattened and anchored at both ends, unlike the assertions above, because
+    // what this one pins is what is NOT on the line: ` || true`, `; true`, `&& :`
+    // and a trailing pipe all leave every substring those match in place and hand
+    // the job exit 0 whatever the guard decided. The `+` also requires a checker
+    // to follow the glob, which is the same contract the script now enforces.
+    assert.match(
+      line,
+      /^run: \.github\/scripts\/check-tracked\.sh '\*\.\w+'(?: [\w.-]+)+$/,
+      `this routed check no longer fails the step on its own status: ${line}`,
+    );
+  }
+  // The same swallow, one level up: a step marked continue-on-error reports its
+  // failure and the job passes regardless.
+  assert.ok(!/continue-on-error:\s*true/.test(src), "a step that cannot fail the job cannot check anything either");
 });

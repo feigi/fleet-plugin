@@ -28,6 +28,18 @@
 # -d ''`, which needs bash 4.4 and so cannot run on a stock macOS /bin/bash.
 set -euo pipefail
 
+# A checker is not optional. `xargs` handed no command falls back to its own
+# default, `echo`, so a call that lost its checker would print the filenames
+# and exit 0 having run none of them — this script's whole contract is that it
+# never exits 0 having verified nothing, and that includes being handed nothing
+# to verify with. `$#` is read before `$1`, so a call that lost the glob too
+# gets this ::error:: line naming the script instead of bash's own `unbound
+# variable` diagnostic.
+if [ "$#" -lt 2 ]; then
+  echo "::error::check-tracked.sh: usage: check-tracked.sh '<glob>' <xargs args and command...>"
+  exit 1
+fi
+
 glob=$1
 shift
 
