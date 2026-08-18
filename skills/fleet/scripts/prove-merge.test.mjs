@@ -39,6 +39,14 @@ const ENV = {
   GIT_COMMITTER_EMAIL: "t@example.com",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
+  // Two cases below assert on git's OWN diagnostic text, across three strings,
+  // and one of those strings is gettext-translatable: rev-parse's "Needed a
+  // single revision" is `die(_("..."))` in builtin/rev-parse.c, and git ships a
+  // live German msgstr for it. cat-file's "Not a valid object name" and
+  // object-name.c's "dereferences to %s type" are unwrapped today — pinning the
+  // locale is what stops any of the three turning on which git build CI runs.
+  LANG: "C",
+  LC_ALL: "C",
 };
 
 const git = (cwd, ...args) =>
@@ -473,6 +481,102 @@ test("a base ref the probe cannot answer for reports the probe failure, not a di
   const { code, json } = prove(w, head, head, merge);
   assert.equal(json.proved, true, "a merge that did land must still prove true");
   assert.equal(code, 0);
+});
+
+test("an object that is present but is not a commit is not reported as absent", (t) => {
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+
+  // A tree, so the object really is in this repository. Every commit already
+  // carries one, so no file has to be written to get it.
+  const tree = git(w, "rev-parse", `${head}^{tree}`);
+  // <merge-commit> is `head`, not a merge: the cat-file loop dies on its FIRST
+  // element, so the third argument is never reached and a real merge here would
+  // only be scenery.
+  const { code, json, stderr } = prove(w, tree, head, head);
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /cannot resolve .+ to a commit in this repository/);
+  // The old wording asserted this object "is not a commit in this repository".
+  // It is in this repository — git reads it and reports its real type, which is
+  // the half `2>/dev/null` was throwing away.
+  assert.match(stderr, /dereferences to tree type/, "git's own diagnosis must survive to stderr");
+  // Names which guard fired: the two guards above are also exit 2 with no stdout.
+  assert.doesNotMatch(stderr, /fetch failed|does not resolve/, "the guards above this one passed");
+
+  // The discriminator the old message threw away: a sha that really is absent
+  // used to print the identical die line, and now carries a different git line.
+  const absent = prove(w, "0".repeat(40), head, head);
+  assert.equal(absent.code, 2);
+  assert.match(absent.stderr, /Not a valid object name 0{40}/);
+  assert.doesNotMatch(
+    absent.stderr,
+    /dereferences to/,
+    "an absent sha and a present non-commit must not collapse into one message",
+  );
+});
+
+test("a base ref that does not resolve carries git's own cause", (t) => {
+  // Real git throughout, no shim: the fetch succeeds against a live origin, so
+  // the guard under test is the only one that can fire. BASE_REF is the
+  // caller-facing way in, and needs no fault injection.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+
+  // <merge-commit> is `head`, not a merge: this guard runs before the cat-file
+  // loop, so the third argument is never reached and a real merge here would
+  // only be scenery.
+  const r = spawnSync("sh", [SCRIPT, head, head, head], {
+    cwd: w,
+    env: { ...ENV, BASE_REF: "nosuchref" },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "", "no proof for a question that was never answered");
+  assert.match(r.stderr, /nosuchref does not resolve/);
+  // `--quiet` made this guard exit 1 with zero bytes of explanation attached.
+  assert.match(r.stderr, /Needed a single revision/, "git's own diagnosis must survive to stderr");
+  // Names which guard fired: the fetch above is also exit 2 with no stdout.
+  assert.doesNotMatch(r.stderr, /fetch failed/, "the fetch passed — this is the guard after it");
+});
+
+test("a healthy run stays quiet — the unmuted guards add nothing to stderr", (t) => {
+  const w = repo(t);
+  // Build and push the merge from a SECOND clone, so `w`'s own fetch has real
+  // objects to transfer: an already-up-to-date fetch would not exercise the
+  // path that could go noisy.
+  const other = join(w, "..", "other");
+  git(w, "clone", "-q", git(w, "remote", "get-url", "origin"), other);
+  git(other, "checkout", "-q", "-b", "feat");
+  const head = commit(other, "feature work");
+  const merge = mergeNoFf(other, head, "merge feat");
+  git(other, "push", "-q", "origin", "main");
+  const first = git(other, "rev-parse", `${merge}^1`);
+
+  const { code, json, stderr } = prove(w, head, head, merge);
+  assert.equal(code, 0);
+  assert.equal(json.proved, true);
+  // Exact, not a /fatal:/ sniff. Dropping `--quiet` from one guard and
+  // `2>/dev/null` from another is only safe while both stay silent when they
+  // succeed, and this script's stderr is what the merge bot reads. Anything git
+  // starts printing on an ordinary run shows up here as a fourteenth line.
+  assert.deepEqual(stderr.split("\n").filter(Boolean), [
+    "$ git fetch --quiet origin",
+    `$ git merge-base --is-ancestor ${merge} origin/main`,
+    `$ git merge-base --is-ancestor ${head} origin/main`,
+    "    pre  is-ancestor = true",
+    `$ git merge-base --is-ancestor ${head} origin/main  # expect SUCCESS`,
+    "    post is-ancestor = true (want true)",
+    `    ${merge}^1 = ${first}  (2 parents)`,
+    `    ${merge}^2 = ${head}`,
+    `    claimed head = ${head}`,
+    `$ git merge-base --is-ancestor ${first} ${head}`,
+    "    no rebase (pre == post) — leg 1 dropped, headWasCurrent carries it",
+    "    headWasCurrent = true (want true, both paths)",
+    "prove-merge: proved=true (path=no-rebase)",
+  ]);
 });
 
 test("no probe in prove-merge.sh has its status discarded by `[ ]`", () => {
