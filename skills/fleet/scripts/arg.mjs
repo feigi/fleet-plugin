@@ -1,4 +1,5 @@
-// Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has().
+// Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has(),
+// sweep().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
@@ -86,5 +87,60 @@ export function makeHas(die) {
   return function has(name) {
     if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
     return process.argv.includes(`--${name}`);
+  };
+}
+
+// #365: the guards above all answer "was this flag given well?", and none of
+// them can answer "was a flag given that nothing reads?". A MISSPELLED name is
+// simply never looked for, so `ci-state.mjs --pr 5 --basee main` computed a
+// real verdict against the DEFAULT base and exited 0/1 with no refusal — the
+// same fail-open harm as #61/#169, reached from the other side: not an absent
+// value, an unread flag. It bites hardest where the caller is markdown re-read
+// by a model each run (ci-state.mjs, candidates.mjs), and #173 already recorded
+// one landing: a doc naming `--label` where the flag is `--require-label`.
+//
+// Only `--`-prefixed tokens are its business. Everything else is positional and
+// is not — board.mjs's `build`/`serve` subcommands, and every valued flag's
+// value. A value can never legitimately BE a `--` token either, because arg()
+// above refuses `--base --other` outright, so there is nothing to skip over and
+// no need to know here which names take a value.
+//
+// The `=` form is looked up by NAME alone: `--base=main` stays arg()/has()'s to
+// refuse in their own wording, while `--basee=main` is caught here. The token
+// is then echoed verbatim rather than the parsed name, so the refusal quotes
+// what the caller actually typed.
+//
+// Callers put the call BELOW their own value guards, the way candidates.mjs
+// places its parseArgs, so where both would refuse the more specific wording
+// wins — `diff-stats.mjs --pr --json` still reports "--pr needs a value" and
+// not the stray behind it. Nothing above those guards runs a query, so it is
+// still a refusal before gh.
+//
+// One deliberate exception: board.mjs sweeps ABOVE its `cmd`, for the reason
+// its own comment gives — so `board.mjs --prot 9000` names the stray rather
+// than printing the usage line for a missing subcommand. The cost is that
+// `build --ledger --bogus` gets this generic wording instead of "--ledger
+// needs a value"; both exit 2, both name a real error, both refuse before gh.
+//
+// candidates.mjs deliberately does NOT route through this. It accepts no
+// positionals, so its parseArgs (#173) additionally refuses a bare
+// `candidates.mjs ready-for-agent` — which this cannot, board.mjs's
+// subcommands being exactly that shape. Strictly stronger there; leave it.
+//
+// ledger.mjs is left out for the opposite reason: its `check`/`filed` take a
+// FREE-TEXT tail, where a `--` token is legitimately DATA — `check
+// "--require-file silently absent when value missing"` works today and is the
+// shape of issue titles in this repo — so this sweep would refuse working
+// invocations, which #365's own AC calls worse than the bug. The cost is that
+// a stray flag in that tail is still absorbed into the duplicate-filing
+// subject at exit 0. Measured, unowned since #362 closed without covering it,
+// and tracked in #584; do not close it with a bare `startsWith("--")` guard.
+export function makeSweep(die) {
+  return function sweep(known) {
+    for (const a of process.argv.slice(2)) {
+      if (a.startsWith("--") && !known.includes(a.slice(2).split("=")[0])) {
+        die(`unknown flag ${a} — accepted: ${known.map((k) => `--${k}`).join(", ")}`);
+      }
+    }
   };
 }

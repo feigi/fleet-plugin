@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { makeDie, makeArg } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep } from "./arg.mjs";
 
 const NAME = "diff-stats";
 
@@ -107,6 +107,7 @@ export function computeStats(files, changedFiles) {
 // makes the refusal explicit and immediate, naming the flag.
 const die = makeDie(NAME);
 const arg = makeArg(die);
+const sweep = makeSweep(die);
 
 function run(cmd, args) {
   console.error(`$ ${cmd} ${args.join(" ")}`);
@@ -133,6 +134,17 @@ function run(cmd, args) {
 function main() {
   const pr = arg("pr");
   if (!pr) die("usage: diff-stats.mjs --pr <number>");
+  // #365, weaker here for the same reason as pr-overlap.mjs: `--pr` is
+  // required, so a misspelled `--prr 5` already fell through to the usage die
+  // above. What was silently ignored at exit 0 is a stray riding along with a
+  // good `--pr` (`--pr 5 --base main`), and that is what this closes.
+  //
+  // Inside main(), never at module scope: computeStats() is imported by
+  // diff-stats.test.mjs and select-dimensions.test.mjs, and a module-scope
+  // sweep would read the IMPORTER's argv. (review-pr runs this script as a
+  // CLI subprocess with its own argv, so it is not one of those importers.)
+  // Below the guard above, so `--pr --json` keeps #169's "--pr needs a value".
+  sweep(["pr"]);
 
   // Parsed through a guard, not bare. gh can exit 0 with a non-JSON body — a
   // proxy's HTML error page is the measured case — and an uncaught SyntaxError

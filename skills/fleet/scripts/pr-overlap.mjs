@@ -11,7 +11,7 @@
 
 import { execFileSync } from "node:child_process";
 import { basename, dirname } from "node:path";
-import { makeDie, makeArg } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep } from "./arg.mjs";
 
 const NAME = "pr-overlap";
 
@@ -25,10 +25,19 @@ const NAME = "pr-overlap";
 // rejects it here, by name, instead.
 const die = makeDie(NAME);
 const arg = makeArg(die);
+const sweep = makeSweep(die);
 
 const a = arg("a");
 const b = arg("b");
 if (!a || !b) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
+// #365, and here it is the WEAKER half of the fix: both flags are required,
+// so a misspelling of either (`--aa 5 --b 6`) already fell through to the
+// usage die above — refused, just never named. What was NOT refused is a
+// stray alongside two good values (`--a 5 --b 6 --quiet`), silently ignored
+// at exit 0. The sweep closes that and upgrades the first case's message from
+// a usage dump to the offending token. Below the usage guard so the usage
+// text still wins where it is the better answer; above the first gh call.
+sweep(["a", "b"]);
 
 function changedFiles(pr) {
   console.error(`$ gh pr diff ${pr} --name-only`);

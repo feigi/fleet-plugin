@@ -536,3 +536,33 @@ test("in-progress job with conclusion:null is accepted — not refused as malfor
   assert.equal(r.payload.verdict, "not-green");
   assert.doesNotMatch(r.stderr, /not the expected shape/);
 });
+
+// #365's other half. The sweep refuses any `--` token not in this script's
+// known set, so a name missing from that set refuses an invocation this script
+// accepts — "worse than the bug" by the ticket's own words. Measured, dropping
+// `base` or `workflow` reddens THIS test and nothing else; the other four names
+// also redden tests above, which happen to pass them.
+//
+// So: every flag ci-state.mjs accepts, in ONE green run. --workflow-file is the
+// one that would not otherwise be here, because its arg() call sits far below
+// the sweep, next to discoverWorkflowFile — the sweep needs the NAME, and a set
+// built by reading down to the first gh call would miss it.
+//
+// Relative to cwd on purpose: run() builds its repo in a fresh tmpdir this
+// scope cannot name, and the script resolves an explicit --workflow-file
+// against cwd, which run() sets to that repo.
+test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one invocation", () => {
+  const r = run(["--base", "main", "--workflow", "CI", "--workflow-file", ".github/workflows/ci.yml", "--declare-no-ci", "--quiet"], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+  });
+  assert.equal(r.status, 0, `a working invocation was refused: ${r.stderr}`);
+  // Live, not subsumed by the status assertion above: the behind-count block
+  // TOLERATES its children — tryRun() swallows the failure and returns null
+  // while execFileSync has already forwarded the child's stderr — so a child
+  // refusing a flag lands here at exit 0 with `behind` silently null. Matches
+  // git's "unknown option" as well as the fleet's own "unknown flag", because
+  // the tolerated children are git's: measured, a bogus flag on the `git
+  // remote get-url` call is otherwise 35/35 green.
+  assert.doesNotMatch(r.stderr, /unknown (flag|option)/);
+  assert.equal(r.payload.verdict, "green");
+});

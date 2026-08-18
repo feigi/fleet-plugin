@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import { makeDie, makeArg, makeHas } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
@@ -25,6 +25,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
+const sweep = makeSweep(die);
 // `ledger`/`prev`/`spend-since`/`port`/`interval` are all read with `||`/`??`
 // fallbacks, so a trailing flag previously substituted a default in total
 // silence — `--spend-since` with nothing after it silently widened the spend
@@ -405,6 +406,22 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
 }
 
 async function main() {
+  // #365: a misspelled flag was never looked for, so `serve --prot 9000`
+  // served on the default 8123 in silence. In main(), not at module scope:
+  // board.test.mjs and board-cli.test.mjs both import from this module, so a
+  // module-scope sweep would read the TEST RUNNER's argv.
+  //
+  // One set for both subcommands, deliberately. `--port`/`--open` are read
+  // only by serve() and `--prev` only by build, so `build --port 5` is
+  // accepted and ignored — the pre-existing gap the block above already
+  // names. Narrowing the set per subcommand would close it, but that is a
+  // different ticket's fix; refusing a flag this file does accept somewhere
+  // is not this ticket's business.
+  //
+  // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
+  // printing the usage line for a missing subcommand. `build`/`serve` carry
+  // no `--` and are never the sweep's business.
+  sweep(["ledger", "prev", "port", "interval", "open", "spend-since"]);
   const cmd = process.argv[2];
   const ledgerFile = arg("ledger") || ".fleet/ledger.md";
 
