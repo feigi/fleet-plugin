@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -363,4 +363,72 @@ test("the design spec's script-surface row names every field the payload actuall
   // and only this half catches `commits`.
   const invented = (out.match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((k) => !(k in e));
   assert.deepEqual(invented, [], `the spec row names fields the script never emits: ${invented.join(", ")}`);
+});
+
+// --- #119: the payload's own string fields.
+//
+// `$wt` and `$short` are spliced raw. Both are reachable and by different
+// routes: a branch name accepts a `"` (git rejects `\` in a ref), while a
+// worktree path is a filename and accepts both. This script's whole output is
+// one JSON array, so a single unescaped byte costs the caller every entry, not
+// just the offending one.
+//
+// `dirtyFiles[]` is NOT covered here and that is deliberate: git C-quotes those
+// paths itself, conditionally, so JSON-escaping on top is a second and
+// different problem. The comment at the `files=` awk names it in place.
+test("a quote in a branch name still emits parseable JSON", (t) => {
+  const w = repo(t);
+  addWorktree(w, 'evil"branch');
+
+  const { code, json } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, join(w, ".worktrees", 'evil"branch'));
+  assert.equal(e.branch, 'evil"branch', "the branch field round-trips to the name that went in");
+});
+
+test("a quote and a backslash in a worktree PATH still emit parseable JSON", (t) => {
+  // The vector a branch name cannot reach: git refuses `\` in a ref but a
+  // directory name carries one fine, so the path is the only field here that
+  // exercises the backslash rule.
+  const w = repo(t);
+  const wt = join(w, '.worktrees/od"d\\path');
+  git(w, "worktree", "add", "-q", wt, "-b", "fix/odd-path", "origin/main");
+
+  const { code, json } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.worktree, wt, "the path round-trips through both the quote and the backslash rule");
+  assert.equal(e.branch, "fix/odd-path");
+});
+
+test("an ordinary worktree is byte-identical — the escaping accepts what it should", (t) => {
+  // The false-positive half: nothing here has anything to escape.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/119-json-sh-extract");
+
+  const { code, json } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.deepEqual(e, { worktree: wt, branch: "fix/119-json-sh-extract", ahead: 0, dirty: 0, dirtyFiles: [], readable: true });
+});
+
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run. This script's
+// contract is exit 0 or exit 2; a missing library must reach the 2.
+test("a missing json.sh is exit 2, with no half-written array", (t) => {
+  const w = repo(t);
+  addWorktree(w, "fix/1-thing");
+  const lone = mkdtempSync(join(tmpdir(), "worktree-audit-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "worktree-audit.sh"));
+
+  const r = spawnSync("sh", [join(lone, "worktree-audit.sh")], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2, "a missing library is `the question could not be answered`");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the base ref");
+  assert.equal(r.stdout, "",
+    "and not even the opening `[` — the guard fires before the array is started, so no caller can see a truncated one");
 });

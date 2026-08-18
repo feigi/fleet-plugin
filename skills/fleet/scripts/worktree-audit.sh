@@ -38,6 +38,20 @@ export LC_ALL=C
 
 NAME=worktree-audit
 die() { echo "$NAME: $1" >&2; exit 2; }
+
+# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
+# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
+# open its operand aborts a non-interactive shell outright and the `||` never
+# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
+# exit 1 with the guard unfired. This script defines no exit 1 at all, so a bare 1 out of it is a code its
+# caller has no reading for. Placed here, above the opening `[`, so a missing
+# library refuses before the array is started rather than truncating it. The `|| die` stays for what `[ -r ]` cannot
+# see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to audit without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
 # One unknown state, one place: null counts, readable:false, one reason. Four
 # branches below reach it and differ in nothing but that reason, so a fifth
 # added later cannot half-set the quadruple and emit a record whose counts
@@ -172,7 +186,17 @@ while IFS="$(printf '\t')" read -r wt br; do
   echo "    $wt  branch=$short  ahead=$ahead  dirty=$dirty" >&2
   [ "$first" = 1 ] || printf ','
   first=0
+  # `$wt` and `$short` are both reachable, by different routes: a branch name
+  # accepts a `"` (git rejects `\` in a ref), while a worktree path is a
+  # filename and accepts both. This script's whole output is one array, so a
+  # single unescaped byte costs the caller every entry, not just this one.
+  # `$files` is NOT wrapped: git C-quotes those paths itself, conditionally,
+  # which is a second and different problem — see the `files=` awk above.
+  # `die` rather than a null field, unlike reap.sh: nothing has been mutated
+  # here, so refusing costs no record of work already done.
+  wt_j=$(jstr "$wt") && short_j=$(jstr "$short") \
+    || die "could not escape the entry for $wt"
   printf '{"worktree":"%s","branch":"%s","ahead":%s,"dirty":%s,"dirtyFiles":[%s],"readable":%s}' \
-    "$wt" "$short" "$ahead" "$dirty" "$files" "$readable"
+    "$wt_j" "$short_j" "$ahead" "$dirty" "$files" "$readable"
 done
 printf ']\n'

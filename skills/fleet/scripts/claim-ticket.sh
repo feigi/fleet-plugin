@@ -13,6 +13,20 @@ set -eu
 NAME=claim-ticket
 die() { echo "$NAME: $1" >&2; exit 2; }
 
+# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
+# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
+# open its operand aborts a non-interactive shell outright and the `||` never
+# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
+# exit 1 with the guard unfired. This script uses exit 2 for every refusal and has no exit 1, and the guard
+# sits ahead of every mutation, so a missing library refuses before a worktree,
+# a label or a runner exists. The `|| die` stays for what `[ -r ]` cannot
+# see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to claim without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
+
 [ $# -ge 3 ] || die "usage: claim-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
@@ -368,5 +382,21 @@ SH
   echo "    wrote $runner and excluded it" >&2
 fi
 
+# `$issue` is guarded above (`case … ''|*[!0-9]*|0?*`), but <slug> and <type> are
+# not, and all four string fields derive from them — `$branch` is
+# `$type/$issue-$slug`, `$wt` is `.worktrees/$issue-$slug`, `$runner` is
+# `$wt/agent-test`. A quote in either argument emitted a payload no parser
+# accepts, at exit 0 and — under `--apply` — after the worktree and the label
+# already existed (#119). `$install` is chosen from this script's own case
+# statement and cannot carry one; it is wrapped for uniformity, the same reason
+# inflight.sh wraps `$pr`. The numeric fields stay unwrapped: `$issue` is a JSON
+# number by the guard above, and the ports are arithmetic on it.
+#
+# Assigned before the printf, never inline in its argument list — a `$()` there
+# sits outside this `|| die`, contributes an empty argument on failure, and
+# printf still exits 0 with a malformed payload.
+issue_branch=$(jstr "$branch") && issue_wt=$(jstr "$wt") \
+  && issue_install=$(jstr "$install") && issue_runner=$(jstr "$runner") \
+  || die "could not escape the receipt fields for #$issue"
 printf '{"issue":%s,"branch":"%s","worktree":"%s","install":"%s","ports":{"postgres":%s,"ollama":%s},"runner":"%s","applied":%s}\n' \
-  "$issue" "$branch" "$wt" "$install" "$pg" "$ollama" "$runner" "$apply"
+  "$issue" "$issue_branch" "$issue_wt" "$issue_install" "$pg" "$ollama" "$issue_runner" "$apply"

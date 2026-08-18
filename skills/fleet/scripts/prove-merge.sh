@@ -35,6 +35,20 @@ set -eu
 
 NAME=prove-merge
 die() { echo "$NAME: $1" >&2; exit 2; }
+
+# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
+# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
+# open its operand aborts a non-interactive shell outright and the `||` never
+# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
+# exit 1 with the guard unfired. Exit 1 out of THIS script means "the proof is a no", which the merge bot
+# reads as a reason to refuse a merge — so a missing file must not be able to
+# say it. The `|| die` stays for what `[ -r ]` cannot
+# see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to answer without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
 # Exit 1 is the answer "no"; anything else is git failing to answer, and a proof
 # must never read a failure as a leg it likes.
 is_ancestor() {
@@ -124,6 +138,16 @@ else
 fi
 echo "$NAME: proved=$proved (path=$proof_path)" >&2
 
+# None of the three string fields is reachable today — `$second` and `$first`
+# come from `git rev-parse`, 40 hex characters and nothing else, and
+# `$proof_path` is this script's own `rebase`/`no-rebase` literal. They go
+# through `jstr` for uniformity against a later edit that changes where a field
+# comes from, the same reason inflight.sh wraps `$pr`, and it costs nothing
+# (#119). Assigned before the printf, never inline in its argument list — a
+# `$()` there sits outside this `|| die`, contributes an empty argument on
+# failure, and printf still exits 0 with a malformed payload.
+second_j=$(jstr "$second") && first_j=$(jstr "$first") && path_j=$(jstr "$proof_path") \
+  || die "could not escape the proof fields for $merge"
 printf '{"preIsAncestor":%s,"postIsAncestor":%s,"secondParent":"%s","firstParent":"%s","parentCount":%s,"proofPath":"%s","headWasCurrent":%s,"proved":%s}\n' \
-  "$pre_anc" "$post_anc" "$second" "$first" "$parents" "$proof_path" "$head_current" "$proved"
+  "$pre_anc" "$post_anc" "$second_j" "$first_j" "$parents" "$path_j" "$head_current" "$proved"
 exit "$rc"
