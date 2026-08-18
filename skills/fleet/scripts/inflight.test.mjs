@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -1901,4 +1901,32 @@ printf '%s\\n' "$f"
   assert.equal(JSON.parse(r.stdout).taken, false, "and the payload the caller reads agrees with the code");
   assert.match(r.stderr, /could not remove .*\/cap\./,
     "the removal that failed is said out loud rather than swallowed");
+});
+
+// --- #119: the escaping library this script now sources rather than carries.
+//
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run. Measured on
+// /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix`, that abort exits **1**
+// — and exit 1 here is not an error, it is the verdict `taken`. A ticket nobody
+// had claimed would come back claimed, on nothing but a missing file. The
+// script's guard is an `[ -r ]` ahead of the `.` for exactly that reason, and
+// this is the test that keeps it there.
+test("a missing json.sh exits 2, never the exit 1 that means `taken`", (t) => {
+  const { repo, env } = fixture(t, 7, {});
+  // The script alone in a directory with no json.sh beside it — the shape a
+  // half-installed plugin takes. `dirname "$0"` resolves here, so this is the
+  // real resolution path and not a stubbed stand-in for it.
+  const lone = mkdtempSync(join(tmpdir(), "inflight-nolib-"));
+  t.after(() => execFileSync("rm", ["-rf", lone]));
+  copyFileSync(SCRIPT, join(lone, "inflight.sh"));
+
+  const r = spawnSync("sh", [join(lone, "inflight.sh"), "7"], { cwd: repo, env, encoding: "utf8" });
+
+  assert.equal(r.status, 2,
+    "a missing library is `the question could not be answered`, never a verdict. Exit 1 here reads as `taken` and would fabricate a claim on a free ticket; exit 0 would free a ticket without probing.");
+  assert.match(r.stderr, /json\.sh/,
+    "and it names the file, so the operator is not left guessing which of this script's exit-2 paths fired");
+  assert.equal(r.stdout, "",
+    "no payload — a verdict was never established, so there is nothing to report");
 });

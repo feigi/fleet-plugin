@@ -26,10 +26,11 @@
 # cannot be rendered is NOT one of the four (#120): the verdict is already
 # correct at that point, and a formatter breaking must not retract it — that
 # field is emitted as JSON null instead, on the payload the verdict already
-# earned. With one gap, jstr's own `sed` stage: the pipeline reports only
-# `tr`'s status, so a `sed` that fails is never noticed and its field still
-# renders as "" — the same value "found nothing" uses — with no null and no
-# stderr line (#119, measured).
+# earned. No gap left in that: `jstr`'s own `sed` stage used to be invisible —
+# a pipeline reports only its LAST stage, so a failed `sed` rendered the field
+# as "", the same value "found nothing" uses, with no null and no stderr line.
+# json.sh captures each fallible stage and reads its status, so that failure now
+# reaches `add_evidence` and lands in the null branch like any other (#119).
 set -eu
 
 # Byte semantics for the `tr`, `sed` and `awk` below. There is no `grep`: this
@@ -58,6 +59,25 @@ export LC_ALL=C
 
 NAME=inflight
 die() { echo "$NAME: $1" >&2; exit 2; }
+
+# The escaping helpers, shared with release-ticket.sh and no-undo-audit.sh
+# rather than copied into each (#119). Below `export LC_ALL=C` deliberately:
+# locale-pin-prose.test.mjs requires every line above that pin to be a comment,
+# a blank, a shebang or a `set -` line, and this is none of them.
+#
+# `[ -r ]` ahead of the `.`, not `. … || die` alone. `.` is a POSIX special
+# builtin: failing to open its operand aborts a non-interactive shell outright,
+# so the `||` never runs. Measured on a missing file under `set -e`: /bin/sh
+# (macOS bash 3.2), bash 3.2 and `bash --posix` all exit **1** with the guard
+# unfired — and exit 1 from this script means `taken`, so a library that merely
+# went missing would fabricate a claim on a free ticket. dash exits 2, also
+# unfired; only bash 5.3 reaches the `||`. The `|| die` stays for what `[ -r ]`
+# cannot see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to answer without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
 
 [ $# -eq 1 ] || die "usage: inflight.sh <issue-number>"
 n=$1
@@ -702,39 +722,12 @@ else
 fi
 echo "$NAME: #$n taken=$taken" >&2
 
-# Every evidence string goes through here, the same helper and the same pipeline
-# as release-ticket.sh's jstr(). Three of the four are names chosen elsewhere: git
-# accepts a `"` in a ref, so a branch — local or remote — carries one in; a
-# worktree path is a filename, so it carries in `\` as well, which git's ref
-# rules reject. Raw, either emits a payload no JSON parser accepts.
-#
-# Backslash first, always — escaping the quote (or a short form below) before
-# the backslash rule runs turns the backslash IT just introduced into `\\` on
-# the second pass, so every rule that adds a backslash has to come after this
-# one. The five C0 bytes RFC 8259 gives a two-character short form — \010 \011
-# \012 \014 \015 (\b \t \n \f \r) — get theirs; BS and FF are matched as a
-# literal byte spelled with `printf`, never as `\b` or `\f`. Neither spelling
-# matches \010, and neither fails quietly: `\b` in a BRE is a zero-width word
-# BOUNDARY to GNU sed and a literal `b` to BSD sed, so the rule would insert
-# `\b` at every word edge on one and mangle every letter `b` on the other
-# (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0 byte and JSON
-# permits it unescaped, so — unlike every version of this helper before #146 —
-# it is left alone. Every remaining byte below \040 has no short form, \013 (VT)
-# included: RFC 8259 lists exactly the five above and `\v` is not among them; tr
-# still turns it into a space, and jrewritten (below) is how a caller finds out
-# that happened, since a replaced value is not the original bytes and must not
-# be treated as a real path or ref. Byte-safe because the tr set is ASCII-only
-# and a multi-byte UTF-8 sequence uses no byte below \200, so nothing here can
-# split one — not because UTF-8 avoids the low bytes, which it does not: half of
-# it is ASCII. tr pads the replacement with its last character.
-#
-# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
-# runs, so a literal newline in $1 is data the LF rule can reach rather than a
-# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
-# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
-# EOF with nothing to append and discards the pattern space instead of printing
-# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
-# `N;$!ba` prints nothing at all for a single-line value.
+# Every evidence string goes through `jstr` from json.sh. Three of the four are
+# names chosen elsewhere: git accepts a `"` in a ref, so a branch — local or
+# remote — carries one in; a worktree path is a filename, so it carries in `\`
+# as well, which git's ref rules reject. Raw, either emits a payload no JSON
+# parser accepts. The rule list and its ordering live in json.sh, once, rather
+# than here and in release-ticket.sh and in no-undo-audit.sh (#119).
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
 # refused unless it is all digits AND unpadded (the guard's `0?*` arm), which is
@@ -744,50 +737,6 @@ echo "$NAME: #$n taken=$taken" >&2
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
 # later edit rather than a reachable vector today.
-jstr() {
-  # Empty in, empty out, no fork at all (#120). This is what lets a
-  # PATH-wide sed/tr outage — the failure this script measures at its own
-  # top — leave a field that legitimately found nothing untouched: that
-  # field never calls the broken tool, so it cannot observe its failure.
-  [ -n "$1" ] || return 0
-  printf '%s' "$1" \
-    | sed -e ':a' -e '$!N' -e '$!ba' \
-        -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-        -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
-        -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
-    | tr '\001-\007\013\016-\037' ' '
-}
-
-# True iff $1 held a byte jstr had to replace rather than escape — every C0
-# byte except \010 \011 \012 \014 \015 (BS, tab, LF, FF, CR: escaped above,
-# never replaced) and \177 (DEL: preserved, never replaced). `$()` strips
-# trailing newlines off both sides, and \012 is the one byte it strips: it is
-# not in the delete set, so the same suffix comes off `raw` and `orig` and the
-# strip can neither manufacture a difference nor hide one. An `X` sentinel
-# appended to both sides stood here for that job and did nothing — measured
-# across every arrangement of these bytes, it changed no answer — so it is gone
-# rather than defended.
-jrewritten() {
-  # Same short circuit as jstr, same reason: nothing to have rewritten, so no
-  # need to ask a tool that might not be there.
-  [ -n "$1" ] || { printf false; return 0; }
-  # `|| return 1` is load-bearing, not belt-and-braces. This function's last
-  # command is `[ … ] && printf false || printf true`, an AND-OR list that
-  # always exits 0, so a failed `tr` reaches the caller only by `set -e`
-  # aborting the function — and the single call site runs it inside an `if`
-  # condition, where `set -e` is exempted. Whether that exemption also reaches
-  # this assignment is the shell's own choice, and shells disagree. Measured:
-  # `dash`, Apple's `/bin/sh`, and bash 3.2.57 in POSIX/sh mode abort here,
-  # which is correct. bash 5.3 in EVERY mode — plain, invoked as `sh`, and
-  # `--posix` — plus bash 3.2.57 outside POSIX mode and zsh 5.9 all run on to
-  # the always-0 last line and hand back a confident `true` about bytes nothing
-  # ever examined. That second list covers every distro whose `/bin/sh` is bash
-  # 5.x. Returning explicitly makes the status this function's own on all of
-  # them.
-  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037') || return 1
-  orig=$(printf '%s' "$1")
-  [ "$raw" = "$orig" ] && printf false || printf true
-}
 
 # A `$(...)` in printf's ARGUMENT list sits outside the `|| die` on the printf
 # itself: a substitution that fails contributes an EMPTY argument and printf
@@ -801,8 +750,9 @@ jrewritten() {
 # that answer into "unanswerable". So a field jstr or jrewritten could not
 # render becomes JSON `null` — not `""`, which already means "this probe
 # looked and found nothing" — and the run continues to the payload it earned,
-# at the verdict's own exit code. The one case that still reaches `""` is the
-# `sed` mask the header names (#119): this function never learns it happened.
+# at the verdict's own exit code. A failed `sed` inside `jstr` used to escape
+# this branch entirely and reach `""` unannounced; json.sh reads each stage's
+# own status, so it arrives here as a non-zero return like any other (#119).
 #
 # The message names the escaper, not just the field, because the two fail
 # independently: jstr can render a string perfectly while jrewritten cannot
