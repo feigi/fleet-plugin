@@ -124,11 +124,13 @@ test("a run with failing tests is NOT unrun", () => {
 });
 
 // #143's all-skipped case, and the reason the clause reads `pass === 0 && !fail`
-// rather than the bare "zero passes" #143's body proposes. `skipped` is NOT
-// declared in `test_run` (see the schema pin below) and `additionalProperties:
-// false` drops what it does not declare, so a run where every test skipped can
-// only arrive at this classifier as `pass: 0` with `fail` zero or absent.
-// Nothing passed and nothing failed is no work done.
+// rather than the bare "zero passes" #143's body proposes. `skipped` is NOT a
+// declared field of `test_run` (see the schema pin below), and whether
+// `additionalProperties: false` drops such a field or rejects the whole object
+// is stated BOTH ways in this directory and is not settled here — either way it
+// never reaches this classifier, so a run where every test skipped can only
+// arrive as `pass: 0` with `fail` zero or absent. Nothing passed and nothing
+// failed is no work done.
 test("a run where nothing passed and nothing failed is unrun — every test skipped", () => {
   for (const run of [
     { command: "node --test", tests: 2, pass: 0, fail: 0 },

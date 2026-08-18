@@ -758,8 +758,8 @@ function unrunReason(review) {
   // `test_run`'s own `required`) and an absent count is not a zero one. The
   // `&& !run.fail` is what keeps this off the suite that failed everything —
   // that reports zero passes too, and it is the run that most needs reporting.
-  // `skipped` is not a declared field, so `additionalProperties: false` leaves
-  // this the only shape an all-skipped run can reach the classifier in.
+  // `skipped` is not a declared field of `test_run`, so however the harness treats
+  // an undeclared one, this is the only shape an all-skipped run reaches here in.
   if (run.pass === 0 && !run.fail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
   // The CONJUNCTION, never `fail > 0` alone: a failing suite ran, and reading
   // that as unrun is the over-refusal #137 removed. Zero findings is provably
