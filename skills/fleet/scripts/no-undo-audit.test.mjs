@@ -168,15 +168,12 @@ function byteConflictRepo(t, printfPath) {
       parent=$(git rev-parse "$1")
       blob=$(printf '%s\\n' "$2" | git hash-object -w --stdin)
       GIT_INDEX_FILE=$idx git read-tree "$parent"
-      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,$p"
-      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,plain.txt"
+      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,$p" --cacheinfo "100644,$blob,plain.txt"
       tree=$(GIT_INDEX_FILE=$idx git write-tree)
-      rm -f "$idx"
       git commit-tree "$tree" -p "$parent" -m "$3"
     }
     git push -q origin "$(side "origin/$branch" 'branch side' 'branch edits the file')":"refs/heads/$branch"
     git push -q origin "$(side origin/main 'MAIN SIDE' 'MAIN COMMIT AT RISK')":refs/heads/main
-    git fetch -q origin
   `, "sh", c.w, join(c.w, "..", "idx"), c.branch, printfPath], { env: ENV, encoding: "utf8" });
   return c;
 }
@@ -943,29 +940,44 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 });
 
 // #582: `tr` is locale-sensitive, and under a UTF-8 locale BSD tr exits 1 on a
-// byte that is not valid UTF-8. Its status is the pipeline's SECOND-to-last, so
-// `set -e` never sees it — the pipeline's status is awk's — and the line carries
-// no `|| die` of its own. `conflicts` came back holding the single truncated
-// entry `b`, `plain.txt` was dropped from the list entirely, `atRisk` was `[]`,
-// and the audit exited 0. A false safe on the one tool whose whole job is to say
-// whether a rebase would eat a commit, which is the outcome the comment above
-// `conflicts=` says must be exit 2. `export LC_ALL=C` is the fix, and it is the
-// convention inflight.sh already follows at five sites.
+// byte that is not valid UTF-8. In the script's `tr | tr | awk` it is the FIRST
+// stage that fails — measured, PIPESTATUS `1 0 0`, the second `tr` and `awk`
+// both exiting 0 on the short input it hands them — so the real status sits in
+// a non-final slot where `set -e` never sees it (the pipeline's status is
+// awk's) and the line carries no `|| die` of its own. `conflicts` came back
+// holding the single truncated entry `b`, `plain.txt` was dropped from the list
+// entirely, `atRisk` was `[]`, and the audit exited 0. A false safe on the one
+// tool whose whole job is to say whether a rebase would eat a commit, which is
+// the outcome the comment above `conflicts=` says must be exit 2.
+// `export LC_ALL=C` is the fix, and it is the convention inflight.sh already
+// follows at five sites.
 //
-// The locale is passed EXPLICITLY rather than inherited. The failing shape is
-// the operator's ambient `LANG=en_US.UTF-8` with `LC_ALL` unset, and a suite
-// that inherits whatever the runner happens to export pins nothing at all —
-// same reasoning, and same technique, as inflight.test.mjs' own locale test.
+// The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
+// are load-bearing. Explicit rather than inherited, because a suite that takes
+// whatever the runner happens to export pins nothing at all — same reasoning,
+// and same technique, as inflight.test.mjs' own locale test. `LANG` rather than
+// `LC_ALL`, because passing `LC_ALL` in puts it in the child's environment
+// BEFORE the script runs, and a POSIX shell keeps a variable's export attribute
+// once it is already there: a plain `LC_ALL=C` with the `export` keyword
+// dropped would still reach `tr`, and these tests would go on passing against a
+// script that exports nothing. Measured both ways — under
+// `{ LC_ALL: "en_US.UTF-8" }` that mutant survives, under this shape it dies.
+// It is also the honest shape: the ambient failure is an operator's
+// `LANG=en_US.UTF-8` with `LC_ALL` unset.
 //
 // Platform ceiling, stated rather than hidden: BSD tr — macOS, the fleet's own
 // platform — rejects the byte, while GNU tr is byte-oriented and accepts it, so
 // on Linux the unpatched script already answers correctly and this test passes
-// with or without the pin. It asserts the correct ANSWER, which is right on both
-// platforms; it is the macOS run that kills the mutant.
+// with or without the pin. Measured under a full GNU toolchain (coreutils 9.11,
+// gnu-sed 4.10, gawk 5.4.1 ahead of PATH): the whole file stays green with
+// `export LC_ALL=C` deleted. This test asserts the correct ANSWER, which is
+// right on both platforms; only the macOS run kills the mutant. `ci.yml` runs
+// ubuntu-latest, so the half CI can check is the source assertion in
+// locale-pin-prose.test.mjs, not this one.
 test("a conflicting path holding an invalid-UTF-8 byte still names every conflict and every commit at risk under an ambient UTF-8 locale", (t) => {
   const c = byteConflictRepo(t, "b\\377ad.txt");
 
-  const r = audit(c, { ...ENV, LC_ALL: "en_US.UTF-8" });
+  const r = audit(c, { ...ENV, LANG: "en_US.UTF-8", LC_ALL: undefined });
   assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.conflicts.length, 2,
@@ -993,7 +1005,7 @@ test("a conflicting path holding an invalid-UTF-8 byte still names every conflic
 test("a conflicting path of valid multi-byte UTF-8 round-trips whole under the pinned locale and is not flagged rewritten", (t) => {
   const c = byteConflictRepo(t, "caf\\303\\251.txt");
 
-  const r = audit(c, { ...ENV, LC_ALL: "en_US.UTF-8" });
+  const r = audit(c, { ...ENV, LANG: "en_US.UTF-8", LC_ALL: undefined });
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.deepEqual(r.json.conflicts, ["café.txt", "plain.txt"],
