@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -690,4 +690,256 @@ test("a missing json.sh is exit 2, before any branch is deleted", (t) => {
   assert.equal(r.stdout, "", "no payload: nothing happened");
   assert.ok(branchExists(w, "chore/landed"),
     "and the branch is still there — the guard fires ahead of every deletion, so this is a clean refusal");
+});
+
+// --- #391: the reason a keep carries, on the three calls that derived it from
+// an exit code and sent git's own diagnosis to /dev/null.
+//
+// Measured before this suite existed, by mutating each arm and re-running the
+// file: garbling the `worktree remove` reason and garbling the `branch -D`
+// reason each left all 24 tests green. Both arms were invisible.
+
+/**
+ * Put a symlink where the worktree directory was, keeping the registration
+ * pointed at the symlink's path — the shape that makes `git worktree remove`
+ * fail AFTER it has already cleared the admin entry.
+ *
+ * Measured, git 2.50.1 (Apple Git-155): rc 255,
+ * `error: failed to delete '<wt>': Not a directory`, the porcelain no longer
+ * lists the entry, and both the symlink and its target survive on disk.
+ *
+ * Chosen over a `chmod 555` parent, which produces the same deregistered state
+ * by a different route: this one reproduces as any user, needs no permission
+ * bits, and so carries none of the euid-0 vacuity the `0o000` fixtures in this
+ * file already have to skip around (#184). Every guard ahead of the removal
+ * still passes through it — `.git` is a regular file and `git -C` follows the
+ * link, so the linkage guard and the status probe both answer about the real
+ * worktree.
+ */
+function symlinkStandIn(wt) {
+  const real = `${wt}-real`;
+  renameSync(wt, real);
+  symlinkSync(real, wt);
+  return real;
+}
+
+/** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
+function failOnlyShim(t, match, stderr, code = 1) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if ${match}; then\n` +
+      stderr.map((l) => `  printf '%s\\n' ${JSON.stringify(l)} >&2\n`).join("") +
+      `  exit ${code}\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+test("a refusal that CLEARED the registration is reported as a partial removal, not as a no-op (#391)", (t) => {
+  // The worst of the two: git unregistered the worktree and then failed to
+  // delete it, so the run reported `worktree remove refused` — indistinguishable
+  // from "nothing happened" — while leaving an orphaned directory behind and
+  // the branch standing as though it had been deliberately retained.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const real = symlinkStandIn(wt);
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, "a refusal is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(
+    json.kept[0].reason,
+    /registration cleared, removal was partial/,
+    `a refusal that unregistered the worktree must not read as a no-op: ${json.kept[0].reason}`,
+  );
+  assert.match(json.kept[0].reason, /Not a directory/, "git's own diagnosis must reach the payload");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
+  assert.match(stderr, /KEEP feature\/merged — worktree remove refused/);
+
+  // The registration really is gone — the state the reason claims, measured.
+  assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /feature\/merged/);
+  // ...and nothing on disk was removed by this script, under any path.
+  assert.ok(lstatSync(wt).isSymbolicLink(), "the stand-in symlink must survive");
+  assert.equal(existsSync(real), true, "the orphaned directory is not this script's to delete");
+  assert.equal(branchExists(w, "feature/merged"), true, "and the branch is still kept");
+});
+
+test("a refusal that LEFT the registration in place is reported as such, distinctly (#391)", (t) => {
+  // The other half, and the half the old message happened to describe
+  // correctly — asserted so the two outcomes cannot collapse back into one
+  // string. A locked worktree exits 128 with the admin entry untouched
+  // (measured, git 2.50.1). Per the brief this needs no dedicated arm: once
+  // git's stderr is quoted, the lock names itself and its own remedy.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  git(w, "worktree", "lock", wt);
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(
+    json.kept[0].reason,
+    /registration intact, nothing was removed/,
+    `a refusal that changed nothing must say so: ${json.kept[0].reason}`,
+  );
+  assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the two outcomes must not collapse into one reason");
+  assert.match(json.kept[0].reason, /locked working tree/, "git's message names the fault and the remedy");
+  assert.match(json.kept[0].reason, /remove -f -f/, "including the remedy, which only git can supply");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's message here really is two lines — it must arrive flattened");
+  assert.match(stderr, /KEEP feature\/merged/);
+
+  assert.match(git(w, "worktree", "list", "--porcelain"), /feature\/merged/, "the registration really did survive");
+  assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("the sweep continues past a worktree-removal refusal and still reaps the other branches (#391)", (t) => {
+  // The constraint that separates this ticket's ruling from #208's: reap.sh
+  // sweeps every [gone] branch unattended in one pass, so one orphan must not
+  // strand the rest. The new registry re-read runs inside that loop, which is
+  // exactly where an added git call could have introduced a bail.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/locked", "work behind a lock");
+  git(w, "worktree", "lock", wt);
+  mergedGoneBranch(w, "feature/healthy", "work that landed");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/healthy"], "the refusal must not strand the branches after it");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/locked");
+  assert.equal(branchExists(w, "feature/healthy"), false);
+  assert.equal(branchExists(w, "feature/locked"), true);
+});
+
+test("a `git branch -D` failure carries git's own message, not just the label (#391)", (t) => {
+  // `>/dev/null 2>&1` sent the cause to the void and reported "branch delete
+  // failed". The real message names the fault outright — the shim reproduces
+  // the one measured in the wild, plus a second line, since the reason has to
+  // survive as a single JSON string.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = branch ] && [ "$2" = -D ]`,
+    [`error: cannot delete branch 'feature/merged' used by worktree at '/some/where'`, "fatal: could not update ref"],
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, [], "a branch that was not deleted must not be reported as reaped");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload");
+  assert.match(json.kept[0].reason, /could not update ref/, "both lines, not just the first");
+  assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
+  assert.match(stderr, /KEEP feature\/merged — branch delete failed/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a dying `git worktree list` keeps the branch and names ITS failure, never 'branch delete failed' (#391)", (t) => {
+  // A pipeline inside `$( )` takes awk's status, never git's, so a dying list
+  // produced an empty $wt: the dirty check, the ignored-files check and the
+  // removal were all skipped, flow fell through to `git branch -D`, and the
+  // payload blamed the branch delete for a failure two steps earlier — while
+  // git's `fatal:` reached the terminal and never the JSON the caller parses.
+  // Same swallow #264 fixed one branch above for `git cherry`.
+  const w = repo(t);
+  mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ]`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable probe is a finding, not a script failure");
+  assert.deepEqual(json.reaped, [], "an unanswerable probe authorizes nothing");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /worktree lookup failed/, `the reason must name the step that failed: ${json.kept[0].reason}`);
+  assert.doesNotMatch(json.kept[0].reason, /branch delete failed/, "the label must not blame a later step for this failure");
+  assert.match(json.kept[0].reason, /worktree list exploded/, "git's own words must reach the payload");
+  assert.match(stderr, /KEEP feature\/merged — worktree lookup failed/);
+  assert.equal(branchExists(w, "feature/merged"), true, "and the branch survives the probe it could not answer");
+});
+
+test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {
+  // These three reasons now carry text neither this repo nor its operator
+  // chose. `keep()` escapes through json.sh, which landed in #119 — before it,
+  // routing git's stderr here would have emitted a payload no parser accepts.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = branch ] && [ "$2" = -D ]`,
+    [`error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`],
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.equal(
+    json.kept[0].reason,
+    `branch delete failed: error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`,
+    "the quotes and backslashes survive as data — runReap JSON.parses stdout, so a raw splice fails before this assert",
+  );
+});
+
+test("an ordinary run's payload is byte-for-byte what it has always been (#391)", (t) => {
+  // The false-positive half. Nothing here fails, so nothing has a cause to
+  // quote and the whole payload must be unchanged — a fix that starts
+  // decorating healthy reasons is as wrong as one that reports none.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], kept: [] });
+  assert.doesNotMatch(stderr, /KEEP/);
+  assert.doesNotMatch(stderr, /registration/, "a successful removal says nothing about registrations");
+  assert.equal(existsSync(wt), false);
+});
+
+test("the dry run is unchanged, and still does not attempt a removal it cannot predict (#391)", (t) => {
+  // The brief keeps this asymmetry deliberately: a dry run prints
+  // `would remove worktree $wt` WITHOUT attempting the removal, so it cannot
+  // foresee a refusal — performing it is the only way to know. This resembles
+  // the dry/apply mismatch class of #86, #385 and #386 but is not an instance
+  // of it, and the fix above must not have quietly turned it into one by
+  // teaching the dry run to probe.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/locked", "work behind a lock");
+  git(w, "worktree", "lock", wt);
+
+  const { code, json, stderr } = runReap(w, []);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json, { applied: false, reaped: ["feature/locked"], kept: [] });
+  assert.ok(stderr.includes(`    would remove worktree ${wt}`), `the dry run's own line is unchanged: ${stderr}`);
+  assert.ok(stderr.includes("    would reap feature/locked"));
+  assert.doesNotMatch(stderr, /KEEP/, "a dry run predicts no refusal — it never ran the removal");
+
+  // And it really did not act: registration, directory and branch all intact.
+  assert.match(git(w, "worktree", "list", "--porcelain"), /feature\/locked/);
+  assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, "feature/locked"), true);
 });
