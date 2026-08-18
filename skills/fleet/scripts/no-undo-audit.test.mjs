@@ -139,6 +139,49 @@ function bareConflictRepo(t, path) {
 }
 
 /**
+ * Both sides add a path spelled as a `printf` FORMAT, plus `plain.txt`, so
+ * merge-tree reports TWO conflicting paths, and main's later commit is
+ * `MAIN COMMIT AT RISK` — the same shape `conflictRepo` builds, reached without
+ * ever naming the path in JavaScript.
+ *
+ * The name has to be produced by the SHELL. `execFileSync` re-encodes every JS
+ * string as UTF-8, so a JS `"\xFF"` arrives as the two bytes `\303\277` — valid
+ * UTF-8, which reproduces nothing. `printf 'b\377ad.txt'` is the only way to get
+ * the raw byte across, and it keeps this file pure ASCII.
+ *
+ * The commits go in through a THROWAWAY `GIT_INDEX_FILE` and are pushed straight
+ * to origin, so neither the real index nor the filesystem ever has to hold the
+ * name — APFS refuses it outright (`touch $(printf 'b\377ad.txt')` → `Illegal
+ * byte sequence`, status 1), which is what makes `--cacheinfo` load-bearing
+ * rather than a shortcut. Nothing needs checking out either: the audit reads
+ * `origin/main` and `origin/<branch>` and compares neither against local HEAD,
+ * so the local branch stays one commit behind and `status --porcelain` stays
+ * clean. That is also why no sparse-checkout is needed to keep it clean.
+ */
+function byteConflictRepo(t, printfPath) {
+  const c = repo(t);
+  execFileSync("sh", ["-c", `
+    set -eu
+    w=$1; idx=$2; branch=$3; p=$(printf "$4")
+    cd "$w"
+    side() {
+      parent=$(git rev-parse "$1")
+      blob=$(printf '%s\\n' "$2" | git hash-object -w --stdin)
+      GIT_INDEX_FILE=$idx git read-tree "$parent"
+      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,$p"
+      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,plain.txt"
+      tree=$(GIT_INDEX_FILE=$idx git write-tree)
+      rm -f "$idx"
+      git commit-tree "$tree" -p "$parent" -m "$3"
+    }
+    git push -q origin "$(side "origin/$branch" 'branch side' 'branch edits the file')":"refs/heads/$branch"
+    git push -q origin "$(side origin/main 'MAIN SIDE' 'MAIN COMMIT AT RISK')":refs/heads/main
+    git fetch -q origin
+  `, "sh", c.w, join(c.w, "..", "idx"), c.branch, printfPath], { env: ENV, encoding: "utf8" });
+  return c;
+}
+
+/**
  * Add/add conflicts on 20 paths, introduced on main by TWO distinct commits
  * that INTERLEAVE through the pathspec list: the even-numbered paths come
  * from one, the odd-numbered from the other, and the audit hands them to
@@ -897,6 +940,67 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.deepEqual(r.json.conflicts, [path]);
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "a leading `:` must be matched literally, not as magic");
+});
+
+// #582: `tr` is locale-sensitive, and under a UTF-8 locale BSD tr exits 1 on a
+// byte that is not valid UTF-8. Its status is the pipeline's SECOND-to-last, so
+// `set -e` never sees it — the pipeline's status is awk's — and the line carries
+// no `|| die` of its own. `conflicts` came back holding the single truncated
+// entry `b`, `plain.txt` was dropped from the list entirely, `atRisk` was `[]`,
+// and the audit exited 0. A false safe on the one tool whose whole job is to say
+// whether a rebase would eat a commit, which is the outcome the comment above
+// `conflicts=` says must be exit 2. `export LC_ALL=C` is the fix, and it is the
+// convention inflight.sh already follows at five sites.
+//
+// The locale is passed EXPLICITLY rather than inherited. The failing shape is
+// the operator's ambient `LANG=en_US.UTF-8` with `LC_ALL` unset, and a suite
+// that inherits whatever the runner happens to export pins nothing at all —
+// same reasoning, and same technique, as inflight.test.mjs' own locale test.
+//
+// Platform ceiling, stated rather than hidden: BSD tr — macOS, the fleet's own
+// platform — rejects the byte, while GNU tr is byte-oriented and accepts it, so
+// on Linux the unpatched script already answers correctly and this test passes
+// with or without the pin. It asserts the correct ANSWER, which is right on both
+// platforms; it is the macOS run that kills the mutant.
+test("a conflicting path holding an invalid-UTF-8 byte still names every conflict and every commit at risk under an ambient UTF-8 locale", (t) => {
+  const c = byteConflictRepo(t, "b\\377ad.txt");
+
+  const r = audit(c, { ...ENV, LC_ALL: "en_US.UTF-8" });
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.conflicts.length, 2,
+    `both conflicting paths, not a list truncated at the bad byte; got ${JSON.stringify(r.json.conflicts)}`);
+  assert.equal(r.json.conflicts[1], "plain.txt",
+    "the path AFTER the bad one is what truncation drops, and dropping it silently is the false safe");
+  assert.match(r.json.conflicts[0], /^b.ad\.txt$/, "the bad path arrives whole, not cut down to `b`");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "and the commit a careless resolution would eat is named, rather than atRisk: [] at exit 0");
+});
+
+// The other half of the same pin, and the half a fix-only suite never covers:
+// what does `export LC_ALL=C` now REFUSE? It makes every `tr`, `sed` and `awk`
+// in the script byte-oriented, so a path of legitimate multi-byte UTF-8 must
+// still round-trip whole and must NOT be flagged rewritten. Every scrub set in
+// this script is \001-\037 and every byte of a multi-byte UTF-8 sequence is
+// >= \200 — the script's own jstr comment says so — so the pin cannot reach it.
+// This is the test that keeps that true.
+//
+// Built through the same shell-side `printf` as the invalid case rather than
+// through `conflictRepo`: written to disk, the name goes through the
+// filesystem's Unicode normalisation, and `caf\303\251.txt` (NFC) can come back
+// NFD — a byte-for-byte assertion failing for a reason that has nothing to do
+// with this script.
+test("a conflicting path of valid multi-byte UTF-8 round-trips whole under the pinned locale and is not flagged rewritten", (t) => {
+  const c = byteConflictRepo(t, "caf\\303\\251.txt");
+
+  const r = audit(c, { ...ENV, LC_ALL: "en_US.UTF-8" });
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["café.txt", "plain.txt"],
+    "byte for byte — this is what a consumer pastes into `git diff --`");
+  assert.deepEqual(r.json.conflictsRewritten, [false, false],
+    "a byte >= \\200 is outside every scrub set, and pinning the locale must not change that");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
 });
 
 // A commit subject is free text, so it reaches the payload with whatever the

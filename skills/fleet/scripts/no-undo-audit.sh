@@ -9,6 +9,25 @@
 # stays with the caller. Exit 0 safe, 1 refused, 2 unanswerable.
 set -eu
 
+# Byte semantics for every tool below, and not a stylistic pin. `tr` is
+# locale-sensitive: under a UTF-8 locale BSD tr exits 1 on a byte that is not
+# valid UTF-8, and the `tr | tr | awk` that splits merge-tree's output holds that
+# status in a pipeline's SECOND-to-last slot, where `set -e` cannot see it — the
+# pipeline's status is awk's — and where no `|| die` is watching either. A
+# conflicting path carrying such a byte truncated `conflicts` at that byte,
+# dropped every path after it, and reported `atRisk: []` at exit 0: a FALSE SAFE
+# from the one tool whose whole job is to say whether a rebase would eat a
+# commit, and precisely the outcome the comment above `conflicts=` says must be
+# exit 2 instead. Reachable only from a fetched tree — a Linux- or
+# latin-1-authored commit — since APFS refuses to hold the name locally. #582.
+#
+# Global rather than per-site, unlike inflight.sh's five: nothing in this script
+# sorts, folds case, or uses a `[a-z]` range or a POSIX class, so collation and
+# case-folding — the two things `LC_ALL=C` otherwise changes — have nothing here
+# to act on. Non-ASCII paths are untouched: every scrub set below is \001-\037
+# and every byte of a multi-byte UTF-8 sequence is >= \200.
+export LC_ALL=C
+
 NAME=no-undo-audit
 # `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
 # caller-supplied path, and this is the one place they all route through.
