@@ -280,6 +280,54 @@ test("a subject sharing no content words with any filed row reports no near-miss
 });
 
 // ---------------------------------------------------------------------------
+// The cap must SAY it capped (issue #154). `candidates.mjs` legislates the same
+// rule one script over and enforces it by refusing outright; refusing is wrong
+// here — these lists are advisory context for a decision, not the work queue,
+// and a single tracker hit already forces exit 3 — so the remedy is to report
+// what was withheld, never to drop it in silence.
+// ---------------------------------------------------------------------------
+
+// Five rows whose every content word is the subject's, so every one scores an
+// identical 1.00: the tie is the point. Nothing about the SCORE separates the
+// three shown from the two dropped — only the cap does — which is exactly the
+// state the caller cannot infer from a three-row list.
+const TIED_FIVE = [
+  "#1 merge loop exit",
+  "#2 loop exit code",
+  "#3 merge exit code",
+  "#4 run merge bot",
+  "#5 merge code loop",
+];
+const TIED_SUBJECT = "the merge loop exit code is undocumented in run-merge-bot.md";
+
+test("near-misses withheld by the cap are counted, not dropped in silence (#154)", () => {
+  const r = run(TIED_SUBJECT, { filed: TIED_FIVE });
+  assert.equal(r.status, 0, "reporting the withheld rows must not move a near-miss off exit 0");
+  assert.equal(r.json.verdict, "clean", "the near-miss report is advisory and must not touch the verdict");
+  assert.equal(r.json.near.length, 3, "the display cap itself is unchanged");
+  assert.deepEqual(r.json.near.map((n) => n.score), [1, 1, 1], "the fixture must actually tie, or this pins nothing");
+  assert.equal(r.json.nearTotal, 5, "the caller must be able to tell 3-of-3 from 3-of-5 from the payload alone");
+  assert.match(
+    r.stderr,
+    /2 further near-miss\(es\) not shown/,
+    "the count withheld has to reach the caller, not just the JSON",
+  );
+  assert.match(
+    r.stderr,
+    /highest withheld 1\.00/,
+    "a withheld row tied with the shown ones is the case the caller most needs told about",
+  );
+});
+
+test("exactly three near-misses report no withholding — the notice must not fire on a complete list (#154)", () => {
+  const r = run(TIED_SUBJECT, { filed: TIED_FIVE.slice(0, 3) });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.near.length, 3, "a full-but-not-over list still fills the cap exactly");
+  assert.equal(r.json.nearTotal, 3, "nothing was withheld, and the payload must say so");
+  assert.doesNotMatch(r.stderr, /further near-miss/, "claiming a withheld row that does not exist is the same lie inverted");
+});
+
+// ---------------------------------------------------------------------------
 // Tracker query (issue #145, option 1) and its offline degradation.
 // ---------------------------------------------------------------------------
 
@@ -305,6 +353,57 @@ test("an open tracker issue absent from the ledger is reported, not passed as sa
   // summarises. Nothing else pins this.
   assert.match(r.stderr, /TRACKER HIT[\s\S]*tracker issue\(s\) match/, "every hit is listed before the line that counts them");
   assert.doesNotMatch(r.stderr, /ALREADY FILED/, "a tracker hit is not the same claim as a filed row");
+});
+
+// gh reports no total alongside a capped list, so 5-of-5 and 5-of-300 arrive
+// byte-identical. Asking for one more row than is displayed is the whole
+// mechanism: the extra row's presence IS the truncation signal (#154).
+const filler = (n) => ({
+  number: n,
+  title: "postgres connection pooling exhausted under sustained load",
+  state: "CLOSED",
+  url: `https://github.com/feigi/claude-config/issues/${n}`,
+});
+const EXACT_TITLE = {
+  number: 606,
+  title: "candidates.mjs row states the opposite of its code",
+  state: "OPEN",
+  url: "https://github.com/feigi/claude-config/issues/606",
+};
+
+test("gh is asked for one more issue than is displayed, so a full page is distinguishable from a truncated one (#154)", () => {
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [] });
+  assert.equal(r.ghArgv[r.ghArgv.indexOf("--limit") + 1], "6", "5 displayed + 1 probe row");
+});
+
+test("a tracker list gh truncated says so, and the probe row still ranks (#154)", () => {
+  // Six back for a five-row display. The best-scoring row is deliberately LAST
+  // in gh's own order: it may only survive if the overlap sort runs across the
+  // whole fetched window before the display cap, not after it.
+  const hits = [1, 2, 3, 4, 5].map(filler).concat([EXACT_TITLE]);
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits });
+  assert.equal(r.status, 3, "truncation reporting must not move a tracker hit off exit 3");
+  assert.equal(r.json.verdict, "tracker-hit");
+  assert.equal(r.json.tracker.hits.length, 5, "the sixth row is a probe, not a row to display");
+  assert.equal(r.json.tracker.truncated, true, "the payload must name the truncation, not leave it inferable");
+  assert.equal(r.json.tracker.hits[0].number, 606, "the probe row participates in the ranking it was fetched into");
+  assert.match(r.stderr, /but more than 5 tracker issue\(s\) match/, "a capped count must not be printed as an exact one");
+  assert.match(r.stderr, /CAPPED at 5/, "and the caller is told the ranking is over gh's window, not over the tracker");
+  assert.match(
+    r.stderr,
+    /TRACKER HIT[\s\S]*tracker issue\(s\) match/,
+    "the rows still come before the line that counts them",
+  );
+});
+
+test("a tracker list that exactly fills the display claims no truncation (#154)", () => {
+  const hits = [1, 2, 3, 4, 5].map(filler);
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits });
+  assert.equal(r.status, 3);
+  assert.equal(r.json.tracker.hits.length, 5, "five rows displayed, none dropped");
+  assert.equal(r.json.tracker.truncated, false, "no probe row came back, so nothing was withheld");
+  assert.match(r.stderr, /but 5 tracker issue\(s\) match/, "an exact count is what a complete list has earned");
+  assert.doesNotMatch(r.stderr, /more than|CAPPED/, "over-reporting truncation would send the caller hunting rows that do not exist");
 });
 
 test("a clean ledger and a clean tracker is the only path that reads safe, exit 0", () => {
