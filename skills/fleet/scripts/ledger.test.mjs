@@ -317,6 +317,61 @@ test("near-misses withheld by the cap are counted, not dropped in silence (#154)
     /highest withheld 1\.00/,
     "a withheld row tied with the shown ones is the case the caller most needs told about",
   );
+  // The comment the notice implements says the withheld rows are reported as a
+  // count and a score, "never the rows" — printing them would give back the
+  // length the cap exists to take away. Read off the notice line itself rather
+  // than the whole stderr, which legitimately carries `#N` on every shown
+  // near-miss, and match the row MARKER rather than this fixture's row text, so
+  // reordering the tied rows cannot red it while the invariant holds.
+  assert.doesNotMatch(
+    r.stderr.split("\n").find((l) => l.includes("further near-miss")) ?? "",
+    /#\d/,
+    "the notice reports the count and the top score, never a withheld row",
+  );
+});
+
+// Every row shares the subject's words, but progressively fewer of them, so no
+// two score alike. That is the whole point: under a tie the highest withheld
+// score and the lowest are the same number, so an index that reports the wrong
+// row prints the right value and no assertion can tell. Measured, a mutation
+// reporting the LOWEST withheld score — and even `rankedNear[0]` — survives the
+// entire suite against the tied fixture above.
+const UNTIED_FIVE = [
+  "#1 merge loop exit",
+  "#2 merge loop pooling",
+  "#3 merge loop pooling exhausted",
+  "#4 merge pooling exhausted",
+  "#5 merge pooling exhausted postgres",
+];
+
+test("the score reported as withheld is the HIGHEST withheld one, not the last shown or the lowest (#154)", () => {
+  const r = run(TIED_SUBJECT, { filed: UNTIED_FIVE });
+  assert.equal(r.status, 0);
+  assert.deepEqual(
+    r.json.near.map((n) => n.score),
+    [1, 0.67, 0.5],
+    "the fixture must NOT tie, or this pins the same nothing the tied one does",
+  );
+  assert.equal(r.json.nearTotal, 5);
+  // One value rules out every off-by-one at once: 0.50 is the last SHOWN row,
+  // 0.25 the lowest withheld, 1.00 the top of the ranking. Only the first
+  // withheld row reads 0.33.
+  assert.match(
+    r.stderr,
+    /2 further near-miss\(es\) not shown — highest withheld 0\.33/,
+    "the caller is told what the cut cost it, which is the top of what it did not get",
+  );
+});
+
+test("exactly one withheld near-miss still fires the notice (#154)", () => {
+  // The tightest boundary the notice has: one row over the cap. A guard off by
+  // one goes silent precisely here and nowhere else, and the fixtures above —
+  // two withheld, none withheld — both straddle it.
+  const r = run(TIED_SUBJECT, { filed: TIED_FIVE.slice(0, 4) });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.near.length, 3, "the display cap is what withholds the fourth row");
+  assert.equal(r.json.nearTotal, 4);
+  assert.match(r.stderr, /1 further near-miss/, "one withheld row is still a withheld row");
 });
 
 test("exactly three near-misses report no withholding — the notice must not fire on a complete list (#154)", () => {
