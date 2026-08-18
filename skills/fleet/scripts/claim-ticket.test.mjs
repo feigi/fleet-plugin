@@ -774,12 +774,15 @@ test("runner: the stamp changes when the template's content changes", () => {
   const scriptDir = mkdtempSync(join(tmpdir(), "claim-script-"));
   const editedScript = join(scriptDir, "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
-  // claim-ticket.sh now derives testcmd via a sibling script, resolved
-  // relative to itself ($(dirname -- "$0")) — copy the real one alongside
-  // this edited copy so the derivation still finds it.
+  // claim-ticket.sh resolves two siblings relative to itself
+  // (`$(dirname -- "$0")`): derive-testcmd.sh for the testcmd, and json.sh for
+  // the payload escaping (#119). Both have to travel with this edited copy or
+  // the script refuses before it emits anything — which is the guard working,
+  // not a regression.
   const sibling = join(scriptDir, "derive-testcmd.sh");
   copyFileSync(join(import.meta.dirname, "derive-testcmd.sh"), sibling);
   chmodSync(sibling, 0o755);
+  copyFileSync(join(import.meta.dirname, "json.sh"), join(scriptDir, "json.sh"));
 
   const after = apply(SUITE, editedScript).text.match(STAMP_RE)[1];
   const before = apply(SUITE).text.match(STAMP_RE)[1];
@@ -921,4 +924,74 @@ test("a worktree whose .git vanishes during install refuses instead of trusting 
 
   assert.equal(r.status, 2);
   assert.match(r.stderr, /has no \.git file — cannot verify the lockfile was not mutated/);
+});
+
+// --- #119: the payload's own string fields.
+//
+// `$issue` is guarded (`case … ''|*[!0-9]*|0?*`), but `<slug>` and `<type>` are
+// not, and all four string fields derive from them: `branch` is
+// `$type/$issue-$slug`, `worktree` is `.worktrees/$issue-$slug`, `runner` is
+// `$worktree/agent-test`. Spliced raw, a quote in either argument emitted a
+// payload no parser accepts — at exit 0, and under `--apply` after the worktree
+// and the label had already been created.
+test("a quote in the slug still emits parseable JSON", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", 'sl"ug', "fix"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.branch, 'fix/42-sl"ug');
+  assert.equal(json.worktree, '.worktrees/42-sl"ug');
+  assert.equal(json.runner, '.worktrees/42-sl"ug/agent-test');
+  assert.equal(json.issue, 42, "still a JSON number, not a string — the numeric fields are not wrapped");
+});
+
+test("a backslash in the slug is escaped too", () => {
+  // The worktree path is a filename and carries `\` fine, where a ref could
+  // not; `branch` and `worktree` are built from the same argument, so one
+  // argument exercises both the ref-legal and the path-only vector.
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "sl\\ug", "fix"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout).worktree, ".worktrees/42-sl\\ug");
+});
+
+test("an ordinary slug is byte-identical — the escaping accepts what it should", () => {
+  // The false-positive half: nothing here has anything to escape, so the
+  // payload must be exactly what this script has always emitted.
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(
+    r.stdout,
+    '{"issue":42,"branch":"fix/42-slug","worktree":".worktrees/42-slug","install":"npm ci","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-slug/agent-test","applied":false}\n',
+  );
+});
+
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run. This script's
+// contract is exit 2 for every refusal and 0 otherwise — there is no exit 1 —
+// and the guard sits ahead of every mutation, so a missing library refuses
+// before a worktree, a label or a runner exists.
+test("a missing json.sh is exit 2, before anything is created", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const lone = mkdtempSync(join(tmpdir(), "claim-nolib-"));
+  copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
+  const bin = mkdtempSync(join(tmpdir(), "claim-nolib-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  const r = spawnSync("sh", [join(lone, "claim-ticket.sh"), "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+
+  assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the lockfile probe");
+  assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
+    "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
 });

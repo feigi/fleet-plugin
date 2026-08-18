@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -598,4 +598,83 @@ test("no probe in prove-merge.sh has its status discarded by `[ ]`", () => {
     .filter(([, line]) => !line.trimStart().startsWith("#"))
     .filter(([, line]) => /(^|\s)\[\s/.test(line) && line.includes("$("));
   assert.deepEqual(offenders, [], "assign the substitution to a variable first");
+});
+
+// --- #119: the payload's string fields, wrapped for uniformity.
+//
+// No reachability fixture here, and that is a measurement rather than an
+// omission. `$secondParent` and `$firstParent` come from `git rev-parse`, which
+// emits 40 hex characters and nothing else, and `$proofPath` is this script's
+// own `rebase`/`no-rebase` literal. None of the three can carry a quote today.
+// They go through `jstr` anyway, the same reason inflight.sh wraps `$pr`:
+// uniformity against a later edit that changes where a field comes from, at no
+// cost. Inventing a fixture that "proves" an unreachable vector would pin
+// fiction; what is pinned instead is that wrapping them changed no byte of the
+// payload, and that the library's absence is a refusal rather than a verdict.
+//
+// Byte-identical is exactly why the test below it cannot discriminate: measured,
+// stripping all three `jstr` calls and interpolating the raw values leaves the
+// whole suite green (22/22). So the unwrap vector is pinned at the SOURCE
+// instead — the one place a regression here is visible without a fixture that
+// does not exist.
+test("wrapping the string fields left the payload byte-identical", (t) => {
+  const w = repo(t);
+  commit(w, "main moves on before the branch is cut");
+  git(w, "push", "-q", "origin", "main");
+  const mainTip = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, head, head, merge);
+
+  assert.equal(code, 0);
+  assert.equal(json.secondParent, head, "40 hex characters, unchanged by the escaping");
+  assert.equal(json.firstParent, mainTip);
+  assert.equal(json.proofPath, "no-rebase", "the script's own literal, unchanged");
+  assert.equal(json.proved, true);
+});
+
+// Source-level, because no payload fixture can tell the two apart. Deleting the
+// escaping line also deletes its `|| die`, so this pins the guard as well.
+test("the printf still reads the ESCAPED proof fields, not the raw ones", () => {
+  const src = readFileSync(SCRIPT, "utf8")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"));
+
+  const escaped = src.filter((line) => /second_j=\$\(jstr/.test(line));
+  assert.equal(escaped.length, 1, "the three proof fields are escaped in one `&&` chain");
+  assert.match(escaped[0], /\|\| die|\\$/, "and that chain carries or continues to a `|| die`");
+
+  const call = src.find((line) => line.includes('"$second_j"'));
+  assert.ok(call, "printf's argument list interpolates $second_j, never $second directly");
+  assert.match(call, /"\$first_j"/, "and $first_j");
+  assert.match(call, /"\$path_j"/, "and $path_j");
+});
+
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. Exit 1 out of THIS script means "the proof is a no", which the merge
+// bot reads as a reason to refuse a merge. A missing file must not be able to
+// say that.
+test("a missing json.sh is exit 2, never the exit 1 that means `not proved`", (t) => {
+  const w = repo(t);
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const pre = commit(w, "feature work");
+  const merge = mergeNoFf(w, pre, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+  const lone = mkdtempSync(join(tmpdir(), "prove-merge-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "prove-merge.sh"));
+
+  const r = spawnSync("sh", [join(lone, "prove-merge.sh"), pre, pre, merge], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2,
+    "a missing library is `the question could not be answered`. Exit 1 would report a genuinely good merge as unproved and the bot would refuse it.");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming a gate that never ran");
+  assert.equal(r.stdout, "", "no payload: nothing was proved either way");
 });

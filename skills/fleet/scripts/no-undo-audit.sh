@@ -46,90 +46,33 @@ NAME=no-undo-audit
 # caller-supplied path, and this is the one place they all route through.
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# JSON string escaping. Same helper and same pipeline as release-ticket.sh's
-# `jstr` — backslashes BEFORE quotes, because escaping the quote first turns the
-# backslash that escape just introduced into `\\` on the second pass. The five
-# C0 bytes RFC 8259 gives a two-character short form — \010 \011 \012 \014 \015
-# (\b \t \n \f \r) — get the same treatment, in the same order, for the same
-# reason: each rule that introduces a backslash has to run after the one
-# escaping backslash itself, or its own backslash gets doubled right back. BS
-# and FF are matched as a literal byte spelled with `printf`, never as `\b` or
-# `\f`. Neither spelling matches \010, and neither fails quietly: `\b` in a BRE
-# is a zero-width word BOUNDARY to GNU sed and a literal `b` to BSD sed, so the
-# rule would insert `\b` at every word edge on one and mangle every letter `b`
-# on the other (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0
-# byte and JSON permits it unescaped, so — unlike every version of this helper
-# before #146 — it is left alone. Every remaining byte below \040 has no JSON
-# short form, \013 (VT) included — RFC 8259 lists exactly the five above and
-# `\v` is not among them; tr turns it into a space, and jrewritten (below) is
-# how a caller finds out that happened, since a replaced value is not the
-# original bytes and must not be treated as a real path or ref. Byte-safe for
-# the UTF-8 in these strings, whose bytes are all >= \200. tr pads the
-# replacement with its last character. (No line number: the same citation
-# named a line that had not been written yet, and #129 tracks four more that
-# drifted.)
+
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it; only what is true of THIS script is repeated here.
+# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
+# is none of them.
 #
-# `:a;$!N;$!ba` slurps the whole value into one pattern space before any rule
-# runs, so a literal newline in $1 is data the LF rule can reach rather than a
-# line break sed's own per-line cycling would otherwise swallow. Guarding `N`
-# with `$!` matters on its own: unguarded, BSD sed's `N` on the last line hits
-# EOF with nothing to append and discards the pattern space instead of printing
-# it — POSIX leaves this undefined and GNU sed's answer differs — so plain
-# `N;$!ba` prints nothing at all for a single-line value (measured, both sit
-# behind the *same* three -e flags either way).
-jstr() {
-  printf '%s' "$1" \
-    | sed -e ':a' -e '$!N' -e '$!ba' \
-        -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-        -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
-        -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
-    | tr '\001-\007\013\016-\037' ' '
-}
+# Exit 1 from this script is a verdict too: `REFUSED — commit the worktree
+# before rebasing`. A library that merely went missing would report a dirty
+# worktree without having looked at one, blocking a rebase that was safe to
+# start, so `[ -r ]` has to fire before the `.` can kill the shell.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to act without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
 
-# True iff $1 held a byte jstr/jarr had to replace rather than escape — every
-# C0 byte except \010 \011 \012 \014 \015 (BS, tab, LF, FF, CR: escaped above,
-# never replaced) and \177 (DEL: preserved, never replaced). `$()` strips
-# trailing newlines off both sides, and \012 is the one byte it strips: it is
-# not in the delete set, so the same suffix comes off `raw` and `orig` and the
-# strip can neither manufacture a difference nor hide one. An `X` sentinel
-# appended to both sides stood here for that job and did nothing — measured
-# across every arrangement of these bytes, it changed no answer — and the
-# sentence defending it named a trap a trailing `\r` cannot spring, `\r` being
-# neither stripped by `$()` nor deleted by tr. Both are gone.
-jrewritten() {
-  raw=$(printf '%s' "$1" | tr -d '\001-\007\013\016-\037')
-  orig=$(printf '%s' "$1")
-  [ "$raw" = "$orig" ] && printf false || printf true
-}
-
-# The array form: one JSON string per input line, comma-joined. Same ruleset as
-# jstr minus the LF rule — \012 is the record separator here, never data, and
-# never can be: a caller has already lost the ability to tell an element's own
-# newline from the boundary between two elements by the time a value reaches
-# per-line stdin, which is why no-undo-audit.sh refuses a conflicting path
-# holding one before it ever calls this (see the `nl` guard below). Escaping a
-# byte this function structurally never receives would be dead code standing
-# in for a restructure nobody has needed; #89 owns that class.
-jarr() {
-  sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-      -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' \
-      -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
-      -e 's/^/"/' -e 's/$/"/' \
-    | tr '\001-\007\013\016-\037' ' ' \
-    | paste -sd, -
-}
-# Parallel boolean array to jarr's own output, true where that line held a byte
-# jarr replaced. `read` alone drops a final line with no trailing newline —
-# `set -eu` never sees it fail, the loop just never runs its body for that
-# line — so `|| [ -n "$line" ]` is load-bearing on the last element, not
-# defensive filler.
-jarr_rewritten() {
-  while IFS= read -r line || [ -n "$line" ]; do
-    jrewritten "$line"
-    echo
-  done | paste -sd, -
-}
-
+# Every string that reaches the JSON goes through `jstr`/`jarr` from json.sh —
+# `$wt` is argv and therefore a filesystem path, which may hold a `"`, a `\`
+# or a control byte that git's ref rules would reject. The rule list, its
+# ordering and the jarr/jstr split live in json.sh, once, rather than here and
+# in inflight.sh and in release-ticket.sh — five copies of the same rules
+# before the extraction, counting jarr and jarr_rewritten (#119).
+#
+# This script is the only caller that reaches the multi-line machinery: `$wt`
+# is the one value here that can carry a newline, which is why json.sh's slurp
+# is not dead code even though no other consumer can feed it one.
 [ $# -eq 2 ] || die "usage: no-undo-audit.sh <worktree> <branch>"
 wt=$1
 branch=$2
@@ -531,8 +474,15 @@ if [ -n "$conflicts" ]; then
 else
   echo "    no conflicting files" >&2
 fi
-conflicts_json=$(printf '%s' "$conflicts" | jarr)
-conflicts_rewritten_json=$(printf '%s' "$conflicts" | jarr_rewritten)
+# `jarr`/`jarr_rewritten` return non-zero when a stage fails (#119), and a bare
+# `var=$(pipeline)` under `set -eu` would abort with the failing tool's own
+# status — 1 out of THIS script is the dirty-worktree refusal, fabricated here
+# on a worktree already measured clean, with no payload and nothing on stderr.
+# The `|| die` converts it to the exit 2 this script's contract reserves for a
+# question it could not answer.
+conflicts_json=$(printf '%s' "$conflicts" | jarr) \
+  && conflicts_rewritten_json=$(printf '%s' "$conflicts" | jarr_rewritten) \
+  || die "could not escape the conflicting paths for $branch"
 
 # 3. What main gained in those files since the fork. These are the commits a
 #    careless resolution deletes — read them before resolving, not after.
@@ -581,8 +531,10 @@ if [ -n "$conflicts" ]; then
     || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
 fi
-at_risk_json=$(printf '%s' "$at_risk" | jarr)
-at_risk_rewritten_json=$(printf '%s' "$at_risk" | jarr_rewritten)
+# Same guard, same reason as the conflicts pair above.
+at_risk_json=$(printf '%s' "$at_risk" | jarr) \
+  && at_risk_rewritten_json=$(printf '%s' "$at_risk" | jarr_rewritten) \
+  || die "could not escape the at-risk commits for $branch"
 
 if [ "$clean" = true ]; then
   rc=0

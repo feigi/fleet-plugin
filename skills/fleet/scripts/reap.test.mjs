@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -589,4 +589,105 @@ test("a repo path containing a space still finds a dirty worktree and keeps it",
   assert.equal(json.kept.length, 1);
   assert.match(json.kept[0].reason, /^dirty worktree /);
   assert.ok(json.kept[0].reason.includes("/my repos/.worktrees/feature/merged"), json.kept[0].reason);
+});
+
+// --- #119: the payload's own string fields.
+//
+// `keep()` splices its two arguments raw, and five call sites reach it: the
+// branch name, `dirty worktree $wt`, `ignored files present in $wt: $ignored`,
+// the `reaped` accumulator, and `cherry probe failed …: $cherry`, which routes
+// arbitrary git stderr. The branch name is the demonstrated trigger — measured
+// on the pre-fix script, an unmerged `[gone]` branch named `feat/has"quote`
+// produced `{"branch":"feat/has"quote",…}` at exit 0 and `JSON.parse` failed at
+// position 56. The script's decision was correct throughout; what broke was the
+// sole machine-readable record of it.
+test("a quote in a [gone] branch name still emits parseable JSON", (t) => {
+  const w = repo(t);
+  unmergedGoneBranch(w, 'feat/has"quote', "work nobody merged");
+
+  const { code, json, stderr } = runReap(w, []);
+
+  assert.equal(code, 0, "a kept branch is a finding at exit 0, quote or no quote");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, 'feat/has"quote',
+    "the field round-trips to the name that went in — `runReap` JSON.parses stdout, so an unescaped splice fails here before this assert runs");
+  assert.equal(json.kept[0].reason, "unmerged commits");
+  assert.ok(branchExists(w, 'feat/has"quote'), "and it is still there: escaping must not change what gets deleted");
+  assert.match(stderr, /KEEP feat\/has"quote/, "the human line stays raw — it is prose, not JSON");
+});
+
+test("git's own stderr reaches the payload escaped, not raw", (t) => {
+  // The fifth interpolation, and the only one that carries text neither this
+  // repo nor its operator chose. Real `git cherry` corruption output happens to
+  // carry no quote, which makes this the least likely of the five to fire —
+  // and the one with the least control over what it splices when it does.
+  const w = repo(t);
+  unmergedGoneBranch(w, "feature/onlyhere", "work");
+  const bin = mkdtempSync(join(tmpdir(), "reap-quote-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = cherry ]; then\n` +
+      `  echo 'error: unable to open loose object "deadbeef cafe": Permission denied' >&2\n` +
+      `  exit 128\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json } = runReap(w, [], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+
+  assert.equal(code, 0);
+  assert.match(json.kept[0].reason, /cherry probe failed/);
+  assert.match(json.kept[0].reason, /"deadbeef cafe"/,
+    "the quotes survive as data rather than terminating the JSON string");
+});
+
+test("an ordinary branch name is untouched — the escaping accepts what it should", (t) => {
+  // The false-positive half. Nothing here has anything to escape, so the
+  // payload must be exactly what this script has always emitted.
+  const w = repo(t);
+  unmergedGoneBranch(w, "fix/119-json-sh-extract", "work");
+
+  const { code, json } = runReap(w, []);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json, {
+    applied: false,
+    reaped: [],
+    kept: [{ branch: "fix/119-json-sh-extract", reason: "unmerged commits" }],
+  });
+});
+
+test("a reaped branch name is escaped too — the other accumulator", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, 'chore/re"aped', "work that landed");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ['chore/re"aped'],
+    "`reaped` is built by its own accumulator, not by keep() — escaping one and not the other leaves half the payload broken");
+  assert.equal(branchExists(w, 'chore/re"aped'), false, "and it really was deleted");
+});
+
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run. This script's
+// contract is exit 0 or exit 2 with no exit 1 at all (#265), and the guard sits
+// ahead of the fetch, so a missing library refuses before anything is deleted.
+test("a missing json.sh is exit 2, before any branch is deleted", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "chore/landed", "work that landed");
+  const lone = mkdtempSync(join(tmpdir(), "reap-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "reap.sh"));
+
+  const r = spawnSync("sh", [join(lone, "reap.sh"), "--apply"], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2, "a missing library is a refusal — this script has no exit 1 to be confused with");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the fetch or the base ref");
+  assert.equal(r.stdout, "", "no payload: nothing happened");
+  assert.ok(branchExists(w, "chore/landed"),
+    "and the branch is still there — the guard fires ahead of every deletion, so this is a clean refusal");
 });

@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -253,6 +253,45 @@ test("a dirty worktree blocks on its own", (t) => {
   assert.equal(json.blockers.length, 1, `no commit exists, so only the dirty check can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /1 uncommitted change\(s\)/);
   assert.equal(code, 1);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// #119, the other direction: the library is present and its tools are not.
+// `block()` used to splice `$(jstr "$1")` straight into the accumulator, which
+// is not a simple command, so `set -e` read only the assignment — a failed
+// escape aborted at exit 1, byte-identical to the blocked verdict below, with
+// neither the receipt that verdict carries nor a line on stderr. Assigned
+// first, the status is readable and the answer becomes a 2.
+//
+// The shim is selected on CONTENT, not on argv: `branch_j`/`wt_j` are escaped
+// well before the precondition scan and go through the same `jstr`, so a sed
+// that failed unconditionally would abort there instead and prove nothing about
+// `block()`. Only a blocker string carries "uncommitted change".
+test("a blocker that cannot be escaped is exit 2 with a cause, never the blocked verdict", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const bin = mkdtempSync(join(tmpdir(), "release-ticket-esc-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const realSed = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "sed"), `#!/bin/sh
+case " $* " in
+  *:a*)
+    in=$(cat)
+    case "$in" in *'uncommitted change'*) exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${realSed} "$@" ;;
+esac
+exec ${realSed} "$@"
+`, { mode: 0o755 });
+
+  const res = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
+
+  assert.equal(res.code, 2,
+    "exit 1 is `NOT released — blocked`, and a run that could not render its blocker has not established one");
+  assert.match(res.stderr, /could not escape the blocker for #9/,
+    "and the cause names the field rather than leaving the operator with a silent 1");
+  assert.equal(res.out, "", "no receipt: a blockers array missing an element is not the record this exit promises");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
@@ -1643,4 +1682,32 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   assert.equal(json.released, true);
   assert.equal(code, 0);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+// --- #119: the escaping library this script now sources rather than carries.
+//
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. This script's contract defines 0 and 2 only, so a bare 1 is a code
+// no caller knows how to read. Worse, the guard must fire BEFORE anything is
+// deleted: an abort partway through the release is the "partially released"
+// state `halt` exists to report, and a missing file must never reach it.
+test("a missing json.sh is exit 2, before anything is deleted", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 5, "thing");
+  const lone = mkdtempSync(join(tmpdir(), "release-ticket-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "release-ticket.sh"));
+
+  const res = spawnSync("sh", [join(lone, "release-ticket.sh"), ...c.args, "--apply"], {
+    cwd: r.w, env: r.env(), encoding: "utf8",
+  });
+
+  assert.equal(res.status, 2,
+    "a missing library is a refusal, not a verdict — exit 1 here is `NOT released — blocked`, and a library that merely went missing must not be able to say it");
+  assert.match(res.stderr, /json\.sh/, "and it names the file rather than leaving the operator to guess");
+  assert.equal(res.stdout, "", "no receipt: nothing was released");
+  assert.ok(existsSync(c.wt),
+    "and the worktree is still there — the guard fires ahead of every mutation, so this is a clean refusal and not a partial release");
 });
