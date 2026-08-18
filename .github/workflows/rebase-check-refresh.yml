@@ -24,8 +24,8 @@ permissions:
 
 # A newer main push supersedes an in-flight refresh — its PR list is strictly
 # fresher. Not a clean supersession: reruns the cancelled run already POSTed stay
-# in flight, and the replacement run will see those jobs as running and skip them
-# (see the rerun branch below).
+# in flight, and the replacement run will see those jobs as running and skip
+# them (see .github/scripts/rerun-rebase-check.sh).
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
@@ -151,61 +151,32 @@ jobs:
               continue
             fi
 
-            # `first(...)` inside jq rather than `| head -1`: it short-circuits on
-            # the first match instead of building the whole list. Note gh is NOT in
-            # this pipeline — its output was captured into $JOBS_JSON on the line
-            # above — so the SIGPIPE-the-fetch hazard this guards against in other
-            # code does not apply here.
-            JOB=""
-            for RUN in $RUN_IDS; do
-              if ! JOBS_JSON=$(gh api "repos/$GH_REPO/actions/runs/$RUN/jobs?filter=latest&per_page=100" </dev/null); then
-                echo "::error::#$PR: failed to list jobs for run $RUN — see gh error above."
-                continue
-              fi
-              JOB=$(printf '%s' "$JOBS_JSON" \
-                | jq -r 'first(.jobs[] | select(.name == "rebase-check") | .id) // empty')
-              if [ -n "$JOB" ]; then
-                break
-              fi
-            done
-
-            if [ -z "$JOB" ]; then
-              echo "#$PR ($SHA): behind by $BEHIND_BY but no rebase-check job in any candidate run — skipping."
-              NO_JOB=$((NO_JOB + 1))
-              continue
-            fi
-
-            # The rerun endpoint rejects a job whose parent RUN is still in
-            # progress — not merely a queued job. `check` runs in parallel with
-            # `rebase-check` and is capped at 10 minutes, so rebase-check can sit
-            # completed inside a run that stays in progress for that long, and a
-            # main push landing mid-CI can leave a PR stale until the next push.
-            # Reruns also fail once a run ages out of the retention window.
+            # The whole `$RUN_IDS` page is handed over, not just the first run
+            # holding a rebase-check job. `per_page=5` exists to have the older,
+            # already-completed runs in hand, and the rerun endpoint rejects a
+            # job whose parent run is still in progress — so the fallback the
+            # page was fetched for only happens if the POST is tried per
+            # candidate rather than once after the search (#159). Unquoted on
+            # purpose: the ids are newline-separated digits and each must become
+            # its own argument.
             #
-            # 401/403 is a different animal: it means this workflow's token cannot
-            # rerun anything here, so it is fatal rather than per-PR — otherwise a
-            # global config defect reads as N benign timing races.
-            if RERUN_ERR=$(gh api --method POST "repos/$GH_REPO/actions/jobs/$JOB/rerun" </dev/null 2>&1); then
-              # A 2xx means accepted for scheduling, not completed: the rerun re-enters
-              # ci.yml's concurrency group and a later push to the PR branch can cancel it.
-              echo "#$PR ($SHA): behind by $BEHIND_BY — requested rerun of rebase-check (job $JOB)."
-              RERAN=$((RERAN + 1))
-            elif printf '%s' "$RERUN_ERR" | grep -qiE 'in progress|queued'; then
-              # Checked BEFORE the 401/403 branch: GitHub refuses a rerun whose
-              # parent run is still going, and returns 403 for it. That is the
-              # routine per-PR skip described above, not a token problem — and
-              # reading it as one would exit 1 with a wrong diagnosis and
-              # abandon every remaining PR in the loop.
-              echo "#$PR ($SHA): rerun of job $JOB rejected — parent run still in progress or queued: $RERUN_ERR"
-              REJECTED=$((REJECTED + 1))
-            elif printf '%s' "$RERUN_ERR" | grep -qE 'HTTP (401|403)'; then
-              echo "::error::#$PR: rerun POST denied — $RERUN_ERR"
-              echo "::error::GITHUB_TOKEN lacks 'actions: write' here, or a secondary rate limit is active. No PR can be refreshed until this is fixed."
-              exit 1
-            else
-              echo "#$PR ($SHA): rerun of job $JOB rejected — $RERUN_ERR"
-              REJECTED=$((REJECTED + 1))
-            fi
+            # The classification comes back as an exit status, which is what
+            # keeps each PR to exactly one counter incremented exactly once
+            # however many candidates were tried. `|| STATUS=$?` because a
+            # non-zero exit is data here, not a failure — but only for the codes
+            # below: anything else (127 for a missing script, 2 for a bash
+            # error) is a defect in this step, and letting it fall through as a
+            # silent no-op is the vacuous green this workflow exists to end.
+            STATUS=0
+            .github/scripts/rerun-rebase-check.sh "$PR" "$SHA" "$BEHIND_BY" $RUN_IDS || STATUS=$?
+            case "$STATUS" in
+              0) RERAN=$((RERAN + 1)) ;;
+              3) REJECTED=$((REJECTED + 1)) ;;
+              4) NO_JOB=$((NO_JOB + 1)) ;;
+              1) exit 1 ;;
+              *) echo "::error::#$PR: rerun-rebase-check.sh exited $STATUS — unexpected. This is a defect in this step, not a PR that could not be refreshed."
+                 exit 1 ;;
+            esac
           done 3<<< "$PRS"
 
           SUMMARY="Checked $TOTAL open PR(s): $UPTODATE up to date, $BEHIND behind their base → $RERAN re-run (no-run: $NO_RUN, no-job: $NO_JOB, rejected: $REJECTED, failed: $FAILED)."
