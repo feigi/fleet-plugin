@@ -12,10 +12,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Most checks in the `check` job are `git ls-files | xargs <checker>`; without
-# pipefail a broken left-hand side is a green run that checked nothing. (The
-# Tests step and rebase-check's script are not that shape — both set their own
-# options.)
+# Most checks in the `check` job run a checker over `git ls-files '<glob>'`;
+# without pipefail a broken left-hand side is a green run that checked nothing.
+# A left-hand side that SUCCEEDS with an empty match is the other half of the
+# same hole, and pipefail cannot see that one at all — which is what
+# .github/scripts/check-tracked.sh is for (#161). (The Tests step and
+# rebase-check's script are not that shape — both set their own options.)
 defaults:
   run:
     shell: bash
@@ -93,7 +95,7 @@ jobs:
       # `node --check` is the whole of it — the only thing that catches a syntax
       # error in a script no test imports before a hook runs it for real.
       - name: Syntax-check scripts
-        run: git ls-files '*.mjs' | xargs -r -n1 node --check
+        run: .github/scripts/check-tracked.sh '*.mjs' -n1 node --check
 
       # The two tracked `.js` files need DIFFERENT invocations, not a wider glob:
       #   - hooks/statusline.js is an ordinary CommonJS script. `node --check`
@@ -124,7 +126,18 @@ jobs:
       - name: Syntax-check .js scripts
         run: |
           set -euo pipefail
-          for f in $(git ls-files '*.js'); do
+          # Same vacuous green as the check-tracked.sh steps, different shape: a
+          # `for` over an empty list iterates zero times and exits 0. The
+          # per-file dispatch below is what keeps this step off that script, so
+          # it carries the count and the refusal itself.
+          files=()
+          while IFS= read -r -d '' f; do files+=("$f"); done < <(git ls-files -z -- '*.js')
+          echo "checking ${#files[@]} file(s) matching *.js"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no tracked file matches *.js — this check verified nothing"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
             case "$f" in
               workflows/*)
                 node -e '
@@ -151,7 +164,7 @@ jobs:
       # value, so it exits 1 on a file holding `null` or `false` — both valid
       # JSON — and a step named "Validate JSON" then fails saying nothing.
       - name: Validate JSON
-        run: git ls-files '*.json' | xargs -r -n1 jq empty
+        run: .github/scripts/check-tracked.sh '*.json' -n1 jq empty
 
       # -S warning, not the default: the only info-level hits in the tree are
       # false positives (SC2016 on inflight.sh's single-quoted `python3 -c`
@@ -159,12 +172,12 @@ jobs:
       # statusline-command.sh's OSC-8 escape). Raise this to `style` only after
       # silencing those two at the source.
       - name: Shellcheck
-        run: git ls-files '*.sh' | xargs -r shellcheck -x -S warning
+        run: .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning
 
       # The caveman-compress skill ships tracked .py that runs as modules; no
       # other step here would catch a syntax error in it.
       - name: Syntax-check python
-        run: git ls-files '*.py' | xargs -r -n1 python3 -m py_compile
+        run: .github/scripts/check-tracked.sh '*.py' -n1 python3 -m py_compile
 
       # Explicit glob, not the directory, to pin exactly which files run.
       # NOT because node would otherwise walk into a vendored tree: node's own
