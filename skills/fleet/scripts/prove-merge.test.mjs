@@ -39,6 +39,14 @@ const ENV = {
   GIT_COMMITTER_EMAIL: "t@example.com",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
+  // Three cases below assert on git's OWN diagnostic text, and one of those
+  // strings is gettext-translatable: rev-parse's "Needed a single revision" is
+  // `die(_("..."))` in builtin/rev-parse.c and git ships a live German msgstr
+  // for it. cat-file's "Not a valid object name" and object-name.c's
+  // "dereferences to %s type" are unwrapped today — pinning the locale is what
+  // stops all three depending on which git build CI happens to run.
+  LANG: "C",
+  LC_ALL: "C",
 };
 
 const git = (cwd, ...args) =>
@@ -479,13 +487,13 @@ test("an object that is present but is not a commit is not reported as absent", 
   const w = repo(t);
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
-  const merge = mergeNoFf(w, head, "merge feat");
-  git(w, "push", "-q", "origin", "main");
 
   // A tree, so the object really is in this repository. Every commit already
   // carries one, so no file has to be written to get it.
   const tree = git(w, "rev-parse", `${head}^{tree}`);
-  const { code, json, stderr } = prove(w, tree, head, merge);
+  // <merge-commit> is `head`, not a merge: this guard dies before the script
+  // ever reads the third argument, so a real merge here would only be scenery.
+  const { code, json, stderr } = prove(w, tree, head, head);
   assert.equal(code, 2);
   assert.equal(json, null);
   assert.match(stderr, /cannot resolve .+ to a commit in this repository/);
@@ -498,7 +506,7 @@ test("an object that is present but is not a commit is not reported as absent", 
 
   // The discriminator the old message threw away: a sha that really is absent
   // used to print the identical die line, and now carries a different git line.
-  const absent = prove(w, "0".repeat(40), head, merge);
+  const absent = prove(w, "0".repeat(40), head, head);
   assert.equal(absent.code, 2);
   assert.match(absent.stderr, /Not a valid object name 0{40}/);
   assert.doesNotMatch(
@@ -515,10 +523,10 @@ test("a base ref that does not resolve carries git's own cause", (t) => {
   const w = repo(t);
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
-  const merge = mergeNoFf(w, head, "merge feat");
-  git(w, "push", "-q", "origin", "main");
 
-  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+  // <merge-commit> is `head`, not a merge: this guard dies before the script
+  // ever reads the third argument, so a real merge here would only be scenery.
+  const r = spawnSync("sh", [SCRIPT, head, head, head], {
     cwd: w,
     env: { ...ENV, BASE_REF: "nosuchref" },
     encoding: "utf8",
@@ -538,7 +546,7 @@ test("a healthy run stays quiet — the unmuted guards add nothing to stderr", (
   // objects to transfer: an already-up-to-date fetch would not exercise the
   // path that could go noisy.
   const other = join(w, "..", "other");
-  execFileSync("git", ["clone", "-q", join(w, "..", "origin.git"), other], { env: ENV });
+  git(w, "clone", "-q", git(w, "remote", "get-url", "origin"), other);
   git(other, "checkout", "-q", "-b", "feat");
   const head = commit(other, "feature work");
   const merge = mergeNoFf(other, head, "merge feat");
