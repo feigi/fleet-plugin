@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +104,33 @@ exit 0
     env: (extra = {}) => ({ ...ENV, PATH: `${bin}:${ENV.PATH ?? process.env.PATH}`, ...extra }),
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
   };
+}
+
+/**
+ * Re-point the registration for `wt` at `dest` and take the real directory away.
+ *
+ * `git worktree list --porcelain` derives the worktree path from the entry's
+ * `gitdir` file, so rewriting that file is how a fixture gets git to name a
+ * path whose FIRST component under `/` does not exist — the one shape
+ * `git worktree add` cannot produce, since it has to create the directory. In
+ * production this is the hand-added worktree outside the checkout whose
+ * ancestor chain was removed (`git worktree add /scratch/wt`, then
+ * `rm -rf /scratch`). The registry entry itself survives, so any
+ * listed-vs-registered count stays balanced.
+ */
+function relocate(w, wt, dest) {
+  const admin = join(w, ".git", "worktrees");
+  // realpathSync: git canonicalises what it writes into `gitdir`, and on macOS
+  // a tmpdir path reaches this suite as /var/... while git recorded
+  // /private/var/... — the scan matches nothing without resolving first.
+  const target = join(realpathSync(wt), ".git");
+  const name = readdirSync(admin).find(
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === target,
+  );
+  assert.ok(name, `fixture: no registry entry points at ${wt}`);
+  writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
+  rmSync(wt, { recursive: true, force: true });
+  return dest;
 }
 
 /** What claim-ticket.sh leaves behind: a worktree on a fresh branch off origin/main. */
@@ -393,6 +420,32 @@ test("a stray worktree the script may not stat keeps the hand-release remedy", (
   assert.doesNotMatch(json.blockers[0], /prune/, "never a prune of a registration whose worktree may still be there");
   assert.match(json.blockers[0], /release it by hand/);
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("a stray worktree with no surviving ancestor below / still names the prune (#178)", (t) => {
+  // The escalation of the two cases above, and the one the ancestor walk used
+  // to lose: `${p%/*}` on `/x` yields the empty string rather than `/`, so a
+  // path whose every ancestor below the root is gone fell out of the loop on
+  // "" and `[ -x "" ]` answered unknown — for a path that is provably absent
+  // with a searchable root. That sent it to the `else` and printed
+  // "release it by hand" about a directory that is not there: nothing for the
+  // operator to release, so nothing clears it, so every later run blocks the
+  // same way. That is the #81 permanent refusal, reached through the one path
+  // shape nobody tested.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  // Ends in the claim's own `<issue>-<slug>`, because `stray` is matched on
+  // that exact path suffix — a leaf of any other name is not this claim's.
+  const dest = relocate(r.w, c.wt, "/nonexistent-top-level-178/9-release-ticket");
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree prune/, "the remedy must be the one that clears a registration");
+  assert.doesNotMatch(json.blockers[0], /by hand/, "there is no directory left for the operator to release");
+  assert.ok(json.blockers[0].includes(dest), "and it must name the path git listed");
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
 });
 
 test("a stray worktree whose HEAD git could not resolve blocks without claiming a branch mismatch", (t) => {
@@ -1292,6 +1345,38 @@ test("the whole .worktrees directory deleted by hand still releases", (t) => {
   assert.equal(code, 0, "the parent going too does not make the child unanswerable");
   assert.deepEqual(json.blockers, []);
   assert.equal(json.released, true);
+});
+
+test("a worktree with no surviving ancestor below / still releases, never a permanent refusal (#178)", (t) => {
+  // One rung past the case above: there the parent went too and the walk found
+  // the repo root; here nothing below `/` survives at all. The walk ended on ""
+  // rather than `/`, so `[ -x "" ]` was false, `gone` answered unknown, and this
+  // guard died — "cannot tell whether ... exists", exit 2, forever, with the
+  // label and the branch standing and the in-flight probe still reading the
+  // ticket as taken. `/` is searchable and the path is provably absent, so
+  // there is nothing here to protect and nothing to be unsure about.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const dest = relocate(r.w, c.wt, "/nonexistent-top-level-178/wt");
+
+  const { code, json, stderr } = release(r, c);
+  // The guard's own marker, not just the exit code: a later refusal would
+  // reproduce exit 2 with no JSON just as well, and asserting the pair alone
+  // would pass with this guard still dying.
+  assert.doesNotMatch(stderr, /cannot tell whether/, "an absent path with a searchable root is not an unknown one");
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.equal(json.worktree, dest, "the payload names the path git listed, not the one claim-ticket.sh would have written");
+  // Reaching the delete is the half exit 0 alone does not prove. The guard
+  // died BEFORE it, so a fix that merely downgraded that `die` to a warning
+  // would exit 0 here too, with the stale registration still standing and the
+  // claim reported released — the same false success from the other side.
+  assert.doesNotMatch(
+    git(r.w, "worktree", "list", "--porcelain"),
+    /nonexistent-top-level-178/,
+    "the registration must actually be gone, not merely un-refused",
+  );
 });
 
 test("an unreadable worktree registry is unknown, never a release", (t) => {
