@@ -836,13 +836,19 @@ ${readRules(usableDiff(snap), stats, snap)}
 
 Tests: from the snapshot's root, run exactly this — copy it verbatim:
   ${testCmd}
-Do not substitute a command of your own. A bare runner picks up a default config
-that tears down a shared container mid-run for every sibling; a guessed glob is
-worse, because one matching nothing still exits 0 reporting 'tests 0' — a green
-that ran nothing. Whatever you run, report it in \`test_run\` — the command
-verbatim and the counts you saw — even when it failed or produced nothing.
+Do not substitute a command of your own. In a repo that has a shared test stack,
+a bare runner picks up a default config whose setup can tear a sibling's
+container down mid-run; a guessed glob is worse in every repo, because one
+matching nothing still exits 0 reporting 'tests 0' — a green that ran nothing.
+Whatever you run, report it in \`test_run\` — the command verbatim and the counts
+you saw — even when it failed or produced nothing.
 'tests 0' is a FAILED run, not a pass: \`tests: 0\` is how this dimension gets
-reported unrun, and an empty findings list cannot say it for you.
+reported unrun, and an empty findings list cannot say it for you. So is a run
+that collected tests and did none of the work — 0 passes with no failures is
+everything skipped. And a count well below what the whole tree reports means you
+ran a PARTIAL copy: nothing downstream can catch that one for you, because only
+your own run knows what the full tree reports. Run from the snapshot's root, and
+report any of the three as unrun.
 Scratch files go in ${scratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
