@@ -320,7 +320,17 @@ test("near-misses withheld by the cap are counted, not dropped in silence (#154)
 });
 
 test("exactly three near-misses report no withholding — the notice must not fire on a complete list (#154)", () => {
-  const r = run(TIED_SUBJECT, { filed: TIED_FIVE.slice(0, 3) });
+  // Two filed rows that score ZERO sit alongside the three that tie. They are
+  // what makes this a real pin rather than a restatement: a `nearTotal` counted
+  // off the filed list instead of the scoring rows reads 5 here and reports two
+  // rows withheld that no cap ever touched — and the tied fixture above, where
+  // every filed row scores, cannot tell those two implementations apart.
+  const r = run(TIED_SUBJECT, {
+    filed: TIED_FIVE.slice(0, 3).concat([
+      "#8 postgres connection pooling exhausted",
+      "#9 unrelated worktree audit prose",
+    ]),
+  });
   assert.equal(r.status, 0);
   assert.equal(r.json.near.length, 3, "a full-but-not-over list still fills the cap exactly");
   assert.equal(r.json.nearTotal, 3, "nothing was withheld, and the payload must say so");
