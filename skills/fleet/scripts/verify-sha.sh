@@ -11,6 +11,20 @@ set -eu
 NAME=verify-sha
 die() { echo "$NAME: $1" >&2; exit 2; }
 
+# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
+# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
+# open its operand aborts a non-interactive shell outright and the `||` never
+# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
+# exit 1 with the guard unfired. Exit 1 out of THIS script means "the sha is not
+# reachable", the one distinction it exists to make, so a missing file would
+# report a member's PR as sitting somewhere it does not. The `|| die` stays for
+# what `[ -r ]` cannot see: a library that reads but returns non-zero.
+json_lib="$(dirname "$0")/json.sh"
+[ -r "$json_lib" ] || die "cannot read $json_lib — refusing to answer without the JSON escaping helpers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=json.sh
+. "$json_lib" || die "$json_lib failed to load"
+
 [ $# -eq 2 ] || die "usage: verify-sha.sh <branch> <sha>"
 branch=$1
 sha=$2
@@ -50,6 +64,19 @@ else
   echo "    $sha is NOT reachable on origin/$branch" >&2
 fi
 
+# Of the three string fields only `$branch` is reachable today: git accepts a
+# `"` in a ref (`git check-ref-format --branch 'evil"branch'` exits 0), so
+# pushing a branch is the whole vector, and raw it emitted an unparseable
+# payload at exit 0 — the worst shape, since the caller gets no signal at all.
+# `$tip` is `git rev-parse`, 40 hex characters and nothing else; `$sha` is argv
+# but only reaches here after `git cat-file -e "${sha}^{commit}"` accepted it,
+# and a name holding a quote is not a valid object name. Both are wrapped
+# anyway: it costs nothing and survives a later edit moving where either comes
+# from. Assigned before the printf, never inline in its argument list — a `$()`
+# there sits outside this `|| die`, contributes an empty argument on failure,
+# and printf still exits 0 with a malformed payload.
+branch_j=$(jstr "$branch") && sha_j=$(jstr "$sha") && tip_j=$(jstr "$tip") \
+  || die "could not escape the payload fields for origin/$branch"
 printf '{"branch":"%s","sha":"%s","reachable":%s,"tip":"%s"}\n' \
-  "$branch" "$sha" "$reachable" "$tip"
+  "$branch_j" "$sha_j" "$reachable" "$tip_j"
 exit "$rc"

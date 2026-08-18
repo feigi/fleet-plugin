@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -280,4 +280,75 @@ test("a wrong argument count is exit 2", () => {
   const r = spawnSync("sh", [SCRIPT, "main"], { cwd: tmpdir(), env: ENV, encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage: verify-sha\.sh/);
+});
+
+// --- #119: the payload's own string fields.
+//
+// `git check-ref-format --branch 'evil"branch'` exits 0 — git accepts a double
+// quote in a ref — so pushing a branch is all the access this needs. Spliced
+// raw, the script emitted `{"branch":"evil"branch",…}` at **exit 0**: an
+// unparseable payload with no signal at all that anything went wrong, while the
+// contract row in `docs/specs/2026-07-23-fleet-plugin-design.md` documents the
+// exit-0/1 payload as `{branch, sha, reachable, tip}`.
+//
+// Only `$branch` is reachable of the three. `$tip` is `git rev-parse`, which
+// emits 40 hex characters and nothing else; `$sha` is echoed from argv but only
+// after `git cat-file -e "${sha}^{commit}"` succeeds, and a sha carrying a quote
+// is not a valid object name. Both are wrapped anyway — it costs nothing and
+// survives a later refactor that changes where either comes from.
+test("a branch name holding a double quote still emits parseable JSON", (t) => {
+  const w = repo(t);
+  const head = commit(w, "work on a hostile branch name");
+  git(w, "branch", 'evil"branch');
+  git(w, "push", "-q", "origin", 'evil"branch');
+
+  const r = spawnSync("sh", [SCRIPT, 'evil"branch', head], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 0, "the sha IS on that branch — the quote must not change the verdict");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.branch, 'evil"branch', "and the field round-trips to the name that went in");
+  assert.equal(json.reachable, true);
+  assert.equal(json.tip, head);
+});
+
+// No backslash case here, deliberately: measured, `git branch 'back\slash'`
+// and `git check-ref-format --branch 'back\slash'` both exit 128 — git refuses
+// a backslash in a ref outright. A branch name is this script's ONLY string
+// input, so `\` is unreachable and a test for it would pin fiction. The
+// backslash vector is real on the scripts whose input is a worktree PATH.
+
+test("an ordinary branch name is untouched — the escaping accepts what it should", (t) => {
+  // The false-positive half. A guard that mangles or refuses the names this
+  // script sees on every healthy run is a different bug from the one above.
+  const w = repo(t);
+  const head = commit(w, "ordinary");
+  git(w, "branch", "fix/119-json-sh-extract");
+  git(w, "push", "-q", "origin", "fix/119-json-sh-extract");
+
+  const r = spawnSync("sh", [SCRIPT, "fix/119-json-sh-extract", head], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, `{"branch":"fix/119-json-sh-extract","sha":"${head}","reachable":true,"tip":"${head}"}\n`,
+    "byte-identical to what this script has always emitted for a name with nothing to escape");
+});
+
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. Exit 1 out of THIS script means `the sha is not reachable`, the one
+// distinction it exists to make. A missing file must never be able to say that.
+test("a missing json.sh is exit 2, never the exit 1 that means `not reachable`", (t) => {
+  const w = repo(t);
+  const head = commit(w, "work");
+  git(w, "push", "-q", "origin", "main");
+  const lone = mkdtempSync(join(tmpdir(), "verify-sha-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "verify-sha.sh"));
+
+  const r = spawnSync("sh", [join(lone, "verify-sha.sh"), "main", head], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2,
+    "a missing library is `the question could not be answered`. Exit 1 would report a sha that IS on the branch as missing from it, and the controller would reject a PR that is exactly where it claims to be.");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the fetch or the ref");
+  assert.equal(r.stdout, "", "no payload: nothing was answered");
 });
