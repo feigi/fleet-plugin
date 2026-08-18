@@ -21,14 +21,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Spelled out rather than discovered by globbing for `^gone() {`: a discovered
+// set silently SHRINKS when a script drops its copy, which is precisely the
+// regression being pinned. A fourth copy has to be added here deliberately —
+// same trade-off, same reason as arg.test.mjs's own CONSUMERS list.
 const SCRIPTS = ["reap.sh", "release-ticket.sh", "worktree-audit.sh"];
 
 /** The `gone()` definition, verbatim, as it appears in a script's source. */
 function extract(name) {
   const src = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
-  const m = src.match(/^gone\(\) \{\n[\s\S]*?^\}$/m);
-  assert.ok(m, `${name} must still define gone() at column 0`);
-  return m[0];
+  // Global, and pinned to exactly ONE match: /bin/sh runs whichever definition
+  // was read last, while this lift takes the first, so a second `gone()` further
+  // down would leave both tests below green against a predicate the scripts
+  // never execute. Zero matches fails the same assert — `undefined !== 1`.
+  const all = src.match(/^gone\(\) \{\n[\s\S]*?^\}$/gm);
+  assert.equal(all?.length, 1, `${name} must define gone() exactly once, at column 0`);
+  return all[0];
 }
 
 // One copy per script and no shared file to change: the three drift unless
@@ -60,10 +68,16 @@ function probe(body, inputs) {
 }
 
 test("gone() answers the full input matrix, 0 only for established absence", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "gone-walk-")));
   t.after(() => {
-    chmodSync(join(root, "noperm"), 0o755);
+    // try: the hook is registered before the fixture exists, so on a setup
+    // failure `noperm` is not there to restore — and a throwing chmod would
+    // take the rmSync below with it and leak the temp dir.
+    try {
+      chmodSync(join(root, "noperm"), 0o755);
+    } catch {
+      // Never built; nothing to restore. The rmSync is the part that matters.
+    }
     rmSync(root, { recursive: true, force: true });
   });
   mkdirSync(join(root, "exists"));
@@ -87,7 +101,14 @@ test("gone() answers the full input matrix, 0 only for established absence", (t)
     [join(root, "noperm", "inner"), "1", "unsearchable prefix stays unknown, never absent"],
     ["relative-no-slash", "1", "no slash: the walk cannot climb, so it cannot establish anything"],
     ["relative/with/slash", "1", "relative prefix is not searchable from here either"],
-  ];
+  ]
+    // Root reads every directory, so the unsearchable prefix the `noperm` row
+    // needs cannot be fixtured under uid 0. Drop that ONE row there, never the
+    // matrix: the other eight need no permission fixture, and `gone ""` among
+    // them is the only case that separates this fix from the rejected
+    // after-the-loop form — skipping the whole test hands uid 0 a green suite
+    // against the very placement it was written to reject.
+    .filter(([p]) => process.getuid?.() !== 0 || !p.startsWith(join(root, "noperm")));
 
   const answers = probe(extract("release-ticket.sh"), cases.map(([p]) => p));
   for (const [i, [p, want, why]] of cases.entries()) {
