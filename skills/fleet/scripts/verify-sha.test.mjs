@@ -188,6 +188,37 @@ test("a failed fetch carries git's own cause, and a bad URL no longer reads like
   assert.match(c.stderr, /couldn't find remote ref nosuchbranch/);
 });
 
+test("a failed fetch is fatal — the script stops rather than answering off a stale ref", (t) => {
+  // #574: the case above asserts exit 2, no JSON, and git's cause on stderr, and
+  // every one of those survives downgrading this guard's `die` to a warning. With
+  // the guard advisory the script runs ON: `origin/main` still resolves from the
+  // tracking ref the clone left behind, and the sha then dies at the `cat-file -e`
+  // guard — which independently gives exit 2, no stdout, and leaves the `cannot
+  // fetch` line and git's diagnosis sitting on stderr. Exit code, empty stdout and
+  // a stderr substring are each reproducible by a later guard, so no conjunction
+  // of them can see whether this one was fatal.
+  //
+  // What only fatality produces is the absence of progress: the `tip =` trace is
+  // echoed on the line after this guard, so it appears if and only if execution
+  // got past it. That line is pinned verbatim by "a healthy run stays quiet", so
+  // it cannot be reworded out from under this assertion unseen — and unlike a
+  // `doesNotMatch` on some later guard's message, it does not depend on which of
+  // them happens to fire, or on how it is worded.
+  const w = repo(t);
+  // One fixture: #565 measured a bad URL and a removed remote to be byte-identical
+  // here, and this test is about the guard's fatality, not about telling causes apart.
+  git(w, "remote", "set-url", "origin", "/nonexistent/path.git");
+
+  const { code, json, stderr } = verify(w, "main", "0".repeat(40));
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.doesNotMatch(
+    stderr,
+    /origin\/main tip =/,
+    "a fetch that failed must stop the script, not warn and answer against an unupdated ref",
+  );
+});
+
 test("a fetch that succeeds but leaves origin/<branch> unresolvable is exit 2 at the rev-parse guard", (t) => {
   const w = repo(t);
   // Real git throughout, no shim: with no fetch refspec configured, `git fetch
