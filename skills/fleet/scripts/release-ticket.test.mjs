@@ -256,6 +256,45 @@ test("a dirty worktree blocks on its own", (t) => {
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// #119, the other direction: the library is present and its tools are not.
+// `block()` used to splice `$(jstr "$1")` straight into the accumulator, which
+// is not a simple command, so `set -e` read only the assignment — a failed
+// escape aborted at exit 1, byte-identical to the blocked verdict below, with
+// neither the receipt that verdict carries nor a line on stderr. Assigned
+// first, the status is readable and the answer becomes a 2.
+//
+// The shim is selected on CONTENT, not on argv: `branch_j`/`wt_j` are escaped
+// well before the precondition scan and go through the same `jstr`, so a sed
+// that failed unconditionally would abort there instead and prove nothing about
+// `block()`. Only a blocker string carries "uncommitted change".
+test("a blocker that cannot be escaped is exit 2 with a cause, never the blocked verdict", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const bin = mkdtempSync(join(tmpdir(), "release-ticket-esc-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const realSed = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "sed"), `#!/bin/sh
+case " $* " in
+  *:a*)
+    in=$(cat)
+    case "$in" in *'uncommitted change'*) exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${realSed} "$@" ;;
+esac
+exec ${realSed} "$@"
+`, { mode: 0o755 });
+
+  const res = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
+
+  assert.equal(res.code, 2,
+    "exit 1 is `NOT released — blocked`, and a run that could not render its blocker has not established one");
+  assert.match(res.stderr, /could not escape the blocker for #9/,
+    "and the cause names the field rather than leaving the operator with a silent 1");
+  assert.equal(res.out, "", "no receipt: a blockers array missing an element is not the record this exit promises");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
 test("a pushed branch blocks on its own", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
@@ -1666,7 +1705,7 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
   });
 
   assert.equal(res.status, 2,
-    "a missing library is a refusal, not a verdict — this script's contract has no exit 1 at all");
+    "a missing library is a refusal, not a verdict — exit 1 here is `NOT released — blocked`, and a library that merely went missing must not be able to say it");
   assert.match(res.stderr, /json\.sh/, "and it names the file rather than leaving the operator to guess");
   assert.equal(res.stdout, "", "no receipt: nothing was released");
   assert.ok(existsSync(c.wt),

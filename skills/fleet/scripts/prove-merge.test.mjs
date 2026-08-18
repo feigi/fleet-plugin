@@ -611,6 +611,12 @@ test("no probe in prove-merge.sh has its status discarded by `[ ]`", () => {
 // cost. Inventing a fixture that "proves" an unreachable vector would pin
 // fiction; what is pinned instead is that wrapping them changed no byte of the
 // payload, and that the library's absence is a refusal rather than a verdict.
+//
+// Byte-identical is exactly why the test below it cannot discriminate: measured,
+// stripping all three `jstr` calls and interpolating the raw values leaves the
+// whole suite green (22/22). So the unwrap vector is pinned at the SOURCE
+// instead — the one place a regression here is visible without a fixture that
+// does not exist.
 test("wrapping the string fields left the payload byte-identical", (t) => {
   const w = repo(t);
   commit(w, "main moves on before the branch is cut");
@@ -628,6 +634,23 @@ test("wrapping the string fields left the payload byte-identical", (t) => {
   assert.equal(json.firstParent, mainTip);
   assert.equal(json.proofPath, "no-rebase", "the script's own literal, unchanged");
   assert.equal(json.proved, true);
+});
+
+// Source-level, because no payload fixture can tell the two apart. Deleting the
+// escaping line also deletes its `|| die`, so this pins the guard as well.
+test("the printf still reads the ESCAPED proof fields, not the raw ones", () => {
+  const src = readFileSync(SCRIPT, "utf8")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"));
+
+  const escaped = src.filter((line) => /second_j=\$\(jstr/.test(line));
+  assert.equal(escaped.length, 1, "the three proof fields are escaped in one `&&` chain");
+  assert.match(escaped[0], /\|\| die|\\$/, "and that chain carries or continues to a `|| die`");
+
+  const call = src.find((line) => line.includes('"$second_j"'));
+  assert.ok(call, "printf's argument list interpolates $second_j, never $second directly");
+  assert.match(call, /"\$first_j"/, "and $first_j");
+  assert.match(call, /"\$path_j"/, "and $path_j");
 });
 
 // `.` is a POSIX special builtin, so failing to open its operand aborts a

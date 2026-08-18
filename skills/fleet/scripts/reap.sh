@@ -37,15 +37,11 @@ export LC_ALL=C
 NAME=reap
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
-# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
-# open its operand aborts a non-interactive shell outright and the `||` never
-# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
-# exit 1 with the guard unfired. This script defines no exit 1 at all (#265), so
-# a bare 1 out of it is a code its caller has no reading for. Placed here, above
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it. This script defines no exit 1 at all (#265), so a
+# bare 1 out of it is a code its caller has no reading for. Placed here, above
 # the fetch, so a missing library refuses before anything is deleted rather than
-# partway through. The `|| die` stays for what `[ -r ]` cannot see: a library
-# that reads but returns non-zero.
+# partway through.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to reap without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR
@@ -91,6 +87,16 @@ kept=""
 # jfield always exits 0, which is what makes it safe inside the `$( )` below:
 # a substitution that failed would contribute an empty string and splice
 # `{"branch":,…}` — malformed JSON — with nothing to notice it.
+#
+# Five interpolations converge on this function: the branch name, `dirty
+# worktree $wt`, `ignored files present in $wt: $ignored`, `cherry probe
+# failed …: $cherry` (arbitrary git stderr) — the first four via `keep`, at
+# eleven call sites — and the `reaped` accumulator, which calls `jfield`
+# directly and never routes through `keep` at all. The branch name is the
+# demonstrated trigger — `git branch 'has"quote'` is a legal refname — and raw
+# it emitted a payload no parser accepts at exit 0, while the branch was
+# correctly kept (#119). The stderr lines stay raw: they are prose for an
+# operator, not JSON.
 jfield() {
   if jf=$(jstr "$1"); then
     printf '"%s"' "$jf"
@@ -100,13 +106,6 @@ jfield() {
   fi
 }
 
-# Five interpolations reach here: the branch name, `dirty worktree $wt`,
-# `ignored files present in $wt: $ignored`, `cherry probe failed …: $cherry`
-# (arbitrary git stderr), and the `reaped` accumulator below. The branch name is
-# the demonstrated trigger — `git branch 'has"quote'` is a legal refname — and
-# raw it emitted a payload no parser accepts at exit 0, while the branch was
-# correctly kept (#119). The stderr line stays raw: it is prose for an operator,
-# not JSON.
 keep() { kept="${kept}{\"branch\":$(jfield "$1"),\"reason\":$(jfield "$2")}," ; echo "    KEEP $1 — $2" >&2; }
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to

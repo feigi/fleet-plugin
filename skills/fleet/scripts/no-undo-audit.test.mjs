@@ -1114,7 +1114,8 @@ test("a BS, a tab, a FF, a CR and a DEL in the worktree path round-trip and are 
 
 // The multi-line half of #146. `wt` is argv $1, a filesystem path, and a
 // directory name may hold a newline where a ref may not — so this is the one
-// input any of the three jstr copies can receive as more than one line. It is
+// input json.sh's `jstr` receives as more than one line from any live caller.
+// It is
 // what the `:a;$!N;$!ba` slurp and the `s/\n/\\n/g` rule exist for: without
 // the slurp sed cycles once per LINE and the LF rule never sees the byte, so
 // the payload carries a raw newline inside a JSON string and no parser accepts
@@ -1127,8 +1128,9 @@ test("a BS, a tab, a FF, a CR and a DEL in the worktree path round-trip and are 
 // stderr with `tr '\n' ' '`; and inflight builds every evidence string from
 // line-oriented git output. (No line numbers: #129 tracks five citations in
 // these files that have already drifted, one of them mid-review here.)
-// Their copies of the slurp are unreachable rather than unpinned; #119 owns
-// the three-copies question.
+// Since #119 there is one `jstr`, in json.sh, rather than three copies: those
+// two callers reach the shared slurp with values that can never be multi-line,
+// so this test is still the only place a real value exercises it.
 test("a newline in the worktree path round-trips as an escaped \\n", (t) => {
   const c = repo(t, "fix/1-thing", "no-undo-audit-has\nnewline-");
 
@@ -1647,10 +1649,10 @@ test("the design spec's script-surface row names every field the payload actuall
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
 // non-interactive shell before any `||` on the line can run — measured, /bin/sh
 // (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
-// unfired. This script's contract has no exit 1 at all (0 safe, 1 refused, 2
-// unanswerable — and "refused" here means a dirty worktree it actually looked
-// at), so a bare 1 out of a missing file would claim a measurement that never
-// happened. The `[ -r ]` ahead of the `.` is what makes it a 2.
+// unfired. Exit 1 is a VERDICT here — `REFUSED — commit the worktree before
+// rebasing`, and "refused" means a dirty worktree this script actually looked
+// at — so a bare 1 out of a missing file would report that refusal without
+// having measured anything. The `[ -r ]` ahead of the `.` is what makes it a 2.
 test("a missing json.sh is exit 2, not a verdict about the worktree", (t) => {
   const c = repo(t);
   const lone = mkdtempSync(join(tmpdir(), "no-undo-audit-nolib-"));
@@ -1666,4 +1668,77 @@ test("a missing json.sh is exit 2, not a verdict about the worktree", (t) => {
   assert.match(r.stderr, /json\.sh/,
     "and it names the file — this script has many exit-2 paths and the operator should not have to guess which fired");
   assert.equal(r.stdout, "", "no payload: nothing was measured");
+});
+
+// --- #119, second half: what happens when the library is THERE and its tools
+// are not. `jarr`/`jarr_rewritten` return non-zero on a failed stage now, which
+// is the whole point of the extraction — and under `set -eu` a bare
+// `var=$(… | jarr)` would then abort with the failing tool's own status. On
+// this script that status is 1, byte-identical to the dirty-worktree refusal,
+// on a worktree the run had already logged as clean, with no payload and no
+// diagnostic. These three pin the `|| die` that converts it to a 2.
+//
+// One shim shape, selected on CONTENT rather than on argv, because the two jarr
+// call sites are invoked with identical arguments and only the values passing
+// through them differ. `sed` fails jarr; `tr -d` fails jrewritten and therefore
+// jarr_rewritten, which is the other operand of each `&&` chain.
+function withBrokenEscaper(t, { tool, marker }) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-esc-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+  // The selector arg is what keeps this off the script's OWN sed/tr calls:
+  // `s/^/"/` appears only in jarr's rule list and `-d` only in jrewritten's.
+  const selector = tool === "sed" ? `'s/^/"/'` : "-d";
+  writeFileSync(join(bin, tool), `#!/bin/sh
+case " $* " in
+  *${selector}*)
+    in=$(cat)
+    case "$in" in *'${marker}'*) exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${real} "$@" ;;
+esac
+exec ${real} "$@"
+`);
+  chmodSync(join(bin, tool), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
+test("a jarr that cannot escape the conflicts is exit 2 with a cause, never the refusal that means dirty", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "boom-conflict" }) });
+
+  assert.equal(r.status, 2,
+    "the worktree is clean and was measured clean — exit 1 here would report it dirty on the strength of a broken sed");
+  assert.match(r.stderr, /could not escape the conflicting paths/,
+    "and it names which stage failed rather than exiting silently");
+  assert.equal(r.stdout, "", "no payload: an unescaped conflicts list is not an answer");
+});
+
+test("a jarr that cannot escape the at-risk commits is exit 2 with its own cause", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "later main side\n");
+  git(c.w, "add", "--", ":(literal)plain.txt");
+  git(c.w, "commit", "-q", "-m", "BOOMATRISK subject");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "BOOMATRISK" }) });
+
+  // A distinct message, not the conflicts one: the two guards are separate
+  // statements and a single shared message could not tell the operator which
+  // array the run lost.
+  assert.equal(r.status, 2, "an at-risk list that could not be rendered is unanswerable, not a dirty worktree");
+  assert.match(r.stderr, /could not escape the at-risk commits/,
+    "and the cause names the at-risk list, not the conflicts one");
+  assert.equal(r.stdout, "", "no payload: a run that cannot say what a resolution would eat has not answered");
+});
+
+test("a jarr_rewritten that cannot answer is exit 2 too — the `&&` chain covers both operands", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "tr", marker: "boom-conflict" }) });
+
+  assert.equal(r.status, 2,
+    "`conflictsRewritten` is what tells the runbook a path is not safe to hand to `git diff` — a run that cannot compute it has not answered");
+  assert.match(r.stderr, /could not escape the conflicting paths/);
+  assert.equal(r.stdout, "", "no payload: half the pair is not a receipt");
 });

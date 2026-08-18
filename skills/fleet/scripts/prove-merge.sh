@@ -36,14 +36,11 @@ set -eu
 NAME=prove-merge
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
-# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
-# open its operand aborts a non-interactive shell outright and the `||` never
-# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
-# exit 1 with the guard unfired. Exit 1 out of THIS script means "the proof is a no", which the merge bot
-# reads as a reason to refuse a merge — so a missing file must not be able to
-# say it. The `|| die` stays for what `[ -r ]` cannot
-# see: a library that reads but returns non-zero.
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it. Exit 1 out of THIS script means "the proof is a
+# no", which the merge bot reads as a reason to refuse a merge, so a missing
+# library must not be able to say it — which is why `[ -r ]` has to fire before
+# the `.` can kill the shell.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to answer without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR

@@ -60,19 +60,15 @@ export LC_ALL=C
 NAME=inflight
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-# The escaping helpers, shared with release-ticket.sh and no-undo-audit.sh
-# rather than copied into each (#119). Below `export LC_ALL=C` deliberately:
-# locale-pin-prose.test.mjs requires every line above that pin to be a comment,
-# a blank, a shebang or a `set -` line, and this is none of them.
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it; only what is true of THIS script is repeated here.
+# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
+# is none of them.
 #
-# `[ -r ]` ahead of the `.`, not `. … || die` alone. `.` is a POSIX special
-# builtin: failing to open its operand aborts a non-interactive shell outright,
-# so the `||` never runs. Measured on a missing file under `set -e`: /bin/sh
-# (macOS bash 3.2), bash 3.2 and `bash --posix` all exit **1** with the guard
-# unfired — and exit 1 from this script means `taken`, so a library that merely
-# went missing would fabricate a claim on a free ticket. dash exits 2, also
-# unfired; only bash 5.3 reaches the `||`. The `|| die` stays for what `[ -r ]`
-# cannot see: a library that reads but returns non-zero.
+# Exit 1 from this script means `taken`, so a library that merely went missing
+# would fabricate a claim on a free ticket — which is why `[ -r ]` has to fire
+# before the `.` can kill the shell.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to answer without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR

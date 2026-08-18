@@ -13,14 +13,11 @@ set -eu
 NAME=claim-ticket
 die() { echo "$NAME: $1" >&2; exit 2; }
 
-# The escaping helpers, shared rather than copied (#119). `[ -r ]` ahead of the
-# `.`, not `. … || die` alone: `.` is a POSIX special builtin, so failing to
-# open its operand aborts a non-interactive shell outright and the `||` never
-# runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and `bash --posix` all
-# exit 1 with the guard unfired. This script uses exit 2 for every refusal and has no exit 1, and the guard
-# sits ahead of every mutation, so a missing library refuses before a worktree,
-# a label or a runner exists. The `|| die` stays for what `[ -r ]` cannot
-# see: a library that reads but returns non-zero.
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it. This script uses exit 2 for every refusal and has
+# no exit 1, so a bare 1 out of it is a code its caller has no reading for. The
+# guard sits ahead of every mutation, so a missing library refuses before a
+# worktree, a branch, a label or a runner exists.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to claim without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR

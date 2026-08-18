@@ -291,11 +291,12 @@ test("a wrong argument count is exit 2", () => {
 // contract row in `docs/specs/2026-07-23-fleet-plugin-design.md` documents the
 // exit-0/1 payload as `{branch, sha, reachable, tip}`.
 //
-// Only `$branch` is reachable of the three. `$tip` is `git rev-parse`, which
-// emits 40 hex characters and nothing else; `$sha` is echoed from argv but only
-// after `git cat-file -e "${sha}^{commit}"` succeeds, and a sha carrying a quote
-// is not a valid object name. Both are wrapped anyway — it costs nothing and
-// survives a later refactor that changes where either comes from.
+// Two of the three are reachable, not one. `$tip` is `git rev-parse`, which
+// emits 40 hex characters and nothing else, and is wrapped for uniformity. But
+// `$sha` is not: it is argv, and `git cat-file -e "${sha}^{commit}"` resolves
+// any rev expression rather than only a hex object name — a REF name included —
+// so a tag or branch holding a quote passes that gate and reaches the payload.
+// The second test below is that vector, and it fails without the wrapping.
 test("a branch name holding a double quote still emits parseable JSON", (t) => {
   const w = repo(t);
   const head = commit(w, "work on a hostile branch name");
@@ -309,6 +310,25 @@ test("a branch name holding a double quote still emits parseable JSON", (t) => {
   assert.equal(json.branch, 'evil"branch', "and the field round-trips to the name that went in");
   assert.equal(json.reachable, true);
   assert.equal(json.tip, head);
+});
+
+// The `$sha` half of the same vector. `git cat-file -e 'evil"tag^{commit}'`
+// resolves the TAG, so argv reaches the payload carrying a quote and the field
+// is emitted as `"sha":"evil"tag"` — unparseable, at exit 0 — with the wrapping
+// removed. Pinned separately from `$branch` because the two are independent
+// operands of the same `&&` chain and either could be dropped alone.
+test("a sha argument naming a quote-bearing ref still emits parseable JSON", (t) => {
+  const w = repo(t);
+  const head = commit(w, "work reachable by a hostile tag name");
+  git(w, "tag", 'evil"tag', head);
+  git(w, "push", "-q", "origin", "main");
+
+  const r = spawnSync("sh", [SCRIPT, "main", 'evil"tag'], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 0, "the tag IS reachable on origin/main — the quote must not change the verdict");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.sha, 'evil"tag', "and the field round-trips to the argument that went in");
+  assert.equal(json.reachable, true);
 });
 
 // No backslash case here, deliberately: measured, `git branch 'back\slash'`

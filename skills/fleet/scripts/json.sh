@@ -16,18 +16,28 @@
 # non-interactive shell outright, so `||` never runs. Measured on a missing
 # file with `set -e`: /bin/sh (macOS bash 3.2) and bash 3.2/`--posix` exit **1**
 # with the guard unfired, dash exits 2 unfired, and only Homebrew bash 5.3
-# reaches the `|| die`. Exit 1 is a VERDICT in three of the callers here —
+# reaches the `|| die`. Exit 1 is a VERDICT in FIVE of the eight callers here —
 # inflight.sh reads it as "ticket taken", verify-sha.sh as "not reachable",
-# prove-merge.sh as "not proved" — so a lib that merely went missing would
-# fabricate one. The `[ -r ]` catches that before `.` can kill the shell; the
-# `|| die` stays for the case `[ -r ]` cannot see, a lib that reads but returns
-# non-zero. A lib that reads and has a SYNTAX error still aborts before either
-# guard; nothing in POSIX sh can catch that, so the suite covers it instead.
+# prove-merge.sh as "not proved", no-undo-audit.sh as "REFUSED, the worktree is
+# dirty", release-ticket.sh as "NOT released, blocked" — so a lib that merely
+# went missing would fabricate one. claim-ticket.sh, reap.sh and
+# worktree-audit.sh define no exit 1 at all, which is not safety: a bare 1 out
+# of them is a code their caller has no reading for. The `[ -r ]` catches that
+# before `.` can kill the shell; the `|| die` stays for the case `[ -r ]`
+# cannot see, and that case is live rather than theoretical — a DIRECTORY at
+# this path passes `[ -r ]` and `.` returns 1 with the arm firing (measured,
+# /bin/sh and bash 5.3; dash sources a directory at exit 0 instead). A lib that
+# reads and has a SYNTAX error aborts before either guard on /bin/sh, bash 3.2
+# and `bash --posix`, while bash 5.3 reaches the `|| die` with status 2. The
+# suite does NOT cover that case: measured, a syntax error appended at EOF
+# leaves bash 3.2 with every function it had already parsed and json.test.mjs
+# stays green. CI's `shellcheck -x -S warning` over `git ls-files '*.sh'` is
+# what catches it (SC1072/SC1073).
 #
 # `LC_ALL=C` is a per-command prefix on every tool below, never an export. Three
 # of the callers (verify-sha.sh, prove-merge.sh, claim-ticket.sh) do not pin the
 # locale, and exporting from a sourced lib would silently re-locale every OTHER
-# tool in them. The prefix is a no-op in the six that do pin it (#582), and
+# tool in them. The prefix is a no-op in the five that do pin it (#582), and
 # closes the same hazard in the three that do not. It matters here because BSD
 # `tr` exits 1 on a byte that is not valid UTF-8 under a UTF-8 locale, and
 # `sed` emits nothing at all.
@@ -60,16 +70,28 @@
 # POSIX leaves this undefined and GNU sed's answer differs — so plain `N;$!ba`
 # prints nothing at all for a single-line value.
 #
-# NO PIPELINE RUNS TO THE END OF A FUNCTION HERE, and that is the #119 fix
-# rather than a style choice. A pipeline's status is its LAST stage's, so the
+# EVERY FALLIBLE STAGE'S STATUS IS READ HERE, and that is the #119 fix rather
+# than a style choice. A pipeline's status is its LAST stage's, so the
 # original `printf | sed | tr` reported only `tr` — forcing `sed` to fail left
 # jstr exiting 0 with an empty value and every caller's `|| die` unfired, while
 # forcing `tr` worked (measured on PR #425). POSIX sh has no `pipefail` and no
 # `PIPESTATUS`, so each stage that can fail is captured and its status read.
-# `$( )` strips trailing newlines off each capture, which is safe only because
-# `sed` ran first and has already turned every data \012 into the two
-# characters `\n` — the one \012 left in the stream is the one sed itself
-# appends. jarr is the exception and is handled in its own note.
+# The consequence, and the rule a later edit is checked against: a pipeline may
+# still END a function, but only where its LAST stage is the fallible one — `tr`
+# closes jstr, `paste` closes jarr and jarr_rewritten, so each function's status
+# IS that tool's (measured: breaking `tr` gives jstr the shim's own status,
+# breaking `sed` gives 1 from that capture's `|| return 1`).
+#
+# `$( )` strips trailing newlines off each capture. For a newline INSIDE the
+# value that is safe, because `sed` ran first and turned it into the two
+# characters `\n`. It is NOT safe for a TRAILING \012: sed consumes that byte as
+# its line terminator rather than data, so no rule can see it, sed re-emits an
+# indistinguishable one and `$( )` takes it off — `jstr` of `a<LF>` and of `a`
+# are byte-identical (measured). No live caller can reach it: every argument
+# reaching jstr today is a script literal or a `$( )`/`awk`/`read` capture that
+# has already lost its own trailing newline. #119 leaves it there rather than
+# adding a sentinel no caller would exercise. jarr is the exception and is
+# handled in its own note.
 #
 # Scratch variables are `json_`-prefixed because /bin/sh has no `local` and
 # these land in the sourcing script's namespace.
@@ -94,8 +116,10 @@ jstr() {
 # byte except \010 \011 \012 \014 \015 (escaped above, never replaced) and \177
 # (preserved, never replaced). `$()` strips trailing newlines off both sides,
 # and \012 is the one byte it strips: it is not in the delete set, so the same
-# suffix comes off both and the strip can neither manufacture a difference nor
-# hide one.
+# suffix comes off both and the strip cannot manufacture a difference. It does
+# hide one — a value ending in \012 answers `false` here while jstr has already
+# dropped that byte — which is the trailing-\012 case the header bounds as
+# unreachable from every live caller, not a byte jarr/jstr REPLACED.
 jrewritten() {
   # Same short circuit as jstr, same reason: nothing to have rewritten, so no
   # need to ask a tool that might not be there.

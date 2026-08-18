@@ -47,19 +47,16 @@ NAME=no-undo-audit
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 
-# The escaping helpers, shared with inflight.sh and no-undo-audit.sh rather
-# than copied into each (#119). Below `export LC_ALL=C` deliberately:
-# locale-pin-prose.test.mjs requires every line above that pin to be a comment,
-# a blank, a shebang or a `set -` line, and this is none of them.
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it; only what is true of THIS script is repeated here.
+# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
+# is none of them.
 #
-# `[ -r ]` ahead of the `.`, not `. … || die` alone. `.` is a POSIX special
-# builtin: failing to open its operand aborts a non-interactive shell outright,
-# so the `||` never runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and
-# `bash --posix` all exit 1 on a missing file with the guard unfired, dash
-# exits 2, and only bash 5.3 reaches the `||`. This script has no exit-1
-# verdict to fabricate the way inflight.sh does, but a bare 1 out of it is
-# still a code its own contract does not define. The `|| die` stays for what
-# `[ -r ]` cannot see: a library that reads but returns non-zero.
+# Exit 1 from this script is a verdict too: `REFUSED — commit the worktree
+# before rebasing`. A library that merely went missing would report a dirty
+# worktree without having looked at one, blocking a rebase that was safe to
+# start, so `[ -r ]` has to fire before the `.` can kill the shell.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to act without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR
@@ -477,8 +474,15 @@ if [ -n "$conflicts" ]; then
 else
   echo "    no conflicting files" >&2
 fi
-conflicts_json=$(printf '%s' "$conflicts" | jarr)
-conflicts_rewritten_json=$(printf '%s' "$conflicts" | jarr_rewritten)
+# `jarr`/`jarr_rewritten` return non-zero when a stage fails (#119), and a bare
+# `var=$(pipeline)` under `set -eu` would abort with the failing tool's own
+# status — 1 out of THIS script is the dirty-worktree refusal, fabricated here
+# on a worktree already measured clean, with no payload and nothing on stderr.
+# The `|| die` converts it to the exit 2 this script's contract reserves for a
+# question it could not answer.
+conflicts_json=$(printf '%s' "$conflicts" | jarr) \
+  && conflicts_rewritten_json=$(printf '%s' "$conflicts" | jarr_rewritten) \
+  || die "could not escape the conflicting paths for $branch"
 
 # 3. What main gained in those files since the fork. These are the commits a
 #    careless resolution deletes — read them before resolving, not after.
@@ -527,8 +531,10 @@ if [ -n "$conflicts" ]; then
     || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
 fi
-at_risk_json=$(printf '%s' "$at_risk" | jarr)
-at_risk_rewritten_json=$(printf '%s' "$at_risk" | jarr_rewritten)
+# Same guard, same reason as the conflicts pair above.
+at_risk_json=$(printf '%s' "$at_risk" | jarr) \
+  && at_risk_rewritten_json=$(printf '%s' "$at_risk" | jarr_rewritten) \
+  || die "could not escape the at-risk commits for $branch"
 
 if [ "$clean" = true ]; then
   rc=0

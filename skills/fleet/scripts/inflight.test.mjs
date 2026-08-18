@@ -162,8 +162,9 @@ exec '${REAL_AWK}' "$@"
   // reaches the caller only because `inflight.sh` returns explicitly on it
   // (`|| return 1`). Without that, bash and zsh hand back a confident `true`
   // — see the both-shells test below, which is what pins it.
-  // (The remaining masking flaw, in jstr's `sed` stage, is #119's, not this
-  // file's.)
+  // (jstr's `sed` stage was masked the same way and is not any more: #119 moved
+  // it into json.sh behind its own capture and `|| return 1`, and json.test.mjs
+  // pins it there.)
   if (trFailWhenArgsHave !== null) {
     writeFileSync(join(bin, "tr"), `#!/bin/sh
 case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
@@ -1183,7 +1184,8 @@ for (const shell of ["sh", "bash"]) {
 //
 // One shell is enough here, unlike above: jstr's `tr` is the last stage of its
 // own pipe, so its failure IS the pipeline's status on every shell. (Its `sed`
-// stage is the one that stays masked — #119's, not this file's.)
+// stage no longer needs a shell split either — #119 gave it its own capture in
+// json.sh, pinned by json.test.mjs rather than here.)
 test("under sh, an escaper that cannot escape at all nulls its field rather than emitting a half-escaped string", (t) => {
   const { repo, env } = fixture(t, 66, { trFailWhenArgsHave: "\\037 " });
   git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");

@@ -991,7 +991,7 @@ test("a missing json.sh is exit 2, before anything is created", () => {
 
   assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
   assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the lockfile probe");
-  assert.equal(r.stdout, "", "no payload: nothing was claimed");
+  assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
 });

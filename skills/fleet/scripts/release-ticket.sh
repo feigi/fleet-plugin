@@ -48,19 +48,17 @@ NAME=release-ticket
 die() { echo "$NAME: $1" >&2; exit 2; }
 
 
-# The escaping helpers, shared with inflight.sh and no-undo-audit.sh rather
-# than copied into each (#119). Below `export LC_ALL=C` deliberately:
-# locale-pin-prose.test.mjs requires every line above that pin to be a comment,
-# a blank, a shebang or a `set -` line, and this is none of them.
+# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# the measurements behind it; only what is true of THIS script is repeated here.
+# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
+# is none of them.
 #
-# `[ -r ]` ahead of the `.`, not `. … || die` alone. `.` is a POSIX special
-# builtin: failing to open its operand aborts a non-interactive shell outright,
-# so the `||` never runs — measured, /bin/sh (macOS bash 3.2), bash 3.2 and
-# `bash --posix` all exit 1 on a missing file with the guard unfired, dash
-# exits 2, and only bash 5.3 reaches the `||`. This script has no exit-1
-# verdict to fabricate the way inflight.sh does, but a bare 1 out of it is
-# still a code its own contract does not define. The `|| die` stays for what
-# `[ -r ]` cannot see: a library that reads but returns non-zero.
+# Exit 1 from this script is a verdict too: `#<n> NOT released — nothing was
+# touched`, emitted with the blocker list a precondition scan actually found. A
+# library that merely went missing would hand the caller that answer for a
+# ticket nothing ever refused, so `[ -r ]` has to fire before the `.` can kill
+# the shell.
 json_lib="$(dirname "$0")/json.sh"
 [ -r "$json_lib" ] || die "cannot read $json_lib — refusing to act without the JSON escaping helpers"
 # shellcheck source-path=SCRIPTDIR
@@ -242,7 +240,15 @@ halt() {
 }
 
 blockers=""
-block() { blockers="${blockers}\"$(jstr "$1")\","; echo "    BLOCKED: $1" >&2; }
+# Assigned first, exactly as `halt` does above: a `$(jstr …)` spliced straight
+# into the accumulator is not a simple command, so `set -e` reads only the
+# assignment and a failed escape would abort at exit 1 — this script's blocked
+# verdict — with neither the receipt that verdict carries nor a line on stderr.
+block() {
+  block_j=$(jstr "$1") || die "could not escape the blocker for #$issue"
+  blockers="${blockers}\"$block_j\","
+  echo "    BLOCKED: $1" >&2
+}
 
 # Is this path ABSENT, or merely one we are not permitted to stat? -e is false
 # for both, and neither caller may infer the first from the second: on the dirty
