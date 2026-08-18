@@ -87,6 +87,11 @@ esac
 # The check-then-act window: this call sits between the last precondition and
 # the first delete, so writing here is a member committing during the round trip.
 [ -z "\${GH_DIRTY:-}" ] || echo late > "\$GH_DIRTY"
+# Same window, a different appearance: the claim's directory is replaced by a
+# symlink standing in for it. That is the shape \`git worktree remove\` clears the
+# registration for and only THEN fails on, and the precondition that refuses a
+# non-directory has already run by the time this call lands.
+[ -z "\${GH_SYMLINK:-}" ] || { mv "\$GH_SYMLINK" "\$GH_SYMLINK.real" && ln -s "\$GH_SYMLINK.real" "\$GH_SYMLINK"; }
 case "$*" in
   *closedByPullRequestsReferences*) ;;
   *"--json labels"*) printf '%s\\n' "\${GH_LABELS-in-progress}" ;;
@@ -131,6 +136,29 @@ function relocate(w, wt, dest) {
   writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
   rmSync(wt, { recursive: true, force: true });
   return dest;
+}
+
+/**
+ * Leave an Orphaned worktree directory: the claim's directory on disk with its
+ * registration cleared and its branch untouched.
+ *
+ * Built by taking the directory out of git's reach, pruning, and putting it
+ * back — rather than by deleting the registry entry by hand, so the repo is
+ * left in a state git itself produced and any listed-vs-registered count stays
+ * balanced. Production reaches the same state through a `git worktree remove`
+ * that cleared the registration before failing to delete the directory; the
+ * end-to-end case below drives that route instead of this one.
+ */
+function orphan(r, c) {
+  const aside = `${c.wt}.aside`;
+  renameSync(c.wt, aside);
+  git(r.w, "worktree", "prune");
+  renameSync(aside, c.wt);
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes(c.wt),
+    "fixture: the registration must really be gone, or this is just a stray",
+  );
+  return c.wt;
 }
 
 /** What claim-ticket.sh leaves behind: a worktree on a fresh branch off origin/main. */
@@ -1160,6 +1188,212 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.match(partial.stderr, /branch deleted: true, in-progress: still on the issue/, "the detail line agrees");
   assert.doesNotMatch(partial.stderr, /is Unreleased/, "still no worktree of ours to report a state for");
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false }, "the branch really did go");
+});
+
+test("a removal that cleared the registration is a partial release, never `nothing landed`", (t) => {
+  // #208 itself. `git worktree remove` deletes the registration BEFORE the
+  // directory and does not put it back when that delete fails, so its exit code
+  // answers for neither — and `done_wt=false` was rendered as the headline
+  // `nothing landed`, a positive assertion that is false here.
+  //
+  // The symlink trigger, not `chmod`: it reproduces as any user, needs no
+  // permission bits, and has no root-vacuity hole. The second reachable shape is
+  // a subdirectory left at mode 555 mid-delete, which fails the same way (rc 255
+  // with the registration already cleared, measured on git 2.50.1); it is named
+  // here rather than built, because this suite's 0o000 fixtures already leak on
+  // failure and go vacuous under euid 0 (#184).
+  //
+  // Swapped in during the gh round trip, since the precondition that refuses a
+  // non-directory worktree runs first and would otherwise block this before any
+  // mutation — which is the check-then-act window, not a contrivance.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wt = release(r, c, { apply: false }).json.worktree;
+
+  const { code, json, stderr } = release(r, c, { env: { GH_SYMLINK: wt } });
+
+  // The fixture reached the state this test is named for, measured on the
+  // repo rather than assumed from the prose the script printed.
+  assert.equal(
+    git(r.w, "worktree", "list", "--porcelain").includes(`worktree ${wt}\n`),
+    false,
+    "fixture: git must really have cleared the registration",
+  );
+  assert.ok(lstatSync(wt).isSymbolicLink(), "fixture: and really have left the path occupied");
+
+  assert.equal(code, 2);
+  assert.match(stderr, /#9 PARTIALLY RELEASED — git worktree remove refused/);
+  assert.doesNotMatch(stderr, /nothing landed/, "the registration landed, so that headline is false");
+  assert.ok(
+    stderr.includes(`worktree ${wt} is Deregistered — the registration is cleared, the directory is still on disk`),
+    `the detail line must name the measured state: ${stderr}`,
+  );
+  assert.equal(json.released, false);
+  assert.match(json.blockers[0], /is Deregistered/, "and the receipt carries it where a caller without stderr can read it");
+  assert.equal(json.label, true, "in-progress survives, so the ticket keeps reading as taken");
+});
+
+test("the run after a Deregistered halt refuses instead of releasing over the directory", (t) => {
+  // The knock-on, end to end and through the real route rather than a
+  // hand-built registry: run one halts with the registration cleared, and run
+  // two used to find no `wt` and no `stray` — `stray` is awk over git's
+  // registry, so an Orphaned worktree directory is invisible to it BY
+  // CONSTRUCTION — delete the branch, drop the label, and exit 0 with
+  // `"released":true,"blockers":[]` over a directory still on disk. The next
+  // claim-ticket.sh for the slug then died on it with nothing left to explain
+  // why.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wt = release(r, c, { apply: false }).json.worktree;
+  assert.equal(release(r, c, { env: { GH_SYMLINK: wt } }).code, 2, "fixture: run one halts");
+
+  const { code, json, stderr } = release(r, c);
+
+  assert.equal(code, 1, "blocked, not released");
+  assert.equal(json.released, false);
+  assert.equal(json.blockers.length, 1, `only the orphan can fire — nothing is committed or pushed: ${json.blockers}`);
+  assert.match(json.blockers[0], /has no registration/);
+  assert.match(stderr, /#9 NOT released — nothing was touched/);
+  assert.deepEqual(
+    { dir: existsSync(wt), branch: artefacts(r, c).branch },
+    { dir: true, branch: true },
+    "the branch may not be deleted out from under a directory that is still there",
+  );
+  assert.ok(
+    !r.calls().some((l) => l.startsWith("issue edit")),
+    `and in-progress must stay on the ticket: ${r.calls()}`,
+  );
+});
+
+test("an orphaned worktree directory names a manual removal, never a prune that cannot work", (t) => {
+  // `git worktree prune` clears registrations, and the defining property of
+  // this state is that there is no registration left to clear — so naming it
+  // hands the operator a command that changes nothing and every later run
+  // blocks identically: the permanent refusal this script exists to clear. The
+  // mirror-image case one guard up has the opposite answer for the same reason.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  orphan(r, c);
+
+  const { code, json } = release(r, c);
+
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed: ${json.blockers}`);
+  assert.doesNotMatch(json.blockers[0], /prune/, "there is no registration left for a prune to clear");
+  assert.match(json.blockers[0], /remove the directory by hand/);
+  assert.match(json.blockers[0], new RegExp(`${c.wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|9-release-ticket`));
+  assert.equal(
+    readFileSync(join(c.wt, "precious.txt"), "utf8"),
+    "work that exists nowhere else\n",
+    "and nothing is deleted automatically — the contents were never inspected",
+  );
+  assert.equal(artefacts(r, c).branch, true, "the branch survives a blocked run");
+});
+
+test("the dry run and --apply report an orphaned directory identically", (t) => {
+  // The check lives in the precondition block, not the mutation path, so the
+  // dry run predicts it for free. Placed below, it would report only under
+  // --apply and rebuild the dry/apply asymmetry class #86, #385 and #386 were
+  // filed against — this case is what would fail if only one path saw it.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  orphan(r, c);
+
+  const dry = release(r, c, { apply: false });
+  const applied = release(r, c);
+
+  assert.deepEqual(dry.json.blockers, applied.json.blockers, "the same blocker, word for word");
+  assert.equal(dry.code, applied.code);
+  assert.equal(dry.code, 1);
+  // `applied` is the only field that may differ: it reports which mode ran, not
+  // what was found. Everything else about a blocked run is the same verdict.
+  assert.equal(dry.json.applied, false);
+  assert.equal(applied.json.applied, true);
+  assert.deepEqual({ ...dry.json, applied: null }, { ...applied.json, applied: null });
+  assert.equal(existsSync(c.wt), true, "and --apply removed nothing either");
+});
+
+test("a clean claim is not mistaken for an orphaned directory", (t) => {
+  // The other half of the new precondition: it must not refuse a state that is
+  // fine. A healthy claim's worktree sits at exactly the path the orphan probe
+  // reconstructs, so a probe that asked the filesystem WITHOUT first asking
+  // whether anything registered owns that path would block every release.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  assert.equal(c.wt, join(r.w, ".worktrees", "9-release-ticket"), "fixture: the same path the probe builds");
+
+  const { code, json } = release(r, c);
+
+  assert.deepEqual(json.blockers, [], "a registered directory is owned by the guards above, not this one");
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a worktree directory the script may not stat is unknown, never a release", (t) => {
+  // -e is false for a directory that is not there and for one inside a prefix
+  // we may not search, and only the first is an absence. Collapsed, an
+  // unsearchable `.worktrees` reads as "no orphan" and the run releases the
+  // claim — branch deleted, label dropped, exit 0 — over a directory that may
+  // be sitting right there. `gone` is what establishes the absence instead.
+  //
+  // `chmod` is unavoidable here, unlike the Deregistered fixture above: being
+  // unable to stat the path IS the condition under test, and no permission-free
+  // shape produces it. Restored before the first assert, like its neighbours,
+  // so a failure cannot leave a fixture the suite's own cleanup cannot remove
+  // (#184 owns the residual euid-0 vacuity this shares with them).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
+  const parent = join(r.w, ".worktrees");
+
+  chmodSync(parent, 0o000);
+  const { code, json } = release(r, c);
+  chmodSync(parent, 0o755);
+
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed: ${json.blockers}`);
+  assert.match(json.blockers[0], /cannot tell whether an orphaned worktree directory/);
+  assert.equal(artefacts(r, c).branch, true, "an unknown answer may not delete the branch");
+});
+
+test("a removal whose effect cannot be measured asserts neither headline", (t) => {
+  // Indeterminate: the probe could not establish which state holds, so the run
+  // says so. `nothing landed` would be #208 with a different trigger, and a
+  // partial release would invent an effect nothing measured.
+  //
+  // The listing is how the registration is read, so a listing git cannot
+  // produce leaves it unknown. Failing it from the SECOND call on is what
+  // isolates the re-measurement: the script's own first call, at the top, has
+  // to succeed or the run dies long before any mutation.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const seen = join(r.w, "..", "list.count");
+  writeFileSync(
+    join(r.w, "..", "bin", "git"),
+    `#!/bin/sh
+case "$1 $2" in
+  "worktree list")
+    n=$(cat "${seen}" 2>/dev/null || echo 0)
+    n=$((n + 1)); echo "$n" > "${seen}"
+    [ "$n" -le 1 ] || { echo 'listing refused by the git shim' >&2; exit 1; } ;;
+  "worktree remove") echo 'refused by the git shim' >&2; exit 1 ;;
+esac
+exec ${real} "$@"
+`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = release(r, c);
+
+  assert.equal(code, 2);
+  assert.match(stderr, /#9 HALTED mid-release — what landed could not be measured/);
+  assert.doesNotMatch(stderr, /nothing landed/, "nothing established that nothing landed");
+  assert.doesNotMatch(stderr, /PARTIALLY/, "and nothing established that anything did");
+  assert.match(stderr, /is Indeterminate — what the removal landed could not be measured/);
+  assert.match(json.blockers[0], /is Indeterminate/);
 });
 
 test("a successful release survives a failing `git worktree prune`", (t) => {
