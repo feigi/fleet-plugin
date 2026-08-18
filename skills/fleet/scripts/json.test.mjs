@@ -218,3 +218,27 @@ test("jarr_rewritten is a parallel boolean array, last line included", () => {
   assert.equal(rc, 0);
   assert.deepEqual(JSON.parse(`[${out}]`), [false, true]);
 });
+
+test("a failing tr makes jarr_rewritten report failure, not a short array", () => {
+  // Its own last stage is `paste`, which exits 0 on whatever the aborted loop
+  // managed to hand it. Without the `|| exit 1` inside the loop and the
+  // `|| return 1` on the capture, a broken `tr` yields a SHORTER boolean array
+  // than the string array it is supposed to parallel — and the caller has no
+  // way to notice, because the two are emitted as separate JSON fields.
+  const { rc } = pipe("jarr_rewritten", "plain\na\x0bb\n", { break: "tr" });
+  assert.notEqual(rc, 0);
+});
+
+test("jarr on empty stdin is empty, not a one-element array holding nothing", () => {
+  // The original `sed | tr | paste` emitted nothing at all on empty input
+  // (measured). Splitting the pipeline to read each stage's status introduced a
+  // `printf '%s\n'` re-emit that would turn "no elements" into one empty line,
+  // and `paste` would answer `""` — inventing an element. The `[ -n ]` guard is
+  // what preserves the original answer.
+  const { rc, out } = pipe("jarr", "");
+  assert.equal(rc, 0);
+  assert.equal(out, "", "empty in, empty out — `[]` and `[\"\"]` are different answers");
+  const { rc: rc2, out: out2 } = pipe("jarr_rewritten", "");
+  assert.equal(rc2, 0);
+  assert.equal(out2, "");
+});
