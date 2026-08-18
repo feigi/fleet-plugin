@@ -740,7 +740,7 @@ function failOnlyShim(t, match, stderr, code = 1) {
   return bin;
 }
 
-const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH}` });
 
 test("a refusal that CLEARED the registration is reported as a partial removal, not as a no-op (#391)", (t) => {
   // The worst of the two: git unregistered the worktree and then failed to
@@ -1075,23 +1075,20 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
   git(w, "worktree", "lock", wt);
 
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  const counter = join(bin, "n");
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = worktree ] && [ "$2" = list ]; then\n` +
-      `  n=$(cat "${counter}" 2>/dev/null || echo 0)\n` +
-      `  n=$((n + 1))\n` +
-      `  printf '%s' "$n" > "${counter}"\n` +
-      `  if [ "$n" -ge 2 ]; then\n` +
-      `    echo "fatal: worktree list exploded" >&2\n` +
-      `    exit 128\n` +
-      `  fi\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
+  // The counter needs its own tmpdir: `failOnlyShim` creates the shim dir
+  // itself, so the path has to exist before the match string that writes to it
+  // can be built. Putting the count in the match is what lets this reuse the
+  // helper — the match runs exactly once per `git`, ahead of the shim's single
+  // `exec`.
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -ge 2 ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
   );
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
