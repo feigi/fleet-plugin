@@ -523,7 +523,7 @@ if [ -n "$conflicts" ]; then
   # `git add -- :colon.txt` erroring is not evidence this guard is dead weight.
   at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
     | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
-    || die "git log failed for the conflicting paths — cannot tell what a resolution would eat"
+    || die "listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat"
   # Above ARG_MAX (1048576 on macOS) xargs splits the pathspec list across
   # more than one `git log` invocation, and each invocation reports every
   # commit touching ITS OWN batch — so a commit whose changes span more than

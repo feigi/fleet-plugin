@@ -184,7 +184,7 @@ function manyConflictsTwoCommits(t) {
 }
 
 /**
- * Shadows `xargs` on PATH with a wrapper that inserts `-s 300` ahead of
+ * Shadows `xargs` on PATH with a wrapper that inserts `-s size` ahead of
  * whatever args the script passes, forcing the ARG_MAX split #148 describes
  * on an ordinary small fixture instead of a ~1 MiB pathspec list — the same
  * technique the ticket used to measure the bug. Both wrappers resolve the real
@@ -200,7 +200,7 @@ function manyConflictsTwoCommits(t) {
  * measured end to end. `batches()` is what makes that platform fail red
  * instead of green-on-nothing.
  */
-function withSplitXargs(t) {
+function withSplitXargs(t, size = 300) {
   const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-xargs-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const log = join(bin, "batches");
@@ -209,7 +209,7 @@ function withSplitXargs(t) {
     writeFileSync(join(bin, name), `#!/bin/sh\n${body}exec ${real} "$@"\n`);
     chmodSync(join(bin, name), 0o755);
   };
-  shim("xargs", `set -- -s 300 "$@"\n`);
+  shim("xargs", `set -- -s ${size} "$@"\n`);
   shim("git", `case " $* " in *':(literal)'*) echo x >>"${log}" ;; esac\n`);
   return {
     path: `${bin}:${process.env.PATH}`,
@@ -818,6 +818,33 @@ test("two commits spanning the conflicting paths are each named once in atRisk, 
     subjects(r).sort(),
     ["MAIN COMMIT AT RISK, even paths", "MAIN COMMIT AT RISK, odd paths"],
     "each commit named once, not once per xargs batch it lands in",
+  );
+});
+
+// #522: this pipeline's status is `xargs`' — the last command — not that of the
+// `git log` xargs drives, and there is no `pipefail` in POSIX sh to change
+// that. So an xargs-side fault reaches the guard, and the guard used to answer
+// for it by naming git log, sending the reader to git for a fault git never had.
+// Induced with the same shim #148's test uses, at a size that leaves xargs no
+// room for the command line at all, so it exits nonzero without running git.
+// Only the audit's own line is pinned: the accompanying diagnostic is xargs'
+// own and its wording differs between implementations.
+test("an xargs-side failure listing the at-risk commits is unanswerable, and does not answer for it by naming git log", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+  const xargs = withSplitXargs(t, 60);
+
+  const r = audit(c, { ...ENV, PATH: xargs.path });
+  assert.equal(r.status, 2, `an at-risk list that could not be built is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload — a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /listing commits for the conflicting paths failed \(git log or xargs\)/,
+    "the guard no longer names both commands that can produce the status it reads",
+  );
+  assert.doesNotMatch(
+    r.stderr,
+    /git log failed for the conflicting paths/,
+    "the guard is back to blaming git log for a fault that can be xargs' own",
   );
 });
 
