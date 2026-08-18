@@ -39,12 +39,12 @@ const ENV = {
   GIT_COMMITTER_EMAIL: "t@example.com",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
-  // Three cases below assert on git's OWN diagnostic text, and one of those
-  // strings is gettext-translatable: rev-parse's "Needed a single revision" is
-  // `die(_("..."))` in builtin/rev-parse.c and git ships a live German msgstr
-  // for it. cat-file's "Not a valid object name" and object-name.c's
-  // "dereferences to %s type" are unwrapped today — pinning the locale is what
-  // stops all three depending on which git build CI happens to run.
+  // Two cases below assert on git's OWN diagnostic text, across three strings,
+  // and one of those strings is gettext-translatable: rev-parse's "Needed a
+  // single revision" is `die(_("..."))` in builtin/rev-parse.c, and git ships a
+  // live German msgstr for it. cat-file's "Not a valid object name" and
+  // object-name.c's "dereferences to %s type" are unwrapped today — pinning the
+  // locale is what stops any of the three turning on which git build CI runs.
   LANG: "C",
   LC_ALL: "C",
 };
@@ -491,8 +491,9 @@ test("an object that is present but is not a commit is not reported as absent", 
   // A tree, so the object really is in this repository. Every commit already
   // carries one, so no file has to be written to get it.
   const tree = git(w, "rev-parse", `${head}^{tree}`);
-  // <merge-commit> is `head`, not a merge: this guard dies before the script
-  // ever reads the third argument, so a real merge here would only be scenery.
+  // <merge-commit> is `head`, not a merge: the cat-file loop dies on its FIRST
+  // element, so the third argument is never reached and a real merge here would
+  // only be scenery.
   const { code, json, stderr } = prove(w, tree, head, head);
   assert.equal(code, 2);
   assert.equal(json, null);
@@ -524,8 +525,9 @@ test("a base ref that does not resolve carries git's own cause", (t) => {
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
 
-  // <merge-commit> is `head`, not a merge: this guard dies before the script
-  // ever reads the third argument, so a real merge here would only be scenery.
+  // <merge-commit> is `head`, not a merge: this guard runs before the cat-file
+  // loop, so the third argument is never reached and a real merge here would
+  // only be scenery.
   const r = spawnSync("sh", [SCRIPT, head, head, head], {
     cwd: w,
     env: { ...ENV, BASE_REF: "nosuchref" },
