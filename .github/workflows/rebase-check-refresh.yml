@@ -179,6 +179,12 @@ jobs:
               0) RERAN=$((RERAN + 1)) ;;
               3) REJECTED=$((REJECTED + 1)) ;;
               4) NO_JOB=$((NO_JOB + 1)) ;;
+              # 4's API-failure twin: no job resolved, and at least one
+              # candidate's jobs listing errored, so nothing established the
+              # job is absent. It lands in FAILED rather than NO_JOB so the
+              # two guards at the foot of this step can see it — the script
+              # has already printed the ::error:: naming the error count.
+              6) FAILED=$((FAILED + 1)) ;;
               1) exit 1 ;;
               *) echo "::error::#$PR: rerun-rebase-check.sh exited $STATUS — unexpected. This is a defect in this step, not a PR that could not be refreshed."
                  exit 1 ;;
