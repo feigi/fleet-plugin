@@ -1406,6 +1406,7 @@ test("a .git file naming a sibling's admin dir by a RELATIVE gitdir: path is ref
   const r = audit(c);
   assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
   assert.equal(r.stdout, "");
+  assert.match(r.stderr, /names another worktree's admin dir/);
 });
 
 // The same spoof, spelled as a SYMLINK instead of a `gitdir:` file. It is not a
