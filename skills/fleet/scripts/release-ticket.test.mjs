@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
@@ -41,6 +41,27 @@ const ENV = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
+// Every fixture below that reaches its condition through `chmod` rests on the
+// bits being ENFORCED, and root ignores them: it searches an 0o000 directory
+// and traverses an 0o400 one. Under euid 0 those fixtures do not test a weaker
+// thing, they test a different one — `a stray worktree the script may not stat
+// keeps the hand-release remedy` would go green under the very mutation it
+// exists to catch (`gone "$stray"` -> `[ ! -e "$stray" ]`), silently ceasing to
+// be the only case that tells the ancestor walk from a naive `-e`. CI is
+// `ubuntu-latest` with no `container:` key, so this is not live today; moving
+// the suite into a container is an ordinary thing to do, and this makes that
+// loud instead of silent. (#184)
+// Named once rather than inlined six times, unlike the fourteen
+// `process.getuid?.() === 0` guards the sibling suites carry: a guard that
+// fires unconditionally turns all six fixtures into skips with nothing
+// failing, and a single named predicate is the only thing
+// `the euid-0 guard does not fire on a normal run` can pin.
+// `geteuid`, not `getuid`, because the EFFECTIVE uid is what the kernel checks
+// permissions against -- the two differ only under setuid, where getuid is the
+// one that gets it wrong.
+const EUID0 = process.geteuid?.() === 0;
+const NO_DENIAL = "chmod denies nothing under euid 0";
+
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
@@ -58,7 +79,22 @@ const commit = (w, msg, content) => {
  */
 function repo(t, dir = "w") {
   const root = mkdtempSync(join(tmpdir(), "release-ticket-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // Restore the search bits before deleting, rather than trusting each fixture's
+  // own restore to have run. A fixture that chmods a directory unsearchable and
+  // then fails BEFORE restoring it -- `release()` throws on `JSON.parse` when a
+  // regression emits a malformed payload, which is exactly when one of these
+  // fixtures is most likely to be the one that fails -- leaves `rmSync` throwing
+  // ENOTEMPTY (measured), and node drops that error on the floor: the temp dir
+  // leaks with nothing said. Doing it here covers every permission fixture in
+  // the file at once, including any added later, and leaves `release()` free to
+  // propagate the real error instead of swallowing it into a null payload that
+  // the `assert.equal(json, null)` cases would then accept as a clean refusal.
+  // spawnSync, not execFileSync: a chmod that fails must not become a second
+  // error masking the first. (#184)
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", root]);
+    rmSync(root, { recursive: true, force: true });
+  });
   const origin = join(root, "origin.git");
   const w = join(root, dir);
   execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
@@ -456,6 +492,7 @@ test("a LOCKED stray worktree names the unlock, not a prune git silently skips",
 });
 
 test("a stray worktree the script may not stat keeps the hand-release remedy", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is gone and for one inside a prefix we may
   // not search, and only the first is an absence — the distinction the ancestor
   // walk exists to make, which a bare `[ -e "$stray" ]` would collapse. Read as
@@ -1351,6 +1388,7 @@ test("the orphan probe is anchored at the checkout, never at the caller's cwd", 
 });
 
 test("a worktree directory the script may not stat is unknown, never a release", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is not there and for one inside a prefix
   // we may not search, and only the first is an absence. Collapsed, an
   // unsearchable `.worktrees` reads as "no orphan" and the run releases the
@@ -1587,6 +1625,7 @@ test("a worktree whose .git is a directory is unknown, never clean", (t) => {
 });
 
 test("an unsearchable worktree is not reported as having no .git", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // The .git-linkage guard tests `-e "$wt/.git"`, and -e is false for two
   // different reasons: the file is absent, or $wt is not searchable so the entry
   // cannot be stat'ed at all. Only the first is an absence. Without the `! -x`
@@ -1629,6 +1668,7 @@ test("an unsearchable worktree is not reported as having no .git", (t) => {
 });
 
 test("a worktree the script may not look at is unknown, never a release", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // -d is false for a directory we are not permitted to stat as surely as for
   // one that is gone, and git cannot separate them either: it marks both
   // `prunable` and `worktree remove` ACCEPTS a prunable entry, so the delete
@@ -1704,6 +1744,7 @@ test("a worktree with no surviving ancestor below / still releases, never a perm
 });
 
 test("an unreadable worktree registry is unknown, never a release", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // `.git/worktrees` is a different directory from `.worktrees` above — git's
   // own admin dir, one subdir per linked worktree, which `worktree list
   // --porcelain` reads to produce its listing. Unreadable, git does not error:
@@ -1737,6 +1778,7 @@ test("an unreadable worktree registry is unknown, never a release", (t) => {
 });
 
 test("an entry git cannot read INSIDE is unknown too, not just an unreadable entry", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // #84 itself, and the case a permission test on the entry cannot reach:
   // naming an entry needs read+execute on the PARENT only, so this claim's
   // entry directory stays readable, executable and `ls`-able while the
@@ -1763,6 +1805,70 @@ test("an entry git cannot read INSIDE is unknown too, not just an unreadable ent
   assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("the euid-0 guard does not fire on a normal run, and the modes it guards really deny (#184)", (t) => {
+  // The guard above is by construction unreachable wherever this suite actually
+  // runs, so a green suite says nothing about it. What a green suite CAN say is
+  // the half that matters here: that the guard is not firing, and that the modes
+  // the six fixtures above chmod really do deny when it does not. A guard that
+  // fired unconditionally would turn all six into skips with nothing failing —
+  // indistinguishable, in the summary, from six tests that passed.
+  if (process.geteuid?.() === 0) return t.skip(NO_DENIAL);
+  assert.equal(EUID0, false, "a guard that fires here voids every permission fixture above, silently");
+
+  const dir = mkdtempSync(join(tmpdir(), "release-ticket-euid-"));
+  t.after(() => {
+    chmodSync(dir, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  writeFileSync(join(dir, "f"), "x");
+  const read = () => readFileSync(join(dir, "f"), "utf8");
+
+  chmodSync(dir, 0o000);
+  assert.throws(read, { code: "EACCES" }, "an 0o000 DIRECTORY must deny the search — four of the six fixtures rest on it");
+  // 0o400 and 0o644 drop the search bit while leaving the read: the asymmetry
+  // `an unreadable worktree registry is unknown, never a release` needs to tell
+  // its guard's `&&` from an `||`, which 0o000 cannot express because it zeroes
+  // both bits at once.
+  for (const mode of [0o400, 0o644]) {
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    chmodSync(dir, mode);
+    assert.throws(read, { code: "EACCES" }, `the search must be denied, ${at}`);
+    assert.deepEqual(readdirSync(dir), ["f"], `while the read is still granted, ${at}`);
+  }
+
+  // `an entry git cannot read INSIDE is unknown too` chmods a FILE, not a
+  // directory, so its precondition is a different denial from the four above.
+  chmodSync(dir, 0o755);
+  chmodSync(join(dir, "f"), 0o000);
+  assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
+});
+
+test("repo()'s teardown deletes a root a fixture left unsearchable (#184)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // The shape this pins cannot be reproduced by letting a test body throw: when
+  // the BODY throws first — `release()` on a malformed payload, the very case
+  // the restore-before-delete exists for — node reports only that error and
+  // drops the teardown's ENOTEMPTY on the floor (measured), so the leak is
+  // silent and no assertion anywhere can see it. `repo()` reaches the runner
+  // only through `t.after`, so a stand-in `t` collects that teardown and runs
+  // it here, in the body, where its effect IS assertable. Without the
+  // `chmod -R u+rwX`, the `rmSync` below throws and this case is the one that
+  // goes red.
+  const afters = [];
+  const r = repo({ after: (fn) => afters.push(fn) });
+  const root = dirname(r.w);
+  // Belt and braces: the stand-in's teardown is what is under test, so it must
+  // not also be this case's only cleanup.
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", root]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  chmodSync(join(r.w, ".git"), 0o000);
+  for (const after of afters) after();
+  assert.equal(existsSync(root), false, "the temp root must not survive an unrestored chmod");
 });
 
 test("something that is not a registry entry is not counted as a dropped worktree", (t) => {
