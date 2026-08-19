@@ -42,7 +42,7 @@ const WORKFLOW = join(ROOT, ".github/workflows/rebase-check-refresh.yml");
 const GH_STUB = [
   "#!/bin/sh",
   'printf "%s\\n" "$*" >> "$GH_LOG"',
-  '[ "$1" = "pr" ] && { cat "$GH_FIX/prs.txt"; exit 0; }',
+  '[ "$1" = "pr" ] && { cat "$GH_FIX/prs.json"; exit 0; }',
   'if [ "$2" = "--method" ]; then url=$4; else url=$2; fi',
   'case "$url" in',
   "  */compare/*)",
@@ -150,6 +150,10 @@ function runStep(t, fixtures, { cwd = ROOT } = {}) {
 const RUNS_3 = JSON.stringify({
   workflow_runs: [{ id: 101, conclusion: null }, { id: 102, conclusion: "failure" }, { id: 103, conclusion: "success" }],
 });
+// gh answers `--json number,baseRefName,headRefOid` with an array of objects,
+// and the step projects it into rows itself — so the stub has to return that
+// shape or the projection under test never runs.
+const prs = (...rows) => JSON.stringify(rows.map(([number, baseRefName, headRefOid]) => ({ number, baseRefName, headRefOid })));
 const jobs = (id) => JSON.stringify({ jobs: [{ name: "check", id: id + 700 }, { name: "rebase-check", id }] });
 const accept = "0\n";
 const reject = (msg) => `1\n${msg}\n`;
@@ -160,7 +164,7 @@ const IN_PROGRESS_403 = "gh: HTTP 403: Cannot re-run jobs of a run that is in pr
 const TOKEN_403 = "gh: HTTP 403: Resource not accessible by integration (https://api.github.com/...)";
 
 const BEHIND_3_CANDIDATES = {
-  "prs.txt": "7 main deadbeef\n",
+  "prs.json": prs([7, "main", "deadbeef"]),
   "compare-deadbeef": "4\n",
   "runs-deadbeef.json": RUNS_3,
   "jobs-101.json": jobs(201),
@@ -269,7 +273,7 @@ test("three rejected candidates are ONE rejected PR, not three", (t) => {
 
 test("rejected is per PR across PRs: one re-run and one exhausted is `rejected: 1`", (t) => {
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -342,12 +346,13 @@ test("no rebase-check job in any candidate POSTs nothing and is counted as no-jo
 test("an up-to-date PR is still a silent green that touches no run at all", (t) => {
   // The default path. Restructuring the rerun branch must not reach it, and the
   // step must not acquire a way to exit 1 on a repo where nothing is stale.
-  const r = runStep(t, { "prs.txt": "7 main deadbeef\n", "compare-deadbeef": "0\n" });
+  const r = runStep(t, { "prs.json": prs([7, "main", "deadbeef"]), "compare-deadbeef": "0\n" });
 
   assert.equal(r.status, 0, r.out);
   assert.equal(r.posts.length, 0);
   assert.equal(r.calls.filter((c) => c.includes("/actions/")).length, 0, "an up-to-date PR must not query runs");
   assert.match(r.summary, /1 up to date, 0 behind/);
+  assert.doesNotMatch(r.out, /--limit/, "one PR is not the list cap — the cap warning must not fire below it");
 });
 
 test("an unexpected exit status from the script fails the step instead of vanishing", (t) => {
@@ -367,7 +372,7 @@ test("an unexpected exit status from the script fails the step instead of vanish
   // without mutating anything. If a `5)` arm is ever added, this test goes red
   // and wants a different unrouted status, not deleting.
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -432,7 +437,7 @@ test("the jobs-API failure lands where the downstream guards read it, without ne
   // this PR must LEAVE. #7 re-runs, so the all-or-nothing guard is silent and
   // the step runs to the foot: a step that exited 0 before must still exit 0.
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -470,4 +475,169 @@ test("a found-and-rejected candidate still classifies the PR when a sibling's jo
   assert.match(r.summary, /failed: 0/, "one unlistable sibling does not move a resolved PR into `failed`");
   assert.match(r.summary, /no-job: 0/);
   assert.equal(r.status, 1, "behind and never re-run is still the all-or-nothing failure");
+});
+
+// ---- #162: a row that reaches no counter -------------------------------
+// The malformed-row guard `continue`s past every counter, so a list where
+// every row fails to parse leaves TOTAL=N and everything else 0: the
+// `BEHIND > 0 && RERAN == 0` guard is false, the `FAILED == TOTAL` guard is
+// false, and the step exits 0 over a summary of zeros. The fix is one
+// assertion over the counters rather than a counter for malformed rows,
+// because a counter only covers the `continue` that exists today.
+
+test("a list whose rows all fail to parse fails the step instead of summarising zeros", (t) => {
+  // An empty string, not a missing key: a null field projects as the literal
+  // `null`, which is three tokens and parses fine. A degraded API blanking a
+  // field is the shape that actually reaches the malformed-row guard.
+  const r = runStep(t, { "prs.json": prs([7, "main", ""], [8, "main", ""]) });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::accounting mismatch: 2 PR\(s\) listed but 0 evaluated/);
+  assert.equal(r.posts.length, 0, "nothing was evaluated — the failure is that this was green");
+});
+
+test("a PR that is behind AND then fails is one row, not two — the run still exits 0", (t) => {
+  // The accept half, and the case that decides the shape of the assertion.
+  // BEHIND is not a terminal disposition: #9 increments BEHIND and then FAILED,
+  // so `UPTODATE + BEHIND + FAILED` reads 4 against TOTAL=3 and would fail a
+  // run whose only complaint is one PR hitting an API error — a warn, not a
+  // failure. Summing the terminal counters instead (up-to-date, re-run,
+  // no-run, no-job, rejected, failed) counts each row exactly once.
+  const r = runStep(t, {
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"], [9, "main", "feed"]),
+    "compare-deadbeef": "0\n",
+    "compare-cafe": "4\n",
+    "compare-feed": "6\n",
+    "runs-cafe.json": JSON.stringify({ workflow_runs: [{ id: 301, conclusion: "success" }] }),
+    "jobs-301.json": jobs(401),
+    "rerun-401": accept,
+    // no runs-feed.json: the stub answers HTTP 500, so #9 is behind and failed.
+  });
+
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.summary, /Checked 3 open PR\(s\): 1 up to date, 2 behind their base → 1 re-run/);
+  assert.match(r.summary, /failed: 1/);
+  assert.doesNotMatch(r.out, /accounting mismatch/, "three rows, three terminal counters — nothing was dropped");
+});
+
+// ---- #162: the projection against the response it came from -------------
+// `gh pr list` exiting non-zero is caught. Exiting ZERO having produced rows
+// that do not correspond to the PRs it listed is not, and this is the
+// most-taken path in the workflow, so there is no baseline from which to
+// notice the day it starts lying.
+
+test("a row count that disagrees with the response is refused before anything is evaluated", (t) => {
+  // A field carrying a newline splits one element into two rows, and both
+  // halves here parse as three tokens — so the assertion at the foot of the
+  // step cannot see it: three rows reaching three terminal counters IS
+  // balanced accounting. The step evaluates two refs that no PR ever had,
+  // summarises one up-to-date PR and two API errors, and exits 0. The count
+  // gh returned is the only thing that disagrees.
+  const r = runStep(t, {
+    "prs.json": prs([7, "main", "deadbeef"], [8, "x y\nz w", "cafe"]),
+    "compare-deadbeef": "0\n",
+  });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh listed 2 open PR\(s\) but the projection produced 3 row\(s\)/);
+  assert.equal(
+    r.calls.filter((c) => c.includes("/compare/")).length,
+    0,
+    "a list this step cannot account for must be refused before any of it is acted on",
+  );
+});
+
+// ---- #162: the list cap ------------------------------------------------
+// `--limit 100` is the one truncation this step cannot measure: TOTAL, the
+// count gh returned and the accounting assertion all describe the 100 rows
+// that came back, never the PRs past them. The warning is kept for that
+// reason, but it warned at a count that merely EQUALS the cap while
+// asserting as fact that PRs were missed.
+
+test("a full page warns that the list hit its limit without asserting PRs were missed", (t) => {
+  const rows = [];
+  const fixtures = {};
+  for (let i = 0; i < 100; i++) {
+    rows.push([i + 1, "main", `sha${i}`]);
+    fixtures[`compare-sha${i}`] = "0\n";
+  }
+  const r = runStep(t, { "prs.json": prs(...rows), ...fixtures });
+
+  // Exactly 100 open PRs, all up to date, nothing truncated: a legitimate
+  // no-op that must stay green, and the largest accept the accounting
+  // assertion gets.
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.summary, /Checked 100 open PR\(s\): 100 up to date/);
+  assert.match(r.out, /::warning::.*--limit 100/, "the warning must state the limit it is reporting");
+  assert.doesNotMatch(
+    r.out,
+    /PRs beyond the first 100 were not refreshed/,
+    "at exactly the cap nothing was necessarily truncated — the count equalling the limit is not evidence",
+  );
+});
+
+// ---- #162: the guards on the list response itself -----------------------
+// Three guards stand between `gh pr list` exiting 0 and the loop, and each
+// one shipped without a witness. They are pinned by their annotations rather
+// than by exit status alone: `set -euo pipefail` makes an unguarded failure
+// exit non-zero too, so a status assertion on its own passes just as well
+// with every guard deleted — and the whole point of these guards is that the
+// run log says which one fired.
+
+test("a fast exit on an empty list is the most-taken path, and it stays green", (t) => {
+  // `prs()` is the literal `[]`: gh listed nothing. Decided from the count,
+  // not from the empty projection, so this is the arm that reads N — and it
+  // is the arm that runs on a quiet week, which is why it must be pinned
+  // rather than inferred from the busy cases.
+  const r = runStep(t, { "prs.json": prs() });
+
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /No open PRs targeting main\./);
+  assert.equal(
+    r.calls.filter((c) => c.includes("/compare/")).length,
+    0,
+    "an empty list must be answered without touching the compare API",
+  );
+});
+
+test("output that is not a JSON array is refused, naming the guard that refused it", (t) => {
+  // The four shapes `jq 'length'` alone cannot tell apart from an array:
+  // length answers 0 for null, the key count for an object and the character
+  // count for a string, so a bare `length` exits 0 on the first three and
+  // only truncated JSON ever reached the annotation. Each is asserted
+  // separately — one of them passing is not the class passing.
+  for (const body of ['null', '{"message":"bad credentials"}', '"nope"', '[{"num']) {
+    const r = runStep(t, { "prs.json": body });
+
+    assert.equal(r.status, 1, `${body} was accepted: ${r.out}`);
+    assert.match(
+      r.out,
+      /::error::gh pr list returned output jq could not read as a JSON array/,
+      `${body} exited non-zero with no annotation — an abort under set -e, not this guard`,
+    );
+  }
+});
+
+test("output that is empty rather than malformed is refused too, not counted as zero PRs", (t) => {
+  // jq handed empty stdin prints nothing and exits 0, so the guard above sees
+  // a success and N is left the empty string. Both readers of N are `[ ]`
+  // integer comparisons that abort with `integer expected` and read FALSE on
+  // it, so without this guard the empty-list fast exit does not fire AND the
+  // cross-check this step exists for is inoperative on exactly this input.
+  const r = runStep(t, { "prs.json": "" });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh pr list exited 0 but produced no countable JSON array/);
+  assert.doesNotMatch(r.out, /No open PRs targeting/, "empty output is not a quiet week — nothing said there are no PRs");
+});
+
+test("an array the projection cannot read is refused with an annotation, not a bare abort", (t) => {
+  // Past the type check — `[1,2]` is an array of length 2 — and into the
+  // projection, where `.headRefOid` on a number is a jq error. A bare
+  // assignment here aborts under `set -e` with nothing in the run log, which
+  // is the failure mode the `if !` convention in this block exists to avoid.
+  const r = runStep(t, { "prs.json": "[1,2]" });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh pr list output could not be projected into rows/);
 });

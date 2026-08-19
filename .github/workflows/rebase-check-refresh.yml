@@ -62,14 +62,60 @@ jobs:
           # on a push to main, so the two agree by construction today — but a
           # hardcoded `main` that stops matching the default branch returns an
           # empty list, exits 0 at the guard below, and refreshes nothing forever.
-          if ! PRS=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit 100 \
-                       --json number,baseRefName,headRefOid \
-                       --jq '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
+          # One name for the cap, because the step both asks for it and reports
+          # hitting it: two literals that have to agree are what made the
+          # warning below fire a page early or late depending on which one moved.
+          PR_LIMIT=100
+          if ! PR_JSON=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit "$PR_LIMIT" \
+                       --json number,baseRefName,headRefOid); then
             echo "::error::gh pr list failed"
             exit 1
           fi
+          # Projected here rather than by `gh --jq` so the row count can be
+          # cross-checked against the array gh actually returned, out of the
+          # SAME response. A second `gh pr list --jq length` would disagree with
+          # this one whenever a PR opened or closed between the two calls, and
+          # report that race as a dropped row. It also deletes the failure mode
+          # the cross-check was asked to detect rather than detecting it: a `gh`
+          # upgrade changing `--jq` semantics cannot drop rows from a projection
+          # gh no longer performs. `jq` is already a dependency of this step.
+          # The type check, not a bare `jq 'length'`: length answers for every
+          # type — 0 for null, the key count for an object, the character count
+          # for a string — so a bare one exits 0 on all three and the message
+          # below is never reached on the inputs it names. `error` is what makes
+          # jq exit non-zero there, which is what the `if !` reads.
+          if ! N=$(printf '%s' "$PR_JSON" | jq 'if type == "array" then length else error("not an array") end'); then
+            echo "::error::gh pr list returned output jq could not read as a JSON array"
+            exit 1
+          fi
+          # jq handed EMPTY stdin prints nothing and exits 0, so the guard above
+          # cannot see that case and N is left the empty string. Both readers of
+          # N below are `[ ]` integer comparisons — the fast exit, and the
+          # cross-check this step turns on — and both abort with `integer
+          # expected` and read FALSE on it, so the cross-check is inoperative on
+          # exactly that input rather than firing.
+          case "$N" in
+            ''|*[!0-9]*)
+              echo "::error::gh pr list exited 0 but produced no countable JSON array (jq length: '$N')"
+              exit 1 ;;
+          esac
+          # `if !` again rather than a bare assignment, for the reason given
+          # above the list call: `set -e` would abort here silently. Still
+          # reachable past the type check — `[1,2]` is an array whose elements
+          # have no `.number` to project.
+          if ! PRS=$(printf '%s' "$PR_JSON" | jq -r '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
+            echo "::error::gh pr list output could not be projected into rows"
+            exit 1
+          fi
 
-          if [ -z "$PRS" ]; then
+          # Decided from the count gh returned, not from an empty projection:
+          # "the API had nothing to list" and "the projection produced nothing"
+          # are the same empty string, and this is the most-taken path in the
+          # workflow, so there is no baseline from which to notice the day it
+          # starts lying. A degraded API answering `[]` is still
+          # indistinguishable from a quiet week — nothing inside this step can
+          # tell those two apart, and this does not claim to.
+          if [ "$N" -eq 0 ]; then
             echo "No open PRs targeting $GITHUB_REF_NAME."
             exit 0
           fi
@@ -79,8 +125,24 @@ jobs:
           # which leaves TOTAL empty and silently disables the accounting guard
           # at the bottom of this step.
           TOTAL=$(printf '%s\n' "$PRS" | wc -l | tr -d '[:space:]')
-          if [ "$TOTAL" -ge 100 ]; then
-            echo "::warning::Hit the 100-PR list cap — PRs beyond the first 100 were not refreshed."
+          # The rows are only worth acting on if there is one per PR gh listed.
+          # The assertion at the foot of this step cannot stand in for this one:
+          # a field carrying a newline splits an element into two rows that can
+          # both parse, and three rows reaching three terminal counters is
+          # balanced accounting over refs no PR ever had.
+          if [ "$TOTAL" -ne "$N" ]; then
+            echo "::error::gh listed $N open PR(s) but the projection produced $TOTAL row(s) — the rows do not correspond to the PRs that were listed."
+            exit 1
+          fi
+          # The one truncation nothing here can measure: TOTAL, the count gh
+          # returned and the assertion at the foot of this step all describe
+          # the rows that came back, never the PRs past them. Kept as a warning
+          # for that reason — it is the only surface truncation has — but it
+          # states the limit rather than asserting PRs were missed: a count
+          # equal to the cap is not evidence that anything was cut off, and
+          # above the cap the number missed is unknowable from here.
+          if [ "$TOTAL" -ge "$PR_LIMIT" ]; then
+            echo "::warning::Listed $TOTAL open PR(s), the --limit $PR_LIMIT this step asks for. Any PRs past that limit were not refreshed and nothing here can say how many there are."
           fi
 
           UPTODATE=0
@@ -194,6 +256,24 @@ jobs:
           SUMMARY="Checked $TOTAL open PR(s): $UPTODATE up to date, $BEHIND behind their base → $RERAN re-run (no-run: $NO_RUN, no-job: $NO_JOB, rejected: $REJECTED, failed: $FAILED)."
           echo "$SUMMARY"
           echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+          # A row that reached no counter is a row nobody evaluated, and none of
+          # the guards below can see one: an all-malformed list leaves BEHIND=0
+          # and FAILED=0, so both of them read a summary of zeros as a clean
+          # no-op. One assertion over the counters rather than a counter for
+          # malformed rows, because a counter only covers the `continue` that
+          # exists today — this covers every future one too.
+          #
+          # The sum is over the TERMINAL dispositions only. BEHIND is NOT one:
+          # a behind PR is counted there and then again as re-run, skipped or
+          # failed, so `UPTODATE + BEHIND + FAILED` reads 4 for three rows when
+          # one of them is behind and then hits an API error — a warn below,
+          # not a failure. Every row increments exactly one of these six.
+          EVALUATED=$((UPTODATE + RERAN + NO_RUN + NO_JOB + REJECTED + FAILED))
+          if [ "$EVALUATED" -ne "$TOTAL" ]; then
+            echo "::error::accounting mismatch: $TOTAL PR(s) listed but $EVALUATED evaluated — rows were dropped without being counted."
+            exit 1
+          fi
 
           # Without this the workflow is green whether it refreshed everything or
           # nothing — the exact failure mode it exists to fix. The condition is
