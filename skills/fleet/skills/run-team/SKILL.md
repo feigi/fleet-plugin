@@ -123,7 +123,11 @@ At start, and whenever the pool empties.
    `0dc39ef^`, `| head -1` names the rename `4fd2f73`, not the fix. It is the
    **new**-string search the paragraph above forbids that prints nothing at exit
    0 there, indistinguishable from "the change never landed"; the old-string
-   search goes empty only on a checkout behind that rename as well.
+   search goes empty on a checkout that predates the old string's own arrival
+   at that path — behind that rename in #206's case, and with no rename in play
+   at all in this file's: measured at `647ae44^`, which already tracks this
+   path under this name, `git log -S 'ls-tree origin/main'` prints nothing at
+   exit 0.
    Add `--reverse` and you get the *oldest* count-changing commit, which is the
    file's last rename whenever the string predates one — measured on #206's old
    wording, `--reverse` names `4fd2f73` ("move next-ticket and sizing-a-ticket
