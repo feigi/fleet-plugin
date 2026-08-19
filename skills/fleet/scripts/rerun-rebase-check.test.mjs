@@ -518,3 +518,30 @@ test("a PR that is behind AND then fails is one row, not two — the run still e
   assert.match(r.summary, /failed: 1/);
   assert.doesNotMatch(r.out, /accounting mismatch/, "three rows, three terminal counters — nothing was dropped");
 });
+
+// ---- #162: the projection against the response it came from -------------
+// `gh pr list` exiting non-zero is caught. Exiting ZERO having produced rows
+// that do not correspond to the PRs it listed is not, and this is the
+// most-taken path in the workflow, so there is no baseline from which to
+// notice the day it starts lying.
+
+test("a row count that disagrees with the response is refused before anything is evaluated", (t) => {
+  // A field carrying a newline splits one element into two rows, and both
+  // halves here parse as three tokens — so the assertion at the foot of the
+  // step cannot see it: three rows reaching three terminal counters IS
+  // balanced accounting. The step evaluates two refs that no PR ever had,
+  // summarises one up-to-date PR and two API errors, and exits 0. The count
+  // gh returned is the only thing that disagrees.
+  const r = runStep(t, {
+    "prs.json": prs([7, "main", "deadbeef"], [8, "x y\nz w", "cafe"]),
+    "compare-deadbeef": "0\n",
+  });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh listed 2 open PR\(s\) but the projection produced 3 row\(s\)/);
+  assert.equal(
+    r.calls.filter((c) => c.includes("/compare/")).length,
+    0,
+    "a list this step cannot account for must be refused before any of it is acted on",
+  );
+});

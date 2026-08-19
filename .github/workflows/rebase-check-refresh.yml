@@ -98,6 +98,15 @@ jobs:
           # which leaves TOTAL empty and silently disables the accounting guard
           # at the bottom of this step.
           TOTAL=$(printf '%s\n' "$PRS" | wc -l | tr -d '[:space:]')
+          # The rows are only worth acting on if there is one per PR gh listed.
+          # The assertion at the foot of this step cannot stand in for this one:
+          # a field carrying a newline splits an element into two rows that can
+          # both parse, and three rows reaching three terminal counters is
+          # balanced accounting over refs no PR ever had.
+          if [ "$TOTAL" -ne "$N" ]; then
+            echo "::error::gh listed $N open PR(s) but the projection produced $TOTAL row(s) — the rows do not correspond to the PRs that were listed."
+            exit 1
+          fi
           if [ "$TOTAL" -ge 100 ]; then
             echo "::warning::Hit the 100-PR list cap — PRs beyond the first 100 were not refreshed."
           fi
