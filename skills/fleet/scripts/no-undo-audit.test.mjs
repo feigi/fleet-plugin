@@ -265,7 +265,8 @@ function withSplitXargs(t, size = 300) {
  * has nothing to walk up to, so git fails there and the script already refuses.
  * `precious.txt` is the uncommitted work that exists nowhere else.
  */
-function nestedWorktree(t, branch = "fix/9-nested") {
+function nestedWorktree(t) {
+  const branch = "fix/9-nested";
   const c = repo(t);
   writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
   git(c.w, "add", ".gitignore");
