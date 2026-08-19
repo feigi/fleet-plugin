@@ -28,7 +28,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
@@ -1396,14 +1396,11 @@ test("a .git file naming a sibling worktree's admin dir is refused, never clean 
 test("a .git file naming a sibling's admin dir by a RELATIVE gitdir: path is refused the same way", (t) => {
   const c = nestedWorktreePair(t);
   // Relative to $wt/.git's own directory, i.e. $wt itself — same shape git
-  // itself resolves relative gitdir: lines against. Both ends have to be
-  // canonical (git's own, via --show-toplevel) or the /private/var symlink
-  // macOS's tmpdir sits under makes `relative` count the wrong number of
-  // `../` segments — a mismatch `git` itself never has, since it resolves
-  // both sides the same way before comparing.
-  const wCanonical = git(c.w, "rev-parse", "--show-toplevel");
-  const relPath = relative(wCanonical, c.siblingAdmin);
-  writeFileSync(join(c.w, ".git"), `gitdir: ${relPath}\n`);
+  // itself resolves relative gitdir: lines against. Spelled as the literal the
+  // fixture's own layout already fixes, rather than computed: the assertion
+  // below is what keeps it honest, since a wrong spelling resolves elsewhere
+  // and fails there loudly.
+  writeFileSync(join(c.w, ".git"), "gitdir: ../../.git/worktrees/8-y\n");
   assert.equal(git(c.w, "rev-parse", "--git-dir"), c.siblingAdmin, "fixture: git must resolve the relative spoof to the sibling admin dir, or this pins nothing new");
 
   const r = audit(c);
