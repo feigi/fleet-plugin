@@ -449,3 +449,25 @@ test("the jobs-API failure lands where the downstream guards read it, without ne
   assert.match(r.out, /::warning::1 PR\(s\) hit API errors and may still show a stale rebase-check/);
   assert.doesNotMatch(r.out, /behind PR\(s\) were not re-run/, "an API failure is reported as one, not as a skip");
 });
+
+test("a found-and-rejected candidate still classifies the PR when a sibling's jobs listing failed", (t) => {
+  // The gate, not the message: the new JOBS_ERRS branch sits INSIDE
+  // `if [ -z "$FOUND_JOB" ]`, and the comment at the head of the script says
+  // why — "a candidate that WAS listed still classifies the PR however many of
+  // its siblings errored". Hoist the branch out of that gate and this case
+  // flips from `rejected` to `failed` with a false "no rebase-check job found"
+  // — the same misdiagnosis class #160 exists to end, reached from the other
+  // side. Nothing above pins it: every #160 test leaves FOUND_JOB unset.
+  const fixtures = { ...BEHIND_3_CANDIDATES, "rerun-202": reject(IN_PROGRESS_403), "rerun-203": reject(IN_PROGRESS_403) };
+  delete fixtures["jobs-101.json"];
+  const r = runStep(t, fixtures);
+
+  assert.equal(r.posts.length, 2, "the two listable candidates were both found and both tried");
+  assert.match(r.out, /failed to list jobs for run 101/, "the listing failure still gets its own line");
+  assert.match(r.out, /every candidate run rejected the rerun/, "jobs WERE found — this is an exhausted walk, not an API failure");
+  assert.doesNotMatch(r.out, /no rebase-check job found/, "claiming no job was found is false when two candidates held one");
+  assert.match(r.summary, /rejected: 1\b/);
+  assert.match(r.summary, /failed: 0/, "one unlistable sibling does not move a resolved PR into `failed`");
+  assert.match(r.summary, /no-job: 0/);
+  assert.equal(r.status, 1, "behind and never re-run is still the all-or-nothing failure");
+});
