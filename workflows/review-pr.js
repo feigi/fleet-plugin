@@ -131,10 +131,22 @@ const VERDICT_SCHEMA = {
 // vendored third-party — editing it is clobbered on the next plugin update, so
 // this is the only durable lever.
 //
-// The rule: downgrade only dimensions whose findings face refuters. A refute
-// pass kills false POSITIVES; a cheaper finder's real cost is false NEGATIVES,
-// which nothing downstream catches. `simplify` gets 0 refuters by policy, so it
-// is not downgraded — its cost is addressed by the size tier instead.
+// The rule: downgrade a dimension only when a MISS by the cheaper finder is
+// RECOVERABLE. Refuters do not separate these six: nothing keys a refuter
+// budget off a dimension, because `verifiersFor` takes a severity and nothing
+// else. `silent-failure` findings at critical/important therefore draw the same
+// refuters `tests` findings do. What separates them is what a miss costs.
+// A weak `tests`/`comments`/`types` pass leaves something a later run or a
+// reader still catches; a refute pass kills false POSITIVES and never false
+// NEGATIVES, so recoverability is the whole of the argument. `correctness` and
+// `silent-failure` miss silently and permanently — the same pair, for the same
+// reason, that `SIZE_TIER_DIMS` keeps. `simplify` is omitted for the vendored-
+// pin reason above instead; it does draw 0 refuters, but VIA SEVERITY — its
+// prompt directs every finding to `suggestion`, which is budgeted 0 — and the
+// size tier is where its cost is paid.
+//
+// So the omissions have two causes, and a new dimension needs both asked: is a
+// miss recoverable, and does its agent carry a frontmatter pin worth keeping?
 const DEFAULT_DIMENSIONS = [
   {
     key: "correctness",
@@ -387,10 +399,17 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // reads the profile it already computed rather than re-deriving a size.
 const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 // A trimmed diff still gets the two dimensions whose misses are silent and
-// permanent. Of the four dropped, `tests`/`comments`/`types` findings face
-// refuters downstream; `simplify` faces none, and this tier is where its cost is
-// paid instead. `single-file` is `files === 1` at ANY size, so this trims a
-// one-file rewrite too — not only a short diff.
+// permanent — the same pair, for the same reason, that the model rule above
+// `DEFAULT_DIMENSIONS` declines to downgrade. Four are dropped: `tests`,
+// `comments`, `types`, `simplify`. NOT because those four alone face refuters
+// (#221) — `verifiersFor` takes a severity and nothing else, so the two kept
+// here draw exactly the refuters the dropped ones do. A miss in the first three
+// is RECOVERABLE: a later run or a reader still catches it. `simplify` is the
+// only one of the four the model rule leaves un-downgraded — its `opus` pin is
+// vendored — so this tier is where its cost is paid instead. Two of the four,
+// `comments` and `tests`, are carved back in below when the diff's own substance
+// is theirs; `types` and `simplify` never are. `single-file` is `files === 1` at
+// ANY size, so this trims a one-file rewrite too — not only a short diff.
 const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
 
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three

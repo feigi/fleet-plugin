@@ -36,6 +36,15 @@ function liftFromSource(name) {
     assert.ok(m, "review-pr.js no longer declares SIZE_TIER_PROFILES/selectDimensions(all, stats) as expected — update this test");
     return new Function(`${m[0]}\nreturn selectDimensions;`)();
   }
+  if (name === "verifiersFor") {
+    // Closes over `A` (the workflow args) and `verifiers`, so both are supplied
+    // as `new Function` parameters rather than re-declared — this pins the real
+    // wiring, not a copy of it. `verifiers` gets a SENTINEL: the claim under test
+    // is that the budget is a function of severity, not that the default is 2.
+    const m = SOURCE.match(/^const verifiersBySeverity = A\.verifiersBySeverity \|\| \{[\s\S]*?^const verifiersFor = .*;$/m);
+    assert.ok(m, "review-pr.js no longer declares verifiersBySeverity then verifiersFor at top level — update this test");
+    return new Function("A", "verifiers", `${m[0]}\nreturn verifiersFor;`)({}, 7);
+  }
   if (name === "resolveDimensions") {
     const m = SOURCE.match(/^function resolveDimensions\(override, all\) \{[\s\S]*?^\}$/m);
     assert.ok(m, "review-pr.js no longer declares resolveDimensions(override, all) at top level — update this test");
@@ -152,12 +161,12 @@ test("a size-tier stats blob missing `kinds` keeps comments rather than dropping
   );
 });
 
-// Downgrade only dimensions whose findings face refuters. verifiersBySeverity
-// gives `suggestion` 0, and simplify's prompt forces every finding to
-// `suggestion` — so a cheaper simplify finder has nothing checking it. The other
-// two omissions are open-ended searches where a MISS is the cost, and a refuter
-// pass catches false positives, never false negatives.
-test("only the refuter-backed dimensions carry a model downgrade", () => {
+// Downgrade only where a MISS is recoverable, NOT "faces refuters" (#221): the
+// refuter budget is keyed on severity, never on a dimension, so `silent-failure`
+// findings draw the same refuters `tests` findings do. The omissions split two
+// ways — the vendored `model: opus` frontmatter pin and the silent-permanent
+// miss — and the rule above `DEFAULT_DIMENSIONS` in review-pr.js owns the why.
+test("only the recoverable-miss dimensions carry a model downgrade", () => {
   const models = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d.model]));
   assert.equal(models.tests, "sonnet");
   assert.equal(models.comments, "sonnet");
@@ -168,6 +177,26 @@ test("only the refuter-backed dimensions carry a model downgrade", () => {
   assert.equal(models.correctness, undefined);
   assert.equal(models["silent-failure"], undefined);
   assert.equal(models.simplify, undefined);
+});
+
+// The test above pins WHICH dimensions carry the downgrade. This pins the fact
+// its comment rests on: `verifiersFor` is keyed on SEVERITY ALONE, so no
+// dimension can draw a different refuter budget and "faces refuters" was never
+// able to separate these six (#221). Without this the corrected rationale is
+// prose with nothing under it — which is how the retired one survived.
+test("the refuter budget is keyed on severity alone, never on a dimension", () => {
+  const verifiersFor = liftFromSource("verifiersFor");
+  // One parameter, and it is the severity. A dimension-aware budget needs a
+  // second one, and passing a dimension anyway must not move the answer.
+  assert.equal(verifiersFor.length, 1);
+  for (const d of DEFAULT_DIMENSIONS)
+    assert.equal(verifiersFor("critical", d.key), 7, `critical/${d.key}`);
+  // `silent-failure` and `tests` sit on opposite sides of the model downgrade and
+  // still draw the same budget — the whole of why the retired rule did not
+  // separate them. `suggestion` is the one band that differs, and it is a
+  // SEVERITY, not a dimension.
+  assert.equal(verifiersFor("important"), verifiersFor("critical"));
+  assert.equal(verifiersFor("suggestion"), 0);
 });
 
 // --- args.dimensions normalization (#113). The "Specialists" section of
