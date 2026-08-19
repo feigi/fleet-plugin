@@ -479,13 +479,15 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
 });
 
 test("run-team's documented return shape is exactly review-pr.js's actual return", () => {
-  // The one claim in this file with a machine on the other side of it. A prose
-  // pin cannot catch this: the sentence stays well-formed while the script's
-  // `return` grows or loses a field, nothing errors, and the controller looks
-  // for a field that is not there or never reads one that is. `dimensionsUnrun`
-  // is the worked example: it was added to both sides after the prose settled,
-  // and the ticket asking for this pin still describes the shape as seven
-  // fields. That is the drift, and it is exactly what nothing was measuring.
+  // The one claim in this file pinned against `review-pr.js`'s own return
+  // value — the board-parser test below holds this file's other machine. A
+  // prose pin cannot catch this: the sentence stays well-formed while the
+  // script's `return` grows or loses a field, nothing errors, and the
+  // controller looks for a field that is not there or never reads one that is.
+  // `dimensionsUnrun` is the worked example: it was added to both sides after
+  // the prose settled, and the ticket asking for this pin still describes the
+  // shape as seven fields. That is the drift, and it is exactly what nothing
+  // was measuring.
   //
   // Cross-checked, not transcribed: a literal field list here would be one more
   // copy to drift. Reading review-pr.js's own `return` means the pin fails in
@@ -539,14 +541,19 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // matches — the refill section's `fix-pr-<M>-b` satisfies it — so the
   // file-wide form is green with the example fully wrong.
   const report = section(RUN_TEAM, "## Report", "\n## Red flags", "run-team Report");
-  assert.match(report, /fix-pr-<M>/, "the Report table no longer shows the default path's per-PR member");
-  // Both rows, not just one. The positive match above is satisfied by a single
-  // surviving row, so a half-revert — one row back to `review-pr-<M>` — walks
-  // straight through it while the example contradicts itself.
-  assert.doesNotMatch(
-    report,
-    /review-pr-<M>/,
-    "the Report table shows `review-pr-<M>`, the fallback path's member, as the default path's",
+  // Both rows, not just one. A half-revert — one row back to `review-pr-<M>` —
+  // and a row deleted outright both leave one surviving row, so a bare
+  // `assert.match` walks straight through either.
+  //
+  // A FLOOR, and neither a ban on the fallback name nor an equality. `## Report`
+  // is a top-level section, not the default path's own, and the fallback member
+  // is sanctioned at `#### Fallback: hand-dispatched reviewer` — so a row (or a
+  // sentence) naming `review-pr-<M>` is a legitimate document state, and
+  // measured, banning the name reds on both. `=== 2` reds on a fourth
+  // DEFAULT-path row, which the table's three outcome shapes plainly invite.
+  assert.ok(
+    [...report.matchAll(/fix-pr-<M>/g)].length >= 2,
+    "the Report table no longer shows BOTH default-path rows naming the fix-applier",
   );
 
   // The ledger rows are the ones a machine actually reads, so pin them by
@@ -576,8 +583,15 @@ test("the two relay red flags stay qualified to the fallback path", () => {
   // with the pin still green. Measured — strip only the ping bullet's
   // qualifier and a list-wide match still fires on the relay bullet's.
   // Each bullet ends where the next one begins.
-  const ping = section(RUN_TEAM, '- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag");
-  const relayed = section(RUN_TEAM, '- "I relayed it', '- "It reported the SHA', "run-team relay red flag");
+  //
+  // Unwrap the slice, as :207 already does: `(fallback path)` carries a literal
+  // space, so a pinned phrase that wraps splits and an exact-adjacency regex
+  // reports a qualifier that is right there as missing. Measured — reflowing
+  // the Red flags list at width 55 or 60, words byte-identical, reds this pin.
+  // Flatten the RESULT and keep the slicing raw; the anchors need real text.
+  const flat = (s) => s.replace(/\s+/g, " ");
+  const ping = flat(section(RUN_TEAM, '- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag"));
+  const relayed = flat(section(RUN_TEAM, '- "I relayed it', '- "It reported the SHA', "run-team relay red flag"));
   for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
     assert.match(
       bullet,
