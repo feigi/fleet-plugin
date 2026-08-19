@@ -55,12 +55,17 @@ const ENV = {
 // `process.getuid?.() === 0` guards the sibling suites carry: a guard that
 // fires unconditionally turns every one of those fixtures into a skip with
 // nothing failing, and a single named predicate is the only thing
-// `the euid-0 guard does not fire on a normal run` can pin.
+// `the euid-0 guard does not fire on a normal run, and the modes it guards
+// really deny (#184)` can pin.
 // Deliberately no count of those fixtures is written down here or below: this
 // block carried a stale one once already, when a commit added a fixture and
 // left the prose at the old number (#661). Re-derive rather than trust prose,
-// with a pattern anchored so that this very line is not itself counted:
-//   grep -c '^  if (EUID0)' skills/fleet/scripts/release-ticket.test.mjs
+// with a pattern whose `^[[:space:]]+if` forces `if` to be the line's first
+// non-space token, so a `//` prefix can never match and no comment quoting the
+// guard is counted, at any indent. That exclusion is the requirement; pinning
+// the guards to exactly two spaces of indent only ever met it by accident, and
+// silently undercounts a guard nested one block deeper:
+//   grep -cE '^[[:space:]]+if \(EUID0\)' skills/fleet/scripts/release-ticket.test.mjs
 // `geteuid`, not `getuid`, because the EFFECTIVE uid is what the kernel checks
 // permissions against -- the two differ only under setuid, where getuid is the
 // one that gets it wrong.
@@ -1832,10 +1837,17 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
 
   chmodSync(dir, 0o000);
   assert.throws(read, { code: "EACCES" }, "an 0o000 DIRECTORY must deny the search — the EUID0 fixtures that chmod a DIRECTORY 0o000 rest on it");
-  // 0o400 and 0o644 drop the search bit while leaving the read: the asymmetry
-  // `an unreadable worktree registry is unknown, never a release` needs to tell
-  // its guard's `&&` from an `||`, which 0o000 cannot express because it zeroes
-  // both bits at once.
+  // 0o400 and 0o644 both drop the search bit while leaving the read -- the
+  // asymmetry 0o000 cannot express, because it zeroes both bits at once. Each
+  // mode is here for its own fixture: 0o400 is what lets `an unreadable
+  // worktree registry is unknown, never a release` tell its guard's `&&` from
+  // an `||`, and 0o644 is what `an unsearchable worktree is not reported as
+  // having no .git` chmods its worktree to, keeping the directory stat-able
+  // from its parent while -e on the .git inside it answers false. The only
+  // other `chmodSync(..., 0o644)` in this file, in `an entry git cannot read
+  // INSIDE is unknown too, not just an unreadable entry`, is not a third
+  // consumer: it RESTORES a file after that fixture's 0o000 denial, and a file
+  // has no search bit to drop.
   for (const mode of [0o400, 0o644]) {
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
     chmodSync(dir, mode);
