@@ -51,11 +51,16 @@ const ENV = {
 // `ubuntu-latest` with no `container:` key, so this is not live today; moving
 // the suite into a container is an ordinary thing to do, and this makes that
 // loud instead of silent. (#184)
-// Named once rather than inlined six times, unlike the fourteen
+// Named once rather than inlined at every site, unlike the inlined
 // `process.getuid?.() === 0` guards the sibling suites carry: a guard that
-// fires unconditionally turns all six fixtures into skips with nothing
-// failing, and a single named predicate is the only thing
+// fires unconditionally turns every one of those fixtures into a skip with
+// nothing failing, and a single named predicate is the only thing
 // `the euid-0 guard does not fire on a normal run` can pin.
+// Deliberately no count of those fixtures is written down here or below: this
+// block carried a stale one once already, when a commit added a fixture and
+// left the prose at the old number (#661). Re-derive rather than trust prose,
+// with a pattern anchored so that this very line is not itself counted:
+//   grep -c '^  if (EUID0)' skills/fleet/scripts/release-ticket.test.mjs
 // `geteuid`, not `getuid`, because the EFFECTIVE uid is what the kernel checks
 // permissions against -- the two differ only under setuid, where getuid is the
 // one that gets it wrong.
@@ -1811,11 +1816,11 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   // The guard above is by construction unreachable wherever this suite actually
   // runs, so a green suite says nothing about it. What a green suite CAN say is
   // the half that matters here: that the guard is not firing, and that the modes
-  // the six fixtures above chmod really do deny when it does not. A guard that
-  // fired unconditionally would turn all six into skips with nothing failing —
-  // indistinguishable, in the summary, from six tests that passed.
+  // the EUID0 fixtures chmod really do deny when it does not. A guard that
+  // fired unconditionally would turn every one of them into a skip with nothing
+  // failing — indistinguishable, in the summary, from that many tests passing.
   if (process.geteuid?.() === 0) return t.skip(NO_DENIAL);
-  assert.equal(EUID0, false, "a guard that fires here voids every permission fixture above, silently");
+  assert.equal(EUID0, false, "a guard that fires here voids every permission fixture in this file, silently");
 
   const dir = mkdtempSync(join(tmpdir(), "release-ticket-euid-"));
   t.after(() => {
@@ -1826,7 +1831,7 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   const read = () => readFileSync(join(dir, "f"), "utf8");
 
   chmodSync(dir, 0o000);
-  assert.throws(read, { code: "EACCES" }, "an 0o000 DIRECTORY must deny the search — four of the six fixtures rest on it");
+  assert.throws(read, { code: "EACCES" }, "an 0o000 DIRECTORY must deny the search — the EUID0 fixtures that chmod a DIRECTORY 0o000 rest on it");
   // 0o400 and 0o644 drop the search bit while leaving the read: the asymmetry
   // `an unreadable worktree registry is unknown, never a release` needs to tell
   // its guard's `&&` from an `||`, which 0o000 cannot express because it zeroes
@@ -1839,7 +1844,8 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   }
 
   // `an entry git cannot read INSIDE is unknown too` chmods a FILE, not a
-  // directory, so its precondition is a different denial from the four above.
+  // directory, so its precondition is a different denial from the
+  // 0o000-directory fixtures.
   chmodSync(dir, 0o755);
   chmodSync(join(dir, "f"), 0o000);
   assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
