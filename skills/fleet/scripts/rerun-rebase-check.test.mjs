@@ -471,3 +471,43 @@ test("a found-and-rejected candidate still classifies the PR when a sibling's jo
   assert.match(r.summary, /no-job: 0/);
   assert.equal(r.status, 1, "behind and never re-run is still the all-or-nothing failure");
 });
+
+// ---- #162: a row that reaches no counter -------------------------------
+// The malformed-row guard `continue`s past every counter, so a list where
+// every row fails to parse leaves TOTAL=N and everything else 0: the
+// `BEHIND > 0 && RERAN == 0` guard is false, the `FAILED == TOTAL` guard is
+// false, and the step exits 0 over a summary of zeros. The fix is one
+// assertion over the counters rather than a counter for malformed rows,
+// because a counter only covers the `continue` that exists today.
+
+test("a list whose rows all fail to parse fails the step instead of summarising zeros", (t) => {
+  const r = runStep(t, { "prs.txt": "7 main\n8 main\n" });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::accounting mismatch: 2 PR\(s\) listed but 0 evaluated/);
+  assert.equal(r.posts.length, 0, "nothing was evaluated — the failure is that this was green");
+});
+
+test("a PR that is behind AND then fails is one row, not two — the run still exits 0", (t) => {
+  // The accept half, and the case that decides the shape of the assertion.
+  // BEHIND is not a terminal disposition: #9 increments BEHIND and then FAILED,
+  // so `UPTODATE + BEHIND + FAILED` reads 4 against TOTAL=3 and would fail a
+  // run whose only complaint is one PR hitting an API error — a warn, not a
+  // failure. Summing the terminal counters instead (up-to-date, re-run,
+  // no-run, no-job, rejected, failed) counts each row exactly once.
+  const r = runStep(t, {
+    "prs.txt": "7 main deadbeef\n8 main cafe\n9 main feed\n",
+    "compare-deadbeef": "0\n",
+    "compare-cafe": "4\n",
+    "compare-feed": "6\n",
+    "runs-cafe.json": JSON.stringify({ workflow_runs: [{ id: 301, conclusion: "success" }] }),
+    "jobs-301.json": jobs(401),
+    "rerun-401": accept,
+    // no runs-feed.json: the stub answers HTTP 500, so #9 is behind and failed.
+  });
+
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.summary, /Checked 3 open PR\(s\): 1 up to date, 2 behind their base → 1 re-run/);
+  assert.match(r.summary, /failed: 1/);
+  assert.doesNotMatch(r.out, /accounting mismatch/, "three rows, three terminal counters — nothing was dropped");
+});

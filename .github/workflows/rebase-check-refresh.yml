@@ -195,6 +195,24 @@ jobs:
           echo "$SUMMARY"
           echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
 
+          # A row that reached no counter is a row nobody evaluated, and none of
+          # the guards below can see one: an all-malformed list leaves BEHIND=0
+          # and FAILED=0, so both of them read a summary of zeros as a clean
+          # no-op. One assertion over the counters rather than a counter for
+          # malformed rows, because a counter only covers the `continue` that
+          # exists today — this covers every future one too.
+          #
+          # The sum is over the TERMINAL dispositions only. BEHIND is NOT one:
+          # a behind PR is counted there and then again as re-run, skipped or
+          # failed, so `UPTODATE + BEHIND + FAILED` reads 4 for three rows when
+          # one of them is behind and then hits an API error — a warn below,
+          # not a failure. Every row increments exactly one of these six.
+          EVALUATED=$((UPTODATE + RERAN + NO_RUN + NO_JOB + REJECTED + FAILED))
+          if [ "$EVALUATED" -ne "$TOTAL" ]; then
+            echo "::error::accounting mismatch: $TOTAL PR(s) listed but $EVALUATED evaluated — rows were dropped without being counted."
+            exit 1
+          fi
+
           # Without this the workflow is green whether it refreshed everything or
           # nothing — the exact failure mode it exists to fix. The condition is
           # "something needed refreshing and none of it worked": every PR being up
