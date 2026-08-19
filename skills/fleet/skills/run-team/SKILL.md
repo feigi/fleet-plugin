@@ -91,9 +91,44 @@ At start, and whenever the pool empties.
    ticket's central claim against `origin/main` — never the working tree, never
    the ticket's own line numbers, which drift. One `git show origin/main:<file>`
    piped to `grep` does it for any ticket citing a construct, which is most of
-   them. Already fixed → close it citing the commit, do not claim it. Partly
-   fixed → say which acceptance criteria the tree already meets, and which the
-   tree now **contradicts**.
+   them. **That read is fatal, not empty, when the path is untracked in
+   `origin/main`** — `git show origin/main:<path>` exits 128 saying the path
+   does not exist, and the file may still sit right there on disk, so it is a
+   probe that could not look rather than a clean tree. Fall back to
+   `git ls-tree origin/main -- <path>` (empty output at exit 0 = untracked)
+   before reading the failure as "unfixed". Already fixed → close it citing the
+   commit, do not claim it. Partly fixed → say which acceptance criteria the
+   tree already meets, and which the tree now **contradicts**.
+
+   **Grep for the ticket's ASKED-FOR CHANGE, not only its subject construct** —
+   the construct check passes on every stale pin ticket, because the construct
+   is what the pin is *about* and never went anywhere. So for a ticket asking
+   for a pin, test or assertion, grep the **test file** for the assertion it
+   wants; for one asking for exact wording, grep the **old** wording the ticket
+   quotes as wrong, never the new wording it proposes. A proposed replacement is
+   a suggestion the implementer is free to reword — an equivalent rewording
+   satisfies the ticket while failing a grep for its literal text — and the
+   quoted defect is the fact. Old string gone from `git show origin/main:<file>`
+   ⇒ the fix landed, and
+   `git log -S '<old string>' --oneline origin/main -- <file> | head -1` names
+   the commit that removed it, `git merge-base --is-ancestor <sha> origin/main`
+   proves it is not a pre-rebase orphan, then close citing it. Seconds either
+   way, and the construct half alone is the probe that could not look.
+
+   **Both halves of that command are load-bearing.** Drop the `origin/main`
+   argument and `git log -S` searches `HEAD`, contradicting the rule a paragraph
+   up: a checkout behind the remote prints nothing at exit 0, indistinguishable
+   from "the change never landed". Add `--reverse` and you get the *oldest*
+   count-changing commit, which is the file's last rename whenever the string
+   predates one — measured on #206's old wording, `--reverse` names `4fd2f73`
+   ("move next-ticket and sizing-a-ticket into the plugin"), a refactor that
+   clears the `--is-ancestor` gate exactly as well as the real fix, while
+   newest-first `| head -1` names `0dc39ef`, the commit that actually did it.
+   (`--follow` fixes the rename half but is mutually destructive with
+   `--reverse`: the two together return empty at exit 0, and `--follow` takes
+   exactly one pathspec or exits 128.) So read the subject of whatever it names
+   before citing it in the close, and treat empty output as an answer you did
+   not get rather than a commit.
 
    Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` ten days
    earlier and #134's AC-2 asked for an exit code a later design (#64)
@@ -104,6 +139,20 @@ At start, and whenever the pool empties.
    **A ticket deferred from a review is a claim about a tree that has since
    moved** — and the older the ticket, the more it has moved, so this bites
    hardest at exactly the head of an oldest-first queue.
+
+   Measured again 2026-08-19: four stale in the 20 oldest, and the construct
+   probe caught **none** of the four. It **missed** #156 — the two pins and the
+   `contentWords()` extraction it asks for had all landed (`d016414`, `1abd6c8`)
+   while `overlap()`, the construct, sat right where the ticket said, so the
+   probe passed the ticket through as live work and it cost a claim, a worktree
+   and a dispatch. It **missed** #205, whose `d:` scan `candidates.test.mjs`
+   already pinned — `6d94451` and `43d6ac5` both added `.d` assertions, and the
+   ticket's own closing comment cites both. It **missed** #206, whose wording
+   defect `0dc39ef` had already fixed — by an **equivalent rewording**, not by
+   the literal string the ticket proposed, which appears nowhere in
+   `origin/main`; the ticket's **line number** had drifted too, `:95` → `:98`.
+   And #187 it could not read at all: that ticket's file is untracked in
+   `origin/main`, the fatal-not-empty case above.
 
    **Decided?** Would two competent implementers, reading only this ticket, build
    materially different things? "Material" by inventory, not feel:
