@@ -983,7 +983,7 @@ instead of asking anyone:
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
-drops `jobs`. Normal path, not only kill-recovery.
+drops `jobs` and `missing`. Normal path, not only kill-recovery.
 
 **`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
 to gate on, and that is not a third way to skip the wait. **The
