@@ -42,7 +42,7 @@ const WORKFLOW = join(ROOT, ".github/workflows/rebase-check-refresh.yml");
 const GH_STUB = [
   "#!/bin/sh",
   'printf "%s\\n" "$*" >> "$GH_LOG"',
-  '[ "$1" = "pr" ] && { cat "$GH_FIX/prs.txt"; exit 0; }',
+  '[ "$1" = "pr" ] && { cat "$GH_FIX/prs.json"; exit 0; }',
   'if [ "$2" = "--method" ]; then url=$4; else url=$2; fi',
   'case "$url" in',
   "  */compare/*)",
@@ -150,6 +150,10 @@ function runStep(t, fixtures, { cwd = ROOT } = {}) {
 const RUNS_3 = JSON.stringify({
   workflow_runs: [{ id: 101, conclusion: null }, { id: 102, conclusion: "failure" }, { id: 103, conclusion: "success" }],
 });
+// gh answers `--json number,baseRefName,headRefOid` with an array of objects,
+// and the step projects it into rows itself — so the stub has to return that
+// shape or the projection under test never runs.
+const prs = (...rows) => JSON.stringify(rows.map(([number, baseRefName, headRefOid]) => ({ number, baseRefName, headRefOid })));
 const jobs = (id) => JSON.stringify({ jobs: [{ name: "check", id: id + 700 }, { name: "rebase-check", id }] });
 const accept = "0\n";
 const reject = (msg) => `1\n${msg}\n`;
@@ -160,7 +164,7 @@ const IN_PROGRESS_403 = "gh: HTTP 403: Cannot re-run jobs of a run that is in pr
 const TOKEN_403 = "gh: HTTP 403: Resource not accessible by integration (https://api.github.com/...)";
 
 const BEHIND_3_CANDIDATES = {
-  "prs.txt": "7 main deadbeef\n",
+  "prs.json": prs([7, "main", "deadbeef"]),
   "compare-deadbeef": "4\n",
   "runs-deadbeef.json": RUNS_3,
   "jobs-101.json": jobs(201),
@@ -269,7 +273,7 @@ test("three rejected candidates are ONE rejected PR, not three", (t) => {
 
 test("rejected is per PR across PRs: one re-run and one exhausted is `rejected: 1`", (t) => {
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -342,7 +346,7 @@ test("no rebase-check job in any candidate POSTs nothing and is counted as no-jo
 test("an up-to-date PR is still a silent green that touches no run at all", (t) => {
   // The default path. Restructuring the rerun branch must not reach it, and the
   // step must not acquire a way to exit 1 on a repo where nothing is stale.
-  const r = runStep(t, { "prs.txt": "7 main deadbeef\n", "compare-deadbeef": "0\n" });
+  const r = runStep(t, { "prs.json": prs([7, "main", "deadbeef"]), "compare-deadbeef": "0\n" });
 
   assert.equal(r.status, 0, r.out);
   assert.equal(r.posts.length, 0);
@@ -367,7 +371,7 @@ test("an unexpected exit status from the script fails the step instead of vanish
   // without mutating anything. If a `5)` arm is ever added, this test goes red
   // and wants a different unrouted status, not deleting.
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -432,7 +436,7 @@ test("the jobs-API failure lands where the downstream guards read it, without ne
   // this PR must LEAVE. #7 re-runs, so the all-or-nothing guard is silent and
   // the step runs to the foot: a step that exited 0 before must still exit 0.
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
     "compare-deadbeef": "4\n",
     "compare-cafe": "2\n",
     "runs-deadbeef.json": RUNS_3,
@@ -481,7 +485,10 @@ test("a found-and-rejected candidate still classifies the PR when a sibling's jo
 // because a counter only covers the `continue` that exists today.
 
 test("a list whose rows all fail to parse fails the step instead of summarising zeros", (t) => {
-  const r = runStep(t, { "prs.txt": "7 main\n8 main\n" });
+  // An empty string, not a missing key: a null field projects as the literal
+  // `null`, which is three tokens and parses fine. A degraded API blanking a
+  // field is the shape that actually reaches the malformed-row guard.
+  const r = runStep(t, { "prs.json": prs([7, "main", ""], [8, "main", ""]) });
 
   assert.equal(r.status, 1, r.out);
   assert.match(r.out, /::error::accounting mismatch: 2 PR\(s\) listed but 0 evaluated/);
@@ -496,7 +503,7 @@ test("a PR that is behind AND then fails is one row, not two — the run still e
   // failure. Summing the terminal counters instead (up-to-date, re-run,
   // no-run, no-job, rejected, failed) counts each row exactly once.
   const r = runStep(t, {
-    "prs.txt": "7 main deadbeef\n8 main cafe\n9 main feed\n",
+    "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"], [9, "main", "feed"]),
     "compare-deadbeef": "0\n",
     "compare-cafe": "4\n",
     "compare-feed": "6\n",

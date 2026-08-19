@@ -62,14 +62,33 @@ jobs:
           # on a push to main, so the two agree by construction today — but a
           # hardcoded `main` that stops matching the default branch returns an
           # empty list, exits 0 at the guard below, and refreshes nothing forever.
-          if ! PRS=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit 100 \
-                       --json number,baseRefName,headRefOid \
-                       --jq '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
+          if ! PR_JSON=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit 100 \
+                       --json number,baseRefName,headRefOid); then
             echo "::error::gh pr list failed"
             exit 1
           fi
+          # Projected here rather than by `gh --jq` so the row count can be
+          # cross-checked against the array gh actually returned, out of the
+          # SAME response. A second `gh pr list --jq length` would disagree with
+          # this one whenever a PR opened or closed between the two calls, and
+          # report that race as a dropped row. It also deletes the failure mode
+          # the cross-check was asked to detect rather than detecting it: a `gh`
+          # upgrade changing `--jq` semantics cannot drop rows from a projection
+          # gh no longer performs. `jq` is already a dependency of this step.
+          if ! N=$(printf '%s' "$PR_JSON" | jq 'length'); then
+            echo "::error::gh pr list returned output jq could not read as a JSON array"
+            exit 1
+          fi
+          PRS=$(printf '%s' "$PR_JSON" | jq -r '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"')
 
-          if [ -z "$PRS" ]; then
+          # Decided from the count gh returned, not from an empty projection:
+          # "the API had nothing to list" and "the projection produced nothing"
+          # are the same empty string, and this is the most-taken path in the
+          # workflow, so there is no baseline from which to notice the day it
+          # starts lying. A degraded API answering `[]` is still
+          # indistinguishable from a quiet week — nothing inside this step can
+          # tell those two apart, and this does not claim to.
+          if [ "$N" -eq 0 ]; then
             echo "No open PRs targeting $GITHUB_REF_NAME."
             exit 0
           fi
