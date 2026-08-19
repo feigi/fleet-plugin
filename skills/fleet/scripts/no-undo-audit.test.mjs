@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1336,7 +1336,7 @@ for (const [why, build] of [
 test("an intact linked worktree, whose .git is a file, still passes", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
-  assert.ok(existsSync(join(c.w, ".git")), "fixture must leave the linkage intact");
+  assert.ok(statSync(join(c.w, ".git")).isFile(), "fixture must leave the linkage intact, and leave it a FILE — the shape this test exists to pin");
   assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
 
   const r = audit(c);
