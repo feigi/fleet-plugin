@@ -575,3 +575,69 @@ test("a full page warns that the list hit its limit without asserting PRs were m
     "at exactly the cap nothing was necessarily truncated — the count equalling the limit is not evidence",
   );
 });
+
+// ---- #162: the guards on the list response itself -----------------------
+// Three guards stand between `gh pr list` exiting 0 and the loop, and each
+// one shipped without a witness. They are pinned by their annotations rather
+// than by exit status alone: `set -euo pipefail` makes an unguarded failure
+// exit non-zero too, so a status assertion on its own passes just as well
+// with every guard deleted — and the whole point of these guards is that the
+// run log says which one fired.
+
+test("a fast exit on an empty list is the most-taken path, and it stays green", (t) => {
+  // `prs()` is the literal `[]`: gh listed nothing. Decided from the count,
+  // not from the empty projection, so this is the arm that reads N — and it
+  // is the arm that runs on a quiet week, which is why it must be pinned
+  // rather than inferred from the busy cases.
+  const r = runStep(t, { "prs.json": prs() });
+
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /No open PRs targeting main\./);
+  assert.equal(
+    r.calls.filter((c) => c.includes("/compare/")).length,
+    0,
+    "an empty list must be answered without touching the compare API",
+  );
+});
+
+test("output that is not a JSON array is refused, naming the guard that refused it", (t) => {
+  // The four shapes `jq 'length'` alone cannot tell apart from an array:
+  // length answers 0 for null, the key count for an object and the character
+  // count for a string, so a bare `length` exits 0 on the first three and
+  // only truncated JSON ever reached the annotation. Each is asserted
+  // separately — one of them passing is not the class passing.
+  for (const body of ['null', '{"message":"bad credentials"}', '"nope"', '[{"num']) {
+    const r = runStep(t, { "prs.json": body });
+
+    assert.equal(r.status, 1, `${body} was accepted: ${r.out}`);
+    assert.match(
+      r.out,
+      /::error::gh pr list returned output jq could not read as a JSON array/,
+      `${body} exited non-zero with no annotation — an abort under set -e, not this guard`,
+    );
+  }
+});
+
+test("output that is empty rather than malformed is refused too, not counted as zero PRs", (t) => {
+  // jq handed empty stdin prints nothing and exits 0, so the guard above sees
+  // a success and N is left the empty string. Both readers of N are `[ ]`
+  // integer comparisons that abort with `integer expected` and read FALSE on
+  // it, so without this guard the empty-list fast exit does not fire AND the
+  // cross-check this step exists for is inoperative on exactly this input.
+  const r = runStep(t, { "prs.json": "" });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh pr list exited 0 but produced no countable JSON array/);
+  assert.doesNotMatch(r.out, /No open PRs targeting/, "empty output is not a quiet week — nothing said there are no PRs");
+});
+
+test("an array the projection cannot read is refused with an annotation, not a bare abort", (t) => {
+  // Past the type check — `[1,2]` is an array of length 2 — and into the
+  // projection, where `.headRefOid` on a number is a jq error. A bare
+  // assignment here aborts under `set -e` with nothing in the run log, which
+  // is the failure mode the `if !` convention in this block exists to avoid.
+  const r = runStep(t, { "prs.json": "[1,2]" });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::gh pr list output could not be projected into rows/);
+});

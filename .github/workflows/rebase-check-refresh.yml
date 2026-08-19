@@ -79,11 +79,34 @@ jobs:
           # the cross-check was asked to detect rather than detecting it: a `gh`
           # upgrade changing `--jq` semantics cannot drop rows from a projection
           # gh no longer performs. `jq` is already a dependency of this step.
-          if ! N=$(printf '%s' "$PR_JSON" | jq 'length'); then
+          # The type check, not a bare `jq 'length'`: length answers for every
+          # type — 0 for null, the key count for an object, the character count
+          # for a string — so a bare one exits 0 on all three and the message
+          # below is never reached on the inputs it names. `error` is what makes
+          # jq exit non-zero there, which is what the `if !` reads.
+          if ! N=$(printf '%s' "$PR_JSON" | jq 'if type == "array" then length else error("not an array") end'); then
             echo "::error::gh pr list returned output jq could not read as a JSON array"
             exit 1
           fi
-          PRS=$(printf '%s' "$PR_JSON" | jq -r '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"')
+          # jq handed EMPTY stdin prints nothing and exits 0, so the guard above
+          # cannot see that case and N is left the empty string. Both readers of
+          # N below are `[ ]` integer comparisons — the fast exit, and the
+          # cross-check this step turns on — and both abort with `integer
+          # expected` and read FALSE on it, so the cross-check is inoperative on
+          # exactly that input rather than firing.
+          case "$N" in
+            ''|*[!0-9]*)
+              echo "::error::gh pr list exited 0 but produced no countable JSON array (jq length: '$N')"
+              exit 1 ;;
+          esac
+          # `if !` again rather than a bare assignment, for the reason given
+          # above the list call: `set -e` would abort here silently. Still
+          # reachable past the type check — `[1,2]` is an array whose elements
+          # have no `.number` to project.
+          if ! PRS=$(printf '%s' "$PR_JSON" | jq -r '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
+            echo "::error::gh pr list output could not be projected into rows"
+            exit 1
+          fi
 
           # Decided from the count gh returned, not from an empty projection:
           # "the API had nothing to list" and "the projection produced nothing"
