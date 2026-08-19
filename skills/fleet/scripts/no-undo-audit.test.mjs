@@ -26,9 +26,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
@@ -265,12 +265,12 @@ function withSplitXargs(t, size = 300) {
  * has nothing to walk up to, so git fails there and the script already refuses.
  * `precious.txt` is the uncommitted work that exists nowhere else.
  */
-function nestedWorktree(t, branch = "fix/9-nested") {
+function nestedWorktree(t) {
+  const branch = "fix/9-nested";
   const c = repo(t);
   writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
   git(c.w, "add", ".gitignore");
   git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
-  git(c.w, "push", "-q", "origin", c.branch);
   const w = join(c.w, ".worktrees", "9-x");
   git(c.w, "worktree", "add", "-q", "-b", branch, w);
   git(w, "push", "-q", "-u", "origin", branch);
@@ -288,7 +288,6 @@ function nestedWorktreePair(t) {
   const c = nestedWorktree(t);
   const sibling = join(c.parent, ".worktrees", "8-y");
   git(c.parent, "worktree", "add", "-q", "-b", "fix/8-sibling", sibling);
-  git(sibling, "push", "-q", "-u", "origin", "fix/8-sibling");
   // Asked of git itself, not built with `join`: on macOS `tmpdir()` sits under
   // a `/var` that is itself a symlink to `/private/var`, and git's own
   // `--git-dir` answers with the resolved form. A hand-joined path would
@@ -1337,7 +1336,7 @@ for (const [why, build] of [
 test("an intact linked worktree, whose .git is a file, still passes", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
-  assert.ok(existsSync(join(c.w, ".git")), "fixture must leave the linkage intact");
+  assert.ok(statSync(join(c.w, ".git")).isFile(), "fixture must leave the linkage intact, and leave it a FILE — the shape this test exists to pin");
   assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
 
   const r = audit(c);
@@ -1397,19 +1396,17 @@ test("a .git file naming a sibling worktree's admin dir is refused, never clean 
 test("a .git file naming a sibling's admin dir by a RELATIVE gitdir: path is refused the same way", (t) => {
   const c = nestedWorktreePair(t);
   // Relative to $wt/.git's own directory, i.e. $wt itself — same shape git
-  // itself resolves relative gitdir: lines against. Both ends have to be
-  // canonical (git's own, via --show-toplevel) or the /private/var symlink
-  // macOS's tmpdir sits under makes `relative` count the wrong number of
-  // `../` segments — a mismatch `git` itself never has, since it resolves
-  // both sides the same way before comparing.
-  const wCanonical = git(c.w, "rev-parse", "--show-toplevel");
-  const relPath = relative(wCanonical, c.siblingAdmin);
-  writeFileSync(join(c.w, ".git"), `gitdir: ${relPath}\n`);
+  // itself resolves relative gitdir: lines against. Spelled as the literal the
+  // fixture's own layout already fixes, rather than computed: the assertion
+  // below is what keeps it honest, since a wrong spelling resolves elsewhere
+  // and fails there loudly.
+  writeFileSync(join(c.w, ".git"), "gitdir: ../../.git/worktrees/8-y\n");
   assert.equal(git(c.w, "rev-parse", "--git-dir"), c.siblingAdmin, "fixture: git must resolve the relative spoof to the sibling admin dir, or this pins nothing new");
 
   const r = audit(c);
   assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
   assert.equal(r.stdout, "");
+  assert.match(r.stderr, /names another worktree's admin dir/);
 });
 
 // The same spoof, spelled as a SYMLINK instead of a `gitdir:` file. It is not a
@@ -1439,7 +1436,7 @@ test("a .git SYMLINKED to a sibling worktree's admin dir is refused, never clean
 
 test("an admin dir whose own gitdir back-pointer file is missing is unanswerable, never clean", (t) => {
   const c = nestedWorktree(t);
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   rmSync(join(admin, "gitdir"));
 
   const r = audit(c);
@@ -1450,7 +1447,7 @@ test("an admin dir whose own gitdir back-pointer file is missing is unanswerable
 
 test("an admin dir whose own gitdir back-pointer file is unreadable is unanswerable, never clean", (t) => {
   const c = nestedWorktree(t);
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   // No restore: the outer temp-dir cleanup (registered by `repo()`, and so
   // ahead of this test's own `t.after`) force-removes the whole tree first,
   // and deleting a file needs write access to its DIRECTORY, never to the
@@ -1461,6 +1458,7 @@ test("an admin dir whose own gitdir back-pointer file is unreadable is unanswera
   const r = audit(c);
   assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
   assert.equal(r.stdout, "");
+  assert.match(r.stderr, /gitdir is missing or unreadable/);
 });
 
 // The false-refusal side of the same trim: a legitimate back-pointer file with
@@ -1472,7 +1470,7 @@ test("an admin dir whose own gitdir back-pointer file is unreadable is unanswera
 test("a back-pointer file with trailing whitespace still passes, not falsely refused", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   const gitdirFile = join(admin, "gitdir");
   writeFileSync(gitdirFile, `${readFileSync(gitdirFile, "utf8").trimEnd()}  \t\n`);
 
