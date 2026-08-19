@@ -87,6 +87,16 @@ For each labeled PR clearing the hold rule, lowest first:
    - **Worktree ahead** → STOP, report `worktree-diverged-#<pr>`. A fix-agent that committed locally but never pushed, or was aborted mid-fix, leaves an unpushed, unreviewed commit that a clean-tree audit passes and your rebase would carry into the merge. The reviewed head lives on the remote, not here; hand the choice back with the PR.
    - **Worktree behind, or no worktree at all** → not a divergence. Rebase from the remote head (`git fetch` first) and say which you used.
 
+   **Plain `git fetch origin` only — never `git fetch origin <src>:<dst>`.** This repo sets
+   `fetch.prune=true`, and pairing prune with an explicit refspec **deletes the very ref the
+   refspec names**. Reproduced 2026-08-19 in a scratch clone: `git fetch origin
+   main:refs/remotes/origin/main` printed `- [deleted] (none) -> origin/main`, took the
+   remote-tracking refs from 10 to 8, and left `refs/remotes/origin/HEAD` dangling; in the live
+   checkout the next `git rev-list` failed with `unknown revision`. Do not reason about which refs
+   are "outside" the refspec — the destination itself goes. A plain `git fetch origin` restores it.
+   Re-derive whatever reading you were taking from `git ls-remote origin`, which carries no local
+   state, rather than trusting a number measured while the ref was missing.
+
    Run the **no-undo audit**, then before merging: diff `origin/main...HEAD` hunk by hunk — nothing but this PR's own change may appear — suite green on the rebased head, and `gh pr view <pr> --json mergeable,mergeStateStatus` reading `MERGEABLE`/`CLEAN` with the label still present, re-checked at the merge instant. Step 4 then merges whatever is actually on the remote — the pre-rebase head, since nothing here was pushed — content-equivalent to what you just verified, not graph-identical to it. Report this path as `rebase-fallback-#<pr>` with the reason; see step 4 for why its proof comes back disproved on purpose.
 
    **A repo that gates on currency cannot merge from this path — and this one does.** The fallback leaves the remote head behind `origin/main` on purpose, which is the exact condition `rebase-check` fails on: `.github/workflows/ci.yml` checks out `pull_request.head.sha` and exits 1 when the merge-base is not the base tip. It is an expected job, so `ci-state.mjs` reports non-green, step 3's gate never opens, and `mergeStateStatus` cannot read `CLEAN` either. The four checks above are still the honest verification of the *content*, but they do not clear that gate. So here the fallback **ends without merging**: report `rebase-fallback-#<pr>` as blocked and hand it back — choosing between resolving the conflict and turning `allow_update_branch` on is a human's call. Step 4's merge is reachable from this path only where no expected job gates on currency.
