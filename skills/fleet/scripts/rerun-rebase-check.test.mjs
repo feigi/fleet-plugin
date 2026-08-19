@@ -271,6 +271,24 @@ test("three rejected candidates are ONE rejected PR, not three", (t) => {
   assert.equal(r.status, 1, r.out);
 });
 
+test("a supersession that leaves every candidate's parent run in progress fails the step", (t) => {
+  // The claim the `concurrency:` note makes. A cancelled refresh's already-POSTed
+  // reruns stay in flight, so the replacement run meets every candidate's parent
+  // run in progress and every POST is refused. That is not a skip: the PR lands
+  // in `rejected`, nothing was re-run, and the all-or-nothing guard exits 1.
+  const r = runStep(t, {
+    ...BEHIND_3_CANDIDATES,
+    "rerun-201": reject(IN_PROGRESS_403),
+    "rerun-202": reject(IN_PROGRESS_403),
+    "rerun-203": reject(IN_PROGRESS_403),
+  });
+
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.summary, /1 behind their base → 0 re-run/);
+  assert.match(r.summary, /rejected: 1\b/);
+  assert.match(r.out, /::error::1 PR\(s\) are behind their base but none were re-run/);
+});
+
 test("rejected is per PR across PRs: one re-run and one exhausted is `rejected: 1`", (t) => {
   const r = runStep(t, {
     "prs.json": prs([7, "main", "deadbeef"], [8, "main", "cafe"]),
