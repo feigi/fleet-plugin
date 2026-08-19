@@ -493,7 +493,7 @@ if (cmd === "check") {
 
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
   if (nearTotal > near.length) {
-    console.error(`${NAME}: ${nearTotal - near.length} further near-miss(es) not shown — highest withheld ${rankedNear[near.length].score.toFixed(2)}; the cap dropped them, not the score`);
+    console.error(`${NAME}: ${nearTotal - near.length} further near-miss${nearTotal - near.length === 1 ? "" : "es"} not shown — highest withheld ${rankedNear[near.length].score.toFixed(2)}; the cap dropped them, not the score`);
   }
   if (!tracker.ok) {
     console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
