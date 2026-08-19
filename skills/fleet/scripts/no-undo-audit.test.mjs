@@ -1438,7 +1438,7 @@ test("a .git SYMLINKED to a sibling worktree's admin dir is refused, never clean
 
 test("an admin dir whose own gitdir back-pointer file is missing is unanswerable, never clean", (t) => {
   const c = nestedWorktree(t);
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   rmSync(join(admin, "gitdir"));
 
   const r = audit(c);
@@ -1449,7 +1449,7 @@ test("an admin dir whose own gitdir back-pointer file is missing is unanswerable
 
 test("an admin dir whose own gitdir back-pointer file is unreadable is unanswerable, never clean", (t) => {
   const c = nestedWorktree(t);
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   // No restore: the outer temp-dir cleanup (registered by `repo()`, and so
   // ahead of this test's own `t.after`) force-removes the whole tree first,
   // and deleting a file needs write access to its DIRECTORY, never to the
@@ -1471,7 +1471,7 @@ test("an admin dir whose own gitdir back-pointer file is unreadable is unanswera
 test("a back-pointer file with trailing whitespace still passes, not falsely refused", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
-  const admin = join(c.parent, ".git", "worktrees", "9-x");
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
   const gitdirFile = join(admin, "gitdir");
   writeFileSync(gitdirFile, `${readFileSync(gitdirFile, "utf8").trimEnd()}  \t\n`);
 
