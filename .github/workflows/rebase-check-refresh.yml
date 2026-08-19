@@ -62,7 +62,11 @@ jobs:
           # on a push to main, so the two agree by construction today — but a
           # hardcoded `main` that stops matching the default branch returns an
           # empty list, exits 0 at the guard below, and refreshes nothing forever.
-          if ! PR_JSON=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit 100 \
+          # One name for the cap, because the step both asks for it and reports
+          # hitting it: two literals that have to agree are what made the
+          # warning below fire a page early or late depending on which one moved.
+          PR_LIMIT=100
+          if ! PR_JSON=$(gh pr list --base "$GITHUB_REF_NAME" --state open --limit "$PR_LIMIT" \
                        --json number,baseRefName,headRefOid); then
             echo "::error::gh pr list failed"
             exit 1
@@ -107,8 +111,15 @@ jobs:
             echo "::error::gh listed $N open PR(s) but the projection produced $TOTAL row(s) — the rows do not correspond to the PRs that were listed."
             exit 1
           fi
-          if [ "$TOTAL" -ge 100 ]; then
-            echo "::warning::Hit the 100-PR list cap — PRs beyond the first 100 were not refreshed."
+          # The one truncation nothing here can measure: TOTAL, the count gh
+          # returned and the assertion at the foot of this step all describe
+          # the rows that came back, never the PRs past them. Kept as a warning
+          # for that reason — it is the only surface truncation has — but it
+          # states the limit rather than asserting PRs were missed: a count
+          # equal to the cap is not evidence that anything was cut off, and
+          # above the cap the number missed is unknowable from here.
+          if [ "$TOTAL" -ge "$PR_LIMIT" ]; then
+            echo "::warning::Listed $TOTAL open PR(s), the --limit $PR_LIMIT this step asks for. Any PRs past that limit were not refreshed and nothing here can say how many there are."
           fi
 
           UPTODATE=0

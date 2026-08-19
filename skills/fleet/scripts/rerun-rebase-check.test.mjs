@@ -352,6 +352,7 @@ test("an up-to-date PR is still a silent green that touches no run at all", (t) 
   assert.equal(r.posts.length, 0);
   assert.equal(r.calls.filter((c) => c.includes("/actions/")).length, 0, "an up-to-date PR must not query runs");
   assert.match(r.summary, /1 up to date, 0 behind/);
+  assert.doesNotMatch(r.out, /--limit/, "one PR is not the list cap — the cap warning must not fire below it");
 });
 
 test("an unexpected exit status from the script fails the step instead of vanishing", (t) => {
@@ -543,5 +544,34 @@ test("a row count that disagrees with the response is refused before anything is
     r.calls.filter((c) => c.includes("/compare/")).length,
     0,
     "a list this step cannot account for must be refused before any of it is acted on",
+  );
+});
+
+// ---- #162: the list cap ------------------------------------------------
+// `--limit 100` is the one truncation this step cannot measure: TOTAL, the
+// count gh returned and the accounting assertion all describe the 100 rows
+// that came back, never the PRs past them. The warning is kept for that
+// reason, but it warned at a count that merely EQUALS the cap while
+// asserting as fact that PRs were missed.
+
+test("a full page warns that the list hit its limit without asserting PRs were missed", (t) => {
+  const rows = [];
+  const fixtures = {};
+  for (let i = 0; i < 100; i++) {
+    rows.push([i + 1, "main", `sha${i}`]);
+    fixtures[`compare-sha${i}`] = "0\n";
+  }
+  const r = runStep(t, { "prs.json": prs(...rows), ...fixtures });
+
+  // Exactly 100 open PRs, all up to date, nothing truncated: a legitimate
+  // no-op that must stay green, and the largest accept the accounting
+  // assertion gets.
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.summary, /Checked 100 open PR\(s\): 100 up to date/);
+  assert.match(r.out, /::warning::.*--limit 100/, "the warning must state the limit it is reporting");
+  assert.doesNotMatch(
+    r.out,
+    /PRs beyond the first 100 were not refreshed/,
+    "at exactly the cap nothing was necessarily truncated — the count equalling the limit is not evidence",
   );
 });
