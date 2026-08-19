@@ -17,7 +17,14 @@
 #   0  rerun accepted (a 2xx)
 #   3  a rebase-check job was found, and every candidate rejected the rerun
 #   4  no rebase-check job in any candidate run
+#   6  no rebase-check job resolved, and at least one candidate's jobs listing
+#      failed — an API failure rather than an absent job (#160)
 #   1  fatal — the token cannot rerun anything here, so no PR can be refreshed
+#
+# 6 rather than 5: the caller's `case` has a `*` arm that fails the step on any
+# status it does not name, and the suite reaches it with jq's own 5 (an
+# unparseable jobs payload aborts this script under `set -e`). Routing 5 here
+# would leave that pin with no unrouted status to fire on.
 #
 # Why this is a script and not more inline YAML: nothing in this repo executes
 # a workflow, so logic living in `run: |` is reachable only by assertions over
@@ -40,14 +47,22 @@ BEHIND_BY=$3
 shift 3
 
 # Distinguishes "every candidate refused" (3) from "there was nothing to
-# refuse" (4). A run whose jobs could not be listed leaves this unset, same as
-# before the extraction: it is an API failure reported on its own line, and the
-# PR still ends up classified by whatever the other candidates said.
+# refuse" (4) from "nobody could look" (6). A run whose jobs could not be
+# listed leaves FOUND_JOB unset and bumps JOBS_ERRS instead: reporting it as a
+# run that LACKED the job points a debugger at ci.yml's job name for what was
+# an API error, and lands the PR in the caller's `no-job` tally, which neither
+# its `FAILED == TOTAL` guard nor its `FAILED > 0` warning reads (#160).
+#
+# A candidate that WAS listed still classifies the PR however many of its
+# siblings errored: an accepted rerun is still 0, an exhausted walk still 3.
+# The error only decides the case where nothing was resolved at all.
 FOUND_JOB=""
+JOBS_ERRS=0
 
 for RUN in "$@"; do
   if ! JOBS_JSON=$(gh api "repos/$GH_REPO/actions/runs/$RUN/jobs?filter=latest&per_page=100" </dev/null); then
     echo "::error::#$PR: failed to list jobs for run $RUN — see gh error above."
+    JOBS_ERRS=$((JOBS_ERRS + 1))
     continue
   fi
   # `first(...)` inside jq rather than `| head -1`: it short-circuits on the
@@ -97,6 +112,13 @@ for RUN in "$@"; do
 done
 
 if [ -z "$FOUND_JOB" ]; then
+  # Errors first: "no rebase-check job in ANY candidate run" is a claim about
+  # every candidate, and a candidate whose jobs listing failed is one this walk
+  # never got to look at. One such candidate is enough to disqualify the claim.
+  if [ "$JOBS_ERRS" -gt 0 ]; then
+    echo "::error::#$PR ($SHA): no rebase-check job found, and $JOBS_ERRS candidate run(s) could not be listed — an API failure, not a missing job."
+    exit 6
+  fi
   echo "#$PR ($SHA): behind by $BEHIND_BY but no rebase-check job in any candidate run — skipping."
   exit 4
 fi

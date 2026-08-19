@@ -330,6 +330,12 @@ test("no rebase-check job in any candidate POSTs nothing and is counted as no-jo
   assert.equal(r.posts.length, 0, "a PR with no rebase-check job anywhere must not POST a rerun");
   assert.match(r.summary, /no-job: 1/);
   assert.match(r.summary, /rejected: 0/, "nothing was rejected — nothing was asked");
+  // The input #160's new error branch must still ACCEPT. Every candidate was
+  // listed and none held the job, so the benign message is the accurate one
+  // and the PR must stay out of `failed`.
+  assert.match(r.summary, /failed: 0/, "three candidates that were all read successfully are not an API failure");
+  assert.match(r.out, /no rebase-check job in any candidate run/, "with nothing unread, that claim is the true one");
+  assert.doesNotMatch(r.out, /could not be listed/);
   assert.equal(r.status, 1, "behind and never re-run is still the all-or-nothing failure");
 });
 
@@ -379,4 +385,67 @@ test("an unexpected exit status from the script fails the step instead of vanish
   // step aborts AT #8 rather than running on to fold it into no counter at all
   // and summarising `2 behind -> 1 re-run` as a green.
   assert.equal(r.summary, "", "an unroutable status must abort the step, not be summarised over");
+});
+
+// ---- #160: an unlistable candidate is not a missing job -----------------
+// The jobs query is the one query in the walk whose failure was reported as an
+// absence. The runs query ~20 lines earlier already says "This is an API
+// failure, not a missing run"; the jobs query said nothing, so a run nobody
+// could look at came back as `no rebase-check job in any candidate run` — a
+// diagnosis pointing at ci.yml's job name — and, because it landed in `no-job`
+// rather than `failed`, neither the `FAILED == TOTAL` guard nor the
+// `FAILED > 0` warning could see it.
+
+test("every candidate's jobs listing failing is an API failure, not a missing job", (t) => {
+  const fixtures = { ...BEHIND_3_CANDIDATES };
+  for (const id of [101, 102, 103]) delete fixtures[`jobs-${id}.json`];
+  const r = runStep(t, fixtures);
+
+  assert.equal(r.posts.length, 0, "nothing was resolvable to POST against");
+  assert.match(
+    r.out,
+    /::error::#7 \(deadbeef\): no rebase-check job found, and 3 candidate run\(s\) could not be listed — an API failure, not a missing job\./,
+    "a run nobody could look at must not be reported as a run that lacks the job",
+  );
+  assert.doesNotMatch(r.out, /no rebase-check job in any candidate run/, "that message asserts the job does not exist");
+  assert.match(r.summary, /failed: 1/, "the counter the `FAILED == TOTAL` guard and the `FAILED > 0` warning read");
+  assert.match(r.summary, /no-job: 0/, "an unlistable candidate is not a candidate that lacked the job");
+});
+
+test("one unlistable candidate among candidates that lack the job is still an API failure", (t) => {
+  // The mixed case, and the classification the whole ticket turns on: you
+  // cannot report "no rebase-check job in ANY candidate run" while one
+  // candidate is a run you never got to look at.
+  const noJob = JSON.stringify({ jobs: [{ name: "check", id: 999 }] });
+  const fixtures = { ...BEHIND_3_CANDIDATES, "jobs-102.json": noJob, "jobs-103.json": noJob };
+  delete fixtures["jobs-101.json"];
+  const r = runStep(t, fixtures);
+
+  assert.match(r.out, /and 1 candidate run\(s\) could not be listed — an API failure, not a missing job\./);
+  assert.match(r.summary, /failed: 1/);
+  assert.match(r.summary, /no-job: 0/);
+});
+
+test("the jobs-API failure lands where the downstream guards read it, without newly failing the step", (t) => {
+  // The other half: incrementing FAILED changes what three readers emit — the
+  // `FAILED == TOTAL` exit, the `FAILED > 0` warning, and the SKIPPED warning
+  // this PR must LEAVE. #7 re-runs, so the all-or-nothing guard is silent and
+  // the step runs to the foot: a step that exited 0 before must still exit 0.
+  const r = runStep(t, {
+    "prs.txt": "7 main deadbeef\n8 main cafe\n",
+    "compare-deadbeef": "4\n",
+    "compare-cafe": "2\n",
+    "runs-deadbeef.json": RUNS_3,
+    "runs-cafe.json": JSON.stringify({ workflow_runs: [{ id: 301, conclusion: "success" }] }),
+    "jobs-101.json": jobs(201),
+    "jobs-102.json": jobs(202),
+    "jobs-103.json": jobs(203),
+    "rerun-201": accept,
+  });
+
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.summary, /2 behind their base → 1 re-run/);
+  assert.match(r.summary, /no-job: 0, rejected: 0, failed: 1/);
+  assert.match(r.out, /::warning::1 PR\(s\) hit API errors and may still show a stale rebase-check/);
+  assert.doesNotMatch(r.out, /behind PR\(s\) were not re-run/, "an API failure is reported as one, not as a skip");
 });
