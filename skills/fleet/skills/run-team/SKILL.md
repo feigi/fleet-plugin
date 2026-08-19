@@ -117,13 +117,23 @@ At start, and whenever the pool empties.
 
    **Both halves of that command are load-bearing.** Drop the `origin/main`
    argument and `git log -S` searches `HEAD`, contradicting the rule a paragraph
-   up: a checkout behind the remote prints nothing at exit 0, indistinguishable
-   from "the change never landed". Add `--reverse` and you get the *oldest*
-   count-changing commit, which is the file's last rename whenever the string
-   predates one — measured on #206's old wording, `--reverse` names `4fd2f73`
-   ("move next-ticket and sizing-a-ticket into the plugin"), a refactor that
-   clears the `--is-ancestor` gate exactly as well as the real fix, while
-   newest-first `| head -1` names `0dc39ef`, the commit that actually did it.
+   up — and the two searches fail differently there. On a checkout behind the
+   fix the prescribed **old**-string search names a *wrong* commit at exit 0,
+   the old string still being present in that tree: measured at #206's
+   `0dc39ef^`, `| head -1` names the rename `4fd2f73`, not the fix. It is the
+   **new**-string search the paragraph above forbids that prints nothing at exit
+   0 there, indistinguishable from "the change never landed"; the old-string
+   search goes empty on a checkout that predates the old string's own arrival
+   at that path — behind that rename in #206's case, and with no rename in play
+   at all in this file's: measured at `647ae44^`, which already tracks this
+   path under this name, `git log -S 'ls-tree origin/main'` prints nothing at
+   exit 0.
+   Add `--reverse` and you get the *oldest* count-changing commit, which is the
+   file's last rename whenever the string predates one — measured on #206's old
+   wording, `--reverse` names `4fd2f73` ("move next-ticket and sizing-a-ticket
+   into the plugin"), a refactor that clears the `--is-ancestor` gate exactly as
+   well as the real fix, while newest-first `| head -1` names `0dc39ef`, the
+   commit that actually did it.
    (`--follow` fixes the rename half but is mutually destructive with
    `--reverse`: the two together return empty at exit 0, and `--follow` takes
    exactly one pathspec or exits 128.) So read the subject of whatever it names
