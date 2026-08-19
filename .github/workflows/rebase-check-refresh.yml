@@ -7,10 +7,10 @@
 # moves, so the PR goes red with the actionable log line instead.
 #
 # Only PRs actually BEHIND their base are re-run: `POST
-# /actions/jobs/{id}/rerun` re-runs a job AND ITS DEPENDENT JOBS, and re-running
-# unconditionally would flip an already-green required check back to in-progress
-# — blocking the merge it was meant to unblock. Gating on `behind_by > 0` avoids
-# that; PRs that are up to date are never touched.
+# /actions/jobs/{id}/rerun` flips `rebase-check` itself back to in-progress, so
+# re-running unconditionally would take an already-green one back to pending and
+# block the merge it was meant to unblock. Gating on `behind_by > 0` avoids that;
+# PRs that are up to date are never touched.
 name: Refresh rebase-check
 
 on:
@@ -24,8 +24,11 @@ permissions:
 
 # A newer main push supersedes an in-flight refresh — its PR list is strictly
 # fresher. Not a clean supersession: reruns the cancelled run already POSTed stay
-# in flight, and the replacement run will see those jobs as running and skip
-# them (see .github/scripts/rerun-rebase-check.sh).
+# in flight, so the replacement run's POSTs against those jobs are refused while
+# their parent runs are in progress and those PRs land in `rejected` (see
+# .github/scripts/rerun-rebase-check.sh). If every behind PR lands there, the
+# `BEHIND > 0 && RERAN == 0` guard fails the step — under rapid main pushes this
+# workflow goes red rather than quietly skipping.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
@@ -52,8 +55,9 @@ jobs:
           # ever lives on a GHE instance.
           export GH_HOST="${GITHUB_SERVER_URL#https://}"
 
-          # `if !` rather than a bare assignment: `set -e` would abort here, but
-          # silently, with no annotation in the run log.
+          # `if !` rather than a bare assignment: `set -e` would abort here with
+          # no `::error::` annotation naming which call failed — gh's own stderr
+          # in the log would be the only diagnosis.
           # `baseRefName` is requested even though the list is filtered to the
           # branch that was pushed: the compare below derives its base from it, so
           # widening or dropping the filter cannot silently measure a PR against
@@ -100,7 +104,7 @@ jobs:
               exit 1 ;;
           esac
           # `if !` again rather than a bare assignment, for the reason given
-          # above the list call: `set -e` would abort here silently. Still
+          # above the list call: `set -e` would abort here unannotated. Still
           # reachable past the type check — `[1,2]` is an array whose elements
           # have no `.number` to project.
           if ! PRS=$(printf '%s' "$PR_JSON" | jq -r '.[] | "\(.number) \(.baseRefName) \(.headRefOid)"'); then
@@ -202,9 +206,13 @@ jobs:
             # Runs for this PR's current head. `per_page=5` rather than 1 because
             # ci.yml sets `cancel-in-progress: true`, so the newest run is often a
             # cancelled stub with no jobs at all — taking only the newest would
-            # exclude that PR permanently, since every later push re-resolves the
-            # same stub. Ordering is created-descending in practice; GitHub does
-            # not document a guarantee, hence the walk rather than an index.
+            # exclude that PR permanently, since every later push to main
+            # re-resolves the same stub. Ordering is created-descending in
+            # practice and GitHub documents no guarantee; the walk does not
+            # escape that dependency — it consumes `$RUN_IDS` in returned order
+            # and takes the first candidate whose rerun is accepted. What it buys
+            # is skipping candidates that hold no rebase-check job, not
+            # order-independence.
             if ! RUNS_JSON=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$SHA&per_page=5" </dev/null); then
               echo "::error::#$PR ($SHA): failed to query CI runs — see gh error above. This is an API failure, not a missing run."
               FAILED=$((FAILED + 1))
