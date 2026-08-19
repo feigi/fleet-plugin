@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+// The board's real parser, imported rather than re-described: the doc example
+// below is fed through it, so a widened/narrowed regex and a reverted example
+// both surface here instead of only in compute-board.test.mjs's own fixtures.
+import { parseRow } from "./compute-board.mjs";
 
 // The fleet's default review path is the controller running `review-pr.js`
 // itself. Only the controller can: subagents have no `Workflow` tool, so on the
@@ -472,4 +476,127 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
     /(left no transcript|no transcript you can read|no output file to fetch|nothing is on disk)/i,
     "the prompt claims the review's specialists left no transcript — they do leave one; the member simply holds no path to it",
   );
+});
+
+test("run-team's documented return shape is exactly review-pr.js's actual return", () => {
+  // The one claim in this file pinned against `review-pr.js`'s own return
+  // value — the board-parser test below holds this file's other machine. A
+  // prose pin cannot catch this: the sentence stays well-formed while the
+  // script's `return` grows or loses a field, nothing errors, and the
+  // controller looks for a field that is not there or never reads one that is.
+  // `dimensionsUnrun` is the worked example: it was added to both sides after
+  // the prose settled, and the ticket asking for this pin still describes the
+  // shape as seven fields. That is the drift, and it is exactly what nothing
+  // was measuring.
+  //
+  // Cross-checked, not transcribed: a literal field list here would be one more
+  // copy to drift. Reading review-pr.js's own `return` means the pin fails in
+  // EITHER direction — a field added to the script and not the prose, or a name
+  // dropped from the prose and not the script.
+  const src = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+  // The workflow's own result is the file's only top-level `return {` — the
+  // others are inside helpers and indented. Fields sit one per line at exactly
+  // two spaces, as `key,` or `key: expr`.
+  const returned = [...section(src, "\nreturn {", "\n};", "review-pr.js return").matchAll(/^ {2}(\w+)[,:]/gm)]
+    .map((m) => m[1]);
+  assert.ok(returned.length, "review-pr.js's top-level return no longer reads one field per line — update this test");
+  const documented = section(RUN_TEAM, "It returns `{", "}`", "run-team return shape")
+    .replace("It returns `{", "")
+    .split(",")
+    .map((f) => f.trim());
+  // Compared as SETS. Field order carries no instruction, and a pin that fires
+  // on a reorder is a pin the next reflow teaches people to edit around.
+  assert.deepEqual(
+    [...documented].sort(),
+    [...returned].sort(),
+    "run-team's `It returns …` field list has drifted from review-pr.js's actual return",
+  );
+});
+
+test("the member-naming rule still names the fix-applier", () => {
+  // Sliced to the naming PARAGRAPH, never to the Reviewers section and never
+  // file-wide: the Reviewers lead-in says `fix-pr-<pr#>` too (pinned separately
+  // above, at the site that DISPATCHES it), and that hit is what a wider match
+  // resolves against — leaving this list free to lose the name with the pin
+  // green. The name is what carries the `Agent` tool, so a controller reading
+  // only this list names the member something else and loses delegation with no
+  // error.
+  const naming = section(RUN_TEAM, "**Name every member.**", "**Inverts one level down", "run-team member naming");
+  assert.match(
+    naming,
+    /fix-pr-<pr#>/,
+    "the member-naming rule no longer names the fix-applier — the default path's per-PR member has no sanctioned name",
+  );
+});
+
+test("the per-PR member is the fix-applier, in the Report example and through the board parser", () => {
+  // `compute-board.mjs` is the machine consumer. Its `reviewer` regex was
+  // widened to accept `fix-pr-<n>` because matching only the older
+  // `review-pr-<n>` left every default-path row with `reviewer: null` — the
+  // implementer on the card and the PR counted as review backlog forever.
+  // Nothing kept the documented examples on the widened side of that.
+  //
+  // Sliced to the Report section, not matched file-wide. Measured: with BOTH
+  // table rows reverted to `review-pr-<M>`, a file-wide /fix-pr-<M>/ still
+  // matches — the refill section's `fix-pr-<M>-b` satisfies it — so the
+  // file-wide form is green with the example fully wrong.
+  const report = section(RUN_TEAM, "## Report", "\n## Red flags", "run-team Report");
+  // Both rows, not just one. A half-revert — one row back to `review-pr-<M>` —
+  // and a row deleted outright both leave one surviving row, so a bare
+  // `assert.match` walks straight through either.
+  //
+  // A FLOOR, and neither a ban on the fallback name nor an equality. `## Report`
+  // is a top-level section, not the default path's own, and the fallback member
+  // is sanctioned at `#### Fallback: hand-dispatched reviewer` — so a row (or a
+  // sentence) naming `review-pr-<M>` is a legitimate document state, and
+  // measured, banning the name reds on both. `=== 2` reds on a fourth
+  // DEFAULT-path row, which the table's three outcome shapes plainly invite.
+  assert.ok(
+    [...report.matchAll(/fix-pr-<M>/g)].length >= 2,
+    "the Report table no longer shows BOTH default-path rows naming the fix-applier",
+  );
+
+  // The ledger rows are the ones a machine actually reads, so pin them by
+  // RUNNING the parser over the doc's own example rather than re-asserting its
+  // regex here. Red in both directions: revert the example to `review-pr-346`
+  // and the extracted name is the fallback's; narrow the regex back to
+  // `review-pr` only and nothing is extracted at all.
+  const ledger = section(RUN_TEAM, "One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example");
+  const reviewers = ledger.split("\n").filter((l) => /^#\d+\s/.test(l)).map((l) => parseRow(l)?.reviewer).filter(Boolean);
+  assert.ok(reviewers.length, "no ledger example row names a per-PR member that `compute-board.mjs` can extract");
+  assert.deepEqual(
+    reviewers.filter((r) => !r.startsWith("fix-pr-")),
+    [],
+    "a ledger example names a per-PR member `compute-board.mjs` does not read as the default path's fix-applier",
+  );
+});
+
+test("the two relay red flags stay qualified to the fallback path", () => {
+  // Same defect the Phase 3 relay assertion above exists to prevent, one
+  // section further down: on the default path `agent()` returns into the
+  // script, so no relay ever occurs and no specialist can be pinged.
+  // Unqualified, both read as obligations on every run — and on the default
+  // one they can never be discharged.
+  //
+  // Sliced per BULLET, not over the Red flags list: over the list either
+  // qualifier satisfies a match for both, so one could be stripped outright
+  // with the pin still green. Measured — strip only the ping bullet's
+  // qualifier and a list-wide match still fires on the relay bullet's.
+  // Each bullet ends where the next one begins.
+  //
+  // Unwrap the slice, as :207 already does: `(fallback path)` carries a literal
+  // space, so a pinned phrase that wraps splits and an exact-adjacency regex
+  // reports a qualifier that is right there as missing. Measured — reflowing
+  // the Red flags list at width 55 or 60, words byte-identical, reds this pin.
+  // Flatten the RESULT and keep the slicing raw; the anchors need real text.
+  const flat = (s) => s.replace(/\s+/g, " ");
+  const ping = flat(section(RUN_TEAM, '- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag"));
+  const relayed = flat(section(RUN_TEAM, '- "I relayed it', '- "It reported the SHA', "run-team relay red flag"));
+  for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
+    assert.match(
+      bullet,
+      /\(fallback path\)/,
+      `${label} red flag is no longer scoped to the fallback — it reads as universal, and on the default path it is an obligation that can never be discharged`,
+    );
+  }
 });
