@@ -51,6 +51,13 @@ const ENV = {
 // `ubuntu-latest` with no `container:` key, so this is not live today; moving
 // the suite into a container is an ordinary thing to do, and this makes that
 // loud instead of silent. (#184)
+// Named once rather than inlined six times, unlike the sibling suites' fifteen
+// `process.getuid?.() === 0` guards: a guard that fires unconditionally turns
+// all six fixtures into skips with nothing failing, and a single named
+// predicate is the only thing the test at the end of this file can pin.
+// `geteuid`, not `getuid`, because the EFFECTIVE uid is what the kernel checks
+// permissions against -- the two differ only under setuid, where getuid is the
+// one that gets it wrong.
 const EUID0 = process.geteuid?.() === 0;
 const NO_DENIAL = "chmod denies nothing under euid 0";
 
