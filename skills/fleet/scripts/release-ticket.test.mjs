@@ -1825,7 +1825,7 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   const read = () => readFileSync(join(dir, "f"), "utf8");
 
   chmodSync(dir, 0o000);
-  assert.throws(read, { code: "EACCES" }, "0o000 must deny, or four fixtures above reach their asserts another way");
+  assert.throws(read, { code: "EACCES" }, "an 0o000 DIRECTORY must deny the search — four of the six fixtures rest on it");
   // 0o400 and 0o644 drop the search bit while leaving the read: the asymmetry
   // `an unreadable worktree registry is unknown, never a release` needs to tell
   // its guard's `&&` from an `||`, which 0o000 cannot express because it zeroes
@@ -1836,6 +1836,12 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
     assert.throws(read, { code: "EACCES" }, `the search must be denied, ${at}`);
     assert.deepEqual(readdirSync(dir), ["f"], `while the read is still granted, ${at}`);
   }
+
+  // `an entry git cannot read INSIDE is unknown too` chmods a FILE, not a
+  // directory, so its precondition is a different denial from the four above.
+  chmodSync(dir, 0o755);
+  chmodSync(join(dir, "f"), 0o000);
+  assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
 });
 
 test("something that is not a registry entry is not counted as a dropped worktree", (t) => {
