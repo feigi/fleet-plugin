@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
@@ -51,10 +51,11 @@ const ENV = {
 // `ubuntu-latest` with no `container:` key, so this is not live today; moving
 // the suite into a container is an ordinary thing to do, and this makes that
 // loud instead of silent. (#184)
-// Named once rather than inlined six times, unlike the sibling suites' fifteen
-// `process.getuid?.() === 0` guards: a guard that fires unconditionally turns
-// all six fixtures into skips with nothing failing, and a single named
-// predicate is the only thing the test at the end of this file can pin.
+// Named once rather than inlined six times, unlike the fourteen
+// `process.getuid?.() === 0` guards the sibling suites carry: a guard that
+// fires unconditionally turns all six fixtures into skips with nothing
+// failing, and a single named predicate is the only thing
+// `the euid-0 guard does not fire on a normal run` can pin.
 // `geteuid`, not `getuid`, because the EFFECTIVE uid is what the kernel checks
 // permissions against -- the two differ only under setuid, where getuid is the
 // one that gets it wrong.
@@ -1842,6 +1843,32 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   chmodSync(dir, 0o755);
   chmodSync(join(dir, "f"), 0o000);
   assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
+});
+
+test("repo()'s teardown deletes a root a fixture left unsearchable (#184)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // The shape this pins cannot be reproduced by letting a test body throw: when
+  // the BODY throws first — `release()` on a malformed payload, the very case
+  // the restore-before-delete exists for — node reports only that error and
+  // drops the teardown's ENOTEMPTY on the floor (measured), so the leak is
+  // silent and no assertion anywhere can see it. `repo()` reaches the runner
+  // only through `t.after`, so a stand-in `t` collects that teardown and runs
+  // it here, in the body, where its effect IS assertable. Without the
+  // `chmod -R u+rwX`, the `rmSync` below throws and this case is the one that
+  // goes red.
+  const afters = [];
+  const r = repo({ after: (fn) => afters.push(fn) });
+  const root = dirname(r.w);
+  // Belt and braces: the stand-in's teardown is what is under test, so it must
+  // not also be this case's only cleanup.
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", root]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  chmodSync(join(r.w, ".git"), 0o000);
+  for (const after of afters) after();
+  assert.equal(existsSync(root), false, "the temp root must not survive an unrestored chmod");
 });
 
 test("something that is not a registry entry is not counted as a dropped worktree", (t) => {
