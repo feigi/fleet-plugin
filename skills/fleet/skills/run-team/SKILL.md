@@ -95,6 +95,16 @@ At start, and whenever the pool empties.
    fixed → say which acceptance criteria the tree already meets, and which the
    tree now **contradicts**.
 
+   **Grep for the ticket's ASKED-FOR CHANGE, not only its subject construct** —
+   the construct check passes on every stale pin ticket, because the construct
+   is what the pin is *about* and never went anywhere. So for a ticket asking
+   for a pin, test or assertion, grep the **test file** for the assertion it
+   wants; for one asking for exact wording, grep the **new** wording. Found it →
+   `git log -S '<new string>' --oneline --reverse -- <file>` names the commit,
+   `git merge-base --is-ancestor <sha> origin/main` proves it is not a
+   pre-rebase orphan, then close citing it. Seconds either way, and the
+   construct half alone is the probe that could not look.
+
    Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` ten days
    earlier and #134's AC-2 asked for an exit code a later design (#64)
    deliberately changed — neither commit carried a trailer back, so the tracker
@@ -104,6 +114,14 @@ At start, and whenever the pool empties.
    **A ticket deferred from a review is a claim about a tree that has since
    moved** — and the older the ticket, the more it has moved, so this bites
    hardest at exactly the head of an oldest-first queue.
+
+   Measured again 2026-08-19, four stale in the 20 oldest, and the construct
+   probe caught one: #156's two pins and its `contentWords()` extraction had all
+   landed (`d016414`, `1abd6c8`) while `overlap()` — the construct — sat right
+   where the ticket said, so the probe passed it and it cost a claim, a worktree
+   and a dispatch; #205's `d:` scan was pinned at five sites (`6d94451`);
+   #206's exact wording had landed verbatim (`0dc39ef`) and only its **line
+   number** had moved, `:95` → `:98`.
 
    **Decided?** Would two competent implementers, reading only this ticket, build
    materially different things? "Material" by inventory, not feel:
