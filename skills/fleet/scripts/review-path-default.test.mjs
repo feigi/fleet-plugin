@@ -533,6 +533,11 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // `review-pr-<n>` left every default-path row with `reviewer: null` — the
   // implementer on the card and the PR counted as review backlog forever.
   // Nothing kept the documented examples on the widened side of that.
+  //
+  // Sliced to the Report section, not matched file-wide. Measured: with BOTH
+  // table rows reverted to `review-pr-<M>`, a file-wide /fix-pr-<M>/ still
+  // matches — the refill section's `fix-pr-<M>-b` satisfies it — so the
+  // file-wide form is green with the example fully wrong.
   const report = section(RUN_TEAM, "## Report", "\n## Red flags", "run-team Report");
   assert.match(report, /fix-pr-<M>/, "the Report table no longer shows the default path's per-PR member");
   // Both rows, not just one. The positive match above is satisfied by a single
@@ -568,7 +573,9 @@ test("the two relay red flags stay qualified to the fallback path", () => {
   //
   // Sliced per BULLET, not over the Red flags list: over the list either
   // qualifier satisfies a match for both, so one could be stripped outright
-  // with the pin still green. Each bullet ends where the next one begins.
+  // with the pin still green. Measured — strip only the ping bullet's
+  // qualifier and a list-wide match still fires on the relay bullet's.
+  // Each bullet ends where the next one begins.
   const ping = section(RUN_TEAM, '- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag");
   const relayed = section(RUN_TEAM, '- "I relayed it', '- "It reported the SHA', "run-team relay red flag");
   for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
