@@ -270,7 +270,6 @@ function nestedWorktree(t, branch = "fix/9-nested") {
   writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
   git(c.w, "add", ".gitignore");
   git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
-  git(c.w, "push", "-q", "origin", c.branch);
   const w = join(c.w, ".worktrees", "9-x");
   git(c.w, "worktree", "add", "-q", "-b", branch, w);
   git(w, "push", "-q", "-u", "origin", branch);
@@ -288,7 +287,6 @@ function nestedWorktreePair(t) {
   const c = nestedWorktree(t);
   const sibling = join(c.parent, ".worktrees", "8-y");
   git(c.parent, "worktree", "add", "-q", "-b", "fix/8-sibling", sibling);
-  git(sibling, "push", "-q", "-u", "origin", "fix/8-sibling");
   // Asked of git itself, not built with `join`: on macOS `tmpdir()` sits under
   // a `/var` that is itself a symlink to `/private/var`, and git's own
   // `--git-dir` answers with the resolved form. A hand-joined path would
