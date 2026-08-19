@@ -234,6 +234,21 @@ test("review-and-fix agrees the workflow is the controller's default, not its pr
     /fallback/i,
     "review-and-fix no longer marks its hand-dispatch rules as the fallback",
   );
+  // #143's rule, in the place it is HANDED OVER rather than the place it is
+  // obeyed. The section's own instruction is to carry the reading rule and not
+  // the command, so the rule it carries has to be the widened one — otherwise a
+  // specialist in a host repo gets the narrow `tests 0` version and a partial
+  // copy of the tree reads green to it.
+  assert.match(
+    specialists,
+    /0 passes with no failures/,
+    "the rule handed to specialists no longer covers an all-skipped run (#143)",
+  );
+  assert.match(
+    specialists,
+    /materially below the full suite/,
+    "the rule handed to specialists no longer covers a partial copy of the tree (#143)",
+  );
   assert.match(
     specialists,
     /critical\/important/,
@@ -339,6 +354,21 @@ test("the fix commit is gated on a test run, in both files", () => {
   // match is satisfied by that pre-existing prose and never fails no matter
   // what step 3 says.
   assert.match(step3, /tests 0/, "step 3 no longer treats a zero-test run as a failure");
+  // #143: `tests 0` was the whole rule, and two runs that report counts still
+  // walk through it — every test skipped, and a partial tree. Both are scoped to
+  // step 3 for the same reason the line above is: the Specialists section states
+  // the same widened rule, so a file-wide match is satisfied by that prose no
+  // matter what this step says.
+  assert.match(
+    step3,
+    /0 passes with no failures/,
+    "step 3 no longer treats an all-skipped run as a no-work run (#143)",
+  );
+  assert.match(
+    step3,
+    /materially below the whole suite/,
+    "step 3 no longer treats a count below the suite's size as a partial tree (#143)",
+  );
   // Acceptance criterion 10's second clause. The gate is worth nothing to the
   // controller if the result never leaves the fix-applier: a green it does not
   // report is indistinguishable from one it never ran.

@@ -123,6 +123,73 @@ test("a run with failing tests is NOT unrun", () => {
   );
 });
 
+// #143's all-skipped case, and the reason the clause reads `pass === 0 && !fail`
+// rather than the bare "zero passes" #143's body proposes. `skipped` is NOT a
+// declared field of `test_run` (see the schema pin below), and whether
+// `additionalProperties: false` drops such a field or rejects the whole object
+// is stated BOTH ways in this directory and is not settled here — either way it
+// never reaches this classifier, so a run where every test skipped can only
+// arrive as `pass: 0` with `fail` zero or absent. Nothing passed and nothing
+// failed is no work done.
+// BOTH arms of `findings`, because this clause is findings-INDEPENDENT by
+// design and only a non-empty fixture says so. The sibling `fail > 0` clause
+// below is the one that reads `findings`; ANDing `!review.findings?.length` in
+// here too would let a specialist that reports 0 passes and 0 fails and attaches
+// one filler finding read as clean — the loophole #143 exists to close. Every
+// fixture here sent `[]`, so that mutation survived the whole suite.
+test("a run where nothing passed and nothing failed is unrun — every test skipped", () => {
+  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
+    for (const run of [
+      { command: "node --test", tests: 2, pass: 0, fail: 0 },
+      { command: "node --test", tests: 2, pass: 0 },
+    ]) {
+      const reason = unrunReason({ dimension: "tests", scope_searched: "x", findings, test_run: run });
+      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
+      assert.equal(typeof reason, "string", `an all-skipped run (${where}) must yield a reason`);
+      assert.match(reason, /node --test/, "the reason no longer names the command that did no work");
+    }
+  }
+});
+
+// THE ACCEPT SIDE of the clause above, and the case a bare `pass 0` rule gets
+// wrong: a suite where every test failed also reports zero passes, and it is the
+// run that most needs reporting — refusing it is the over-refusal #137 removed.
+// The `fail > 0` pin above cannot stand in for this one. Its fixture passes 11
+// tests, so it stays clean whether the clause reads `pass === 0` or
+// `pass === 0 && !fail`; only a fixture with BOTH zero passes and failures can
+// tell those two apart.
+test("a run where every test failed is NOT unrun, even though nothing passed", () => {
+  assert.equal(
+    unrunReason({
+      dimension: "tests",
+      scope_searched: "the snapshot's own suite",
+      findings: [{ severity: "critical", claim: "x", evidence: "y" }],
+      test_run: { command: "npm test --", tests: 3, pass: 0, fail: 3 },
+    }),
+    null,
+    "a suite that reported only failures still ran",
+  );
+});
+
+// #143's third case, deferred there from the #526 review. `fail > 0` on its own
+// is a suite that ran, pinned clean above and deliberately so; the contradiction
+// is the CONJUNCTION with an empty findings list — the suite ran, it reported
+// failures, and the reviewer filed nothing about them. `findings` is required by
+// the schema, so the undefined arm covers a specialist that ignored it rather
+// than a shape the schema permits.
+test("a run with failing tests and no findings at all is unrun", () => {
+  for (const findings of [[], undefined]) {
+    const reason = unrunReason({
+      dimension: "tests",
+      scope_searched: "the snapshot's own suite",
+      findings,
+      test_run: { command: "node --test", tests: 744, pass: 738, fail: 6 },
+    });
+    assert.equal(typeof reason, "string", `fail>0 with findings ${JSON.stringify(findings)} must yield a reason`);
+    assert.match(reason, /6 failing tests/, "the reason no longer says how many tests failed unreported");
+  }
+});
+
 // `pass`/`fail` are optional (see the schema pin below), so a run that reported
 // only a count must still come back clean rather than tripping the predicate on
 // a field it was never required to send.

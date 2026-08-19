@@ -194,4 +194,73 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
     /'tests 0' is a FAILED run/,
     "the prompt no longer rules a zero-test run a failure",
   );
+  // The RULING was pinned and the INSTRUCTION was not, so the sentence telling
+  // specialists not to swap the command out could be deleted with this suite
+  // green (#143). Everything around it explains why; this is the only clause
+  // that actually forbids anything.
+  assert.match(
+    prompt,
+    /Do not substitute a command of your own\./,
+    "the prompt no longer forbids substituting a command — only explains why one would be wrong",
+  );
+});
+
+// #143's second correction. The rationale above asserted, present tense and as
+// fact about the run being described, that a bare runner "tears down a shared
+// container mid-run for every sibling". Measured against this repo:
+// `derive-testcmd.sh` resolves `node --test` here and
+// `skills/fleet/commands/review-and-fix.md` records that this repo has no
+// compose file, no `globalSetup`, and no vitest — so no teardown can happen,
+// and a specialist that checks the reason it was given finds it false.
+//
+// The rule is still worth carrying, because review-pr.js reviews repos that DO
+// have a stack. It has to be stated as a conditional about those repos rather
+// than as a fact about this run.
+test("the anti-substitution rationale is portable, not a present-tense claim about this run", () => {
+  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
+  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
+  const end = CODE.indexOf("Scratch files go in", at);
+  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
+  const prompt = CODE.slice(at, end);
+  assert.doesNotMatch(
+    prompt,
+    /tears down a shared container mid-run for every sibling/,
+    "the prompt again asserts a container teardown as fact about a run that cannot have one (#143)",
+  );
+  // The conditional that replaced it, and the half that is NOT conditional: a
+  // zero-match glob exits 0 in every repo, so hedging that one would weaken a
+  // rule this repo has actually measured (#142).
+  assert.match(
+    prompt,
+    /In a repo that has a shared test stack/,
+    "the container rationale is no longer scoped to the repos it can happen in",
+  );
+  assert.match(
+    prompt,
+    /a guessed glob is\s+worse in every repo/,
+    "the zero-match-glob half is no longer stated as holding everywhere",
+  );
+});
+
+// The rule #143 widened, in the place specialists actually read. The classifier
+// catches the zero-pass case on its own (`review-pr-unrun.test.mjs`), but the
+// partial-tree case it CANNOT: `unrunReason` is pure and never learns how many
+// tests the whole tree has, so the only reader positioned to notice is the agent
+// that ran the command. If this instruction goes, that case has no other guard.
+test("the prompt rules a no-work run unrun too: zero passes, and a count below the whole tree", () => {
+  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
+  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
+  const end = CODE.indexOf("Scratch files go in", at);
+  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
+  const prompt = CODE.slice(at, end);
+  assert.match(
+    prompt,
+    /0 passes with no failures is\s+everything skipped/,
+    "the prompt no longer rules an all-skipped run a no-work run (#143)",
+  );
+  assert.match(
+    prompt,
+    /a count well below what the whole tree reports means you\s+ran a PARTIAL copy/,
+    "the prompt no longer rules a partial-tree run unrun — the case nothing downstream can catch (#143)",
+  );
 });
