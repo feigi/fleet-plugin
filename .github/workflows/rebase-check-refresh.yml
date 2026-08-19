@@ -24,11 +24,16 @@ permissions:
 
 # A newer main push supersedes an in-flight refresh — its PR list is strictly
 # fresher. Not a clean supersession: reruns the cancelled run already POSTed stay
-# in flight, so the replacement run's POSTs against those jobs are refused while
-# their parent runs are in progress and those PRs land in `rejected` (see
-# .github/scripts/rerun-rebase-check.sh). If every behind PR lands there, the
-# `BEHIND > 0 && RERAN == 0` guard fails the step — under rapid main pushes this
-# workflow goes red rather than quietly skipping.
+# in flight, and the replacement run's POSTs against those jobs are refused while
+# their parent runs are in progress. That is at most ONE candidate per PR, not
+# the whole page — rerun-rebase-check.sh exits on its first accepted POST — so
+# the replacement run falls back to that PR's remaining candidates and counts it
+# `re-run` as soon as one of them accepts (see
+# .github/scripts/rerun-rebase-check.sh). A PR reaches `rejected` only once every
+# candidate holding a rebase-check job has refused: under supersession that takes
+# a page with a single usable run, or enough successive supersessions to have put
+# every candidate in flight. If every behind PR lands there, the
+# `BEHIND > 0 && RERAN == 0` guard fails the step.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true

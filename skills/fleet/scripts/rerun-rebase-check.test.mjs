@@ -271,11 +271,13 @@ test("three rejected candidates are ONE rejected PR, not three", (t) => {
   assert.equal(r.status, 1, r.out);
 });
 
-test("a supersession that leaves every candidate's parent run in progress fails the step", (t) => {
-  // The claim the `concurrency:` note makes. A cancelled refresh's already-POSTed
-  // reruns stay in flight, so the replacement run meets every candidate's parent
-  // run in progress and every POST is refused. That is not a skip: the PR lands
-  // in `rejected`, nothing was re-run, and the all-or-nothing guard exits 1.
+test("every candidate refused: the PR lands in `rejected` and the step fails", (t) => {
+  // The exhausted-fallback end state the `concurrency:` note names, not what one
+  // supersession produces on its own — that leaves a single candidate's parent
+  // run in flight, since the script stops at its first accepted POST. Reached
+  // when a PR has nowhere left to fall back to: every candidate holding a
+  // rebase-check job refuses, so nothing was re-run, the PR lands in `rejected`,
+  // and the all-or-nothing guard exits 1 with its annotation.
   const r = runStep(t, {
     ...BEHIND_3_CANDIDATES,
     "rerun-201": reject(IN_PROGRESS_403),
