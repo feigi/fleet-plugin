@@ -152,12 +152,12 @@ test("a size-tier stats blob missing `kinds` keeps comments rather than dropping
   );
 });
 
-// Downgrade only dimensions whose findings face refuters. verifiersBySeverity
-// gives `suggestion` 0, and simplify's prompt forces every finding to
-// `suggestion` — so a cheaper simplify finder has nothing checking it. The other
-// two omissions are open-ended searches where a MISS is the cost, and a refuter
-// pass catches false positives, never false negatives.
-test("only the refuter-backed dimensions carry a model downgrade", () => {
+// Downgrade only where a MISS is recoverable, NOT "faces refuters" (#221): the
+// refuter budget is keyed on severity, never on a dimension, so `silent-failure`
+// findings draw the same refuters `tests` findings do. The omissions split two
+// ways — the vendored `model: opus` frontmatter pin and the silent-permanent
+// miss — and the rule above `DEFAULT_DIMENSIONS` in review-pr.js owns the why.
+test("only the recoverable-miss dimensions carry a model downgrade", () => {
   const models = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d.model]));
   assert.equal(models.tests, "sonnet");
   assert.equal(models.comments, "sonnet");
