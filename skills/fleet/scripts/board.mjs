@@ -197,14 +197,14 @@ function newestTranscriptMs(dir) {
 // double-counts too, though only by ~1.5%.
 //
 // The meta read below is guarded by existsSync, so the UNNAMED-AGENT case never
-// enters the try — it simply leaves `meta` at {}. Everything that does reach the
-// catch is a real fault: a sidecar read torn mid-write, EACCES/EISDIR, a delete
-// racing the existsSync, or valid JSON of the wrong SHAPE (guard below).
-// Swallowing those booked the agent's whole spend as `other` with nothing on
-// stderr, which moves reviewPct — the review headline compute-spend.mjs calls
-// the one number anyone acts on. Measured on a two-agent fixture: an intact
-// reviewer sidecar gives reviewPct 80, the same sidecar truncated gives 0, in
-// silence (#325).
+// runs the guarded read — it simply leaves `meta` at {}. Everything that does
+// reach the catch is a real fault: a sidecar read torn mid-write,
+// EACCES/EISDIR, a delete racing the existsSync, or valid JSON of the wrong
+// SHAPE (guard below). Swallowing those booked the agent's whole spend as
+// `other` with nothing on stderr, which moves reviewPct — the review headline
+// compute-spend.mjs calls the one number anyone acts on. Measured on a
+// two-agent fixture: an intact reviewer sidecar gives reviewPct 80, the same
+// sidecar truncated gives 0, in silence (#325).
 //
 // Keep the {} fallback rather than rethrowing. The TRANSCRIPT is still readable,
 // so a throw would land in gatherSpend's per-file catch and drop this agent's
