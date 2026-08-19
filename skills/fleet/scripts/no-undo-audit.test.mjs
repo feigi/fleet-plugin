@@ -1457,6 +1457,7 @@ test("an admin dir whose own gitdir back-pointer file is unreadable is unanswera
   const r = audit(c);
   assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
   assert.equal(r.stdout, "");
+  assert.match(r.stderr, /gitdir is missing or unreadable/);
 });
 
 // The false-refusal side of the same trim: a legitimate back-pointer file with
