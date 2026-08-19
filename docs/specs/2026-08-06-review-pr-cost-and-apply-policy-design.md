@@ -13,11 +13,13 @@ template — unquoted, zsh reads the literal `<path>` placeholder as a redirecti
 and dies with a parse error before git ever runs. Once a real path is
 substituted in, quoted and unquoted behave identically.
 
-One change was made after implementation and is recorded below: the size tier
-keeps `comments` on any small diff that touches docs (Change 2). The whole-branch
-review found that mixed prose PRs — this repo's modal PR, and the category the
+One change and one correction were made after implementation, both recorded
+below. The change: the size tier keeps `comments` on any small diff that touches
+docs (Change 2). The whole-branch review found that mixed prose PRs — this repo's modal PR, and the category the
 `docsOnly` branch exists for — were losing comment-analyzer coverage entirely,
-a case this spec's original matrix had no row for.
+a case this spec's original matrix had no row for. The correction: Change 1's
+stated rule never separated the six dimensions it claimed to (#221) — the models
+shipped are unchanged, the stated reason for them is not.
 
 Open, deliberately not closed here: whether `opts.model` beats `agentType`
 frontmatter in workflow `agent()` (see Unknowns). The new `models …` log line
@@ -165,6 +167,22 @@ open-ended search.
 entire output is unverified by policy, and its own prompt (`review-pr.js:106`)
 states that a simplification changing observable behaviour is a defect — a
 reasoning-heavy judgement, which is plausibly why the vendor pinned it.
+
+**Corrected after implementation (#221): the rule stated above is not the rule
+these six entries follow.** Nothing keys a refuter budget off a dimension —
+`verifiersFor` is `(sev) => verifiersBySeverity[sev] ?? verifiers`, a severity and
+nothing else — so `silent-failure` findings at `critical`/`important` draw exactly
+the refuters `tests` findings do, and "faces refuters" cannot be what puts one on
+`sonnet` and the other on the session model. What does: **downgrade only where a
+MISS by the cheaper finder is RECOVERABLE.** A weak `tests`/`comments`/`types`
+pass leaves something a later run or a reader still catches; `correctness` and
+`silent-failure` miss silently and permanently — the same pair, for the same
+reason, that `SIZE_TIER_DIMS` keeps. `simplify`'s **0 refuters** are real, but
+reach it VIA SEVERITY — its prompt directs every finding to `suggestion`, which
+the budget zeroes — so what omits it here is the vendored `opus` pin, with the
+size tier paying its cost instead. The table above stays as the dated record of
+what was decided at `8a84402`; `review-pr.js`'s comment above `DEFAULT_DIMENSIONS`
+carries the rule in force.
 
 Dispatch reads `model: A.specialistModel || d.model`. `undefined` inherits, so
 the no-override path is unchanged for the three dimensions that omit it.

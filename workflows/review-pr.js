@@ -399,10 +399,17 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // reads the profile it already computed rather than re-deriving a size.
 const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 // A trimmed diff still gets the two dimensions whose misses are silent and
-// permanent. Of the four dropped, `tests`/`comments`/`types` findings face
-// refuters downstream; `simplify` faces none, and this tier is where its cost is
-// paid instead. `single-file` is `files === 1` at ANY size, so this trims a
-// one-file rewrite too — not only a short diff.
+// permanent — the same pair, for the same reason, that the model rule above
+// `DEFAULT_DIMENSIONS` declines to downgrade. Four are dropped: `tests`,
+// `comments`, `types`, `simplify`. NOT because those four alone face refuters
+// (#221) — `verifiersFor` takes a severity and nothing else, so the two kept
+// here draw exactly the refuters the dropped ones do. A miss in the first three
+// is RECOVERABLE: a later run or a reader still catches it. `simplify` is the
+// only one of the four the model rule leaves un-downgraded — its `opus` pin is
+// vendored — so this tier is where its cost is paid instead. Two of the four,
+// `comments` and `tests`, are carved back in below when the diff's own substance
+// is theirs; `types` and `simplify` never are. `single-file` is `files === 1` at
+// ANY size, so this trims a one-file rewrite too — not only a short diff.
 const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
 
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
