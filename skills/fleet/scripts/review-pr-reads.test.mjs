@@ -269,10 +269,10 @@ test("every branch carries the bounding rule", () => {
 });
 
 // Bound the slice at BOTH ends. `indexOf` returns -1 when absent and `slice(-1)`
-// is a truthy one-character string, so asserting on an unbounded slice passes
-// with the whole block deleted — and an unbounded end runs to EOF, where the
-// specialist and refuter prompts can satisfy the same assertions. This is the
-// defect `review-pr-testcmd.test.mjs:99-107` records having shipped.
+// is a truthy one-character string, so an unbounded slice passes with the block
+// deleted, and an unbounded end runs to EOF where the specialist and refuter
+// prompts satisfy it — the defect `review-pr-testcmd.test.mjs`'s "the specialist
+// prompt hands the command over verbatim and rules 'tests 0' a failure" records.
 function between(text, from, to, what) {
   const at = text.indexOf(from);
   assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
