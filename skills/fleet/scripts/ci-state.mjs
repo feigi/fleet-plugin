@@ -30,8 +30,8 @@ const arg = makeArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
 
-// --quiet suppresses the diagnostic stream (command echoes, per-job/per-field
-// lines) and drops the raw job list from the payload. The controller's CI
+// `--quiet` suppresses the diagnostic stream (command echoes, per-job/per-field
+// lines) and drops `jobs` and `missing` from the payload. The controller's CI
 // Monitor (and, standalone, the reviewer's own watch loop) polls this hot, and
 // none of that stream is acted on — `reasons` already names every failing job,
 // and the exit code already encodes green/not-green. die() and the one-line
