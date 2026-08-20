@@ -40,8 +40,9 @@ runner="$wt/agent-test"
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
 # absent path, while `git worktree add` refuses it on lstat semantics (`fatal:
-# '…' already exists`) — leaving the refusal to fire three mutations later, after
-# the in-progress label is already on the issue, and in the DEFAULT dry run
+# '…' already exists`) — leaving the refusal to fire only inside the NEXT
+# mutation, `git worktree add` itself, stranding the branch ref it just created,
+# with the in-progress label already on the issue, and in the DEFAULT dry run
 # leaving it not to fire at all: exit 0 and a receipt naming the path claimable.
 # Same predicate release-ticket.sh's `occupied()` already carries, for residue
 # this fleet leaves itself — a symlink pointing AT the registered directory

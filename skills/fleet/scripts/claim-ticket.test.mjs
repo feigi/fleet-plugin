@@ -930,15 +930,16 @@ test("a worktree whose .git vanishes during install refuses instead of trusting 
 // on lstat semantics. A DANGLING symlink at $wt splits the two — the guard looks
 // through it and sees nothing, while the path is still occupied and still fails
 // the `worktree add` below. `-L` closes that gap, and it is the same predicate
-// release-ticket.sh:464 already ships as `occupied()`, for residue THIS fleet
+// release-ticket.sh already ships as `occupied()`, for residue THIS fleet
 // leaves: where a symlink points AT the registered worktree directory, `git
 // worktree remove` deletes the directory and returns 0, leaving the link behind
 // and now dangling.
 //
 // The DRY RUN is the discriminating mode, and it is this script's default. Under
-// `--apply` both spellings do land on exit 2 — only the diagnosis differs, which
-// is the ticket's own framing — but the dry run is where they diverge outright
-// (measured, git 2.50.1):
+// `--apply` both spellings do land on exit 2, but base only gets there having
+// already labelled the issue and stranded the branch ref `git worktree add`
+// created before dying — the ticket's own framing — and the dry run is where
+// they diverge outright (measured, git 2.50.1):
 //
 //   dangling symlink, base    exit 0  + a receipt naming the path as claimable
 //   dangling symlink, fixed   exit 2  claim-ticket: … already exists
@@ -948,12 +949,19 @@ test("a worktree whose .git vanishes during install refuses instead of trusting 
 // be made. `--apply` is left unpinned deliberately: it reaches this same guard on
 // the same line, so the cheap mode is already the one that fails.
 //
+// The third row is this test's own, and was unheld until now: #188 did not touch
+// the `-e` half, and deleting it outright — leaving `[ -L "$wt" ] && die` — left
+// the whole suite green. It is pinned in the dry run for the same reason the
+// first row is: `git worktree add` never runs in this mode to refuse the occupied
+// path on its own, so a regression there surfaces as exit 0 and a receipt naming
+// the path claimable, not as somebody else's later refusal.
+//
 // Both directions, because a guard that refused everything would satisfy the
 // refusal alone. `-L` is true for ANY symlink, so the accept case is what
 // establishes it did not widen into one: measured on git 2.50.1, every path `-L`
 // newly refuses (dangling link, symlink loop) is a path `git worktree add`
 // refuses too, and an unoccupied path must still claim.
-test("a dangling symlink at the worktree path is refused, and a free path still claims", () => {
+test("a dangling symlink and a real directory are both refused, and a free path still claims", () => {
   const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
   mkdirSync(join(dir, ".worktrees"), { recursive: true });
   symlinkSync("/nonexistent-target", join(dir, ".worktrees", "42-slug"));
@@ -961,8 +969,16 @@ test("a dangling symlink at the worktree path is refused, and a free path still 
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
   assert.equal(r.status, 2, "a path occupied by a dangling link is a refusal, not a claimable path");
   assert.match(r.stderr, /\.worktrees\/42-slug already exists — ticket may already be claimed/,
-    "this script's own diagnosis, not git's bare `fatal: … already exists` three mutations later");
+    "this script's own diagnosis, not git's bare `fatal: … already exists` from inside the next mutation");
   assert.equal(r.stdout, "", "and no receipt: nothing here is claimable, so there is nothing to predict");
+
+  // The `-e` half of the same line — a REAL directory at $wt, no symlink.
+  const occupied = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  mkdirSync(join(occupied, ".worktrees", "42-slug"), { recursive: true });
+  const d = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: occupied, encoding: "utf8" });
+  assert.equal(d.status, 2, "an occupied directory is a refusal too, in the mode with no downstream net");
+  assert.match(d.stderr, /\.worktrees\/42-slug already exists — ticket may already be claimed/);
+  assert.equal(d.stdout, "", "and no receipt: an unguarded real directory is exit 0 and a claim prediction");
 
   // The input the guard must ACCEPT — same script, same mode, nothing at $wt.
   const free = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
