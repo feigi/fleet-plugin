@@ -30,7 +30,7 @@
 // one document is the one a reader does not reach: SKILL.md asserts, reaping.md
 // carries the evidence, and release-ticket.sh's own comment sits at the check.
 // The script's header (release-ticket.sh:15-25) already carried the corrected
-// wording when this was filed; the comment 545 lines below it did not.
+// wording when this was filed; the comment at the dirty check did not.
 //
 // NOT pinned, deliberately: reap.sh's sibling prose. Its "recomputed inside this
 // invocation" makes no delete-time claim, and reaping.md's reap-side
@@ -129,9 +129,9 @@ test("run-team/SKILL.md: the release-claims section carries the same limitation"
 });
 
 test("release-ticket.sh: the comment at the dirty check does not contradict the header above it", () => {
-  // The header (release-ticket.sh:15-25) states the limitation; this comment sat
-  // 545 lines below it saying git recomputes this same check at the delete, full
-  // stop. Whichever a reader reaches first is the one they act on.
+  // The header (release-ticket.sh:15-25) states the limitation; this comment
+  // said git recomputes this same check at the delete, full stop. Whichever a
+  // reader reaches first is the one they act on.
   const comment = stripHashGutter(
     between(
       SCRIPT,
