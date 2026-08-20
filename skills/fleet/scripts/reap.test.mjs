@@ -603,6 +603,39 @@ test("a non-fleet worktree holding an ignored file is kept, never reaped", (t) =
   assert.equal(readFileSync(join(wt, ".env"), "utf8"), "SECRET=exists nowhere else\n", "the precious file must survive the run");
 });
 
+test("a non-fleet worktree with NO ignored file is reaped — the control for the case above", (t) => {
+  // Without this, the test above passes on a reap.sh that keeps every
+  // non-fleet worktree unconditionally: it would be pinning the `.worktrees/`
+  // arm of the case, not the `--ignored` probe inside it. Same fixture, one
+  // difference — the ignored file — and the opposite verdict.
+  //
+  // It is also the exit-status control for this branch. Reached with
+  // `$ignored` empty, the `if [ -n "$ignored" ]` is the last command of the
+  // worktree-present branch, and a condition that tests false leaves an `if`
+  // with no `else` at status 0. Under `set -eu` any other answer would abort
+  // the sweep here, after the earlier branches were already deleted.
+  const w = repo(t);
+  const wt = join(w, "..", "outside");
+  git(w, "worktree", "add", "-q", wt, "-b", "feature/merged", "main");
+  writeFileSync(join(wt, ".gitignore"), ".env\n");
+  git(wt, "add", ".gitignore");
+  commit(wt, "merged work");
+  git(wt, "push", "-q", "-u", "origin", "feature/merged");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feature/merged", "feature/merged");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", "feature/merged");
+  git(w, "fetch", "-q", "--prune", "origin");
+  // and NO .env written this time
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, "the sweep must not abort under set -eu on the branch's own last command");
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.equal(existsSync(wt), false, "the worktree directory goes with it");
+});
+
 test("a repo path containing a space still finds and reaps the branch's worktree", (t) => {
   const w = repo(t, "my repos");
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
