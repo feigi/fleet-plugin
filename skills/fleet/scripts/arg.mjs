@@ -14,8 +14,10 @@
 // splice has no equivalent here. That parser is still ledger.mjs's own — it
 // is named here so this header is not read as covering a caller it does not,
 // and so the next change to the rule below is known to need a second edit
-// there. (fleet-tick.mjs also imports makeDie alone, but reads no flags at
-// all — nothing to reach.)
+// there. (fleet-tick.mjs also imports makeDie alone, so arg()'s refusals do
+// not reach it either — but not for want of flags: it parses six of its own
+// with node:util's parseArgs, and its unknown-flag, required-flag and range
+// refusals are a second edit site on the same terms.)
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
