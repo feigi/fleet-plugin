@@ -976,12 +976,18 @@ mismatch. Give the finisher this verbatim, so it derives the cause itself
 instead of asking anyone:
 
 > Worktree differs from your pin, or from what you last read. **Check
-> head-equality first: `worktree HEAD == PR headRefOid` on a clean tree settles
-> it.** A rebase entry sitting at or behind the pin is that head's provenance —
-> the implementer's own pre-push replay — not divergence from it, and needs no
-> adjudication at all. Three finishers in one run adjudicated a reflog this one
-> check had already answered. Only when the heads DIFFER, decide which of two
-> things happened — both cheap, both self-checkable:
+> head-equality first: `worktree HEAD == the SHA you were dispatched against` on
+> a clean tree settles it.** Against your dispatch pin, never against
+> `PR headRefOid`: a member that kept working and pushed after the pin matches
+> the branch tip on a clean tree, so a headRefOid comparison reports "settled"
+> over commits no reviewer read — the exact divergence this halt exists to
+> catch. `headRefOid` is a second, separate read (pushed vs unpushed), never the
+> equality the halt turns on. A rebase entry sitting at or behind the pin is
+> that head's provenance — the implementer's own pre-push replay — not
+> divergence from it, and needs no adjudication at all. Three finishers in one
+> run adjudicated a reflog this one check had already answered. Only when the
+> head differs from your pin, decide which of two things happened — both cheap,
+> both self-checkable:
 >
 > - **Live editor.** `git status --porcelain` is dirty. Sample `git diff --stat`
 >   twice, a minute apart — diffstat growing means someone is still writing.

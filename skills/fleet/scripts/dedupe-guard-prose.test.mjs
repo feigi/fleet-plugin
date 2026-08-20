@@ -142,6 +142,24 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   assert.match(runLedger, /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
 });
 
+test("the finisher verifies a claimed APPLY against the branch diff, not the applier's word", () => {
+  // Duty 2 audits deferrals AND applies. The review ran against a snapshot cut
+  // before the fix-applier's edits existed, so nothing but the finisher ever
+  // checks that a claimed APPLY actually landed — measured once at five applies
+  // where the controller's hand-written list named three.
+  //
+  // ONE bounded span, not two presence pins: a pin on the claim sentence alone
+  // stays green with the verification command deleted, and a pin on the command
+  // alone stays green with the duty reworded into a suggestion. Bounded rather
+  // than exact so a reflow of the sentence between them survives, which is the
+  // ceiling this whole file already accepts.
+  assert.match(
+    finisherDeferrals(),
+    /\*\*A fix-applier's "applied" is a claim like any other\*\*.{0,200}?Confirm `git diff origin\/main\.\.\.HEAD` actually contains what it reported applying\./,
+    "duty 2 no longer requires the finisher to verify a claimed APPLY against the branch diff — an applier's \"applied\" becomes self-certifying and a dropped fix ships labelled",
+  );
+});
+
 test("the finisher files its own deferrals through the same guard", () => {
   // The finisher reaches `gh issue create` by a different route — auditing the
   // reviewer's deferrals and filing whatever is missing — so it is precisely

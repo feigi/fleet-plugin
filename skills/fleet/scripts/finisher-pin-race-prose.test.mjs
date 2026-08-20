@@ -131,6 +131,42 @@ test("a moved head still halts, always — the two causes decide what the report
   );
 });
 
+test("the head-equality short-circuit compares against the dispatch pin, on a clean tree", () => {
+  const text = causeText();
+  // The short-circuit exists to stop finishers adjudicating a reflog that
+  // head-equality had already settled. WHICH head it compares to is the whole
+  // rule: this block is ENTERED on a mismatch against the dispatch pin, so a
+  // comparison against `PR headRefOid` answers a different question — "is the
+  // local tree in sync with the pushed tip?" — and a member that kept working
+  // and pushed after the pin passes it while holding commits no reviewer read.
+  // ONE contiguous span, not two matches: the operand and the clean-tree scope
+  // have to stay joined, since either half alone is satisfiable by the broken
+  // form.
+  assert.match(
+    text,
+    /head-equality first: `worktree HEAD == the SHA you were dispatched against` on a clean tree settles it\./,
+    "the head-equality short-circuit no longer reads as pin-equality scoped to a clean tree — either the operand moved off the dispatch pin, or the clean-tree scope was dropped",
+  );
+  // The superseded operand, verbatim. `headRefOid` still appears in the block
+  // as the SECOND, separate read (pushed vs unpushed), so only this exact
+  // equality can be excluded here, not the identifier.
+  assert.doesNotMatch(
+    text,
+    /`worktree HEAD == PR headRefOid`/,
+    "the short-circuit is back to comparing the worktree head to the pushed branch tip — a member that pushed after the pin reads as 'settled' and gets labelled over commits no reviewer saw",
+  );
+  // The clean-tree scope is what keeps the live-editor cause reachable at all:
+  // a dirty tree is never settled by the short-circuit, and the bullet opens
+  // directly on the dirty read with no head predicate to fail. Contiguous, so
+  // splicing a head condition in front of that read reds this — the loose
+  // `git status --porcelain.*dirty` pin above walks straight through it.
+  assert.match(
+    text,
+    /\*\*Live editor\.\*\* `git status --porcelain` is dirty\./,
+    "the live-editor cause is no longer keyed on a dirty tree alone — a head predicate in front of the dirty read strands the mid-mutation case with no named cause",
+  );
+});
+
 test("the pre-existing ruling-owed gate for the fix-applier is untouched", () => {
   // ACCEPT side: this run's edit sits right next to the fix-applier dispatch
   // paragraph. This pins that the older, unrelated rule wasn't clipped or
