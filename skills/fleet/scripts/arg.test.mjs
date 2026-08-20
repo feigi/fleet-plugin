@@ -92,6 +92,104 @@ test("die()'s refusal starts its own line even when a partial line is already on
   assert.match(r.stderr, /^probe: refused$/m);
 });
 
+// ── #299/#328: the guard around die()'s own writeSync, EXECUTED ───────────
+//
+// makeDie()'s try/catch exists because fd 2 goes non-blocking once enough
+// forwarded child stderr is queued on a pipe: writeSync then throws EAGAIN,
+// and uncaught that throw skips process.exit(2), leaving Node's default exit
+// 1. For ci-state.mjs the inversion is not a confusing failure but a WRONG
+// ANSWER — its own vocabulary spends 1 on "gate not satisfied", so a tool that
+// could not read reads as a legitimate verdict the fleet then gates on.
+//
+// candidates.test.mjs already pins the guard's source SHAPE, and that pin is
+// deterministic — but it is a text pin, and it stops at `try { writeSync(2,`.
+// It says nothing about what the catch does or whether the exit below still
+// runs: `catch { process.exit(1); }` satisfies it (measured, green) and is the
+// whole defect back. Nothing in this repo EXECUTED the catch until here.
+//
+// Two tests, because neither covers the other and only one of them works on
+// every platform — see each for its own measurements.
+
+test("die() keeps exit 2 when its own writeSync throws — the guard executed, not lifted", () => {
+  // The write is made to fail deterministically instead of by racing a pipe:
+  // fd 2 is closed, so writeSync throws EBADF. A different errno from the
+  // EAGAIN in the field, the same and only thing die() promises about it — the
+  // message may be lost, the exit code may not.
+  //
+  // Measured on darwin: guarded, exit 2; with the try/catch reverted, exit 1.
+  // That is the #299 inversion itself, reproduced without the race, so this is
+  // the assertion that discriminates on a machine where EAGAIN never fires.
+  const dir = mkdtempSync(join(tmpdir(), "arg-die-throw-"));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { closeSync } from "node:fs";',
+    'import { makeDie } from "./arg.mjs";',
+    "closeSync(2);",
+    'makeDie("probe")("refused");',
+    "",
+  ].join("\n"));
+
+  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: "utf8" });
+  // No stderr to quote in the message — the fd this process would report on is
+  // the one the test closed.
+  assert.equal(r.status, 2, `exit ${r.status}: die()'s writeSync threw and took the exit code with it`);
+});
+
+// The three scripts #328 names, end to end. Each forwards gh's own stderr
+// (execFileSync with no `stdio`, so Node re-emits it through the ASYNC
+// process.stderr) and only then refuses through die() — so the flood has to
+// come from gh, not from the test, or fd 2 is never the one under pressure.
+//
+// Spelled out rather than derived from CONSUMERS above: board, candidates,
+// fleet-tick and ledger reach die() too, but not all of them through a
+// gh-failure path with argv this uniform, and candidates carries its own copy
+// of this row already (candidates.test.mjs, at the JQ_OVERRIDE that motivated
+// the fix). A consumer added later belongs here deliberately.
+const GH_FLOOD = [
+  { script: "ci-state", argv: ["--pr", "42"] },
+  { script: "diff-stats", argv: ["--pr", "42"] },
+  { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
+];
+
+// A `gh` that writes exactly `bytes` to stderr and then fails, so the script
+// under test takes its execFileSync catch. The payload is a file the stub
+// `cat`s rather than shell-generated, to keep the byte count exact.
+function runWithFloodingGh(script, argv, bytes) {
+  const dir = mkdtempSync(join(tmpdir(), "arg-die-flood-"));
+  writeFileSync(join(dir, "flood"), "z".repeat(bytes));
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`, { mode: 0o755 });
+  return spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
+    { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+  );
+}
+
+for (const { script, argv } of GH_FLOOD) {
+  test(`${script}.mjs still exits 2 when gh fails behind a stderr larger than the pipe buffer`, () => {
+    // The row the guard must NOT change. A catch around the write could just as
+    // easily swallow the refusal on the ordinary path, or return before the
+    // exit — so the small case pins both halves: the line lands, the code is 2.
+    // Anchored on the script's own NAME prefix only, not the wording after it,
+    // so rephrasing a refusal is not this test's business.
+    const ordinary = runWithFloodingGh(script, argv, 64);
+    assert.equal(ordinary.status, 2, `expected exit 2 on the ordinary path, got ${ordinary.status}: ${ordinary.stderr}`);
+    assert.match(ordinary.stderr, new RegExp(`^${script}: `, "m"), `${script}.mjs refused without saying so: ${ordinary.stderr}`);
+
+    // The row that inverted. Platform-bound and therefore a CI gate, not a
+    // local one: measured on darwin, all three of these still exit 2 with the
+    // try/catch reverted (3/3) — EAGAIN never fires there, which is why the
+    // deterministic test above exists. On Linux #299/#328 measured the
+    // inversion at 3/10 to 7/10 unfixed and 0/20 fixed.
+    const flooded = runWithFloodingGh(script, argv, 200_000);
+    assert.ok(
+      flooded.stderr.length > 60_000,
+      `gh's forwarded stderr must exceed the pipe buffer or this pins nothing, got ${flooded.stderr.length}`,
+    );
+    assert.equal(flooded.status, 2, `expected exit 2 behind ${flooded.stderr.length} B of forwarded stderr, got ${flooded.status}`);
+  });
+}
+
 // ── #365: a flag name no script reads ────────────────────────────────────────
 //
 // The guards above answer "was this flag given well?". Nothing answered "was a
