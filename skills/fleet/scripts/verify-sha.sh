@@ -9,7 +9,7 @@
 set -eu
 
 NAME=verify-sha
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it. Exit 1 out of THIS script means "the sha is not

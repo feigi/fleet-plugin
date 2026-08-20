@@ -35,7 +35,7 @@ set -eu
 export LC_ALL=C
 
 NAME=reap
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it. This script defines no exit 1 at all (#265), so a

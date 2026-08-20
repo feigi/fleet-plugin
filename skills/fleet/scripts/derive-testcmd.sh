@@ -32,7 +32,7 @@ set -eu
 export LC_ALL=C
 
 NAME=derive-testcmd
-die() { echo "$NAME: $1" >&2; exit 1; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
 [ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <ref>"
 repo=$1

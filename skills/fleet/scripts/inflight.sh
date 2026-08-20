@@ -58,7 +58,7 @@ set -eu
 export LC_ALL=C
 
 NAME=inflight
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it; only what is true of THIS script is repeated here.
