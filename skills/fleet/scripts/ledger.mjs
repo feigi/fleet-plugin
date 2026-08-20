@@ -312,7 +312,7 @@ if (cmd === "check") {
   // give back the length the cap exists to take away, while the count and the
   // top withheld score are what tell a caller whether the cut cost it
   // anything.
-  const nearTotal = rankedNear.length;
+  const withheld = rankedNear.slice(NEAR_SHOWN);
 
   // The ledger can only see what THIS run recorded. An issue that already
   // exists on the tracker but never reached this `filed` list — filed by an
@@ -492,8 +492,8 @@ if (cmd === "check") {
   }
 
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
-  if (nearTotal > near.length) {
-    console.error(`${NAME}: ${nearTotal - near.length} further near-miss${nearTotal - near.length === 1 ? "" : "es"} not shown — highest withheld ${rankedNear[near.length].score.toFixed(2)}; the cap dropped them, not the score`);
+  if (withheld.length) {
+    console.error(`${NAME}: ${withheld.length} further near-miss${withheld.length === 1 ? "" : "es"} not shown — highest withheld ${withheld[0].score.toFixed(2)}; the cap dropped them, not the score`);
   }
   if (!tracker.ok) {
     console.error(`${NAME}: WARNING — TRACKER NOT CHECKED (${tracker.error}). An issue that exists on the tracker but was never recorded in this run is invisible to the answer below.`);
@@ -531,7 +531,7 @@ if (cmd === "check") {
   // payload a consumer parses (#154). They differ in what is knowable —
   // the ledger is fully in hand, so the near-miss total is exact, while gh
   // reports no total, so the tracker can only say that more exist.
-  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal, tracker, verdict }));
+  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal: rankedNear.length, tracker, verdict }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
