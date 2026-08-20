@@ -106,7 +106,7 @@ jfield() {
   fi
 }
 
-keep() { kept="${kept}{\"branch\":$(jfield "$1"),\"reason\":$(jfield "$2")}," ; echo "    KEEP $1 — $2" >&2; }
+keep() { kept="${kept}{\"branch\":$(jfield "$1"),\"reason\":$(jfield "$2")}," ; printf '    KEEP %s — %s\n' "$1" "$2" >&2; }
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
@@ -309,7 +309,7 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
         continue
       fi
     else
-      echo "    would remove worktree $wt" >&2
+      printf '    would remove worktree %s\n' "$wt" >&2
     fi
   fi
 

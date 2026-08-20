@@ -29,7 +29,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,9 +55,16 @@ const ENV = {
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
-/** Bare origin + working clone with one commit on main. Returns the clone dir. */
+/**
+ * Bare origin + working clone with one commit on main. Returns the clone dir.
+ *
+ * realpath'd: on macOS `$TMPDIR` sits under the `/var` → `/private/var`
+ * symlink, and `git worktree list --porcelain` reports the RESOLVED path. An
+ * unresolved fixture path never matches what the scripts print, which reads as
+ * a truncation failure and hides whether the escaping is right.
+ */
 function repo(t) {
-  const root = mkdtempSync(join(tmpdir(), "printf-die-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "printf-die-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
   const work = join(root, "work");
