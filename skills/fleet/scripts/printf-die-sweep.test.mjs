@@ -209,8 +209,16 @@ test("a %-carrying message is passed through, not interpreted as a format", (t) 
   );
 });
 
-// A plain message must still work. Cheap, and it is what proves the two tests
-// above are testing escaping rather than a script that refuses everything.
+// A plain message must still work — and this is the only case in the suite that
+// notices if drop-merged-label.sh stops refusing ordinary input at all.
+// Measured: widening its numeric guard's class (`*[!0-9]*` → `*[!0-9a-z]*`)
+// reds this test ALONE, because `back\clue` and `100% done %s %d` fall outside
+// any widened class and go on being refused, while `notanumber` does not.
+//
+// The "refuses everything" direction this was written for is already covered
+// twice over — that mutant reds the `\c` and the `%` test as well — so it is
+// the ordinary-input reachability above, not the accept direction, that makes
+// this worth its fixture (#707 review).
 test("an ordinary message with no escapes is unaffected", (t) => {
   const w = repo(t);
   const r = run(w, "drop-merged-label.sh", ["notanumber"]);
