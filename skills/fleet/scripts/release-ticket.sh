@@ -144,6 +144,30 @@ if [ -e "$wtroot" ]; then
   # not be counted as a worktree git failed to report.
   for entry in "$wtroot"/*; do
     [ -d "$entry" ] || continue
+    # Skip only an EMPTY directory. That is an operator's stray `mkdir`, which
+    # git ignores — and counting one refuses EVERY release of every ticket in
+    # the repo, forever, over something git is right to ignore (measured, git
+    # 2.50.1: git lists 2 worktrees where a bare `-d` count said 2 registered
+    # against 1 linked). A stray FILE was already skipped by the `-d` above; a
+    # stray directory was not, which is why the file case shipped green.
+    #
+    # Emptiness, NOT the absence of a `gitdir` file, and the difference is a
+    # wrong "free": git drops an entry whose `gitdir` was deleted, so keying the
+    # skip on that file waves the entry through as "not git's", the count agrees,
+    # no refusal fires, and the release proceeds while the checkout may still be
+    # on disk (measured: listed 1 → linked 0, and a gitdir-keyed count returns 0
+    # to match). A corrupt entry still holds git's own files — commondir, HEAD,
+    # index, logs, refs — so emptiness separates it from a stray where the
+    # missing `gitdir` does not. This is #384's own second commit, and #395
+    # exists partly to keep this copy from inheriting the discriminator it
+    # replaced.
+    #
+    # `-x` first, and the order is the whole point: an entry chmod'd 000 reads
+    # as empty to the same test, and git drops that one too (measured: listed 1
+    # → linked 0, and dropping the `-x` makes the count return 0 to match, a
+    # wrong "free"). Unsearchable, so we cannot tell → count it and let the
+    # mismatch below fire.
+    if [ -x "$entry" ] && [ -z "$(ls -A "$entry" 2>/dev/null)" ]; then continue; fi
     registered=$((registered + 1))
   done
 fi
@@ -154,11 +178,33 @@ fi
 wt_list=$(git worktree list --porcelain)
 
 # The main worktree is always listed first and has no registry entry of its own,
-# so it is the one the count subtracts. `grep -c` exits 1 on zero matches, which
-# `set -e` would take as fatal here, hence the `|| true`.
-listed=$(printf '%s\n' "$wt_list" | grep -c '^worktree ' || true)
-[ "$((listed - 1))" -eq "$registered" ] ||
-  die "git listed $((listed - 1)) worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+# hence the -1.
+#
+# awk, not `grep -c … || true`. `grep -c` exits 1 on zero matches — legitimate,
+# and `set -e` would read it as fatal — so a `|| true` has to absorb it, and
+# that same `|| true` absorbs a grep that could not RUN AT ALL just as happily.
+# The count is then the empty string, `$((listed - 1))` is -1 (measured), and
+# the mismatch report below blames `git worktree list` for a count no listing
+# can produce — sending the operator after git when the fault was a fork
+# failure. awk needs no such case separated out: the program contains no `exit`,
+# so it returns 0 whether or not anything matched, and every non-zero status is
+# a real failure. This script already removed exactly this shape elsewhere.
+listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
+  die "could not count the worktrees git listed for #$issue"
+linked=$((listed - 1))
+# Name the direction actually observed. The two disagreements have opposite
+# causes and send the reader to opposite places, so one message cannot serve
+# both: FEWER listed than registered is git silently dropping an entry it could
+# not read, which is the fault this whole check exists to catch. MORE listed
+# than registered is the reverse — the on-disk count is the stale read, a
+# sibling agent's `git worktree add` having landed between the two, which in a
+# parallel fleet is routine rather than exotic. Calling that "the listing is
+# incomplete" sends an operator hunting a permissions fault that is not there.
+if [ "$linked" -lt "$registered" ]; then
+  die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
+elif [ "$linked" -gt "$registered" ]; then
+  die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
+fi
 
 wt=$(printf '%s\n' "$wt_list" |
      awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}')

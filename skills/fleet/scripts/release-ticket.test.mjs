@@ -1905,6 +1905,159 @@ test("something that is not a registry entry is not counted as a dropped worktre
   assert.equal(json.released, true);
 });
 
+test("a stray DIRECTORY in the registry is not a worktree git failed to report (#395)", (t) => {
+  // The case above covers a stray *file*, which the `-d` test skipped anyway —
+  // which is exactly why the directory case shipped green. A stray *directory*
+  // is the one that bites: git ignores it, a `-d`-only count sees it, and the
+  // mismatch then turns EVERY release of every ticket in that repo into a hard
+  // refusal until a human notices. One `mkdir` under `.git/worktrees` is all it
+  // takes (measured, git 2.50.1: git lists 2, the bare `-d` count said 2
+  // registered against 1 linked).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  mkdirSync(join(r.w, ".git", "worktrees", "stray-dir"), { recursive: true });
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+});
+
+test("a registry entry git cannot even open is unknown, not a stray to skip (#395)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // The other half of that skip, and why `-x` is tested BEFORE emptiness: an
+  // entry chmod'd 000 answers "empty" to precisely the same `ls -A` test a
+  // stray directory does. But git DROPS this one (measured: listed 1, so
+  // linked 0), so skipping it as "not git's" would make the count agree and
+  // release a claim whose checkout is still on disk — the wrong "free" this
+  // whole check exists to rule out, reintroduced one layer in. Reversing the
+  // two tests is silent: every other fixture in this file stays green.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const entry = join(r.w, ".git", "worktrees", "9-release-ticket");
+
+  chmodSync(entry, 0o000);
+  const { code, json, stderr } = release(r, c);
+  // Restored before the first assert — `artefacts` below runs `worktree list`
+  // itself and would otherwise read this claim's worktree as absent.
+  chmodSync(entry, 0o755);
+
+  assert.equal(code, 2, "a dropped entry is unanswerable, never the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("a registry entry whose gitdir is GONE is unknown, not a stray to skip (#395)", (t) => {
+  // Why the skip tests EMPTINESS and not the absence of a `gitdir` file — the
+  // discriminator #384 shipped first and then replaced, which this copy must
+  // not inherit. Git drops an entry whose `gitdir` was deleted (measured:
+  // listed 1, linked 0), so keying the skip on that file waves a corrupt entry
+  // through as "not git's", the count agrees at 0, and the claim releases while
+  // its checkout may still be on disk. An operator's stray `mkdir` is empty;
+  // even a corrupt entry still holds git's own files — commondir, HEAD, index,
+  // logs, refs — and that is the difference the count can see.
+  //
+  // No chmod, so no euid-0 guard: this case discriminates as root too.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  execFileSync("rm", [join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir")]);
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "a dropped entry is unanswerable, never the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("git listing MORE than the registry reports THAT, not an incomplete listing (#395)", (t) => {
+  // The mismatch has two directions with opposite causes, and one message
+  // cannot serve both. FEWER listed than registered is git dropping an entry it
+  // could not read — the fault this check exists to catch. MORE listed than
+  // registered is the reverse: the on-disk count is the stale read, a sibling
+  // agent's `git worktree add` having landed between the two, which in a
+  // parallel fleet is routine. Calling that "the listing is incomplete" sends
+  // an operator hunting a permissions fault that is not there.
+  //
+  // Shimmed rather than raced: git derives its listing FROM the registry, so no
+  // real interleaving produces this deterministically.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "git"),
+    `#!/bin/sh
+if [ "$1" = worktree ] && [ "$2" = list ]; then
+  '${real}' "$@" || exit $?
+  printf 'worktree /nonexistent/landed-between-the-two-reads\\n\\n'
+  exit 0
+fi
+exec '${real}' "$@"
+`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed 2 worktrees but only 1 registry entries were counted/);
+  assert.match(stderr, /the registry read missed entries git can see/);
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "the opposite direction's cause must not be reported for this one");
+});
+
+test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", (t) => {
+  // The counter is a stage like any other. It used to be
+  // `grep -c '^worktree ' || true`, and that `|| true` was not optional:
+  // `grep -c` exits 1 on zero matches, which is legitimate. But it absorbed a
+  // grep that could not RUN just as happily, leaving the count empty,
+  // `$((listed - 1))` at -1 (measured), and the die blaming `git worktree list`
+  // for a tally no listing can produce. One awk, whose program contains no
+  // `exit`, needs no such case absorbed — so the status is the counter's own.
+  //
+  // Selected by a substring of the awk PROGRAM, never by counting invocations:
+  // `{c++}` appears in exactly one awk in this script, and the others read the
+  // same listing right after.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const realAwk = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "awk"),
+    `#!/bin/sh\ncase "$*" in *'{c++}'*) exit 1 ;; esac\nexec '${realAwk}' "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /could not count the worktrees git listed for #9/);
+  assert.doesNotMatch(stderr, /-1 worktrees/,
+    "a counter that could not run never reports a count at all");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a healthy repo with a second live worktree still releases (#395)", (t) => {
+  // The acceptance case every guard on a refusal path needs: a guard that
+  // refuses everything passes every "does it refuse?" test above. Two real
+  // linked worktrees, so the arithmetic is exercised at registered=2/linked=2
+  // rather than at the trivial 1-against-1 — an off-by-one in the `-1` or a
+  // skip that swallowed a real entry would land here and nowhere else.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const sibling = claim(r.w, 77, "other-claim");
+  assert.equal(readdirSync(join(r.w, ".git", "worktrees")).length, 2,
+    "fixture: two entries really are registered");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 0, `a healthy repo must still release: ${stderr}`);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  // The sibling is untouched — the release names one claim, not every worktree.
+  assert.equal(existsSync(sibling.wt), true, "the other claim's worktree must survive");
+});
+
 test("a claim whose worktree was actually removed and pruned still releases", (t) => {
   // The acceptance case the registry check must not regress, stated against
   // the registry rather than the checkout: `git worktree remove` clears this
