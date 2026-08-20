@@ -10,14 +10,14 @@
 //
 // THE FIELD LIST IS READ OUT OF ci-state.mjs, never restated here. `--quiet`'s
 // effect on the payload is one assignment, and a field added to or renamed in
-// it silently un-completes all three paragraphs at once. Deriving the list means
-// that edit reddens here instead, which is the only way the three stay agreed
-// with the source rather than merely with each other.
+// it silently un-completes all four sites at once. Deriving the list means that
+// edit reddens here instead, which is the only way the four stay agreed with the
+// source rather than merely with each other.
 //
 // TWO BOUNDS, each measured against the mutation it exists to catch, in the
 // manner of `staleness-qualifier-prose.test.mjs`:
 //
-// - The PARAGRAPH bound. SKILL.md carries two of the three statements, so
+// - The PARAGRAPH bound. SKILL.md carries two of the four statements, so
 //   matched over the whole file each is the other's false green: measured, with
 //   the finisher-duty clause gutted a file-wide variant went green off the
 //   CI-Monitor copy alone, and stayed green with a decoy line appended too.
@@ -38,15 +38,29 @@
 //
 // A moved anchor reddens instead of silently widening the slice back to the file.
 //
-// This file names its three sources by path and globs nothing, so its own text
+// #690 added the fourth site, the only one in source rather than in a document:
+// ci-state.mjs's own header, far above the assignment it describes. Two things
+// about it differ from the three document sites. Its `--quiet` is BACKTICKED
+// because the clause anchor requires that spelling — bare, as the header read
+// before #690, `paragraph()`'s own anchor is what fails, so it reports a moved
+// anchor rather than an unpinned site (measured in both spellings). And the
+// paragraph bound runs to the next blank line, which in source is past the
+// end of the comment: the slice carries `const quiet = has("quiet")` and the
+// lines after it. Harmless — the clause starts at the anchor and stops at its
+// own sentence's period, so no code reaches the captured clause (measured) —
+// but it is not the tidy one-paragraph cut the document sites get.
+//
+// This file names its four sources by path and globs nothing, so its own text
 // is not in the corpus and cannot satisfy the pins it carries.
 //
 // THE CEILING: this pins that each paragraph names every dropped field, and
 // nothing else — not that the surrounding rule is right, not the prose around
 // the clause, and it does not run ci-state.mjs (ci-state.test.mjs owns its
-// behavior). It says nothing about the stderr stream `--quiet` also suppresses,
-// which is a separate effect these paragraphs deliberately do not discuss. And
-// it covers three paragraphs, not every statement in the repo: the script-surface
+// behavior). It says nothing about the stderr stream `--quiet` also suppresses:
+// a separate effect, and where a site states it — ci-state.mjs's header states
+// it in the same sentence, ahead of the `drops` — the clause bound starts at
+// `drops` and leaves it outside the pin. And it covers four sites, not every
+// statement in the repo: the script-surface
 // row in `docs/specs/2026-07-23-fleet-plugin-design.md` names both fields
 // correctly today and is left to the pattern its siblings already use —
 // `worktree-audit.test.mjs` and `no-undo-audit.test.mjs` each check their
@@ -66,11 +80,15 @@ import { join } from "node:path";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
 
+const CI_STATE_PATH = "skills/fleet/scripts/ci-state.mjs";
+const SKILL = "skills/fleet/skills/run-team/SKILL.md";
+const REVIEW_AND_FIX = "skills/fleet/commands/review-and-fix.md";
+
 const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 // The one assignment `--quiet` gates the payload on. Its absence is a failure
 // rather than an empty field list: an empty list would pass every site vacuously.
-const CI_STATE = readFileSync(join(import.meta.dirname, "ci-state.mjs"), "utf8");
+const CI_STATE = read(CI_STATE_PATH);
 const FIELDS = ((CI_STATE.match(/if \(!quiet\) Object\.assign\(payload, \{([^}]*)\}\)/) ?? [])[1] ?? "")
   .split(",").map((f) => f.trim()).filter(Boolean);
 
@@ -106,13 +124,11 @@ function dropsClause(name, anchor) {
   return clause[1];
 }
 
-const SKILL = "skills/fleet/skills/run-team/SKILL.md";
-const REVIEW_AND_FIX = "skills/fleet/commands/review-and-fix.md";
-
 const SITES = [
   [SKILL, "**Own the CI waits.**", "the CI-Monitor read"],
   [SKILL, "Gate on the `check` job", "the finisher-duty read"],
   [REVIEW_AND_FIX, "6. Diff-check green", "step 6's finisher read"],
+  [CI_STATE_PATH, "`--quiet` suppresses the diagnostic stream", "the source-comment read"],
 ];
 
 for (const [name, anchor, label] of SITES) {
@@ -121,7 +137,7 @@ for (const [name, anchor, label] of SITES) {
     for (const field of FIELDS) {
       assert.ok(
         clause.includes(`\`${field}\``),
-        `${name}: ${label} says "${clause}", which does not name \`${field}\`. ci-state.mjs drops ${FIELDS.map((f) => `\`${f}\``).join(" and ")} under \`--quiet\`, and a reader arriving at this paragraph alone has no reason to see the other statements. Name every field here, or — if ci-state.mjs's payload changed — update all three paragraphs together.`,
+        `${name}: ${label} says "${clause}", which does not name \`${field}\`. ci-state.mjs drops ${FIELDS.map((f) => `\`${f}\``).join(" and ")} under \`--quiet\`, and a reader arriving at this paragraph alone has no reason to see the other statements. Name every field here, or — if ci-state.mjs's payload changed — update all four sites together.`,
       );
     }
   });
