@@ -166,11 +166,15 @@ jobs:
       - name: Validate JSON
         run: .github/scripts/check-tracked.sh '*.json' -n1 jq empty
 
-      # -S warning, not the default: the only info-level hits in the tree are
-      # false positives (SC2016 on inflight.sh's single-quoted `python3 -c`
-      # script — there is no heredoc in that file — SC1003 on
-      # statusline-command.sh's OSC-8 escape). Raise this to `style` only after
-      # silencing those two at the source.
+      # -S warning, not the default: the default adds info-level hits that are
+      # noise here — SC2016 where a single-quoted `python3 -c` script is meant
+      # not to expand, SC1003 on an OSC-8 escape, SC2015 on the
+      # `a=$(…) && b=$(…) || die` chains where `die` is the branch every
+      # failure in the chain should take. Shapes, not a closed list, and
+      # deliberately no file names: a file list goes stale the next time one of
+      # them is edited, and shellcheck is how you find the sites anyway.
+      # Re-measure before acting on this. Raise this to `style` only after
+      # silencing them at the source.
       - name: Shellcheck
         run: .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning
 
@@ -184,8 +188,8 @@ jobs:
       # discovery excludes `node_modules` (measured), and the defect behind
       # 'the runner's directory expansion ran vendored tests' was a `find` in
       # the emitted runner — see claim-ticket.sh, which says so itself: "this
-      # filter, not node, is what keeps vendored tests out". There is no
-      # vendored tree under skills/fleet/scripts/ anyway; it is 29 flat files.
+      # walk, not node, is what keeps vendored tests out". There is no
+      # vendored tree under skills/fleet/scripts/ anyway.
       # The suite stubs `gh` and sets its own git identity, so it needs no auth
       # and no network.
       # `failglob` because the bare glob is exactly the silent green this repo
