@@ -1955,11 +1955,23 @@ test("an entry that is searchable but UNREADABLE is unknown too, not an empty st
   // `ls -A` fails EACCES and — its stderr discarded — prints exactly what an
   // empty stray `mkdir` prints. Skip on the OUTPUT alone and this entry is
   // waved through as "not git's"; git drops it too (the `gitdir` inside is
-  // unreadable), the counts AGREE at 0, no refusal fires, and the release
-  // deletes the branch and drops the in-progress label with the member's
-  // uncommitted work still on disk. Both anomalies together is what makes this
-  // the dangerous one — they cancel, where either alone disagrees in the safe
-  // direction.
+  // unreadable), the counts AGREE at 0, and no refusal fires. Both anomalies
+  // together is what makes this the dangerous one — they cancel, where either
+  // alone disagrees in the safe direction.
+  //
+  // What that costs then depends on where the checkout is, and this fixture
+  // deliberately pins the CHEAP half: the checkout sits at its canonical path,
+  // so the orphan probe reconstructs it and blocks at exit 1 — refused, but
+  // naming an orphan instead of the entry nobody could read, and the ticket
+  // stays stuck. The expensive half needs the checkout somewhere else, which
+  // is one `git worktree move`: `wt` and `stray` are both read off git's
+  // listing, the one thing the unreadable entry already blinded, and the
+  // orphan probe reconstructs one path only. Measured at euid 501 with the
+  // checkout moved (its directory name kept, so `stray` WOULD have matched had
+  // git listed it): exit 0, `released:true`, `blockers:[]`, branch deleted,
+  // `in-progress` dropped, member's uncommitted work still on disk. Both
+  // halves are the same skip, so this case is what stands between it and a
+  // merge — it was the only one of the 86 here that caught it.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const entry = join(r.w, ".git", "worktrees", "9-release-ticket");
