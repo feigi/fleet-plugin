@@ -30,7 +30,16 @@ sha=$2
 # the only stderr it can add is the diagnosis of a failure, and swallowing that
 # leaves the die message asserting a cause the script cannot know. A bad remote
 # URL and a removed remote are both "cannot fetch"; only git can say which.
-echo "\$ git fetch --quiet origin $branch" >&2
+#
+# `printf`, not `echo`, on THIS line alone (#484): `$branch` is still raw argv
+# here — `[ $# -eq 2 ]` is the only guard it has passed — so a `\c` in it
+# truncated the trace AND swallowed its newline, welding git's own `fatal:`
+# onto the tail of a line that had already lied about the command being run.
+# The three `$branch` echoes below are a different case and stay: each runs
+# only after git ACCEPTED the ref, and `git check-ref-format --branch` refuses
+# a backslash, so no value reaching them can carry one. Acceptance is what
+# makes a refname safe, never the proposal.
+printf '$ git fetch --quiet origin %s\n' "$branch" >&2
 git fetch --quiet origin "$branch" \
   || die "cannot fetch origin/$branch"
 

@@ -29,7 +29,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,10 +93,17 @@ const run = (cwd, script, args, extraEnv = {}) =>
 // `derive-testcmd.sh` at 1. The ticket does not mention that asymmetry.
 const CASES = [
   {
+    // The `\c` sits in the BRANCH slot, not the sha slot. Both reach `die()`,
+    // but only the branch reaches the fetch trace at verify-sha.sh:33 — the
+    // one line in these scripts where raw argv is printed before any git
+    // command has accepted it. With the escape in the sha slot the suite was
+    // green over that line: the sha is read after the fetch, so it can never
+    // get there. `trace` below is what pins it.
     script: "verify-sha.sh",
-    args: ["main", "back\\clue"],
+    args: ["back\\clue", "deadbee"],
     exit: 2,
-    line: "verify-sha: cannot resolve back\\clue to a commit in this repository",
+    line: "verify-sha: cannot fetch origin/back\\clue",
+    trace: "$ git fetch --quiet origin back\\clue",
   },
   {
     script: "drop-merged-label.sh",
@@ -173,6 +180,16 @@ for (const c of CASES) {
       r.stderr.includes(`${c.line}\n`),
       `\`echo\` truncates this refusal at the \`\\c\` — it must arrive verbatim and newline-terminated.\nwant: ${JSON.stringify(`${c.line}\n`)}\ngot:  ${JSON.stringify(r.stderr)}`,
     );
+    // A trace line ABOVE the refusal, where the script names the command it is
+    // about to run. Only verify-sha.sh has one carrying unvalidated argv, and
+    // the newline is the half that matters most: `echo` eats it, so git's own
+    // `fatal:` lands welded to the tail of the trace and stops anchoring `^`.
+    if (c.trace) {
+      assert.ok(
+        r.stderr.includes(`${c.trace}\n`),
+        `the trace line must name the command verbatim and keep its newline.\nwant: ${JSON.stringify(`${c.trace}\n`)}\ngot:  ${JSON.stringify(r.stderr)}`,
+      );
+    }
   });
 }
 
@@ -228,14 +245,23 @@ test("worktree-audit: a worktree gone from disk is named verbatim as MISSING", (
   git(w, "worktree", "add", "-q", "-b", "fix/2-thing", wt);
   rmSync(wt, { recursive: true, force: true });
   const r = run(w, "worktree-audit.sh", []);
+  // Status first, as the test above already does. Without it an unrelated
+  // early refusal — the script dying before it ever reaches this line — is
+  // reported under the escaping headline below, naming a cause it did not have.
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(
     r.stderr.includes(`MISSING on disk: ${wt}\n`),
     `the missing path must arrive verbatim; got ${JSON.stringify(r.stderr)}`,
   );
 });
 
-// `keep()`'s reason is the single line eleven call sites converge on, and four
-// of them interpolate a worktree path. reap only considers a branch whose
+// `keep()`'s reason is the single line eleven call sites converge on, and seven
+// of them interpolate a worktree path. Neither number is worth trusting from
+// prose — this comment shipped "four", which is the count of the sites that do
+// NOT interpolate one (129, 139, 308, 328). Re-derive both instead:
+//   grep -c 'keep "\$b"' reap.sh                    # 11
+//   grep 'keep "\$b"' reap.sh | grep -c '\$wt'      # 7
+// reap only considers a branch whose
 // upstream reads `[gone]`, so the fixture has to push the branch and then
 // delete it on origin — reap's own `fetch --prune` is what marks it gone.
 test("reap: a KEEP reason holding a backslashed path reaches the operator whole", (t) => {
@@ -249,6 +275,7 @@ test("reap: a KEEP reason holding a backslashed path reaches the operator whole"
   git(w, "push", "-q", "origin", "--delete", "fix/3-thing");
   writeFileSync(join(wt, "g.txt"), "uncommitted\n"); // dirty → `dirty worktree $wt`
   const r = run(w, "reap.sh", []);
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(
     r.stderr.includes(`KEEP fix/3-thing — dirty worktree ${wt}\n`),
     `\`echo\` truncates the KEEP line at the \`\\c\` — the worktree path must arrive verbatim; got ${JSON.stringify(r.stderr)}`,
@@ -264,8 +291,77 @@ test("claim-ticket: the dry-run plan names a backslashed worktree path verbatim"
   git(w, "commit", "-q", "-m", "pkg");
   git(w, "push", "-q", "origin", "main");
   const r = run(w, "claim-ticket.sh", ["7", "back\\clue", "fix"]);
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(
     r.stderr.includes("would: git worktree add .worktrees/7-back\\clue -b fix/7-back\\clue origin/main\n"),
     `the planned path and branch must arrive verbatim — \`echo\` truncates both at the \`\\c\`; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The fix's own regression risk, at every site at once.
+//
+// The fixtures above are behavioural and cost a git repo each, so they pin one
+// line per script. This pins the invariant the whole sweep rests on across all
+// of them, statically: `printf` must be handed a LITERAL format, never one
+// built by interpolation.
+//
+// Why a static test is the only thing that can catch it: `printf "$msg\n"` is
+// the regression that reopens BOTH halves of #484, and every `\c` fixture above
+// stays green over it. Measured on /bin/sh and /bin/dash — POSIX printf expands
+// `\c` only under `%b`, never in the format it was handed, so
+// `printf "$NAME: back\clue\n"` prints `back\clue` intact while
+// `printf '%s\n' "back\clue"` does too. Only a `%`-carrying message tells them
+// apart, and feeding one to all ~35 sites would need a fixture per site. Under
+// that mutation the die() sites of verify-sha.sh and inflight.sh were reverted
+// and the full suite stayed green.
+//
+// Not delegated to shellcheck: SC2059 is exactly this check, but it reports at
+// `info`, and CI runs `shellcheck -x -S warning`, which filters it out before
+// it is printed. Raising that floor is a change to a workflow file this ticket
+// has no business in.
+//
+// It does NOT catch a revert to `echo` — nothing static can, since two thirds
+// of the `echo` calls in these scripts interpolate values that are safe by
+// construction (numbers, SHAs, refs git already accepted). That direction is
+// what the behavioural fixtures above, and the per-script path fixtures in
+// inflight.test.mjs and release-ticket.test.mjs, are for.
+test("every printf in the fleet scripts is handed a literal format string", () => {
+  // The format argument is the first token after `printf`: a single-quoted run
+  // (literal through and through), a double-quoted run honouring `\"`, or a
+  // bare word. Full-line comments are skipped — several of them quote the very
+  // form being banned.
+  const FORMAT = /(?:^|[;&|(){}\s])printf[ \t]+('[^']*'|"(?:[^"\\]|\\.)*"|[^\s;&|)]+)/g;
+  // Single quotes cannot interpolate at all. Anything else does the moment it
+  // carries an unescaped `$` or a backtick — `"\$arg"` is a literal dollar and
+  // stays legal, which is what the agent-test runner claim-ticket.sh writes
+  // through a heredoc relies on.
+  const interpolates = (tok) => {
+    if (tok.startsWith("'")) return false;
+    const body = tok.startsWith('"') ? tok.slice(1, -1) : tok;
+    return /(?:^|[^\\])[$`]/.test(body);
+  };
+
+  const scripts = readdirSync(DIR).filter((n) => n.endsWith(".sh")).sort();
+  // A glob that matches nothing passes every assertion below it. Same failure
+  // as `tests 0`, and the same reading rule: no scripts is a broken test.
+  assert.ok(scripts.length >= 9, `expected the fleet scripts, found ${scripts.length}`);
+
+  const bad = [];
+  let checked = 0;
+  for (const name of scripts) {
+    readFileSync(join(DIR, name), "utf8").split("\n").forEach((line, i) => {
+      if (/^\s*#/.test(line)) return;
+      for (const m of line.matchAll(FORMAT)) {
+        checked++;
+        if (interpolates(m[1])) bad.push(`${name}:${i + 1}  ${m[1]}`);
+      }
+    });
+  }
+  assert.ok(checked >= 100, `expected to find the sweep's printf calls, found ${checked}`);
+  assert.deepEqual(
+    bad,
+    [],
+    `these printf calls build their format by interpolation, which consumes any \`%\` in the message and re-opens #484:\n  ${bad.join("\n  ")}`,
   );
 });
