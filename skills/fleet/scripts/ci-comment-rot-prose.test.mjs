@@ -28,9 +28,11 @@ const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)),
 
 // Comment prose only, wrap-invisible. Every claim below spans a hard wrap, so a
 // fragment only matches once the `#` markers and the line breaks are gone —
-// same convention as the other *-prose tests. Comment lines are the ones whose
-// first non-space character is `#`; a `#` inside a `run:` string is not one,
-// which is what keeps the workflow's own shell out of the prose.
+// same convention as the other *-prose tests. A comment line is one whose
+// FIRST non-space character is `#` — which excludes a trailing `# …` on a code
+// line and a `#` inside a `run:` string alike, and sweeps in the whole-line
+// shell comments inside `run:` blocks. Prose meant to be pinned here therefore
+// has to live in a whole-line comment.
 const prose = (src) =>
   src
     .split("\n")
@@ -50,7 +52,12 @@ export function citationFault(citing, cited) {
   if (!citing.includes("claim-ticket.sh")) {
     return "ci.yml no longer names claim-ticket.sh — the vendored-tree argument lost the source it rests on";
   }
-  const quoted = citing.match(/claim-ticket\.sh[^"]*"([^"]+)"/);
+  // Bounded to the citing sentence. Unbounded (`[^"]*`) the scan runs to the
+  // next quote ANYWHERE later in the prose, so the moment the citation is
+  // paraphrased — one of the two fixes #348 sanctions — the rule re-attaches to
+  // an unrelated quoted phrase further down ci.yml and demands claim-ticket.sh
+  // contain that.
+  const quoted = citing.match(/claim-ticket\.sh[^".]*"([^"]+)"/);
   if (!quoted) return null; // paraphrased, not quoted: nothing claims to be verbatim
   if (!cited.includes(quoted[1])) {
     return `ci.yml quotes claim-ticket.sh as saying "${quoted[1]}", and that file does not say it`;
@@ -96,11 +103,14 @@ test("the Shellcheck comment does not present its examples as the complete set",
 test("the vendored-tree sentence makes a structural claim, not a size claim", () => {
   // The sentence exists to say there is nothing to walk INTO under that
   // directory. A file count neither supports that nor survives a commit.
-  const sentence = CI.match(/no vendored tree under skills\/fleet\/scripts\/[^.]*/);
-  assert.ok(sentence, "ci.yml no longer argues that skills/fleet/scripts/ holds no vendored tree");
+  // A fixed window, not the sentence: `[^.]*` stops at the first period, and
+  // the count reads exactly the same re-added as the NEXT sentence as it did
+  // after a semicolon, which is the form #348 deleted.
+  const span = CI.match(/no vendored tree under skills\/fleet\/scripts\/.{0,120}/);
+  assert.ok(span, "ci.yml no longer argues that skills/fleet/scripts/ holds no vendored tree");
   assert.doesNotMatch(
-    sentence[0],
+    span[0],
     /\d/,
-    `the vendored-tree sentence sizes the directory again, and the number is stale on arrival: "${sentence[0]}"`,
+    `the vendored-tree claim sizes the directory again, and the number is stale on arrival: "${span[0]}"`,
   );
 });
