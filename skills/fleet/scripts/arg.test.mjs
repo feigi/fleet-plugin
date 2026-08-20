@@ -148,7 +148,7 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
 // (candidates.test.mjs, at the JQ_OVERRIDE that motivated the fix); ledger
 // CAPTURES gh's stderr (`stdio: ["ignore", "pipe", "pipe"]`, ledger.mjs:441)
 // instead of forwarding it, so fd 2 is never the fd under pressure; board LOGS
-// a failed gh and returns null (tryRun, board.mjs:77) rather than refusing, so
+// a failed gh and returns null (tryRun, board.mjs:76-79) rather than refusing, so
 // it has no exit 2 to invert in the first place. fleet-tick is here because it
 // does forward and does refuse (fleet-tick.mjs:177-184) — measured at 65,613 B
 // forwarded and exit 2 — it only needs a wordier argv to reach gh, which is a
