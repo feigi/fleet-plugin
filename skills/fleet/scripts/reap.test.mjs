@@ -565,6 +565,44 @@ test("a worktree whose .git is a dangling symlink is kept, never reaped as clean
   assert.equal(branchExists(w, "feature/merged"), true);
 });
 
+test("a non-fleet worktree holding an ignored file is kept, never reaped", (t) => {
+  // The one keep the worktree-present branch owns that nothing else here
+  // reaches. `git worktree remove` refuses on modified and untracked files but
+  // deletes IGNORED ones silently, so outside `.worktrees/` — where an ignored
+  // file is a .env or a scratch note that exists nowhere else — the
+  // `--ignored` probe is the only thing left between a merged, linked,
+  // tracked-clean worktree and `git branch -D`. Every earlier guard passes by
+  // construction, which is what makes this test see that probe and only it.
+  const w = repo(t);
+  // Deliberately NOT under `.worktrees/`: that home is what the case statement
+  // keys the fleet exemption on, and a fleet worktree is reaped WITH its
+  // machine-generated ignored files.
+  const wt = join(w, "..", "outside");
+  git(w, "worktree", "add", "-q", wt, "-b", "feature/merged", "main");
+  writeFileSync(join(wt, ".gitignore"), ".env\n");
+  git(wt, "add", ".gitignore");
+  commit(wt, "merged work");
+  git(wt, "push", "-q", "-u", "origin", "feature/merged");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feature/merged", "feature/merged");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", "feature/merged");
+  git(w, "fetch", "-q", "--prune", "origin");
+  writeFileSync(join(wt, ".env"), "SECRET=exists nowhere else\n");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the --ignored probe can keep it");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  // The reason, not just the keep: every other guard in this branch also
+  // leaves `reaped` empty, so the pair alone does not say which one answered.
+  assert.match(json.kept[0].reason, /^ignored files present in .*: \.env$/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(join(wt, ".env"), "utf8"), "SECRET=exists nowhere else\n", "the precious file must survive the run");
+});
+
 test("a repo path containing a space still finds and reaps the branch's worktree", (t) => {
   const w = repo(t, "my repos");
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
