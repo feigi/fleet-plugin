@@ -58,7 +58,7 @@ const flat = (s) => s.replace(/\s+/g, " ");
 // all five step-5 pins and line width merely samples which one fires.
 const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
 const finisherDeferrals = () =>
-  flat(between(RUN_TEAM, "**Confirm every deferral is filed as an issue**", "Add `ready-to-merge`", "run-team finisher duty 2"));
+  flat(between(RUN_TEAM, "**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2"));
 
 test("step 5 files through ledger.mjs check, not its own gh search", () => {
   const s = step5();
@@ -140,6 +140,24 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // The exit-0 hazard is the one both files must state, not merely agree on:
   // it is the code that reads as permission.
   assert.match(runLedger, /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
+});
+
+test("the finisher verifies a claimed APPLY against the branch diff, not the applier's word", () => {
+  // Duty 2 audits deferrals AND applies. The review ran against a snapshot cut
+  // before the fix-applier's edits existed, so nothing but the finisher ever
+  // checks that a claimed APPLY actually landed — measured once at five applies
+  // where the controller's hand-written list named three.
+  //
+  // ONE bounded span, not two presence pins: a pin on the claim sentence alone
+  // stays green with the verification command deleted, and a pin on the command
+  // alone stays green with the duty reworded into a suggestion. Bounded rather
+  // than exact so a reflow of the sentence between them survives, which is the
+  // ceiling this whole file already accepts.
+  assert.match(
+    finisherDeferrals(),
+    /\*\*A fix-applier's "applied" is a claim like any other\*\*.{0,200}?Confirm `git diff origin\/main\.\.\.HEAD` actually contains what it reported applying\./,
+    "duty 2 no longer requires the finisher to verify a claimed APPLY against the branch diff — an applier's \"applied\" becomes self-certifying and a dropped fix ships labelled",
+  );
 });
 
 test("the finisher files its own deferrals through the same guard", () => {

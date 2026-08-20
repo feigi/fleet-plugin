@@ -948,14 +948,25 @@ a minute apart showed *different* mutants, so a member's report and any single
    and you find out at merge time. **Give it the two-cause block below,
    verbatim** — a bare SHA mismatch names no cause, and the halt report needs
    one.
-2. **Confirm every deferral is filed as an issue** — not parked as a comment on
-   the PR's *own* source issue, which the PR's `Closes #N` buries on merge.
-   Caught once at seven findings. A comment on an existing *follow-up* issue is
-   filed: that is `review-and-fix.md` step 5, not a violation. Not filed → file
-   it or halt, never label over it — and file it the way step 5 does, through
+2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
+   the merge.** The test is a durable home, not a tracker number: a tracker
+   issue and a committed in-tree comment both qualify, and for a finding whose
+   remedy was measured worse than the defect the in-tree note is the better one.
+   What fails is a promise living only in a PR body, or on the PR's *own* source
+   issue, which `Closes #N` buries on merge. Caught once at seven findings. A
+   comment on an existing *follow-up* issue is filed: that is
+   `review-and-fix.md` step 5, not a violation. Not filed → file it or halt,
+   never label over it — and file it the way step 5 does, through
    `ledger.mjs check "<subject>"`, never a bare search. The finisher files last,
    off its own read of what the reviewer left behind, so a deferral it reads as
    unfiled may already be on the tracker under someone else's wording.
+
+   **A fix-applier's "applied" is a claim like any other**, and nothing else
+   checks it — the review ran against a snapshot cut before those edits existed.
+   Confirm `git diff origin/main...HEAD` actually contains what it reported
+   applying. Two finishers in one run extended duty 2 this way unprompted, and
+   one found five applies where the controller's hand-written list named three:
+   a controller's list of what to verify is itself a claim.
 3. Add `ready-to-merge`.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
@@ -964,8 +975,19 @@ A halt at step 1 has exactly two causes, reading identical from a bare SHA
 mismatch. Give the finisher this verbatim, so it derives the cause itself
 instead of asking anyone:
 
-> Worktree differs from your pin, or from what you last read. Before you halt,
-> decide which of two things happened — both cheap, both self-checkable:
+> Worktree differs from your pin, or from what you last read. **Check
+> head-equality first: `worktree HEAD == the SHA you were dispatched against` on
+> a clean tree settles it.** Against your dispatch pin, never against
+> `PR headRefOid`: a member that kept working and pushed after the pin matches
+> the branch tip on a clean tree, so a headRefOid comparison reports "settled"
+> over commits no reviewer read — the exact divergence this halt exists to
+> catch. `headRefOid` is a second, separate read (pushed vs unpushed), never the
+> equality the halt turns on. A rebase entry sitting at or behind the pin is
+> that head's provenance — the implementer's own pre-push replay — not
+> divergence from it, and needs no adjudication at all. Three finishers in one
+> run adjudicated a reflog this one check had already answered. Only when the
+> head differs from your pin, decide which of two things happened — both cheap,
+> both self-checkable:
 >
 > - **Live editor.** `git status --porcelain` is dirty. Sample `git diff --stat`
 >   twice, a minute apart — diffstat growing means someone is still writing.
