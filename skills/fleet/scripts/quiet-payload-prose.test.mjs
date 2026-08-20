@@ -21,11 +21,20 @@
 //   matched over the whole file each is the other's false green: measured, with
 //   the finisher-duty clause gutted a file-wide variant went green off the
 //   CI-Monitor copy alone, and stayed green with a decoy line appended too.
-// - The CLAUSE bound, from `drops` to the end of its own sentence. The
-//   finisher-duty paragraph names `jobs` a second time for an unrelated reason
-//   ("or its `jobs`"), so a paragraph-wide match is satisfiable from outside the
-//   statement: measured, with the clause narrowed to `missing` alone a
-//   paragraph-wide variant went green while this file went red.
+// - The CLAUSE bound: the `--quiet` sentence, from its `drops` to that
+//   sentence's end. Two mutations shape it, one at each edge. Widening it to the
+//   paragraph: the finisher-duty paragraph names `jobs` a second time for an
+//   unrelated reason ("or its `jobs`"), so a paragraph-wide match is satisfiable
+//   from outside the statement — measured, with the clause narrowed to `missing`
+//   alone a paragraph-wide variant went green while this file went red. That
+//   same reason is why the clause STARTS at `drops`: the `--quiet` anchoring it
+//   is matched, never captured, since capturing it drags the preamble back in.
+//   Narrowing it to the first `drops` in the paragraph: any earlier `drops`
+//   sentence about some other effect then satisfies the pin instead, and the
+//   stderr stream `--quiet` also suppresses is exactly such a sentence, already
+//   written in this shape in ci-state.mjs's own header — measured, with a decoy
+//   stderr sentence inserted ahead of a gutted statement, a first-match variant
+//   went green on the pre-#677 text verbatim while this file went red.
 //
 // A moved anchor reddens instead of silently widening the slice back to the file.
 //
@@ -84,13 +93,17 @@ function paragraph(name, anchor) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-// From `drops` to the end of its own sentence. The surrounding paragraphs each
-// mention at least one dropped field for other reasons, so the clause bound is
-// what makes a gutted statement red rather than green on its neighbours.
+// The `--quiet` sentence, from its `drops` to the end of that sentence. The
+// surrounding paragraphs each mention at least one dropped field for other
+// reasons, so the clause bound is what makes a gutted statement red rather than
+// green on its neighbours — and the `--quiet` prefix is what keeps this the
+// sentence ABOUT the flag rather than whichever sentence says `drops` first.
+// It is matched and discarded, not captured: a clause starting at `--quiet`
+// would swallow the preamble the bound exists to exclude.
 function dropsClause(name, anchor) {
-  const clause = paragraph(name, anchor).match(/drops[^.]*/);
-  assert.ok(clause, `${name}: the "${anchor}" paragraph no longer says what \`--quiet\` drops at all`);
-  return clause[0];
+  const clause = paragraph(name, anchor).match(/`--quiet`[^.]*?(drops[^.]*)/);
+  assert.ok(clause, `${name}: the "${anchor}" paragraph no longer has a \`--quiet\` sentence saying what it drops`);
+  return clause[1];
 }
 
 const SKILL = "skills/fleet/skills/run-team/SKILL.md";
