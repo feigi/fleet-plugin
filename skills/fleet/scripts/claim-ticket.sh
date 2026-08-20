@@ -11,7 +11,7 @@
 set -eu
 
 NAME=claim-ticket
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it. This script uses exit 2 for every refusal and has
@@ -99,17 +99,17 @@ echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
   echo "    would: gh issue edit $issue --add-label in-progress" >&2
-  echo "    would: git worktree add $wt -b $branch origin/main" >&2
-  echo "    would: (cd $wt && $install)" >&2
-  echo "    would: write $runner and add it to .git/info/exclude" >&2
+  printf '    would: git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
+  printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
+  printf '    would: write %s and add it to .git/info/exclude\n' "$runner" >&2
 else
   echo "\$ gh issue edit $issue --add-label in-progress" >&2
   gh issue edit "$issue" --add-label in-progress >/dev/null || die "could not label issue $issue"
 
-  echo "\$ git worktree add $wt -b $branch origin/main" >&2
+  printf '$ git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
   git worktree add "$wt" -b "$branch" origin/main >/dev/null || die "worktree add failed"
 
-  echo "\$ (cd $wt && $install)" >&2
+  printf '$ (cd %s && %s)\n' "$wt" "$install" >&2
   (cd "$wt" && $install >/dev/null 2>&1) || die "install failed in $wt"
 
   # The lockfile must be untouched by the install. Non-empty means the wrong
@@ -282,14 +282,14 @@ for arg do
       shared=\${shared%/*}
     done
     case "/\$arg/ /\${resolved#"\$shared"}/" in
-      */node_modules/*) echo "agent-test: \$arg is under node_modules — excluded from the run, not missing" >&2; exit 1 ;;
+      */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "\$arg" >&2; exit 1 ;;
     esac
-    found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { echo "agent-test: cannot read every path under \$arg" >&2; exit 1; }
+    found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
     files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here and the refusal below would
     # never print. Read a status you care about explicitly, as find does above.
-    [ -n "\$files" ] || { echo "agent-test: no test files under \$arg" >&2; exit 1; }
+    [ -n "\$files" ] || { printf 'agent-test: no test files under %s\n' "\$arg" >&2; exit 1; }
     set -- "\$@" \$files
   else
     # find only ever sees what a directory argument expanded to; a bare file
@@ -324,7 +324,7 @@ for arg do
         case "\$arg" in */*) argdir="\${arg%/*}" ;; *) argdir="." ;; esac
         case "\$(cd "\$argdir" 2>/dev/null && pwd)/" in
           "\$PWD"/node_modules/*)
-            echo "agent-test: \$arg is under node_modules — node discards it silently, not a test failure" >&2
+            printf 'agent-test: %s is under node_modules — node discards it silently, not a test failure\n' "\$arg" >&2
             exit 1
             ;;
         esac
@@ -361,7 +361,7 @@ for arg do
         # this is for the mixed case, where node drops it and runs the rest,
         # and the runner would otherwise report a pass for a suite that
         # never ran.
-        *) echo "agent-test: \$arg does not exist" >&2; exit 1 ;;
+        *) printf 'agent-test: %s does not exist\n' "\$arg" >&2; exit 1 ;;
       esac
     fi
     set -- "\$@" "\$arg"
@@ -376,7 +376,7 @@ SH
   chmod +x "$runner"
   excl="$(git rev-parse --git-common-dir)/info/exclude"
   grep -qx agent-test "$excl" 2>/dev/null || echo "agent-test" >> "$excl"
-  echo "    wrote $runner and excluded it" >&2
+  printf '    wrote %s and excluded it\n' "$runner" >&2
 fi
 
 # `$issue` is guarded above (`case … ''|*[!0-9]*|0?*`), but <slug> and <type> are

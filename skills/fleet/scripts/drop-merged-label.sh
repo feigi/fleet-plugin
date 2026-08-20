@@ -21,7 +21,7 @@
 set -eu
 
 NAME=drop-merged-label
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: drop-merged-label.sh <pr> [--apply]"
 pr=$1

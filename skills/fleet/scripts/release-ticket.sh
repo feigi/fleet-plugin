@@ -45,7 +45,7 @@ set -eu
 export LC_ALL=C
 
 NAME=release-ticket
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
@@ -311,16 +311,16 @@ halt() {
   detail=$1
   [ -z "$wt" ] || detail="$1 — $wt_report"
   if [ "$wt_outcome" = Deregistered ] || [ "$wt_outcome" = Released ] || [ "$done_branch" = true ]; then
-    echo "$NAME: #$issue PARTIALLY RELEASED — $1" >&2
+    printf '%s: #%s PARTIALLY RELEASED — %s\n' "$NAME" "$issue" "$1" >&2
   elif [ "$wt_outcome" = Indeterminate ]; then
     # Neither headline. Asserting `nothing landed` here would be the original
     # defect with a different trigger, and asserting a partial release would
     # invent one; the operator is told the measurement failed instead.
-    echo "$NAME: #$issue HALTED mid-release — what landed could not be measured: $1" >&2
+    printf '%s: #%s HALTED mid-release — what landed could not be measured: %s\n' "$NAME" "$issue" "$1" >&2
   else
-    echo "$NAME: #$issue HALTED mid-release — nothing landed: $1" >&2
+    printf '%s: #%s HALTED mid-release — nothing landed: %s\n' "$NAME" "$issue" "$1" >&2
   fi
-  [ -z "$wt" ] || echo "    $wt_report" >&2
+  [ -z "$wt" ] || printf '    %s\n' "$wt_report" >&2
   echo "    branch deleted: $done_branch, in-progress: still on the issue" >&2
   echo "    the ticket still reads as taken — finish or restore it by hand" >&2
   blocker_j=$(jstr "$detail") || die "could not escape the halt blocker for #$issue"
@@ -337,7 +337,7 @@ blockers=""
 block() {
   block_j=$(jstr "$1") || die "could not escape the blocker for #$issue"
   blockers="${blockers}\"$block_j\","
-  echo "    BLOCKED: $1" >&2
+  printf '    BLOCKED: %s\n' "$1" >&2
 }
 
 # Is this path ABSENT, or merely one we are not permitted to stat? -e is false
@@ -799,7 +799,7 @@ if printf '%s\n' "$labels" | grep -qx in-progress; then has_label=true; else has
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2
   [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label in-progress" >&2
-  [ -n "$wt" ] && echo "    would: git worktree remove $wt" >&2
+  [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
   [ "$has_branch" = true ] && echo "    would: git branch -d $branch" >&2
 else
   # Label LAST. The two local deletes are the ones that refuse — that refusal is
@@ -814,7 +814,7 @@ else
     # force past. Quote git's own reason: this fires precisely when something
     # appeared that the checks above did not see, so naming a cause here would
     # be a guess.
-    echo "\$ git worktree remove $wt" >&2
+    printf '$ git worktree remove %s\n' "$wt" >&2
     # Measure on the REFUSAL only. git's two deletes are ordered, not atomic, so
     # a non-zero rc tells us a step failed and nothing about which — that is the
     # whole of #208. A zero rc is different in kind: both deletes completed, and

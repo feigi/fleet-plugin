@@ -58,7 +58,7 @@ set -eu
 export LC_ALL=C
 
 NAME=inflight
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it; only what is true of THIS script is repeated here.
@@ -90,7 +90,7 @@ add_hit() { hits="${hits}\"$1\","; echo "    HIT: $1" >&2; }
 # gone — so every existing diagnostic string below still reads the same on
 # stderr, and a caller grepping for one is unaffected by this change.
 unknown=""
-add_unknown() { unknown="${unknown}\"$1\","; echo "$NAME: $2" >&2; }
+add_unknown() { unknown="${unknown}\"$1\","; printf '%s: %s\n' "$NAME" "$2" >&2; }
 
 # Evidence defaults. A probe that fails leaves its own field empty rather
 # than unset — `set -u` would otherwise abort the payload assembly at the
@@ -113,15 +113,20 @@ wtfile=""
 # `${…:+}` so a file that was never created contributes no argument at all
 # rather than an empty one, and `rm -f` with no operands is specified to exit 0.
 #
-# `|| echo`, not a bare `rm -f`: this trap fires OUTSIDE the three probe
+# `|| printf`, not a bare `rm -f`: this trap fires OUTSIDE the three probe
 # functions, where `set -e` is still live, so a failing `rm -f` exits 1 — and
 # the contract reads 1 as "taken", which would let cleanup overwrite a verdict
 # already computed and announced. The same hazard the verdict `printf` at the
-# foot of this file guards with `|| die`. `echo` returns 0, so the declared
+# foot of this file guards with `|| die`. The reporter returns 0, so the declared
 # status survives and the cleanup failure is still said out loud rather than
 # swallowed by a bare `|| :`.
+#
+# `printf`, not `echo`: $errfile and $wtfile are mktemp paths, and `echo`
+# expands a backslash in one. It returns 0 just as `echo` did, so the status
+# argument above is unchanged. Format string double-quoted because the trap
+# body is already single-quoted.
 trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ||
-  echo "$NAME: could not remove $errfile $wtfile" >&2' EXIT
+  printf "%s: could not remove %s %s\n" "$NAME" "$errfile" "$wtfile" >&2' EXIT
 
 # Probe 1 — a PR that is actually ABOUT this ticket.
 #
@@ -695,7 +700,7 @@ wt=$(printf '%s\n' "$worktrees" | LC_ALL=C awk -v n="$n" '
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the worktree list for #$n"; return 1; }
 if [ -n "$wt" ]; then
-  echo "    worktrees: $wt" >&2
+  printf '    worktrees: %s\n' "$wt" >&2
   # `hits` is a set of probe names, not a tally, and both halves of this probe
   # answer under the one name — so record it only if the branch half above did
   # not already.
@@ -794,7 +799,7 @@ add_evidence worktree "$wt"
 # `probe_X || :`, which exempts the whole body from `set -e`, so every fallible
 # command in one carries its own guard.) The EXIT trap installed once at the top
 # of this file is the other site outside that exemption, and carries the same
-# guard for the same reason — see the `|| echo` on it.
+# guard for the same reason — see the `|| printf` on it.
 #
 # The evidence slot is an unquoted `%s`, unlike every other string slot in this
 # printf, and it now carries the object's keys as well as its values:

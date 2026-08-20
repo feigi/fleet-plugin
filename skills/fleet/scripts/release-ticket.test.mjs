@@ -940,6 +940,34 @@ test("a backslash in the worktree path does not make the lock probe answer `no`"
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+test("the dry run's plan names a backslashed worktree path verbatim", (t) => {
+  // The plan is the operator's only chance to see what `--apply` would delete,
+  // and it ran through `echo`, which expands escapes in its operand: a `\c` in
+  // the path truncated the line at `back` and swallowed its newline, so the
+  // plan named a directory that does not exist and the line after it collided
+  // onto the remains (#484).
+  //
+  // `back\clue`, not the `back\slash` the lock fixture above uses: `\s` is an
+  // unknown escape and passes through `echo` untouched, which is what makes a
+  // `\slash` fixture read as coverage while catching nothing. Only `\c`
+  // truncates.
+  //
+  // Asserted on the tail rather than on `c.wt`: this file's `repo()` does not
+  // realpath its mkdtemp root, while git reports the RESOLVED path, so on
+  // macOS the two differ by a `/private` prefix. The leaf and the newline are
+  // what the defect destroys anyway.
+  const r = repo(t, "back\\clue");
+  const c = claim(r.w, 9, "release-ticket");
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.code, 0, `an ordinary claim must plan cleanly: ${dry.stderr}`);
+  assert.match(
+    dry.stderr,
+    /\n {4}would: git worktree remove \S*back\\clue\/\.worktrees\/9-release-ticket\n/,
+    `the planned path must arrive verbatim and newline-terminated; got ${JSON.stringify(dry.stderr)}`,
+  );
+});
+
 test("a lock on a SIBLING worktree is not this claim's lock", (t) => {
   // The lock probe reads the whole porcelain listing, so the per-entry `cur`
   // reset is the only thing standing between a sibling's `locked` line and this

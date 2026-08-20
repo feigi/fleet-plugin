@@ -37,7 +37,7 @@ set -eu
 export LC_ALL=C
 
 NAME=worktree-audit
-die() { echo "$NAME: $1" >&2; exit 2; }
+die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it. This script defines no exit 1 at all, so a bare 1
@@ -54,7 +54,7 @@ json_lib="$(dirname "$0")/json.sh"
 # added later cannot half-set the quadruple and emit a record whose counts
 # contradict its own `readable` field. The MISSING branch stays spelled out —
 # it is the one state with non-null counts, and looking different is the point.
-unknown() { readable=false; ahead=null; dirty=null; files=""; echo "    UNREADABLE: $wt ($1)" >&2; }
+unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
 # Is $1 established ABSENT, or merely a path this script cannot stat? A bare
 # `[ -d ]` failure is both — an unreadable parent (dropped mount, chmod'd
@@ -165,7 +165,7 @@ while IFS="$(printf '\t')" read -r wt br; do
   elif gone "$wt"; then
     readable=false
     ahead=0; dirty=0; files=""
-    echo "    MISSING on disk: $wt" >&2
+    printf '    MISSING on disk: %s\n' "$wt" >&2
   elif [ -e "$wt" ]; then
     # `-d` false does not mean "not there". A registered worktree path replaced
     # by a regular file, a symlink to one, or a FIFO is all three still LISTED
@@ -180,7 +180,7 @@ while IFS="$(printf '\t')" read -r wt br; do
   else
     unknown "cannot tell whether it exists — an ancestor could not be read"
   fi
-  echo "    $wt  branch=$short  ahead=$ahead  dirty=$dirty" >&2
+  printf '    %s  branch=%s  ahead=%s  dirty=%s\n' "$wt" "$short" "$ahead" "$dirty" >&2
   [ "$first" = 1 ] || printf ','
   first=0
   # `$wt` and `$short` are both reachable, by different routes: a branch name

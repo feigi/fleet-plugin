@@ -595,6 +595,31 @@ test("probe 3: an ordinary worktree list still reports a genuinely free ticket a
   assert.equal(r.json.evidence.worktree, "");
 });
 
+test("probe 3: a backslash in the worktree path reaches the operator's listing whole", (t) => {
+  // `    worktrees: $wt` is this script's only stderr report of a path, and it
+  // ran through `echo`, which expands escapes in its operand: a `\c` truncated
+  // the line at `back`, swallowed its newline, and left the next line collided
+  // onto the remains — the operator handed a path that does not exist (#484).
+  //
+  // `\c`, never `\s`: an unknown escape passes through `echo` unharmed, so a
+  // `back\slash` fixture reads as coverage and catches nothing. The assertion
+  // takes the whole leaf WITH its newline for the same reason — the truncated
+  // head is exactly what survives the defect, so a substring match on it would
+  // pass against the bug.
+  //
+  // The pair to this is printf-die-sweep.test.mjs, which pins one line per
+  // script; this file owns inflight.sh's, because the fixture apparatus for a
+  // linked worktree already lives here.
+  const r = inflight(66, { detachedWorktreeUnder: "wt", worktreeLeaf: "fix-66-back\\clue" }, t);
+  assert.equal(r.code, 1, `a worktree that exists must never read as free: ${r.stderr}`);
+  assert.equal(r.json.taken, true);
+  assert.match(
+    r.stderr,
+    /\n {4}worktrees: \S*\/wt\/fix-66-back\\clue\n/,
+    `the path must arrive verbatim and newline-terminated; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
 test("probe 3: a translation that cannot run refuses, rather than reading an empty listing as free", (t) => {
   // The guard on the `tr` that makes the NUL-delimited listing readable by awk.
   // Probe 3's other two status checks — the count and the filter — each have a
