@@ -160,24 +160,19 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
 
   if [ -n "$wt" ]; then
     # Three states, never the two `|| echo dirty` used to collapse it to:
-    # present (readable decides), established absent (nothing to protect —
-    # reap.sh's OWN branches never rename their worktree away from `[gone]`,
-    # so a directory that is really not there holds no work), or cannot tell
-    # (keep — an unanswerable probe authorizes nothing, the same fail-closed
-    # direction the cherry check above already takes). `-e`/`gone` first,
-    # before any git command runs through $wt, so a genuinely deleted
-    # directory never reaches a status call that would fail on it and read as
-    # dirty forever (#83).
+    # present (readable decides, in the body below), established absent
+    # (nothing to protect — reap.sh's OWN branches never rename their worktree
+    # away from `[gone]`, so a directory that is really not there holds no
+    # work, and it falls through to the removal), or cannot tell (keep — an
+    # unanswerable probe authorizes nothing, the same fail-closed direction the
+    # cherry check above already takes).
+    #
+    # `-e` is this `if`'s own condition rather than a boolean read one line
+    # later, so existence is settled before any git command runs through $wt: a
+    # genuinely deleted directory never reaches a status call that would fail
+    # on it and read as dirty forever (#83), and the unanswerable case reaches
+    # no such call at all, its `elif` being mutually exclusive with the body.
     if [ -e "$wt" ]; then
-      wt_present=true
-    elif gone "$wt"; then
-      wt_present=false
-    else
-      keep "$b" "cannot tell whether worktree $wt exists"
-      continue
-    fi
-
-    if [ "$wt_present" = true ]; then
       # Establish the .git linkage exists before trusting anything git says
       # through it. Delete a worktree's .git file outright and `git -C` does
       # not fail: it walks UP to the enclosing repo and answers about THAT at
@@ -236,9 +231,10 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       # keeping on ignored files would strand them all and defeat reap. Run
       # the ignored-keep for non-fleet trees only, keyed on the .worktrees/
       # home (robust to an older tree that predates the agent-test marker).
-      # Gated on $wt_present: an established-absent directory has no ignored
-      # files to strand, and running this against it would read the same
-      # rc-nonzero "unreadable" it was already ruled out from being.
+      # Inside the `[ -e "$wt" ]` branch, and only there: an established-absent
+      # directory has no ignored files to strand, and running this against it
+      # would read the same rc-nonzero "unreadable" it was already ruled out
+      # from being.
       case "$wt" in
         */.worktrees/*) : ;;
         *)
@@ -253,6 +249,9 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
           fi
           ;;
       esac
+    elif ! gone "$wt"; then
+      keep "$b" "cannot tell whether worktree $wt exists"
+      continue
     fi
 
     # Reached with $wt either present-readable-clean or established absent —
