@@ -52,15 +52,21 @@ export function citationFault(citing, cited) {
   if (!citing.includes("claim-ticket.sh")) {
     return "ci.yml no longer names claim-ticket.sh — the vendored-tree argument lost the source it rests on";
   }
-  // Bounded to the citing sentence. Unbounded (`[^"]*`) the scan runs to the
-  // next quote ANYWHERE later in the prose, so the moment the citation is
-  // paraphrased — one of the two fixes #348 sanctions — the rule re-attaches to
-  // an unrelated quoted phrase further down ci.yml and demands claim-ticket.sh
-  // contain that.
-  const quoted = citing.match(/claim-ticket\.sh[^".]*"([^"]+)"/);
-  if (!quoted) return null; // paraphrased, not quoted: nothing claims to be verbatim
-  if (!cited.includes(quoted[1])) {
-    return `ci.yml quotes claim-ticket.sh as saying "${quoted[1]}", and that file does not say it`;
+  // The citing SENTENCE, and EVERY quoted span in it. Two separate traps.
+  // Scanning unbounded (`[^"]*"([^"]+)"`) runs to the next quote anywhere later
+  // in the prose, so the moment the citation is paraphrased — one of the two
+  // fixes #348 sanctions — the rule re-attaches to an unrelated quoted phrase
+  // further down ci.yml and demands claim-ticket.sh contain that. Taking only
+  // the FIRST span is the silent direction: an aside that does quote the file
+  // stands in front of a misquote and absorbs the whole check. The early return
+  // above is what guarantees this match is non-null.
+  const sentence = citing.match(/claim-ticket\.sh[^.]*/)[0];
+  // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
+  // dropping the quotation marks is the other of the two fixes #348 sanctions.
+  for (const [, quoted] of sentence.matchAll(/"([^"]+)"/g)) {
+    if (!cited.includes(quoted)) {
+      return `ci.yml quotes claim-ticket.sh as saying "${quoted}", and that file does not say it`;
+    }
   }
   return null;
 }
