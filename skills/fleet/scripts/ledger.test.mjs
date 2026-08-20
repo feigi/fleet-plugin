@@ -309,7 +309,7 @@ test("near-misses withheld by the cap are counted, not dropped in silence (#154)
   assert.equal(r.json.nearTotal, 5, "the caller must be able to tell 3-of-3 from 3-of-5 from the payload alone");
   assert.match(
     r.stderr,
-    /2 further near-miss\(es\) not shown/,
+    /2 further near-misses not shown/,
     "the count withheld has to reach the caller, not just the JSON",
   );
   assert.match(
@@ -358,7 +358,7 @@ test("the score reported as withheld is the HIGHEST withheld one, not the last s
   // withheld row reads 0.33.
   assert.match(
     r.stderr,
-    /2 further near-miss\(es\) not shown — highest withheld 0\.33/,
+    /2 further near-misses not shown — highest withheld 0\.33/,
     "the caller is told what the cut cost it, which is the top of what it did not get",
   );
 });
@@ -371,7 +371,7 @@ test("exactly one withheld near-miss still fires the notice (#154)", () => {
   assert.equal(r.status, 0);
   assert.equal(r.json.near.length, 3, "the display cap is what withholds the fourth row");
   assert.equal(r.json.nearTotal, 4);
-  assert.match(r.stderr, /1 further near-miss/, "one withheld row is still a withheld row");
+  assert.match(r.stderr, /1 further near-miss not shown/, "one withheld row is still a withheld row, and one reads in the singular");
 });
 
 test("exactly three near-misses report no withholding — the notice must not fire on a complete list (#154)", () => {
