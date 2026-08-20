@@ -1,12 +1,19 @@
-// #677. `run-team/SKILL.md` stated what `--quiet` drops twice, 345 lines apart,
-// and only one of the two was complete: the CI-Monitor paragraph named `jobs`
-// and `missing`, the finisher-duty paragraph named `jobs` alone. The incomplete
-// copy is the one that costs — it is the paragraph an agent reads when deciding
-// whether it holds the per-job state a `ready-to-merge` label rests on, and
-// `missing` is exactly the field separating "the expected job is absent" from
-// "the expected job failed". `review-and-fix.md`'s twin of that same gate was
-// complete throughout, so the outlier was visible only to a reader holding all
-// three paragraphs open at once. That is what this file is for.
+// #677. `run-team/SKILL.md` stated what `--quiet` drops twice, and only one of
+// the two was complete: the CI-Monitor paragraph named `jobs` and `missing`,
+// the finisher-duty paragraph named `jobs` alone. The incomplete copy is the
+// one that costs — it is the paragraph an agent reads when deciding whether it
+// holds the per-job state a `ready-to-merge` label rests on, and `missing` is
+// exactly the field separating "the expected job is absent" from "the expected
+// job failed". `review-and-fix.md`'s twin of that same gate was complete
+// throughout, so the outlier was visible only to a reader holding all three
+// paragraphs open at once. That is what this file is for.
+//
+// #701. That sentence used to state the gap between those two paragraphs as a
+// line count. Nothing pinned it, and it drifted on SKILL.md edits between the
+// two anchors that touched neither this file nor ci-state.mjs: written 345, it
+// measured 353 when #701 was filed and 375 when #701 was fixed. A fresh number
+// would rot the same way, so the paragraphs are named rather than located. Do
+// not restore one.
 //
 // THE FIELD LIST IS READ OUT OF ci-state.mjs, never restated here. `--quiet`'s
 // effect on the payload is one assignment, and a field added to or renamed in
