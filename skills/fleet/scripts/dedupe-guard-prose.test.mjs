@@ -58,7 +58,7 @@ const flat = (s) => s.replace(/\s+/g, " ");
 // all five step-5 pins and line width merely samples which one fires.
 const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
 const finisherDeferrals = () =>
-  flat(between(RUN_TEAM, "**Confirm every deferral is filed as an issue**", "Add `ready-to-merge`", "run-team finisher duty 2"));
+  flat(between(RUN_TEAM, "**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2"));
 
 test("step 5 files through ledger.mjs check, not its own gh search", () => {
   const s = step5();
