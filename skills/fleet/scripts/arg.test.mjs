@@ -135,20 +135,30 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
   assert.equal(r.status, 2, `exit ${r.status}: die()'s writeSync threw and took the exit code with it`);
 });
 
-// The three scripts #328 names, end to end. Each forwards gh's own stderr
-// (execFileSync with no `stdio`, so Node re-emits it through the ASYNC
-// process.stderr) and only then refuses through die() — so the flood has to
-// come from gh, not from the test, or fd 2 is never the one under pressure.
+// The three scripts #328 names plus fleet-tick, end to end. Each forwards gh's
+// own stderr (execFileSync with no `stdio`, so Node re-emits it through the
+// ASYNC process.stderr) and only then refuses through die() — so the flood has
+// to come from gh, not from the test, or fd 2 is never the one under pressure.
+// That FORWARDS-then-refuses shape is the entry rule for this table, not
+// "reaches die()", which every consumer does.
 //
-// Spelled out rather than derived from CONSUMERS above: board, candidates,
-// fleet-tick and ledger reach die() too, but not all of them through a
-// gh-failure path with argv this uniform, and candidates carries its own copy
-// of this row already (candidates.test.mjs, at the JQ_OVERRIDE that motivated
-// the fix). A consumer added later belongs here deliberately.
+// Spelled out rather than derived from CONSUMERS above, because each consumer
+// that is absent is absent for its own reason and none of them is "has no
+// gh-failure path": candidates carries its own copy of this row already
+// (candidates.test.mjs, at the JQ_OVERRIDE that motivated the fix); ledger
+// CAPTURES gh's stderr (`stdio: ["ignore", "pipe", "pipe"]`, ledger.mjs:441)
+// instead of forwarding it, so fd 2 is never the fd under pressure; board LOGS
+// a failed gh and returns null (tryRun, board.mjs:77) rather than refusing, so
+// it has no exit 2 to invert in the first place. fleet-tick is here because it
+// does forward and does refuse (fleet-tick.mjs:177-184) — measured at 65,613 B
+// forwarded and exit 2 — it only needs a wordier argv to reach gh, which is a
+// reason to spell the argv out, not a reason to leave the path ungated.
+// A consumer added later belongs here deliberately.
 const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },
   { script: "diff-stats", argv: ["--pr", "42"] },
   { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
+  { script: "fleet-tick", argv: ["--implementers", "1", "--reviewers", "1", "--merge-bots", "1", "--pool", "1"] },
 ];
 
 // A `gh` that writes exactly `bytes` to stderr and then fails, so the script
@@ -177,10 +187,24 @@ for (const { script, argv } of GH_FLOOD) {
     assert.match(ordinary.stderr, new RegExp(`^${script}: `, "m"), `${script}.mjs refused without saying so: ${ordinary.stderr}`);
 
     // The row that inverted. Platform-bound and therefore a CI gate, not a
-    // local one: measured on darwin, all three of these still exit 2 with the
-    // try/catch reverted (3/3) — EAGAIN never fires there, which is why the
-    // deterministic test above exists. On Linux #299/#328 measured the
-    // inversion at 3/10 to 7/10 unfixed and 0/20 fixed.
+    // local one: measured on darwin, all four of these still exit 2 with the
+    // try/catch reverted (4/4) — EAGAIN never fires there, which is why the
+    // deterministic test above exists.
+    //
+    // The Linux rates are #328's, read off that issue's body rather than
+    // measured here: the #322 review recorded the unfixed inversion per script
+    // at 5/10, 6/10, 7/10; a second pass at 4/10, 3/10, 0/10 and then 6/10,
+    // 4/10; a third harness at 1/40, 0/40, 0/40 against a self-validating 32/40
+    // control. So the unfixed span is 0/10 to 7/10 — one script read 0/10 in a
+    // pass that read 4/10 and 3/10 for its siblings — and the guard drops all
+    // three to 0/10 in the passes that measured it. #328's own conclusion is
+    // that the RATE is machine-dependent and only the MECHANISM is confirmed,
+    // so a single green Linux run is not evidence the guard is present; the
+    // deterministic test above is what pins that, on every platform.
+    //
+    // candidates.test.mjs's 7/15 unfixed / 0/20 fixed is a DIFFERENT
+    // experiment — candidates.mjs under JQ_OVERRIDE (#299) — not these scripts
+    // under a gh stub. The two are not one series; neither figure carries over.
     const flooded = runWithFloodingGh(script, argv, 200_000);
     assert.ok(
       flooded.stderr.length > 60_000,
