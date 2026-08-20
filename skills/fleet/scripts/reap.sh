@@ -167,11 +167,10 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
     # unanswerable probe authorizes nothing, the same fail-closed direction the
     # cherry check above already takes).
     #
-    # `-e` is this `if`'s own condition rather than a boolean read one line
-    # later, so existence is settled before any git command runs through $wt: a
-    # genuinely deleted directory never reaches a status call that would fail
-    # on it and read as dirty forever (#83), and the unanswerable case reaches
-    # no such call at all, its `elif` being mutually exclusive with the body.
+    # `-e` is this `if`'s own condition, so existence is settled before any
+    # git command runs through $wt: a genuinely deleted directory never
+    # reaches a status call that would fail on it and read as dirty forever
+    # (#83).
     if [ -e "$wt" ]; then
       # Establish the .git linkage exists before trusting anything git says
       # through it. Delete a worktree's .git file outright and `git -C` does
@@ -231,10 +230,6 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
       # keeping on ignored files would strand them all and defeat reap. Run
       # the ignored-keep for non-fleet trees only, keyed on the .worktrees/
       # home (robust to an older tree that predates the agent-test marker).
-      # Inside the `[ -e "$wt" ]` branch, and only there: an established-absent
-      # directory has no ignored files to strand, and running this against it
-      # would read the same rc-nonzero "unreadable" it was already ruled out
-      # from being.
       case "$wt" in
         */.worktrees/*) : ;;
         *)
