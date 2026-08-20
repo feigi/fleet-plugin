@@ -414,11 +414,11 @@ test("--declare-no-ci=true dies behind another flag too, not only at the front o
   assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
 });
 
-// The control: the new `=` guard must not touch the bare spelling. --quiet has
-// no coverage elsewhere (--declare-no-ci's bare form is already pinned above,
-// by its effect on verdict/exit code) — pinned here by ITS effect instead:
-// vlog's command echoes vanish from stderr, though the same gh calls still ran
-// (r.log is written by the stub itself, unconditionally).
+// The control: the new `=` guard must not touch the bare spelling. --quiet's
+// STDERR effect is what pins it here (--declare-no-ci's bare form is already
+// pinned above, by its effect on verdict/exit code): vlog's command echoes
+// vanish from stderr, though the same gh calls still ran (r.log is written by
+// the stub itself, unconditionally). Its PAYLOAD effect is the next test's.
 test("--quiet still reads as present in its bare spelling — the = refusal is not a blanket one", () => {
   const loud = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
   assert.equal(loud.status, 0, loud.stdout + loud.stderr);
@@ -428,6 +428,25 @@ test("--quiet still reads as present in its bare spelling — the = refusal is n
   assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
   assert.doesNotMatch(quiet.stderr, /\$ gh pr view/);
   assert.match(quiet.log, /pr view/, "gh still ran despite the quieter stderr");
+});
+
+// #677. The other half of what `--quiet` does, and the half the flag exists for:
+// `jobs` and `missing` leave the JSON payload with it and are present without
+// it. Same fixture both ways, so the flag is the only difference. The field
+// names are spelled out rather than derived from ci-state.mjs — deriving them
+// from the assignment under test would make this pass vacuously if that
+// assignment changed, which is the one thing it must not do. The deriving is
+// `quiet-payload-prose.test.mjs`'s job, over the prose that has to agree.
+test("--quiet drops `jobs` and `missing` from the payload; without it they are there", () => {
+  const opts = { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } };
+  const loud = run([], opts);
+  const quiet = run(["--quiet"], opts);
+  assert.equal(loud.status, 0, loud.stdout + loud.stderr);
+  assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
+  for (const field of ["jobs", "missing"]) {
+    assert.ok(field in loud.payload, `without --quiet the payload must carry \`${field}\`, and it reads ${JSON.stringify(loud.payload)}`);
+    assert.ok(!(field in quiet.payload), `--quiet must drop \`${field}\` from the payload, and it reads ${JSON.stringify(quiet.payload)}`);
+  }
 });
 
 test("trailing --pr (no value, the entry flag itself) still dies naming the flag", () => {
