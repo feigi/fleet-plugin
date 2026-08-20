@@ -38,7 +38,17 @@ wt=".worktrees/$issue-$slug"
 runner="$wt/agent-test"
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
-[ -e "$wt" ] && die "$wt already exists — ticket may already be claimed"
+# `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
+# absent path, while `git worktree add` refuses it on lstat semantics (`fatal:
+# '…' already exists`) — leaving the refusal to fire three mutations later, after
+# the in-progress label is already on the issue, and in the DEFAULT dry run
+# leaving it not to fire at all: exit 0 and a receipt naming the path claimable.
+# Same predicate release-ticket.sh's `occupied()` already carries, for residue
+# this fleet leaves itself — a symlink pointing AT the registered directory
+# survives the `git worktree remove` that deletes its target. Measured on git
+# 2.50.1: every path `-L` adds here (dangling link, symlink loop) is one `git
+# worktree add` refuses too, so it cannot refuse a claim that would have worked.
+{ [ -e "$wt" ] || [ -L "$wt" ]; } && die "$wt already exists — ticket may already be claimed"
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
 # Everything below is derived from origin/main, the ref the worktree is built

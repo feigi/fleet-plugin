@@ -926,6 +926,51 @@ test("a worktree whose .git vanishes during install refuses instead of trusting 
   assert.match(r.stderr, /has no \.git file — cannot verify the lockfile was not mutated/);
 });
 
+// #188: `[ -e ]` stats, so it FOLLOWS symlinks, while `git worktree add` refuses
+// on lstat semantics. A DANGLING symlink at $wt splits the two — the guard looks
+// through it and sees nothing, while the path is still occupied and still fails
+// the `worktree add` below. `-L` closes that gap, and it is the same predicate
+// release-ticket.sh:464 already ships as `occupied()`, for residue THIS fleet
+// leaves: where a symlink points AT the registered worktree directory, `git
+// worktree remove` deletes the directory and returns 0, leaving the link behind
+// and now dangling.
+//
+// The DRY RUN is the discriminating mode, and it is this script's default. Under
+// `--apply` both spellings do land on exit 2 — only the diagnosis differs, which
+// is the ticket's own framing — but the dry run is where they diverge outright
+// (measured, git 2.50.1):
+//
+//   dangling symlink, base    exit 0  + a receipt naming the path as claimable
+//   dangling symlink, fixed   exit 2  claim-ticket: … already exists
+//   real directory,   both    exit 2  claim-ticket: … already exists
+//
+// So base does not merely misdiagnose the path, it PREDICTS a claim that cannot
+// be made. `--apply` is left unpinned deliberately: it reaches this same guard on
+// the same line, so the cheap mode is already the one that fails.
+//
+// Both directions, because a guard that refused everything would satisfy the
+// refusal alone. `-L` is true for ANY symlink, so the accept case is what
+// establishes it did not widen into one: measured on git 2.50.1, every path `-L`
+// newly refuses (dangling link, symlink loop) is a path `git worktree add`
+// refuses too, and an unoccupied path must still claim.
+test("a dangling symlink at the worktree path is refused, and a free path still claims", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  mkdirSync(join(dir, ".worktrees"), { recursive: true });
+  symlinkSync("/nonexistent-target", join(dir, ".worktrees", "42-slug"));
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 2, "a path occupied by a dangling link is a refusal, not a claimable path");
+  assert.match(r.stderr, /\.worktrees\/42-slug already exists — ticket may already be claimed/,
+    "this script's own diagnosis, not git's bare `fatal: … already exists` three mutations later");
+  assert.equal(r.stdout, "", "and no receipt: nothing here is claimable, so there is nothing to predict");
+
+  // The input the guard must ACCEPT — same script, same mode, nothing at $wt.
+  const free = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const ok = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: free, encoding: "utf8" });
+  assert.equal(ok.status, 0, "`-L` must not refuse a path that is simply not there");
+  assert.match(ok.stdout, /"worktree":"\.worktrees\/42-slug"/);
+});
+
 // --- #119: the payload's own string fields.
 //
 // `$issue` is guarded (`case … ''|*[!0-9]*|0?*`), but `<slug>` and `<type>` are
