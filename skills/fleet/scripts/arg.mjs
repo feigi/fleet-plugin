@@ -17,7 +17,10 @@
 // there. (fleet-tick.mjs also imports makeDie alone, so arg()'s refusals do
 // not reach it either — but not for want of flags: it parses six of its own
 // with node:util's parseArgs, and its unknown-flag, required-flag and range
-// refusals are a second edit site on the same terms.)
+// refusals are a second edit site on the same terms, as is the empty-or-blank
+// value its integer guard refuses — the only one of the four spellings below
+// that it hand-writes, because parseArgs takes an empty value and
+// `Number("")` is 0.)
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
