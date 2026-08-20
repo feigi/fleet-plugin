@@ -74,9 +74,12 @@ function repo(t, dir = "w") {
  * path had no fixture at all before this file (a dry run and `--apply` could
  * each mispredict the other and nothing here would notice). Returns the
  * worktree's absolute path.
+ *
+ * `wt` overrides that home. reap.sh exempts `.worktrees/` from the
+ * `--ignored` keep, so a test that exercises that keep has to put its
+ * worktree somewhere else and pass the path in.
  */
-function mergedGoneBranchWithWorktree(w, name, msg) {
-  const wt = join(w, ".worktrees", name);
+function mergedGoneBranchWithWorktree(w, name, msg, wt = join(w, ".worktrees", name)) {
   git(w, "worktree", "add", "-q", wt, "-b", name, "main");
   commit(wt, msg);
   git(wt, "push", "-q", "-u", "origin", name);
@@ -563,6 +566,96 @@ test("a worktree whose .git is a dangling symlink is kept, never reaped as clean
   assert.equal(json.kept.length, 1);
   assert.match(json.kept[0].reason, /no \.git linkage/);
   assert.equal(branchExists(w, "feature/merged"), true);
+});
+
+test("a non-fleet worktree holding an ignored file is kept, never reaped", (t) => {
+  // The one keep the worktree-present branch owns that nothing else here
+  // reaches. `git worktree remove` refuses on modified and untracked files but
+  // deletes IGNORED ones silently, so outside `.worktrees/` — where an ignored
+  // file is a .env or a scratch note that exists nowhere else — the
+  // `--ignored` probe is the only thing left between a merged, linked,
+  // tracked-clean worktree and `git branch -D`. Every earlier guard passes by
+  // construction, which is what makes this test see that probe and only it.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  // Deliberately NOT under `.worktrees/`: that home is what the case statement
+  // keys the fleet exemption on, and a fleet worktree is reaped WITH its
+  // machine-generated ignored files.
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  writeFileSync(join(wt, ".env"), "SECRET=exists nowhere else\n");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the --ignored probe can keep it");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  // The reason, not just the keep: every other guard in this branch also
+  // leaves `reaped` empty, so the pair alone does not say which one answered.
+  assert.match(json.kept[0].reason, /^ignored files present in .*: \.env$/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(join(wt, ".env"), "utf8"), "SECRET=exists nowhere else\n", "the precious file must survive the run");
+});
+
+test("a non-fleet worktree with NO ignored file is reaped — the control for the case above", (t) => {
+  // Without this, the test above passes on a reap.sh that keeps every
+  // non-fleet worktree unconditionally: it would be pinning the `.worktrees/`
+  // arm of the case, not the `--ignored` probe inside it. Same fixture, one
+  // difference — the ignored file — and the opposite verdict.
+  //
+  // It is also the exit-status control for this branch. Reached with
+  // `$ignored` empty, the `if [ -n "$ignored" ]` is the last command of the
+  // worktree-present branch, and a condition that tests false leaves an `if`
+  // with no `else` at status 0. Under `set -eu` any other answer would abort
+  // the sweep here, after the earlier branches were already deleted.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  // Deliberately NOT under `.worktrees/`, same as the case above.
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  // and NO .env written this time
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, "the sweep must not abort under set -eu on the branch's own last command");
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.equal(existsSync(wt), false, "the worktree directory goes with it");
+});
+
+test("a FLEET worktree under `.worktrees/` is reaped, ignored file and all", (t) => {
+  // The other arm of `case "$wt" in */.worktrees/*) : ;; *) ...ignored-check... ;; esac`.
+  // The pair above reaches the `--ignored` keep from OUTSIDE that home, so both
+  // pin the `*)` arm; nothing pinned the exemption itself. Measured BEFORE this
+  // test existed: mutating the pattern to one that never matches — routing every
+  // fleet worktree through the keep and stranding all of them, the regression the
+  // comment at reap.sh's case statement warns about — left this file 37/37 green.
+  // It now fails here, and only here.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  // The home is the ONLY difference from the pair above: same ignored file, same
+  // tracked-clean worktree, opposite verdict.
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, ".env"), "AGENT_TEST=machine-generated\n");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the --ignored probe could keep it");
+  assert.match(git(wt, "status", "--porcelain", "--ignored"), /^!! \.env$/m, "fixture: the file really is ignored, or the exemption is untested");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(existsSync(wt), false, "the exemption reaps a fleet worktree WITH its machine-generated ignored files");
 });
 
 test("a repo path containing a space still finds and reaps the branch's worktree", (t) => {
