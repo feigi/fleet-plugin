@@ -1925,13 +1925,12 @@ test("a stray DIRECTORY in the registry is not a worktree git failed to report (
 
 test("a registry entry git cannot even open is unknown, not a stray to skip (#395)", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
-  // The other half of that skip, and why `-x` is tested BEFORE emptiness: an
-  // entry chmod'd 000 answers "empty" to precisely the same `ls -A` test a
-  // stray directory does. But git DROPS this one (measured: listed 1, so
-  // linked 0), so skipping it as "not git's" would make the count agree and
-  // release a claim whose checkout is still on disk — the wrong "free" this
-  // whole check exists to rule out, reintroduced one layer in. Reversing the
-  // two tests is silent: every other fixture in this file stays green.
+  // The other half of that skip, and why the skip reads `ls`'s STATUS rather
+  // than only its output: an entry chmod'd 000 answers "empty" to precisely the
+  // same `ls -A` test a stray directory does. But git DROPS this one (measured:
+  // listed 1, so linked 0), so skipping it as "not git's" would make the count
+  // agree and release a claim whose checkout is still on disk — the wrong
+  // "free" this whole check exists to rule out, reintroduced one layer in.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const entry = join(r.w, ".git", "worktrees", "9-release-ticket");
@@ -1943,6 +1942,40 @@ test("a registry entry git cannot even open is unknown, not a stray to skip (#39
   chmodSync(entry, 0o755);
 
   assert.equal(code, 2, "a dropped entry is unanswerable, never the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+});
+
+test("an entry that is searchable but UNREADABLE is unknown too, not an empty stray (#395)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // The half an `-x` test cannot reach, and the one that costs a member their
+  // work: 0111 is searchable, so `-x` passes it, but it is not readable, so
+  // `ls -A` fails EACCES and — its stderr discarded — prints exactly what an
+  // empty stray `mkdir` prints. Skip on the OUTPUT alone and this entry is
+  // waved through as "not git's"; git drops it too (the `gitdir` inside is
+  // unreadable), the counts AGREE at 0, no refusal fires, and the release
+  // deletes the branch and drops the in-progress label with the member's
+  // uncommitted work still on disk. Both anomalies together is what makes this
+  // the dangerous one — they cancel, where either alone disagrees in the safe
+  // direction.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const entry = join(r.w, ".git", "worktrees", "9-release-ticket");
+  const gitdir = join(entry, "gitdir");
+
+  chmodSync(gitdir, 0o000);
+  chmodSync(entry, 0o111);
+  const { code, json, stderr } = release(r, c);
+  // Restored innermost first, before the first assert — `artefacts` below runs
+  // `worktree list` itself and would otherwise read this claim's worktree as
+  // absent. 0111 keeps the entry searchable, so naming `gitdir` inside it
+  // still resolves while the restore runs.
+  chmodSync(gitdir, 0o644);
+  chmodSync(entry, 0o755);
+
+  assert.equal(code, 2, "an entry we could not read is unanswerable, never the exit 0 that releases");
   assert.equal(json, null, "refused before any mutation");
   assert.match(stderr, /git listed 0 worktrees for 1 registry entries/);
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
@@ -1962,7 +1995,7 @@ test("a registry entry whose gitdir is GONE is unknown, not a stray to skip (#39
   // No chmod, so no euid-0 guard: this case discriminates as root too.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  execFileSync("rm", [join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir")]);
+  rmSync(join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir"));
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, "a dropped entry is unanswerable, never the exit 0 that releases");
@@ -2041,8 +2074,13 @@ test("a healthy repo with a second live worktree still releases (#395)", (t) => 
   // The acceptance case every guard on a refusal path needs: a guard that
   // refuses everything passes every "does it refuse?" test above. Two real
   // linked worktrees, so the arithmetic is exercised at registered=2/linked=2
-  // rather than at the trivial 1-against-1 — an off-by-one in the `-1` or a
-  // skip that swallowed a real entry would land here and nowhere else.
+  // rather than at the trivial 1-against-1 — the only case in this file that
+  // does. Not the only case that CATCHES a broken count, and the prose here
+  // once said so: dropping the `-1` fails 75 of the 85 cases and a skip made
+  // unconditional fails 68, because every fixture with a live worktree walks
+  // this arithmetic (measured). The two subtle skips — dropping the read check,
+  // or keying on `gitdir` — this case does not catch at all; the permission
+  // fixtures above are the only ones that do.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const sibling = claim(r.w, 77, "other-claim");

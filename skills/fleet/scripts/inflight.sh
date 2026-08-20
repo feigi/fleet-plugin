@@ -511,9 +511,13 @@ fi
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
 # than a second invented convention — but the two copies have since diverged
-# and this comment no longer claims they match: the stray-directory skip, the
-# awk counter, the direction split and the recount below all landed here first
-# and are still open against that copy (#395).
+# and this comment no longer claims they match. Three of the four items that
+# landed here first — the stray-directory skip, the awk counter and the
+# direction split — were ported to that copy by #395; the recount below is the
+# one still open against it (#694). The divergence now runs the other way too:
+# that copy's skip reads `ls`'s exit STATUS, so an entry it could not list is
+# counted rather than skipped as a stray, where the `-x` test below covers only
+# the unsearchable half of that (#697).
 #
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
