@@ -589,8 +589,8 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   // and it reproduces the exact porcelain shape all four broken-HEAD routes
   // produce: the null object id with no `branch` line. The four are enumerated
   // at `unresolved_head` in release-ticket.sh; the dangling-symlink and
-  // directory routes are built in the case below, and `chmod 000` is the one
-  // named there rather than built.
+  // directory routes are built in the case below it, and the `chmod 000` route
+  // in the case after that.
   //
   // No checkout call: this worktree never left the branch claim-ticket.sh put
   // it on. Only its admin HEAD file is broken.
@@ -635,11 +635,9 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
   // mutation is the exact misread the function's own comment warns about, and
   // until this fixture it was refuted by nothing.
   //
-  // Neither shape touches a permission bit, so unlike the `chmod 000` route —
-  // the one still named rather than built — both reproduce as any user and
-  // mean the same thing under euid 0, with no `EUID0` skip to carry. Not that
-  // a 000-mode fixture would leak: `repo()`'s teardown chmods the root back
-  // before `rmSync`, which is what closed #184.
+  // Neither shape touches a permission bit, so unlike the `chmod 000` route
+  // built in the case below, both reproduce as any user and mean the same
+  // thing under euid 0, with no `EUID0` skip to carry.
   for (const shape of ["symlink", "dir"]) {
     const r = repo(t);
     const c = claim(r.w, 9, "release-ticket");
@@ -701,7 +699,14 @@ test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` li
   // here would leave the mode at 000 for the rest of the case.
   const porcelain = git(r.w, "worktree", "list", "--porcelain");
   const { code, json } = release(r, c);
-  chmodSync(head, 0o644);
+  // Guarded, because the restore runs before the first assert and must not
+  // become the failure itself: strip this fixture's `chmodSync(head, 0o000)`
+  // and the release SUCCEEDS, taking the whole worktree with it, so a bare
+  // chmod here dies ENOENT and buries the shape assertion below that is the
+  // real report (measured — it was the raw failure this case first produced).
+  // Nothing leaks either way: a mode-000 FILE never blocks `rmSync`, and
+  // `repo()`'s teardown chmods the root back regardless.
+  if (existsSync(head)) chmodSync(head, 0o644);
 
   // The shape, measured on the repo rather than inferred from the enumeration.
   // Only the claim's worktree can supply either line: the main checkout is on
