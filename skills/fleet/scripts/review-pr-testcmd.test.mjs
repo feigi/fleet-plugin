@@ -105,8 +105,9 @@ test("no hardcoded testCmd default remains", () => {
 // diffPath/diffLines/prHead were added: `additionalProperties: false` drops
 // an undeclared field silently, so BOTH the prompt asking for it and the
 // schema declaring it have to be pinned, or the feature disconnects in one
-// token exactly like `review-pr-reads.test.mjs:308-367` records happening to
-// the diff facts.
+// token exactly like `review-pr-reads.test.mjs`'s "the snapshot agent asks for
+// the diff facts AND declares them in its schema" records happening to the
+// diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
   const snapshot = between(CODE, "const snap = await agent(", "if (!snap", "the snapshot agent dispatch");
 
@@ -141,7 +142,13 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     "testCmdError is not bound to the script's stderr on refusal",
   );
 
-  const props = snapshot.slice(snapshot.indexOf("properties: {"), snapshot.indexOf("\n      },"));
+  // Scoped to the `properties` object, not the whole schema: a field declared
+  // ANYWHERE else is undeclared as far as `additionalProperties: false` is
+  // concerned, and an unbounded slice covering the rest of the block passes on
+  // it anyway. `between()` for the end anchor too — measured: move a field out
+  // of `properties` and re-indent the close, and the raw `indexOf` form here
+  // returned -1, widened to nearly the whole block, and stayed green.
+  const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
   for (const field of ["testCmd", "testCmdError"]) {
     assert.match(
       props,
