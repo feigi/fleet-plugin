@@ -696,7 +696,15 @@ rerun rewrites the run in place, so never cache a conclusion; key watchers on
 `<run-id>:<attempt>:<conclusion>`. Leaving `attempt` out of the key is the bug
 that looks like it works: a rerun that lands on the *same* conclusion regenerates
 an already-seen key and fires nothing, so the second failure is silent and reads
-exactly like a run still in progress. Also: the newest
+exactly like a run still in progress. **Building that key with jq's `//` is the
+same bug in the opposite direction**: `ci-state` reports an in-progress run as
+`conclusion: ""`, and `//` catches `null` and `false` but never the empty
+string, so `.conclusion // "-"` passes `""` straight through, keys a RUNNING job
+as terminal and fires a spurious not-green — measured in four separate runs,
+including one where the controller then had to re-arm blind. Test any fallback
+you write against `""`, `null` AND a real conclusion, and check it still lets
+the real one through: `map(if . == null or . == "" then "-" else tostring end)`.
+Also: the newest
 run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
 entirely. See references/ci-and-staleness.md.
 
