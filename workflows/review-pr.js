@@ -445,12 +445,32 @@ function selectDimensions(all, stats) {
   }
   let dims = all;
   if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
-  // No source → nothing to type-check, hunt for swallowed errors in, or simplify.
+  // No source → nothing to type-check or simplify. `silent-failure` was dropped
+  // here too until #236, and the SIZE TIER'S FLOOR OUTRANKS THAT (`SIZE_TIER_DIMS`
+  // below): this guard runs first, so on a `single-file`/`small` diff it was
+  // removing silent-failure before the tier could re-admit it, and the floor
+  // `run-team/SKILL.md` documents did not exist for any non-src diff. Measured:
+  // PR #226 changed one `.github/workflows/ci.yml` and reviewed CI's own gating
+  // logic with `dimensionsRun: ["correctness"]`. A CI-workflow or shell diff is
+  // exactly where a swallowed error hides, so the floor wins THERE and the guard
+  // still drops silent-failure everywhere else — a 50-loc config-only PR profiles
+  // `production`, never reaches the tier, and keeps the old behaviour.
   if (stats.hasSrc === false)
-    dims = dims.filter((d) => d.key !== "types" && d.key !== "silent-failure" && d.key !== "simplify");
-  // INTERSECT, never an early return: a single-file `.github/workflows/ci.yml`
-  // change is profile "single-file" with hasSrc false, and returning early here
-  // would hand silent-failure a YAML file — exactly what the guard above drops.
+    dims = dims.filter(
+      (d) =>
+        d.key !== "types" &&
+        d.key !== "simplify" &&
+        (d.key !== "silent-failure" || SIZE_TIER_PROFILES.has(stats.profile)),
+    );
+  // COMPOSES with the guards above rather than replacing them — it filters `dims`,
+  // not `all`. Since #236 that composition no longer changes any OUTCOME: every
+  // dimension the guards above can remove is one this filter would not have kept
+  // anyway (`tests` only when `hasTests === false`, which is the carve-out's own
+  // negation; `types`/`simplify` are not in `SIZE_TIER_DIMS`; `comments` and
+  // `correctness` are never removed above). `silent-failure` on a no-src diff was
+  // the single case where the two forms differed, and it is now deliberately the
+  // floor. Kept as a filter regardless: it is the form that stays correct without
+  // re-proving that equivalence every time a guard is added above.
   //
   // `comments` survives the size trim whenever the diff touches a docs-CLASSIFIED
   // FILE. The docsOnly branch above keeps comment-analyzer because the failure
