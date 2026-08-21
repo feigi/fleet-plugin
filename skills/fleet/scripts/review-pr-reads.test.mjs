@@ -8,7 +8,8 @@ import { between } from "./prose-pin.mjs";
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
 // SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs:23-40`
-// and `review-pr-testcmd.test.mjs:23-33`, and for the same reason: extraction to
+// and `review-pr-testcmd.test.mjs`'s `liftResolveTestCmd`, and for the same
+// reason: extraction to
 // a module would need `import` to resolve inside the Workflow sandbox ("no
 // filesystem or Node.js API access"), which nothing in `workflows/` does, and a
 // failed import bricks the fleet's DEFAULT review path.

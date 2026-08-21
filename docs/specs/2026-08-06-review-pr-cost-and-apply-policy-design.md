@@ -356,7 +356,8 @@ and standalone paths — not only the suggestions Change 3 newly admits.
 
 **New `skills/fleet/scripts/select-dimensions.test.mjs`.** Lifts
 `selectDimensions` and `DEFAULT_DIMENSIONS` out of `review-pr.js` **by source
-text**, per the precedent at `review-pr-testcmd.test.mjs:23-33`, failing loudly
+text**, per the precedent of `review-pr-testcmd.test.mjs`'s
+`liftResolveTestCmd`, failing loudly
 with "update this test" when the shape moves. Asserts the full matrix above, plus
 which dimensions carry a `model` field.
 

@@ -92,7 +92,8 @@ function snapshotBlock() {
 // `required: [..., "pathVerified"]` still passes, all four tests above still
 // pass, and the agent has lost the only instruction saying what value to report:
 // `pathVerified` degrades to a boolean it invents, silently reopening #140 under
-// a green suite. That is the exact shape `review-pr-reads.test.mjs:323-329`
+// a green suite. That is the exact shape `review-pr-reads.test.mjs`'s "the
+// snapshot agent asks for the diff facts AND declares them in its schema"
 // measured on the diff facts — "deleting this paragraph outright left this file
 // at 12 pass, 0 fail".
 test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its output", () => {
@@ -156,7 +157,8 @@ test("the snapshot block wipes, extracts, probes, then symlinks — in that orde
 
 // The function is worthless if nothing calls it, and every test above tests a
 // COPY lifted from the source text: it stays green while the feature
-// disconnects. `review-pr-testcmd.test.mjs:76-79` records this exact defect for
+// disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
+// resolveTestCmd once the snapshot is validated" records this exact defect for
 // resolveTestCmd and `select-dimensions.test.mjs:251-256` for the fan-out.
 // Delete the two lines below in review-pr.js and #140's refusal is dead code
 // with this whole file green.
@@ -171,7 +173,8 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
     /^if \(missingReason\) throw new Error\(/m,
     "snapshotMissing's result is computed but never thrown on — the guard decides nothing",
   );
-  // Ordering, same guardAt/callAt shape as review-pr-testcmd.test.mjs:87-90:
+  // Ordering, same guardAt/callAt shape as review-pr-testcmd.test.mjs's
+  // "review-pr.js actually calls resolveTestCmd once the snapshot is validated":
   // after the schema that produces `pathVerified`, and before the first thing
   // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
   // for a tree that was never confirmed to exist.

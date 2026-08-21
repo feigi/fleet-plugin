@@ -311,9 +311,10 @@ disconnect-in-one-token defect this repo has shipped:
 9. The specialist prompt slice contains `${readRules(`. Anchor the slice on
    `READ ONLY FROM THE SNAPSHOT` and terminate it on `Scratch files go in`,
    asserting `indexOf !== -1` for **both** anchors — the same bounded-slice
-   discipline as `review-pr-testcmd.test.mjs:103-107`, whose comment records
-   that an unbounded slice ran to EOF and was satisfiable from the refuter
-   prompt further down.
+   discipline as `review-pr-testcmd.test.mjs`'s "the specialist prompt hands
+   the command over verbatim and rules 'tests 0' a failure", whose comment
+   records that an unbounded slice ran to EOF and was satisfiable from the
+   verifier prompt further down.
 10. The refuter prompt slice contains `${readRules(`. Anchor on
     `Try to REFUTE this finding` and terminate on `Scratch: `.
 
@@ -365,7 +366,8 @@ three new fields must be declared or a compliant agent's report is rejected.
 Measured, not projected: the count at the ORIGINAL base `ac110b5` was 262, and
 main moved under this branch when #222 merged.
 
-`review-pr-testcmd.test.mjs:98-124` slices the specialist prompt between
+`review-pr-testcmd.test.mjs`'s "the specialist prompt hands the command over
+verbatim and rules 'tests 0' a failure" slices the specialist prompt between
 `READ ONLY FROM THE SNAPSHOT` and `Scratch files go in`. Change 2 interpolates
 inside that window, so confirm both its assertions still pass rather than
 assuming they do — they match on `run exactly this` + `${testCmd}` and on
