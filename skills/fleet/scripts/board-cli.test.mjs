@@ -84,7 +84,7 @@ test("--spend-since with the value omitted fails, rather than reading as 'no fil
 
 // #364 gave has() a boolean-specific refusal, and gather() calls has() on
 // --spend-since — a flag that TAKES a value. The wording stays correct only
-// because arg("spend-since") runs one line earlier and dies first; swap the two
+// because arg("spend-since") runs before it and dies first; swap the two
 // and the operator is told to drop a value the flag requires. Nothing pinned
 // that order, so this does: measured, the reorder turns this message into
 // "--spend-since is a boolean flag" while the rest of the suite stays green.

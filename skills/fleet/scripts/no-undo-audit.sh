@@ -520,13 +520,14 @@ if [ -n "$conflicts" ]; then
   # reading. Left that way deliberately: re-sorting costs a second `git log`
   # to buy a ranking this audit does not offer, since it names the commits a
   # resolution would eat rather than ordering them.
-  # Kept as its own statement rather than appended to the pipe above:
-  # appended, `awk` would become the pipe's LAST command, and with no
-  # `pipefail` in POSIX sh (dash rejects `set -o pipefail` outright) the `||
-  # die` after that pipe reads awk's exit status, not git log's — silently
-  # swallowing a real git-log failure behind a trivially-successful awk pass
-  # on whatever partial output preceded it. A fresh statement over the
-  # already-captured string can't touch the `|| die` two lines up.
+  # Kept as its own statement rather than appended to the xargs/git-log pipe
+  # that produced $at_risk: appended, `awk` would become that pipeline's LAST
+  # command, and with no `pipefail` in POSIX sh (dash rejects `set -o pipefail`
+  # outright) its `|| die` would read awk's exit status, not git log's —
+  # silently swallowing a real git-log failure behind a trivially-successful
+  # awk pass on whatever partial output preceded it. A fresh statement over the
+  # already-captured string leaves the xargs/git-log `|| die` reading xargs,
+  # which is what its own message names.
   at_risk=$(printf '%s\n' "$at_risk" | awk '!seen[$1]++') \
     || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2

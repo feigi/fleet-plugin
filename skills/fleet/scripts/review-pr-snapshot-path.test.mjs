@@ -15,7 +15,7 @@ import { between } from "./prose-pin.mjs";
 // `snapshotMissing` is the fix: a `pathVerified` boolean in the snapshot
 // schema's own `required` array, so the agent cannot silently omit it — read by
 // the CALLER rather than trusted from the agent's narration of the
-// byte-identity 'Verify it' step a few lines above it in the prompt.
+// byte-identity 'Verify it' step in the snapshot prompt.
 //
 // review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
 // so the function is lifted out of the source text instead — same technique as
@@ -160,8 +160,8 @@ test("the snapshot block wipes, extracts, probes, then symlinks — in that orde
 // disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
 // resolveTestCmd once the snapshot is validated" records this exact defect for
 // resolveTestCmd and `select-dimensions.test.mjs:251-256` for the fan-out.
-// Delete the two lines below in review-pr.js and #140's refusal is dead code
-// with this whole file green.
+// Delete the `snapshotMissing(snap)` call and its `throw` in review-pr.js and
+// #140's refusal is dead code with this whole file green.
 test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
   assert.match(
     CODE,

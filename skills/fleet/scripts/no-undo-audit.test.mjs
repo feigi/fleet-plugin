@@ -429,7 +429,7 @@ test("a dirty worktree still refuses, and names the worktree not the stash", (t)
   assert.match(r.stderr, /REFUSED/);
   assert.match(r.stderr, /commit the worktree before rebasing/);
   // The old message told the caller to clear the stash list and forbade
-  // `git stash drop` two lines later. Removing the gate must remove the
+  // `git stash drop` in the same refusal. Removing the gate must remove the
   // instruction, or the contradiction outlives the bug.
   assert.doesNotMatch(r.stderr, /stash-list-clear/);
   // `git stash`, not `git stash drop`: stashing to clear a dirty worktree now

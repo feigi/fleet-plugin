@@ -284,7 +284,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   const snapshot = slice("const snap = await agent(", "if (!snap");
   assert.match(snapshot, /gh pr diff \$\{pr\} > \$\{scratch\}\/pr\.diff/, "no diff capture");
   // `/headRefOid/` alone also matches the prose ("Report `prHead` = the
-  // headRefOid") a few lines down, so deleting this command left the suite
+  // headRefOid") in the same prompt, so deleting this command left the suite
   // green — pin the command line itself, not a word it shares with prose.
   assert.match(
     snapshot,
@@ -363,8 +363,8 @@ test("the specialist prompt interpolates the read rules", () => {
   // under an unqualified "READ ONLY FROM THE SNAPSHOT" is the exact
   // contradiction this branch's headline fix removes. Bound to the clause
   // itself (the `)` closing the HEAD parenthetical, then the qualifier), not
-  // to "diff" appearing anywhere in the prompt: `${readRules(usableDiff(snap),
-  // stats)}` a few lines down contains "Diff" in its own text, so a
+  // to "diff" appearing anywhere in the prompt: the `readRules` interpolation
+  // this same prompt carries contains "Diff" in its own text, so a
   // presence-only check would stay green against a qualifier reading
   // "— nothing else." — which restores the original contradiction outright.
   // `\s+` between every word so a reflow of the same sentence stays green.
