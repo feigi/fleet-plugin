@@ -133,9 +133,8 @@ else
   # symlink) between the `worktree add` above and here, and `git -C` does not
   # fail — it walks UP to the enclosing repo and answers about THAT at rc 0,
   # which this check would read as an untouched lockfile it never actually
-  # looked at. `-f`: `git worktree add` just wrote `.git` as a regular file two
-  # lines up, so no healthy run trips this; reference shape and same reason as
-  # release-ticket.sh's own linkage guard (#128). `-x "$wt"` for the reason
+  # looked at. `-f`: `git worktree add` writes $wt's `.git` as a regular file,
+  # so no healthy run trips this; reference shape and same reason as
   # both siblings give their own copy: `-f` is equally false for a `.git` that
   # is absent and for one this process may not stat, and an unsearchable $wt
   # must not be reported as an absence nothing established. Left ungated it ate
