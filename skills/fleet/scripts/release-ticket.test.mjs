@@ -1640,10 +1640,12 @@ test("a successful release survives a failing `git worktree prune`", (t) => {
   // which is what the case below expects. So the shim is pinned directly, in
   // both directions — a `gitShim` that dropped `body` would empty this case
   // rather than fail it, and the refusal it exists to survive would go untested
-  // while the suite stayed green.
+  // while the suite stayed green. `cwd` pins both probes to the fixture: on
+  // the failure path the body stops matching and `exec` reaches real git,
+  // which would then prune whatever repo the runner happens to stand in.
   const shim = join(r.w, "..", "bin", "git");
-  assert.equal(spawnSync(shim, ["worktree", "prune"]).status, 3, "the body really does refuse prune");
-  assert.equal(spawnSync(shim, ["--version"]).status, 0, "and everything else really does reach real git");
+  assert.equal(spawnSync(shim, ["worktree", "prune"], { cwd: r.w }).status, 3, "the body really does refuse prune");
+  assert.equal(spawnSync(shim, ["--version"], { cwd: r.w }).status, 0, "and everything else really does reach real git");
 
   const { code, json } = release(r, c);
   assert.equal(code, 0, "the release succeeded; prune is housekeeping");
