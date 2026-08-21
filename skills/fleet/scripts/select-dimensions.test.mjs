@@ -140,20 +140,24 @@ test("a large config-only diff still drops silent-failure — the floor is the s
     f("tsconfig.json", 6, 4),
     f("package.json", 6, 4),
   ]);
-  assert.ok(!keys.includes("silent-failure"), "hasSrc no longer gates silent-failure outside the size tier");
   assert.deepEqual(keys, ["correctness", "comments"]);
 });
 
-// AC-3: the floor must not reach a diff that has nothing for it to do. A
-// docs-only diff is ONE file here, so it satisfies `files === 1` as well —
-// `docsOnly` wins the else-if chain, and selectDimensions returns before the
-// tier regardless. Both halves have to hold, and this is the row the size-tier
-// restructuring is most able to break.
-test("a docs-only diff is untouched by the floor and still drops types, simplify and tests", () => {
-  const keys = dimensionKeys([f("README.md")]);
-  assert.deepEqual(keys, ["correctness", "comments"]);
-  for (const k of ["types", "simplify", "tests", "silent-failure"])
-    assert.ok(!keys.includes(k), `${k} reached a docs-only diff`);
+// AC-3: the floor must not reach a diff with nothing for it to do, and the ORDER
+// is the whole guarantee — `docsOnly` returns BEFORE the tier. A file list cannot
+// pin that: computeStats assigns profile `docs` ahead of `files === 1`, so a docs
+// diff never matches SIZE_TIER_PROFILES, both branches agree on [correctness,
+// comments], and `a docs-only diff runs correctness + comments` above already
+// pins that agreement. Pin the DIRECTION instead, on the one blob where the two
+// disagree — the same shape as the missing-`kinds` row below. Measured: leaking
+// the tier into the docsOnly filter, and deleting that branch outright, each
+// passed all 1030 tests without this.
+test("docsOnly returns before the size tier — the floor never reaches a docs diff", () => {
+  const docsInTier = { profile: "single-file", docsOnly: true, hasSrc: false, hasTests: false };
+  assert.deepEqual(
+    selectDimensions(DEFAULT_DIMENSIONS, docsInTier).map((d) => d.key),
+    ["correctness", "comments"],
+  );
 });
 
 test("a small multi-file source diff trims to correctness + silent-failure", () => {

@@ -453,8 +453,13 @@ function selectDimensions(all, stats) {
   // PR #226 changed one `.github/workflows/ci.yml` and reviewed CI's own gating
   // logic with `dimensionsRun: ["correctness"]`. A CI-workflow or shell diff is
   // exactly where a swallowed error hides, so the floor wins THERE and the guard
-  // still drops silent-failure everywhere else — a 50-loc config-only PR profiles
-  // `production`, never reaches the tier, and keeps the old behaviour.
+  // still drops silent-failure everywhere else — a 50-loc MULTI-FILE config-only
+  // PR profiles `production`, never reaches the tier, and keeps the old behaviour.
+  // The floor is the size TIER's, so `tests-only` OUTRANKS it: computeStats
+  // assigns that profile ahead of `single-file`/`small`, so a no-src diff that
+  // also touches a test file never reaches SIZE_TIER_PROFILES and still loses
+  // silent-failure. Out of #236's scope — its ACs are keyed on the two size-tier
+  // profiles — and filed as #739.
   if (stats.hasSrc === false)
     dims = dims.filter(
       (d) =>

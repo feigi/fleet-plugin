@@ -693,10 +693,13 @@ the size tier runs correctness+comments without being docs-only at all; and any
 comments only when a docs file is in the diff and tests only when a test file is.
 That floor holds **regardless of `hasSrc`** (#236) — a one-file `.yml` or
 `.github/` shell change runs correctness+silent-failure, not correctness alone,
-and a *small* docs+config diff runs all three. `single-file` means one file at
-**any** size, so a one-file rewrite trims too. An unknown profile
-widens to the full six, the safe direction, so a trim is never something to count
-on in advance — and a full six is never something to assume.
+and a *small* docs+config diff runs all three. It is the size **tier's** floor,
+so `tests-only` outranks it: that profile is assigned ahead of
+`single-file`/`small`, so a no-src diff that also touches a test file gets no
+silent-failure-hunter (#739). `single-file` means one file at **any** size, so a
+one-file rewrite trims too. An unknown profile widens to the full six, the safe
+direction, so a trim is never something to count on in advance — and a full six
+is never something to assume.
 
 **One review workflow at a time.** The workflow is not a member — count the
 **fix-applier** against the reviewer cap, never the workflow — but that
