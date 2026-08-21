@@ -66,7 +66,20 @@ See references/member-lifecycle.md.
 
 At start, and whenever the pool empties.
 
-0. **Launch the cockpit, once per run.** On the first phase-0 pass only:
+0. **Once per run, before anything else.**
+
+   **Fast-forward the checkout before you trust these rules — you are reading
+   them from it.** `git fetch origin && git rev-list --count main..origin/main`;
+   non-zero means the SKILL.md you are executing is superseded, so
+   `git merge --ff-only origin/main` and re-read what changed under
+   `skills/fleet`. The usual cause is the PREVIOUS run's own close-out PR: it
+   lands the rules THIS run needs and nothing pulls them. Measured twice — 57
+   commits stale in one run, 20 in another, the second shipping every dispatch
+   prompt without two rules that had merged the day before. Silent by
+   construction: stale text reads as authoritative, and the tier guard's own
+   floor is re-derived from a stale `tier-outcomes.tsv` at the same time.
+
+   **Launch the cockpit.** On the first phase-0 pass only:
    `node ~/.claude/skills/fleet/scripts/board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
    feed or update it, and it survives your own compaction. Skip on later
