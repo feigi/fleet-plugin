@@ -419,13 +419,9 @@ locked() {
 # same porcelain shape — the null object id with no `branch` line: `chmod 000`
 # on it, garbage content in it, a dangling symlink in its place, or a
 # directory in its place (measured, git 2.50.1). release-ticket.test.mjs
-# builds the garbage-content, dangling-symlink and directory routes; `chmod
-# 000` is the one named here rather than built, because it is the only one
-# needing a permission bit: root ignores the mode, so it would have to carry
-# the `EUID0` skip the file's other permission fixtures do and would measure
-# nothing on a root runner, while the other three reproduce as any user. Not
-# because it would leak — `repo()`'s teardown chmods the root back before
-# `rmSync`, which is what closed #184.
+# builds all four. `chmod 000` is the only one needing a permission bit, so it
+# alone carries the `EUID0` skip the file's other permission fixtures do and
+# measures nothing on a root runner; the other three reproduce as any user.
 #
 # BOTH conditions, never one alone. The null OID alone is also an UNBORN
 # branch (`git worktree add --orphan`) — that one carries a real `branch`

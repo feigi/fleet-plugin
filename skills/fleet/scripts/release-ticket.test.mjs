@@ -589,14 +589,24 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   // and it reproduces the exact porcelain shape all four broken-HEAD routes
   // produce: the null object id with no `branch` line. The four are enumerated
   // at `unresolved_head` in release-ticket.sh; the dangling-symlink and
-  // directory routes are built in the case below, and `chmod 000` is the one
-  // named there rather than built.
+  // directory routes are built in "the symlink and directory HEAD shapes reach
+  // the same arm, `detached` line and all", and the `chmod 000` route in "the
+  // chmod 000 HEAD shape reaches the same arm, and prints no `detached` line".
   //
   // No checkout call: this worktree never left the branch claim-ticket.sh put
   // it on. Only its admin HEAD file is broken.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+
+  // The other half of `unresolved_head`'s parenthetical, and the fixture-shape
+  // pin the `chmod 000` case carries too: this route is the second of the two
+  // that print no `detached` line, and unlike `chmod 000` it needs no
+  // permission bit, so it still measures under euid 0. Without it this fixture
+  // can be quietly rebuilt as the dangling-symlink shape and the whole suite
+  // stays green, leaving one of the four routes untested (measured).
+  assert.doesNotMatch(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
+    "fixture: garbage content, like chmod, prints no detached line");
 
   const { code, json } = release(r, c);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
@@ -635,11 +645,10 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
   // mutation is the exact misread the function's own comment warns about, and
   // until this fixture it was refuted by nothing.
   //
-  // Neither shape touches a permission bit, so unlike the `chmod 000` route —
-  // the one still named rather than built — both reproduce as any user and
-  // mean the same thing under euid 0, with no `EUID0` skip to carry. Not that
-  // a 000-mode fixture would leak: `repo()`'s teardown chmods the root back
-  // before `rmSync`, which is what closed #184.
+  // Neither shape touches a permission bit, so unlike the `chmod 000` route
+  // built in "the chmod 000 HEAD shape reaches the same arm, and prints no
+  // `detached` line", both reproduce as any user and mean the same thing
+  // under euid 0, with no `EUID0` skip to carry.
   for (const shape of ["symlink", "dir"]) {
     const r = repo(t);
     const c = claim(r.w, 9, "release-ticket");
@@ -675,6 +684,64 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
     assert.deepEqual(r.calls(), [], `and the label is never touched, ${shape}`);
     assert.deepEqual(artefacts(r, c), { dir: true, worktree: false, branch: true }, shape);
   }
+});
+
+test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` line", (t) => {
+  // The fourth broken-HEAD route enumerated at `unresolved_head` in
+  // release-ticket.sh, and the only one of the four needing a permission bit —
+  // hence the skip below, which the garbage, symlink and directory routes do
+  // not carry. Under euid 0 the mode denies nothing: git reads the HEAD, the
+  // `branch` line comes back, the worktree stops being a stray at all and the
+  // release proceeds. The fixture would build the HEALTHY shape and assert the
+  // broken one's remedy.
+  if (EUID0) return t.skip(NO_DENIAL);
+
+  // A file's own bits do not gate its unlink, only its parent directory's do, so
+  // a mode-000 HEAD costs `repo()`'s chmod-back teardown nothing — a naive
+  // `rmSync` already clears it, where the fixtures putting a mode on a DIRECTORY
+  // still rest on that chmod-back and get `ENOTEMPTY` without it (measured).
+  // What this route does need is the in-body restore below, which the garbage,
+  // symlink and directory routes have nothing to restore for.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const head = join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD");
+  chmodSync(head, 0o000);
+
+  // Both reads taken while the bit is off, asserted only after the restore
+  // below: `artefacts()` runs `worktree list` itself, so an assert that fired
+  // here would leave the mode at 000 for the rest of the case.
+  const porcelain = git(r.w, "worktree", "list", "--porcelain");
+  const { code, json } = release(r, c);
+  // Guarded, because the restore runs before the first assert and must not
+  // become the failure itself: strip this fixture's `chmodSync(head, 0o000)`
+  // and the release SUCCEEDS, taking the whole worktree with it, so a bare
+  // chmod here dies ENOENT and buries the shape assertion below that is the
+  // real report (measured — it was the raw failure this case first produced).
+  // Nothing leaks either way: a mode-000 FILE never blocks `rmSync`, and
+  // `repo()`'s teardown chmods the root back regardless.
+  if (existsSync(head)) chmodSync(head, 0o644);
+
+  // The shape, measured on the repo rather than inferred from the enumeration.
+  // Only the claim's worktree can supply either line: the main checkout is on
+  // `main`, carrying a real sha and a `branch` line of its own.
+  assert.match(porcelain, /^HEAD 0+$/m, "fixture: the mode alone must produce the null object id");
+  assert.doesNotMatch(porcelain, /^branch refs\/heads\/fix\/9-release-ticket$/m, "fixture: and must take the branch line with it");
+  // The half of the sibling's parenthetical that nothing in this file asserted
+  // before: this route is one of the two that do NOT print `detached`, which is
+  // why `unresolved_head` can key on that line in neither direction.
+  assert.doesNotMatch(porcelain, /^detached$/m, "fixture: and chmod, unlike the symlink and directory shapes, prints no detached line");
+
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+  assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — the mode just stopped git reading it");
+  assert.doesNotMatch(json.blockers[0], /release it by hand/, "distinct message from the branch-mismatch else");
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  // All three true, where the other three routes leave `worktree: false`: the
+  // fault was the mode and nothing else, so the restore above puts the `branch`
+  // line back. Nothing on disk was damaged, and nothing was released.
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true });
 });
 
 test("a symlink over HEAD that RESOLVES never reaches the unresolved-HEAD arm — the linkage probe refuses first", (t) => {
@@ -2020,11 +2087,10 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   // worktree registry is unknown, never a release` tell its guard's `&&` from
   // an `||`, and 0o644 is what `an unsearchable worktree is not reported as
   // having no .git` chmods its worktree to, keeping the directory stat-able
-  // from its parent while -e on the .git inside it answers false. The only
-  // other `chmodSync(..., 0o644)` in this file, in `an entry git cannot read
-  // INSIDE is unknown too, not just an unreadable entry`, is not a third
-  // consumer: it RESTORES a file after that fixture's 0o000 denial, and a file
-  // has no search bit to drop.
+  // from its parent while -e on the .git inside it answers false. No other
+  // `chmodSync(..., 0o644)` in this file is a further consumer: every one of
+  // them RESTORES a FILE after that fixture's own 0o000 denial, and a file has
+  // no search bit to drop.
   for (const mode of [0o400, 0o644]) {
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
     chmodSync(dir, mode);
@@ -2032,9 +2098,9 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
     assert.deepEqual(readdirSync(dir), ["f"], `while the read is still granted, ${at}`);
   }
 
-  // `an entry git cannot read INSIDE is unknown too` chmods a FILE, not a
-  // directory, so its precondition is a different denial from the
-  // 0o000-directory fixtures.
+  // Every fixture that chmods a FILE 0o000 rests on this assert rather than the
+  // one above: a file's denial is its own read, which is a different
+  // precondition from the 0o000-DIRECTORY fixtures' denied search.
   chmodSync(dir, 0o755);
   chmodSync(join(dir, "f"), 0o000);
   assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
@@ -2148,7 +2214,7 @@ test("an entry that is searchable but UNREADABLE is unknown too, not an empty st
   // git listed it): exit 0, `released:true`, `blockers:[]`, branch deleted,
   // `in-progress` dropped, member's uncommitted work still on disk. Both
   // halves are the same skip, so this case is what stands between it and a
-  // merge — it was the only one of the 86 here that caught it.
+  // merge — it was the only case here that caught it.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const entry = join(r.w, ".git", "worktrees", "9-release-ticket");
@@ -2260,11 +2326,11 @@ test("a healthy repo with a second live worktree still releases (#395)", (t) => 
   // linked worktrees, so the arithmetic is exercised at registered=2/linked=2
   // rather than at the trivial 1-against-1 — the only case in this file that
   // does. Not the only case that CATCHES a broken count, and the prose here
-  // once said so: dropping the `-1` fails 75 of the 85 cases and a skip made
-  // unconditional fails 68, because every fixture with a live worktree walks
-  // this arithmetic (measured). The two subtle skips — dropping the read check,
-  // or keying on `gitdir` — this case does not catch at all; the permission
-  // fixtures above are the only ones that do.
+  // once said so: dropping the `-1` reds most of this file, and a skip made
+  // unconditional reds most of it too, because every fixture with a live
+  // worktree walks this arithmetic (measured). The two subtle skips — dropping
+  // the read check, or keying on `gitdir` — this case does not catch at all;
+  // the permission fixtures above are the only ones that do.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const sibling = claim(r.w, 77, "other-claim");
