@@ -1,9 +1,9 @@
 // #286. The `no-ci` FINISHER GATE — the label rests on the reviewer's own
-// verified suite run, and without one nobody labels — is stated in four
-// documents and pinned in none of them. What already exists pins a different
-// clause of the same bullet: review-path-default.test.mjs anchors the Phase 3
-// no-ci edge's outstanding-ruling condition (`never while you still owe it a
-// ruling`). The gate itself was free to rot in any of the four.
+// verified suite run, and without one nobody labels — is stated at four sites
+// across three documents and pinned in none of them. What already exists pins a
+// different clause of the same bullet: review-path-default.test.mjs anchors the
+// Phase 3 no-ci edge's outstanding-ruling condition (`never while you still owe
+// it a ruling`). The gate itself was free to rot in any of the four.
 //
 // The four sites word it differently ON PURPOSE, so this pins the invariant each
 // one must keep rather than a shared sentence:
@@ -65,9 +65,14 @@ function paragraphSaying(text, anchor, label) {
 function bullet(source, startAnchor, endAnchor, label) {
   const at = source.indexOf(startAnchor);
   assert.notEqual(at, -1, `${label}: '${startAnchor}' moved — update this test`);
-  const end = source.indexOf(endAnchor, at + startAnchor.length);
-  assert.notEqual(end, -1, `${label}: '${endAnchor}' moved — update this test`);
-  return flat(source.slice(at, end));
+  const endAt = source.indexOf(endAnchor, at + startAnchor.length);
+  assert.notEqual(endAt, -1, `${label}: '${endAnchor}' moved — update this test`);
+  // Clamp to the NEXT top-level bullet too. The end anchor is fixed, so on it
+  // alone a sibling edge inserted between the two joins the slice and can carry
+  // a pin the real edge has lost — the vacuity this slice exists to rule out.
+  // The endAnchor assertion stays as the "moved — update this test" tripwire.
+  const next = source.indexOf("\n- **", at + startAnchor.length);
+  return flat(source.slice(at, next === -1 ? endAt : Math.min(next, endAt)));
 }
 
 const SITES = [
@@ -93,7 +98,11 @@ const SITES = [
     // No refusal half: the merge bot reads the label, it never adds one.
     "run-merge-bot label read",
     () => paragraphSaying(RUN_MERGE_BOT, "on a `ready-to-merge` PR is not a block", "run-merge-bot label read"),
-    /finisher only ever adds it[^.]*after checking the reviewer's own green `testCmd` run/i,
+    // The gap is `[\s\S]*?`, not `[^.]*`: a period between the two anchors is a
+    // reflow, not a lost gate, and the paragraph is already flattened. Keep BOTH
+    // anchors — they are what makes this non-vacuous; dropping either one to a
+    // loose `/reviewer's .{0,30}run/` is satisfied by the surrounding prose alone.
+    /finisher only ever adds it[\s\S]*?after checking the reviewer's own green `testCmd` run/i,
     null,
   ],
 ];
