@@ -540,8 +540,8 @@ test("a stray worktree the script may not stat keeps the hand-release remedy", (
   chmodSync(parent, 0o000);
   const { code, json } = release(r, c);
   // Restored before the first assert, for the reason "a worktree the script may
-  // not look at is unknown, never a release" gives: a failure here would
-  // otherwise leave a fixture the suite's own cleanup cannot remove.
+  // not look at is unknown, never a release" gives: the `precious.txt` read
+  // below goes through this directory and gets EACCES while it is 0o000.
   chmodSync(parent, 0o755);
 
   assert.equal(code, 1);
@@ -1415,8 +1415,8 @@ test("a removal that cleared the registration is a partial release, never `nothi
   // permission bits, and has no root-vacuity hole. The second reachable shape is
   // a subdirectory left at mode 555 mid-delete, which fails the same way (rc 255
   // with the registration already cleared, measured on git 2.50.1); it is named
-  // here rather than built, because this suite's 0o000 fixtures already leak on
-  // failure and go vacuous under euid 0 (#184).
+  // here rather than built, because a mode-based fixture goes vacuous under
+  // euid 0 (#184).
   //
   // Swapped in during the gh round trip, since the precondition that refuses a
   // non-directory worktree runs first and would otherwise block this before any
@@ -1576,9 +1576,11 @@ test("a worktree directory the script may not stat is unknown, never a release",
   //
   // `chmod` is unavoidable here, unlike the Deregistered fixture above: being
   // unable to stat the path IS the condition under test, and no permission-free
-  // shape produces it. Restored before the first assert, like its neighbours,
-  // so a failure cannot leave a fixture the suite's own cleanup cannot remove
-  // (#184 owns the residual euid-0 vacuity this shares with them).
+  // shape produces it. Restored before the first assert like its neighbours,
+  // though unlike them this case does not need it: it asserts `branch` alone,
+  // which `for-each-ref` answers without searching `.worktrees` (measured —
+  // dropping this line leaves this case green while four neighbours go red).
+  // #184 owns the residual euid-0 vacuity this shares with them.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
@@ -1827,8 +1829,8 @@ test("an unsearchable worktree is not reported as having no .git", (t) => {
   chmodSync(c.wt, 0o644);
   const { code, json, stderr } = release(r, c);
   // Restored before the first assert, for the reason "a worktree the script may
-  // not look at is unknown, never a release" gives: a failure here would
-  // otherwise leave a fixture the suite's own cleanup cannot remove.
+  // not look at is unknown, never a release" gives: the `precious.txt` read
+  // below is inside this directory and needs the search bit back.
   chmodSync(c.wt, 0o755);
 
   assert.equal(code, 2);
@@ -1866,8 +1868,9 @@ test("a worktree the script may not look at is unknown, never a release", (t) =>
 
   chmodSync(parent, 0o000);
   const { code } = release(r, c);
-  // Restored before the first assert, or a failure here leaves a fixture the
-  // suite's own cleanup cannot remove.
+  // Restored before the first assert, or `artefacts`'s `existsSync(c.wt)` reads
+  // through a directory it still may not search, and "nothing may be touched"
+  // fails over work that is sitting right there (measured).
   chmodSync(parent, 0o755);
 
   // The property, not this script's wording for it: the pre-fix code refused
@@ -1947,8 +1950,9 @@ test("an unreadable worktree registry is unknown, never a release", (t) => {
   for (const mode of [0o000, 0o400]) {
     chmodSync(wtroot, mode);
     const { code, json, stderr } = release(r, c);
-    // Restored before the first assert, or a failure here leaves a fixture the
-    // suite's own cleanup cannot remove.
+    // Restored before the first assert — `artefacts` below runs `worktree list`
+    // itself, and would read this claim's worktree as absent while the registry
+    // is still unreadable.
     chmodSync(wtroot, 0o755);
 
     const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
