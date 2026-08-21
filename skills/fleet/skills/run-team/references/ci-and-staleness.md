@@ -1,8 +1,8 @@
 # CI reading and staleness
 
-Why green not verdict, why conclusion not stable, why behind-count only honest
-signal. Assertions live in SKILL.md Phase 3 event loop + Merge bot sections;
-evidence here.
+Why green not verdict, why absence is its own verdict, why conclusion not
+stable, why behind-count only honest signal. Assertions live in SKILL.md
+Phase 3 event loop + Merge bot sections; evidence here.
 
 ## Own the CI waits — members cannot hold across a run
 
@@ -23,6 +23,29 @@ ACROSS runs, can report `pass` inherited from cancelled run on superseded SHA;
 head-SHA binding alone misses it, because head right and only conclusions belong
 elsewhere. Tell members monitor event is wake-up, never verdict — they re-query
 `gh run view <rid> --json jobs` at labelling time.
+
+## `no-ci`: absence is its own verdict, never green and never red
+
+Third verdict `ci-state.mjs` emits, alongside `green`/`not-green`. Only genuine
+absence earns it: no `.github/workflows/` directory, or one holding no workflow
+files. Every failure to *read* a workflow — directory unreadable, target
+unreadable, files present under names other than `--workflow`, two sharing that
+name, no resolvable repo root — is exit 2, "could not be answered", never
+`no-ci`. So a repo whose CI is merely misconfigured can never borrow the
+declarable verdict.
+
+Absence never means pass. `no-ci` alone exits **1**, same bucket as `not-green`
+— nothing to be green, and not red either. Exit 0 comes only with the caller's
+`--declare-no-ci`, saying the gate is satisfied by their own verified suite run.
+That flag is caller-side: it is echoed into `reasons` and flips the exit code,
+so re-running with it and finding it there confirms only that you passed it,
+never that anyone verified anything.
+
+Why controller needs the verdict by name: no workflow run will ever complete
+here, so the CI-run-completion edge never fires and waiting on it stalls the
+whole PR — the silent-stall shape #111 reported before this verdict existed.
+Dispatch the finisher off the reviewer's final verdict instead. Under `no-ci`
+the script reads no run list and no run view: no workflow, nothing to bind.
 
 ## A conclusion is not stable, even for a fixed run id on an unchanged head
 
