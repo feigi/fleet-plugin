@@ -157,7 +157,10 @@ function failOnlyShim(t, match, stderr, code = 1) {
     join(bin, "git"),
     `#!/bin/sh\n` +
       `if ${match}; then\n` +
-      stderr.map((l) => `  printf '%s\\n' ${JSON.stringify(l)} >&2\n`).join("") +
+      // Shell-quoted, not `JSON.stringify`: that escapes for JSON, but the
+      // splice lands in shell, where a `$` in a fixture line would expand
+      // instead of reaching git's stderr as data.
+      stderr.map((l) => `  printf '%s\\n' '${l.replace(/'/g, `'\\''`)}' >&2\n`).join("") +
       `  exit ${code}\n` +
       `fi\n` +
       `exec ${REAL_GIT} "$@"\n`,
@@ -250,24 +253,14 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
 
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  // Not `failOnlyShim`: that helper always exits, and this shim must warn and
-  // then fall THROUGH to the real `git cherry`, so the merge check reads a
-  // genuine run's stdout rather than an empty one.
+  // The warning goes in the `match`, not the stderr array: a false match falls
+  // THROUGH to `exec ${REAL_GIT}`, so the shim warns and the merge check still
+  // reads a genuine `git cherry` run's stdout rather than an empty one.
   // `git cherry` SUCCEEDS here — rc 0, no commit lines on stdout — but writes a
   // diagnostic containing a `+` to stderr, which the capture's 2>&1 folds into
   // the value the merge check matches. Only the line-start `+` is a commit, so
   // this branch must still be reaped. An unanchored match keeps it forever.
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = cherry ]; then\n` +
-      `  echo "warning: unable to access '/x/c++/lib/.gitattributes'" >&2\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
+  const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; false; }`, []);
 
   const { code, json } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
 
