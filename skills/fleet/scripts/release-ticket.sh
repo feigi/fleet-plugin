@@ -439,9 +439,12 @@ locked() {
 # measured) as well as on a genuine detached checkout, so its presence is not
 # evidence of a real detached checkout and its absence is not evidence of this
 # fault either. A guard keyed on it instead of on `branch` misclassifies half
-# of what it exists to catch — and that is pinned, not just reasoned: the
-# symlink and directory fixtures are the only ones whose porcelain carries the
-# line, so keying on it reds them and nothing else (measured).
+# of what it exists to catch — and that is pinned, not just reasoned: adding
+# `cur&&/^detached$/{hasbranch=1}` reds the symlink and directory fixtures and
+# nothing else (measured). Not because they are the only porcelain in the suite
+# carrying the line — the genuine `--detach` fixtures print it too — but because
+# those carry a real sha, so `nullhead` never fires for them and the added
+# trigger has nothing left to flip.
 unresolved_head() {
   printf '%s\n' "$wt_list" |
     P="$1" awk '
