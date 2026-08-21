@@ -32,6 +32,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { phrase } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../../.github/scripts/check-tracked.sh", import.meta.url));
 const CI_YML = fileURLToPath(new URL("../../../.github/workflows/ci.yml", import.meta.url));
@@ -131,8 +132,6 @@ test("a path holding a space reaches the checker as one argument", (t) => {
 // Flattened, so a re-indent or a line break inside the step cannot red this;
 // only the command actually changing can. Same convention as the *-prose tests.
 const flat = (s) => s.replace(/\s+/g, " ");
-const phrase = (s) =>
-  new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 test("every ls-files check in ci.yml goes through check-tracked.sh", () => {
   const ci = flat(readFileSync(CI_YML, "utf8"));

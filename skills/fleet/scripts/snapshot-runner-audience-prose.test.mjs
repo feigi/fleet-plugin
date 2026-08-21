@@ -28,24 +28,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const RUN_TEAM = read("skills", "fleet", "skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "fleet", "skills", "run-team", "references", "isolation.md");
 const REVIEW_AND_FIX = read("skills", "fleet", "commands", "review-and-fix.md");
-
-// Bounded at BOTH ends — an unbounded end lets a later, unrelated occurrence of
-// the same phrase satisfy the assertion with the guard itself deleted.
-function between(text, from, to, what) {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
-}
-
-const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 // Each row carries its label once: the row name is also `between()`'s `what`,
 // so the test name and the doc named in a drift failure cannot disagree.
