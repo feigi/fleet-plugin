@@ -29,10 +29,10 @@ elsewhere. Tell members monitor event is wake-up, never verdict — they re-quer
 Third verdict `ci-state.mjs` emits, alongside `green`/`not-green`. Only genuine
 absence earns it: no `.github/workflows/` directory, or one holding no workflow
 files. Every failure to *read* a workflow — directory unreadable, target
-unreadable, files present under names other than `--workflow`, two sharing that
-name, no resolvable repo root — is exit 2, "could not be answered", never
-`no-ci`. So a repo whose CI is merely misconfigured can never borrow the
-declarable verdict.
+unreadable, files present under names other than `--workflow`, two readable
+files sharing that name, no resolvable repo root — is exit 2, "could not be
+answered", never `no-ci`. So a repo whose CI is merely misconfigured can never
+borrow the declarable verdict.
 
 Absence never means pass. `no-ci` alone exits **1**, same bucket as `not-green`
 — nothing to be green, and not red either. Exit 0 comes only with the caller's
@@ -44,8 +44,10 @@ never that anyone verified anything.
 Why controller needs the verdict by name: no workflow run will ever complete
 here, so the CI-run-completion edge never fires and waiting on it stalls the
 whole PR — the silent-stall shape #111 reported before this verdict existed.
-Dispatch the finisher off the reviewer's final verdict instead. Under `no-ci`
-the script reads no run list and no run view: no workflow, nothing to bind.
+SKILL.md's `no-ci` edge therefore dispatches the finisher off the reviewer's
+final verdict instead — that edge, not this file, carries the conditions on it.
+Under `no-ci` the script reads no run list and no run view: no workflow, nothing
+to bind.
 
 ## A conclusion is not stable, even for a fixed run id on an unchanged head
 
