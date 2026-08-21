@@ -677,6 +677,55 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
   }
 });
 
+test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` line", (t) => {
+  // The fourth broken-HEAD route enumerated at `unresolved_head` in
+  // release-ticket.sh, and the only one of the four needing a permission bit —
+  // hence the skip below, which the three fixtures above do not carry. Under
+  // euid 0 the mode denies nothing: git reads the HEAD, the `branch` line comes
+  // back, the worktree stops being a stray at all and the release proceeds. The
+  // fixture would build the HEALTHY shape and assert the broken one's remedy.
+  if (EUID0) return t.skip(NO_DENIAL);
+
+  // The cheapest of the four to tear down, not the dearest: a file's own bits do
+  // not gate its unlink, only its parent directory's do, so a mode-000 HEAD does
+  // not even need `repo()`'s chmod-back teardown — a naive `rmSync` already
+  // clears it (measured, against `ENOTEMPTY` for the mode-555 subdir that does
+  // need it).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const head = join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD");
+  chmodSync(head, 0o000);
+
+  // Both reads taken while the bit is off, asserted only after the restore
+  // below: `artefacts()` runs `worktree list` itself, so an assert that fired
+  // here would leave the mode at 000 for the rest of the case.
+  const porcelain = git(r.w, "worktree", "list", "--porcelain");
+  const { code, json } = release(r, c);
+  chmodSync(head, 0o644);
+
+  // The shape, measured on the repo rather than inferred from the enumeration.
+  // Only the claim's worktree can supply either line: the main checkout is on
+  // `main`, carrying a real sha and a `branch` line of its own.
+  assert.match(porcelain, /^HEAD 0+$/m, "fixture: the mode alone must produce the null object id");
+  assert.doesNotMatch(porcelain, /^branch refs\/heads\/fix\/9-release-ticket$/m, "fixture: and must take the branch line with it");
+  // The half of the sibling's parenthetical that nothing in this file asserted
+  // before: this route is one of the two that do NOT print `detached`, which is
+  // why `unresolved_head` can key on that line in neither direction.
+  assert.doesNotMatch(porcelain, /^detached$/m, "fixture: and chmod, unlike the symlink and directory shapes, prints no detached line");
+
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+  assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — the mode just stopped git reading it");
+  assert.doesNotMatch(json.blockers[0], /release it by hand/, "distinct message from the branch-mismatch else");
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  // All three true, where the other three routes leave `worktree: false`: the
+  // fault was the mode and nothing else, so the restore above puts the `branch`
+  // line back. Nothing on disk was damaged, and nothing was released.
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true });
+});
+
 test("a symlink over HEAD that RESOLVES never reaches the unresolved-HEAD arm — the linkage probe refuses first", (t) => {
   // What this case pins is the LINKAGE PROBE, not `unresolved_head`, and the
   // name says so because the obvious reading is wrong: point the link at the
