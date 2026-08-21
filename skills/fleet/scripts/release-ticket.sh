@@ -418,10 +418,11 @@ locked() {
 # on some other branch? Four ways an admin HEAD file breaks all produce the
 # same porcelain shape — the null object id with no `branch` line: `chmod 000`
 # on it, garbage content in it, a dangling symlink in its place, or a
-# directory in its place (measured, git 2.50.1). The fixture in
-# release-ticket.test.mjs reproduces only the second — garbage content, no
-# permission bits and no symlink; the other three are named here rather than
-# built.
+# directory in its place (measured, git 2.50.1). release-ticket.test.mjs
+# builds the garbage-content, dangling-symlink and directory routes; `chmod
+# 000` is the one named here rather than built, because a permission fixture
+# leaks on failure and goes vacuous under euid 0 and the other three need no
+# permission bits at all (#184).
 #
 # BOTH conditions, never one alone. The null OID alone is also an UNBORN
 # branch (`git worktree add --orphan`) — that one carries a real `branch`
@@ -435,7 +436,9 @@ locked() {
 # measured) as well as on a genuine detached checkout, so its presence is not
 # evidence of a real detached checkout and its absence is not evidence of this
 # fault either. A guard keyed on it instead of on `branch` misclassifies half
-# of what it exists to catch.
+# of what it exists to catch — and that is pinned, not just reasoned: the
+# symlink and directory fixtures are the only ones whose porcelain carries the
+# line, so keying on it reds them and nothing else (measured).
 unresolved_head() {
   printf '%s\n' "$wt_list" |
     P="$1" awk '

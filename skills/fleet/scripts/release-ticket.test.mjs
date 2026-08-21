@@ -571,9 +571,10 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   //
   // Garbage content is the fixture here — no permission bits, no symlink —
   // and it reproduces the exact porcelain shape all four broken-HEAD routes
-  // produce: the null object id with no `branch` line. The four, and why only
-  // this one is built, are enumerated at `unresolved_head` in
-  // release-ticket.sh.
+  // produce: the null object id with no `branch` line. The four are enumerated
+  // at `unresolved_head` in release-ticket.sh; the dangling-symlink and
+  // directory routes are built in the case below, and `chmod 000` is the one
+  // named there rather than built.
   //
   // No checkout call: this worktree never left the branch claim-ticket.sh put
   // it on. Only its admin HEAD file is broken.
@@ -598,6 +599,95 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
     { dir: true, worktree: false, branch: true },
     "`artefacts().worktree` keys on the branch LINE, which the corrupt HEAD removed — the directory and branch both survive untouched",
   );
+});
+
+test("the symlink and directory HEAD shapes reach the same arm, `detached` line and all", (t) => {
+  // The other two broken-HEAD routes enumerated at `unresolved_head` in
+  // release-ticket.sh. The garbage fixture above pins that the arm fires; these
+  // pin that it is keyed on the right FIELD, which nothing here could pin
+  // before.
+  //
+  // All four routes produce the null object id with no `branch` line, but only
+  // these two ALSO print a `detached` line (measured, git 2.50.1: chmod and
+  // garbage do not). That makes them the only fixtures in this file whose
+  // porcelain can tell `unresolved_head`'s `branch` key from a `detached` one —
+  // adding `cur&&/^detached$/{hasbranch=1}` to it reds these and leaves every
+  // other test in the file green (measured), because every shape the suite has
+  // ever seen carries no `detached` line to trip it. That mutation is the exact
+  // misread the function's own comment warns about, and until this fixture it
+  // was refuted by nothing.
+  //
+  // Neither shape touches a permission bit, so unlike the `chmod 000` route —
+  // the one still named rather than built — both reproduce as any user, mean
+  // the same thing under euid 0, and leave nothing behind that the suite's own
+  // `rmSync` cannot remove when an assertion below fails (#184).
+  for (const shape of ["symlink", "dir"]) {
+    const r = repo(t);
+    const c = claim(r.w, 9, "release-ticket");
+    const head = join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD");
+    rmSync(head);
+    // Dangling INSIDE the fixture root, not at `/nonexistent`: the link only
+    // has to fail to resolve, and one anchored in the temp repo cannot start
+    // resolving because of something on the machine running the suite.
+    if (shape === "symlink") symlinkSync(join(r.w, "no-such-head"), head);
+    else mkdirSync(head);
+
+    // The shape really reached the porcelain this test is named for, measured
+    // on the repo rather than inferred from the prose above. A fixture that
+    // quietly produced the garbage shape's output instead would duplicate the
+    // test above and pin nothing new — the vacuous pass this whole case exists
+    // to avoid. Only the claim's worktree can supply the line: the main
+    // checkout is on `main` and carries a `branch` line.
+    assert.match(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
+      `fixture: the ${shape} shape must really print the detached line`);
+
+    const { code, json } = release(r, c);
+    assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+    assert.match(json.blockers[0], /could not read its HEAD/, shape);
+    assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, `the worktree IS on this branch, ${shape}`);
+    assert.doesNotMatch(json.blockers[0], /release it by hand/, `distinct message from the branch-mismatch else, ${shape}`);
+    assert.equal(json.released, false, shape);
+    assert.equal(code, 1, shape);
+  }
+});
+
+test("a symlink over HEAD that RESOLVES is not swept into the unresolved-HEAD arm", (t) => {
+  // The acceptance half of the fixture above, and the reason that one is not
+  // keyed on "HEAD is a symlink". What makes the shape above unresolvable is
+  // that the link DANGLES: point the same link at the real HEAD file and
+  // `worktree list --porcelain` reads straight through it — a real sha with the
+  // `branch` line intact and no `detached` line (measured, git 2.50.1). That is
+  // input `unresolved_head` must ACCEPT, and a fixture pinning the file type
+  // rather than the fault would refuse a worktree whose HEAD git can read
+  // perfectly well.
+  //
+  // Asserted on the PORCELAIN, which is the whole of what `unresolved_head`
+  // reads, and not on the absence of a blocker: git's own repository-validity
+  // check rejects a symlinked HEAD where `worktree list` accepts it, so the
+  // uncommitted-work probe further down refuses this claim (measured) and the
+  // run emits no payload at all. Against a null payload every `doesNotMatch`
+  // on a blocker passes for the wrong reason — the vacuous green this case
+  // exists to avoid — so the refusal below is pinned by the one phrase that
+  // separates it from the HEAD arm rather than by that arm's silence.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const head = join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD");
+  renameSync(head, `${head}.real`);
+  symlinkSync(`${head}.real`, head);
+
+  const listed = git(r.w, "worktree", "list", "--porcelain");
+  assert.match(listed, /^branch refs\/heads\/fix\/9-release-ticket$/m,
+    "fixture: a resolving symlink must leave the branch line git could not produce for the dangling one");
+  assert.doesNotMatch(listed, /^HEAD 0+$/m, "and a real sha, not the null OID the four broken routes share");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(json, null, "the linkage probe refuses before any payload is emitted");
+  // The distinguishing prefix, not the shared tail: the `.git`-file refusal
+  // ends in the same words, so a tail-only match could not tell them apart.
+  assert.match(stderr, /cannot read the git linkage of/);
+  assert.doesNotMatch(stderr, /could not read its HEAD/, "HEAD resolved fine — this refusal is about the linkage");
+  assert.equal(code, 2);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "and nothing is touched");
 });
 
 test("a stray worktree whose directory is gone still gets the prune remedy, even with an unresolvable HEAD", (t) => {
