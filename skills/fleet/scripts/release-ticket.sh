@@ -418,10 +418,14 @@ locked() {
 # on some other branch? Four ways an admin HEAD file breaks all produce the
 # same porcelain shape — the null object id with no `branch` line: `chmod 000`
 # on it, garbage content in it, a dangling symlink in its place, or a
-# directory in its place (measured, git 2.50.1). The fixture in
-# release-ticket.test.mjs reproduces only the second — garbage content, no
-# permission bits and no symlink; the other three are named here rather than
-# built.
+# directory in its place (measured, git 2.50.1). release-ticket.test.mjs
+# builds the garbage-content, dangling-symlink and directory routes; `chmod
+# 000` is the one named here rather than built, because it is the only one
+# needing a permission bit: root ignores the mode, so it would have to carry
+# the `EUID0` skip the file's other permission fixtures do and would measure
+# nothing on a root runner, while the other three reproduce as any user. Not
+# because it would leak — `repo()`'s teardown chmods the root back before
+# `rmSync`, which is what closed #184.
 #
 # BOTH conditions, never one alone. The null OID alone is also an UNBORN
 # branch (`git worktree add --orphan`) — that one carries a real `branch`
@@ -435,7 +439,12 @@ locked() {
 # measured) as well as on a genuine detached checkout, so its presence is not
 # evidence of a real detached checkout and its absence is not evidence of this
 # fault either. A guard keyed on it instead of on `branch` misclassifies half
-# of what it exists to catch.
+# of what it exists to catch — and that is pinned, not just reasoned: adding
+# `cur&&/^detached$/{hasbranch=1}` reds the symlink and directory fixtures and
+# nothing else (measured). Not because they are the only porcelain in the suite
+# carrying the line — the genuine `--detach` fixtures print it too — but because
+# those carry a real sha, so `nullhead` never fires for them and the added
+# trigger has nothing left to flip.
 unresolved_head() {
   printf '%s\n' "$wt_list" |
     P="$1" awk '
