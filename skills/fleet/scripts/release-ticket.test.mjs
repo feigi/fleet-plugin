@@ -72,6 +72,12 @@ const ENV = {
 const EUID0 = process.geteuid?.() === 0;
 const NO_DENIAL = "chmod denies nothing under euid 0";
 
+// The real git behind every PATH shim below, resolved once at import so the
+// bodies that need the binary before falling through can name it. `command -v`
+// like the sed and awk shims further down, rather than the `which` these git
+// shims each used: `which` is not POSIX and need not exist.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
@@ -212,6 +218,16 @@ function claim(w, issue, slug, type = "fix") {
   const wt = join(w, ".worktrees", `${issue}-${slug}`);
   git(w, "worktree", "add", "-q", wt, "-b", branch, "origin/main");
   return { branch, wt, args: [String(issue), slug, type] };
+}
+
+/**
+ * A `git` on the fixture's PATH — the same `bin` dir `repo` puts the `gh` stub
+ * in — that runs `body` first and defers to real git for whatever `body` leaves
+ * unhandled. `body` may interpolate `REAL_GIT` when it has to call the real
+ * binary and then keep going (the #395 case appends a line to its listing).
+ */
+function gitShim(r, body) {
+  writeFileSync(join(r.w, "..", "bin", "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`, { mode: 0o755 });
 }
 
 function release(r, c, { apply = true, env = {}, cwd = r.w } = {}) {
@@ -1287,12 +1303,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // is git's to reword.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  writeFileSync(
-    join(r.w, "..", "bin", "git"),
-    `#!/bin/sh\ncase "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac\nexec ${real} "$@"\n`,
-    { mode: 0o755 },
-  );
+  gitShim(r, `case "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac`);
   // The worktree path the SCRIPT reports, never the one node built: git resolves
   // symlinks, so the /var tmpdir node is handed comes back as /private/var
   // (measured, macOS). A dry run reads the same `wt` the halt receipt prints and
@@ -1363,12 +1374,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   // too, and dropping `done_branch` from the condition survives the suite.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  writeFileSync(
-    join(r.w, "..", "bin", "git"),
-    `#!/bin/sh\ncase "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac\nexec ${real} "$@"\n`,
-    { mode: 0o755 },
-  );
+  gitShim(r, `case "$1 $2" in "\${GIT_FAIL:-}") echo 'refused by the git shim' >&2; exit 1 ;; esac`);
   // By hand, with real git: the registration goes, the branch stays.
   execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
 
@@ -1599,21 +1605,16 @@ test("a removal whose effect cannot be measured asserts neither headline", (t) =
   // to succeed or the run dies long before any mutation.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
   const seen = join(r.w, "..", "list.count");
-  writeFileSync(
-    join(r.w, "..", "bin", "git"),
-    `#!/bin/sh
-case "$1 $2" in
+  gitShim(
+    r,
+    `case "$1 $2" in
   "worktree list")
     n=$(cat "${seen}" 2>/dev/null || echo 0)
     n=$((n + 1)); echo "$n" > "${seen}"
     [ "$n" -le 1 ] || { echo 'listing refused by the git shim' >&2; exit 1; } ;;
   "worktree remove") echo 'refused by the git shim' >&2; exit 1 ;;
-esac
-exec ${real} "$@"
-`,
-    { mode: 0o755 },
+esac`,
   );
 
   const { code, json, stderr } = release(r, c);
@@ -1633,9 +1634,18 @@ test("a successful release survives a failing `git worktree prune`", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   // A `git` shim on PATH that fails only on prune, and defers everything else.
+  gitShim(r, `[ "$1" = worktree ] && [ "$2" = prune ] && exit 3`);
+  // Alone among the shimmed cases, this one's assertions are satisfied by a
+  // shim that does NOTHING: a git that never refuses prune releases cleanly,
+  // which is what the case below expects. So the shim is pinned directly, in
+  // both directions — a `gitShim` that dropped `body` would empty this case
+  // rather than fail it, and the refusal it exists to survive would go untested
+  // while the suite stayed green. `cwd` pins both probes to the fixture: on
+  // the failure path the body stops matching and `exec` reaches real git,
+  // which would then prune whatever repo the runner happens to stand in.
   const shim = join(r.w, "..", "bin", "git");
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  writeFileSync(shim, `#!/bin/sh\n[ "$1" = worktree ] && [ "$2" = prune ] && exit 3\nexec ${real} "$@"\n`, { mode: 0o755 });
+  assert.equal(spawnSync(shim, ["worktree", "prune"], { cwd: r.w }).status, 3, "the body really does refuse prune");
+  assert.equal(spawnSync(shim, ["--version"], { cwd: r.w }).status, 0, "and everything else really does reach real git");
 
   const { code, json } = release(r, c);
   assert.equal(code, 0, "the release succeeded; prune is housekeeping");
@@ -2192,18 +2202,13 @@ test("git listing MORE than the registry reports THAT, not an incomplete listing
   // real interleaving produces this deterministically.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  writeFileSync(
-    join(r.w, "..", "bin", "git"),
-    `#!/bin/sh
-if [ "$1" = worktree ] && [ "$2" = list ]; then
-  '${real}' "$@" || exit $?
+  gitShim(
+    r,
+    `if [ "$1" = worktree ] && [ "$2" = list ]; then
+  '${REAL_GIT}' "$@" || exit $?
   printf 'worktree /nonexistent/landed-between-the-two-reads\\n\\n'
   exit 0
-fi
-exec '${real}' "$@"
-`,
-    { mode: 0o755 },
+fi`,
   );
 
   const { code, json, stderr } = release(r, c);
