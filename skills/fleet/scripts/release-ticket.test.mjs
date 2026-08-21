@@ -618,9 +618,10 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
   // was refuted by nothing.
   //
   // Neither shape touches a permission bit, so unlike the `chmod 000` route —
-  // the one still named rather than built — both reproduce as any user, mean
-  // the same thing under euid 0, and leave nothing behind that the suite's own
-  // `rmSync` cannot remove when an assertion below fails (#184).
+  // the one still named rather than built — both reproduce as any user and
+  // mean the same thing under euid 0, with no `EUID0` skip to carry. Not that
+  // a 000-mode fixture would leak: `repo()`'s teardown chmods the root back
+  // before `rmSync`, which is what closed #184.
   for (const shape of ["symlink", "dir"]) {
     const r = repo(t);
     const c = claim(r.w, 9, "release-ticket");
@@ -648,6 +649,13 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
     assert.doesNotMatch(json.blockers[0], /release it by hand/, `distinct message from the branch-mismatch else, ${shape}`);
     assert.equal(json.released, false, shape);
     assert.equal(code, 1, shape);
+    // The sibling's two lines, not redundancy: a regression that blocked and
+    // ALSO touched the tracker or deleted the worktree left this case green
+    // while reddening the sibling (measured, both mutations). `worktree: false`
+    // because `artefacts()` keys on the `branch` LINE, which the broken HEAD
+    // removes — the directory and branch themselves both survive.
+    assert.deepEqual(r.calls(), [], `and the label is never touched, ${shape}`);
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: false, branch: true }, shape);
   }
 });
 
