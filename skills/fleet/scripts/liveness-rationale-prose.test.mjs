@@ -44,11 +44,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { phrase } from "./prose-pin.mjs";
 
 const SKILL = "skills/fleet/skills/run-team/SKILL.md";
 const ANCHOR = "**Both halves of that command are load-bearing.**";
-
-const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 // The paragraph carrying the rule, and no more of the file than that. A missing
 // anchor is a failure rather than a wider slice: silently falling back to the

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 // review-pr.js used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
@@ -104,14 +105,11 @@ test("no hardcoded testCmd default remains", () => {
 // diffPath/diffLines/prHead were added: `additionalProperties: false` drops
 // an undeclared field silently, so BOTH the prompt asking for it and the
 // schema declaring it have to be pinned, or the feature disconnects in one
-// token exactly like `review-pr-reads.test.mjs:308-367` records happening to
-// the diff facts.
+// token exactly like `review-pr-reads.test.mjs`'s "the snapshot agent asks for
+// the diff facts AND declares them in its schema" records happening to the
+// diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
-  const at = CODE.indexOf("const snap = await agent(");
-  const end = CODE.indexOf("if (!snap", at);
-  assert.notEqual(at, -1, "the snapshot agent dispatch moved — update this test");
-  assert.notEqual(end, -1, "the snapshot agent's validity guard moved — update this test");
-  const snapshot = CODE.slice(at, end);
+  const snapshot = between(CODE, "const snap = await agent(", "if (!snap", "the snapshot agent dispatch");
 
   assert.match(
     snapshot,
@@ -144,7 +142,13 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     "testCmdError is not bound to the script's stderr on refusal",
   );
 
-  const props = snapshot.slice(snapshot.indexOf("properties: {"), snapshot.indexOf("\n      },"));
+  // Scoped to the `properties` object, not the whole schema: a field declared
+  // ANYWHERE else is undeclared as far as `additionalProperties: false` is
+  // concerned, and an unbounded slice covering the rest of the block passes on
+  // it anyway. `between()` for the end anchor too — measured: move a field out
+  // of `properties` and re-indent the close, and the raw `indexOf` form here
+  // returned -1, widened to nearly the whole block, and stayed green.
+  const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
   for (const field of ["testCmd", "testCmdError"]) {
     assert.match(
       props,
@@ -172,11 +176,7 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
   // string, so asserting on the slice passes with the prompt gone. Assert the
   // index — and bound the END too: unbounded, this slice ran to EOF and the
   // assertions below were satisfiable from the verifier prompt further down.
-  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
-  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = CODE.indexOf("Scratch files go in", at);
-  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = CODE.slice(at, end);
+  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
   // The worked example must INTERPOLATE testCmd, not restate it. A hardcoded
   // copy drifts from the resolved value the moment either one changes, and a
   // caller passing args.testCmd (or the derivation) would be handed the wrong
@@ -217,11 +217,7 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
 // have a stack. It has to be stated as a conditional about those repos rather
 // than as a fact about this run.
 test("the anti-substitution rationale is portable, not a present-tense claim about this run", () => {
-  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
-  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = CODE.indexOf("Scratch files go in", at);
-  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = CODE.slice(at, end);
+  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
   assert.doesNotMatch(
     prompt,
     /tears down a shared container mid-run for every sibling/,
@@ -248,11 +244,7 @@ test("the anti-substitution rationale is portable, not a present-tense claim abo
 // tests the whole tree has, so the only reader positioned to notice is the agent
 // that ran the command. If this instruction goes, that case has no other guard.
 test("the prompt rules a no-work run unrun too: zero passes, and a count below the whole tree", () => {
-  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
-  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = CODE.indexOf("Scratch files go in", at);
-  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = CODE.slice(at, end);
+  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
   assert.match(
     prompt,
     /0 passes with no failures is\s+everything skipped/,

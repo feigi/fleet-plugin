@@ -102,6 +102,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -109,8 +110,6 @@ const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
 const CI_STATE_PATH = "skills/fleet/scripts/ci-state.mjs";
 const SKILL = "skills/fleet/skills/run-team/SKILL.md";
 const REVIEW_AND_FIX = "skills/fleet/commands/review-and-fix.md";
-
-const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 // The one assignment `--quiet` gates the payload on. Its absence is a failure
 // rather than an empty field list: an empty list would pass every site

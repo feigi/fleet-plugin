@@ -38,26 +38,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const RUN_TEAM = read("skills", "fleet", "skills", "run-team", "SKILL.md");
 const NEXT_TICKET = read("skills", "fleet", "skills", "next-ticket", "SKILL.md");
-
-// Bound at BOTH ends — see review-pr-reads.test.mjs:271-275 for why an unbounded
-// end lets a later, unrelated occurrence of the same phrase satisfy the
-// assertion with the real clause deleted.
-function between(text, from, to, what) {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
-}
-
-// `\s+` between every word, never a literal space — the step is a hard-wrapped
-// markdown list item, so any inter-word space may be a newline plus indent.
-const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
 const step = () =>
   between(RUN_TEAM, "**In-flight check**", "**Read each survivor in full", "run-team/SKILL.md");

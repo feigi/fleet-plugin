@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
 // SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs:23-40`
-// and `review-pr-testcmd.test.mjs:23-33`, and for the same reason: extraction to
+// and `review-pr-testcmd.test.mjs`'s `liftResolveTestCmd`, and for the same
+// reason: extraction to
 // a module would need `import` to resolve inside the Workflow sandbox ("no
 // filesystem or Node.js API access"), which nothing in `workflows/` does, and a
 // failed import bricks the fleet's DEFAULT review path.
@@ -268,18 +270,10 @@ test("every branch carries the bounding rule", () => {
   }
 });
 
-// Bound the slice at BOTH ends. `indexOf` returns -1 when absent and `slice(-1)`
-// is a truthy one-character string, so an unbounded slice passes with the block
-// deleted, and an unbounded end runs to EOF where the specialist and refuter
-// prompts satisfy it — the defect `review-pr-testcmd.test.mjs`'s "the specialist
-// prompt hands the command over verbatim and rules 'tests 0' a failure" records.
-function between(text, from, to, what) {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
-}
+// Bounded at both ends in prose-pin.mjs's between() — an unbounded end runs to
+// EOF where the specialist and refuter prompts satisfy it, the defect
+// `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the command over
+// verbatim and rules 'tests 0' a failure" records.
 const slice = (from, to) => between(CODE, from, to, "review-pr.js");
 
 // The snapshot schema's `additionalProperties: false` REJECTS an undeclared

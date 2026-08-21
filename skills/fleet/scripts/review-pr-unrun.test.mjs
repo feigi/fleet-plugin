@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
 // IDENTICAL shapes: `findings: []` either way, with the key listed in
@@ -210,11 +211,8 @@ test("a run that reported tests but not pass/fail is NOT unrun", () => {
 // unconditionally, which is the whole point of reading the object rather than
 // the text (see the header). Stripping first would only re-narrow it.
 function findingsSchema() {
-  const at = SOURCE.indexOf("const FINDINGS_SCHEMA = {");
-  assert.notEqual(at, -1, "review-pr.js no longer declares FINDINGS_SCHEMA — update this test");
-  const end = SOURCE.indexOf("const VERDICT_SCHEMA", at);
-  assert.notEqual(end, -1, "VERDICT_SCHEMA no longer follows FINDINGS_SCHEMA — update this test");
-  return new Function(`${SOURCE.slice(at, end)}\nreturn FINDINGS_SCHEMA;`)();
+  const src = between(SOURCE, "const FINDINGS_SCHEMA = {", "const VERDICT_SCHEMA", "review-pr.js");
+  return new Function(`${src}\nreturn FINDINGS_SCHEMA;`)();
 }
 
 // #139: the description at `:37` called `scope_searched` **Required** while the
@@ -254,11 +252,7 @@ test("test_run is declared, carries the command and count, and does not force pa
 // per-dimension envelope already gone. If the recording is not in that closure
 // it cannot be anywhere.
 function verifyStage() {
-  const at = CODE.indexOf("(review, d) =>");
-  assert.notEqual(at, -1, "the verify stage's (review, d) closure moved — update this test");
-  const end = CODE.indexOf("const n = verifiersFor", at);
-  assert.notEqual(end, -1, "the verify stage no longer reaches verifiersFor — update this test");
-  return CODE.slice(at, end);
+  return between(CODE, "(review, d) =>", "const n = verifiersFor", "the verify stage");
 }
 
 // The entry, not the call site. `unrunEntries` returns zero or one, so both
@@ -360,11 +354,7 @@ test("the returned object carries dimensionsUnrun alongside dimensionsRun", () =
 // the sentence saying what to DO about a zero-test run could be deleted with
 // the suite green. This edit rewrites that sentence; pin it where it now lands.
 test("the specialist prompt names test_run as where a zero-test run gets reported", () => {
-  const at = CODE.indexOf("READ ONLY FROM THE SNAPSHOT");
-  assert.notEqual(at, -1, "the specialist prompt moved — update this test");
-  const end = CODE.indexOf("Scratch files go in", at);
-  assert.notEqual(end, -1, "the specialist prompt's scratch line moved — update this test");
-  const prompt = CODE.slice(at, end);
+  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
   assert.match(prompt, /test_run/, "the prompt never names test_run, so nothing fills the field the schema requires");
   // The instruction that matters is reporting the run that produced NOTHING. A
   // specialist that reports only successful runs leaves `test_run` absent in

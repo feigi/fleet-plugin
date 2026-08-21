@@ -109,8 +109,12 @@ jobs:
       #     CJS script (the `export`) — `node --check` rejects it either way.
       #     `new AsyncFunction(...)` is the one thing that compiles both parts
       #     without running them; it's also what
-      #     skills/fleet/scripts/review-pr-reads.test.mjs:439 already uses to
-      #     catch exactly this, reused here rather than reinvented.
+      #     skills/fleet/scripts/review-pr-reads.test.mjs's "review-pr.js parses
+      #     — no other reader in this repo would notice a syntax error" already
+      #     uses to catch exactly this, reused here rather than reinvented.
+      #     Cited by test NAME, not by line: a refactor that shifts that file
+      #     silently re-points a line number at unrelated code, and nothing in
+      #     this workflow's comments is checked by any test.
       #     That test pins review-pr.js BY NAME, so for that one file this loop
       #     is redundant today. The loop is here so workflows/merge-wave.js
       #     (docs/specs/2026-07-23-fleet-plugin-design.md, section `## Layout`:

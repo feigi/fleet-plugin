@@ -48,6 +48,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const REAPING = readFileSync(
@@ -56,16 +57,6 @@ const REAPING = readFileSync(
 );
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 const SCRIPT = readFileSync(join(REPO, "skills", "fleet", "scripts", "release-ticket.sh"), "utf8");
-
-// Bound at BOTH ends: an unbounded end lets a later, unrelated occurrence of the
-// same phrase satisfy the assertion with the real clause deleted.
-function between(text, from, to, what) {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
-}
 
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
 // with the comment gutter, not whitespace, at the break — `\s+` does not span a

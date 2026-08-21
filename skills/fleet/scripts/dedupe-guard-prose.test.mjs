@@ -30,20 +30,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "skills", "fleet", "commands", "review-and-fix.md"), "utf8");
-
-// Bound at BOTH ends — an unbounded end lets a later, unrelated occurrence of
-// the same phrase satisfy an assertion with the real clause deleted.
-function between(text, from, to, what) {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
-}
 
 // run-team's finisher duties are an indented ordered list, so a hard wrap puts
 // leading spaces mid-phrase. Collapse whitespace so `\s+` spans a wrap.
