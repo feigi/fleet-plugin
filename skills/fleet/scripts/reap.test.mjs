@@ -149,26 +149,35 @@ function unmergedGoneBranch(w, name, msg) {
   return sha;
 }
 
+/** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
+function failOnlyShim(t, match, stderr, code = 1) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if ${match}; then\n` +
+      stderr.map((l) => `  printf '%s\\n' ${JSON.stringify(l)} >&2\n`).join("") +
+      `  exit ${code}\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
 /**
  * A PATH dir whose `git` fails only `cherry`, matching the ticket's real repro:
  * multi-line stderr, exit 128 (one unreadable loose object suffices in the
  * wild). Everything else execs the real git, unshimmed.
  */
 function cherryShim(t) {
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = cherry ]; then\n` +
-      `  echo "error: unable to open loose object deadbeefcafe: Permission denied" >&2\n` +
-      `  echo "fatal: revision walk setup failed" >&2\n` +
-      `  exit 128\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
+  return failOnlyShim(
+    t,
+    `[ "$1" = cherry ]`,
+    ["error: unable to open loose object deadbeefcafe: Permission denied", "fatal: revision walk setup failed"],
+    128,
   );
-  return bin;
 }
 
 function runReap(cwd, args, envOverrides = {}) {
@@ -243,6 +252,9 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
 
   const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
+  // Not `failOnlyShim`: that helper always exits, and this shim must warn and
+  // then fall THROUGH to the real `git cherry`, so the merge check reads a
+  // genuine run's stdout rather than an empty one.
   // `git cherry` SUCCEEDS here — rc 0, no commit lines on stdout — but writes a
   // diagnostic containing a `+` to stderr, which the capture's 2>&1 folds into
   // the value the merge check matches. Only the line-start `+` is a commit, so
@@ -274,19 +286,7 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
  * `git worktree remove`, execs the real git, unshimmed.
  */
 function pruneShim(t) {
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = worktree ] && [ "$2" = prune ]; then\n` +
-      `  echo "fatal: unable to prune worktrees: permission denied" >&2\n` +
-      `  exit 1\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
-  return bin;
+  return failOnlyShim(t, `[ "$1" = worktree ] && [ "$2" = prune ]`, ["fatal: unable to prune worktrees: permission denied"]);
 }
 
 // #265: `git worktree prune` used to be the last command of an AND-OR list
@@ -716,18 +716,10 @@ test("git's own stderr reaches the payload escaped, not raw", (t) => {
   // and the one with the least control over what it splices when it does.
   const w = repo(t);
   unmergedGoneBranch(w, "feature/onlyhere", "work");
-  const bin = mkdtempSync(join(tmpdir(), "reap-quote-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if [ "$1" = cherry ]; then\n` +
-      `  echo 'error: unable to open loose object "deadbeef cafe": Permission denied' >&2\n` +
-      `  exit 128\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
+  // `failOnlyShim` emits each line through `printf '%s\n'`, so the `"` this test
+  // exists to chase reaches git's stderr as data — the payload has something
+  // real to escape.
+  const bin = failOnlyShim(t, `[ "$1" = cherry ]`, ['error: unable to open loose object "deadbeef cafe": Permission denied'], 128);
 
   const { code, json } = runReap(w, [], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
 
@@ -814,23 +806,6 @@ function symlinkStandIn(wt) {
   renameSync(wt, real);
   symlinkSync(real, wt);
   return real;
-}
-
-/** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
-function failOnlyShim(t, match, stderr, code = 1) {
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if ${match}; then\n` +
-      stderr.map((l) => `  printf '%s\\n' ${JSON.stringify(l)} >&2\n`).join("") +
-      `  exit ${code}\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
-  return bin;
 }
 
 const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH}` });
