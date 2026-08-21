@@ -1415,8 +1415,8 @@ test("a removal that cleared the registration is a partial release, never `nothi
   // permission bits, and has no root-vacuity hole. The second reachable shape is
   // a subdirectory left at mode 555 mid-delete, which fails the same way (rc 255
   // with the registration already cleared, measured on git 2.50.1); it is named
-  // here rather than built, because this suite's 0o000 fixtures already leak on
-  // failure and go vacuous under euid 0 (#184).
+  // here rather than built, because a mode-based fixture goes vacuous under
+  // euid 0 (#184).
   //
   // Swapped in during the gh round trip, since the precondition that refuses a
   // non-directory worktree runs first and would otherwise block this before any
