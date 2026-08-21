@@ -646,8 +646,9 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
   // until this fixture it was refuted by nothing.
   //
   // Neither shape touches a permission bit, so unlike the `chmod 000` route
-  // built in the case below, both reproduce as any user and mean the same
-  // thing under euid 0, with no `EUID0` skip to carry.
+  // built in "the chmod 000 HEAD shape reaches the same arm, and prints no
+  // `detached` line", both reproduce as any user and mean the same thing
+  // under euid 0, with no `EUID0` skip to carry.
   for (const shape of ["symlink", "dir"]) {
     const r = repo(t);
     const c = claim(r.w, 9, "release-ticket");
@@ -688,10 +689,11 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
 test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` line", (t) => {
   // The fourth broken-HEAD route enumerated at `unresolved_head` in
   // release-ticket.sh, and the only one of the four needing a permission bit —
-  // hence the skip below, which the three fixtures above do not carry. Under
-  // euid 0 the mode denies nothing: git reads the HEAD, the `branch` line comes
-  // back, the worktree stops being a stray at all and the release proceeds. The
-  // fixture would build the HEALTHY shape and assert the broken one's remedy.
+  // hence the skip below, which the garbage, symlink and directory routes do
+  // not carry. Under euid 0 the mode denies nothing: git reads the HEAD, the
+  // `branch` line comes back, the worktree stops being a stray at all and the
+  // release proceeds. The fixture would build the HEALTHY shape and assert the
+  // broken one's remedy.
   if (EUID0) return t.skip(NO_DENIAL);
 
   // A file's own bits do not gate its unlink, only its parent directory's do, so
