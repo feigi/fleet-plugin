@@ -803,16 +803,20 @@ function symlinkStandIn(wt) {
 
 const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH}` });
 
-// Every shim test above and below routes through this helper, and a PATH it
-// builds WRONG fails silently rather than loudly: the shim still shadows `git`
-// (it is first), so the shape of a broken tail is a reap.sh that cannot find
-// its other tools, not a red assertion here. Pinned in both directions — the
-// shim goes on the front, the real PATH survives on the back — and pinned as
-// the ONLY key, because runReap spreads this over ENV and a second key here
-// would silently clobber one of ENV's git-scrubbing entries. The tail asserts
-// against `process.env.PATH`, not `ENV.PATH`: ENV spreads process.env and
-// never sets PATH, and that identity is exactly what lets this helper spell
-// the tail without the `?? process.env.PATH` fallback its call sites used to.
+// Every shim test above and below routes through this helper, and gross damage
+// here fails LOUDLY: drop the tail and every one of them goes red, reverse the
+// order and all but one does — the shim stops shadowing `git`, or the real
+// toolchain stops resolving. What none of them can see is a tail that stays
+// PLAUSIBLE. An empty entry (`::` — that is the CWD) or a duplicated one leaves
+// the shim first and every tool still findable, so the whole file stays green
+// while reap.sh runs on a PATH nobody meant; the PATH equality below is the
+// only thing in this file that catches that class. The Object.keys line covers
+// the other invisible one: runReap spreads this over ENV, so a second key here
+// would clobber one of ENV's git-scrubbing entries and the fixtures would
+// quietly start reading the developer's ~/.gitconfig. The tail asserts against
+// `process.env.PATH`, not `ENV.PATH`: ENV spreads process.env and never sets
+// PATH, and that identity is exactly what lets this helper spell the tail
+// without the `?? process.env.PATH` fallback its call sites used to.
 test("withShim prepends the shim dir, keeps the real PATH, and sets nothing else", () => {
   assert.equal(withShim("/x/bin").PATH, `/x/bin:${process.env.PATH}`);
   assert.deepEqual(Object.keys(withShim("/x/bin")), ["PATH"]);
