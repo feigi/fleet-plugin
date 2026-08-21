@@ -1122,6 +1122,27 @@ files the diff does not touch; a fallback reviewer has to be told that *and* tol
 to read each corrected sentence literally, clause by clause.
 See references/correction-tickets.md.
 
+**But the discipline follows the DIFF, not the class — hand it to any
+implementer whose diff writes prose.** Phase 2 selects it on `class=correction`,
+and that selection is too narrow: a `routine` ticket that adds a test fixture, a
+helper, or a coverage case writes comment prose too, and prose is where minted
+claims live. Measured twice in one run, both `class=routine`, both therefore
+dispatched WITHOUT this block: PR #756 added an unasked-for comment asserting a
+silent-failure mode that does not exist (gross PATH damage is loud — 10 of 39
+tests red), and PR #768 minted a false comparative ("the cheapest of the four to
+tear down, not the dearest", when its route is the only one of four needing any
+in-body teardown) **and** introduced two positional references replacing a
+name-based one. Neither ticket asked for either sentence.
+
+Two of the rules above are what caught both, so give them to every implementer
+regardless of class: **every factual claim the diff restates needs a settling
+command first**, and **no positional references**. A third earns its place here
+— **never write a COUNT or a tally into prose; state the property instead.** A
+count is false the moment the next commit lands, and #768 falsified two of them
+(`the only other chmodSync(..., 0o644)`, already off by one before it; `fails 75
+of the 85 cases`, measured 81 of 91) in a file whose own header records having
+shipped a stale count once already.
+
 #### Fallback: hand-dispatched reviewer member (no `Workflow` tool)
 
 Only where the workflow is unavailable **or has failed** — never a preference.
