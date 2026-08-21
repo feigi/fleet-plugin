@@ -526,7 +526,7 @@ if [ -n "$conflicts" ]; then
   # die` after that pipe reads awk's exit status, not git log's — silently
   # swallowing a real git-log failure behind a trivially-successful awk pass
   # on whatever partial output preceded it. A fresh statement over the
-  # already-captured string can't touch the `|| die` two lines up.
+  # already-captured string can't touch that pipe's own `|| die`.
   at_risk=$(printf '%s\n' "$at_risk" | awk '!seen[$1]++') \
     || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
   [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2

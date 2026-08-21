@@ -1149,9 +1149,9 @@ const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "skills", "run-tea
 
 test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
   // The step-1 bullet alone. A slice any wider is vacuous for this claim: the
-  // command one line above the rule already spells `--require-label` correctly,
-  // so a positive match anywhere in phase 0 stays green with the rule naming
-  // anything at all.
+  // `candidates.mjs` invocation in the same bullet already spells
+  // `--require-label` correctly, so a positive match anywhere in phase 0 stays
+  // green with the rule naming anything at all.
   const at = RUN_TEAM.indexOf("1. **Candidate scan**");
   assert.notEqual(at, -1, "run-team phase 0 step 1 moved — update this test");
   const end = RUN_TEAM.indexOf("\n2. ", at);
