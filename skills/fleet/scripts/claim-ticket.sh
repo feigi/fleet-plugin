@@ -68,7 +68,7 @@ if   git cat-file -e origin/main:package-lock.json 2>/dev/null; then install="np
 elif git cat-file -e origin/main:pnpm-lock.yaml    2>/dev/null; then install="pnpm i --frozen-lockfile"
 elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="yarn --immutable"
 elif [ -z "$pkg" ]; then install="true"
-elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0))' 2>&1); then
+elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
 else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"

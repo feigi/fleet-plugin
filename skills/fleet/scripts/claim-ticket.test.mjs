@@ -69,9 +69,15 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   // the runner's own `node --test` report to a parent that is not listening —
   // status 0 and not a byte of stdout. An artifact of testing a test runner
   // from inside one; strip it so these assertions see what a member sees.
+  // FORCE_COLOR is stripped for the same reason: it reaches the runner's own
+  // `node --test`, which then SGR-wraps its summary even into a pipe
+  // (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
+  // that reads that summary literally. A developer with FORCE_COLOR set is
+  // exactly what these assertions have to survive, not exercise.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_TEST_WORKER_ID;
+  delete env.FORCE_COLOR;
   return {
     wt,
     text: readFileSync(join(wt, "agent-test"), "utf8"),
