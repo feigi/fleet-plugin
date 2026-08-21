@@ -803,6 +803,21 @@ function symlinkStandIn(wt) {
 
 const withShim = (bin) => ({ PATH: `${bin}:${ENV.PATH}` });
 
+// Every shim test above and below routes through this helper, and a PATH it
+// builds WRONG fails silently rather than loudly: the shim still shadows `git`
+// (it is first), so the shape of a broken tail is a reap.sh that cannot find
+// its other tools, not a red assertion here. Pinned in both directions — the
+// shim goes on the front, the real PATH survives on the back — and pinned as
+// the ONLY key, because runReap spreads this over ENV and a second key here
+// would silently clobber one of ENV's git-scrubbing entries. The tail asserts
+// against `process.env.PATH`, not `ENV.PATH`: ENV spreads process.env and
+// never sets PATH, and that identity is exactly what lets this helper spell
+// the tail without the `?? process.env.PATH` fallback its call sites used to.
+test("withShim prepends the shim dir, keeps the real PATH, and sets nothing else", () => {
+  assert.equal(withShim("/x/bin").PATH, `/x/bin:${process.env.PATH}`);
+  assert.deepEqual(Object.keys(withShim("/x/bin")), ["PATH"]);
+});
+
 test("a refusal that CLEARED the registration is reported as a partial removal, not as a no-op (#391)", (t) => {
   // The worst of the two: git unregistered the worktree and then failed to
   // delete it, so the run reported `worktree remove refused` — indistinguishable
