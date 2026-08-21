@@ -687,11 +687,14 @@ and four on another.
 `diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
 config, but that strictness cuts both ways and the size tier trims again on top.
 Measured: a docs PR that also adds one test file is profile `tests-only` and runs
-**three** (correctness+tests+comments), not six; a docs+config diff runs
-correctness+comments without being docs-only at all; and any `single-file` or
-`small` profile trims to correctness+silent-failure, keeping comments only when a
-docs file is in the diff and tests only when a test file is. `single-file` means
-one file at **any** size, so a one-file rewrite trims too. An unknown profile
+**three** (correctness+tests+comments), not six; a docs+config diff too big for
+the size tier runs correctness+comments without being docs-only at all; and any
+`single-file` or `small` profile trims to correctness+silent-failure, keeping
+comments only when a docs file is in the diff and tests only when a test file is.
+That floor holds **regardless of `hasSrc`** (#236) — a one-file `.yml` or
+`.github/` shell change runs correctness+silent-failure, not correctness alone,
+and a *small* docs+config diff runs all three. `single-file` means one file at
+**any** size, so a one-file rewrite trims too. An unknown profile
 widens to the full six, the safe direction, so a trim is never something to count
 on in advance — and a full six is never something to assume.
 

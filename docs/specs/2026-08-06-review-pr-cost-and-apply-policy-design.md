@@ -195,10 +195,22 @@ Key on `stats.profile`. `computeStats` assigns it through an else-if chain
 (`diff-stats.mjs:76-82`), so the values are mutually exclusive and no ordering
 bug against `docsOnly` or `tests-only` is possible.
 
-It must **not** be an early return. A single `.github/workflows/ci.yml` change is
-`profile: "single-file"` with `hasSrc: false`; an early return would run
-`silent-failure` on YAML, which the existing `hasSrc` guard exists to prevent. So
-the content trim runs first and the size tier intersects what survived:
+It composes with the content guards rather than replacing them: the content trim
+runs first and the size tier filters what survived.
+
+**Superseded by #236 — the one place this composition was load-bearing was
+wrong.** A single `.github/workflows/ci.yml` change is `profile: "single-file"`
+with `hasSrc: false`, and this spec originally argued that keeping the tier a
+filter was what stopped `silent-failure` running on YAML. That is exactly
+backwards: a CI-workflow or shell diff is mostly shell, which is what the
+silent-failure hunter is for, and PR #226 reviewed CI's own gating logic with
+`dimensionsRun: ["correctness"]`. `silent-failure` is now a FLOOR on any
+`single-file`/`small` profile regardless of `hasSrc`; above the size tier the
+`hasSrc` guard still drops it. With that settled, the filter no longer changes
+any outcome versus a floor over the full set — every dimension the guards above
+can remove is one the tier would not have kept anyway — and it is kept only
+because that form stays correct without re-proving the equivalence each time a
+guard is added above it.
 
 The shipped filter is in `review-pr.js`; it is not copied here, because a copy in
 a doc cannot be tested and drifts silently. Read `selectDimensions`.
@@ -237,9 +249,10 @@ comments, types, simplify]`):
 | `docs` | correctness, comments | 2 |
 | `tests-only` | correctness, tests, comments | 3 |
 | `single-file`, has src | correctness, silent-failure | 2 |
-| `single-file`, config only | correctness | 1 |
+| `single-file`, config only | correctness, silent-failure | 2 |
+| `small`, config only | correctness, silent-failure | 2 |
 | `small`, has src | correctness, silent-failure | 2 |
-| `small`, docs + config (not `docsOnly`) | correctness, comments | 2 |
+| `small`, docs + config (not `docsOnly`) | correctness, silent-failure, comments | 3 |
 | `small`, docs + src (not `docsOnly`) | correctness, silent-failure, comments | 3 |
 | `small`, src + test | correctness, silent-failure, tests | 3 |
 | `small`, `kinds` missing from the blob | correctness, silent-failure, comments | 3 |
@@ -369,7 +382,7 @@ edited files. Re-verify every anchor after editing.
 1. `args.specialistModel` overrides all six dimensions; the default is documented beside `verifierEffort`.
 2. With no override, `correctness`, `silent-failure` and `simplify` dispatch with no `model` field.
 3. Unknown, unparseable or empty profile still returns the full six.
-4. A single-file config-only diff returns `correctness` alone, never `silent-failure`.
+4. ~~A single-file config-only diff returns `correctness` alone, never `silent-failure`.~~ **Reversed by #236:** it returns `correctness` + `silent-failure`. The size-tier floor is unconditional on `hasSrc`; the `hasSrc` guard still gates `silent-failure` above the tier.
 5. Thresholds are named once, as constants; `diff-stats.mjs` gains no new fields.
 6. `log()` names the size tier when it fires and the models in use.
 7. An in-scope `suggestion` is applied only after surviving one refuter; an out-of-scope one is filed.
