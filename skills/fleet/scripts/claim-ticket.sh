@@ -68,7 +68,7 @@ if   git cat-file -e origin/main:package-lock.json 2>/dev/null; then install="np
 elif git cat-file -e origin/main:pnpm-lock.yaml    2>/dev/null; then install="pnpm i --frozen-lockfile"
 elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="yarn --immutable"
 elif [ -z "$pkg" ]; then install="true"
-elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0))' 2>&1); then
+elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
 else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
@@ -145,8 +145,17 @@ else
   # already pins as the wording to prefer over one this script invents.
   if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
     die "$wt has no .git file — cannot verify the lockfile was not mutated"
-  elif ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock 2>&1); then
-    die "could not verify lockfile state in $wt — $dirty"
+  # No `2>&1` here, unlike the two captures above: those capture a refusal
+  # REASON, this captures DATA that is then compared. release-ticket.sh:766
+  # already states it — folded-in stderr would be counted as a change. A git
+  # that exits 0 still writes to stderr for a malformed `.gitattributes` line
+  # or a chatty `core.fsmonitor`, and merged that chatter became the whole of
+  # $dirty and refused a lockfile it had just verified as clean — after the
+  # label, the branch and the worktree were already created. git's denial
+  # reaches this terminal on its own, which is the "its own denial" the
+  # paragraph above means; the die names the failure, not the reason.
+  elif ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock); then
+    die "could not verify lockfile state in $wt"
   elif [ -n "$dirty" ]; then
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"
   fi

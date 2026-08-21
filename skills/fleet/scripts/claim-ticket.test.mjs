@@ -69,9 +69,15 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   // the runner's own `node --test` report to a parent that is not listening —
   // status 0 and not a byte of stdout. An artifact of testing a test runner
   // from inside one; strip it so these assertions see what a member sees.
+  // FORCE_COLOR is stripped for the same reason: it reaches the runner's own
+  // `node --test`, which then SGR-wraps its summary even into a pipe
+  // (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
+  // that reads that summary literally. A developer with FORCE_COLOR set is
+  // exactly what these assertions have to survive, not exercise.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_TEST_WORKER_ID;
+  delete env.FORCE_COLOR;
   return {
     wt,
     text: readFileSync(join(wt, "agent-test"), "utf8"),
@@ -825,6 +831,24 @@ test("install: an unparseable manifest refuses, and says so", () => {
   const { err } = claim(repo({ "package.json": "{,,broken", [TESTS]: "" }));
   assert.match(err, /could not read origin\/main:package\.json/);
   assert.doesNotMatch(err, /refusing to guess an install command/);
+});
+
+// Regression control for the ndeps fix above (String(…) around the reduce in
+// claim-ticket.sh): Node's console.log SGR-wraps a bare number whenever
+// FORCE_COLOR is set (`\x1b[33m0\x1b[39m`), and `[ "$ndeps" = 0 ]` in the
+// script does not match that. Forced into THIS spawn's own env, not
+// process.env, so apply()/claim()'s scrubbing elsewhere is irrelevant here —
+// this pins the script's own robustness, not an absence of FORCE_COLOR in
+// whatever ran the suite.
+test("a FORCE_COLOR'd caller still resolves a dependency-free manifest", () => {
+  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, FORCE_COLOR: "1" },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /install: true/);
 });
 
 test("runner: scripts.test wins", () => {

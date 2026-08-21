@@ -82,11 +82,17 @@ test("wrong argument count refuses with a usage message", () => {
 
 // `node --test` marks its children with these; inherited, a nested run's
 // stdout arrives empty and reads as `tests 0` — a false red for a run that
-// never happened.
+// never happened. FORCE_COLOR goes for the same reason and is the same fix
+// claim-ticket.test.mjs applies to its own spawns: inherited, it reaches the
+// child's `node --test`, which SGR-wraps its summary even into a pipe
+// (`\x1b[34mℹ pass 1\x1b[39m`), and the `^(?:ℹ|#) …$` assertions below read
+// that summary literally. A developer with FORCE_COLOR set is what these
+// assertions have to survive, not exercise.
 function withoutNestedTestMarkers() {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_TEST_WORKER_ID;
+  delete env.FORCE_COLOR;
   return env;
 }
 
