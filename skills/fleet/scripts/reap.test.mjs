@@ -230,7 +230,7 @@ test("a git cherry that dies is KEPT, never reaped — an unanswerable probe aut
 
   const bin = cherryShim(t);
 
-  const { code, json, stderr } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
   assert.equal(code, 0, "an unanswerable probe is not a script failure");
   assert.deepEqual(json.reaped, [], "the sole-copy commit must not be deleted on a probe that could not answer");
@@ -262,7 +262,7 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   // this branch must still be reaped. An unanchored match keeps it forever.
   const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; false; }`, []);
 
-  const { code, json } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
@@ -294,7 +294,7 @@ test("a failing `git worktree prune` still prints the payload and refuses on 2, 
 
   const bin = pruneShim(t);
 
-  const { code, json, stderr } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
   assert.equal(code, 2, "a failing prune must refuse loudly on 2, never fall through to the -e default of 1");
   assert.ok(json, "the payload must still print even though the prune below it failed");
@@ -356,7 +356,7 @@ test("the design spec's script-surface row carries the keep reason this script a
   unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
   const bin = cherryShim(t);
 
-  const { json } = runReap(w, ["--apply"], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+  const { json } = runReap(w, ["--apply"], withShim(bin));
 
   // Everything up to the first colon: the label reap.sh chose, without git's
   // own message, which is the machine's to vary and no doc can carry.
@@ -714,7 +714,7 @@ test("git's own stderr reaches the payload escaped, not raw", (t) => {
   // real to escape.
   const bin = failOnlyShim(t, `[ "$1" = cherry ]`, ['error: unable to open loose object "deadbeef cafe": Permission denied'], 128);
 
-  const { code, json } = runReap(w, [], { PATH: `${bin}:${ENV.PATH ?? process.env.PATH}` });
+  const { code, json } = runReap(w, [], withShim(bin));
 
   assert.equal(code, 0);
   assert.match(json.kept[0].reason, /cherry probe failed/);
