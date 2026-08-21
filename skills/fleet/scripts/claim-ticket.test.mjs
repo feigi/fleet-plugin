@@ -833,6 +833,24 @@ test("install: an unparseable manifest refuses, and says so", () => {
   assert.doesNotMatch(err, /refusing to guess an install command/);
 });
 
+// Regression control for the ndeps fix above (String(…) around the reduce in
+// claim-ticket.sh): Node's console.log SGR-wraps a bare number whenever
+// FORCE_COLOR is set (`\x1b[33m0\x1b[39m`), and `[ "$ndeps" = 0 ]` in the
+// script does not match that. Forced into THIS spawn's own env, not
+// process.env, so apply()/claim()'s scrubbing elsewhere is irrelevant here —
+// this pins the script's own robustness, not an absence of FORCE_COLOR in
+// whatever ran the suite.
+test("a FORCE_COLOR'd caller still resolves a dependency-free manifest", () => {
+  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, FORCE_COLOR: "1" },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /install: true/);
+});
+
 test("runner: scripts.test wins", () => {
   assert.equal(claim(repo({ "package.json": pkg({ scripts: { test: "vitest" } }) })).testcmd, "npm test --");
 });
