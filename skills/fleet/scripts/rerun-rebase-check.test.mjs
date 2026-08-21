@@ -414,12 +414,13 @@ test("an unexpected exit status from the script fails the step instead of vanish
 
 // ---- #160: an unlistable candidate is not a missing job -----------------
 // The jobs query is the one query in the walk whose failure was reported as an
-// absence. The runs query ~20 lines earlier already says "This is an API
-// failure, not a missing run"; the jobs query said nothing, so a run nobody
-// could look at came back as `no rebase-check job in any candidate run` — a
-// diagnosis pointing at ci.yml's job name — and, because it landed in `no-job`
-// rather than `failed`, neither the `FAILED == TOTAL` guard nor the
-// `FAILED > 0` warning could see it.
+// absence. The runs query in .github/workflows/rebase-check-refresh.yml
+// already says "This is an API failure, not a missing run"; the jobs query in
+// .github/scripts/rerun-rebase-check.sh printed its per-run failure and left it
+// unclassified, so a run nobody could look at came back as `no rebase-check job
+// in any candidate run` — a diagnosis pointing at ci.yml's job name — and,
+// because it landed in `no-job` rather than `failed`, neither the
+// `FAILED == TOTAL` guard nor the `FAILED > 0` warning could see it.
 
 test("every candidate's jobs listing failing is an API failure, not a missing job", (t) => {
   const fixtures = { ...BEHIND_3_CANDIDATES };
