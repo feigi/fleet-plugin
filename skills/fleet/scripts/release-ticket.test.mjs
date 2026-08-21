@@ -1635,6 +1635,15 @@ test("a successful release survives a failing `git worktree prune`", (t) => {
   const c = claim(r.w, 9, "release-ticket");
   // A `git` shim on PATH that fails only on prune, and defers everything else.
   gitShim(r, `[ "$1" = worktree ] && [ "$2" = prune ] && exit 3`);
+  // Alone among the shimmed cases, this one's assertions are satisfied by a
+  // shim that does NOTHING: a git that never refuses prune releases cleanly,
+  // which is what the case below expects. So the shim is pinned directly, in
+  // both directions — a `gitShim` that dropped `body` would empty this case
+  // rather than fail it, and the refusal it exists to survive would go untested
+  // while the suite stayed green.
+  const shim = join(r.w, "..", "bin", "git");
+  assert.equal(spawnSync(shim, ["worktree", "prune"]).status, 3, "the body really does refuse prune");
+  assert.equal(spawnSync(shim, ["--version"]).status, 0, "and everything else really does reach real git");
 
   const { code, json } = release(r, c);
   assert.equal(code, 0, "the release succeeded; prune is housekeeping");
