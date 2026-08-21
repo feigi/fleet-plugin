@@ -843,6 +843,22 @@ un-idiomatic, and the finding's own grep hit a seventh it omitted) and the state
 cost was understated. Behavior-neutral plus a false rationale is a defer, however
 clean the verdict reads.
 
+**When YOU extend a finding to sibling sites, the extension needs its own
+per-site measurement — being right about the sites does not make you right about
+the remedy.** A verified finding covers the sites its refuters measured; a
+controller that widens it to every sibling spelling is making a *new* claim about
+each added site, and that claim is as unverified as any `suggested_fix`.
+Measured: on PR #764 a `survived` 2-0 finding was extended from one site to five
+— all five genuinely carried the false claim, so the extension was right — but
+the prescribed replacement reason ("the asserts below must stat through the
+restored path") was **false at one of the five**, whose case asserts a value
+`for-each-ref` answers without searching the chmodded directory. Only a per-site
+mutation separated them: deleting all five restores at once reddened **four**,
+not five. Writing the prescribed reason at the fifth would have minted a new
+false claim on the correction PR that existed to remove one. So hand the
+extension over as *sites to fix*, and require the fix-applier to measure each
+site's reason rather than copying a shared one.
+
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
@@ -1187,6 +1203,13 @@ would land in. Both are measured, and they fail in opposite directions:
   (its array is lowercase `pipestatus`, 1-indexed), so `${PIPESTATUS[0]}` is
   always empty and `[ "" -eq 0 ]` passes. A bot's merge gate opened without ever
   reading an exit code.
+- **`status` is a READ-ONLY variable in zsh**, an alias for `$?`. So the obvious
+  bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` —
+  aborts with `read-only variable: status`. Measured this way it fails safe (a
+  hard abort, no merge), but the same assignment inside an `if`, or with stderr
+  suppressed, reads as a check that silently did not run. Same root cause as the
+  `PIPESTATUS` trap above, opposite failure direction — so name the variable
+  anything else (`ci_status`).
 
 So **gate on the payload's own fields** — `verdict`, `behind`, `missing`, the
 per-job conclusions, and `prHead == runHeadSha` — read with `jq` from an
