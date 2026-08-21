@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 // `snap.path` used to reach every specialist prompt and every verifier prompt
 // unchecked: a well-formed string the schema required, but never confirmed to
@@ -74,18 +75,14 @@ test("a snapshot that omitted pathVerified is refused, not assumed true", () => 
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
 });
 
-// Bound the slice at BOTH ends. `indexOf` returns -1 when absent and `slice(-1)`
-// is a truthy one-character string, so an unbounded slice satisfies its
-// assertions with the whole block deleted, and an unbounded end runs to EOF
-// where the specialist and refuter prompts can satisfy them instead — the defect
-// `review-pr-reads.test.mjs:271-282` records having shipped. Same two anchors
-// its `slice()` and `review-pr-testcmd.test.mjs:110-114` already use.
+// Bound at both ends via prose-pin.mjs's between() — an unbounded end lets the
+// specialist and refuter prompts further down satisfy the assertions instead,
+// the defect `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the
+// command over verbatim and rules 'tests 0' a failure" test records having
+// shipped. Same two anchors `review-pr-reads.test.mjs`'s `slice()` and
+// `review-pr-testcmd.test.mjs` already use.
 function snapshotBlock() {
-  const at = CODE.indexOf("const snap = await agent(");
-  assert.notEqual(at, -1, "the snapshot agent dispatch moved — update this test");
-  const end = CODE.indexOf("if (!snap", at);
-  assert.notEqual(end, -1, "the snapshot agent's validity guard moved — update this test");
-  return CODE.slice(at, end);
+  return between(CODE, "const snap = await agent(", "if (!snap", "the snapshot agent dispatch");
 }
 
 // Every test above runs against the lifted `snapshotMissing`, which decides what
