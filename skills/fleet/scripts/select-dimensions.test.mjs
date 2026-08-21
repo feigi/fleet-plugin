@@ -104,12 +104,60 @@ test("a single-file source diff trims to correctness + silent-failure", () => {
   assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), ["correctness", "silent-failure"]);
 });
 
-// The size tier INTERSECTS what the content guards left; it is not an early
-// return. A single .github/workflows/ci.yml change is profile "single-file" with
-// hasSrc false — an early return would run silent-failure on YAML, which the
-// hasSrc guard exists to prevent.
-test("a single-file config diff trims to correctness alone, never silent-failure", () => {
-  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), ["correctness"]);
+// The size-tier floor OUTRANKS the hasSrc guard for `silent-failure` (#236). A
+// single `.github/workflows/ci.yml` change is profile "single-file" with hasSrc
+// false, so the guard had already removed silent-failure before the tier ran and
+// the documented floor did not exist: PR #226 reviewed CI's own gating logic with
+// `dimensionsRun: ["correctness"]`. A CI workflow diff is mostly shell, which is
+// what the silent-failure hunter is for, and it is where this fleet got bitten.
+test("a single-file config diff keeps the silent-failure floor", () => {
+  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), ["correctness", "silent-failure"]);
+  // Shell under `.github/` is the ticket's other named case, and it classifies
+  // `config` for the same reason. A `.sh` ANYWHERE ELSE is classify()'s `src`
+  // residue, so it always had silent-failure and is not part of this class.
+  assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), ["correctness", "silent-failure"]);
+});
+
+// AC-2: `small` is the other size-tier profile and gets the same floor. Two
+// config files at 6 loc — `single-file` needs files === 1, so this row can only
+// reach the tier through `small`, and it went in as [correctness] alone too.
+test("a small config-only diff keeps the silent-failure floor", () => {
+  assert.deepEqual(
+    dimensionKeys([f(".github/workflows/ci.yml", 2, 1), f(".github/workflows/release.yml", 2, 1)]),
+    ["correctness", "silent-failure"],
+  );
+});
+
+// The floor's own boundary, and the half a widening test cannot pin: OUTSIDE the
+// size tier the hasSrc guard still drops silent-failure. Five config files at 50
+// loc profile `production`, so nothing re-admits it. Without this the fix reads
+// as "hasSrc no longer gates silent-failure at all", which is not what shipped.
+test("a large config-only diff still drops silent-failure — the floor is the size tier's, not a repeal", () => {
+  const keys = dimensionKeys([
+    f(".github/workflows/a.yml", 6, 4),
+    f(".github/workflows/b.yml", 6, 4),
+    f(".github/workflows/c.yml", 6, 4),
+    f("tsconfig.json", 6, 4),
+    f("package.json", 6, 4),
+  ]);
+  assert.deepEqual(keys, ["correctness", "comments"]);
+});
+
+// AC-3: the floor must not reach a diff with nothing for it to do, and the ORDER
+// is the whole guarantee — `docsOnly` returns BEFORE the tier. A file list cannot
+// pin that: computeStats assigns profile `docs` ahead of `files === 1`, so a docs
+// diff never matches SIZE_TIER_PROFILES, both branches agree on [correctness,
+// comments], and `a docs-only diff runs correctness + comments` above already
+// pins that agreement. Pin the DIRECTION instead, on the one blob where the two
+// disagree — the same shape as the missing-`kinds` row below. Measured: leaking
+// the tier into the docsOnly filter, and deleting that branch outright, each
+// passed all 1030 tests without this.
+test("docsOnly returns before the size tier — the floor never reaches a docs diff", () => {
+  const docsInTier = { profile: "single-file", docsOnly: true, hasSrc: false, hasTests: false };
+  assert.deepEqual(
+    selectDimensions(DEFAULT_DIMENSIONS, docsInTier).map((d) => d.key),
+    ["correctness", "comments"],
+  );
 });
 
 test("a small multi-file source diff trims to correctness + silent-failure", () => {
@@ -125,10 +173,15 @@ test("a small multi-file source diff trims to correctness + silent-failure", () 
 // the carve-out they lost comment-analyzer entirely. Key ordering follows
 // DEFAULT_DIMENSIONS because `.filter()` preserves it. Prose living in a source
 // comment is NOT covered: that scores `docs: 0`. See #218.
+//
+// The docs+config row carries `silent-failure` since #236 — hasSrc is false, but
+// `small` is a size-tier profile and the floor is unconditional on it. The ticket
+// names this row only in passing, through `small`; it is the one row the floor
+// widens beyond the config-only cases above.
 test("a small mixed docs+config diff keeps comments, which docsOnly alone would miss", () => {
   assert.deepEqual(
     dimensionKeys([f("README.md", 5, 3), f(".github/workflows/ci.yml", 2, 1)]),
-    ["correctness", "comments"],
+    ["correctness", "silent-failure", "comments"],
   );
 });
 
