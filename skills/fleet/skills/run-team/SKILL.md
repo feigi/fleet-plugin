@@ -29,6 +29,22 @@ context is lost. Members did exactly this in one run — finishers, a reviewer a
 merge bots alike, the work done and only the delivery missing. Say it in every
 dispatch prompt. See references/member-lifecycle.md.
 
+**Say in every dispatch prompt that you do not acknowledge reports.** A member
+cannot see whether its `SendMessage` arrived, so silence from you is
+indistinguishable from loss and it re-sends — three members did in one run, each
+burning a turn, and in all three the original had in fact arrived. Give them the
+line verbatim: *"The controller does not acknowledge reports. Send once and exit;
+never re-send unless the controller asks by name."*
+
+**Your OWN messages can vanish the same way, and that half is not recoverable by
+a re-send.** Two controller rulings were lost in one run, both with a
+`success: true` receipt: a member proceeded on its stated default and filed a
+tracker issue the lost ruling had said not to file. So **never read a member's
+silence as assent**, and require members to report their *confirmation state*
+alongside results — "I escalated X, received no ruling, proceeded on default Y".
+That sentence is the only thing that made either loss visible. After any ruling
+you cannot confirm was received, re-check the artifacts it governed.
+
 **Name every member.** The name makes it a team member, and membership is what
 carries the `Agent` tool. Omit it → the member loses delegation with no error.
 Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
@@ -1112,6 +1128,32 @@ Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then
 `SendMessage` you what it merged and what it held, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step.
+
+**Put both gate traps in the bot's brief, not in a follow-up message.** A bot
+already looping cannot be corrected — the loop consumes the turns a correction
+would land in. Both are measured, and they fail in opposite directions:
+
+- **`ci-state --quiet` is unsatisfiable-FALSE.** It drops `jobs` and `missing`,
+  so a gate reading per-job state from it can never be satisfied. One bot polled
+  ~2000 REST calls over 15 minutes on a PR that was green throughout, and had to
+  be killed. It does not look like a bug; it looks like patience.
+- **`$?`/`PIPESTATUS` is unconditionally-TRUE in zsh.** zsh has no `PIPESTATUS`
+  (its array is lowercase `pipestatus`, 1-indexed), so `${PIPESTATUS[0]}` is
+  always empty and `[ "" -eq 0 ]` passes. A bot's merge gate opened without ever
+  reading an exit code.
+
+So **gate on the payload's own fields** — `verdict`, `behind`, `missing`, the
+per-job conclusions, and `prHead == runHeadSha` — read with `jq` from an
+**unpiped** `ci-state` with stdout redirected and stderr dropped. Never fold
+`2>&1` into the payload: `ci-state` traces every `gh` call to stderr and it
+breaks the parse. Ask the bot **which fields its gate actually read**; a bot that
+cannot answer has not got one. Prefer ONE blocking `gh run watch` to a poll loop
+(three waves measured 20-377 core each, against ~2000 for the poll loop) and treat its return as permission to look, never as
+the verdict.
+
+**An empty payload reads as a block, not a pass** — the safe direction, but still
+a false one. A bot that ran `ci-state` from outside the repo got `fatal: not a
+git repository`, an empty payload, and a gate that refused a mergeable PR.
 
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
 and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
