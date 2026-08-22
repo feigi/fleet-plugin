@@ -1642,6 +1642,50 @@ test("the design spec's script-surface row names every field the payload actuall
   assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
 });
 
+// Both docs describe this script's exit-2 causes, and its linkage clause covers
+// TWO failures git reports differently. A parenthetical naming only the walk-up
+// one stood, byte-identical, in both files, and was false for the other (#420).
+// Measured, git 2.50.1: delete the worktree's `.git` and `rev-parse
+// --show-prefix` returns `.worktrees/<wt>/` while `--show-toplevel` is the
+// enclosing repo; rewrite that file to `gitdir: …/worktrees/<sibling>` and
+// `--show-prefix` is empty at rc 0 with `--show-toplevel` the worktree itself,
+// while HEAD, the branch and `status` all answer from the sibling.
+//
+// ONE exact-span assertion rather than a match per mechanism, because the claim
+// lives in the JOIN: separate matches for `enclosing repo` and for `another
+// worktree's HEAD and index` are both satisfied by a rewrite that re-merges the
+// two into a single wrong account ("git walks up and reports the enclosing
+// repo, or reads another worktree's HEAD and index"), which is the defect this
+// pin exists to keep out. Safe to pin as an exact span because both carriers
+// are one unwrapped line — a table row and a prose paragraph — so there is no
+// reflow to survive.
+//
+// SCOPE of the rc-0 clause: measured for a worktree nested inside its repo —
+// the only shape this fleet builds, since `claim-ticket.sh` derives the
+// worktree path under `.worktrees/` relative to the repo root. Outside any
+// repo the clause's own subject does not exist: with `.git` deleted git has
+// nothing to walk up to and `rev-parse` exits 128, though the script still
+// refuses at exit 2, via its not-a-git-worktree die rather than the one for
+// git answering above the worktree (measured, git 2.50.1). Re-open if the
+// fleet ever places a worktree outside the repo — the clause then needs
+// scoping, and the string is byte-identical across the docs this test reads
+// and this constant, so every carrier moves together.
+const LINKAGE_PARENTHETICAL =
+  "its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir";
+
+test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
+  for (const [rel, anchor] of [
+    ["../commands/run-merge-bot.md", (l) => l.includes("Exit **2**")],
+    ["../../../docs/specs/2026-07-23-fleet-plugin-design.md", (l) => l.startsWith("| `no-undo-audit.sh` |")],
+  ]) {
+    const line = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+      .split("\n").find(anchor);
+    assert.ok(line, `${rel} must still describe this script's exit-2 causes`);
+    assert.ok(line.includes(LINKAGE_PARENTHETICAL),
+      `${rel} no longer names both linkage failures as distinct: a deleted \`.git\` is the one git walks up from, and a \`.git\` naming another worktree's admin dir is the one git answers for this worktree while reading the other one's HEAD and index. Merging them, or generalising until it names neither, both land here.`);
+  }
+});
+
 // --- #119: the escaping library this script now sources rather than carries.
 //
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
