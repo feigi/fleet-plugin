@@ -36,6 +36,27 @@ burning a turn, and in all three the original had in fact arrived. Give them the
 line verbatim: *"The controller does not acknowledge reports. Send once and exit;
 never re-send unless the controller asks by name."*
 
+**But a missing report is NOT evidence the member failed to send one — the
+inbound direction drops AND delays messages.** Both were measured in one run,
+and they are indistinguishable at the moment you look: one finisher's report was
+accepted with a msg_id and never arrived at all, while another's arrived late —
+its original and its re-send landing together, after the controller had already
+concluded it was missing. Measured: a finisher completed every
+duty, labelled the PR, and sent its report; the send was accepted with a msg_id
+and never arrived. The controller read the silence as the member ending its turn
+without reporting, said so, and was wrong. The re-send it asked for by name is
+the only reason the report exists. So when a report is missing, **ask by name —
+that is what the "unless the controller asks by name" clause is for — and do not
+attribute the gap to the member until it answers.** A member re-sending on a
+named request should state the original's msg_id and that it is a re-send, which
+is what distinguishes a lost message from a member that never sent one; a
+controller that skips the ask cannot tell those apart and will guess wrong in
+whichever direction its expectations point.
+
+Note this cuts against the paragraph above only in appearance: the default stays
+*send once*, because unprompted re-sends were measured 2-to-1 false. The ask is
+the controller's move, not the member's.
+
 **Your OWN messages can vanish the same way, and that half is not recoverable by
 a re-send.** Two controller rulings were lost in one run, both with a
 `success: true` receipt: a member proceeded on its stated default and filed a
@@ -1425,8 +1446,42 @@ is clean" — most likely false, least likely checked: a grep that found nothing
 looks like a grep never run. Make members state their search scope. Negative claim
 vs specific finding with paths → paths win.
 
-**Members share one filesystem and one docker stack**, and the failures arrive as
-*wrong findings*, not errors:
+**Members share one filesystem, one docker stack and one process table**, and the
+failures arrive as *wrong findings*, not errors:
+
+- **A pattern kill reaches siblings — say so in the dispatch prompt.** `pkill -f
+  <pattern>` matches on the whole command line, and every member runs the same
+  suite from the same checkout, so a pattern naming a test file matches whichever
+  member happens to be running it. Measured: an implementer chasing its own
+  stalled run issued `pkill -f "claim-ticket.test.mjs"` and killed a
+  `node --test claim-ticket.test.mjs inflight.test.mjs` that was not its own. The
+  victim sees a `cancelled`/exit-144 it cannot attribute, on a run it did not
+  abort — and a killed **baseline** compared against a clean mutant is a wrong
+  measurement that reads exactly like a real result. Ports are derived per issue
+  precisely so collisions are impossible; the process table has no such
+  partition. Members report a stalled run to the controller instead of
+  pattern-killing it, and the controller re-checks any measurement taken in the
+  window.
+
+  **Do not guess the victim — the blast radius is the machine, not the wave.**
+  In that incident the controller reasoned from dispatch scope to "almost
+  certainly `impl-<N>`" and told the maintainer so; the named member then proved
+  it was not the victim (it had never invoked those files standalone, and its
+  mutation baselines post-dated the window). Idle members of *previous* runs,
+  other Claude sessions on the same machine, and the maintainer's own shell are
+  all `pkill -f` targets and none of them appear in your ledger. Warn every live
+  member, record the incident as unattributed, and re-check measurements by
+  timestamp rather than by who you think was running.
+
+- **A warning acted on silently is indistinguishable from one that never
+  arrived.** The same incident: the controller's warning DID reach the member,
+  which re-ran, found nothing changed, and said nothing — correctly reading
+  "send once, never re-send" as covering it. The controller then had to spend a
+  round trip asking whether its own outbox was lossy. So say in the dispatch
+  prompt that **confirmation state includes warnings received and acted on, even
+  when the outcome is no change** — one line, in the report the member already
+  owes. That is the cheap half of the *never read silence as assent* rule, paid
+  by the member rather than by the controller's guesswork.
 
 - **Specialist tree isolation is `review-and-fix.md`'s job — do not restate it.**
   It owns the object-store rule, the two-tree split, snapshot provisioning, and
