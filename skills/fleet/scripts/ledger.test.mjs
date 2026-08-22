@@ -1059,3 +1059,154 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
   });
   assert.equal(existsSync(dir), false, `cliFixture registered no cleanup on its test: ${dir} survived it`);
 });
+
+// ── The payload subcommands on a pipe (#246) ─────────────────────────────────
+//
+// `console.log(payload)` followed by `process.exit()` truncates on a pipe.
+// process.exit() abandons the queued async write, so the consumer receives
+// whatever the kernel had already accepted — at exit 0, which types a corrupt
+// payload as a successful one. Measured on this script before the fix: `read`
+// of an oversized ledger handed a prefix that JSON.parse rejects to a
+// spawnSync consumer at status 0, while the identical command redirected to a
+// file delivered all of it and parsed. `board.mjs` is that spawnSync consumer
+// and has no flag that would let it read the ledger any other way, so it
+// served a cockpit with an empty board.
+//
+// Every assertion below is "the payload parses" and "the tail arrived", never
+// a byte count. The cut is a pipe-buffer boundary raced against the consumer's
+// draining rather than a constant — the same defect has been measured
+// delivering one buffer, and on a minority of runs two — so a test pinning
+// either number passes only until the race goes the other way.
+//
+// cli() spawns through spawnSync, whose stdout is a pipe, so these run the
+// defect's own path rather than a simulation of it.
+
+// A floor, not a boundary pin: a fixture has to be too large for any observed
+// drain outcome to deliver whole by accident, or a still-truncating script
+// passes these tests and they pin nothing. Several times the buffer rather
+// than merely past it, since two buffers have been measured getting through on
+// a minority of runs — and not larger still because three of the four
+// subcommands can only be fed an oversized payload through argv, which has its
+// own ceiling.
+//
+// Asserted in BYTES. String.length counts UTF-16 units, and the `·` these rows
+// carry (as real ones do) makes the two disagree, which is how one measured
+// 65536-byte prefix reads as 64456 characters and invites the false conclusion
+// that the cut is fuzzy.
+const OVERSIZED = 200_000;
+
+// Built here rather than read from the repo's own `.fleet/ledger.md`: that
+// file is whatever the last run left, it has been well under the pipe buffer
+// for entire days, and a fixture that small makes every assertion below
+// vacuous while still passing.
+function oversizedLedger() {
+  const rows = [], filed = [], ruled = [];
+  for (let i = 0; i < 1600; i++) {
+    rows.push(`#${i} impl-${i} · class=routine · ports=81${i} · a row of the width these reach once a run has been going a while`);
+    filed.push(`#${i} a filed finding subject with enough distinctive words in it to read like a real one, number ${i}`);
+    ruled.push(`#${i} MERGE · the review cleared and the checks were green · entry ${i}`);
+  }
+  const section = (entries) => entries.map((e) => `- ${e}`).join("\n");
+  const text = `# Fleet run ledger\n\n## Rows\n\n${section(rows)}\n\n## Filed\n\n${section(filed)}\n\n## Ruled\n\n${section(ruled)}\n`;
+  assert.ok(
+    Buffer.byteLength(text) > OVERSIZED,
+    `fixture must be far past the pipe buffer or this test pins nothing, got ${Buffer.byteLength(text)} bytes`,
+  );
+  return { text, rows, filed, ruled };
+}
+
+function parsePayload(r, what) {
+  try {
+    return JSON.parse(r.stdout);
+  } catch (e) {
+    assert.fail(`${what} payload did not parse — the pipe truncated it at ${Buffer.byteLength(r.stdout)} bytes, exit ${r.status}: ${e.message}`);
+  }
+}
+
+test("read hands a pipe the whole ledger — a truncated payload must never read as exit 0 (#246)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  const { text, rows, filed, ruled } = oversizedLedger();
+  writeFileSync(file, text);
+
+  const r = cli(["--file", file, "read"]);
+  assert.equal(r.status, 0, `read must still exit 0; got ${r.status}\n${r.stderr}`);
+  const payload = parsePayload(r, "read's");
+
+  // The tail, named specifically. The payload serialises rows, then filed,
+  // then ruled, so ruled's last entry is the furthest thing from the start of
+  // the write and the first thing an abandoned write loses — and a consumer
+  // that greps still finds the earlier keys, which is what made this look
+  // milder than it is. A parsing consumer loses every key, the survivors
+  // included, because the object is unterminated.
+  assert.equal(payload.ruled.at(-1), ruled.at(-1), "the end of the payload did not arrive");
+  assert.deepEqual(payload.rows, rows);
+  assert.deepEqual(payload.filed, filed);
+  assert.deepEqual(payload.ruled, ruled);
+});
+
+// The same mechanism in the three siblings. Their payloads echo the free-text
+// tail they were given, which is the only unbounded thing in them, so that is
+// what an oversized case has to be built from. Swept with `read` rather than
+// after it: fixing only the subcommand a report happens to name is the failure
+// this repo keeps re-recording, and all four ended `console.log` + exit 0.
+for (const cmd of ["row", "filed", "ruled"]) {
+  test(`${cmd} hands a pipe its whole payload, at its unchanged exit code (#246)`, (t) => {
+    const { dir, cli } = cliFixture(t);
+    const file = join(dir, "ledger.md");
+    writeFileSync(file, ledgerText([]));
+    const text = "alpha bravo charlie delta ".repeat(8000);
+    assert.ok(Buffer.byteLength(text) > OVERSIZED, `tail must be far past the pipe buffer, got ${Buffer.byteLength(text)} bytes`);
+
+    const r = cli(["--file", file, cmd, "4242", text]);
+    assert.equal(r.status, 0, `${cmd} must still exit 0; got ${r.status}\n${r.stderr}`);
+    const payload = parsePayload(r, `${cmd}'s`);
+    // Each subcommand names its echoed text differently; the guarantee is the
+    // same one — whatever it chose to send arrived intact.
+    assert.ok(
+      JSON.stringify(payload).includes(text),
+      `${cmd}'s payload parsed but lost the text it echoes`,
+    );
+  });
+}
+
+// The other half. Everything above is a payload that must ARRIVE; these are
+// the invocations that must still be refused or still succeed exactly as they
+// did, because dropping a process.exit() from a branch changes where control
+// goes next — a `read` branch that merely stops calling exit() runs on into
+// the unknown-subcommand die() and turns a good invocation into exit 2, and a
+// dispatch rearranged to prevent that can just as easily stop refusing a bad
+// one. `check`'s own exit codes are pinned by the whole first half of this
+// file, which is why they are not restated here.
+test("an ordinary ledger still round-trips through a pipe, and an unknown subcommand still refuses (#246)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+
+  const row = cli(["--file", file, "row", "7", "impl-7 · class=routine"]);
+  assert.equal(row.status, 0, `row: got ${row.status}\n${row.stderr}`);
+  assert.deepEqual(parsePayload(row, "row's"), { ticket: "#7", line: "#7 impl-7 · class=routine", created: true });
+
+  const filed = cli(["--file", file, "filed", "8", "a short filed subject"]);
+  assert.equal(filed.status, 0, `filed: got ${filed.status}\n${filed.stderr}`);
+  assert.deepEqual(parsePayload(filed, "filed's"), { issue: "8", subject: "a short filed subject", total: 1 });
+
+  const ruled = cli(["--file", file, "ruled", "9", "MERGE · green"]);
+  assert.equal(ruled.status, 0, `ruled: got ${ruled.status}\n${ruled.stderr}`);
+  assert.deepEqual(parsePayload(ruled, "ruled's"), { pr: "9", decision: "MERGE · green", total: 1 });
+
+  const read = cli(["--file", file, "read"]);
+  assert.equal(read.status, 0, `read: got ${read.status}\n${read.stderr}`);
+  assert.deepEqual(parsePayload(read, "read's"), {
+    rows: ["#7 impl-7 · class=routine"],
+    filed: ["#8 a short filed subject"],
+    ruled: ["#9 MERGE · green"],
+  });
+
+  // Nothing in this suite spawned an unknown subcommand before, so the die()
+  // every payload branch used to jump over was pinned by nothing at all.
+  const unknown = cli(["--file", file, "reed"]);
+  assert.equal(unknown.status, 2, `an unknown subcommand must still exit 2; got ${unknown.status}\n${unknown.stderr}`);
+  assert.match(unknown.stderr, /unknown subcommand 'reed'/);
+  assert.equal(unknown.stdout, "", "a refusal must not also emit a payload");
+});
