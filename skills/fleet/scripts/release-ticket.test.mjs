@@ -8,7 +8,10 @@
 // that. Deleting a check must fail the case named after it.
 //
 // Real git throughout: a shell script that reasons about git history can only be
-// tested against real git history. `gh` is the one thing stubbed, on PATH.
+// tested against real git history. `gh` is stubbed on PATH for every case. `git`,
+// `sed` and `awk` are stubbed on PATH too, but only by the cases that simulate a
+// specific failure, and each of those shims falls through to the real binary for
+// every invocation it is not aimed at.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -77,6 +80,11 @@ const NO_DENIAL = "chmod denies nothing under euid 0";
 // like the sed and awk shims further down, rather than the `which` these git
 // shims each used: `which` is not POSIX and need not exist.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+
+// Same, for `awkShim` below. The #395 counter shim keeps its own inline body: it
+// exits 1 with nothing on stderr, modelling an awk that could not run and had
+// nothing to say, where `awkShim` exits 2 with a diagnostic.
+const REAL_AWK = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
@@ -228,6 +236,20 @@ function claim(w, issue, slug, type = "fix") {
  */
 function gitShim(r, body) {
   writeFileSync(join(r.w, "..", "bin", "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`, { mode: 0o755 });
+}
+
+/**
+ * Fail `awk` on PATH for the one program whose text contains `marker`, and hand
+ * every other invocation straight to the real binary. The marker is a substring
+ * of the awk PROGRAM, never a count of invocations: release-ticket.sh runs
+ * several awks over the same listing and only the program text tells them apart.
+ */
+function awkShim(r, marker) {
+  writeFileSync(
+    join(r.w, "..", "bin", "awk"),
+    `#!/bin/sh\ncase "$*" in *'${marker}'*) echo "awk: simulated failure" >&2; exit 2 ;; esac\nexec '${REAL_AWK}' "$@"\n`,
+    { mode: 0o755 },
+  );
 }
 
 function release(r, c, { apply = true, env = {}, cwd = r.w } = {}) {
@@ -2560,4 +2582,152 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
   assert.equal(res.stdout, "", "no receipt: nothing was released");
   assert.ok(existsSync(c.wt),
     "and the worktree is still there — the guard fires ahead of every mutation, so this is a clean refusal and not a partial release");
+});
+
+// --- #243: the lookups over `git worktree list --porcelain` refuse in the
+// script's own voice.
+//
+// Each awk below is a bare `$(...)` assignment, so an awk that cannot answer
+// ends the run through `set -e` carrying awk's diagnostic and nothing else. The
+// exit code is right — 2, unanswerable — but a caller grepping stderr for
+// `release-ticket:` sees no line at all, and the refusal is indistinguishable
+// from an awk that simply had nothing to say.
+//
+// One shim case per guarded assignment, all four of them: the branch lookup, the
+// main checkout's branch, the main checkout's path, and the stray scan. Each
+// shim picks its victim by a substring of that program's own text, so the other
+// three answer normally and deleting one `|| die` reds the case named after it
+// and nothing else (measured). The two PREDICATE lookups over the same listing,
+// `locked` and `unresolved_head`, are not covered here and cannot be: they
+// answer THROUGH awk's exit status, which `|| die` cannot separate from a real
+// answer. The sites are named by construct throughout, never by line: they have
+// moved every time this file was touched.
+test("a newline in the slug refuses in the script's own voice, not awk's (#243)", (t) => {
+  // The trigger the ticket measured, and it needs no shim — but it is BSD awk's
+  // behaviour rather than awk's. Measured: one-true-awk 20200816 rejects a
+  // newline inside a `-v` assignment, while mawk 1.3.4 and gawk 5.4.1 both
+  // accept it. So this case pins the guard on macOS, where fleet members run
+  // this script, and NOT on a mawk/gawk CI, where the run walks past the lookup
+  // and dies later — still prefixed, so this case still passes, pinning nothing.
+  //
+  // The bare prefix is asserted deliberately for that reason: tightening it to
+  // the guard's own message would turn the vacuous pass into a red on those
+  // awks, which is worse, not better. The four LOOKUP cases below carry the pin
+  // on every implementation — their shim replaces awk's behaviour instead of
+  // depending on it, measured under mawk by stripping each guard in turn.
+  //
+  // No claim is made first because git will not hold a ref with a newline in
+  // it, so there is nothing to release.
+  const r = repo(t);
+  const { code, out, stderr } = release(r, { args: ["9", "a\nb", "fix"] });
+
+  assert.equal(code, 2, "unanswerable is exit 2");
+  assert.match(stderr, /^release-ticket: /m,
+    "the caller's grep is for this prefix — awk's own diagnostic alone leaves it with nothing");
+  assert.equal(out, "", "no payload on a refusal");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a worktree LOOKUP that could not run refuses in the script's own voice (#243)", (t) => {
+  // The first site, and the one the ticket names first. Reached without going
+  // through <slug> at all — awk failing on the listing itself rather than on a
+  // `-v` value. That route needs the shim: #243 measured only the newline
+  // trigger, and the byte that would otherwise reach these programs as record
+  // data is held shut by the script's own `export LC_ALL=C` (#582). Selected by
+  // `refs/heads/`, which is this lookup's own `-v b=` and appears in no other
+  // awk this script runs.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "refs/heads/");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*worktree git listed for #9/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a main-checkout branch LOOKUP that could not run refuses in its own voice (#243)", (t) => {
+  // The second site in script order, and one of the two this PR guarded beyond
+  // the pair the ticket names — so nothing pinned it until this case. `n==1&&`
+  // is this program's own first-worktree test and is the only occurrence in the
+  // script (`grep -c`), so the lookup above still answers and only this fails.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "n==1&&");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*main checkout's branch/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a main-checkout path LOOKUP that could not run refuses in its own voice (#243)", (t) => {
+  // The third site, the other one guarded beyond the ticket's pair. The marker
+  // is this program's whole body: the stray scan's `p=substr($0,10)` and the
+  // branch lookup's `w=substr($0,10)` both ASSIGN rather than print, so
+  // `print substr($0,10); exit` matches here and nowhere else (`grep -cF`).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "print substr($0,10); exit");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*main checkout's path/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a stray LOOKUP that could not run refuses in the script's own voice (#243)", (t) => {
+  // The fourth site, and the second the ticket names. `length(d)` is the stray
+  // lookup's own suffix comparison and appears in no other awk here, so the
+  // three lookups above still answer and only this one fails — a guard on the
+  // first site alone leaves this red.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "length(d)");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*stray worktree/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a healthy run says nothing on stderr and still releases (#243)", (t) => {
+  // The acceptance half. A guard that refuses whenever its lookup came back
+  // empty would pass every refusal case above, and these awks are entitled to
+  // match nothing: the stray lookup finds no directory on an ordinary release,
+  // and a claim whose worktree was already pruned leaves both lookups empty.
+  // Both shapes must stay exit 0 with a clean stderr.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const pruned = claim(r.w, 77, "other-claim");
+  git(r.w, "worktree", "remove", pruned.wt);
+
+  // Every line a successful run writes to stderr is the `$ <command>` trace, and
+  // every refusal this script can emit is prefixed with its own name — so "no
+  // line that is not the trace" is the byte-level statement of "nothing
+  // refused", without pinning the trace's wording.
+  const traceOnly = (stderr, what) =>
+    assert.deepEqual(stderr.split("\n").filter((l) => l && !l.startsWith("$ ")), [], what);
+
+  const first = release(r, c);
+  assert.equal(first.code, 0, `an ordinary release must still go through: ${first.stderr}`);
+  traceOnly(first.stderr, "a run that refused nothing writes only the trace");
+  assert.equal(first.json.released, true);
+
+  const second = release(r, pruned);
+  assert.equal(second.code, 0, `a branch-only claim must still release: ${second.stderr}`);
+  traceOnly(second.stderr, "both lookups empty is an answer, not a failure");
+  assert.equal(second.json.released, true);
 });
