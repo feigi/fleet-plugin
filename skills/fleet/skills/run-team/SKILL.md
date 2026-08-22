@@ -1048,11 +1048,12 @@ a minute apart showed *different* mutants, so a member's report and any single
 
    **That range is right for the positive check and wrong for a negative one.**
    It spans the implementer's commits too, so a constraint of the form *file X
-   was not touched* has to be scoped to the apply commit. Measured: a controller
-   wrote "neither document was touched" against `origin/main...HEAD` on a
-   two-commit branch whose documents the IMPLEMENTER had correctly edited — the
-   PR's whole point — and a finisher reading that literally halts a correct PR.
-   It caught the error instead, and said so; do not rely on that.
+   was not touched* has to be scoped to the apply commit. Measured on PR #776:
+   a controller wrote "neither document was touched" against
+   `origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
+   had correctly edited — the PR's whole point — and a finisher reading that
+   literally halts a correct PR. It caught the error instead, and said so; do
+   not rely on that.
 3. Add `ready-to-merge`.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
