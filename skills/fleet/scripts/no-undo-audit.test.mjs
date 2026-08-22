@@ -1659,6 +1659,17 @@ test("the design spec's script-surface row names every field the payload actuall
 // pin exists to keep out. Safe to pin as an exact span because both carriers
 // are one unwrapped line — a table row and a prose paragraph — so there is no
 // reflow to survive.
+//
+// SCOPE of the rc-0 clause: measured for a worktree nested inside its repo —
+// the only shape this fleet builds, since `claim-ticket.sh` derives the
+// worktree path under `.worktrees/` relative to the repo root. Outside any
+// repo the clause's own subject does not exist: with `.git` deleted git has
+// nothing to walk up to and `rev-parse` exits 128, though the script still
+// refuses at exit 2, via its not-a-git-worktree die rather than the one for
+// git answering above the worktree (measured, git 2.50.1). Re-open if the
+// fleet ever places a worktree outside the repo — the clause then needs
+// scoping, and the string is byte-identical across the docs this test reads
+// and this constant, so every carrier moves together.
 const LINKAGE_PARENTHETICAL =
   "its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir";
 
