@@ -453,11 +453,18 @@ if (cmd === "check") {
         // Validated: exactly those fields the hit line below interpolates that
         // have no defined absent-value. `title` is deliberately not among them —
         // the row builder substitutes `h.title || ""` for it, in the row and in
-        // the score alike, so a row carrying every other field is one this code
-        // is written to handle and still describes truthfully. Validating
-        // `title` here would degrade that row to `unverified` over the one field
-        // the hit line does not need, which is the opposite of what a guard
-        // against undescribable hits is for (#232).
+        // the score alike, so a row that OMITS `title` and carries every other
+        // field still describes itself truthfully. Validating `title` here would
+        // degrade that row to `unverified` over the one field the hit line does
+        // not need, which is the opposite of what a guard against undescribable
+        // hits is for (#232).
+        //
+        // Absence is the whole of that claim, deliberately: a `title` that is
+        // PRESENT and not a string is not handled here or anywhere below —
+        // `h.title || ""` keeps a truthy non-string, and scoreTokens then calls
+        // `.toLowerCase()` on it, so the read degrades to `unverified` reporting
+        // a TypeError where a tracker reason belongs. That is #643's, which
+        // rules on field TYPE where this guard rules on field PRESENCE.
         if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number"
           || typeof h.state !== "string" || typeof h.url !== "string")) {
           throw new Error("gh returned JSON that is not an issue list");
