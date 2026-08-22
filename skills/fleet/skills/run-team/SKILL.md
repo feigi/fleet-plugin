@@ -376,10 +376,19 @@ cockpit does not parse or surface it.
 `ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
 be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
 reporting `ledger read parse failed` and serving a blind cockpit for a whole run
-(#246, fixed). Every use above is a recovery path, so a payload that arrives
-short lands exactly where a lost class or a settled `ruled:` is unrecoverable —
-which is why the script's own suite pins that each subcommand reaches a pipe
-whole.
+(#246). Every use above is a recovery path, so a payload that arrives short
+lands exactly where a lost class or a settled `ruled:` is unrecoverable — which
+is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each
+reach a pipe whole. Those four are what is fixed and what is pinned.
+
+**Do not read that as "#246 is closed".** Two things it needs are still open.
+`check` is pinned on a pipe nowhere: its terminal exit now falls through like
+the four above, but its ALREADY FILED exit still cuts its payload mid-branch
+(#808) — the exit code survives there, so gate on the code and do not trust
+that payload. And `board.mjs` reads `ledger.mjs read` through `execFileSync`
+with no `maxBuffer` (#807), so the blind-cockpit symptom itself returns once
+the payload passes 1 MiB: the fix moved that cliff up from 64 KiB rather than
+removing it.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 refill is level-triggered, so there are no implementer waves. **Append one row to
