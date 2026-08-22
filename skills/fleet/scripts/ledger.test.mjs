@@ -542,6 +542,43 @@ test("gh returning JSON of the wrong shape is a failed read, not a tracker hit",
   assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
 });
 
+test("a tracker row carrying only an issue number is a failed read, not a tracker hit", () => {
+  // The sibling above feeds bare integers, which `!h` and the issue-number check
+  // already rejected before this ticket — so it could never reach the case that
+  // motivated the invariant it asserts. This one can: an object row passes both
+  // of those and still cannot describe itself, because the hit line interpolates
+  // the state and the url too. Left unvalidated it printed
+  // "TRACKER HIT — #114 (undefined)  — undefined" at the blocking exit code (#232).
+  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [{ number: 114 }] });
+  assert.equal(r.status, 0, "a row the payload cannot describe must not escalate to a tracker hit");
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.tracker.hits, undefined, "a partial row is the same failure arm — hits stays absent");
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  assert.doesNotMatch(r.stderr, /TRACKER HIT/);
+  assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
+});
+
+test("a tracker row missing only its title is still a tracker hit", () => {
+  // The other half of the guard above, and the reason it stops where it does.
+  // `title` is the one interpolated field with a defined absent-value — the row
+  // builder substitutes `h.title || ""` for it in the row and in the score alike
+  // — so this row is fully describable and blocking on it would trade a real hit
+  // for a non-answer. Without this pin a later "tighten the guard" pass adds
+  // `title` to the predicate and nothing goes red (#232).
+  const { title: _title, ...noTitle } = HIT_114;
+  const r = run("Non-zero column audit 11 rows", { filed: [], hits: [noTitle] });
+  assert.equal(r.status, 3, "a describable row still blocks the filing");
+  assert.equal(r.json.tracker.ok, true);
+  assert.equal(r.json.verdict, "tracker-hit");
+  assert.equal(r.json.tracker.hits[0].number, 114);
+  assert.equal(r.json.tracker.hits[0].title, "", "the absent title reaches the row as the builder's substitute");
+  assert.equal(r.json.tracker.hits[0].state, "OPEN");
+  assert.equal(r.json.tracker.hits[0].score, 0, "no title is no tokens to score, which the overlap treats as no overlap");
+  assert.match(r.stderr, /TRACKER HIT/);
+  assert.doesNotMatch(r.stderr, /undefined/, "an empty title is not an undescribable one");
+});
+
 test("a ledger hit short-circuits: gh is never invoked", () => {
   const r = run("Non-zero column audit 11 rows", { filed: [FILED_114], hits: [HIT_114] });
   assert.equal(r.status, 1);
