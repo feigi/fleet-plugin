@@ -281,11 +281,26 @@ test("runner: a symlink to a vendored tree outside the worktree refuses", () => 
 // parent refused every directory argument, the bare invocation's implicit `.`
 // included, so the whole suite became unrunnable. No other fixture in this file
 // is built under a `node_modules` parent, so nothing else can see it.
+//
+// The absolute spellings are the half that outlived the first fix (#230). An
+// argument spelled absolutely carries the shared ancestor's `node_modules`
+// inside its own text, so a guard term that reads the caller's spelling
+// unanchored matches on it however the anchored term ruled — and the same
+// directory reached two verdicts depending only on how it was named. Spelled
+// and resolved forms are asserted side by side here because agreement between
+// them, not any single row, is the property.
 test("runner: a node_modules in the worktree's own ancestry refuses nothing", () => {
   const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, SCRIPT, under);
-  for (const [args, count] of [[[], 6], [["."], 6], [["t"], 3]]) {
+  for (const [args, count] of [
+    [[], 6],
+    [["."], 6],
+    [[a.wt], 6],
+    [["t"], 3],
+    [["./t"], 3],
+    [[join(a.wt, "t")], 3],
+  ]) {
     const r = a.run(...args);
     assert.equal(r.status, 0, `${JSON.stringify(args)}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, new RegExp(`^(?:ℹ|#) pass ${count}$`, "m"));
