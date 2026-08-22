@@ -158,12 +158,21 @@ const data = load();
 // The chain is `else if` so that not exiting does not send a good subcommand
 // on into the unknown-subcommand die() below it.
 //
-// `check` deliberately still exits explicitly. Its codes are the contract
-// callers gate on, and its already-filed exit sits mid-branch, where falling
-// through would go on to run the tracker search that exit exists to skip. Its
-// payload is bounded by its own argv and by gh's reply rather than by the
-// ledger, so reaching the cut there takes an argv no caller sends — the same
-// mechanism, left unswept knowingly rather than missed.
+// `check` is swept at its terminal exit and not at its already-filed one. The
+// terminal exit was the last statement of its branch, so it became an
+// exitCode assignment like the branches above and its codes are unchanged.
+// The already-filed exit sits mid-branch: falling through there would go on
+// to run the near-miss ranking and the tracker search that exit exists to
+// skip, so removing it needs the branch extracted into a function first
+// (#808).
+//
+// That remaining site truncates for real, and its payload is bounded by the
+// LEDGER, not by argv: `match` is a row read straight out of `data.filed`, so
+// the bound is the width of whatever `filed` was given — and `filed` caps
+// nothing. Measured, an ordinary four-word `check` against a ledger holding
+// one wide filed row is cut at the pipe buffer. What it exits with there is
+// still 1, the ALREADY FILED signal callers gate on, so that site loses the
+// payload under a correct code rather than #246's corrupt-payload-as-success.
 if (cmd === "read") {
   console.log(JSON.stringify(data));
 } else if (cmd === "row") {
@@ -565,7 +574,15 @@ if (cmd === "read") {
   // break `check "$s" && gh issue create` on every offline run (ruled against
   // in #152). A hit scoring 0.00 still forces 3: gh matched the issue body,
   // which the title-based score cannot see.
-  process.exit(verdict === "tracker-hit" ? 3 : 0);
+  //
+  // exitCode, not exit(): this is the last statement of the branch, so
+  // assigning and falling out reaches the same codes by the same path every
+  // other subcommand now takes, and stops abandoning the payload at the pipe
+  // buffer. `near` is sliced from `data.filed`, so this payload is
+  // ledger-bounded and did reach the cut — measured, four filed rows of
+  // ~230 KB against a four-word argv arrived cut at exit 0, the "clean, safe
+  // to file" signal.
+  process.exitCode = verdict === "tracker-hit" ? 3 : 0;
 } else {
   die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
 }
