@@ -1,7 +1,9 @@
 # CLI-Guard Test Consolidation
 
 Each fleet script's own test suite spawns that script and pins its own `arg()`
-CLI-boundary guards — a trailing flag dies exit 2, and `--flag=value` dies by name.
+CLI-boundary guards — a trailing flag dies by name, and `--flag=value` is refused
+rather than read as absent. The `=` form's wording is pinned too, except in
+`candidates`, which pins only that it refuses.
 Proposals to lift those per-file spawn assertions out of the per-script suites and into
 one shared table-driven file are refused. The per-file pins stay where they are.
 
@@ -39,8 +41,8 @@ module" ruling and `arg.mjs` now exists. That does not change this ruling. Shari
 coverage. The per-file spawn assertions stay where they are as the integration layer
 proving each script actually wired it up. Re-measured against `d6931fa` when this record
 was written, that is the shape in the tree: the shared module carries its own unit tests
-while each script's suite still pins its own guard, and the per-file layer now spans more
-scripts than the proposed table had rows.
+while the per-file pins stay in the suites that spawn each script — including in scripts
+the proposed table never had a row for.
 
 **On the duplication itself:** near-identical spawn assertions across the script suites
 are the correct cost of each suite standing alone. `spawnSync` boilerplate is cheap; a
