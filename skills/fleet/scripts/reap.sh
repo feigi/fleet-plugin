@@ -61,9 +61,20 @@ gone() {
   [ ! -e "$1" ] && [ -x "$look" ]
 }
 
+# Count first, then value. The count guard used to be the only one, and the
+# `--apply` test demoted anything else to "not --apply", so a single argument
+# passed whatever it said. Measured on the pre-fix script over identical
+# fixtures, `reap.sh --aply` and a bare `reap.sh` both exited 0 with
+# byte-identical stdout and stderr — same payload, same banner, same per-branch
+# lines — so nothing in the run said the flag had not been understood (#250).
+# Both refusals sit above the fetch, so a rejected invocation reads nothing and
+# deletes nothing.
 apply=false
-[ "${1:-}" = "--apply" ] && apply=true
 [ $# -gt 1 ] && die "usage: reap.sh [--apply]"
+if [ $# -eq 1 ]; then
+  [ "$1" = "--apply" ] || die "unrecognised argument '$1' — usage: reap.sh [--apply]"
+  apply=true
+fi
 
 base=${BASE_REF:-origin/main}
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"

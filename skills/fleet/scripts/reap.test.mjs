@@ -342,6 +342,95 @@ test("the default dry run reports its verdict and exits 0, never a bare 1 (#265)
   assert.equal(branchExists(w, "feature/merged"), true, "a dry run must not delete anything");
 });
 
+// #250. The usage guard was arity-only — it rejected a second argument and
+// nothing looked at what a single one SAID, while the `--apply` test beside it
+// demoted anything that was not exactly `--apply` to "not --apply". A mistyped
+// flag therefore ran the dry run and reported it as one. Measured against the
+// pre-fix script, `reap.sh --aply` exited 0 and printed
+// `{"applied":false,"reaped":[],"kept":[]}` — the exit code and the payload of
+// a deliberate dry run, with nothing anywhere saying the flag was not
+// understood. The direction of the silence is the mild one (a typo'd `--apply`
+// under-deletes), which is why it is a refusal rather than a data-loss bug.
+//
+// Exit 2 and an empty stdout do not on their own pin THIS guard: every later
+// refusal in this script produces both, so a downstream one would satisfy the
+// pair while the prologue let the argument through. What discriminates is what
+// the run never reached — the fetch it echoes before running, and the dry-run
+// banner — plus the branch still standing.
+test("a mistyped --apply refuses instead of quietly running a dry run (#250)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const { code, json, stderr } = runReap(w, ["--aply"]);
+
+  assert.equal(code, 2, "an unrecognised argument must refuse, not be demoted to 'not --apply'");
+  assert.equal(json, null, "a refused invocation reports nothing — a payload here would read as a clean no-op");
+  assert.match(stderr, /unrecognised argument '--aply'/, "the refusal must name the argument it did not understand");
+  assert.doesNotMatch(stderr, /git fetch --prune origin/, "the guard is fatal and fires above the fetch");
+  assert.doesNotMatch(stderr, /DRY RUN/, "a refusal must not also announce the dry run it used to become");
+  assert.equal(branchExists(w, "feature/merged"), true, "a refused invocation deletes nothing");
+});
+
+// The other direction, and the one a new guard gets wrong: what it must still
+// ACCEPT. Both accepted forms, against a fixture with a branch to act on, so a
+// guard that refused either would be visible here rather than as a fleet run
+// that stopped reaping.
+test("the invocations reap.sh accepts are unchanged — bare and --apply (#250)", (t) => {
+  for (const [args, applied] of [[[], false], [["--apply"], true]]) {
+    const w = repo(t, `w-${applied}`);
+    mergedGoneBranch(w, "feature/merged", "merged work");
+
+    const { code, json, stderr } = runReap(w, args);
+
+    assert.equal(code, 0, `\`reap.sh ${args.join(" ")}\` must still run: ${stderr}`);
+    assert.equal(json.applied, applied);
+    assert.deepEqual(json.reaped, ["feature/merged"], "the accepted forms still report what they reap");
+    assert.doesNotMatch(stderr, /unrecognised argument/, "an accepted invocation must not be refused");
+  }
+});
+
+// Arity is a separate arm from value, and the value guard's own message also
+// carries the usage line — so `doesNotMatch` is what says two arguments took
+// the arity path rather than falling through it into the new one.
+test("two arguments still refuse via the arity path (#250)", (t) => {
+  const w = repo(t);
+
+  const { code, json, stderr } = runReap(w, ["a", "b"]);
+
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /usage: reap\.sh \[--apply\]/);
+  assert.doesNotMatch(stderr, /unrecognised argument/, "an arity refusal is not a value refusal");
+});
+
+// Third pin on the same table row, for the same reason as the two below: the
+// row states this script's exit-2 contract in prose, #114 audited it while the
+// guard was arity-only, and a reader trusting it draws a conclusion about a
+// script that settings.json's autoMode allowlist lets run unattended. Taken
+// from a real refusal rather than typed here — a hand-copied phrase drifts
+// exactly the way the row did.
+test("the design spec's script-surface row carries the argument refusal this script emits (#250)", (t) => {
+  const w = repo(t);
+
+  const { stderr } = runReap(w, ["--aply"]);
+
+  // The label only: the argument itself is the caller's to vary and no doc can
+  // carry it.
+  const label = /^reap: (.+?) '/m.exec(stderr);
+  assert.ok(label, `fixture must reach the argument refusal: ${stderr}`);
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  assert.ok(
+    row.includes(label[1]),
+    `the spec row must state this refusal, and does not carry "${label[1]}".\nrow: ${row}`,
+  );
+});
+
 // The design spec's script-surface table states this script's exit-0 contract in
 // prose, and it spent the whole life of #264 asserting the bug as the behaviour:
 // "the merged check reads a `git cherry` that failed as 'no unmerged commits'
