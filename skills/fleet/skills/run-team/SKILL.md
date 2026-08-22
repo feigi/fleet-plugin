@@ -1045,6 +1045,15 @@ a minute apart showed *different* mutants, so a member's report and any single
    applying. Two finishers in one run extended duty 2 this way unprompted, and
    one found five applies where the controller's hand-written list named three:
    a controller's list of what to verify is itself a claim.
+
+   **That range is right for the positive check and wrong for a negative one.**
+   It spans the implementer's commits too, so a constraint of the form *file X
+   was not touched* has to be scoped to the apply commit. Measured on PR #776:
+   a controller wrote "neither document was touched" against
+   `origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
+   had correctly edited — the PR's whole point — and a finisher reading that
+   literally halts a correct PR. It caught the error instead, and said so; do
+   not rely on that.
 3. Add `ready-to-merge`.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
