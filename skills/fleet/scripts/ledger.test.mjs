@@ -559,6 +559,25 @@ test("a tracker row carrying only an issue number is a failed read, not a tracke
   assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
 });
 
+// Both fields at once is what the sibling above feeds, and that is precisely
+// what it cannot pin: either surviving half of the predicate still rejects a row
+// missing both, so dropping ONE `typeof` check leaves the whole suite green
+// while production prints "TRACKER HIT — #114 (undefined)" or "— undefined" at
+// the blocking exit code — the #232 defect itself, back with nothing red (#232).
+// One row per field is what makes each half individually mutation-killable.
+for (const [missing, drop] of [["state", ({ state: _s, ...rest }) => rest], ["url", ({ url: _u, ...rest }) => rest]]) {
+  test(`a tracker row missing only its ${missing} is a failed read, not a tracker hit`, () => {
+    const r = run("Non-zero column audit 11 rows", { filed: [], hits: [drop(HIT_114)] });
+    assert.equal(r.status, 0, `a row without ${missing} cannot describe itself and must not escalate`);
+    assert.equal(r.json.tracker.ok, false);
+    assert.equal(r.json.tracker.hits, undefined, "one field short is the same failure arm — hits stays absent");
+    assert.equal(r.json.verdict, "unverified");
+    assert.match(r.stderr, /TRACKER NOT CHECKED/);
+    assert.doesNotMatch(r.stderr, /TRACKER HIT/);
+    assert.doesNotMatch(r.stderr, /undefined/, "never print a hit the payload cannot describe");
+  });
+}
+
 test("a tracker row missing only its title is still a tracker hit", () => {
   // The other half of the guard above, and the reason it stops where it does.
   // `title` is the one interpolated field with a defined absent-value — the row
