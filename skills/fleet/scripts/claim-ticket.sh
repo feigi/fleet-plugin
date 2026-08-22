@@ -275,11 +275,22 @@ for arg do
     # "resolves inside a vendored tree" however the caller spelled it.
     # BOTH, because they cover disjoint inputs. \`cd\` fails on a directory
     # \`[ -d ]\` admits but that carries no search bit, and the resolution is
-    # then empty: the spelling is the only thing left to refuse
-    # \`node_modules/pkg\` with, and the \`case\` has to be what reports it
-    # (see above) rather than the readability message from \`find\` below.
-    # Falling \`\$resolved\` back to the spelling is what gives that input an
-    # anchor of its own, so the walk below has something to measure either way.
+    # then empty. Its PARENT is still enterable — only the directory itself
+    # lost the bit, and \`[ -d ]\` above had to traverse the parent to answer —
+    # so resolving that and re-appending the basename hands the walk below a
+    # \`pwd -P\` path for this input too, and the \`case\` stays what reports it
+    # (see above) rather than the readability message from \`find\`. Falling
+    # \`\$resolved\` back to the argument's own text instead is what left #230
+    # half-open: an absolute spelling through a symlinked ancestor (a macOS
+    # \$TMPDIR is one) shares no literal prefix with \$root, so \$shared empties,
+    # \`\${resolved#"\$shared"}\` is the whole spelling, and a NON-vendored
+    # directory was refused as vendored under its own absolute name while the
+    # relative and realpath spellings of it reported the permission fault.
+    # The last resort is the fail-safe for a parent that will not resolve
+    # either: it restores the older behaviour rather than leave \$resolved
+    # empty. \`[ -d ]\` above already traversed the parent, so no input
+    # is known to reach it and no test does — kept because a guard whose
+    # recovery can leave nothing to measure is the wrong way to be wrong.
     # Judged from where the argument DIVERGES from the runner's own location,
     # because \`pwd -P\` is absolute and a \`node_modules\` segment ABOVE the
     # divergence is an ancestor of the runner itself — shared with it, so it
@@ -301,11 +312,15 @@ for arg do
     # \$shared off the spelling instead is not equivalent: that is lexical,
     # while \$shared comes from \`pwd -P\`, so a caller naming a path through a
     # symlinked ancestor (a macOS \$TMPDIR is one) shares no literal prefix
-    # with it and nothing is stripped. The resolution is immune because both
-    # sides of that comparison are resolved. The remaining spelling-dependent
-    # input is a cwd OUTSIDE the worktree, from which a relative argument
-    # descending through the shared ancestor does name that \`node_modules\`
-    # and is refused — node reads the file branch's arguments the same way.
+    # with it and nothing is stripped. Both sides of that comparison are
+    # \`pwd -P\`-derived wherever the argument or its parent resolves, which is
+    # what makes the resolved term immune to the spelling; the one input that
+    # escapes is the last resort above, where neither did.
+    # The spelling term's own remaining input is a cwd OUTSIDE the worktree,
+    # from which a relative argument descending through the shared ancestor
+    # does name that \`node_modules\` and is refused — measured, and node reads
+    # the file branch's arguments the same way. Nothing else in the suite
+    # reaches the term, so that input is what pins it.
     # \`CDPATH=\` on both: an inherited CDPATH resolves a bare relative name
     # against a same-named directory somewhere else entirely, so the guard
     # would judge one directory while \`find\` below — which never consults
@@ -316,7 +331,11 @@ for arg do
     # still excludes its vendored contents once the walk reaches them.
     root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
     resolved=\$(CDPATH= cd -- "\$arg" 2>/dev/null && pwd -P)
-    [ -n "\$resolved" ] || resolved=\$arg
+    if [ -z "\$resolved" ]; then
+      parent=\$(CDPATH= cd -- "\$(dirname -- "\$arg")" 2>/dev/null && pwd -P)
+      [ -z "\$parent" ] || resolved=\${parent%/}/\$(basename -- "\$arg")
+      [ -n "\$resolved" ] || resolved=\$arg
+    fi
     shared=\$root
     while [ -n "\$shared" ]; do
       case "\$resolved" in "\$shared"/* | "\$shared") break ;; esac

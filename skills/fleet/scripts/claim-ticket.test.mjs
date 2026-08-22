@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 
 const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 
@@ -298,7 +298,6 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
     [["."], 6],
     [[a.wt], 6],
     [["t"], 3],
-    [["./t"], 3],
     [[join(a.wt, "t")], 3],
   ]) {
     const r = a.run(...args);
@@ -313,6 +312,36 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
   const r = a.run("vendlink");
   assert.notEqual(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stderr, /is under node_modules — excluded from the run/);
+});
+
+// The spelling term's own reason to exist, and the only input in this repo that
+// isolates it: a cwd OUTSIDE the worktree, from which a relative argument
+// descends through the shared ancestor's `node_modules` and so names it in its
+// own text, while resolving to an ordinary directory the divergence walk has
+// already cleared. Measured: delete `${arg##/*}` from the guard and every other
+// test in the repo stays green, so without this row the term reads as dead code
+// to the next simplifier — and it is not, since node excludes an argv entry
+// whose normalized relative form opens with `node_modules/` and says nothing
+// about it (#100). The message is asserted, not just the status: without the
+// term the argument reaches node, which reports its own `Could not find`, and
+// the two exits are indistinguishable by status alone. The absolute leg is the
+// control — the same directory named absolutely is exempt from that term and
+// must still run, which is #230's property and what separates this test from
+// one that merely refuses everything spelled from outside.
+test("runner: a relative argument through the shared ancestor is refused from outside the worktree", () => {
+  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  mkdirSync(under, { recursive: true });
+  const a = apply(SUITE, SCRIPT, under);
+  // Four levels up from the worktree: `42-slug` -> `.worktrees` -> `claim-XXXX`
+  // -> `node_modules` -> the ancestor holding it, so a path relative to that cwd
+  // opens with the `node_modules` segment the guard has to read.
+  const up = join("..", "..", "..", "..");
+  const outside = a.runFrom(up, relative(join(a.wt, up), join(a.wt, "t")));
+  assert.notEqual(outside.status, 0, outside.stdout + outside.stderr);
+  assert.match(outside.stderr, /is under node_modules — excluded from the run/);
+  const ok = a.runFrom(up, join(a.wt, "t"));
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /^(?:ℹ|#) pass 3$/m);
 });
 
 // The guard resolves `$arg` against the process cwd, but `$root` against the
@@ -497,18 +526,21 @@ test("runner: a vendored directory argument refuses however it is spelled", () =
   }
 });
 
-// The spelling term's own reason to exist, and the only input that isolates
-// it: `cd` fails on a directory `[ -d ]` admits but that carries no search
-// bit, so the resolution comes back empty and the argument's own text is all
-// that is left to judge. Nothing else in this file hands the guard an
-// argument it cannot resolve, so both that term and the fallback that gives
-// the divergence walk something to measure are unpinned without this.
-// Both spellings, because they reach the refusal through different halves:
-// the relative one is what the spelling term reads, while the absolute one is
-// exempt from that term and gets there only through the fallback. The
-// readability message is asserted absent in both — `find` refuses a starting
-// point it cannot open as well, so a bare non-zero cannot tell the guard's
-// refusal from find's, and which cause the reader is sent after is the point.
+// The vendored half of the no-search-bit case: `cd` fails on a directory
+// `[ -d ]` admits but that carries no search bit, so unless the resolution is
+// recovered from somewhere the divergence walk has nothing to measure and this
+// argument stops being refused as vendored at all. Measured against this file:
+// remove the recovery entirely and this is the one test that reds. What the
+// recovery is ANCHORED on is a separate property and this test is blind to it —
+// give it back the argument's raw text and this row stays green — which is why
+// the ancestor-spelling test below exists as well as this one.
+// One spelling, not two. The relative one was measured redundant across every
+// mutation of both halves of the guard: with a recovery in place the resolved
+// term reaches it unaided, and with none the spelling term does, so no mutation
+// moves it. The absolute spelling is the row that carries this test.
+// The readability message is asserted absent — `find` refuses a starting point
+// it cannot open as well, so a bare non-zero cannot tell the guard's refusal
+// from find's, and which cause the reader is sent after is the point.
 // Root can read anything, so it cannot see this.
 test("runner: a vendored directory with no search bit is refused as vendored, not as unreadable", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches every directory");
@@ -518,14 +550,49 @@ test("runner: a vendored directory with no search bit is refused as vendored, no
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
   chmodSync(vendor, 0o000);
   try {
-    for (const spelling of [join("node_modules", "pkg"), vendor]) {
-      const r = a.run(spelling);
-      assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-      assert.match(r.stderr, /is under node_modules — excluded from the run/, spelling);
-      assert.doesNotMatch(r.stderr, /cannot read every path under/, spelling);
-    }
+    const r = a.run(vendor);
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /is under node_modules — excluded from the run/);
+    assert.doesNotMatch(r.stderr, /cannot read every path under/);
   } finally {
     chmodSync(vendor, 0o755);
+  }
+});
+
+// #230's own criterion in the one case the spelling exemption does not reach: a
+// directory `[ -d ]` admits but that carries no search bit resolves to nothing,
+// so what the guard falls back to is what decides the verdict. Anchored on the
+// parent, every spelling of the directory agrees; anchored on the argument's raw
+// text it did not — `$root` comes from `pwd -P`, so an absolute spelling routed
+// through a symlinked ancestor shares no literal prefix with it, `$shared` walks
+// down to empty, and the ancestor's own `node_modules` is left sitting in the
+// text being matched. One directory, two absolute names, opposite verdicts.
+// The symlinked ancestor is built here rather than borrowed from `$TMPDIR`:
+// macOS resolves `/var/folders/...` to `/private/var/...` and would supply one
+// for free, Linux would not, and a fixture that reproduces on one platform only
+// stops discriminating on the other without saying so.
+// NON-vendored on purpose. A vendored directory has to keep being refused (the
+// test above pins that), so only a directory the guard has no business refusing
+// can tell an anchored fallback from an unanchored one.
+// Root can read anything, so it cannot see this.
+test("runner: an unreadable directory under a node_modules ancestor names the read fault in every spelling", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const real = mkdtempSync(join(tmpdir(), "anc-"));
+  const spelled = `${real}-link`;
+  symlinkSync(real, spelled);
+  mkdirSync(join(real, "node_modules"), { recursive: true });
+  const a = apply(SUITE, SCRIPT, join(spelled, "node_modules"));
+  const locked = join(a.wt, "t");
+  chmodSync(locked, 0o000);
+  try {
+    for (const spelling of ["t", locked, join(realpathSync(a.wt), "t")]) {
+      const r = a.run(spelling);
+      assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /cannot read every path under/, spelling);
+      assert.doesNotMatch(r.stderr, /is under node_modules/, spelling);
+    }
+  } finally {
+    chmodSync(locked, 0o755);
   }
 });
 
