@@ -449,7 +449,17 @@ if (cmd === "check") {
         // prints "TRACKER HIT — #undefined" — a confident hit blocking a filing
         // that is in fact unverified. Throw into the catch below: an unreadable
         // answer is a failed tracker read, exactly like unparseable output.
-        if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number")) {
+        //
+        // Validated: exactly those fields the hit line below interpolates that
+        // have no defined absent-value. `title` is deliberately not among them —
+        // the row builder substitutes `h.title || ""` for it, in the row and in
+        // the score alike, so a row carrying every other field is one this code
+        // is written to handle and still describes truthfully. Validating
+        // `title` here would degrade that row to `unverified` over the one field
+        // the hit line does not need, which is the opposite of what a guard
+        // against undescribable hits is for (#232).
+        if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number"
+          || typeof h.state !== "string" || typeof h.url !== "string")) {
           throw new Error("gh returned JSON that is not an issue list");
         }
         // Every row gh returned is validated above, the probe row included: a
