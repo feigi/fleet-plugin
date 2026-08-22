@@ -497,6 +497,38 @@ test("runner: a vendored directory argument refuses however it is spelled", () =
   }
 });
 
+// The spelling term's own reason to exist, and the only input that isolates
+// it: `cd` fails on a directory `[ -d ]` admits but that carries no search
+// bit, so the resolution comes back empty and the argument's own text is all
+// that is left to judge. Nothing else in this file hands the guard an
+// argument it cannot resolve, so both that term and the fallback that gives
+// the divergence walk something to measure are unpinned without this.
+// Both spellings, because they reach the refusal through different halves:
+// the relative one is what the spelling term reads, while the absolute one is
+// exempt from that term and gets there only through the fallback. The
+// readability message is asserted absent in both — `find` refuses a starting
+// point it cannot open as well, so a bare non-zero cannot tell the guard's
+// refusal from find's, and which cause the reader is sent after is the point.
+// Root can read anything, so it cannot see this.
+test("runner: a vendored directory with no search bit is refused as vendored, not as unreadable", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  chmodSync(vendor, 0o000);
+  try {
+    for (const spelling of [join("node_modules", "pkg"), vendor]) {
+      const r = a.run(spelling);
+      assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /is under node_modules — excluded from the run/, spelling);
+      assert.doesNotMatch(r.stderr, /cannot read every path under/, spelling);
+    }
+  } finally {
+    chmodSync(vendor, 0o755);
+  }
+});
+
 // #100: node counts argv separately from the runner's own `find`, and a file
 // or glob argument reaches node with no check of its own. Node drops an
 // argument it cannot resolve and exits non-zero only when it refuses every
