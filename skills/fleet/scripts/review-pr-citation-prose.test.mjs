@@ -100,4 +100,13 @@ test("no unbraced variable ref survives in the Specialists section's own example
     /git show\s+"?\$[A-Za-z_]/,
     "an example in review-and-fix.md's Specialists section builds a `git show` argument from an unbraced parameter — zsh takes the `:<path>` suffix as a history modifier, inside double quotes too, and the read can return the commit at exit 0 instead of the blob",
   );
+
+  // The other half: what this regex must ACCEPT. Fed the braced form the rule
+  // prescribes, it has to stay quiet — a pin that forbids its own remedy sends
+  // the next editor back to the unbraced form to get the suite green.
+  assert.doesNotMatch(
+    'git show "${SHA}:<path>"',
+    /git show\s+"?\$[A-Za-z_]/,
+    "the unbraced-ref pin also rejects the braced form it exists to promote",
+  );
 });
