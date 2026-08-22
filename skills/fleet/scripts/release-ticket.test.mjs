@@ -2603,10 +2603,21 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
 // answer. The sites are named by construct throughout, never by line: they have
 // moved every time this file was touched.
 test("a newline in the slug refuses in the script's own voice, not awk's (#243)", (t) => {
-  // The reachable trigger, and it needs no shim: awk rejects a newline inside a
-  // `-v` assignment, and `<slug>` reaches the worktree lookup as one. No claim
-  // is made first because git will not hold a ref with a newline in it — the
-  // run dies at the lookup, well before any branch is consulted.
+  // The trigger the ticket measured, and it needs no shim — but it is BSD awk's
+  // behaviour rather than awk's. Measured: one-true-awk 20200816 rejects a
+  // newline inside a `-v` assignment, while mawk 1.3.4 and gawk 5.4.1 both
+  // accept it. So this case pins the guard on macOS, where fleet members run
+  // this script, and NOT on a mawk/gawk CI, where the run walks past the lookup
+  // and dies later — still prefixed, so this case still passes, pinning nothing.
+  //
+  // The bare prefix is asserted deliberately for that reason: tightening it to
+  // the guard's own message would turn the vacuous pass into a red on those
+  // awks, which is worse, not better. The four LOOKUP cases below carry the pin
+  // on every implementation — their shim replaces awk's behaviour instead of
+  // depending on it, measured under mawk by stripping each guard in turn.
+  //
+  // No claim is made first because git will not hold a ref with a newline in
+  // it, so there is nothing to release.
   const r = repo(t);
   const { code, out, stderr } = release(r, { args: ["9", "a\nb", "fix"] });
 

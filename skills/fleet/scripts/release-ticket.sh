@@ -222,13 +222,15 @@ fi
 # THROUGH its exit status, where telling "could not run" from "no match" needs
 # more than a `|| die`.
 #
-# The reachable #243 trigger is a newline in <slug>, which reaches the branch
-# lookup as a `-v` value and awk refuses it outright. An undecodable byte would
-# arrive as record data instead — a second trigger no policy on <slug> could
-# also cover — but it is held shut here by one line, `export LC_ALL=C` above:
-# under a UTF-8 locale these very programs exit 2 on such a byte, under `C`
-# they read it as data (both measured, #582). So the guard covers a trigger the
-# locale pin currently closes, not a dead one.
+# Neither #243 trigger is what makes these guards worth having, and both are
+# narrower than they look. A newline in <slug> reaches the branch lookup as a
+# `-v` value, where BSD awk refuses it outright but mawk and gawk accept it
+# (measured), so on those the run simply walks past. An undecodable byte would
+# arrive as record data instead — the trigger no policy on <slug> could also
+# cover — but it is held shut here by one line, `export LC_ALL=C` above: under
+# a UTF-8 locale these very programs exit 2 on such a byte, under `C` they read
+# it as data (both measured, #582). What the guards actually answer for is an
+# awk that could not run AT ALL, which no locale or implementation rules out.
 #
 # Guarding cannot turn an empty answer into a refusal: none of these programs
 # has a non-zero `exit`, so matching nothing is status 0 (measured), and an
