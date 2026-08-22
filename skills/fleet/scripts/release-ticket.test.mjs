@@ -2561,3 +2561,103 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
   assert.ok(existsSync(c.wt),
     "and the worktree is still there — the guard fires ahead of every mutation, so this is a clean refusal and not a partial release");
 });
+
+// --- #243: the lookups over `git worktree list --porcelain` refuse in the
+// script's own voice.
+//
+// Each awk below is a bare `$(...)` assignment, so an awk that cannot answer
+// ends the run through `set -e` carrying awk's diagnostic and nothing else. The
+// exit code is right — 2, unanswerable — but a caller grepping stderr for
+// `release-ticket:` sees no line at all, and the refusal is indistinguishable
+// from an awk that simply had nothing to say. The sites are named by construct
+// throughout, never by line: they have moved every time this file was touched.
+test("a newline in the slug refuses in the script's own voice, not awk's (#243)", (t) => {
+  // The reachable trigger, and it needs no shim: awk rejects a newline inside a
+  // `-v` assignment, and `<slug>` reaches the worktree lookup as one. No claim
+  // is made first because git will not hold a ref with a newline in it — the
+  // run dies at the lookup, well before any branch is consulted.
+  const r = repo(t);
+  const res = spawnSync("sh", [SCRIPT, "9", "a\nb", "fix", "--apply"], {
+    cwd: r.w, env: r.env(), encoding: "utf8",
+  });
+
+  assert.equal(res.status, 2, "unanswerable is exit 2");
+  assert.match(res.stderr, /^release-ticket: /m,
+    "the caller's grep is for this prefix — awk's own diagnostic alone leaves it with nothing");
+  assert.equal(res.stdout, "", "no payload on a refusal");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a worktree LOOKUP that could not run refuses in the script's own voice (#243)", (t) => {
+  // The same guard reached the way the corrupt-`gitdir` fixture in the issue
+  // reaches it — awk failing on the listing itself rather than on a `-v` value.
+  // Selected by `refs/heads/`, which is the worktree lookup's own `-v b=` and
+  // appears in no other awk this script runs.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const realAwk = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "awk"),
+    `#!/bin/sh\ncase "$*" in *'refs/heads/'*) echo "awk: simulated failure" >&2; exit 2 ;; esac\nexec '${realAwk}' "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*worktree git listed for #9/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a stray LOOKUP that could not run refuses in the script's own voice (#243)", (t) => {
+  // The second site. `length(d)` is the stray lookup's own suffix comparison and
+  // appears in no other awk here, so the worktree lookup above still answers and
+  // only this one fails — a guard on the first site alone leaves this red.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const realAwk = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(r.w, "..", "bin", "awk"),
+    `#!/bin/sh\ncase "$*" in *'length(d)'*) echo "awk: simulated failure" >&2; exit 2 ;; esac\nexec '${realAwk}' "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*stray worktree/m,
+    "the script says which lookup could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a healthy run says nothing on stderr and still releases (#243)", (t) => {
+  // The acceptance half. A guard that refuses whenever its lookup came back
+  // empty would pass every refusal case above, and these awks are entitled to
+  // match nothing: the stray lookup finds no directory on an ordinary release,
+  // and a claim whose worktree was already pruned leaves both lookups empty.
+  // Both shapes must stay exit 0 with a clean stderr.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const pruned = claim(r.w, 77, "other-claim");
+  git(r.w, "worktree", "remove", pruned.wt);
+
+  // Every line a successful run writes to stderr is the `$ <command>` trace, and
+  // every refusal this script can emit is prefixed with its own name — so "no
+  // line that is not the trace" is the byte-level statement of "nothing
+  // refused", without pinning the trace's wording.
+  const traceOnly = (stderr, what) =>
+    assert.deepEqual(stderr.split("\n").filter((l) => l && !l.startsWith("$ ")), [], what);
+
+  const first = release(r, c);
+  assert.equal(first.code, 0, `an ordinary release must still go through: ${first.stderr}`);
+  traceOnly(first.stderr, "a run that refused nothing writes only the trace");
+  assert.equal(first.json.released, true);
+
+  const second = release(r, pruned);
+  assert.equal(second.code, 0, `a branch-only claim must still release: ${second.stderr}`);
+  traceOnly(second.stderr, "both lookups empty is an answer, not a failure");
+  assert.equal(second.json.released, true);
+});
