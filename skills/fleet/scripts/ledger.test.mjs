@@ -1068,9 +1068,10 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
 // payload as a successful one. Measured on this script before the fix: `read`
 // of an oversized ledger handed a prefix that JSON.parse rejects to a
 // spawnSync consumer at status 0, while the identical command redirected to a
-// file delivered all of it and parsed. `board.mjs` is that spawnSync consumer
-// and has no flag that would let it read the ledger any other way, so it
-// served a cockpit with an empty board.
+// file delivered all of it and parsed. `board.mjs` is the consumer that made
+// it visible — it reads `read` through execFileSync, which pipes stdout just
+// the same — and it has no flag that would let it read the ledger any other
+// way, so it served a cockpit with an empty board.
 //
 // Every assertion below is "the payload parses" and "the tail arrived", never
 // a byte count. The cut is a pipe-buffer boundary raced against the consumer's
@@ -1086,14 +1087,25 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
 // passes these tests and they pin nothing. Several times the buffer rather
 // than merely past it, since two buffers have been measured getting through on
 // a minority of runs — and not larger still because three of the four
-// subcommands can only be fed an oversized payload through argv, which has its
-// own ceiling.
+// subcommands can only be fed an oversized payload through argv, which has two
+// separate ceilings: a total across every argument, and a far lower one on any
+// single argument. The sweep below stays under the second by splitting its
+// tail across several elements, asserted there rather than assumed here.
 //
 // Asserted in BYTES. String.length counts UTF-16 units, and the `·` these rows
-// carry (as real ones do) makes the two disagree, which is how one measured
-// 65536-byte prefix reads as 64456 characters and invites the false conclusion
-// that the cut is fuzzy.
+// carry (as real ones do) makes the two disagree, so a cut that is exact in
+// bytes reads as a smaller and untidy character count, inviting the false
+// conclusion that the cut is fuzzy. No figure is quoted for that: a character
+// count belongs to the fixture that produced it, and one carried over from a
+// different measurement reads as if it were this one's.
 const OVERSIZED = 200_000;
+
+// Linux caps a single argv element at MAX_ARG_STRLEN, 32 pages; darwin caps
+// only the total. So a tail sent as one element passes locally and execve
+// refuses it on CI — and that refusal is not a truncation: spawnSync returns
+// status null, failing the exit-code assertion below and reading exactly like
+// the defect these tests exist to catch.
+const ARG_STRLEN_MAX = 131_072;
 
 // Built here rather than read from the repo's own `.fleet/ledger.md`: that
 // file is whatever the last run left, it has been well under the pipe buffer
@@ -1119,7 +1131,12 @@ function parsePayload(r, what) {
   try {
     return JSON.parse(r.stdout);
   } catch (e) {
-    assert.fail(`${what} payload did not parse — the pipe truncated it at ${Buffer.byteLength(r.stdout)} bytes, exit ${r.status}: ${e.message}`);
+    // Report what was observed, never the cause. Truncation is not the only
+    // way to get here — an empty stdout, or one a stray line polluted, parses
+    // just as badly at exit 0 — and naming the pipe would send a reader after
+    // #246 for a defect that is not it. The byte count already says whether
+    // the payload stopped on a buffer boundary.
+    assert.fail(`${what} payload did not parse — ${Buffer.byteLength(r.stdout)} bytes on stdout at exit ${r.status}: ${e.message}`);
   }
 }
 
@@ -1133,16 +1150,15 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   assert.equal(r.status, 0, `read must still exit 0; got ${r.status}\n${r.stderr}`);
   const payload = parsePayload(r, "read's");
 
-  // The tail, named specifically. The payload serialises rows, then filed,
-  // then ruled, so ruled's last entry is the furthest thing from the start of
-  // the write and the first thing an abandoned write loses — and a consumer
-  // that greps still finds the earlier keys, which is what made this look
-  // milder than it is. A parsing consumer loses every key, the survivors
-  // included, because the object is unterminated.
-  assert.equal(payload.ruled.at(-1), ruled.at(-1), "the end of the payload did not arrive");
-  assert.deepEqual(payload.rows, rows);
-  assert.deepEqual(payload.filed, filed);
-  assert.deepEqual(payload.ruled, ruled);
+  // The whole payload, not a named tail. A truncated one never reaches this
+  // line at all — it is unterminated JSON and dies in parsePayload above — so
+  // a separate tail assertion discriminated nothing. That is the same thing
+  // the grep-shaped reading of this defect got wrong: a consumer that greps
+  // still finds the earlier keys, which made it look milder than it is, while
+  // a parsing consumer loses every key, the survivors included, because the
+  // object is unterminated. Comparing the whole object also catches a key the
+  // payload should not carry, which the per-key assertions let through.
+  assert.deepEqual(payload, { rows, filed, ruled });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
@@ -1150,15 +1166,26 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
 // what an oversized case has to be built from. Swept with `read` rather than
 // after it: fixing only the subcommand a report happens to name is the failure
 // this repo keeps re-recording, and all four ended `console.log` + exit 0.
+//
+// The tail goes over as several argv elements, not one. All three subcommands
+// join their trailing arguments with a space, so what they echo is identical
+// either way — but one element this size is refused outright by execve on
+// Linux, which is a spawn that never happened rather than a payload that
+// arrived short.
 for (const cmd of ["row", "filed", "ruled"]) {
   test(`${cmd} hands a pipe its whole payload, at its unchanged exit code (#246)`, (t) => {
     const { dir, cli } = cliFixture(t);
     const file = join(dir, "ledger.md");
     writeFileSync(file, ledgerText([]));
-    const text = "alpha bravo charlie delta ".repeat(8000);
+    const parts = Array.from({ length: 4 }, () => "alpha bravo charlie delta ".repeat(2000).trim());
+    const text = parts.join(" ");
     assert.ok(Buffer.byteLength(text) > OVERSIZED, `tail must be far past the pipe buffer, got ${Buffer.byteLength(text)} bytes`);
+    assert.ok(
+      parts.every((p) => Buffer.byteLength(p) < ARG_STRLEN_MAX),
+      `every argv element must stay under the per-argument ceiling, or execve refuses the spawn and the exit-code assertion below fails for a reason that has nothing to do with a pipe`,
+    );
 
-    const r = cli(["--file", file, cmd, "4242", text]);
+    const r = cli(["--file", file, cmd, "4242", ...parts]);
     assert.equal(r.status, 0, `${cmd} must still exit 0; got ${r.status}\n${r.stderr}`);
     const payload = parsePayload(r, `${cmd}'s`);
     // Each subcommand names its echoed text differently; the guarantee is the
