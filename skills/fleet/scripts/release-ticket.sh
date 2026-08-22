@@ -214,16 +214,25 @@ elif [ "$linked" -gt "$registered" ]; then
   die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
 fi
 
-# Every lookup over the listing is guarded, for the reason the worktree counter
-# is: left bare, an awk that could not answer propagates its own status out of
-# the assignment through `set -e`, and the run ends on awk's diagnostic with no
-# line carrying the `release-ticket:` prefix a caller greps stderr for. A
-# newline in <slug> reaches the branch lookup as a `-v` value and awk refuses
-# it outright; an undecodable byte from a corrupted `gitdir` admin file reaches
-# these programs as record data, which is why no policy on <slug> could cover
-# both (#243). Guarding cannot turn an empty answer into a refusal: none of
-# these programs has a non-zero `exit`, so matching nothing is status 0
-# (measured), and an absent worktree stays the answer the checks below expect.
+# Every lookup ASSIGNED from the listing is guarded, for the reason the worktree
+# counter above is: left bare, an awk that could not answer ends the run on its
+# own diagnostic, with no line carrying the `release-ticket:` prefix a caller
+# greps stderr for. Not every lookup OVER it, though — `locked` and
+# `unresolved_head` below read the same `$wt_list` through awk and answer
+# THROUGH its exit status, where telling "could not run" from "no match" needs
+# more than a `|| die`.
+#
+# The reachable #243 trigger is a newline in <slug>, which reaches the branch
+# lookup as a `-v` value and awk refuses it outright. An undecodable byte would
+# arrive as record data instead — a second trigger no policy on <slug> could
+# also cover — but it is held shut here by one line, `export LC_ALL=C` above:
+# under a UTF-8 locale these very programs exit 2 on such a byte, under `C`
+# they read it as data (both measured, #582). So the guard covers a trigger the
+# locale pin currently closes, not a dead one.
+#
+# Guarding cannot turn an empty answer into a refusal: none of these programs
+# has a non-zero `exit`, so matching nothing is status 0 (measured), and an
+# absent worktree stays the answer the checks below expect.
 wt=$(printf '%s\n' "$wt_list" |
      awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}') ||
   die "could not read the worktree git listed for #$issue"

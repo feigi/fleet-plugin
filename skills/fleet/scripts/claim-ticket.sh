@@ -147,8 +147,9 @@ else
   if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
     die "$wt has no .git file — cannot verify the lockfile was not mutated"
   # No `2>&1` here, unlike the two captures above: those capture a refusal
-  # REASON, this captures DATA that is then compared. release-ticket.sh:766
-  # already states it — folded-in stderr would be counted as a change. A git
+  # REASON, this captures DATA that is then compared. The comment above
+  # release-ticket.sh's own `git -C "$wt" status --porcelain` capture already
+  # states it — folded-in stderr would be counted as a change. A git
   # that exits 0 still writes to stderr for a malformed `.gitattributes` line
   # or a chatty `core.fsmonitor`, and merged that chatter became the whole of
   # $dirty and refused a lockfile it had just verified as clean — after the
