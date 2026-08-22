@@ -214,14 +214,27 @@ elif [ "$linked" -gt "$registered" ]; then
   die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
 fi
 
+# Every lookup over the listing is guarded, for the reason the worktree counter
+# is: left bare, an awk that could not answer propagates its own status out of
+# the assignment through `set -e`, and the run ends on awk's diagnostic with no
+# line carrying the `release-ticket:` prefix a caller greps stderr for. A
+# newline in <slug> reaches the branch lookup as a `-v` value and awk refuses
+# it outright; an undecodable byte from a corrupted `gitdir` admin file reaches
+# these programs as record data, which is why no policy on <slug> could cover
+# both (#243). Guarding cannot turn an empty answer into a refusal: none of
+# these programs has a non-zero `exit`, so matching nothing is status 0
+# (measured), and an absent worktree stays the answer the checks below expect.
 wt=$(printf '%s\n' "$wt_list" |
-     awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}')
-main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}')
+     awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}') ||
+  die "could not read the worktree git listed for #$issue"
+main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}') ||
+  die "could not read the main checkout's branch from git's listing for #$issue"
 # The main checkout's path, and the anchor the orphan probe below reconstructs a
 # claim's directory from. Off git's own listing rather than $PWD: this script is
 # routinely run from inside a member's worktree, where a cwd-relative
 # ".worktrees/..." names nothing.
-main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit}')
+main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit}') ||
+  die "could not read the main checkout's path from git's listing for #$issue"
 
 # claim-ticket.sh creates the worktree on this branch, but it does not stay
 # there: an interrupted rebase leaves it detached, and a member can switch it.
@@ -235,7 +248,8 @@ main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit
 # on it — by exact suffix, not a pattern, since <slug> is caller-supplied.
 stray=$(printf '%s\n' "$wt_list" |
         awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
-          if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}')
+          if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}') ||
+  die "could not scan git's listing for a stray worktree for #$issue"
 
 has_branch=false
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=true
