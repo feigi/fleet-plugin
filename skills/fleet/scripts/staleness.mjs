@@ -124,20 +124,22 @@ function probe() {
   // answer. Without this a `--path 'skills/**/*.mjs'` would be read against
   // whatever git listed first.
   const lines = listing.split("\n").filter((l) => l !== "");
-  const entry = lines.length === 1 && /^\d+ (\w+) ([0-9a-f]+)\t(.*)$/.exec(lines[0]);
-  if (!entry || entry[3] !== path) {
+  const entry = lines.length === 1 && /^\d+ \w+ ([0-9a-f]+)\t(.*)$/.exec(lines[0]);
+  if (!entry || entry[2] !== path) {
     return unknown("the pathspec did not resolve to exactly this one path in origin/main — give a single literal file path");
   }
-  const [, type, blob] = entry;
-  // A tree read as a file greps a list of FILENAMES, which is how a probe
-  // reports a directory as clean.
-  if (type !== "blob") return unknown(`origin/main names a ${type} at this path, not a file`);
 
+  // The object ls-tree named, read as a file. A directory or a submodule at
+  // this path lands here and refuses, which is the answer: a tree read as a
+  // file would put a list of FILENAMES in front of the search, and a needle
+  // absent from a list of filenames reads as clean. No separate type branch
+  // above — it would refuse the same inputs with the same verdict, and a guard
+  // whose removal no verdict can detect is a guard nothing pins.
   let content;
   try {
-    content = git(["cat-file", "blob", blob]);
+    content = git(["cat-file", "blob", entry[1]]);
   } catch {
-    return unknown("the blob origin/main names at this path could not be read");
+    return unknown("what origin/main holds at this path could not be read as a file — a directory or a submodule reads this way too");
   }
   // The probe's own positive control for the state check: a search over no
   // bytes finds nothing, and "found nothing" is the answer BOTH verdicts below
