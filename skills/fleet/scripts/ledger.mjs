@@ -212,7 +212,13 @@ if (cmd === "read") {
   // the path is simply wrong (typo'd --file) is a fail-open that no caller
   // would notice. Warn loudly by default; --require-file makes absence a
   // hard failure for callers that know the file must already exist.
-  if (!existsSync(file)) {
+  //
+  // Read once, into a flag both halves of the answer use: the warning below
+  // and the payload's `ledger.ok` are then the same observation, so the
+  // machine-readable half cannot contradict the human-readable one about
+  // whether there was a file to read (#231).
+  const ledgerRead = existsSync(file);
+  if (!ledgerRead) {
     if (requireFile) die(`--require-file given but ledger file does not exist: ${file}`);
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
@@ -245,7 +251,10 @@ if (cmd === "read") {
   const match = data.filed.find((f) => isMatch(tokenSet(subjectOf(f))));
   if (match) {
     console.error(`${NAME}: ALREADY FILED — ${match}`);
-    console.log(JSON.stringify({ subject, found: true, match, verdict: "already-filed" }));
+    // `ledger` rides on this arm too, where it can only be true. A consumer
+    // testing `!payload.ledger.ok` otherwise reads the field's absence as
+    // falsy — "never read" — on the one answer that proves it was read.
+    console.log(JSON.stringify({ subject, found: true, match, ledger: { ok: ledgerRead }, verdict: "already-filed" }));
     // Exit 1 means "do not file this again" — the strong signal. Exit 3 is also
     // non-zero but weaker: tracker rows to review, not a ruling. A caller that
     // checks only the exit status stops on both, which errs toward not
@@ -564,7 +573,14 @@ if (cmd === "read") {
   // payload a consumer parses (#154). They differ in what is knowable —
   // the ledger is fully in hand, so the near-miss total is exact, while gh
   // reports no total, so the tracker can only say that more exist.
-  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal: rankedNear.length, tracker, verdict }));
+  // `ledger.ok` beside `tracker.ok`, and deliberately NOT inside `verdict`:
+  // the two halves each report their own readability, which is what makes an
+  // unread ledger distinguishable from one read and found empty — those
+  // payloads were otherwise identical in every field (#231). Folding it into
+  // the verdict instead would answer `unverified` for the run's FIRST check
+  // on any fresh clone, where `.fleet/` does not exist until save() creates
+  // it — see the comment on the repository probe above.
+  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal: rankedNear.length, ledger: { ok: ledgerRead }, tracker, verdict }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked

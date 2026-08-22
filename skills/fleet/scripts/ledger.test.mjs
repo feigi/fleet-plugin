@@ -479,6 +479,71 @@ test("a clean ledger and a clean tracker is the only path that reads safe, exit 
   assert.equal(r.json.verdict, "clean");
 });
 
+// ── The ledger's own readability (#231) ──────────────────────────────────────
+//
+// `tracker.ok` reports whether the tracker half was read. The ledger half had
+// no such field, so a run whose ledger file does not exist emitted a payload
+// identical in every field to one that read the ledger and found nothing
+// filed — `clean` on both, exit 0 on both. Only stderr told them apart, which
+// a consumer parsing the payload cannot see.
+//
+// The verdict deliberately stays `clean` on both arms: `.fleet/` is gitignored
+// and created lazily by save(), so a fresh clone's first `check` legitimately
+// has no file to read, and folding that into the verdict would report the
+// normal case as unverified.
+
+const UNFILED_SUBJECT = "postgres connection pooling exhausted under load";
+
+test("a ledger that was never read is named as such, and nothing else about the answer moves (#231)", () => {
+  // One subject for both runs: `subject` and the derived `tracker.query` ride
+  // in the payload, so a differing subject would defeat the comparison below.
+  const unread = run(UNFILED_SUBJECT, { ledgerDirExists: false });
+  const read = run(UNFILED_SUBJECT, { filed: [] });
+
+  assert.equal(unread.json.ledger?.ok, false, "a ledger file that does not exist was never read, and the payload must say so");
+  assert.equal(read.json.ledger?.ok, true, "a ledger that was read reports so even when it held nothing filed");
+
+  // The whole point of the field: these two payloads were identical, so
+  // anything weaker than "differs here and nowhere else" leaves the caller
+  // reconstructing the answer from stderr again.
+  assert.deepEqual(
+    { ...unread.json, ledger: null },
+    { ...read.json, ledger: null },
+    "the readability flag is the ONLY difference between an unread ledger and one read empty",
+  );
+
+  // PR #225 made the exit code a pure function of `verdict`, so a field added
+  // beside it is only safe once both are pinned on the arm it lands on.
+  for (const r of [unread, read]) {
+    assert.equal(r.json.verdict, "clean", "naming the unread ledger must not mint a new verdict");
+    assert.equal(r.status, 0, "and must not move the exit code");
+  }
+
+  // The warning already stated this consequence in words; the field is what
+  // makes the machine-readable half agree with it rather than contradict it.
+  assert.match(unread.stderr, /WARNING — ledger file not found/);
+  assert.doesNotMatch(read.stderr, /ledger file not found/);
+});
+
+test("an unread ledger still reports the tracker hit at its own exit code (#231)", () => {
+  // The blocking arm, where a perturbation costs most: exit 3 comes from the
+  // verdict alone, so the new field has to be shown not to reach it here.
+  const r = run("Non-zero column audit 11 rows", { ledgerDirExists: false, hits: [HIT_114] });
+  assert.equal(r.json.ledger?.ok, false, "a tracker hit says nothing about whether the ledger was read");
+  assert.equal(r.json.verdict, "tracker-hit");
+  assert.equal(r.status, 3, "the blocking exit code is unchanged by the new field");
+});
+
+test("the already-filed payload names the ledger it read, and stays exit 1 (#231)", () => {
+  // The other payload `check` emits. A consumer testing `!payload.ledger.ok`
+  // reads a missing field as falsy — "never read" — on the one answer that
+  // proves the ledger WAS read, so the field cannot be scoped to one arm.
+  const r = run("Non-zero column audit 11 rows", { filed: [FILED_114] });
+  assert.equal(r.status, 1, "the strong signal is unchanged");
+  assert.equal(r.json.verdict, "already-filed");
+  assert.equal(r.json.ledger?.ok, true, "a matched row can only have come from a ledger that was read");
+});
+
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghFails: true });
   assert.equal(r.status, 0, "offline must not block filing — it degrades, per the ledger-only answer");
@@ -808,6 +873,9 @@ test("the documented flow on a FRESH clone — no --file, .fleet/ not created ye
   assert.equal(r.ghRan, true, "a ledger directory that does not exist YET is still inside its repository");
   assert.equal(r.json.tracker.ok, true);
   assert.equal(r.json.verdict, "clean");
+  // The state the #231 ruling protects: this run legitimately has no ledger
+  // to read, so the flag says so — and the verdict still does not move.
+  assert.equal(r.json.ledger?.ok, false, "a fresh clone's first check reports the ledger unread, not the run unverified (#231)");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /cannot resolve the ledger's repository/);
   assert.equal(r.ghCwd, r.ledgerRepoDir, "and the query is still bound to the ledger's own repository, not the runner's cwd");
