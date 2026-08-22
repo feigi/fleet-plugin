@@ -61,3 +61,82 @@ for (const fragment of [
     );
   });
 }
+
+// #283. The `git show <sha>:<path>` instruction above is the review path's one
+// place that tells a reader how to settle a citation, so it is also where the
+// rule for building that argument out of a shell parameter belongs — and this
+// is where it gets pinned. Not the repo's only such place: run-team's phase-0
+// "Still live?" block instructs the same read. Its refs are literal and so
+// unaffected, and #283 wants the rule stated once, so nothing was added there;
+// whether that block needs a pointer to this one is #779. Anchoring the slice
+// on the rule's own opening is deliberate: delete the rule and the anchor
+// assertion reds before any content assertion runs. The fix and the reason
+// quoting is NOT the fix are pinned as one contiguous span rather than as two
+// fragments, because two fragments in one sentence still leave the join open
+// to a spliced exception clause — and "quote it" is precisely the
+// plausible-looking remedy that does not work here, so a mutation that keeps
+// only that half must red.
+function braceRule() {
+  const section = specialists();
+  const at = section.indexOf("Brace a ref held in a variable");
+  assert.notEqual(
+    at,
+    -1,
+    "review-and-fix.md's Specialists section no longer states the brace rule — its `git show <sha>:<path>` instruction then reads as safe for a ref held in a variable, which under zsh it is not, quoted or otherwise",
+  );
+  const end = section.indexOf("\n\n", at);
+  assert.notEqual(end, -1, "the brace rule now runs to the end of the Specialists section — the slice is unbounded and unrelated prose could satisfy the assertions below");
+  return section.slice(at, end).replace(/\s+/g, " ");
+}
+
+test("the Specialists section says to brace a variable ref, and that quoting is not the fix", () => {
+  assert.ok(
+    braceRule().includes(
+      'Brace a ref held in a variable — `git show "${SHA}:<path>"` — because quoting is not what fixes it.',
+    ),
+    'the brace rule lost part of its span. All three halves are load-bearing together: the instruction to brace, the worked `git show "${SHA}:<path>"` form a reader copies, and the clause denying that quoting is the fix. Any one of them alone leaves a reader who quotes and does not brace believing the read is settled',
+  );
+});
+
+// The colon is what makes this a hazard, so the colon is what the pattern
+// requires: `git show "$SHA" -- <path>` is prescribed two sentences up in the
+// same section and has to stay green. `cat-file` and a positional `$1` are in
+// because they produce the identical silent shape — measured, `git cat-file -p
+// "$SHA:t"` prints the tree object at exit 0 where the braced form exits 128.
+// Deliberately over-strict in one spot: `git show "$SHA":<path>` is safe (the
+// closing quote ends the parameter name) and reds anyway. Five further blind
+// spots — other porcelain, a ref in its own code span, a wrapped line, `$a[1]`,
+// and single-quoted forms, which fail loudly rather than silently — are
+// measured and filed as #780 rather than guessed at here.
+const UNBRACED_REF = /git (?:show|cat-file)[^`\n]*?\s["']?\$[A-Za-z_0-9]+["']?:/;
+
+test("no unbraced variable ref survives in the Specialists section's own examples", () => {
+  assert.doesNotMatch(
+    specialists(),
+    UNBRACED_REF,
+    "an example in review-and-fix.md's Specialists section builds a `git show` or `git cat-file` object argument from an unbraced parameter — zsh takes the `:<path>` suffix as a history modifier, inside double quotes too, and the read can return the commit at exit 0 instead of the blob",
+  );
+
+  // The other half: what this regex must ACCEPT. Fed the braced form the rule
+  // prescribes, it has to stay quiet — a pin that forbids its own remedy sends
+  // the next editor back to the unbraced form to get the suite green. Both
+  // quoting styles, because a plausible mis-edit that widens this to single
+  // quotes without carrying the brace exclusion across passes the double-quoted
+  // case on its own (measured).
+  const braced = ['git show "${SHA}:<path>"', "git show '${SHA}:<path>'"];
+  for (const form of braced) {
+    assert.doesNotMatch(
+      form,
+      UNBRACED_REF,
+      `the unbraced-ref pin also rejects the braced form it exists to promote: ${form}`,
+    );
+  }
+
+  // And the colon-free form the same section prescribes for one named commit,
+  // where there is no suffix for a history modifier to eat and so no hazard.
+  assert.doesNotMatch(
+    'git show "$SHA" -- <path>',
+    UNBRACED_REF,
+    'the unbraced-ref pin reds `git show "$SHA" -- <path>`, which carries no colon and no history-modifier hazard and is what the section prescribes for one named commit',
+  );
+});

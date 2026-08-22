@@ -11,7 +11,11 @@ they stood there — not pointers into the current tree. Resolve one with
 `git show "8a84402:<path>" | sed -n '<N>p'`; keep the quotes when you paste that
 template — unquoted, zsh reads the literal `<path>` placeholder as a redirection
 and dies with a parse error before git ever runs. Once a real path is
-substituted in, quoted and unquoted behave identically.
+substituted in, this literal-ref template behaves identically quoted or
+unquoted — and so does a ref held in a variable, identically broken: zsh
+reads the `:<path>` suffix as a history modifier inside double quotes as
+well as outside, so quoting is not what fixes that one. Brace it —
+`git show "${SHA}:<path>"`.
 
 One change and one correction were made after implementation, both recorded
 below. The change: the size tier keeps `comments` on any small diff that touches
