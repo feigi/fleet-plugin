@@ -373,23 +373,22 @@ they are gone, with only `rewrote row #N` on stderr to say so. Recover a class
 after a compaction with `ledger.mjs read` — `class=` is a raw-row field, and the
 cockpit does not parse or surface it.
 
-**Redirect `ledger.mjs read` to a file; never pipe it.** On a pipe its payload
-truncates and it still exits 0 (#246), so a grown ledger silently loses its tail
-— that is why `board.mjs` reported `ledger read parse failed` and served a blind
-cockpit that whole run. **The cut is a pipe-buffer boundary, not a fixed
-ceiling**, so never write a byte count into a check. What survives is whatever
-the kernel accepted before `process.exit(0)` abandoned the async write: measured
-on one 506 KB ledger that a redirect delivers whole and parses, every pipe
-consumer — `execFileSync` (what `board.mjs` uses), `| wc -c`, `| cat > f` — cut
-at exactly 65536 bytes, and that same `| cat > f` returned 131072, one further
-buffer, on 5 of 55 runs. So the amount is a race with the consumer's draining,
-not a constant. None of it parsed; all of it exited 0. Assert that the payload
-**did not parse** — a test pinning 65536 passes only until the drain wins that
-race. Measure bytes, not `String.length`, if you check at all: the same 65536-byte
-prefix reads as 64456 through `readFileSync(…, "utf8").length`, because a `·` in
-a row is two bytes and one UTF-16 unit. Every use above is a recovery path, so the
-truncation lands exactly where a lost class or a settled `ruled:` is
-unrecoverable, and nothing warns you twice.
+`ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
+be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
+reporting `ledger read parse failed` and serving a blind cockpit for a whole run
+(#246). Every use above is a recovery path, so a payload that arrives short
+lands exactly where a lost class or a settled `ruled:` is unrecoverable — which
+is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each
+reach a pipe whole. Those four are what is fixed and what is pinned.
+
+**Do not read that as "#246 is closed".** Two things it needs are still open.
+`check` is pinned on a pipe nowhere: its terminal exit now falls through like
+the four above, but its ALREADY FILED exit still cuts its payload mid-branch
+(#808) — the exit code survives there, so gate on the code and do not trust
+that payload. And `board.mjs` reads `ledger.mjs read` through `execFileSync`
+with no `maxBuffer` (#807), so the blind-cockpit symptom itself returns once
+the payload passes 1 MiB: the fix moved that cliff up from 64 KiB rather than
+removing it.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 refill is level-triggered, so there are no implementer waves. **Append one row to
