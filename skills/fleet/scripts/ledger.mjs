@@ -145,12 +145,28 @@ function save(d) {
 
 const data = load();
 
+// The payload subcommands end by falling out of this chain, never by calling
+// process.exit(). On a pipe, process.stdout.write is async and process.exit()
+// discards whatever is still queued, so a payload past the buffer arrives cut
+// — at exit 0, which types a corrupt read as a successful one (#246).
+// candidates.mjs states the same reason at its own exit line; this was the
+// second script on that shape. The consumer that made it visible is board.mjs,
+// which reads `read` through execFileSync — a pipe — and accepts its ledger
+// only as a path, so nothing on the caller's side could work around it: a
+// grown ledger served a cockpit whose board was empty at HTTP 200.
+//
+// The chain is `else if` so that not exiting does not send a good subcommand
+// on into the unknown-subcommand die() below it.
+//
+// `check` deliberately still exits explicitly. Its codes are the contract
+// callers gate on, and its already-filed exit sits mid-branch, where falling
+// through would go on to run the tracker search that exit exists to skip. Its
+// payload is bounded by its own argv and by gh's reply rather than by the
+// ledger, so reaching the cut there takes an argv no caller sends — the same
+// mechanism, left unswept knowingly rather than missed.
 if (cmd === "read") {
   console.log(JSON.stringify(data));
-  process.exit(0);
-}
-
-if (cmd === "row") {
+} else if (cmd === "row") {
   const [ticket, ...textParts] = rest;
   if (!ticket || textParts.length === 0) die("usage: ledger.mjs row <ticket> <text>");
   const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
@@ -167,30 +183,21 @@ if (cmd === "row") {
   save(data);
   console.error(created ? `    new row ${key}` : `    rewrote row ${key}`);
   console.log(JSON.stringify({ ticket: key, line, created }));
-  process.exit(0);
-}
-
-if (cmd === "filed") {
+} else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
   save(data);
   console.log(JSON.stringify({ issue, subject, total: data.filed.length }));
-  process.exit(0);
-}
-
-if (cmd === "ruled") {
+} else if (cmd === "ruled") {
   const [pr, ...decisionParts] = rest;
   if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
   save(data);
   console.log(JSON.stringify({ pr, decision, total: data.ruled.length }));
-  process.exit(0);
-}
-
-if (cmd === "check") {
+} else if (cmd === "check") {
   // The first check of a run legitimately has no file yet, so absence alone
   // cannot be an error — but a silent "safe to file" for every check when
   // the path is simply wrong (typo'd --file) is a fail-open that no caller
@@ -559,6 +566,6 @@ if (cmd === "check") {
   // in #152). A hit scoring 0.00 still forces 3: gh matched the issue body,
   // which the title-based score cannot see.
   process.exit(verdict === "tracker-hit" ? 3 : 0);
+} else {
+  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
 }
-
-die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
