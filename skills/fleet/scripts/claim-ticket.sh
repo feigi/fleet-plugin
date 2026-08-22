@@ -274,19 +274,38 @@ for arg do
     # inside its path) to the real directory, so the test also becomes
     # "resolves inside a vendored tree" however the caller spelled it.
     # BOTH, because they cover disjoint inputs. \`cd\` fails on a directory
-    # \`[ -d ]\` admits but that carries no search bit, and \`\$resolved\` is
+    # \`[ -d ]\` admits but that carries no search bit, and the resolution is
     # then empty: the spelling is the only thing left to refuse
     # \`node_modules/pkg\` with, and the \`case\` has to be what reports it
     # (see above) rather than the readability message from \`find\` below.
-    # The resolution is judged from where it DIVERGES from the runner's own
-    # location, because \`pwd -P\` is absolute and a \`node_modules\` segment
-    # ABOVE the divergence is an ancestor of the runner itself — shared with
-    # it, so it says nothing about the argument. Matched absolutely, a
-    # worktree living under one refused every directory argument, including
-    # the bare invocation's implicit \`.\`. Anchoring at the worktree root
-    # instead is the opposite error: it discards every resolution that lands
-    # outside, so a symlink to a vendored tree elsewhere on disk ran green —
-    # #186's own class, one input over.
+    # Falling \`\$resolved\` back to the spelling is what gives that input an
+    # anchor of its own, so the walk below has something to measure either way.
+    # Judged from where the argument DIVERGES from the runner's own location,
+    # because \`pwd -P\` is absolute and a \`node_modules\` segment ABOVE the
+    # divergence is an ancestor of the runner itself — shared with it, so it
+    # says nothing about the argument. Matched absolutely, a worktree living
+    # under one refused every directory argument, including the bare
+    # invocation's implicit \`.\`. Anchoring at the worktree root instead is
+    # the opposite error: it discards every resolution that lands outside, so
+    # a symlink to a vendored tree elsewhere on disk ran green — #186's own
+    # class, one input over.
+    # The SPELLING is read only where it is anchored at all, which is why
+    # \`\${arg##/*}\` empties an absolute one (#230). A relative spelling is
+    # anchored at the cwd and means something there; an absolute spelling
+    # names the whole path from the root, so it necessarily carries the
+    # ancestor shared with the runner inside its own text and matched on the
+    # \`node_modules\` the divergence walk had just ruled irrelevant. One
+    # directory then drew opposite verdicts under two names — the same
+    # directory that ran as \`t\` refused as its own absolute path. Exempting
+    # it is the rule the file branch below already applies, and stripping
+    # \$shared off the spelling instead is not equivalent: that is lexical,
+    # while \$shared comes from \`pwd -P\`, so a caller naming a path through a
+    # symlinked ancestor (a macOS \$TMPDIR is one) shares no literal prefix
+    # with it and nothing is stripped. The resolution is immune because both
+    # sides of that comparison are resolved. The remaining spelling-dependent
+    # input is a cwd OUTSIDE the worktree, from which a relative argument
+    # descending through the shared ancestor does name that \`node_modules\`
+    # and is refused — node reads the file branch's arguments the same way.
     # \`CDPATH=\` on both: an inherited CDPATH resolves a bare relative name
     # against a same-named directory somewhere else entirely, so the guard
     # would judge one directory while \`find\` below — which never consults
@@ -297,12 +316,13 @@ for arg do
     # still excludes its vendored contents once the walk reaches them.
     root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
     resolved=\$(CDPATH= cd -- "\$arg" 2>/dev/null && pwd -P)
+    [ -n "\$resolved" ] || resolved=\$arg
     shared=\$root
     while [ -n "\$shared" ]; do
       case "\$resolved" in "\$shared"/* | "\$shared") break ;; esac
       shared=\${shared%/*}
     done
-    case "/\$arg/ /\${resolved#"\$shared"}/" in
+    case "/\${arg##/*}/ /\${resolved#"\$shared"}/" in
       */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "\$arg" >&2; exit 1 ;;
     esac
     found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
