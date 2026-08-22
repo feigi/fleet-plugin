@@ -214,6 +214,50 @@ At start, and whenever the pool empties.
    And #187 it could not read at all: that ticket's file is untracked in
    `origin/main`, the fatal-not-empty case above.
 
+   **`staleness.mjs` runs that check for you, and answers in THREE values.**
+   `~/.claude/skills/fleet/scripts/staleness.mjs --path <path> --gone
+   '<string>'`, or `--present '<string>'`, once per claim the ticket makes.
+   It goes here and not in the candidate scan because choosing WHICH string
+   settles a ticket needs the ticket read, which the step above already did —
+   so the cost lands on shortlisted candidates and never on the backlog.
+   `--gone` is a defect the fix must remove, the wording the ticket quotes as
+   wrong; `--present` is what the fix must add, the assertion a pin ticket asks
+   for. Give exactly one — the direction is not inferable from the string, and
+   the wrong one answers the opposite verdict with full confidence.
+
+   | Exit | Verdict | What it does to supply |
+   |---|---|---|
+   | 0 | still reproduces | offer it |
+   | 1 | provably fixed | do not offer; close citing the payload's `commit` and `subject` |
+   | 2 | could not check | offer it, **and say the probe could not check** |
+
+   The third value is the one that has to survive. A probe that could not look
+   answers exactly like a probe that looked and found nothing, so folding it
+   into either neighbour retires live supply on a guess in one direction and
+   reports a defect as live on a spelling the tree stopped using in the other.
+   Exit 2 is also where every guard and every failed git call in that script
+   lands, so a probe that breaks keeps the ticket in the queue.
+
+   What it refuses to answer is the point of it. It reads `origin/main` and
+   nothing else — never the working tree, never anything on disk — so a path
+   this repo does not track is exit 2 rather than a clean read: that is #187's
+   case and the generated-artifact case together, `agent-test` being written
+   into a claimed worktree by `claim-ticket.sh`'s heredoc, which makes every
+   copy under `.worktrees/` a snapshot of whenever that worktree was claimed.
+   `fixed` is never read off the string's presence alone either: it carries the
+   commit `git log -S` names for that string at that path, reachable from
+   `origin/main` by construction since that is where the walk starts. A
+   `--gone` string absent from the file that ALSO never changed count there is
+   exit 2, not a fix — that is the positive control, and without it a typo in
+   the string closes a live ticket.
+
+   It does not run a reproduction. The general "is this still reproducible?"
+   oracle over the whole backlog is what #238 ruled out, and a reproduction run
+   without a positive and a negative control misattributes causes rather than
+   merely missing defects — the #230 check needed a purpose-built fixture plus
+   both. A ticket no single string settles is a `could not check`: offered,
+   annotated, never quietly dropped.
+
    **Decided?** Would two competent implementers, reading only this ticket, build
    materially different things? "Material" by inventory, not feel:
 
@@ -272,7 +316,11 @@ At start, and whenever the pool empties.
 
    Annotate every survivor with its class — `correction` or `routine` — so the
    maintainer sees which tickets carry the correction-ticket discipline before
-   ticking them. Annotate any survivor the `Out of scope` read sequences after
+   ticking them. Annotate any survivor whose liveness probe came back **could
+   not check** with that verdict and the reason its payload gave: this list is
+   where the third value has to land, and a survivor presented without it reads
+   as one the probe checked and found live. Annotate any survivor the
+   `Out of scope` read sequences after
    another survivor in the same list. Without that, FIFO puts a chain's members
    next to each other and two consecutive numbers read as two independent
    tickets — which is exactly how both land in one wave.
