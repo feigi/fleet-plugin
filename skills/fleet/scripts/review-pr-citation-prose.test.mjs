@@ -61,3 +61,43 @@ for (const fragment of [
     );
   });
 }
+
+// #283. The `git show <sha>:<path>` instruction above is the repo's one place
+// that tells a reader how to settle a citation, so it is also where the rule
+// for building that argument out of a shell parameter belongs — and this is
+// where it gets pinned. Anchoring the slice on the rule's own opening is
+// deliberate: delete the rule and the anchor assertion reds before any content
+// assertion runs. The fix and the reason quoting is NOT the fix are pinned as
+// one contiguous span rather than as two fragments, because two fragments in
+// one sentence still leave the join open to a spliced exception clause — and
+// "quote it" is precisely the plausible-looking remedy that does not work
+// here, so a mutation that keeps only that half must red.
+function braceRule() {
+  const section = specialists();
+  const at = section.indexOf("Brace a ref held in a variable");
+  assert.notEqual(
+    at,
+    -1,
+    "review-and-fix.md's Specialists section no longer states the brace rule — its `git show <sha>:<path>` instruction then reads as safe for a ref held in a variable, which under zsh it is not, quoted or otherwise",
+  );
+  const end = section.indexOf("\n\n", at);
+  assert.notEqual(end, -1, "the brace rule now runs to the end of the Specialists section — the slice is unbounded and unrelated prose could satisfy the assertions below");
+  return section.slice(at, end).replace(/\s+/g, " ");
+}
+
+test("the Specialists section says to brace a variable ref, and that quoting is not the fix", () => {
+  assert.ok(
+    braceRule().includes(
+      'Brace a ref held in a variable — `git show "${SHA}:<path>"` — because quoting is not what fixes it.',
+    ),
+    'the brace rule lost part of its span. All three halves are load-bearing together: the instruction to brace, the worked `git show "${SHA}:<path>"` form a reader copies, and the clause denying that quoting is the fix. Any one of them alone leaves a reader who quotes and does not brace believing the read is settled',
+  );
+});
+
+test("no unbraced variable ref survives in the Specialists section's own examples", () => {
+  assert.doesNotMatch(
+    specialists(),
+    /git show\s+"?\$[A-Za-z_]/,
+    "an example in review-and-fix.md's Specialists section builds a `git show` argument from an unbraced parameter — zsh takes the `:<path>` suffix as a history modifier, inside double quotes too, and the read can return the commit at exit 0 instead of the blob",
+  );
+});
