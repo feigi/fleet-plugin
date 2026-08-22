@@ -406,9 +406,9 @@ test("two arguments still refuse via the arity path (#250)", (t) => {
 // Third pin on the same table row, for the same reason as the two below: the
 // row states this script's exit-2 contract in prose, #114 audited it while the
 // guard was arity-only, and a reader trusting it draws a conclusion about a
-// script settings.json's autoMode allowlist runs unattended. Taken from a real
-// refusal rather than typed here — a hand-copied phrase drifts exactly the way
-// the row did.
+// script that settings.json's autoMode allowlist lets run unattended. Taken
+// from a real refusal rather than typed here — a hand-copied phrase drifts
+// exactly the way the row did.
 test("the design spec's script-surface row carries the argument refusal this script emits (#250)", (t) => {
   const w = repo(t);
 
