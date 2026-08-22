@@ -1598,6 +1598,13 @@ run is invisible to it. The stdout JSON names that distinction in one field:
 two both exit 0, so `verdict` is the only thing that tells a searched-and-clean
 tracker from one that was never read.
 
+The ledger half reports its own readability as its own field, `ledger.ok`, the
+peer of `tracker.ok`: false when the file did not exist, which is what tells a
+ledger that was read and held nothing filed from one there was nothing to read
+(#231). That state is the normal one for a run's first `check` — `.fleet/` is
+git-ignored and created lazily by the first write — so it stays `clean` at exit
+0, and `ledger.ok` is the field that says why rather than the verdict moving.
+
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.
 
