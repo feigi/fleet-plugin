@@ -64,3 +64,16 @@ A release attempt in which at least one artefact was removed before a later step
 refused. Reserved for that case — a run that refuses before removing anything is not
 partially released, and neither is one that could not measure what it did.
 _Avoid_: half-released, incomplete release
+
+### Triage
+
+**Review deferral**:
+A ticket capturing a follow-up deferred from a prior PR review. Age carries no
+signal about tree state; its premises must be verified against `origin/main`
+before triage.
+_Avoid_: deferred finding, follow-up
+
+**Remedy-open**:
+A defect whose existence is verified and whose fix is not yet chosen. The state
+the filing-time label bar turns on.
+_Avoid_: undecided, unclear
