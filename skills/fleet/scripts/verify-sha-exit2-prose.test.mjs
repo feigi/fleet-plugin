@@ -70,24 +70,54 @@ const B = String.raw`\*{0,2}`; // an optional bold marker at one seam
 const S = String.raw`\*{0,2}\s+\*{0,2}`; // a word gap that tolerates one
 const EXIT2_VERDICT = String.raw`[Ee]xit${S}2${S}is${S}not${S}a${S}verdict`;
 
+// The guard's required annotation, in the form the guard writes it. Shared, so
+// the pin below and the assertion that the annotation survives that pin are
+// provably about the same string rather than two copies that can drift apart.
+const ANNOTATION = "`# 0 reachable, 1 not reachable, 2 unanswerable`";
+
 // The tally is the rot. A written count is false the moment a `die()` is added
 // or removed, and this script's set has already changed twice.
 //
 // Scoped to the COUNTED NOUN, not to a bare number near "exit 2": the annotation
 // this same guard carries is `2 unanswerable`, which is the exit code's meaning
 // and must stay. Measured — the first spelling of this pin reddened on the
-// guard's own correct text, and `reachable`/`unanswerable` remain the two nouns
-// that can never go in this list.
+// guard's own correct text, and `reachable`/`unanswerable` are what the exit
+// codes MEAN, so neither can ever go in this list.
 //
-// `cases?` is here because it was measured missing, not guessed: "three
-// unanswerable cases" passed this pin green where the same sentence with
-// "failure modes" reddened it. `ways?` was measured and REJECTED — it reds
-// "Treat exit 2 the same way in all cases", which is prose, not a tally.
-const TALLY =
-  /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:\w+[-\s]+){0,2}(?:paths?|causes?|cases?|reasons?|branches|failure\s+modes?)\b/i;
+// What separates a tally from prose is the NUMBER, not the noun: in a tally the
+// number counts something, and in this guard's correct sentences the number is
+// an exit code with `exit` in front of it. The lookbehind refuses an exit code
+// in the counting position, and that is what carries the noun list — measured,
+// the spelling this replaces reddened on `Escalate exit 2 on all paths by
+// pinging the maintainer`, and `ways?` could not be admitted at all because it
+// reddened on `Treat exit 2 the same way in all cases`. Both are prose. Both
+// are green here, and every counted-noun spelling below stays red.
+//
+// The separator inside the lookbehind takes a hyphen as well as a space, or
+// `exit-2` — how this repo writes the branch — reads as a count and reds. It
+// takes `**` on either seam for the reason `S` does: a lookaround cannot see a
+// bold-split token, so `**Exit** 2` would walk straight through it. Case comes
+// from the `i` flag, and `[Ee]` keeps the exclusion working if that flag is ever
+// narrowed — an exclusion that stops firing is a green over the rot itself.
+//
+// The nouns are here because each was measured missing, not guessed: every one
+// of them let `three unanswerable <noun> here` through green against the
+// spelling this replaces, the same way `cases` did before it was added.
+//
+// THE CEILING: this is still a list, so a counted noun nobody has thought of
+// still passes. The filler window between the number and the noun also stays
+// narrow — `three distinct kinds of ways` overruns it and is green, on this
+// spelling and on the one it replaces. Widening that window is what let a noun
+// reach an exit code in the first place, so it stays as it is.
+const TALLY = new RegExp(
+  String.raw`(?<![Ee]xit\*{0,2}[-\s]+\*{0,2})` +
+    String.raw`\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:\w+[-\s]+){0,2}` +
+    String.raw`(?:paths?|causes?|cases?|reasons?|branches|conditions?|outcomes?|scenarios?|situations?|types?|ways?|(?:failure\s+)?modes?)\b`,
+  "i",
+);
 
 test("the guard names the script's exit codes where it names the command", () => {
-  assert.match(guard(), phrase("0 reachable, 1 not reachable, 2 unanswerable"));
+  assert.match(guard(), phrase(ANNOTATION));
 });
 
 test("exit 1 keeps the verdict — the flag, the held enqueue and the maintainer's ruling", () => {
@@ -131,13 +161,59 @@ test("the exit-2 branch is stated as a property of the code, never as a tally of
   );
   // The green case, pinned against the same regex and separately from the
   // guard, so the failure MESSAGE stays honest: a noun list widened until it
-  // reaches the annotation reds the assertion above saying a count was written
-  // into the guard — a lie about text that is correct and required to be there.
+  // reaches the annotation reds the forbid-a-tally assertion saying a count was
+  // written into the guard — a lie about text that is correct and required.
   assert.doesNotMatch(
-    "`# 0 reachable, 1 not reachable, 2 unanswerable`",
+    ANNOTATION,
     TALLY,
     "the tally pin's noun list now reaches the guard's own required annotation — `reachable` and `unanswerable` are what the exit codes MEAN, not a count of causes",
   );
+  // What the pin CATCHES, asserted rather than inferred. Every assertion over
+  // the guard here is a `doesNotMatch`, and those are green against a regex
+  // that matches nothing: gut TALLY and the guard alone cannot tell. Measured —
+  // a pin emptied to `/$^/` left this whole file green before these landed.
+  //
+  // The spellings are the counted nouns that would express a tally in this
+  // guard, each measured to have passed green before it was covered.
+  for (const noun of [
+    "paths",
+    "causes",
+    "cases",
+    "reasons",
+    "branches",
+    "failure modes",
+    "modes",
+    "conditions",
+    "outcomes",
+    "scenarios",
+    "situations",
+    "types",
+    "ways",
+  ]) {
+    assert.match(
+      `There are three unanswerable ${noun} here.`,
+      TALLY,
+      `the tally pin stopped reading a count spelled with "${noun}" — that is the rot rule 4 forbids, wearing a word the pin no longer sees`,
+    );
+  }
+  // And what it must REFUSE to catch. Every widening of this pin risks
+  // reddening correct text, and correct text here is number-adjacent by
+  // construction — the guard names exit codes for a living. In each of these
+  // the number is an exit code, not a count, which is the property the pin
+  // keys on; the hyphen spelling is in because this repo writes the branch
+  // that way and a whitespace-only exclusion reds on it.
+  for (const correct of [
+    "Treat exit 2 the same way in all cases.",
+    "Escalate exit 2 on all paths by pinging the maintainer.",
+    "Escalate exit-2 on all paths by pinging the maintainer.",
+    "Treat **Exit** 2 the same way in all cases.",
+  ]) {
+    assert.doesNotMatch(
+      correct,
+      TALLY,
+      `the tally pin reddens on correct prose: "${correct}" states no count — the number in it is an exit code, and a pin that cannot tell those apart fires on edits that are right`,
+    );
+  }
 });
 
 test("verify-sha.sh still declares the exit codes the guard quotes", () => {
