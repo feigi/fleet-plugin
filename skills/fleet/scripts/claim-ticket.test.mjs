@@ -942,13 +942,26 @@ test("runner: the stamp changes when the script's content changes", () => {
 // default mode, and the refusal reaching it is what shows the derivation sits
 // with the pre-branch derivations rather than inside the apply branch, where
 // the default mode never reaches it at all.
-// One stub per half of the guard. `exit 1` is the nonzero half the pipeline
-// form hid behind `cut`. `exit 0` printing nothing is the rc-0 half: the
-// status says success, the stamp is empty anyway, and only reading the value
-// refuses it.
+// Three stubs, because the two halves of the guard cover each other on the
+// obvious ones and a stub each half owns alone is what discriminates.
+// Measured on this tree: with only the first two, restoring the pipeline form
+// `cksum "$0" | cut -d' ' -f1` — the #263 bug itself — leaves both green,
+// because a failing `cksum` prints nothing, `cut` succeeds on empty input, and
+// the value check refuses what the status check was meant to. Dropping the
+// `|| die` to a bare `|| true` goes green the same way.
+//   - "cannot be read"     rc 1, prints nothing. The realistic shape. Reds
+//                          only when BOTH halves are gone; either alone
+//                          catches it.
+//   - "comes back empty"   rc 0, prints nothing. Owned by the value check —
+//                          deleting that line is the mutation it reds.
+//   - "fails despite printing"  rc 1, prints a plausible checksum line. Owned
+//                          by the status check: the value survives `cut`, so
+//                          this is the stub the pipeline form and the bare
+//                          `|| true` both red.
 for (const [what, stub] of [
   ["cannot be read", "#!/bin/sh\nexit 1\n"],
   ["comes back empty", "#!/bin/sh\nexit 0\n"],
+  ["fails despite printing", "#!/bin/sh\necho '111 222 x'\nexit 1\n"],
 ]) {
   test(`a checksum that ${what} refuses before anything is claimed, in both modes`, () => {
     const dir = repo({ [TESTS]: "" });
