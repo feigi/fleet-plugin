@@ -1198,11 +1198,35 @@ const SPEC_COCKPIT_DESIGN = fileURLToPath(
 // Derived from the declaration, not restated from it: a rename of the accepted
 // flag reddens here, which is the whole failure this ticket is an instance of —
 // a hand-copied spelling that nothing made move with the script.
-const DECLARED_LABEL_FLAG = readFileSync(SCRIPT, "utf8")
-  .match(/const OPTIONS = \{[\s\S]*?\n\};/)[0]
-  .match(/"([a-z-]*label)":/)[1];
+//
+// Guarded at every step, and called from a test body rather than run at module
+// scope, because an unguarded index here fails at IMPORT. Reformatting
+// `OPTIONS` — one-lining it, wrapping it in `Object.freeze`, anything that
+// drops the literal `\n};` this regex needs — has zero behavioural effect and
+// took this file from 62 tests to a single failure, with no *test-authored*
+// diagnostic: node does name the file and the line, but nothing names
+// `OPTIONS` as the thing to look at, and the 61 unrelated tests never run.
+//
+// The `*label` match is global and required to be UNIQUE rather than indexed
+// at the first hit, because indexing fails SILENTLY: an `"exclude-label"`
+// declared above `"require-label"` would pin the specs below to a flag they do
+// not mean, and a test passing for the wrong reason is this ticket's own defect
+// class. Anchoring to the literal `require-label` would settle the ordering by
+// restating the string this test exists to stop restating.
+function declaredLabelFlag() {
+  const block = readFileSync(SCRIPT, "utf8").match(/const OPTIONS = \{[\s\S]*?\n\};/);
+  assert.ok(block, "candidates.mjs' OPTIONS block no longer matches — update this test");
+  const flags = [...block[0].matchAll(/"([a-z-]*label)":/g)];
+  assert.equal(
+    flags.length,
+    1,
+    `candidates.mjs' OPTIONS declares ${flags.length} \`*label\` flags, not the 1 this test derives — update this test`,
+  );
+  return flags[0][1];
+}
 
 test("the run-team design spec's candidate-scan step names the flag this script declares", () => {
+  const DECLARED_LABEL_FLAG = declaredLabelFlag();
   // The step alone, for the reason the run-team pin above gives: a match
   // anywhere in the document is vacuous, and here it is worse than vacuous —
   // the supersession note at the head cites `--label` deliberately, as the
