@@ -50,9 +50,16 @@ const vlog = (...a) => {
 // it emits every byte twice.
 //
 // Matched on the quota wording rather than on the 403 status, because 403 also
-// carries refusals no amount of waiting clears. One expression covers both
-// spellings a quota is refused with, the primary limit and the secondary one.
-const RATE_LIMITED = /rate limit/i;
+// carries refusals no amount of waiting clears. One expression spans the
+// spellings a quota is refused with: the primary limit, the secondary one, and
+// the abuse-detection wording GitHub used for that same secondary limit before
+// renaming it — which a GitHub Enterprise Server predating the rename still
+// emits, and this script does reach GHE (the behind probe passes --hostname).
+//
+// `abuse detection` in full, never a bare `abuse`: "disabled for abuse of
+// GitHub's terms of service" is a permanent refusal, and the short form
+// relabels it a blip that clears itself (measured).
+const RATE_LIMITED = /rate limit|abuse detection/i;
 
 // The outage payload, on stdout at the unchanged exit 2 — where this arm
 // printed nothing at all. A caller reading only the exit code is unaffected;
@@ -61,10 +68,13 @@ const RATE_LIMITED = /rate limit/i;
 //
 // It reports the refused query and nothing else. A quota refusal is a probe
 // that could not look, so every field this script would otherwise observe is
-// ABSENT rather than null: absent `status` keeps board.mjs's mapCi() on its
-// `!== "completed"` arm, which is `unknown` and never green; absent `jobs` and
-// `missing` let a gate's fail-closed default fire instead of reading an empty
-// array as "nothing missing". A null is a reading, and nothing here was read.
+// ABSENT rather than null. A null is a reading, and nothing here was read.
+//
+// Absence is what a direct reader needs: run-team/SKILL.md sends a merge bot to
+// "gate on the payload's own fields", and an absent `missing` refuses that gate
+// where an empty array would have told it nothing was missing. board.mjs is not
+// that reader — it takes exit 2 as a failed read whatever was printed on the
+// way out, and carries its previous CI value for the PR forward instead.
 //
 // writeSync, for die()'s reason in arg.mjs: the child's forwarded stderr may
 // still be draining through the async stream process.exit() discards.
@@ -93,7 +103,11 @@ function run(cmd, args) {
     // (ENOENT/ENOBUFS), signal, exit (#176).
     // A quota refusal names itself first (#262); every other cause reports
     // exactly as it always has, on this same line and this same exit code.
-    if (RATE_LIMITED.test(String(e.stderr ?? ""))) emitRateLimited(`${cmd} ${args[0]} ${args[1]}`);
+    // `?? ""` stays — RegExp.test would coerce an absent stderr to the string
+    // "undefined", which a future looser pattern could match. String() around
+    // it does nothing: encoding: "utf8" above makes e.stderr a string whenever
+    // a child ran, and test() ToString-coerces anything else regardless.
+    if (RATE_LIMITED.test(e.stderr ?? "")) emitRateLimited(`${cmd} ${args[0]} ${args[1]}`);
     die(`${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);
   }
 }

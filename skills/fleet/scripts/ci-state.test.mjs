@@ -623,6 +623,43 @@ test("a rate-limited gh read names the quota as its cause in the payload, at the
   assert.ok(r.payload, "a quota refusal must emit a payload — the cause is unreadable to a gate that only sees stderr");
   assert.equal(r.payload.verdict, "rate-limited");
   assert.match(r.payload.reasons.join("; "), /rate limit/i);
+  // `pr` is the payload's only identifying field, and the fleet polls this
+  // script for several PRs at once — an outage attributed to the wrong one, or
+  // carrying a string where every other payload here carries a number, is
+  // indistinguishable from a correct report at the point a caller reads it.
+  // assert/strict, so this pins the type as well as the value.
+  assert.equal(r.payload.pr, 42);
+  // The refused query, not merely that a quota was mentioned: `pr view` is
+  // GraphQL and `run list`/`run view` are REST, so which one was refused is
+  // what separates an exhausted REST quota from a token or repo problem. The
+  // fixture refuses `run list` — keep this literal in step with it.
+  assert.match(r.payload.reasons.join("; "), /gh run list/);
+});
+
+// GitHub's older spelling of the same self-clearing secondary limit, still
+// emitted by a GHE Server predating the rename. Without this the alternation in
+// RATE_LIMITED is unpinned: dropping it leaves every test above green, because
+// they all drive the current wording.
+const LEGACY_ABUSE_STDERR =
+  "HTTP 403: You have triggered an abuse detection mechanism. Please wait a few minutes before you try again.";
+
+test("the pre-rename secondary-limit wording is read as a quota refusal too", () => {
+  const r = ghFailure(LEGACY_ABUSE_STDERR);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.ok(r.payload, "the abuse-detection spelling is the same self-clearing limit under its old name");
+  assert.equal(r.payload.verdict, "rate-limited");
+});
+
+// The bound on that alternation: `abuse` alone appears in refusals no wait
+// clears, so matching the short form would tell a caller to re-probe a
+// repository that has been disabled outright.
+const DISABLED_REPO_STDERR =
+  "HTTP 403: Repository access blocked. This repository has been disabled for abuse of GitHub's terms of service.";
+
+test("a repository disabled for abuse is NOT a quota refusal", () => {
+  const r = ghFailure(DISABLED_REPO_STDERR);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.payload, null, "a permanent block must not be reported as an outage that clears on its own");
 });
 
 test("a gh read failing for any other reason reports exactly as it did before: exit 2, no payload", () => {
@@ -633,12 +670,13 @@ test("a gh read failing for any other reason reports exactly as it did before: e
 });
 
 // The outage payload must not be mistaken for a reading. A quota refusal is a
-// probe that could not look, so it reports no CI state at all: `status` absent
-// keeps board.mjs's mapCi() on its `!== "completed"` arm (unknown, never green
-// or red), and `jobs`/`missing` absent is what makes a gate's fail-closed
-// default — the `// ["absent"]` spelling — fire instead of reading an empty
-// array as "nothing missing". Emitting them as nulls or empty arrays would let
-// unobserved state read as observed.
+// probe that could not look, so it reports no CI state at all. Emitting these
+// as nulls or empty arrays would let unobserved state read as observed: an
+// empty `missing` says "nothing is missing", which is a reading, where an
+// absent one refuses the `jq` gate run-team/SKILL.md sends a merge bot to write
+// over "the payload's own fields — `verdict`, `behind`, `missing`, the per-job
+// conclusions, and `prHead == runHeadSha`". That doc names the shape of the
+// risk itself: "An empty payload reads as a block, not a pass."
 test("the outage payload reports no CI state it could not observe", () => {
   const r = ghFailure(RATE_LIMIT_STDERR);
   for (const field of ["status", "conclusion", "jobs", "missing", "runId"]) {
