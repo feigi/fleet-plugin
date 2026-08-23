@@ -16,7 +16,9 @@
 // THE CEILING, same as inflight-exit2-prose.test.mjs: these are PRESENCE pins
 // over a bounded slice. Text spliced INSIDE a pinned phrase reddens them; a
 // whole new sentence appended after one, carving out an exception, does not.
-// A reflow (line wraps, `**bold**` moved) stays green by design.
+// A reflow (line wraps, `**bold**` moved) stays green by design. The
+// declared-code scan carries a second ceiling of its own, stated at
+// `declaredNonZeroCodes`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -118,7 +120,18 @@ test("the spec's preamble states the further-code property instead of naming one
 
 // Derived from the script's own contract rather than restating it: this is the
 // check that would have caught #407 the day PR #404 landed. Add a code to the
-// header and every carrier below reddens until it names the code too.
+// header in the `N = ` form every code there uses today, and each carrier the
+// coverage test reads reddens until it names the code too.
+//
+// THE SCAN'S CEILING: `N = ` is the only spelling it reads. Declare a code in
+// the same contract block as `exit 4 — ...` and this scan does not see it, so
+// the coverage test stays green over a code no document names — measured, next
+// to a `4 = ` control that reddens. Widening the scan to any digit next to `=`
+// or an em-dash was measured too: it does catch that spelling, and it also
+// mints a code out of ordinary header prose, so a bare `(#7 — see there)`
+// reddens the coverage test over a code nobody declared. What holds this up
+// is the contract's own wording — declare a new code `N = `, or teach this
+// scan the spelling you chose.
 //
 // Guarded at each step and called from a test body, never run at module scope:
 // an unguarded index here fails at IMPORT, taking the unrelated tests in this
@@ -136,6 +149,12 @@ function declaredNonZeroCodes() {
 }
 
 test("every non-zero code the script declares is named by the documents a consumer reads", () => {
+  // run-team/SKILL.md's candidate scan step is deliberately NOT a carrier here.
+  // It carries a rule for exit 3 alone — the exit that sends an all-specs queue
+  // to to-tickets — and names neither exit 1 nor exit 2, reading an empty queue
+  // as no work in prose instead. This loop asserts every declared code is named
+  // by every carrier it reads, so listing that step reddens on exit 1 (measured).
+  // Leaving it out is a decision, not an oversight.
   for (const [what, text] of [
     ["next-ticket/SKILL.md's candidate step", candidatesStep()],
     ["the design spec's candidates row", candidatesRow()],
