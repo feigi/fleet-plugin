@@ -154,24 +154,18 @@ test("the exit-2 branch is stated as a property of the code, never as a tally of
   // them apart, so it must key on the code.
   assert.match(guard(), phrase("no JSON on stdout"));
   assert.match(guard(), phrase("the cause on stderr"));
-  assert.doesNotMatch(
-    guard(),
-    TALLY,
-    "a count of exit-2 paths has been written into the guard — state the property instead; the next `die()` added to verify-sha.sh falsifies the number",
-  );
-  // The green case, pinned against the same regex and separately from the
-  // guard, so the failure MESSAGE stays honest: a noun list widened until it
-  // reaches the annotation reds the forbid-a-tally assertion saying a count was
-  // written into the guard — a lie about text that is correct and required.
-  assert.doesNotMatch(
-    ANNOTATION,
-    TALLY,
-    "the tally pin's noun list now reaches the guard's own required annotation — `reachable` and `unanswerable` are what the exit codes MEAN, not a count of causes",
-  );
-  // What the pin CATCHES, asserted rather than inferred. Every assertion over
+
+  // Whether the PIN works is settled before the guard is judged by it, because
+  // an assertion that fails masks every one after it and the messages are not
+  // interchangeable. Measured: with the pin's noun list widened to reach the
+  // annotation, the guard's own verdict fired first and reported that a count
+  // had been written into the guard — false, about text that is correct and
+  // required to be there. The honest message existed and never ran.
+  //
+  // What the pin CATCHES, asserted rather than inferred: every assertion over
   // the guard here is a `doesNotMatch`, and those are green against a regex
-  // that matches nothing: gut TALLY and the guard alone cannot tell. Measured —
-  // a pin emptied to `/$^/` left this whole file green before these landed.
+  // that matches nothing. Measured — a pin emptied to `/$^/` left this whole
+  // file green before these landed, guard verdict included.
   //
   // The spellings are the counted nouns that would express a tally in this
   // guard, each measured to have passed green before it was covered.
@@ -214,6 +208,22 @@ test("the exit-2 branch is stated as a property of the code, never as a tally of
       `the tally pin reddens on correct prose: "${correct}" states no count — the number in it is an exit code, and a pin that cannot tell those apart fires on edits that are right`,
     );
   }
+  // The annotation keeps its own message rather than joining the sentences
+  // above: what goes wrong here is a noun list reaching a REQUIRED string, and
+  // naming the two words that can never join that list is what sends the reader
+  // to the fix instead of to the guard.
+  assert.doesNotMatch(
+    ANNOTATION,
+    TALLY,
+    "the tally pin's noun list now reaches the guard's own required annotation — `reachable` and `unanswerable` are what the exit codes MEAN, not a count of causes",
+  );
+
+  // Only now the guard itself, judged by a pin already shown to discriminate.
+  assert.doesNotMatch(
+    guard(),
+    TALLY,
+    "a count of exit-2 paths has been written into the guard — state the property instead; the next `die()` added to verify-sha.sh falsifies the number",
+  );
 });
 
 test("verify-sha.sh still declares the exit codes the guard quotes", () => {
