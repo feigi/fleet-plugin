@@ -24,13 +24,18 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./ci-state.mjs", import.meta.url));
 
+// A `gh` failure carries a MESSAGE, not just an exit code, and the cause a
+// caller can act on lives only in that message. `$GH_FAIL_MSG` is how a test
+// picks which cause this stub refuses with; empty — the default every fixture
+// above already relies on — keeps the bare `exit 1` with a silent stderr.
 const GH_STUB = `#!/bin/sh
 echo "$*" >> "$GH_LOG"
+fail() { [ -n "$GH_FAIL_MSG" ] && echo "$GH_FAIL_MSG" >&2; exit 1; }
 case "$1 $2" in
-  "pr view") [ -f "$PR_VIEW_FILE" ] && cat "$PR_VIEW_FILE" || exit 1 ;;
-  "run list") [ -f "$RUN_LIST_FILE" ] && cat "$RUN_LIST_FILE" || exit 1 ;;
-  "run view") [ -f "$RUN_VIEW_FILE" ] && cat "$RUN_VIEW_FILE" || exit 1 ;;
-  *) exit 1 ;;
+  "pr view") [ -f "$PR_VIEW_FILE" ] && cat "$PR_VIEW_FILE" || fail ;;
+  "run list") [ -f "$RUN_LIST_FILE" ] && cat "$RUN_LIST_FILE" || fail ;;
+  "run view") [ -f "$RUN_VIEW_FILE" ] && cat "$RUN_VIEW_FILE" || fail ;;
+  *) fail ;;
 esac
 `;
 
@@ -60,7 +65,7 @@ const RUN_VIEW = JSON.stringify({
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so the fixture has to be a real repo. No remote is added:
@@ -89,6 +94,7 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIE
     ...process.env,
     PATH: `${binDir}:${process.env.PATH}`,
     GH_LOG: ghLog,
+    GH_FAIL_MSG: ghFailMsg,
     PR_VIEW_FILE: fixtureFile("pr-view.json", prView),
     RUN_LIST_FILE: fixtureFile("run-list.json", runList),
     RUN_VIEW_FILE: fixtureFile("run-view.json", runView),
@@ -584,4 +590,61 @@ test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one inv
   // remote get-url` call is otherwise 35/35 green.
   assert.doesNotMatch(r.stderr, /unknown (flag|option)/);
   assert.equal(r.payload.verdict, "green");
+});
+
+// --- #262: a quota refusal is a distinguishable cause, not a generic failure -
+// Every `gh` read failure landed on one arm that reported the exit code and
+// nothing a caller could act on — an exhausted REST quota, a repo that cannot
+// be resolved and a revoked token were one undifferentiated cause. The correct
+// responses differ: a quota refusal recovers on its own and is worth re-probing
+// shortly, the others need someone to look, so the cause is named in the
+// PAYLOAD. That is where the fleet's gates read this script — `run-team`'s
+// SKILL.md directs a merge bot to gate on the payload's own fields and warns
+// that an empty payload, which is all this arm produced, "reads as a block, not
+// a pass — the safe direction, but still a false one".
+//
+// No test reached this arm before: every other exit-2 case here dies in
+// workflow discovery or in a shape check, never in the subprocess failure path.
+// `$GH_FAIL_MSG` is what makes the two causes drivable, and the pair below is
+// the point — either test alone passes a script that ignores the cause entirely.
+
+// The quota refusal as `gh` actually words it, wrapping the REST body.
+const RATE_LIMIT_STDERR =
+  "couldn't fetch workflows for feigi/claude-config: HTTP 403: API rate limit exceeded for user ID 1234.";
+// A failure that is NOT a quota refusal and never recovers by waiting.
+const MISSING_REPO_STDERR = "could not resolve to a Repository with the name 'feigi/nope'";
+
+const ghFailure = (ghFailMsg) =>
+  run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW }, runList: null, ghFailMsg });
+
+test("a rate-limited gh read names the quota as its cause in the payload, at the unchanged exit 2", () => {
+  const r = ghFailure(RATE_LIMIT_STDERR);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.ok(r.payload, "a quota refusal must emit a payload — the cause is unreadable to a gate that only sees stderr");
+  assert.equal(r.payload.verdict, "rate-limited");
+  assert.match(r.payload.reasons.join("; "), /rate limit/i);
+});
+
+test("a gh read failing for any other reason reports exactly as it did before: exit 2, no payload", () => {
+  const r = ghFailure(MISSING_REPO_STDERR);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.payload, null, "only a quota refusal earns a payload; every other cause is unchanged");
+  assert.match(r.stderr, /gh failed/);
+});
+
+// The outage payload must not be mistaken for a reading. A quota refusal is a
+// probe that could not look, so it reports no CI state at all: `status` absent
+// keeps board.mjs's mapCi() on its `!== "completed"` arm (unknown, never green
+// or red), and `jobs`/`missing` absent is what makes a gate's fail-closed
+// default — the `// ["absent"]` spelling — fire instead of reading an empty
+// array as "nothing missing". Emitting them as nulls or empty arrays would let
+// unobserved state read as observed.
+test("the outage payload reports no CI state it could not observe", () => {
+  const r = ghFailure(RATE_LIMIT_STDERR);
+  for (const field of ["status", "conclusion", "jobs", "missing", "runId"]) {
+    assert.ok(
+      !(field in r.payload),
+      `a probe that never read CI must not report \`${field}\`, and the payload reads ${JSON.stringify(r.payload)}`,
+    );
+  }
 });
