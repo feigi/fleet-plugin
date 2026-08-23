@@ -27,6 +27,7 @@ const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const NEXT_TICKET = read("skills", "fleet", "skills", "next-ticket", "SKILL.md");
 const RUN_TEAM = read("skills", "fleet", "skills", "run-team", "SKILL.md");
+const SPEC = read("docs", "specs", "2026-07-23-fleet-plugin-design.md");
 
 const candidatesStep = () =>
   between(NEXT_TICKET, "## 1. Candidates", "## 2. Dependencies", "next-ticket/SKILL.md");
@@ -83,4 +84,68 @@ test("phase 0 names what exit 3's queue actually holds, so the run reports it ra
   const s = scanStep();
   assert.match(s, phrase("to-tickets' input rather than claimable tickets"));
   assert.match(s, phrase("Log it as specs awaiting to-tickets"));
+});
+
+// --- The script-surface contract table, and the preamble that scopes it.
+const scriptSurface = () =>
+  between(SPEC, "## Script surface", "| Script | In | Out |", "the fleet-plugin design spec");
+
+const candidatesRow = () => {
+  const line = SPEC.split("\n").find((l) => l.startsWith("| `candidates.mjs` |"));
+  assert.ok(line, "the design spec's script-surface table no longer has a `candidates.mjs` row — update this test");
+  return line;
+};
+
+test("the spec's candidates row stops reading an all-specs queue as exit 1", () => {
+  const row = candidatesRow();
+  // The clause as it stood absorbed the exit-3 case: "no candidate survived"
+  // is true of a queue the filter emptied, which is exit 3. Narrowing it is
+  // the correction — appending exit 3 while leaving this would ship two
+  // clauses in one cell that contradict each other.
+  assert.doesNotMatch(row, phrase("no candidate survived"));
+  assert.match(row, phrase("no row came back at all"));
+  assert.match(row, phrase("the to-spec filter removed every one"));
+});
+
+test("the spec's preamble states the further-code property instead of naming one carrier", () => {
+  // Naming `ledger.mjs check` as THE script with an extra code made the
+  // preamble false by omission the moment a second script minted one. A
+  // property carries no carrier list to go stale and no tally to rot.
+  const s = scriptSurface();
+  assert.doesNotMatch(s, phrase("`ledger.mjs check` mints one further code"));
+  assert.match(s, phrase("Where a script needs a verdict those meanings cannot carry, it mints a further code and states it in its own row"));
+});
+
+// Derived from the script's own contract rather than restating it: this is the
+// check that would have caught #407 the day PR #404 landed. Add a code to the
+// header and every carrier below reddens until it names the code too.
+//
+// Guarded at each step and called from a test body, never run at module scope:
+// an unguarded index here fails at IMPORT, taking the unrelated tests in this
+// file down with it and naming nothing as the thing to look at.
+function declaredNonZeroCodes() {
+  const src = read("skills", "fleet", "scripts", "candidates.mjs");
+  const header = src.slice(0, src.indexOf("\nimport "));
+  const at = header.indexOf("Exit-code contract");
+  assert.notEqual(at, -1, "candidates.mjs' header no longer states an `Exit-code contract` — update this test");
+  const codes = [...header.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
+  assert.ok(codes.includes("0"), "candidates.mjs' exit-code contract no longer declares 0 — update this test");
+  const nonZero = [...new Set(codes)].filter((c) => c !== "0");
+  assert.ok(nonZero.length > 0, "candidates.mjs' exit-code contract declares no non-zero code — update this test");
+  return nonZero;
+}
+
+test("every non-zero code the script declares is named by the documents a consumer reads", () => {
+  for (const [what, text] of [
+    ["next-ticket/SKILL.md's candidate step", candidatesStep()],
+    ["the design spec's candidates row", candidatesRow()],
+  ]) {
+    for (const code of declaredNonZeroCodes()) {
+      assert.match(
+        text,
+        new RegExp(`exit ${code}\\b`, "i"),
+        `${what} does not name exit ${code}, which candidates.mjs' own exit-code contract declares`,
+      );
+    }
+  }
 });
