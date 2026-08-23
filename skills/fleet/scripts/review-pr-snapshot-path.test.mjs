@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
-import { between } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 
 // `snap.path` used to reach every specialist prompt and every verifier prompt
 // unchecked: a well-formed string the schema required, but never confirmed to
@@ -184,4 +184,44 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
   assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");
   assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
   assert.ok(callAt < testCmdAt, "resolveTestCmd reads snap before the guard has cleared it");
+});
+
+// The #538 measurement, pinned because its whole value is that nobody repeats
+// it. The next reader to notice that `pathVerified` is a boolean the agent
+// types will reach for a caller-side `readdirSync` exactly as #538 did, and the
+// reason that cannot work is a property of the Workflow harness that no amount
+// of reading this repo reveals — #538 was filed precisely because the repo's
+// own assertions about the sandbox had never been executed.
+//
+// Runs against SOURCE rather than CODE, the one pin in this file that does: the
+// record is a comment, and CODE has its comments stripped. The usual objection
+// to a source-text pin — that it passes vacuously over a construct sitting dead
+// under a comment — does not apply to prose, which is what this protects and
+// all it claims to.
+test("the measurement that forecloses a caller-side filesystem check is recorded", () => {
+  // The `// ` prefixes come out before matching: prose-pin's phrase() joins
+  // words with `\\s+` so a pin survives re-wrapping, and a comment marker
+  // sitting mid-phrase is not whitespace, so leaving them in would pin the
+  // current line breaks instead of the sentence.
+  const rationale = between(
+    SOURCE,
+    "`pathVerified` closes a narrower gap",
+    "function snapshotMissing(snap)",
+    "review-pr.js's snapshotMissing rationale",
+  ).replace(/^\s*\/\/ ?/gm, "");
+  assert.match(
+    rationale,
+    phrase("MEASURED rather than read off the documentation"),
+    "the record no longer says the sandbox verdict was executed — a reader will re-derive it, which is what #538 was",
+  );
+  assert.match(
+    rationale,
+    phrase("refused for ANY specifier"),
+    "the record no longer says the refusal is of the mechanism — a reader may retry, believing only node:fs was denied",
+  );
+  assert.match(
+    rationale,
+    phrase("`require` is undefined"),
+    "the record no longer covers require — a reader may conclude only import was measured",
+  );
 });

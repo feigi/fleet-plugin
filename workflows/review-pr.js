@@ -689,6 +689,26 @@ their command failed. Do not modify ${worktree}.`,
 // all six dimensions instead of one (#140). `required: [..., "pathVerified"]` on
 // the schema is what makes this a caller check rather than trust in the agent's
 // own report — the field cannot be silently omitted, only reported false.
+//
+// Whether that round-trip could be dropped for a real caller-side filesystem
+// check — `readdirSync(snap.path)` in place of a boolean the agent types — was
+// asked as #538 and MEASURED rather than read off the documentation asserting
+// it, because this repo's own assertions about the sandbox had never been
+// executed. It cannot be dropped. A workflow script's body compiles as a
+// function body inside the harness VM, so a static `import` is parsed as the
+// dynamic call form and never reaches a module loader; `import()` is refused
+// for ANY specifier, before the name is resolved, so what the harness rejects
+// is the mechanism and not `node:fs` in particular; and `require` is undefined.
+// Enumerating the scope turns up the ECMAScript builtins and the harness
+// injections, and nothing that reaches a filesystem. Both verdicts were made
+// observable before either was believed: a workflow importing nothing returned
+// a computed value, and one throwing on purpose surfaced as a distinct error,
+// so "it ran and worked" and "it was refused" could be told apart.
+//
+// So the round-trip stays, and a boolean the agent is instructed to bind to a
+// mechanical probe is the strongest check reachable from here. Measured
+// 2026-08-23; if the harness changes, re-measure with a throwaway workflow
+// rather than re-reading this.
 function snapshotMissing(snap) {
   if (!snap || !snap.path || !snap.head) return "the snapshot agent returned no tree — nothing to review";
   if (!snap.pathVerified)
