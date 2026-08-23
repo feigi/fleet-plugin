@@ -9,10 +9,12 @@ import { between } from "./prose-pin.mjs";
 // it executes the workflow. Both functions under test are lifted out of the
 // SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs:23-40`
 // and `review-pr-testcmd.test.mjs`'s `liftResolveTestCmd`, and for the same
-// reason: extraction to
-// a module would need `import` to resolve inside the Workflow sandbox ("no
-// filesystem or Node.js API access"), which nothing in `workflows/` does, and a
-// failed import bricks the fleet's DEFAULT review path.
+// reason: extraction to a module would need `import` to resolve inside the
+// Workflow sandbox, and it does not. That was the documented claim until #538
+// executed it — `import()` refused for any specifier and `require` undefined,
+// with the verdict and its controls recorded beside `snapshotMissing` in
+// review-pr.js. Nothing in `workflows/` imports, and a failed import bricks the
+// fleet's DEFAULT review path, so the lift is a constraint, not a preference.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
