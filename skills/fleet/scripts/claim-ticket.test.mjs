@@ -910,6 +910,65 @@ test("runner: the stamp changes when the template's content changes", () => {
   assert.notEqual(after, before);
 });
 
+// #263: the stamp was derived by `cksum "$0" | cut -d' ' -f1`, whose status is
+// `cut`'s, so `set -eu` never saw a `cksum` that could not read its operand —
+// measured on that form, the runner carried nothing after the colon and the
+// claim exited 0 reporting itself applied. And it was derived after the issue
+// had been labelled and after `git worktree add`, so reading the status ALONE
+// is the change that was refused: it exchanges a blank stamp for a refusal on
+// a ticket that is already half-claimed. Both halves are pinned here.
+//
+// The stub is the fixture, not a route: every call site this repo has, in the
+// skill text and in this file, names the script by an absolute path, so `$0`
+// always resolves and no argv makes the real `cksum` fail. Nothing here claims
+// a reachable failure — what is pinned is that the derivation reports its own
+// status and does so before anything is claimed.
+//
+// Exit 2, an empty stdout and a matching stderr are each reproducible by some
+// other guard, so none of them establishes WHERE the refusal fired. The `gh`
+// log, the worktree registration and the branch ref are what only a refusal
+// ahead of every mutation can satisfy — they are the criterion that separates
+// this fix from the one that was refused.
+//
+// The dry run is measured too, in the same fixture: it is this script's
+// default mode, and the refusal reaching it is what shows the derivation sits
+// with the pre-branch derivations rather than inside the apply branch, where
+// the default mode never reaches it at all.
+test("a checksum that cannot be read refuses before anything is claimed, in both modes", () => {
+  const dir = repo({ [TESTS]: "" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-cksum-"));
+  const ghLog = join(bin, "gh.log");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${ghLog}\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "cksum"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const git = (...a) => spawnSync("git", a, { cwd: dir, encoding: "utf8" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
+
+  assert.equal(r.status, 2, `a failed checksum is a refusal — this script's only failure code\n${r.stderr}`);
+  assert.match(r.stderr, /refusing to claim without a runner template stamp/,
+    "and it names the stamp rather than blaming whatever ran next");
+  assert.equal(r.stdout, "", "no payload: the refusal fires before the claim exists, so there is nothing to report");
+
+  // Nothing claimed. Each of these was TRUE under the guard-in-place form that
+  // was refused, which is why the code and the message above cannot stand in
+  // for them.
+  assert.equal(existsSync(ghLog), false,
+    "the issue is unlabelled — `gh` was never invoked, so there is no label to undo");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree on disk");
+  assert.doesNotMatch(git("worktree", "list", "--porcelain").stdout, /42-slug/,
+    "and none registered — a refusal that leaves an entry needs a manual release-ticket");
+  assert.notEqual(git("rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug").status, 0,
+    "and no branch ref survives");
+
+  // The default mode reaches the same derivation. Moved back inside the apply
+  // branch it would not, and this claim would be predicted as makeable.
+  const d = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8", env });
+  assert.equal(d.status, 2, `the dry run refuses too\n${d.stderr}`);
+  assert.match(d.stderr, /refusing to claim without a runner template stamp/);
+  assert.equal(d.stdout, "", "and predicts no claim it could not make");
+});
+
 // Every row of the install matrix. `true` is the no-op: nothing to install.
 for (const [name, files, want] of [
   ["lockfile wins", { "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" }, "npm ci"],
