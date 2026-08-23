@@ -26,6 +26,7 @@ import { between, phrase } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const NEXT_TICKET = read("skills", "fleet", "skills", "next-ticket", "SKILL.md");
+const RUN_TEAM = read("skills", "fleet", "skills", "run-team", "SKILL.md");
 
 const candidatesStep = () =>
   between(NEXT_TICKET, "## 1. Candidates", "## 2. Dependencies", "next-ticket/SKILL.md");
@@ -51,4 +52,35 @@ test("next-ticket scopes exit 3 to the final pass, so it agrees with the fallbac
   const s = candidatesStep();
   assert.match(s, phrase("Exit 3 judges the LAST pass alone"));
   assert.match(s, phrase("falls back to a genuinely empty one is exit 1"));
+});
+
+// The same slice candidates.test.mjs bounds for the `--require-label` rule —
+// `1. **Candidate scan**` to the step after it. A match anywhere in phase 0 is
+// vacuous: phase 0 discusses `inflight.sh`'s exit 2 at length a few steps down,
+// so a file-wide search for "exit" finds another script's contract and reports
+// this one as documented.
+const scanStep = () =>
+  between(RUN_TEAM, "1. **Candidate scan**", "\n2. ", "run-team/SKILL.md");
+
+test("phase 0 denies that exit 3 is the empty queue", () => {
+  const s = scanStep();
+  assert.match(s, phrase("Exit 3 is not that empty queue"));
+  assert.match(s, phrase("the to-spec filter took every one"));
+});
+
+test("phase 0 forbids answering exit 3 by widening the net", () => {
+  // The hazard this rule exists to close, and the one a careless wording
+  // opens: exit 3 proves there ARE labeled items, which reads as evidence the
+  // filter is too tight. It is not — the items are specs, and the fallback
+  // pass is unfiltered, so widening reaches `ready-for-human` and untriaged
+  // work an unattended run still has no channel to a human for.
+  const s = scanStep();
+  assert.match(s, phrase("never a reason to widen the net"));
+  assert.match(s, phrase("still do not pass `--allow-fallback`"));
+});
+
+test("phase 0 names what exit 3's queue actually holds, so the run reports it rather than claiming no work", () => {
+  const s = scanStep();
+  assert.match(s, phrase("to-tickets' input rather than claimable tickets"));
+  assert.match(s, phrase("Log it as specs awaiting to-tickets"));
 });
