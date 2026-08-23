@@ -1175,3 +1175,67 @@ test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
     "run-team's phase 0 step 1 names `--label`, which candidates.mjs refuses",
   );
 });
+
+// --- #240: the third carrier, and the one the pin above cannot see. The rule
+// in run-team/SKILL.md is pinned; the design spec that rule descends from was
+// not, and it still spelled the flag `--label`.
+//
+// The spelling was CORRECT the day that spec was written: at `02bfd59`, the
+// commit that added it, `next-ticket` step 1 — the step the spec cites rather
+// than restates — was a raw `gh issue list` reading "Add `--label
+// ready-for-agent` first". `c3310fe` moved that query into this script the next
+// day, and this script has read `arg("require-label")` in every commit of its
+// life. That is why the spec carries a supersession note rather than a silent
+// swap: these documents are dated records, and only a behavioural claim the
+// code contradicts gets corrected in them.
+const SPEC_RUN_TEAM_DESIGN = fileURLToPath(
+  new URL("../../../docs/specs/2026-07-22-run-team-agent-fleet-design.md", import.meta.url),
+);
+const SPEC_COCKPIT_DESIGN = fileURLToPath(
+  new URL("../../../docs/specs/2026-07-24-fleet-cockpit-design.md", import.meta.url),
+);
+
+// Derived from the declaration, not restated from it: a rename of the accepted
+// flag reddens here, which is the whole failure this ticket is an instance of —
+// a hand-copied spelling that nothing made move with the script.
+const DECLARED_LABEL_FLAG = readFileSync(SCRIPT, "utf8")
+  .match(/const OPTIONS = \{[\s\S]*?\n\};/)[0]
+  .match(/"([a-z-]*label)":/)[1];
+
+test("the run-team design spec's candidate-scan step names the flag this script declares", () => {
+  // The step alone, for the reason the run-team pin above gives: a match
+  // anywhere in the document is vacuous, and here it is worse than vacuous —
+  // the supersession note at the head cites `--label` deliberately, as the
+  // spelling this script refuses, so a file-wide negative would fail on the
+  // correction's own prose.
+  const spec = readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8");
+  const at = spec.indexOf("1. Candidate scan");
+  assert.notEqual(at, -1, "the spec's phase 0 candidate scan moved — update this test");
+  const end = spec.indexOf("\n2. ", at);
+  assert.notEqual(end, -1, "the spec's phase 0 step after the candidate scan moved — update this test");
+  const step = spec.slice(at, end);
+
+  assert.ok(
+    step.includes(`\`--${DECLARED_LABEL_FLAG} ready-for-agent\``),
+    `the spec's candidate-scan step no longer names --${DECLARED_LABEL_FLAG}, the label flag this script's OPTIONS declares`,
+  );
+  // `--require-label` does not contain `--label`, so this tells them apart with
+  // no quoting — same reasoning as the run-team pin above.
+  assert.doesNotMatch(
+    step,
+    /--label\b/,
+    "the spec's candidate-scan step names `--label`, which this script refuses at exit 2",
+  );
+});
+
+test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {
+  // The other half of the same class, and the one a fix for it can break:
+  // `--label` is correct for `gh issue list`, so a sweep for the wrong spelling
+  // that did not distinguish the caller would rewrite a working invocation into
+  // a broken one. This is the input the check must ACCEPT.
+  assert.match(
+    readFileSync(SPEC_COCKPIT_DESIGN, "utf8"),
+    /`gh issue list --label ready-for-agent`/,
+    "the cockpit spec's `gh issue list --label ready-for-agent` changed — `--label` is gh's own flag and is correct there, so a sweep for this script's wrong spelling must leave it alone",
+  );
+});
