@@ -25,7 +25,14 @@ nothing but to-spec specs counts as empty. Solo only — flag exists for this
 caller. Fleet never passes it: empty means no work, and an unattended fleet has
 no channel to the human `ready-for-human` needs.
 
-Exit 1 = query fine, queue empty. Exit 2 = query broke. Different facts.
+Exit 1 = query fine, queue empty. Exit 3 = query fine, rows came back and the
+to-spec filter took every one — specs are to-tickets' input, so run to-tickets
+rather than reading it as no work. Exit 2 = query broke. Different facts.
+
+Exit 3 judges the LAST pass alone, so with `--allow-fallback` it is the
+unfiltered pass's verdict: a labeled pass the filter emptied that falls back to a
+genuinely empty one is exit 1, which is the fallback trigger's "counts as empty"
+read off the exit code rather than a second rule.
 
 ## 2. Dependencies
 
