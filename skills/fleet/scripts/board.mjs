@@ -88,18 +88,26 @@ function tryParse(json, fallback, what) {
 }
 
 // ci-state.mjs exits 0 for green, 1 for not-green, 2 for a hard failure — and on
-// exit 1 it has ALREADY printed its verdict JSON to stdout before exiting. So a
-// thrown non-zero exit whose stdout is non-empty is a real verdict (feed it to
-// mapCi); only an empty stdout (the exit-2 die() path) is a genuine read failure.
-// Discarding e.stdout — as a plain tryRun would — makes red/still-running CI
-// unreachable: every non-green PR reads as "unknown" and the red-ci flag, the
-// top of the attention strip, never fires.
+// exit 1 it has ALREADY printed its verdict JSON to stdout before exiting, so a
+// thrown exit 1 carries a real verdict. Feed that to mapCi: discarding e.stdout,
+// as a plain tryRun would, makes red/still-running CI unreachable — every
+// non-green PR reads as "unknown" and the red-ci flag, the top of the attention
+// strip, never fires.
+//
+// What separates a verdict from a failed read is the EXIT CODE. Emptiness of
+// stdout was only ever a proxy for it, and #262 retired the proxy: a quota
+// refusal now names its cause on stdout on the way out at exit 2, so "non-empty
+// stdout" began reading an outage as a reading. That payload carries no
+// `status`, so mapCi answered "unknown" and gather()'s prevCi carry-forward —
+// which only a null return reaches — was skipped, overwriting a PR's
+// last-known-good CI state during a blip that clears itself. Exit 2 means the
+// question could not be answered, whatever the script printed while saying so.
 function runCiState(scriptDir, pr) {
   try {
     return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], { encoding: "utf8" });
   } catch (e) {
     const out = e.stdout ? e.stdout.toString() : "";
-    if (out.trim()) return out;
+    if (e.status !== 2 && out.trim()) return out;
     console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
     return null;
   }
