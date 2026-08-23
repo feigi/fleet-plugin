@@ -111,8 +111,13 @@ is therefore `~/.claude/skills/fleet/`.
 mandatory" records the plan for that edit and the file as the plan found it,
 not the file as it stands: the `# Skills:` comment block it cites is live, and
 now carries `!skills/fleet/` and no negation for the skills that moved under
-it, so `git check-ignore -v skills/fleet` exits non-zero with no match. The
-plan is kept as written because it executed as written.
+it. `git check-ignore -v --no-index skills/fleet` names that negation; with the
+negation gone it names `skills/*` instead. The printed pattern is the signal
+and the exit status is not — both cases exit 0. The plan's own "before and
+after" check omits `--no-index`, which discriminated while `skills/fleet` was
+untracked but cannot now that it is tracked, because `git check-ignore` skips
+tracked paths without it: the plain form reports no match either way. The plan
+is kept as written because it executed as written.
 
 **One gitignore edit is mandatory.** `skills/` is not wholesale tracked either:
 `.gitignore`'s `# Skills:` comment block ("Trailing-slash ignore blocks
