@@ -278,6 +278,11 @@ At start, and whenever the pool empties.
    **Torn → surface, never guess** (step 6's `unsure` group). Opposite of
    `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
 
+   **This is a consumption gate**, priced for the seat where implementer
+   divergence costs a claim, a worktree and a dispatch; the filing-time
+   counterpart was repriced to *is the defect confirmed* and states its own bar
+   inline — see `docs/adr/0001-filing-label-bar-is-defect-confirmed.md`.
+
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
 
