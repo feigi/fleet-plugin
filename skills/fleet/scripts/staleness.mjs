@@ -105,6 +105,14 @@ function verdict(v, extra) {
   // Measured: piped into a process that exits immediately, this exits 2 and
   // says so, where console.log exited 1 silently. A verdict nobody received is
   // a verdict nobody can act on, so a failed write is a could-not-check.
+  //
+  // NOT PINNED, and deliberately so: the shape that reaches this catch is a
+  // reader that closed the pipe before the write, and a test for it has to win
+  // a race against the child's own exit — such a pin reports on timing rather
+  // than on whether the downgrade works, and a flaky pin on a safety path is
+  // worse than none. The measurement above is what stands behind it. Closing
+  // it properly needs a seam that makes fd 1 fail on demand, which is the same
+  // testability seam #822 turns on.
   try {
     writeSync(1, `${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
   } catch {
