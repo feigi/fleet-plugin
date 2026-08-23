@@ -330,10 +330,17 @@ if (cmd === "read") {
   };
   const round2 = (n) => Math.round(n * 100) / 100;
   const scored = scoreTokens(subject);
-  // Floor is "shares at least one content word", not a score threshold: the
-  // measured #114 rewording shares exactly one, and a threshold tuned to look
-  // tidy would drop the very case this exists for. The top-3 cap, not the
-  // floor, is what keeps the output short.
+  // No floor was tuned here: the measured #114 rewording shares exactly one
+  // content word, and a threshold picked to look tidy would drop the very case
+  // this exists for. The top-3 cap, not the floor, is what keeps the output
+  // short. `rankedNear`'s filter still imposes one, because it tests the
+  // ROUNDED score: a raw overlap below 0.005 rounds to 0.00, so a row that
+  // DOES share a content word is dropped from both `near` and `nearTotal`,
+  // with no line reporting it. That cutoff is not a chosen number — it sits
+  // wherever round2's two decimals land and moves only if that precision does.
+  // Filtering on the raw score instead is not the free fix it looks like: it
+  // admits such a row at a display score of `0.00` (measured), so honest
+  // output would need a wider precision, not just a different filter.
   const NEAR_SHOWN = 3;
   const rankedNear = data.filed
     .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
