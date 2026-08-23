@@ -20,6 +20,17 @@
 // CEILING: presence and adjacency over bounded slices. These prove the rule is
 // stated and that its inverse is not; they cannot prove a later sentence in the
 // same slice does not carve out an exception.
+//
+// Measured as of this commit, on an isolated copy of the four files: 12 semantic
+// mutations — both label branches inverted, the torn tie-break deleted and
+// exception-spliced, the delegation restored, the gate sentence deleted and
+// stripped of its seat pricing, the ADR pointer renamed on one side, the guard
+// floor and trigger each retuned, complements swapped to supersedes, and the
+// apply/label roles swapped — each reddened its own pin and no other. Nine
+// controls stayed green: the gate paragraph rewrapped at 70/100/140 and by
+// `fmt(1)`, the guard bullets and step 5 rewrapped, an unpinned step-5 sentence
+// reworded, and an ADR heading reworded. Re-derive after any edit to these
+// slices; a rationale indexed to wording rots with the wording.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
