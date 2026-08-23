@@ -500,8 +500,8 @@ test("a ledger that was never read is named as such, and nothing else about the 
   const unread = run(UNFILED_SUBJECT, { ledgerDirExists: false });
   const read = run(UNFILED_SUBJECT, { filed: [] });
 
-  assert.equal(unread.json.ledger?.ok, false, "a ledger file that does not exist was never read, and the payload must say so");
-  assert.equal(read.json.ledger?.ok, true, "a ledger that was read reports so even when it held nothing filed");
+  assert.equal(unread.json.ledger.ok, false, "a ledger file that does not exist was never read, and the payload must say so");
+  assert.equal(read.json.ledger.ok, true, "a ledger that was read reports so even when it held nothing filed");
 
   // The whole point of the field: these two payloads were identical, so
   // anything weaker than "differs here and nowhere else" leaves the caller
@@ -529,7 +529,7 @@ test("an unread ledger still reports the tracker hit at its own exit code (#231)
   // The blocking arm, where a perturbation costs most: exit 3 comes from the
   // verdict alone, so the new field has to be shown not to reach it here.
   const r = run("Non-zero column audit 11 rows", { ledgerDirExists: false, hits: [HIT_114] });
-  assert.equal(r.json.ledger?.ok, false, "a tracker hit says nothing about whether the ledger was read");
+  assert.equal(r.json.ledger.ok, false, "a tracker hit says nothing about whether the ledger was read");
   assert.equal(r.json.verdict, "tracker-hit");
   assert.equal(r.status, 3, "the blocking exit code is unchanged by the new field");
 });
@@ -541,7 +541,7 @@ test("the already-filed payload names the ledger it read, and stays exit 1 (#231
   const r = run("Non-zero column audit 11 rows", { filed: [FILED_114] });
   assert.equal(r.status, 1, "the strong signal is unchanged");
   assert.equal(r.json.verdict, "already-filed");
-  assert.equal(r.json.ledger?.ok, true, "a matched row can only have come from a ledger that was read");
+  assert.equal(r.json.ledger.ok, true, "a matched row can only have come from a ledger that was read");
 });
 
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
@@ -875,7 +875,7 @@ test("the documented flow on a FRESH clone — no --file, .fleet/ not created ye
   assert.equal(r.json.verdict, "clean");
   // The state the #231 ruling protects: this run legitimately has no ledger
   // to read, so the flag says so — and the verdict still does not move.
-  assert.equal(r.json.ledger?.ok, false, "a fresh clone's first check reports the ledger unread, not the run unverified (#231)");
+  assert.equal(r.json.ledger.ok, false, "a fresh clone's first check reports the ledger unread, not the run unverified (#231)");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /cannot resolve the ledger's repository/);
   assert.equal(r.ghCwd, r.ledgerRepoDir, "and the query is still bound to the ledger's own repository, not the runner's cwd");
@@ -969,6 +969,46 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
   assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
   assert.deepEqual(alternation.split("|").sort(), real, `the usage line and ledger.mjs's dispatch disagree on the subcommand set`);
+});
+
+// The Out cell is the other copy of the same claim, and it is the copy that
+// drifted: `ledger` reached both of `check`'s payloads while the row still
+// typed check as `{subject, found, match, verdict}` (#231). The pin its two
+// siblings carry (no-undo-audit.test.mjs, worktree-audit.test.mjs) does not
+// transfer verbatim — those cells are bare type signatures, this one documents
+// five subcommands in prose, and that prose calls the ledger a ledger ("`read`
+// the whole ledger as"), so a word-boundary match over the whole cell reports
+// `ledger` present while no payload field is named anywhere. Two things fix
+// that: slice to `check`'s own clause, and count only what the cell puts in
+// backticks, since a field name is backticked in this table and prose is not.
+test("the design spec's script-surface row names every field `check` emits", () => {
+  // Both arms. `check` emits two shapes and the already-filed one is the
+  // subset, so measuring the row against it alone would let every field the
+  // wider arm adds drop out of the row unnoticed.
+  const arms = [run(UNFILED_SUBJECT, { filed: [] }), run("Non-zero column audit 11 rows", { filed: [FILED_114] })];
+  const keys = [...new Set(arms.flatMap((r) => Object.keys(r.json)))].sort();
+  assert.ok(keys.length, "check must still emit a payload for the row to be measured against");
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `ledger.mjs` |"));
+  assert.ok(row, "the script-surface table must still carry a ledger.mjs row");
+
+  // `check`'s clause runs from its own name to the next subcommand the cell
+  // types. Everything after that belongs to `read` or to the per-field glosses,
+  // where these same words appear without naming a field of this payload.
+  const out = row.split("|")[3];
+  const start = out.indexOf("`check`");
+  const end = out.indexOf("`read`", start);
+  assert.ok(start >= 0 && end > start, "the Out cell must still type `check`'s payload ahead of `read`'s");
+  const named = (out.slice(start + "`check`".length, end).match(/`[^`]+`/g) ?? []).join(" ");
+
+  // Word boundaries on top of the backtick scoping, so `near` cannot be
+  // satisfied by the `nearTotal` standing next to it.
+  const missing = keys.filter((k) => !new RegExp(`\\b${k}\\b`).test(named));
+  assert.deepEqual(missing, [], `the spec row omits fields check emits: ${missing.join(", ")}`);
 });
 
 // ── The --file / --require-file parser (#362) ────────────────────────────────
