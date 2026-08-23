@@ -1334,6 +1334,17 @@ the verdict.
 a false one. A bot that ran `ci-state` from outside the repo got `fatal: not a
 git repository`, an empty payload, and a gate that refused a mergeable PR.
 
+**A `rate-limited` payload is not a reading — read `verdict` before anything
+else.** An exhausted GitHub quota makes `ci-state` name its cause rather than
+refuse in silence: `verdict: "rate-limited"` on stdout at the unchanged exit 2,
+with every field it never got to observe ABSENT. Gate on the fields above as a
+conjunction and that blocks, because `verdict` is not `green`. Gate on a SUBSET
+and it passes vacuously — absence is not self-blocking in `jq`, so
+`.prHead == .runHeadSha` is `null == null` and `(.missing | length) == 0` is
+`0 == 0`, each exiting 0 on a payload that read no CI at all (measured). A quota
+refusal clears on its own, so the response is to re-probe shortly — not to block
+the PR, and not to send it back for work it does not need.
+
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
 and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
 the loop so handled PRs do not re-fire.

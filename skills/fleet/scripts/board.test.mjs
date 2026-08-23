@@ -3,7 +3,7 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -43,6 +43,65 @@ test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped
 test("mapCi: null or unparseable input → unknown", () => {
   assert.equal(mapCi(null), "unknown");
   assert.equal(mapCi("not json"), "unknown");
+});
+
+// #262 put a payload on stdout at exit 2 for a quota refusal, and runCiState()
+// was reading "stdout is non-empty" as "a verdict was read". mapCi alone cannot
+// see that: it is handed a string and never learns which exit code produced it,
+// so every pin above stayed green while a rate-limited outage overwrote a PR's
+// last-known-good CI with "unknown" — the carry-forward gather() documents as
+// "On failure, carry the previous board's value for that PR". The seam is
+// gather(), so the gate has to sit there.
+//
+// scriptDir is injected, so both arms drive the REAL runCiState()/gather()
+// against a ci-state whose exit code and stdout are exactly what the arm needs;
+// the stub `gh` only has to feed the PR loop, since every other gh read in
+// gather() degrades through tryRun(). Out of process, because gather() reads
+// process.argv and would otherwise read the test runner's.
+function gatherCi({ ciStateBody, prevCi }) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-scripts-"));
+  writeFileSync(join(scriptDir, "ci-state.mjs"), ciStateBody);
+  writeFileSync(join(bin, "gh"),
+    '#!/bin/sh\ncase "$1 $2" in\n"pr list") echo \'[{"number":42,"state":"OPEN","labels":[],"title":"t"}]\' ;;\n*) exit 1 ;;\nesac\n');
+  chmodSync(join(bin, "gh"), 0o755);
+  writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: [{ pr: 42, ci: prevCi }] }));
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+                       prevFile: ${JSON.stringify(join(cwd, "prev.json"))},
+                       scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
+    console.log(JSON.stringify(r.ci));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return JSON.parse(r.stdout.trim().split("\n").pop())[42];
+}
+
+// The regression itself. This payload is what ci-state.mjs emits on a quota
+// refusal: it carries no `status`, so if it ever reaches mapCi the answer is
+// "unknown" and the previous red is gone.
+const RATE_LIMITED_EXIT_2 = `import { writeSync } from "node:fs";
+writeSync(1, JSON.stringify({ pr: 42, verdict: "rate-limited", reasons: ["quota"] }) + "\\n");
+process.exit(2);`;
+
+test("gather: a rate-limited ci-state — exit 2 WITH a payload — carries the previous board's CI value", () => {
+  assert.equal(gatherCi({ ciStateBody: RATE_LIMITED_EXIT_2, prevCi: "red" }), "red");
+});
+
+// The other direction, and the reason this pair is not one test: a runCiState()
+// that returned null for every non-zero exit would satisfy the arm above and
+// make the board blind to red CI, which is the failure the carry-forward exists
+// to prevent. Exit 1 is a real verdict and must still beat the previous value —
+// prev is "green" here precisely so a passing "red" can only have come from
+// mapCi reading this payload, never from the carry-forward.
+const NOT_GREEN_EXIT_1 = `import { writeSync } from "node:fs";
+writeSync(1, JSON.stringify({ pr: 42, status: "completed", verdict: "not-green", reasons: ["x"] }) + "\\n");
+process.exit(1);`;
+
+test("gather: exit 1 is a verdict, not a failed read — it still overrides the previous value", () => {
+  assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }), "red");
 });
 
 test("createBoardServer serves board.json and the page", async () => {
