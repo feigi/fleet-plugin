@@ -1,5 +1,29 @@
 # Runner Template Stamp Hardening
 
+> **Superseded in part.** #263 (PR #829) changed the code this record
+> describes. The stamp derivation moved out of the apply branch to sit with the
+> other pre-branch derivations, and it is now guarded in two parts — `cksum`'s
+> own exit status, then the value it printed. So the opening paragraph's
+> *"read one line later inside the heredoc"* no longer describes the code, and
+> its *"stays as it is"* framing must not be read as "guarding the derivation
+> was rejected outright". Nothing below was reconsidered or accepted: the guard
+> #263 added is a top-level `|| die`, which exits the outer script, and is not
+> the heredoc-inlined form the #253 entry measured finishing at exit 0 with a
+> blank stamp. The four rejections still stand.
+>
+> Also false below: *"the error is one-way"*, in the cryptographic-hash entry.
+> The stamp under-reports as well as over-reports, so a match does not mean
+> fresh — the runner's body is chosen by `$testcmd`, which comes from the
+> sibling `derive-testcmd.sh`, and the checksum does not cover that file.
+> Measured: two byte-identical copies of `claim-ticket.sh` differing only in
+> that sibling emitted runners of very different sizes under one stamp.
+>
+> Nothing would have caught this drift. The repo's line-distance prose gate
+> walks `skills/fleet/scripts/` and keys on `.sh`/`.mjs`/`.js` comment markers,
+> so it scans no file in this directory — measured, its own idiom pattern does
+> match the sentence quoted above. The analysis below is left as written, in
+> the tense it was written in.
+
 The `agent-test` runner that `claim-ticket.sh` writes into each worktree carries a
 one-line template stamp — a `cksum` of the emitting script — so an operator can tell
 whether the runner in front of them came from the current template. Four separate

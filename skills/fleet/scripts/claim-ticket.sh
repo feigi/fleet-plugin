@@ -114,10 +114,14 @@ echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
 # diff the stamp against a fresh `cksum` of this script to see if they match.
 # It is a checksum of the WHOLE script, not of the emitted template, so it
 # over-reports: any edit to this file moves it — a reworded die message, a
-# comment — while the runner it produces stays byte-identical. The error is
-# one-way, a runner missing a template fix never reads as fresh, so a match
-# means fresh and a mismatch means "re-materialize to be sure", not
-# "definitely stale".
+# comment — while the runner it produces stays byte-identical. It under-reports
+# too, so the error is not one-way and a match does not mean fresh: which body
+# the runner gets is decided by $testcmd, which comes from the sibling
+# derive-testcmd.sh, and this checksum does not cover that file. Measured — two
+# byte-identical copies of this script, differing only in that sibling, emitted
+# runners of very different sizes under one stamp. So what the stamp covers is
+# this file's own bytes: a mismatch means "re-materialize to be sure", and a
+# match means only that this script has not changed.
 #
 # One command, not `cksum | cut`: the convention inflight.sh states in its own
 # comments — a pipeline reports only its last stage's status, so `set -eu`
@@ -138,6 +142,12 @@ echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
 # this script's own path and on nothing the branch establishes.
 tmpl_stamp=$(cksum "$0") || die "could not checksum $0 — refusing to claim without a runner template stamp"
 tmpl_stamp=${tmpl_stamp%% *}
+# Status is not content, so that is two parts and not one — the same shape the
+# lockfile guard uses, status then value. A `cksum` that exits 0 printing
+# nothing leaves this empty, and `set -u` catches an unset variable, never an
+# empty one, so without this the blank stamp line ships at exit 0 with the
+# ticket claimed: the rc-0 half of the same hole the pipeline form opened.
+[ -n "$tmpl_stamp" ] || die "cksum $0 produced no checksum — refusing to claim without a runner template stamp"
 
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
