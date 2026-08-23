@@ -84,6 +84,15 @@ const ROWS = "## Rows";
 const FILED = "## Filed";
 const RULED = "## Ruled";
 
+// What a section header looks like on disk, defined once because a second
+// copy drifts: the parser slices sections with it, and the readability flag
+// below is set from it. Anchored to a real line start (or string start), not
+// a bare substring search — otherwise an escaped entry that merely CONTAINS
+// the text "## Filed" (never a physical line, just a run of characters inside
+// a one-line entry) is found by indexOf() before the genuine header and the
+// whole section is sliced from the wrong offset.
+const headerRe = (name) => new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`);
+
 // One entry is always exactly one physical line on disk. Escape backslash
 // first, then newline, so a `\` in entry text can never be mistaken for the
 // start of an escape sequence introduced by this encoding. Without this, an
@@ -97,6 +106,10 @@ function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
+// Set by load(), the only function that reads the file, so `ledger.ok` can
+// report what the parse saw rather than what a later stat() guesses (#231).
+let ledgerParsed = false;
+
 function load() {
   if (!existsSync(file)) return { rows: [], filed: [], ruled: [] };
   let text;
@@ -106,13 +119,7 @@ function load() {
     die(`cannot read ${file}: ${e.message}`);
   }
   const section = (name) => {
-    // Anchored to a real line start (or string start), not a bare substring
-    // search — otherwise an escaped entry that merely CONTAINS the text
-    // "## Filed" (never a physical line, just a run of characters inside a
-    // one-line entry) is found by indexOf() before the genuine header and
-    // the whole section is sliced from the wrong offset.
-    const headerRe = new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`);
-    const m = headerRe.exec(text);
+    const m = headerRe(name).exec(text);
     if (!m) return [];
     const start = m.index + m[1].length + name.length;
     const after = text.slice(start);
@@ -121,6 +128,9 @@ function load() {
       .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
       .map((l) => unescapeText(l.slice(2)));
   };
+  // Set here, past the read and the early return, so it can only be true of a
+  // file this function actually opened and recognised as a ledger.
+  ledgerParsed = headerRe(FILED).test(text);
   return { rows: section(ROWS), filed: section(FILED), ruled: section(RULED) };
 }
 
@@ -213,12 +223,17 @@ if (cmd === "read") {
   // would notice. Warn loudly by default; --require-file makes absence a
   // hard failure for callers that know the file must already exist.
   //
-  // Read once, into a flag both halves of the answer use: the warning below
-  // and the payload's `ledger.ok` are then the same observation, so the
-  // machine-readable half cannot contradict the human-readable one about
-  // whether there was a file to read (#231).
-  const ledgerRead = existsSync(file);
-  if (!ledgerRead) {
+  // `ledger.ok` is the parse's answer, not this stat()'s: load() sets it only
+  // for a file it opened and found a `## Filed` header in, so a --file landing
+  // on some other existing file reports `ok:false` rather than a positive
+  // machine-readable claim that the ledger was read. The warning below stays
+  // on existence because that is the question it answers, and --require-file's
+  // contract is absence rather than shape — so the two are two observations
+  // now, each true of its own question, where before they were one that was
+  // true of neither. Narrower, not airtight: a ledger truncated AFTER the
+  // header still parses, with the rows below it lost (#231).
+  const ledger = { ok: ledgerParsed };
+  if (!existsSync(file)) {
     if (requireFile) die(`--require-file given but ledger file does not exist: ${file}`);
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
@@ -254,7 +269,7 @@ if (cmd === "read") {
     // `ledger` rides on this arm too, where it can only be true. A consumer
     // testing `!payload.ledger.ok` otherwise reads the field's absence as
     // falsy — "never read" — on the one answer that proves it was read.
-    console.log(JSON.stringify({ subject, found: true, match, ledger: { ok: ledgerRead }, verdict: "already-filed" }));
+    console.log(JSON.stringify({ subject, found: true, match, ledger, verdict: "already-filed" }));
     // Exit 1 means "do not file this again" — the strong signal. Exit 3 is also
     // non-zero but weaker: tracker rows to review, not a ruling. A caller that
     // checks only the exit status stops on both, which errs toward not
@@ -580,7 +595,7 @@ if (cmd === "read") {
   // the verdict instead would answer `unverified` for the run's FIRST check
   // on any fresh clone, where `.fleet/` does not exist until save() creates
   // it — see the comment on the repository probe above.
-  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal: rankedNear.length, ledger: { ok: ledgerRead }, tracker, verdict }));
+  console.log(JSON.stringify({ subject, found: false, match: null, near, nearTotal: rankedNear.length, ledger, tracker, verdict }));
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked

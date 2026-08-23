@@ -79,7 +79,7 @@ function ledgerText(filed) {
 // save(), so the DEFAULT `true` here is a fixture that pre-creates something
 // production never has yet — and it is what hid a #155 regression from the
 // accept-pin below.
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, spawnEnv = {} } = {}) {
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
     // Inherited git vars outrank both cwd and `-C`, and they reach here from
@@ -107,7 +107,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     const file = join(ledgerDir, "ledger.md");
     // No directory means no ledger file either — writing one would be the very
     // state `ledgerDirExists: false` exists to withhold.
-    if (ledgerDirExists) writeFileSync(file, ledgerText(filed));
+    // `ledgerBody` writes the file's bytes directly: the states worth testing
+    // below are ones ledgerText() structurally cannot produce — a file that is
+    // not a ledger, and a ledger whose header is corrupt.
+    if (ledgerDirExists) writeFileSync(file, ledgerBody ?? ledgerText(filed));
     const fixture = join(dir, "hits.json");
     writeFileSync(fixture, JSON.stringify(hits));
     const argsFile = join(dir, "gh-argv");
@@ -542,6 +545,34 @@ test("the already-filed payload names the ledger it read, and stays exit 1 (#231
   assert.equal(r.status, 1, "the strong signal is unchanged");
   assert.equal(r.json.verdict, "already-filed");
   assert.equal(r.json.ledger.ok, true, "a matched row can only have come from a ledger that was read");
+});
+
+// The other half of the same question, and the half the field got wrong when
+// it was first added: `--file` landing on a file that EXISTS but is not a
+// ledger — a typo resolving to a real neighbouring path, or a ledger whose
+// header lost a byte. An existence probe answers "read it" for both, which is
+// a machine-readable claim that is simply false, and the arm it is false on is
+// the one where the intact ledger says ALREADY FILED (#231).
+test("a --file that exists but does not parse as a ledger is not reported as read (#231)", () => {
+  const notALedger = run(UNFILED_SUBJECT, { ledgerBody: "not a ledger at all\n" });
+  assert.equal(notALedger.json.ledger.ok, false, "a file that is not a ledger was never read AS one, whatever stat() says");
+
+  // One byte. This is the fixture that separates a parse from a stat: every
+  // other property of the file is intact.
+  const mangled = run("Non-zero column audit 11 rows", { ledgerBody: ledgerText([FILED_114]).replace("## Filed", "##Filed") });
+  assert.equal(mangled.json.ledger.ok, false, "a corrupt header means the filed rows were never read, and the payload must say so");
+  assert.equal(mangled.json.found, false, "the corrupt header is WHY nothing matched — the subject is one the intact ledger answers already-filed");
+
+  // The two halves answer different questions now, so the warning must not
+  // start claiming absence for a file that is sitting right there.
+  for (const r of [notALedger, mangled]) assert.doesNotMatch(r.stderr, /ledger file not found/);
+
+  // --require-file's contract is absence, not shape. Gating it on the parse
+  // would turn these runs into exit 2 — a caller-visible change #231 does not
+  // authorise — so it is pinned here rather than left to drift.
+  const required = run(UNFILED_SUBJECT, { ledgerBody: "not a ledger at all\n", args: ["--require-file"] });
+  assert.equal(required.status, 0, "--require-file still gates on absence alone");
+  assert.equal(required.json.ledger.ok, false, "and the field still reports the parse, under --require-file too");
 });
 
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
