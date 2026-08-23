@@ -14,6 +14,9 @@
 // `untracked in origin/main answers unknown`, and `a fix that is only local
 // answers live` each pin a case the probe must NOT report as fixed. The last
 // of those is the one a probe written against the working tree passes anyway.
+// The same rule governs the cases added since: an empty tracked file, a
+// pathspec with more than one answer, and a `fixed` whose citation has to name
+// the commit that was pushed rather than one sitting in a local branch.
 //
 // `git unavailable answers unknown, never fixed` guards the exit code from the
 // other end: Node exits 1 on an uncaught throw and 1 is `fixed` here, so any
@@ -29,7 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,6 +183,79 @@ test("a --gone fix that is only local, never pushed, is still live", (t) => {
   assert.equal(r.code, 0, `expected live (exit 0), got ${r.code}: ${r.stderr}`);
   assert.equal(r.json.verdict, "live");
   assert.equal(r.json.found, true, "the string must be read out of origin/main, where it is still present");
+});
+
+// The verdict here is `fixed` and it is the RIGHT verdict — what this pins is
+// the evidence. The `-S` walk starts at origin/main so the commit it names is
+// one everybody can see; walked from HEAD it answers `fixed` just as
+// confidently and cites work that was never pushed, which is a close written
+// against a commit nobody else has. The case above keeps a local fix from
+// retiring the ticket; this one keeps a local commit out of the citation when
+// the fix is real.
+test("the commit a fixed verdict cites comes from origin/main, never a local one", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst wrong = 2;\n", "the defect");
+  push(w);
+  const sha = commitFile(w, "src.mjs", "const keep = 1;\nconst right = 3;\n", "fix it upstream");
+  push(w);
+  // Both of these change the needle's count at this path and both are newer
+  // than the pushed fix, so a walk over HEAD names one of them instead.
+  commitFile(w, "src.mjs", "const keep = 1;\nconst wrong = 2;\n", "local: reintroduce, unpushed");
+  commitFile(w, "src.mjs", "const keep = 1;\nconst right = 3;\n", "local: remove again, unpushed");
+
+  const r = probe(w, ["--path", "src.mjs", "--gone", "const wrong = 2;"]);
+  assert.equal(r.code, 1, `expected fixed (exit 1), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.commit, sha, "the citation must be the pushed fix, not the unpushed local commit");
+  assert.equal(r.json.subject, "fix it upstream");
+});
+
+// MUST STILL OFFER. An empty file answers every search the same way, so
+// without this the commit that emptied it gets cited as the fix — and the
+// subject of a commit that wiped a file says nothing about the ticket.
+test("an empty tracked file answers unknown, never fixed", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst wrong = 2;\n", "the defect");
+  push(w);
+  commitFile(w, "src.mjs", "", "chore: reset generated file (unrelated)");
+  push(w);
+
+  const r = probe(w, ["--path", "src.mjs", "--gone", "const wrong = 2;"]);
+  assert.equal(r.code, 2, `expected could-not-check (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "unknown");
+  assert.equal(r.json.bytes, 0, "the payload must say the search had no bytes to look at");
+});
+
+// MUST STILL OFFER. A pathspec with more than one answer is not an answer:
+// without the guard the probe reads whichever entry git listed first and
+// reports on a file nobody asked about — here the clean one, while the defect
+// sits live in its neighbour.
+test("a pathspec resolving to more than one entry answers unknown", (t) => {
+  const w = repo(t);
+  commitFile(w, "zzz.mjs", "const wrong = 2;\n", "the defect, in the second file");
+  push(w);
+
+  const r = probe(w, ["--path", ".", "--gone", "const wrong = 2;"]);
+  assert.equal(r.code, 2, `expected could-not-check (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "unknown");
+});
+
+// The probe answers a question about the tree, so where it was run from must
+// not change the answer. git resolves a pathspec against the process's cwd:
+// unanchored, a tracked file reads as UNTRACKED from a subdirectory, and an
+// absolute path — the spelling a caller that just read the file produces —
+// reads as a pathspec that resolved to something else. Both are false
+// statements about the tree, in the file whose whole job is not making those.
+test("--path is read against the repo root, from any cwd and either spelling", (t) => {
+  const w = realpathSync(repo(t));
+  mkdirSync(join(w, "sub"));
+
+  const fromSub = probe(join(w, "sub"), ["--path", "src.mjs", "--gone", "const keep = 1;"]);
+  assert.equal(fromSub.code, 0, `expected live (exit 0) from a subdirectory, got ${fromSub.code}: ${fromSub.stderr}`);
+  assert.equal(fromSub.json.found, true, "a tracked file must not read as untracked because of the caller's cwd");
+
+  const absolute = probe(w, ["--path", join(w, "src.mjs"), "--gone", "const keep = 1;"]);
+  assert.equal(absolute.code, 0, `expected live (exit 0) for an absolute --path, got ${absolute.code}: ${absolute.stderr}`);
+  assert.equal(absolute.json.found, true, "an absolute path names the same file as its root-relative spelling");
 });
 
 // A tree read as a file greps a list of FILENAMES, and a needle absent from

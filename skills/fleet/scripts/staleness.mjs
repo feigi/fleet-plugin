@@ -42,6 +42,8 @@
 // probe informs supply, and a human or a triage pass closes.
 
 import { execFileSync } from "node:child_process";
+import { writeSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
 
 const NAME = "staleness";
@@ -50,11 +52,6 @@ const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
-
-// Below the value guards, the way candidates.mjs places its parseArgs: where
-// both would refuse, the more specific wording wins, and nothing above here
-// has run a git call.
-sweep(["path", "gone", "present"]);
 
 const path = arg("path");
 const gone = arg("gone");
@@ -70,6 +67,17 @@ if (has("gone") && has("present")) die("--gone and --present are opposite questi
 if (!gone && !present) die("give --gone <string> (the fix removes it) or --present <string> (the fix adds it)");
 if (!path) die("--path <path> is required");
 
+// Below the value guards, the way candidates.mjs places its parseArgs: where
+// both would refuse, the more specific wording wins, and nothing above here
+// has run a git call.
+//
+// One consequence the caller has to be told about, so run-team/SKILL.md says
+// it too: a needle that itself starts with `--` never reaches this script's
+// question. `arg()` refuses it as a missing value, at exit 2, which is the
+// verdict that keeps the ticket in the queue — a ticket quoting a flag name
+// is a could-not-check, not a broken invocation.
+sweep(["path", "gone", "present"]);
+
 const mode = gone ? "gone" : "present";
 const needle = gone ?? present;
 
@@ -77,23 +85,71 @@ const needle = gone ?? present;
 // because `stdio` is absent here), so the diagnostics below name the cause and
 // never re-print git's text — the duplication candidates.mjs measured at
 // 7,700 B → 15,454 B applies identically.
+//
+// maxBuffer is set because the default is 1 MB and execFileSync THROWS
+// (ENOBUFS) rather than truncating: a tracked file over that size would land
+// in a catch below and be reported under whatever cause that catch names,
+// with no errno anywhere, since the failure is Node's and git prints nothing.
+// The largest tracked file here is under 200 KB today, so this is headroom
+// rather than a fix for a live case — but the growing one is a metrics TSV
+// that only ever gets appended to.
 function git(args) {
-  return execFileSync("git", args, { encoding: "utf8" });
+  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 function verdict(v, extra) {
-  console.log(JSON.stringify({ verdict: v, path, mode, needle, ...extra }));
+  // writeSync, not console.log, for the reason arg.mjs gives for die(): a
+  // failed write to stdout is invisible through console.log, so a reader that
+  // dies mid-pipe leaves `fixed` still exiting 1 — "close citing the payload's
+  // commit and subject" — with no payload anywhere and nothing on stderr.
+  // Measured: piped into a process that exits immediately, this exits 2 and
+  // says so, where console.log exited 1 silently. A verdict nobody received is
+  // a verdict nobody can act on, so a failed write is a could-not-check.
+  try {
+    writeSync(1, `${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
+  } catch {
+    die("the verdict could not be written to stdout — could not check");
+  }
   process.exitCode = { live: 0, fixed: 1, unknown: 2 }[v];
 }
 
-// "Could not check" is a first-class ANSWER, not a failure: it prints the same
-// payload shape as the other two so a caller reading only stdout can say
-// "offered, could not check" instead of dropping the row.
+// "Could not check" is a first-class ANSWER, not a failure: it carries the
+// same four identifying fields as the other two verdicts, and a `why`, so a
+// caller reading only stdout can say "offered, could not check" instead of
+// dropping the row. What varies across all three is the EVIDENCE, and it
+// varies with how far the probe got — measured over every branch below:
+// `bytes` once the file was read, `found` once the search over it ran (an
+// empty file is read and never searched), `commit`/`subject` only on `fixed`,
+// and `error` only where the blob read is the call that failed.
 const unknown = (why, extra = {}) => verdict("unknown", { why, ...extra });
 
 function probe() {
-  // The tracked/untracked discriminator, and it runs FIRST because both
-  // failures it separates are silent in the other direction. `git show
+  // `--path` is read against the REPO ROOT, never the caller's cwd. git
+  // resolves a pathspec relative to wherever the process happens to be, so an
+  // unanchored probe run from a subdirectory reports a tracked file as
+  // UNTRACKED — a positive claim about the tree, made by the script whose
+  // whole job is answering questions about the tree, and false. Same anchoring
+  // ci-state.mjs does before it answers anything, and the reason ledger.mjs
+  // and release-ticket.sh reach for `git -C`.
+  let root;
+  try {
+    root = git(["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    return unknown("`git rev-parse --show-toplevel` failed — with no repository root to read this path against, nothing about it is settled");
+  }
+  // ls-tree prints root-relative paths, so the equality check below needs the
+  // argument in that same spelling: an absolute path, a `./` prefix and a
+  // trailing slash all name the same file and must not read as a different
+  // one. Without this the probe refuses a single literal file path while
+  // telling the caller to give a single literal file path. `|| "."` is the
+  // path that names the root itself — an empty pathspec is fatal to git, while
+  // "." reaches the one-answer guard below, which is the refusal that case has
+  // earned.
+  const target = relative(root, resolve(root, path)) || ".";
+
+  // The tracked/untracked discriminator, and it is the first thing asked about
+  // the path, because both failures it separates are silent in the other
+  // direction. `git show
   // origin/main:<path>` is FATAL, not empty, on a path this repo does not
   // track — while the file may sit right there in the working checkout — so
   // reading that failure as "the file is gone, the fix landed" closes a live
@@ -108,7 +164,7 @@ function probe() {
   // what it finds — `origin/main` or `unknown`, nothing else.
   let listing;
   try {
-    listing = git(["ls-tree", "origin/main", "--", path]);
+    listing = git(["-C", root, "ls-tree", "origin/main", "--", target]);
   } catch {
     return unknown("`git ls-tree origin/main` failed — the tree could not be read, so nothing about this path is settled");
   }
@@ -125,7 +181,7 @@ function probe() {
   // whatever git listed first.
   const lines = listing.split("\n").filter((l) => l !== "");
   const entry = lines.length === 1 && /^\d+ \w+ ([0-9a-f]+)\t(.*)$/.exec(lines[0]);
-  if (!entry || entry[2] !== path) {
+  if (!entry || entry[2] !== target) {
     return unknown("the pathspec did not resolve to exactly this one path in origin/main — give a single literal file path");
   }
 
@@ -137,9 +193,15 @@ function probe() {
   // whose removal no verdict can detect is a guard nothing pins.
   let content;
   try {
-    content = git(["cat-file", "blob", entry[1]]);
-  } catch {
-    return unknown("what origin/main holds at this path could not be read as a file — a directory or a submodule reads this way too");
+    content = git(["-C", root, "cat-file", "blob", entry[1]]);
+  } catch (e) {
+    // The cause is NOT asserted here, because this catch cannot tell the
+    // causes apart: a directory and a submodule land here, and so does a read
+    // this process could not complete — a missing or corrupt object in a
+    // partial clone, or a blob past the buffer above. Naming one of them would
+    // hand a reader who then checks and finds an ordinary file a dead end, so
+    // the error itself is carried instead.
+    return unknown("what origin/main holds at this path could not be read as a file — a directory, a submodule, and a read that failed all reach here", { error: e.code ?? e.message });
   }
   // The probe's own positive control for the state check: a search over no
   // bytes finds nothing, and "found nothing" is the answer BOTH verdicts below
@@ -206,7 +268,7 @@ function probe() {
   // newest-first names the commit that actually did it.)
   let record;
   try {
-    record = git(["log", "-S", needle, "-n", "1", "--format=%H%x00%s", "origin/main", "--", path]);
+    record = git(["-C", root, "log", "-S", needle, "-n", "1", "--format=%H%x00%s", "origin/main", "--", target]);
   } catch {
     return unknown("`git log -S` failed — the commit that changed this string could not be located, and a close needs it");
   }
