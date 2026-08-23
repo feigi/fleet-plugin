@@ -12,10 +12,10 @@ import { computeStats } from "./diff-stats.mjs";
 // hand-derived, and two hand-derived comments were wrong.
 //
 // Extraction is deliberately NOT a module move. That would require `import` to
-// resolve inside the Workflow sandbox ("no filesystem or Node.js API access"),
-// which nothing in `workflows/` does today, and a failed import bricks the
-// fleet's DEFAULT review path. Coupling to the literal spelling is the cheaper
-// risk: it breaks loudly, here, with the message below.
+// resolve inside the Workflow sandbox, which #538 measured it does not — the
+// verdict and its controls are recorded beside `snapshotMissing` in
+// review-pr.js. A failed import bricks the fleet's DEFAULT review path, so
+// coupling to the literal spelling is the cheaper risk: it breaks loudly, here.
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 

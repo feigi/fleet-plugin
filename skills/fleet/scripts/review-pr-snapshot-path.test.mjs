@@ -198,30 +198,66 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
 // to a source-text pin — that it passes vacuously over a construct sitting dead
 // under a comment — does not apply to prose, which is what this protects and
 // all it claims to.
-test("the measurement that forecloses a caller-side filesystem check is recorded", () => {
-  // The `// ` prefixes come out before matching: prose-pin's phrase() joins
-  // words with `\\s+` so a pin survives re-wrapping, and a comment marker
-  // sitting mid-phrase is not whitespace, so leaving them in would pin the
-  // current line breaks instead of the sentence.
-  const rationale = between(
+//
+// EVIDENCE AND VERDICT ARE PINNED SEPARATELY, because pinning the first never
+// pins the second. With only the three measured facts held down, `It cannot be
+// dropped.` inverted to `It can be dropped.`, `stays` to `goes`, and a softened
+// `It could arguably be dropped, but …` all left this file GREEN — the record
+// telling the next reader the opposite of what was measured, which is the one
+// thing #538 exists to prevent.
+//
+// What these pins do NOT do: a pin is a substring test, so prose CONTRADICTING
+// a fragment, added around it, passes every one of them. That is unreachable by
+// any positive assertion and is not claimed below — hence the messages say the
+// phrase stopped matching rather than that a reader has been misled. They are
+// literal in the repo's usual way too: phrase() escapes metacharacters and
+// joins on `\s+`, so a pin survives re-wrapping and nothing else, and a
+// backtick or a capital changing reds it exactly as a deletion does.
+
+// Hoisted so each generated test re-derives its own slice, and so a broken
+// boundary reds every fragment rather than only the first. The `// ` prefixes
+// come out before matching: a comment marker sitting mid-phrase is not
+// whitespace, so leaving them in would pin the current line breaks instead of
+// the sentence. `^[ \t]*` and not `^\s*`: under `/gm` the latter's `\s` eats the
+// newline of a blank line and glues the paragraphs either side of it. No pin
+// below changes verdict either way — phrase() joins on `\s+`, which already
+// spans a blank line — so this is the sibling spelling from
+// `review-pr-citation-prose.test.mjs:23`, kept as one idiom rather than two.
+const rationale = () =>
+  between(
     SOURCE,
     "`pathVerified` closes a narrower gap",
     "function snapshotMissing(snap)",
     "review-pr.js's snapshotMissing rationale",
-  ).replace(/^\s*\/\/ ?/gm, "");
-  assert.match(
-    rationale,
-    phrase("MEASURED rather than read off the documentation"),
-    "the record no longer says the sandbox verdict was executed — a reader will re-derive it, which is what #538 was",
-  );
-  assert.match(
-    rationale,
-    phrase("refused for ANY specifier"),
-    "the record no longer says the refusal is of the mechanism — a reader may retry, believing only node:fs was denied",
-  );
-  assert.match(
-    rationale,
-    phrase("`require` is undefined"),
-    "the record no longer covers require — a reader may conclude only import was measured",
-  );
-});
+  ).replace(/^[ \t]*\/\/ ?/gm, "");
+
+for (const [fragment, carries] of [
+  [
+    "MEASURED rather than read off the documentation",
+    "it is what tells the reader the verdict was executed rather than read off the docs, which is the whole reason #538 was filed",
+  ],
+  [
+    "refused for ANY specifier",
+    "it is what records that the harness rejects the mechanism, not `node:fs` in particular",
+  ],
+  [
+    "`require` is undefined",
+    "it is what records that require was measured too, not only import",
+  ],
+  [
+    "It cannot be dropped.",
+    "it is the verdict the three fragments above are evidence FOR — without it the record can carry the whole measurement and still read as though the round-trip were removable",
+  ],
+  [
+    "So the round-trip stays,",
+    "it is the same verdict restated where the record acts on it; pinning the evidence alone leaves both statements of the conclusion free to move",
+  ],
+]) {
+  test(`the #538 record still carries "${fragment}"`, () => {
+    assert.match(
+      rationale(),
+      phrase(fragment),
+      `review-pr.js's #538 record no longer matches "${fragment}" — this pin is literal, so a reword or a case change reds it exactly as a deletion does. Restore the wording or re-pin it: ${carries}`,
+    );
+  });
+}
