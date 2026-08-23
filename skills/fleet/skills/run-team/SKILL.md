@@ -1598,6 +1598,17 @@ run is invisible to it. The stdout JSON names that distinction in one field:
 two both exit 0, so `verdict` is the only thing that tells a searched-and-clean
 tracker from one that was never read.
 
+The ledger half reports its own readability as its own field, `ledger.ok`, the
+peer of `tracker.ok`: false when the file did not exist, and false too when the
+path led to something that did not parse as a ledger — which is what tells a
+ledger that was read and held nothing filed from one there was nothing to read
+(#231). The absent case is the normal one for a run's first `check` — `.fleet/`
+is git-ignored and created lazily by the first write — so it stays `clean` at
+exit 0, and `ledger.ok` is the field that says why rather than the verdict
+moving. The stderr warning is deliberately narrower than the field: it fires on
+a path with no file, so a `--file` that landed on the wrong existing file is a
+silent `ok:false` with nothing on stderr. Gate on the field, not on the warning.
+
 **Write the ledger line before dispatching, not after.** A member that dies
 between spawn and write is invisible — and members die in batches.
 

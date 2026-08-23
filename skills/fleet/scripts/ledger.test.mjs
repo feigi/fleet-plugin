@@ -79,7 +79,7 @@ function ledgerText(filed) {
 // save(), so the DEFAULT `true` here is a fixture that pre-creates something
 // production never has yet — and it is what hid a #155 regression from the
 // accept-pin below.
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, spawnEnv = {} } = {}) {
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
     // Inherited git vars outrank both cwd and `-C`, and they reach here from
@@ -107,7 +107,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     const file = join(ledgerDir, "ledger.md");
     // No directory means no ledger file either — writing one would be the very
     // state `ledgerDirExists: false` exists to withhold.
-    if (ledgerDirExists) writeFileSync(file, ledgerText(filed));
+    // `ledgerBody` writes the file's bytes directly: the states worth testing
+    // below are ones ledgerText() structurally cannot produce — a file that is
+    // not a ledger, and a ledger whose header is corrupt.
+    if (ledgerDirExists) writeFileSync(file, ledgerBody ?? ledgerText(filed));
     const fixture = join(dir, "hits.json");
     writeFileSync(fixture, JSON.stringify(hits));
     const argsFile = join(dir, "gh-argv");
@@ -479,6 +482,99 @@ test("a clean ledger and a clean tracker is the only path that reads safe, exit 
   assert.equal(r.json.verdict, "clean");
 });
 
+// ── The ledger's own readability (#231) ──────────────────────────────────────
+//
+// `tracker.ok` reports whether the tracker half was read. The ledger half had
+// no such field, so a run whose ledger file does not exist emitted a payload
+// identical in every field to one that read the ledger and found nothing
+// filed — `clean` on both, exit 0 on both. Only stderr told them apart, which
+// a consumer parsing the payload cannot see.
+//
+// The verdict deliberately stays `clean` on both arms: `.fleet/` is gitignored
+// and created lazily by save(), so a fresh clone's first `check` legitimately
+// has no file to read, and folding that into the verdict would report the
+// normal case as unverified.
+
+const UNFILED_SUBJECT = "postgres connection pooling exhausted under load";
+
+test("a ledger that was never read is named as such, and nothing else about the answer moves (#231)", () => {
+  // One subject for both runs: `subject` and the derived `tracker.query` ride
+  // in the payload, so a differing subject would defeat the comparison below.
+  const unread = run(UNFILED_SUBJECT, { ledgerDirExists: false });
+  const read = run(UNFILED_SUBJECT, { filed: [] });
+
+  assert.equal(unread.json.ledger.ok, false, "a ledger file that does not exist was never read, and the payload must say so");
+  assert.equal(read.json.ledger.ok, true, "a ledger that was read reports so even when it held nothing filed");
+
+  // The whole point of the field: these two payloads were identical, so
+  // anything weaker than "differs here and nowhere else" leaves the caller
+  // reconstructing the answer from stderr again.
+  assert.deepEqual(
+    { ...unread.json, ledger: null },
+    { ...read.json, ledger: null },
+    "the readability flag is the ONLY difference between an unread ledger and one read empty",
+  );
+
+  // PR #225 made the exit code a pure function of `verdict`, so a field added
+  // beside it is only safe once both are pinned on the arm it lands on.
+  for (const r of [unread, read]) {
+    assert.equal(r.json.verdict, "clean", "naming the unread ledger must not mint a new verdict");
+    assert.equal(r.status, 0, "and must not move the exit code");
+  }
+
+  // The warning already stated this consequence in words; the field is what
+  // makes the machine-readable half agree with it rather than contradict it.
+  assert.match(unread.stderr, /WARNING — ledger file not found/);
+  assert.doesNotMatch(read.stderr, /ledger file not found/);
+});
+
+test("an unread ledger still reports the tracker hit at its own exit code (#231)", () => {
+  // The blocking arm, where a perturbation costs most: exit 3 comes from the
+  // verdict alone, so the new field has to be shown not to reach it here.
+  const r = run("Non-zero column audit 11 rows", { ledgerDirExists: false, hits: [HIT_114] });
+  assert.equal(r.json.ledger.ok, false, "a tracker hit says nothing about whether the ledger was read");
+  assert.equal(r.json.verdict, "tracker-hit");
+  assert.equal(r.status, 3, "the blocking exit code is unchanged by the new field");
+});
+
+test("the already-filed payload names the ledger it read, and stays exit 1 (#231)", () => {
+  // The other payload `check` emits. A consumer testing `!payload.ledger.ok`
+  // reads a missing field as falsy — "never read" — on the one answer that
+  // proves the ledger WAS read, so the field cannot be scoped to one arm.
+  const r = run("Non-zero column audit 11 rows", { filed: [FILED_114] });
+  assert.equal(r.status, 1, "the strong signal is unchanged");
+  assert.equal(r.json.verdict, "already-filed");
+  assert.equal(r.json.ledger.ok, true, "a matched row can only have come from a ledger that was read");
+});
+
+// The other half of the same question, and the half the field got wrong when
+// it was first added: `--file` landing on a file that EXISTS but is not a
+// ledger — a typo resolving to a real neighbouring path, or a ledger whose
+// header lost a byte. An existence probe answers "read it" for both, which is
+// a machine-readable claim that is simply false, and the arm it is false on is
+// the one where the intact ledger says ALREADY FILED (#231).
+test("a --file that exists but does not parse as a ledger is not reported as read (#231)", () => {
+  const notALedger = run(UNFILED_SUBJECT, { ledgerBody: "not a ledger at all\n" });
+  assert.equal(notALedger.json.ledger.ok, false, "a file that is not a ledger was never read AS one, whatever stat() says");
+
+  // One byte. This is the fixture that separates a parse from a stat: every
+  // other property of the file is intact.
+  const mangled = run("Non-zero column audit 11 rows", { ledgerBody: ledgerText([FILED_114]).replace("## Filed", "##Filed") });
+  assert.equal(mangled.json.ledger.ok, false, "a corrupt header means the filed rows were never read, and the payload must say so");
+  assert.equal(mangled.json.found, false, "the corrupt header is WHY nothing matched — the subject is one the intact ledger answers already-filed");
+
+  // The two halves answer different questions now, so the warning must not
+  // start claiming absence for a file that is sitting right there.
+  for (const r of [notALedger, mangled]) assert.doesNotMatch(r.stderr, /ledger file not found/);
+
+  // --require-file's contract is absence, not shape. Gating it on the parse
+  // would turn these runs into exit 2 — a caller-visible change #231 does not
+  // authorise — so it is pinned here rather than left to drift.
+  const required = run(UNFILED_SUBJECT, { ledgerBody: "not a ledger at all\n", args: ["--require-file"] });
+  assert.equal(required.status, 0, "--require-file still gates on absence alone");
+  assert.equal(required.json.ledger.ok, false, "and the field still reports the parse, under --require-file too");
+});
+
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghFails: true });
   assert.equal(r.status, 0, "offline must not block filing — it degrades, per the ledger-only answer");
@@ -808,6 +904,9 @@ test("the documented flow on a FRESH clone — no --file, .fleet/ not created ye
   assert.equal(r.ghRan, true, "a ledger directory that does not exist YET is still inside its repository");
   assert.equal(r.json.tracker.ok, true);
   assert.equal(r.json.verdict, "clean");
+  // The state the #231 ruling protects: this run legitimately has no ledger
+  // to read, so the flag says so — and the verdict still does not move.
+  assert.equal(r.json.ledger.ok, false, "a fresh clone's first check reports the ledger unread, not the run unverified (#231)");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /cannot resolve the ledger's repository/);
   assert.equal(r.ghCwd, r.ledgerRepoDir, "and the query is still bound to the ledger's own repository, not the runner's cwd");
@@ -901,6 +1000,46 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
   assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
   assert.deepEqual(alternation.split("|").sort(), real, `the usage line and ledger.mjs's dispatch disagree on the subcommand set`);
+});
+
+// The Out cell is the other copy of the same claim, and it is the copy that
+// drifted: `ledger` reached both of `check`'s payloads while the row still
+// typed check as `{subject, found, match, verdict}` (#231). The pin its two
+// siblings carry (no-undo-audit.test.mjs, worktree-audit.test.mjs) does not
+// transfer verbatim — those cells are bare type signatures, this one documents
+// five subcommands in prose, and that prose calls the ledger a ledger ("`read`
+// the whole ledger as"), so a word-boundary match over the whole cell reports
+// `ledger` present while no payload field is named anywhere. Two things fix
+// that: slice to `check`'s own clause, and count only what the cell puts in
+// backticks, since a field name is backticked in this table and prose is not.
+test("the design spec's script-surface row names every field `check` emits", () => {
+  // Both arms. `check` emits two shapes and the already-filed one is the
+  // subset, so measuring the row against it alone would let every field the
+  // wider arm adds drop out of the row unnoticed.
+  const arms = [run(UNFILED_SUBJECT, { filed: [] }), run("Non-zero column audit 11 rows", { filed: [FILED_114] })];
+  const keys = [...new Set(arms.flatMap((r) => Object.keys(r.json)))].sort();
+  assert.ok(keys.length, "check must still emit a payload for the row to be measured against");
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `ledger.mjs` |"));
+  assert.ok(row, "the script-surface table must still carry a ledger.mjs row");
+
+  // `check`'s clause runs from its own name to the next subcommand the cell
+  // types. Everything after that belongs to `read` or to the per-field glosses,
+  // where these same words appear without naming a field of this payload.
+  const out = row.split("|")[3];
+  const start = out.indexOf("`check`");
+  const end = out.indexOf("`read`", start);
+  assert.ok(start >= 0 && end > start, "the Out cell must still type `check`'s payload ahead of `read`'s");
+  const named = (out.slice(start + "`check`".length, end).match(/`[^`]+`/g) ?? []).join(" ");
+
+  // Word boundaries on top of the backtick scoping, so `near` cannot be
+  // satisfied by the `nearTotal` standing next to it.
+  const missing = keys.filter((k) => !new RegExp(`\\b${k}\\b`).test(named));
+  assert.deepEqual(missing, [], `the spec row omits fields check emits: ${missing.join(", ")}`);
 });
 
 // ── The --file / --require-file parser (#362) ────────────────────────────────
