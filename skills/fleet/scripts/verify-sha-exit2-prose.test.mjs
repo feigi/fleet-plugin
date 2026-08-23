@@ -32,8 +32,9 @@
 //
 // Rule 4 is why this file pins no number. `verify-sha.sh`'s exit-2 paths have
 // already grown twice — the `merge-base --is-ancestor` guard, then #119's three
-// JSON-escaping guards — and the issue that asked for this fix was itself
-// written against a count that the tree had already moved past.
+// JSON-escaping guards — and the issue that asked for this fix was filed
+// before the last of those landed: its count was accurate when written, and
+// stale by the time this fix was. A number written here would age the same way.
 //
 // THE CEILING, same as inflight-exit2-prose.test.mjs: these are PRESENCE pins
 // over a bounded slice, plus two adjacency pins. Text spliced INSIDE a pinned
@@ -55,6 +56,22 @@ const SCRIPT = read("skills", "fleet", "scripts", "verify-sha.sh");
 const guard = () =>
   between(RUN_TEAM, "**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md");
 
+// The tally is the rot. A written count is false the moment a `die()` is added
+// or removed, and this script's set has already changed twice.
+//
+// Scoped to the COUNTED NOUN, not to a bare number near "exit 2": the annotation
+// this same guard carries is `2 unanswerable`, which is the exit code's meaning
+// and must stay. Measured — the first spelling of this pin reddened on the
+// guard's own correct text, and `reachable`/`unanswerable` remain the two nouns
+// that can never go in this list.
+//
+// `cases?` is here because it was measured missing, not guessed: "three
+// unanswerable cases" passed this pin green where the same sentence with
+// "failure modes" reddened it. `ways?` was measured and REJECTED — it reds
+// "Treat exit 2 the same way in all cases", which is prose, not a tally.
+const TALLY =
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:\w+[-\s]+){0,2}(?:paths?|causes?|cases?|reasons?|branches|failure\s+modes?)\b/i;
+
 test("the guard names the script's exit codes where it names the command", () => {
   assert.match(guard(), phrase("0 reachable, 1 not reachable, 2 unanswerable"));
 });
@@ -62,10 +79,12 @@ test("the guard names the script's exit codes where it names the command", () =>
 test("exit 1 keeps the verdict — the flag, the held enqueue and the maintainer's ruling", () => {
   // ADJACENCY, not three presence pins: each clause on its own survives the
   // subject being swapped to exit 2, which is the overshoot this guards.
-  // `exit 2` excluded from the gap so the two branches cannot merge into one.
+  // `[Ee]xit 2` excluded from the gap so the two branches cannot merge into
+  // one. The character class is load-bearing, not decoration: a drifting
+  // sentence that opens on the code capitalises it, which a bare `exit` misses.
   assert.match(
     guard(),
-    /[Nn]ot\s+reachable\*{0,2}\s*\(exit\s+1\)\s*→\s*flag(?:(?!exit\s+2)[\s\S]){0,200}?until\s+the\s+maintainer\s+rules/,
+    /[Nn]ot\s+reachable\*{0,2}\s*\(exit\s+1\)\s*→\s*flag(?:(?![Ee]xit\s+2)[\s\S]){0,200}?until\s+the\s+maintainer\s+rules/,
     "the not-reachable branch no longer binds exit 1 to flag/hold/maintainer-rules, or exit 2 has drifted into that gap — an unanswerable probe must never spend a maintainer's ruling",
   );
 });
@@ -80,7 +99,7 @@ test("exit 2 is not a verdict and carries its own remedy", () => {
   // commit behind a probe that answers the same way every time.
   assert.match(
     guard(),
-    /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict(?:(?!exit\s+1)[\s\S]){0,400}?re-run/,
+    /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict(?:(?![Ee]xit\s+1)[\s\S]){0,400}?re-run/,
     "the exit-2 branch no longer tells the controller to re-run, or exit 1 has drifted into its gap",
   );
   assert.match(guard(), phrase("never record it as a stray commit"));
@@ -91,17 +110,19 @@ test("the exit-2 branch is stated as a property of the code, never as a tally of
   // them apart, so it must key on the code.
   assert.match(guard(), phrase("no JSON on stdout"));
   assert.match(guard(), phrase("the cause on stderr"));
-  // The tally is the rot. A written count is false the moment a `die()` is
-  // added or removed, and this script's set has already changed twice.
-  //
-  // Scoped to the COUNTED NOUN, not to a bare number near "exit 2": the
-  // annotation this same guard carries is `2 unanswerable`, which is the exit
-  // code's meaning and must stay. Measured — the first spelling of this pin
-  // reddened on the guard's own correct text.
   assert.doesNotMatch(
     guard(),
-    /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:\w+[-\s]+){0,2}(?:paths?|causes?|reasons?|branches|failure\s+modes?)\b/i,
+    TALLY,
     "a count of exit-2 paths has been written into the guard — state the property instead; the next `die()` added to verify-sha.sh falsifies the number",
+  );
+  // The green case, pinned against the same regex and separately from the
+  // guard, so the failure MESSAGE stays honest: a noun list widened until it
+  // reaches the annotation reds the assertion above saying a count was written
+  // into the guard — a lie about text that is correct and required to be there.
+  assert.doesNotMatch(
+    "`# 0 reachable, 1 not reachable, 2 unanswerable`",
+    TALLY,
+    "the tally pin's noun list now reaches the guard's own required annotation — `reachable` and `unanswerable` are what the exit codes MEAN, not a count of causes",
   );
 });
 
@@ -113,8 +134,18 @@ test("verify-sha.sh still declares the exit codes the guard quotes", () => {
   // Every exit-2 path is the same `die`, which is what lets one rule cover all
   // of them. A second exit-2 spelling would need the guard revisited.
   assert.match(SCRIPT, /^die\(\)\s*\{[^}]*exit 2;?\s*\}/m);
+  // Comment lines stripped first: this script is two-thirds prose about its own
+  // exit codes, and counting the raw substring reds on a comment that merely
+  // MENTIONS exit 2 — with a message sending the reader after a code path that
+  // does not exist (measured). `\b` also stops `exit 22` from counting. Whole
+  // comment lines only, never a trailing `#`: cutting at one would let a `#`
+  // inside a quoted string hide a genuine second exit, and a missed exit
+  // defeats the assertion, where a comment it still trips is merely loud.
+  //
+  // No null guard: the `die()` pin above carries this same `exit 2` literal on a
+  // line that is not a comment, so reaching here means a match already exists.
   assert.equal(
-    SCRIPT.match(/exit 2/g).length,
+    SCRIPT.replace(/^\s*#.*$/gm, "").match(/\bexit 2\b/g).length,
     1,
     "verify-sha.sh grew a second way to exit 2 — the guard's single rule covers every cause only because `die()` is the sole one",
   );
