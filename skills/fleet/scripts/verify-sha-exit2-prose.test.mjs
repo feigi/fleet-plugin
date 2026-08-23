@@ -86,31 +86,44 @@ const ANNOTATION = "`# 0 reachable, 1 not reachable, 2 unanswerable`";
 //
 // What separates a tally from prose is the NUMBER, not the noun: in a tally the
 // number counts something, and in this guard's correct sentences the number is
-// an exit code with `exit` in front of it. The lookbehind refuses an exit code
-// in the counting position, and that is what carries the noun list — measured,
-// the spelling this replaces reddened on `Escalate exit 2 on all paths by
-// pinging the maintainer`, and `ways?` could not be admitted at all because it
-// reddened on `Treat exit 2 the same way in all cases`. Both are prose. Both
-// are green here, and every counted-noun spelling below stays red.
+// an exit code with `exit` in front of it. The lookbehind refuses a number the
+// exit token directly precedes, and that is what carries the noun list —
+// measured, the spelling this replaces reddened on `Escalate exit 2 on all
+// paths by pinging the maintainer`, and `ways?` could not be admitted at all
+// because it reddened on `Treat exit 2 the same way in all cases`. Both are
+// prose. Both are green here, and every counted-noun spelling below stays red.
 //
 // The separator inside the lookbehind takes a hyphen as well as a space, or
 // `exit-2` — how this repo writes the branch — reads as a count and reds. It
 // takes `**` on either seam for the reason `S` does: a lookaround cannot see a
-// bold-split token, so `**Exit** 2` would walk straight through it. Case comes
-// from the `i` flag, and `[Ee]` keeps the exclusion working if that flag is ever
-// narrowed — an exclusion that stops firing is a green over the rot itself.
+// bold-split token, so `**Exit** 2` would walk straight through it. The
+// optional `code`/`codes` token is in for the reason the hyphen is: `exit code
+// 2` names the same exit code, and measured, without that token `Treat exit
+// code 2 the same way in all cases.` reddened while `Treat exit 2 …` did not.
+// The seam tolerance repeats around it, or `**exit code** 2` walks through the
+// same way `**Exit** 2` would. Case comes from the `i` flag, and `[Ee]` keeps
+// the exclusion working if that flag is ever narrowed — an exclusion that stops
+// firing is a green over the rot itself.
 //
-// The nouns are here because each was measured missing, not guessed: every one
-// of them let `three unanswerable <noun> here` through green against the
-// spelling this replaces, the same way `cases` did before it was added.
+// The nouns this change adds are here because each was measured missing, not
+// guessed: every one of them let `three unanswerable <noun> here` through green
+// against the spelling this replaces. The nouns already in that spelling stay
+// as they are; the loop that pins every noun carries the per-noun history.
 //
 // THE CEILING: this is still a list, so a counted noun nobody has thought of
 // still passes. The filler window between the number and the noun also stays
 // narrow — `three distinct kinds of ways` overruns it and is green, on this
 // spelling and on the one it replaces. Widening that window is what let a noun
 // reach an exit code in the first place, so it stays as it is.
+//
+// The exclusion is ADJACENCY, so correct prose that puts anything between the
+// exit token and its number still reds: measured, `Treat exit codes 1 and 2 the
+// same way in all cases.` reds here and was green against the spelling this
+// replaces, because `and` sits where the exit token would have to be. No
+// lookbehind reaches that one — it is a false red that admitting `ways?`
+// opened, and this spelling does not close it.
 const TALLY = new RegExp(
-  String.raw`(?<![Ee]xit\*{0,2}[-\s]+\*{0,2})` +
+  String.raw`(?<![Ee]xit(?:\*{0,2}[-\s]+\*{0,2}codes?)?\*{0,2}[-\s]+\*{0,2})` +
     String.raw`\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:\w+[-\s]+){0,2}` +
     String.raw`(?:paths?|causes?|cases?|reasons?|branches|conditions?|outcomes?|scenarios?|situations?|types?|ways?|(?:failure\s+)?modes?)\b`,
   "i",
@@ -195,12 +208,16 @@ test("the exit-2 branch is stated as a property of the code, never as a tally of
   // construction — the guard names exit codes for a living. In each of these
   // the number is an exit code, not a count, which is the property the pin
   // keys on; the hyphen spelling is in because this repo writes the branch
-  // that way and a whitespace-only exclusion reds on it.
+  // that way and a whitespace-only exclusion reds on it, and the `exit code`
+  // spellings are in because the exclusion has to carry across that token and
+  // its bold seam — both measured red before it did.
   for (const correct of [
     "Treat exit 2 the same way in all cases.",
     "Escalate exit 2 on all paths by pinging the maintainer.",
     "Escalate exit-2 on all paths by pinging the maintainer.",
     "Treat **Exit** 2 the same way in all cases.",
+    "Treat exit code 2 the same way in all cases.",
+    "Treat **exit code** 2 the same way in all cases.",
   ]) {
     assert.doesNotMatch(
       correct,
