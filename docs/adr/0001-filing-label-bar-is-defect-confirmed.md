@@ -81,9 +81,10 @@ the accumulated record across runs, never on the run in front of you.
   decision lands.
 - **Trigger:** `needs-triage` still taking more than half of them.
 
-The guard's input is deferrals filed *after* this lands. The standing backlog
-is not that input — it is mostly pre-reprice filings, whose reconciliation is
-#593.
+The guard's input is deferrals filed *after* `6d0c1f6` — the filing-step half
+dated in the Status line, because that is what moved filer behaviour, not this
+record's own merge. The standing backlog is not that input — it is mostly
+pre-reprice filings, whose reconciliation is #593.
 
 Baseline for that comparison, measured against the tracker on 2026-08-23 — an
 as-of figure, never a live count, because the tracker is append-only and any
