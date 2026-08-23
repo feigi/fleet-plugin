@@ -28,6 +28,16 @@ Status: implemented
 > work is skipped silently, which is what PR #40 was filed to fix. See
 > `docs/specs/2026-07-23-fleet-plugin-design.md`.
 
+> **Superseded in part.** The candidate scan (2026-07-23) is now a script call.
+> Phase 0's *Candidate scan* step below cites `next-ticket` step 1, which at the
+> time was a raw `gh issue list` where `--label ready-for-agent` was the correct
+> flag. `~/.claude/skills/fleet/scripts/candidates.mjs` now carries that query
+> and spells it `--require-label ready-for-agent`; it refuses `--label` at exit 2
+> rather than ignoring it, so the step below is corrected in place to the flag
+> the script accepts. `--allow-fallback` is the switch that now holds the
+> `next-ticket`/fleet divergence the step describes, and the fleet does not pass
+> it. See `docs/specs/2026-07-23-fleet-plugin-design.md`.
+
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem
@@ -198,11 +208,11 @@ Runs at start, and again whenever the approved pool empties.
 
 1. Candidate scan — `next-ticket` step 1, including the server-side label
    exclusion and the `--jq` body reduction. Never fetch raw bodies for the whole
-   list; they are ~97% of the payload. **`--label ready-for-agent` is mandatory
-   here, and there is no fallback.** `next-ticket` drops the label filter and
-   retries against `ready-for-human` when the first query returns nothing; the
-   fleet must NOT. Empty result means the fleet has no work, not that it should
-   widen the net.
+   list; they are ~97% of the payload. **`--require-label ready-for-agent` is
+   mandatory here, and there is no fallback.** `next-ticket` drops the label
+   filter and retries against `ready-for-human` when the first query returns
+   nothing; the fleet must NOT. Empty result means the fleet has no work, not
+   that it should widen the net.
 2. Dependency scan — `next-ticket` step 2, on the `d` array.
 3. In-flight check — `next-ticket` step 3, all three probes per candidate
    (`gh pr list --state all --search`, `git ls-remote --heads origin`,
