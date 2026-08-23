@@ -65,19 +65,22 @@ test("exit 1 keeps the verdict — the flag, the held enqueue and the maintainer
   // `exit 2` excluded from the gap so the two branches cannot merge into one.
   assert.match(
     guard(),
-    /[Nn]ot\s+reachable\s*\(exit\s+1\)\s*→\s*flag(?:(?!exit\s+2)[\s\S]){0,200}?until\s+the\s+maintainer\s+rules/,
+    /[Nn]ot\s+reachable\*{0,2}\s*\(exit\s+1\)\s*→\s*flag(?:(?!exit\s+2)[\s\S]){0,200}?until\s+the\s+maintainer\s+rules/,
     "the not-reachable branch no longer binds exit 1 to flag/hold/maintainer-rules, or exit 2 has drifted into that gap — an unanswerable probe must never spend a maintainer's ruling",
   );
 });
 
 test("exit 2 is not a verdict and carries its own remedy", () => {
-  assert.match(guard(), phrase("Exit 2 is not a verdict"));
+  // `\*{0,2}` at each wrap point, not a hard-space literal: bolding a phrase in
+  // place leaves the rule true and must not red the pin (measured — the first
+  // spelling of the exit-1 pin below reddened on `**Not reachable**`).
+  assert.match(guard(), /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict/);
   // Same adjacency shape, mirrored: exit 1's remedy must not drift into the
   // exit-2 gap either. Re-running a genuine "not reachable" hides a stray
   // commit behind a probe that answers the same way every time.
   assert.match(
     guard(),
-    /[Ee]xit\s+2\s+is\s+not\s+a\s+verdict(?:(?!exit\s+1)[\s\S]){0,400}?re-run/,
+    /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict(?:(?!exit\s+1)[\s\S]){0,400}?re-run/,
     "the exit-2 branch no longer tells the controller to re-run, or exit 1 has drifted into its gap",
   );
   assert.match(guard(), phrase("never record it as a stray commit"));
