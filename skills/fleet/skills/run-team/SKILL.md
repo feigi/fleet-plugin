@@ -1496,9 +1496,16 @@ A starved implementer queue never stalls the review or merge side.
 
 **Verify every reported SHA.** `~/.claude/skills/fleet/scripts/verify-sha.sh
 <branch> <sha>` before enqueueing — a member can commit in a nested worktree,
-leaving the SHA on a stray branch while its report reads normally. Not reachable →
-flag, do not enqueue, do not return the ticket to the pool until the maintainer
-rules.
+leaving the SHA on a stray branch while its report reads normally. Exit codes as
+`inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
+(exit 1) → flag, do not enqueue, do not return the ticket to the pool until the
+maintainer rules. **Exit 2 is not a verdict** — the question could not be
+answered, and every cause of it reaches you as one shape: no JSON on stdout at
+all, the cause on stderr alone. Read that stderr, fix what it names and re-run;
+escalate if it repeats. Never read exit 2 as `not reachable`, and never record it
+as a stray commit — the flag and the maintainer's ruling above are what exit 1
+earns, and spending them on a probe that never answered costs a member its
+ticket over a failure a re-run would have cleared.
 
 **Never `--delete-branch`.** It errors on a `main` held by another worktree, or
 strands the feature worktree on `main`. `gh pr merge <n> --merge` alone; GitHub
