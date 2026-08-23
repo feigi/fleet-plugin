@@ -69,8 +69,13 @@ export function makeDie(name) {
 // `--flag=value` form `indexOf` cannot see (`arg()` would otherwise report
 // the flag absent and the caller would fall back exactly as if it were).
 // Rejecting a `--`-prefixed value does forfeit a real capability — a value
-// that legitimately starts with `--` — but no caller here passes one, and
-// refusing loudly beats silently taking the next flag as this one's value.
+// that legitimately starts with `--` — and staleness.mjs (#238) is a caller
+// that can want one: its `--gone`/`--present` value is a string quoted out of
+// a ticket, and #240's is `--label ready-for-agent`. It documents the
+// restriction in run-team/SKILL.md and lets the refusal land as its
+// could-not-check verdict rather than working around it here, because
+// refusing loudly still beats silently taking the next flag as this one's
+// value.
 export function makeArg(die) {
   return function arg(name) {
     const i = process.argv.indexOf(`--${name}`);

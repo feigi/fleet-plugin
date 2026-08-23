@@ -225,6 +225,13 @@ At start, and whenever the pool empties.
    for. Give exactly one — the direction is not inferable from the string, and
    the wrong one answers the opposite verdict with full confidence.
 
+   One string shape it will not take: a needle that itself starts with `--`.
+   The value guard refuses it — `staleness: --gone needs a value` — at exit 2
+   rather than reading it as the string, so a ticket whose defect IS a flag
+   spelling, #240's `--label ready-for-agent` being one this backlog carries,
+   is a could-not-check: offer it and annotate it, do not read the refusal as
+   an invocation to retry.
+
    | Exit | Verdict | What it does to supply |
    |---|---|---|
    | 0 | still reproduces | offer it |
