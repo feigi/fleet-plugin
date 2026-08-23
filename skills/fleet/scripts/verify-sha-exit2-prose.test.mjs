@@ -56,6 +56,20 @@ const SCRIPT = read("skills", "fleet", "scripts", "verify-sha.sh");
 const guard = () =>
   between(RUN_TEAM, "**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md");
 
+// Bold moves, and these pins must not care. `**` is allowed at ANY word
+// boundary inside a pinned phrase: markdown emphasis slides around a sentence
+// without changing what the sentence says, so a pin that reds on a moved `**`
+// pins the formatting rather than the rule. One `\*{0,2}` per pin — the first
+// spelling — closed only the seam its own instance happened to use, and every
+// other seam still reddened. Measured: `Exit 2 is **not a verdict**` and `Not
+// reachable **(exit 1)**` are both what an editor emphasising this guard
+// writes, and both were false reds. The tolerance goes INSIDE the gap
+// lookaheads too, or `**Exit** 2` drifts straight through the exclusion the
+// gap exists to enforce — measured green before this was widened.
+const B = String.raw`\*{0,2}`; // an optional bold marker at one seam
+const S = String.raw`\*{0,2}\s+\*{0,2}`; // a word gap that tolerates one
+const EXIT2_VERDICT = String.raw`[Ee]xit${S}2${S}is${S}not${S}a${S}verdict`;
+
 // The tally is the rot. A written count is false the moment a `die()` is added
 // or removed, and this script's set has already changed twice.
 //
@@ -84,22 +98,22 @@ test("exit 1 keeps the verdict — the flag, the held enqueue and the maintainer
   // sentence that opens on the code capitalises it, which a bare `exit` misses.
   assert.match(
     guard(),
-    /[Nn]ot\s+reachable\*{0,2}\s*\(exit\s+1\)\s*→\s*flag(?:(?![Ee]xit\s+2)[\s\S]){0,200}?until\s+the\s+maintainer\s+rules/,
+    new RegExp(
+      String.raw`[Nn]ot${S}reachable${B}\s*${B}\(exit${S}1\)${B}\s*${B}→\s*${B}flag` +
+        String.raw`(?:(?!${B}[Ee]xit${S}2)[\s\S]){0,200}?until${S}the${S}maintainer${S}rules`,
+    ),
     "the not-reachable branch no longer binds exit 1 to flag/hold/maintainer-rules, or exit 2 has drifted into that gap — an unanswerable probe must never spend a maintainer's ruling",
   );
 });
 
 test("exit 2 is not a verdict and carries its own remedy", () => {
-  // `\*{0,2}` at each wrap point, not a hard-space literal: bolding a phrase in
-  // place leaves the rule true and must not red the pin (measured — the first
-  // spelling of the exit-1 pin below reddened on `**Not reachable**`).
-  assert.match(guard(), /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict/);
+  assert.match(guard(), new RegExp(EXIT2_VERDICT));
   // Same adjacency shape, mirrored: exit 1's remedy must not drift into the
   // exit-2 gap either. Re-running a genuine "not reachable" hides a stray
   // commit behind a probe that answers the same way every time.
   assert.match(
     guard(),
-    /[Ee]xit\s+2\*{0,2}\s+is\s+not\s+a\s+verdict(?:(?![Ee]xit\s+1)[\s\S]){0,400}?re-run/,
+    new RegExp(EXIT2_VERDICT + String.raw`(?:(?!${B}[Ee]xit${S}1)[\s\S]){0,400}?re-run`),
     "the exit-2 branch no longer tells the controller to re-run, or exit 1 has drifted into its gap",
   );
   assert.match(guard(), phrase("never record it as a stray commit"));
