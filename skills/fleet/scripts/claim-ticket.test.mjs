@@ -878,9 +878,9 @@ test("runner: carries a template stamp on the node --test entrypoint", () => {
   assert.match(text, STAMP_RE);
 });
 
-// Same script, two claims — the stamp is a property of the template, not the
-// instance, so it must not vary with the issue number, ports, or install
-// command baked into the rest of the file.
+// Same script, two claims — the stamp is a property of this script's own
+// bytes, not of the claim, so it must not vary with the issue number, ports,
+// or install command baked into the rest of the file.
 test("runner: the stamp is stable across claims of the same template", () => {
   const a = apply(SUITE).text.match(STAMP_RE)[1];
   const b = apply(SUITE).text.match(STAMP_RE)[1];
@@ -890,7 +890,7 @@ test("runner: the stamp is stable across claims of the same template", () => {
 // The other half: point a claim at a byte-for-byte-different copy of the
 // script and the stamp must move. Copying rather than editing the real
 // script in place keeps this test from mutating the file under test.
-test("runner: the stamp changes when the template's content changes", () => {
+test("runner: the stamp changes when the script's content changes", () => {
   const scriptDir = mkdtempSync(join(tmpdir(), "claim-script-"));
   const editedScript = join(scriptDir, "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
@@ -909,6 +909,90 @@ test("runner: the stamp changes when the template's content changes", () => {
 
   assert.notEqual(after, before);
 });
+
+// #263: the stamp was derived by `cksum "$0" | cut -d' ' -f1`, whose status is
+// `cut`'s, so `set -eu` never saw a `cksum` that could not read its operand —
+// measured on that form, the runner carried nothing after the colon and the
+// claim exited 0 reporting itself applied. And it was derived after the issue
+// had been labelled and after `git worktree add`, so reading the status ALONE
+// is the change that was refused: it exchanges a blank stamp for a refusal on
+// a ticket that is already half-claimed. Reading the status is also not enough
+// by itself — a `cksum` that exits 0 printing nothing leaves the stamp empty
+// and ships that same blank line at exit 0 with the ticket claimed, which is
+// why the value is read as well as the status. All three are pinned here.
+//
+// The stubs are the fixture, not a route: every call site this repo has, in
+// the skill text and in this file, names the script by an absolute path, so
+// `$0` always resolves and no argv makes the real `cksum` fail or come back
+// empty. Nothing here claims a reachable failure — what is pinned is that the
+// derivation reports on its own result and does so before anything is
+// claimed.
+//
+// Exit 2, an empty stdout and a matching stderr are each reproducible by some
+// other guard, so none of them establishes WHERE the refusal fired. The `gh`
+// log is what only a refusal ahead of every mutation can satisfy — it is the
+// criterion that separates this fix from the one that was refused. Measured:
+// `gh issue edit` is the first mutation the apply branch makes, so under every
+// placement of the derivation this script allows, the `gh` log is the
+// assertion that reds. A registration check and a branch-ref check stood here
+// too and could never fire ahead of it; the worktree check that remains states
+// the same refusal in the form the json.sh guard's own test uses.
+//
+// The dry run is measured too, in the same fixture: it is this script's
+// default mode, and the refusal reaching it is what shows the derivation sits
+// with the pre-branch derivations rather than inside the apply branch, where
+// the default mode never reaches it at all.
+// Three stubs, because the two halves of the guard cover each other on the
+// obvious ones and a stub each half owns alone is what discriminates.
+// Measured on this tree: with only the first two, restoring the pipeline form
+// `cksum "$0" | cut -d' ' -f1` — the #263 bug itself — leaves both green,
+// because a failing `cksum` prints nothing, `cut` succeeds on empty input, and
+// the value check refuses what the status check was meant to. Dropping the
+// `|| die` to a bare `|| true` goes green the same way.
+//   - "cannot be read"     rc 1, prints nothing. The realistic shape. Reds
+//                          only when BOTH halves are gone; either alone
+//                          catches it.
+//   - "comes back empty"   rc 0, prints nothing. Owned by the value check —
+//                          deleting that line is the mutation it reds.
+//   - "fails despite printing"  rc 1, prints a plausible checksum line. Owned
+//                          by the status check: the value survives `cut`, so
+//                          this is the stub the pipeline form and the bare
+//                          `|| true` both red.
+for (const [what, stub] of [
+  ["cannot be read", "#!/bin/sh\nexit 1\n"],
+  ["comes back empty", "#!/bin/sh\nexit 0\n"],
+  ["fails despite printing", "#!/bin/sh\necho '111 222 x'\nexit 1\n"],
+]) {
+  test(`a checksum that ${what} refuses before anything is claimed, in both modes`, () => {
+    const dir = repo({ [TESTS]: "" });
+    const bin = mkdtempSync(join(tmpdir(), "claim-cksum-"));
+    const ghLog = join(bin, "gh.log");
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${ghLog}\nexit 0\n`, { mode: 0o755 });
+    writeFileSync(join(bin, "cksum"), stub, { mode: 0o755 });
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+
+    const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
+
+    assert.equal(r.status, 2, `a stamp this script cannot derive is a refusal — its only failure code\n${r.stderr}`);
+    assert.match(r.stderr, /refusing to claim without a runner template stamp/,
+      "and it names the stamp rather than blaming whatever ran next");
+    assert.equal(r.stdout, "", "no payload: the refusal fires before the claim exists, so there is nothing to report");
+
+    // Nothing claimed. Both were TRUE under the guard-in-place form that was
+    // refused, which is why the code and the message above cannot stand in
+    // for them.
+    assert.equal(existsSync(ghLog), false,
+      "the issue is unlabelled — `gh` was never invoked, so there is no label to undo");
+    assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree on disk");
+
+    // The default mode reaches the same derivation. Moved back inside the apply
+    // branch it would not, and this claim would be predicted as makeable.
+    const d = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8", env });
+    assert.equal(d.status, 2, `the dry run refuses too\n${d.stderr}`);
+    assert.match(d.stderr, /refusing to claim without a runner template stamp/);
+    assert.equal(d.stdout, "", "and predicts no claim it could not make");
+  });
+}
 
 // Every row of the install matrix. `true` is the no-op: nothing to install.
 for (const [name, files, want] of [

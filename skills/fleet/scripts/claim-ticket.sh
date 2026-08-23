@@ -107,6 +107,48 @@ pg=$((16000 + issue))
 ollama=$((22000 + issue))
 echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
 
+# The stamp the runner carries. The runner is written once at claim time and
+# never rewritten (#124), so an old worktree can be sitting on a runner a later
+# template fix never reached. This stamp does not detect or fix that — nothing
+# reads it, nothing refuses on a mismatch — it only makes staleness legible:
+# diff the stamp against a fresh `cksum` of this script to see if they match.
+# It is a checksum of the WHOLE script, not of the emitted template, so it
+# over-reports: any edit to this file moves it — a reworded die message, a
+# comment — while the runner it produces stays byte-identical. It under-reports
+# too, so the error is not one-way and a match does not mean fresh: which body
+# the runner gets is decided by $testcmd, which comes from the sibling
+# derive-testcmd.sh, and this checksum does not cover that file. Measured — two
+# byte-identical copies of this script, differing only in that sibling, emitted
+# runners of very different sizes under one stamp. So what the stamp covers is
+# this file's own bytes: a mismatch means "re-materialize to be sure", and a
+# match means only that this script has not changed.
+#
+# One command, not `cksum | cut`: the convention inflight.sh states in its own
+# comments — a pipeline reports only its last stage's status, so `set -eu`
+# reads `cut`'s success and a `cksum` that could not read its operand yields a
+# stamp line with nothing after the colon, at exit 0 and a claim reported as
+# applied. Measured on the pipeline form. The trailing fields come off by
+# parameter expansion rather than another process, since `cksum` prints the
+# checksum, the byte count and the path.
+#
+# Reading the status is only half of it: this derivation sits with the others
+# that run before the apply branch, not beside the heredoc that consumes it.
+# Guarded where that heredoc is, the refusal fires after the issue has been
+# labelled and after `git worktree add`, so it exchanges a blank stamp for a
+# half-claimed ticket — label applied, branch ref and worktree on disk, and a
+# claim reporting failure — needing a manual release-ticket. Measured on that
+# form too. Derived here it has nothing to clean up, the same property the
+# json.sh guard is placed for. Nothing blocks the move: the value depends on
+# this script's own path and on nothing the branch establishes.
+tmpl_stamp=$(cksum "$0") || die "could not checksum $0 — refusing to claim without a runner template stamp"
+tmpl_stamp=${tmpl_stamp%% *}
+# Status is not content, so that is two parts and not one — the same shape the
+# lockfile guard uses, status then value. A `cksum` that exits 0 printing
+# nothing leaves this empty, and `set -u` catches an unset variable, never an
+# empty one, so without this the blank stamp line ships at exit 0 with the
+# ticket claimed: the rc-0 half of the same hole the pipeline form opened.
+[ -n "$tmpl_stamp" ] || die "cksum $0 produced no checksum — refusing to claim without a runner template stamp"
+
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
   echo "    would: gh issue edit $issue --add-label in-progress" >&2
@@ -166,19 +208,6 @@ else
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
   # not pass them down. Anyone who finds the worktree finds the runner.
-  #
-  # The runner is written once at claim time and never rewritten (#124), so an
-  # old worktree can be sitting on a runner a later template fix never
-  # reached. This stamp does not detect or fix that — nothing reads it,
-  # nothing refuses on a mismatch — it only makes staleness legible: diff the
-  # stamp against a fresh `cksum` of this script to see if they match. It is a
-  # checksum of the WHOLE script, not of the emitted template, so it
-  # over-reports: any edit here moves it — a reworded die message, a comment —
-  # while the runner it produces stays byte-identical. The error is one-way,
-  # a runner missing a template fix never reads as fresh, so a match means
-  # fresh and a mismatch means "re-materialize to be sure", not "definitely
-  # stale".
-  tmpl_stamp=$(cksum "$0" | cut -d' ' -f1)
   cat > "$runner" <<SH
 #!/bin/sh
 # agent-test template: $tmpl_stamp
