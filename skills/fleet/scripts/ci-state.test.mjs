@@ -686,3 +686,73 @@ test("the outage payload reports no CI state it could not observe", () => {
     );
   }
 });
+
+// --- #840: a non-numeric --pr must refuse, never ship an unnamed payload -----
+// `--pr` was validated for truthiness alone, so `--pr abc` reached both payload
+// sites. Each builds `pr: Number(pr)`, and `JSON.stringify(NaN)` is `null` — the
+// normal path shipped a payload with no identifying field at exit 0 under
+// `verdict: "green"`, the verdict the fleet gates on.
+//
+// The gh receipt below is the load-bearing assertion, not decoration. Exit 2, an
+// empty stdout and a matching stderr line are each reproducible by a LATER
+// guard: downgrade this one to a warning and the script runs on, gh fails, and
+// die() reproduces all three while the warning still sits in stderr. Only a
+// refusal reached BEFORE the first query can show gh was never asked, so the
+// receipt is what pins fatality and the other three merely describe the refusal.
+//
+// The stub also keeps a regressed guard off this repo's live GitHub data, the
+// second job arg.test.mjs's own stubGhBin() gives for the same shape.
+function runWithGhReceipt(args) {
+  const dir = mkdtempSync(join(tmpdir(), "ci-state-pr-guard-"));
+  const ghLog = join(dir, "gh.log");
+  writeFileSync(ghLog, "");
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> ${ghLog}\nexit 1\n`, { mode: 0o755 });
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+  const log = readFileSync(ghLog, "utf8");
+  rmSync(dir, { recursive: true, force: true });
+  return { ...r, log };
+}
+
+test("a non-numeric --pr refuses before any query, rather than reporting `pr: null`", () => {
+  const r = runWithGhReceipt(["--pr", "abc"]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /--pr needs a number/);
+  assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
+  assert.equal(r.log, "", `the refusal must land before the first gh read, and gh was asked: ${r.log}`);
+});
+
+// The direction a new guard gets wrong on its own: what it wrongly REFUSES. A
+// suite that only feeds it invalid input pins nothing about the callers it must
+// keep working. board.mjs's runCiState() sends `String(pr)` off a numeric board
+// record, which is exactly the digits this harness prepends — so a guard
+// tightened past them refuses a working invocation, the outcome #365's own AC
+// calls worse than the bug being fixed.
+//
+// assert/strict pins the TYPE as well as the value: `pr` reading back as the
+// string "42" would satisfy a loose check while breaking every consumer that
+// keys on a number, and reading back as `null` is the defect itself. Nothing
+// else covers the normal-path payload's `pr` — the sibling assertion in the
+// quota section covers the outage payload's.
+test("the numeric shape board.mjs sends is accepted, and the payload names its PR", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.pr, 42);
+});
+
+// What the new guard's PLACEMENT could newly break. It sits below the usage die
+// on purpose: RegExp.test coerces a null argument to the string "null", so a
+// guard merged into that die — or hoisted above it — answers an omitted --pr
+// with a complaint about a number and never prints the usage line at all. Both
+// spellings exit 2, so the exit code cannot tell them apart.
+test("--pr omitted still answers with the usage line, not the numeric complaint", () => {
+  const r = runWithGhReceipt([]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: ci-state\.mjs --pr <number>/);
+  assert.doesNotMatch(r.stderr, /needs a number/, "an omitted --pr is a different mistake from a malformed one");
+  assert.equal(r.log, "", `a usage refusal must also precede any gh read, and gh was asked: ${r.log}`);
+});
