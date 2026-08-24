@@ -112,6 +112,14 @@ At start, and whenever the pool empties.
    fallback** — do NOT pass `--allow-fallback`. Empty means no work;
    `ready-for-human` needs a human to brainstorm first and you have no channel to
    one mid-flight.
+
+   **Exit 3 is not that empty queue, and never a reason to widen the net.** It
+   says the labeled query returned rows and the to-spec filter took every one:
+   what is queued is to-tickets' input rather than claimable tickets, and a
+   member handed one implements an entire spec as a single ticket. Log it as
+   specs awaiting to-tickets, not as no work — and still do not pass
+   `--allow-fallback`, whose second pass is unfiltered and so reaches the
+   `ready-for-human` and untriaged work you have no channel for.
 2. Dependency scan, `next-ticket` step 2, on the `d` array. Open blocker → drop.
 3. **In-flight check** — `~/.claude/skills/fleet/scripts/inflight.sh <N>` per
    candidate; any hit = taken. It runs all three probes (PRs, remote heads, local
