@@ -161,6 +161,33 @@ if (!pr) {
       "[--workflow-file <path>] [--declare-no-ci] [--quiet]",
   );
 }
+// #840: `pr` was validated for truthiness alone, so `--pr abc` survived to
+// both payload sites — each builds `pr: Number(pr)`, and `JSON.stringify(NaN)`
+// is `null`. The normal path is the worse of the two: an unidentifiable payload
+// at exit 0 with `verdict: "green"`, which is the verdict the fleet gates on.
+// `pr` is that payload's only identifying field, and the fleet polls this
+// script for several PRs at once — so a null there is not a cosmetic gap, it is
+// a report that cannot be attributed to the PR it answered for.
+//
+// Refused here rather than repaired at the two payload sites: one guard covers
+// both, and it lands before the first gh read instead of after a real query
+// answered for a PR nobody named. Reaching gh at all is the other harm — `gh pr
+// view` resolves a non-numeric ref as a BRANCH, so `--pr abc` could return a
+// genuine verdict for whatever PR that branch belongs to.
+//
+// BELOW the usage die above, never merged into it: absent and malformed are
+// different mistakes, and test() coerces a null argument to the string "null" —
+// merged, an omitted --pr would be answered with a complaint about a number
+// instead of the usage line. ABOVE sweep(), per arg.mjs: where both would
+// refuse, the more specific wording wins.
+//
+// Digits-only forfeits the branch and URL spellings `gh pr view` itself takes,
+// the same trade arg.mjs documents for its `--`-prefixed values. Nothing here
+// passes one: board.mjs sends `String(pr)` off a numeric record, and every
+// documented invocation is `--pr <N>`. A caller wanting one now gets a refusal
+// rather than a wrong answer.
+if (!/^[0-9]+$/.test(pr)) die(`--pr needs a number, got ${pr}`);
+
 const base = arg("base") || "main";
 const workflow = arg("workflow") || "CI";
 // --declare-no-ci is the caller's opt-out, never inferred: without it, a repo
