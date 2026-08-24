@@ -11,7 +11,7 @@
 // validation shipped with no coverage at all.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync, spawn } from "node:child_process";
+import { spawnSync, spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "./board.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
+const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 
 // One assistant turn, enough for readAgent to bill an agent. The summation
 // shapes are board.test.mjs's business, not this file's.
@@ -30,7 +31,10 @@ const TURN = [
 // catches and degrades, so the board still builds and nothing here touches the
 // network or this repo's live issue list. Prepended to PATH rather than
 // replacing it, because gather() also shells out to `node`.
-function runBoard(sinceArgs) {
+// `ledgerFile` overrides the missing-ledger default the --spend-since and
+// --interval cases want: those die before the read matters, while the #807
+// case below needs a real one the read has to carry back whole.
+function runBoard(sinceArgs, ledgerFile) {
   const home = mkdtempSync(join(tmpdir(), "since-home-"));
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
   // is a symlink to /private/var, and the child's process.cwd() reports the
@@ -46,8 +50,14 @@ function runBoard(sinceArgs) {
   const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
   mkdirSync(sub, { recursive: true });
   writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...sinceArgs], {
+  return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
+    // This harness's own ceiling, not the subject's: a board built over a big
+    // ledger prints a board.json past spawnSync's default, and the default
+    // kills the child and reports `status: null` — which reads exactly like
+    // the subject crashing. Measured: without this the #807 case fails on the
+    // READER, with the fix under test working correctly.
+    maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
   });
 }
@@ -138,8 +148,8 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 //
 // Same reason this file exists at all (see header): the --spend-since guard
 // fires only AFTER gather()'s gh reads, and tryRun() (board.mjs) runs each
-// one through `execFileSync(cmd, args, { encoding: "utf8" })`. With no
-// `stdio` option that CAPTURES the child's stderr and re-emits it through
+// one through `execFileSync`, passing no `stdio` option. That CAPTURES the
+// child's stderr rather than inheriting it, and re-emits it through
 // board.mjs's OWN process.stderr — the child never touches an inherited
 // fd 2. So the write that has to clear the pipe before die() can land is
 // board.mjs's own, and on a pipe that is an async stream write: whatever is
@@ -258,4 +268,65 @@ test("every flag board.mjs accepts survives the unknown-flag sweep in one build"
   // carried this same line and there it WAS subsumed — dropped, not forgotten.
   assert.doesNotMatch(r.stderr, /unknown flag/);
   assert.equal(JSON.parse(r.stdout).interval, 42);
+});
+
+// ── #807: a ledger read big enough to hit node's default stdout cap ──────────
+//
+// `tryRun` runs every board read through `execFileSync`, and with no
+// `maxBuffer` node applies its default stdout cap and KILLS the child past it
+// rather than truncating. In `tryRun` that throw is indistinguishable from an
+// unreachable tool: the read degrades to `tryParse`'s empty ledger and the
+// cockpit renders a board with nothing on it at HTTP 200, one stderr line the
+// only trace. That is #246's own symptom — #803 moved the cliff up from the
+// pipe buffer rather than removing it.
+//
+// Pinned on the ACCEPT side, deliberately. Asserting the failure shape instead
+// would stay green on a board.mjs that refused the oversized read outright,
+// and a refusal is not the fix: the ledger grows for the life of a run, so the
+// read has to keep working, not fail more legibly.
+//
+// This file rather than board.test.mjs for the reason in the header: the read
+// happens inside gather(), which cannot be driven in-process, and the rig that
+// stubs `gh` out of the way already lives here.
+const OVERSIZED_ROWS = 4000;
+
+// The row shape `ledger.mjs row` actually writes, padded so the JSON payload
+// clears the cap. Padding rather than more rows keeps the fixture's cost in
+// bytes instead of in parse work. Every row gets its own key, so a read that
+// arrived short cannot satisfy the count assertions by coincidence.
+function oversizedLedger() {
+  const section = (kind) => Array.from(
+    { length: OVERSIZED_ROWS },
+    (_, i) => `- #${i} ${kind}-${i} · class=routine · ${"pad".padEnd(120, "x")}`,
+  ).join("\n");
+  return `# Fleet run ledger\n\n## Rows\n\n${section("impl")}\n\n## Filed\n\n${section("finding")}\n\n## Ruled\n\n${section("pr")}\n`;
+}
+
+test("build: a ledger read past node's default stdout cap arrives whole, not as an empty board", () => {
+  const dir = mkdtempSync(join(tmpdir(), "board-big-ledger-"));
+  const ledger = join(dir, "ledger.md");
+  writeFileSync(ledger, oversizedLedger());
+
+  // Calibration, not decoration. It proves THIS fixture still exercises the
+  // capped mode on the node running the suite, using the exact call shape
+  // board.mjs had before the fix. Without it, a fixture that drifted under the
+  // cap — or a node whose default rose above it — leaves everything below
+  // passing over a read that was never at risk, which is the vacuous green
+  // this test exists to refuse.
+  assert.throws(
+    () => execFileSync(process.execPath, [LEDGER, "--file", ledger, "read"], { encoding: "utf8" }),
+    (e) => e.code === "ENOBUFS",
+    "fixture no longer clears node's default stdout cap — enlarge it; the assertions below prove nothing without this",
+  );
+
+  const r = runBoard([], ledger);
+  assert.equal(r.status, 0, r.stderr);
+  const board = JSON.parse(r.stdout);
+  // Counts, not emptiness: `tickets: 0` is what the bug produced, but so is a
+  // read that came back with some rows and lost the rest.
+  assert.equal(board.tickets.length, OVERSIZED_ROWS, `tickets lost: ${r.stderr.slice(-300)}`);
+  assert.equal(board.filed.length, OVERSIZED_ROWS, `filed rows lost: ${r.stderr.slice(-300)}`);
+  // The read must not have been reported as failed either — the stub `gh`
+  // failures on the same stderr are expected and are not this read.
+  assert.doesNotMatch(r.stderr, /ledger\.mjs[^\n]*failed/);
 });
