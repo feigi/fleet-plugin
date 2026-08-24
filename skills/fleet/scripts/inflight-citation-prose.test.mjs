@@ -27,8 +27,7 @@ import { between, phrase } from "./prose-pin.mjs";
 // slice. Text spliced INSIDE the pinned clause reddens them; a whole new
 // sentence appended after one, carving out an exception, does not. Reflow stays
 // green by design — the words are pinned, not their layout.
-const REPO = join(import.meta.dirname, "..", "..", "..");
-const INFLIGHT = readFileSync(join(REPO, "skills", "fleet", "scripts", "inflight.sh"), "utf8");
+const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
 
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
 // with the comment gutter, not whitespace, at the break — `\s+` does not span a
@@ -37,9 +36,10 @@ const INFLIGHT = readFileSync(join(REPO, "skills", "fleet", "scripts", "inflight
 const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
 
 // Bounded at both ends, by the probe's own heading and by the function the
-// comment documents. inflight.sh names release-ticket.sh elsewhere, and an
-// unbounded slice would let one of those satisfy the positive pin, or trip the
-// negative one, with probe 3's clause untouched.
+// comment documents. inflight.sh names release-ticket.sh in other comments, on
+// both sides of this slice; none of them satisfies the positive pin or trips
+// the negative one today, and the bounds are what keep a future one from doing
+// either with probe 3's clause untouched.
 const probe3 = () =>
   stripHashGutter(
     between(INFLIGHT, "# Probe 3 — a local worktree or branch.", "probe_local() {", "inflight.sh"),
