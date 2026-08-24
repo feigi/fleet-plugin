@@ -71,10 +71,25 @@ function argInterval() {
   return n;
 }
 
+// Node's default stdout cap is 1 MiB and execFileSync THROWS (ENOBUFS) past it
+// rather than truncating (#807). Here that throw is indistinguishable from an
+// unreachable tool: the read degrades to the caller's empty default and the
+// cockpit is served a BLANK board at HTTP 200 with only a stderr line — the
+// #246 symptom, which #803 moved up from the pipe buffer rather than removed.
+// The ledger is append-mostly and shared by every fleet script, so the ceiling
+// arms itself over the life of a run and gives no second warning. Bounded, not
+// Infinity: a runaway child should still be stopped rather than allowed to
+// exhaust the box. Same headroom staleness.mjs takes, for the same reason.
+//
+// Both child reads in this file take it. `tryRun` is NOT the single funnel —
+// runCiState() spawns its own, because it needs the exit code that a plain
+// tryRun discards — so a fix applied only here would leave that one uncapped.
+const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
+
 // Every external read is wrapped: a failure returns null and the caller keeps a
 // last-known value. Partial board beats a crashed loop or a false alarm.
 function tryRun(cmd, args) {
-  try { return execFileSync(cmd, args, { encoding: "utf8" }); }
+  try { return execFileSync(cmd, args, READ_OPTS); }
   catch (e) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${e.message}`); return null; }
 }
 
@@ -104,7 +119,7 @@ function tryParse(json, fallback, what) {
 // question could not be answered, whatever the script printed while saying so.
 function runCiState(scriptDir, pr) {
   try {
-    return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], { encoding: "utf8" });
+    return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], READ_OPTS);
   } catch (e) {
     const out = e.stdout ? e.stdout.toString() : "";
     if (e.status !== 2 && out.trim()) return out;
