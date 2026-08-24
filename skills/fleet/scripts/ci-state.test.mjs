@@ -62,10 +62,13 @@ const RUN_VIEW = JSON.stringify({
 // unreadable: repo-relative files OR directories chmod'ed 0o000 for the run and
 // restored after, so a permission probe cannot leave an undeletable tmpdir.
 // cwd: repo-relative directory to run from, for the repo-root anchoring test.
+// pr: the `--pr` value, defaulting to the digits every other fixture wants;
+// `null` omits the flag entirely, for the tests that probe how the argument
+// itself is refused rather than what it selects.
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so the fixture has to be a real repo. No remote is added:
@@ -107,7 +110,7 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIE
   }
   let r;
   try {
-    r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
+    r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
   } finally {
     for (const [full, mode] of restore.reverse()) chmodSync(full, mode);
   }
@@ -685,4 +688,87 @@ test("the outage payload reports no CI state it could not observe", () => {
       `a probe that never read CI must not report \`${field}\`, and the payload reads ${JSON.stringify(r.payload)}`,
     );
   }
+});
+
+// --- #840: a non-numeric --pr must refuse, never ship an unnamed payload -----
+// `--pr` was validated for truthiness alone, so `--pr abc` reached both payload
+// sites. Each builds `pr: Number(pr)`, and `JSON.stringify(NaN)` is `null` — the
+// normal path shipped a payload with no identifying field at exit 0 under
+// `verdict: "green"`, the verdict the fleet gates on.
+//
+// The gh receipt below is the load-bearing assertion, not decoration. Exit 2, an
+// empty stdout and a matching stderr line are each reproducible by a LATER
+// guard: downgrade this one to a warning and the script runs on, gh fails, and
+// die() reproduces all three while the warning still sits in stderr. Only a
+// refusal reached BEFORE the first query can show gh was never asked, so the
+// receipt is what pins fatality and the other three merely describe the refusal.
+//
+// `prView: null` is what keeps that argument true, and is not tidiness. Under
+// the green fixture the downgraded guard reaches a gh that ANSWERS, so the run
+// gets further than the refusal it is being compared against and diverges on
+// its exit code first — the assertion that reds is the status one, and the
+// receipt is never what caught it. A gh that fails when reached is what makes
+// exit 2, an empty stdout and a matching stderr line reproducible by the later
+// guard too, leaving the receipt as the only assertion that separates them.
+//
+// The stub also keeps a regressed guard off this repo's live GitHub data —
+// arg.test.mjs's own stubGhBin() gives the same two jobs, for the same shape of
+// guard.
+test("a non-numeric --pr refuses before any query, rather than reporting `pr: null`", () => {
+  const r = run([], { pr: "abc", prView: null });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /--pr needs a number/);
+  assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
+  assert.equal(r.log, "", `the refusal must land before the first gh read, and gh was asked: ${r.log}`);
+});
+
+// Both anchors, separately. A guard that loses `$` still matches "42x" on its
+// digit prefix, and one that loses `^` still matches "x42" on its digit suffix,
+// so each value refuses only while its own anchor is present and neither mutant
+// survives the pair. What a surviving mutant lets through is this block's whole
+// defect back: Number("42x") is NaN, the payload's only identifying field
+// serializes to null, and `gh pr view 42x` resolves the value as a BRANCH — the
+// ambiguity the digits-only shape is chosen to forfeit against. Every other
+// --pr this suite feeds the guard is all digits or none, and both mutants agree
+// with the real guard on those.
+for (const pr of ["42x", "x42"]) {
+  test(`a --pr mixing digits with non-digits refuses as \`abc\` does: ${pr}`, () => {
+    const r = run([], { pr, prView: null });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /--pr needs a number/);
+    assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
+    assert.equal(r.log, "", `the refusal must land before the first gh read, and gh was asked: ${r.log}`);
+  });
+}
+
+// The direction a new guard gets wrong on its own: what it wrongly REFUSES. A
+// suite that only feeds it invalid input pins nothing about the callers it must
+// keep working. board.mjs's runCiState() sends `String(pr)` off a numeric board
+// record, which is exactly the digits this harness defaults to — so a guard
+// tightened past them refuses a working invocation, the outcome #365's own AC
+// calls worse than the bug being fixed.
+//
+// assert/strict pins the TYPE as well as the value: `pr` reading back as the
+// string "42" would satisfy a loose check while breaking every consumer that
+// keys on a number, and reading back as `null` is the defect itself. Nothing
+// else covers the normal-path payload's `pr` — the sibling assertion in the
+// quota section covers the outage payload's.
+test("the numeric shape board.mjs sends is accepted, and the payload names its PR", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.pr, 42);
+});
+
+// What the new guard's PLACEMENT could newly break. It sits below the usage die
+// on purpose: RegExp.test coerces a null argument to the string "null", so a
+// guard merged into that die — or hoisted above it — answers an omitted --pr
+// with a complaint about a number and never prints the usage line at all. Both
+// spellings exit 2, so the exit code cannot tell them apart.
+test("--pr omitted still answers with the usage line, not the numeric complaint", () => {
+  const r = run([], { pr: null, prView: null });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: ci-state\.mjs --pr <number>/);
+  assert.doesNotMatch(r.stderr, /needs a number/, "an omitted --pr is a different mistake from a malformed one");
+  assert.equal(r.log, "", `a usage refusal must also precede any gh read, and gh was asked: ${r.log}`);
 });
