@@ -62,10 +62,13 @@ const RUN_VIEW = JSON.stringify({
 // unreadable: repo-relative files OR directories chmod'ed 0o000 for the run and
 // restored after, so a permission probe cannot leave an undeletable tmpdir.
 // cwd: repo-relative directory to run from, for the repo-root anchoring test.
+// pr: the `--pr` value, defaulting to the digits every other fixture wants;
+// `null` omits the flag entirely, for the tests that probe how the argument
+// itself is refused rather than what it selects.
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so the fixture has to be a real repo. No remote is added:
@@ -107,7 +110,7 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", prView = PR_VIE
   }
   let r;
   try {
-    r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
+    r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
   } finally {
     for (const [full, mode] of restore.reverse()) chmodSync(full, mode);
   }
@@ -700,35 +703,48 @@ test("the outage payload reports no CI state it could not observe", () => {
 // refusal reached BEFORE the first query can show gh was never asked, so the
 // receipt is what pins fatality and the other three merely describe the refusal.
 //
-// The stub also keeps a regressed guard off this repo's live GitHub data, the
-// second job arg.test.mjs's own stubGhBin() gives for the same shape.
-function runWithGhReceipt(args) {
-  const dir = mkdtempSync(join(tmpdir(), "ci-state-pr-guard-"));
-  const ghLog = join(dir, "gh.log");
-  writeFileSync(ghLog, "");
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> ${ghLog}\nexit 1\n`, { mode: 0o755 });
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
-  });
-  const log = readFileSync(ghLog, "utf8");
-  rmSync(dir, { recursive: true, force: true });
-  return { ...r, log };
-}
-
+// `prView: null` is what keeps that argument true, and is not tidiness. Under
+// the green fixture the downgraded guard reaches a gh that ANSWERS, so the run
+// gets further than the refusal it is being compared against and diverges on
+// its exit code first — the assertion that reds is the status one, and the
+// receipt is never what caught it. A gh that fails when reached is what makes
+// exit 2, an empty stdout and a matching stderr line reproducible by the later
+// guard too, leaving the receipt as the only assertion that separates them.
+//
+// The stub also keeps a regressed guard off this repo's live GitHub data —
+// arg.test.mjs's own stubGhBin() gives the same two jobs, for the same shape of
+// guard.
 test("a non-numeric --pr refuses before any query, rather than reporting `pr: null`", () => {
-  const r = runWithGhReceipt(["--pr", "abc"]);
+  const r = run([], { pr: "abc", prView: null });
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /--pr needs a number/);
   assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
   assert.equal(r.log, "", `the refusal must land before the first gh read, and gh was asked: ${r.log}`);
 });
 
+// Both anchors, separately. A guard that loses `$` still matches "42x" on its
+// digit prefix, and one that loses `^` still matches "x42" on its digit suffix,
+// so each value refuses only while its own anchor is present and neither mutant
+// survives the pair. What a surviving mutant lets through is this block's whole
+// defect back: Number("42x") is NaN, the payload's only identifying field
+// serializes to null, and `gh pr view 42x` resolves the value as a BRANCH — the
+// ambiguity the digits-only shape is chosen to forfeit against. Every other
+// --pr this suite feeds the guard is all digits or none, and both mutants agree
+// with the real guard on those.
+for (const pr of ["42x", "x42"]) {
+  test(`a --pr mixing digits with non-digits refuses as \`abc\` does: ${pr}`, () => {
+    const r = run([], { pr, prView: null });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /--pr needs a number/);
+    assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
+    assert.equal(r.log, "", `the refusal must land before the first gh read, and gh was asked: ${r.log}`);
+  });
+}
+
 // The direction a new guard gets wrong on its own: what it wrongly REFUSES. A
 // suite that only feeds it invalid input pins nothing about the callers it must
 // keep working. board.mjs's runCiState() sends `String(pr)` off a numeric board
-// record, which is exactly the digits this harness prepends — so a guard
+// record, which is exactly the digits this harness defaults to — so a guard
 // tightened past them refuses a working invocation, the outcome #365's own AC
 // calls worse than the bug being fixed.
 //
@@ -750,7 +766,7 @@ test("the numeric shape board.mjs sends is accepted, and the payload names its P
 // with a complaint about a number and never prints the usage line at all. Both
 // spellings exit 2, so the exit code cannot tell them apart.
 test("--pr omitted still answers with the usage line, not the numeric complaint", () => {
-  const r = runWithGhReceipt([]);
+  const r = run([], { pr: null, prView: null });
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /usage: ci-state\.mjs --pr <number>/);
   assert.doesNotMatch(r.stderr, /needs a number/, "an omitted --pr is a different mistake from a malformed one");
