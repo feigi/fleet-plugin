@@ -475,11 +475,16 @@ its terminal exit now falls through like the four above, but its ALREADY FILED
 exit still cuts its payload mid-branch (#808) — the exit code survives there,
 so gate on the code and do not trust that payload.
 
-The consumer side no longer adds a cliff of its own. `board.mjs` reads
+The consumer side raised its cliff rather than removing it. `board.mjs` reads
 `ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's
 default is carried rather than killed mid-flight and reported as an
 unreachable tool — which is how the blind cockpit came back at HTTP 200 even
-after the pipe cut was gone (#807).
+after the pipe cut was gone (#807). That cap is deliberately bounded, so a
+payload past it lands in the same blind cockpit — and so does a ledger that
+cannot be read at all, at any size. The read fails open to an empty ledger and
+`board.json` carries no field saying so, while `spend` in the same payload does
+carry its own error (#874). Zeroes on the cockpit are not yet proof the
+pipeline is idle.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 refill is level-triggered, so there are no implementer waves. **Append one row to
