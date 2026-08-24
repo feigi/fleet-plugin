@@ -433,9 +433,9 @@ probe_remote || :
 # admin dir, and both lookups below report nothing, at rc 0, for a ticket that
 # has a live branch or worktree — the same wrong "free" #76 exists to rule out,
 # one probe down. Establish each storage was readable before trusting an empty
-# result from it — the same rule release-ticket.sh:73 already applies to its
-# own worktree-registry read (#84) — absence must be established, never
-# inferred.
+# result from it — the same rule release-ticket.sh's `-r`/`-x` guard on
+# `$wtroot` already applies to its own worktree-registry read (#84) — absence
+# must be established, never inferred.
 #
 # Ceiling, left open on purpose: a single loose ref git skips as corrupt
 # (`warning: ignoring broken ref refs/heads/x`, still rc 0) passes a
