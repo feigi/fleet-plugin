@@ -162,18 +162,19 @@ if (!pr) {
   );
 }
 // #840: `pr` was validated for truthiness alone, so `--pr abc` survived to
-// both payload sites — each builds `pr: Number(pr)`, and `JSON.stringify(NaN)`
-// is `null`. The normal path is the worse of the two: an unidentifiable payload
+// every payload site — each builds `pr: Number(pr)`, and `JSON.stringify(NaN)`
+// is `null`. The normal path is the worse of them: an unidentifiable payload
 // at exit 0 with `verdict: "green"`, which is the verdict the fleet gates on.
 // `pr` is that payload's only identifying field, and the fleet polls this
 // script for several PRs at once — so a null there is not a cosmetic gap, it is
 // a report that cannot be attributed to the PR it answered for.
 //
-// Refused here rather than repaired at the two payload sites: one guard covers
-// both, and it lands before the first gh read instead of after a real query
-// answered for a PR nobody named. Reaching gh at all is the other harm — `gh pr
-// view` resolves a non-numeric ref as a BRANCH, so `--pr abc` could return a
-// genuine verdict for whatever PR that branch belongs to.
+// Refused here rather than repaired at each payload site: one guard covers
+// every one of them, and it lands before the first gh read rather than
+// after a real query answered for a PR nobody named. Reaching gh at all is
+// the other harm — `gh pr view` resolves a non-numeric ref as a BRANCH, so
+// `--pr abc` could return a genuine verdict for whatever PR that branch
+// belongs to.
 //
 // BELOW the usage die above, never merged into it: absent and malformed are
 // different mistakes, and test() coerces a null argument to the string "null" —
