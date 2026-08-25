@@ -238,6 +238,41 @@ test("a fetch that succeeds but leaves origin/<branch> unresolvable is exit 2 at
   assert.doesNotMatch(stderr, /cannot fetch/, "the fetch passed — this is the guard after it");
 });
 
+test("a rev-parse that cannot resolve origin/<branch> is fatal — the script stops rather than answering off an empty tip", (t) => {
+  // #580, the defect #574 fixed one guard up. The case above asserts exit 2, no
+  // JSON, this guard's own message and git's cause — and every one of those
+  // survives downgrading this guard's `die` to a warning. With it advisory `tip`
+  // is empty, the script runs ON, and the `cat-file -e` guard below kills it:
+  // exit 2 again, no stdout again, and this guard's own line still sitting on
+  // stderr. Measured — the whole suite stayed green under that mutant, so no
+  // conjunction of those three can see whether this guard was fatal.
+  //
+  // What only fatality produces is the absence of progress. The `tip =` trace is
+  // echoed on the line after this guard, so it appears if and only if execution
+  // got past it, and it is pinned verbatim by "a healthy run stays quiet", so it
+  // cannot be reworded out from under this assertion unseen. git's own `ambiguous
+  // argument` is the other bracket: it proves rev-parse ran and failed HERE,
+  // rather than this test passing off an earlier guard that stopped the script
+  // before it. Neither bracket names a `die` string, so rewording any guard's
+  // message — this one included — leaves both standing.
+  const w = repo(t);
+  // The fixture of the case above: with no refspec configured the fetch still
+  // succeeds, into FETCH_HEAD, so deleting the tracking ref leaves this guard to
+  // fire while the one before it passes.
+  git(w, "config", "--unset", "remote.origin.fetch");
+  git(w, "update-ref", "-d", "refs/remotes/origin/main");
+
+  const { code, json, stderr } = verify(w, "main", "0".repeat(40));
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /ambiguous argument 'origin\/main'/, "rev-parse ran and failed here, not some earlier guard");
+  assert.doesNotMatch(
+    stderr,
+    /origin\/main tip =/,
+    "a ref that does not resolve must stop the script, not warn and carry an empty tip onward",
+  );
+});
+
 test("an object that is present but is not a commit is not reported as absent", (t) => {
   const w = repo(t);
   const tree = git(w, "rev-parse", "HEAD^{tree}");
@@ -249,6 +284,61 @@ test("an object that is present but is not a commit is not reported as absent", 
   // repository". It is in this repository — git reads it and reports its real
   // type, which is the half the guard was throwing away.
   assert.match(stderr, /dereferences to tree type/, "git's own diagnosis must survive to stderr");
+});
+
+test("a sha the cat-file guard rejects is fatal — the script stops rather than asking merge-base about it", (t) => {
+  // #580's second site, and the one where the #574 remedy does not transcribe.
+  // The guards around this one each have a progress marker on the line below
+  // them; this one has none. The script emits nothing between it and the
+  // merge-base status guard, and on both fixtures its two sibling cases use — 40
+  // zeros, and a tree object — merge-base cannot resolve the object either, so
+  // it exits 128 and that status guard kills the run. Measured: exit 2, empty
+  // stdout and this guard's own line on stderr, all reproduced, and the suite
+  // stayed green under the mutant. Neither `reachable` echo is ever reached, so
+  // there is no marker here whose absence could be asserted.
+  //
+  // This fixture therefore removes the mask rather than looking for a marker
+  // that is not there. `git cat-file` is shimmed to fail — standing in for the
+  // unreadable object store this guard's own comment names as one of the things
+  // it fires on — and every other git call is real. `$sha` is a genuinely
+  // reachable commit, so with the guard downgraded merge-base answers normally
+  // and the script runs to completion, printing `reachable:true` at exit 0. The
+  // downgrade does not take a different route to exit 2; it returns the WRONG
+  // ANSWER, which is why the exit code and the payload are pinned here too.
+  const w = repo(t);
+  const head = commit(w, "work that really landed");
+  git(w, "push", "-q", "origin", "main");
+
+  const bin = mkdtempSync(join(tmpdir(), "verify-sha-catfile-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  // Resolved out here, where PATH is still the real one, and quoted at the exec,
+  // for the reasons the merge-base shim above records at length.
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n[ "$1" = cat-file ] && { echo "error: unable to read object" >&2; exit 1; }\nexec "${REAL_GIT}" "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = verify(w, "main", head, {
+    ...ENV,
+    PATH: `${bin}:${ENV.PATH ?? process.env.PATH}`,
+  });
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  // The positive control, and this test needs one: shimming `git` wholesale
+  // could break the fetch instead, and a run that died two guards earlier gives
+  // exit 2 with an empty stdout just the same — this test would pass while
+  // measuring nothing. The `tip =` trace sits between the two, so it proves
+  // execution reached THIS guard, and the shim's own line proves cat-file is
+  // what failed. Both are pinned elsewhere: the trace verbatim by "a healthy run
+  // stays quiet", the shim's line by the shim right here.
+  assert.match(stderr, /origin\/main tip =/, "the fetch and the rev-parse guard both passed — this is the guard after them");
+  assert.match(stderr, /unable to read object/, "cat-file ran and failed, which is the failure under test");
+  assert.doesNotMatch(
+    stderr,
+    /IS reachable on origin\/main/,
+    "a sha this guard could not resolve must stop the script, not warn and then report it as reachable",
+  );
 });
 
 test("a healthy run stays quiet — the unmuted guards add nothing to stderr", (t) => {
