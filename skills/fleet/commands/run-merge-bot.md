@@ -157,6 +157,8 @@ For each labeled PR clearing the hold rule, lowest first:
 
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
+   **`--merge` (no-ff) is load-bearing, not stylistic — and do not let a content claim reach you worded as a graph-shape one.** It always writes a **two-parent** merge commit, even where the branch is trivially fast-forwardable, and step 5's proof *requires* that: `prove-merge.sh` dies at `has no second parent — not a merge commit` and exits **2** on a single-parent merge. Exit 2 is "could not evaluate the claim at all", not "the claim is false" — so a real fast-forward leaves you with no proof to report and a halt, not a failed proof. Measured on #908: a controller brief predicted "the merge will be a fast-forward", and the merge tree *was* byte-identical to the reviewed head (`988f29d1`, `git diff <pin> <merge>` empty) — but the commit still had two parents, which is the only reason the proof was available. "The merge adds nothing" is a statement about content; **never write it as "fast-forward", which is a statement about shape, and which would have broken step 5.**
+
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
 
    ```bash
