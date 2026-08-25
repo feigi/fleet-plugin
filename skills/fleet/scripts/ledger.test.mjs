@@ -235,14 +235,22 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the pair below pins each rule where the other
-// cannot cover for it. Same-size sets are where the two rules come apart, and
-// the tests above reach that case only through rows built for other purposes.
+// least four tokens — and the equal-set acceptance below the floor and the
+// acceptance at the floor are what pin those rules, each sitting where the
+// other rule cannot account for the outcome. Same-size sets are where the two
+// rules come apart, and the tests above reach that case only through rows
+// built for other purposes.
 //
-// A same-size match is deliberately NOT pinned here: it satisfies both rules
-// at once, so no single-rule mutation can red it and it discriminates
-// nothing. The refusal below is the same-size case worth pinning, and an
-// equal set under the floor is the acceptance only one rule can explain.
+// Two tests share this fence without pinning either rule. The same-size
+// refusal runs four tokens against four, so both size rules pass and only the
+// subset conjunct refuses it — that conjunct is what it pins, and it is the
+// same-size case worth pinning. The empty-subject usage failure dies before
+// isMatch is reached, so it reaches neither rule.
+//
+// A same-size match at or above the floor is deliberately NOT pinned here: it
+// satisfies both rules at once, so no single-rule mutation can red it and it
+// discriminates nothing. An equal set under the floor is an acceptance only
+// one rule can explain.
 // ---------------------------------------------------------------------------
 
 test("a same-size four-token near-miss differing in one token is not a match (#888)", () => {
@@ -265,10 +273,66 @@ test("equal token sets match below the subset floor — the floor gates the subs
   assert.match(r.json.match, /^#902 /);
 });
 
+test("a strict subset exactly at the subset floor is a match — the floor is pinned from above (#899)", () => {
+  // The floor is a lower bound, so the refusal beneath it anchors one side
+  // only: raise the floor and matches quietly stop happening. That is the
+  // direction `check` is deliberately biased toward — a duplicate someone
+  // closes rather than a finding silently lost — which is exactly why a
+  // raised floor disturbs nothing else here. Acceptance AT the floor is the
+  // observation that notices, and it has to be a STRICT subset: an equal pair
+  // qualifies under the equal-size rule as well, so the floor would no longer
+  // be what decides and the mutation would have nothing to move.
+  //
+  // Plain words, no punctuation, on both sides. The subject's token count is
+  // the whole subject of this pin, so it must not shift when norm() changes
+  // how it folds punctuation — otherwise this reds for a reason it does not
+  // name. A match also returns before the tracker query is built, so nothing
+  // in term selection or the near-miss scoring can reach this either.
+  const r = run("quorum lease drains retry", {
+    filed: ["#903 retry budget drains the shared quorum lease"],
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.json.found, true);
+  assert.match(r.json.match, /^#903 /);
+});
+
 test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
   const r = run("— — —", { filed: [FILED_114] });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /normalised subject is empty/);
+});
+
+// ---------------------------------------------------------------------------
+// Direction normalisation (#899 review). isMatch() orders the pair by size
+// before either acceptance rule reads it, so both rules always measure the
+// smaller set. Hardcoding the ordering away leaves the rest of this file
+// green because no other fixture reaches a match through the mirror
+// orientation — not because of how their sizes happen to fall.
+// ---------------------------------------------------------------------------
+
+test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the floor measures", () => {
+  // Dropping the ordering — hardcoding the pair as (subject, filed) so the
+  // checked subject is always taken as the smaller set — leaves every other
+  // fixture in this file green. This fixture is the mirror orientation, where
+  // the FILED row is the smaller set. Other fixtures build that orientation
+  // too, but none of them reaches a match through it, so the ordering never
+  // decides their answer — this is the first fixture where it does.
+  //
+  // Sized clear of the floor deliberately. At exactly four tokens a raised
+  // floor reds this too, and it would then be pinning the boundary a
+  // neighbouring test already owns rather than the ordering. Clear of the
+  // floor, the ordering moves it — so does disabling the `#NNN` strip, which
+  // decides whether the filed row can be a subset at all, not which of the
+  // two sets is the smaller one.
+  //
+  // Plain words on both sides, as the token counts are load-bearing and must
+  // not shift when norm() changes how it folds punctuation.
+  const r = run("the retry budget drains the shared quorum lease under sustained load", {
+    filed: ["#904 retry budget drains quorum lease"],
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.json.found, true);
+  assert.match(r.json.match, /^#904 /);
 });
 
 // ---------------------------------------------------------------------------
