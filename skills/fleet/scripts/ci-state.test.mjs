@@ -489,6 +489,32 @@ test("PR info missing headRefOid: exit 2 naming the field, never a silent \"unde
   assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
 });
 
+// Each identifying field is guarded on its type AND on its emptiness, and
+// neither clause is reachable through the other: an empty string satisfies the
+// type check, a number satisfies the emptiness check. The sibling above feeds
+// an ABSENT field, which both clauses refuse at once — so it pins neither.
+// What a lost clause costs is the field flowing on: `branch` becomes the empty
+// string or a number and `gh run list --branch` asks for the wrong branch,
+// while `prHead` becomes a value no run's headSha can equal, which reads as
+// the superseded-SHA case rather than as a reply that could not be trusted.
+for (const [what, field, headRefName, headRefOid] of [
+  ["an empty branch name", "headRefName", "", PR_HEAD],
+  ["a non-string branch name", "headRefName", 42, PR_HEAD],
+  ["an empty head sha", "headRefOid", BRANCH, ""],
+  ["a non-string head sha", "headRefOid", BRANCH, 42],
+]) {
+  test(`PR info carrying ${what}: exit 2 naming the field, never a verdict built on it`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      prView: JSON.stringify({ headRefName, headRefOid, state: "OPEN", mergeStateStatus: "CLEAN" }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /pr view/);
+    assert.match(r.stderr, new RegExp(field));
+    assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
+  });
+}
+
 test("run list returns an error object, not an array: exit 2, never the crash from runs.filter", () => {
   // The ticket's own reproduction: gh exits 0 printing an error body where
   // --json databaseId,headSha,... normally produces an array.
@@ -532,6 +558,27 @@ test("a job entry in the run view is null: exit 2, never the crash reading j.nam
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /job entry 0 is not an object/);
 });
+
+// isObject is the whole refusal at the row and job level, so each of its
+// clauses is load-bearing alone. Every malformed row and job fixture elsewhere
+// in this file is `null`, which the null clause already refuses on its own —
+// an array and a scalar are what separate the other two from decoration. Both
+// degrade quietly rather than crashing, which is why they need pinning: an
+// array job yields `undefined` for every field read off it, and a scalar the
+// same, so the run reports jobs it never saw instead of refusing the reply.
+for (const [what, entry] of [
+  ["an array", []],
+  ["a scalar", "check"],
+]) {
+  test(`a job entry that is ${what}: exit 2, never read as a job with no fields`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      runView: JSON.stringify({ jobs: [entry], attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /job entry 0 is not an object/);
+  });
+}
 
 // The false-positive class the guard must NOT create: an in-progress job's
 // `conclusion` is legitimately `null`, not a missing/wrong-shaped field. If
