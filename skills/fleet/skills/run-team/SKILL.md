@@ -706,6 +706,14 @@ multi-select**, and **a judgement the evidence cannot settle**.
   member will touch that PR, so no push is coming and nothing will wake you.
 - **Reviewer labels a PR** → merge-bot wave.
 - **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
+  **But the finisher that applied the label may still be live on that worktree,
+  and the wave's first act on a behind PR is a rebase** — which is destructive to
+  a worktree someone is in, the same hazard the reaping rule names. The label
+  lands at duty 3 and the finisher's report is duty 4, so the gap is the normal
+  case, not a rarity — the duty order produces it, not luck. Wait for that
+  report before dispatching the bot. Waiting is nearly free — a PR already
+  labelled is not blocking anything, and its behind-count is expired on arrival
+  either way.
 - **Merge-bot wave reports done** → reap merged branches and worktrees (below),
   then run the reconcile (below).
 - **The run ends, or the maintainer says drain** → release every claim that never
@@ -1046,8 +1054,20 @@ nothing leaves it no gate at all.
 > steps that point at it are the ones you skip.
 >
 > The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
-> `skipped` off a non-zero behind-count, is staleness and not a failure. Never
-> rebase to clear it.
+> `skipped`, **solely** off a non-zero behind-count, is staleness and not a
+> failure. Never rebase to clear it. **`solely` is the load-bearing word:**
+> `ci.yml`'s `rebase-check` exits 1 on five conditions and only one is
+> staleness, so a non-zero behind-count does not by itself settle which fired.
+> The job log names the condition — and because the staleness condition exits
+> before the merge-commit condition is evaluated, the log is silent on that one
+> by construction, so measure it separately with
+> `git fetch origin && git rev-list --merges --count "origin/<base>..HEAD"` —
+> keep the fetch, or a stale local `origin/<base>` widens the range over the
+> base's own merge commits and reports a merge commit this branch never added.
+> A non-zero count does not send you to a local rebase either: the merge bot's
+> step-1 `gh pr update-branch --rebase` drops merge commits too
+> (`run-merge-bot.md` step 1), so both conditions clear on that one server-side
+> rebase. What it buys you is knowing the red was never solely staleness.
 >
 > **Run `<testCmd>` from the worktree before committing**, copied verbatim.
 > `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
@@ -1101,7 +1121,9 @@ above carries the report-last rule; you do not have to restate it. When the
 diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
-fine) — or `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
+fine — **solely** off that count, which is a condition to establish rather than
+infer, see the five-condition note in the fix-applier block above) — or
+`ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
