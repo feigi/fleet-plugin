@@ -154,6 +154,17 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
   // stays green when only the loop body is reverted. Measured: it did.
   assert.match(step1(), /\n\s+post=\$\(git ls-remote origin "\$ref" \| cut -f1\)/);
   assert.match(step1(), /\*\*Poll `git ls-remote`, not `gh pr view headRefOid`\*\*/);
+  // The DETECTOR, not just the fix. Both prose rules above describe a `pr_head`
+  // field the printf has to actually emit, so deleting it leaves the doc
+  // describing a field it no longer prints. Measured: with only the two asserts
+  // above, deleting the printf field left this file 15/15 and the suite
+  // 1155/1155, byte-identical to baseline. Bare /pr_head/ and /headRefOid/
+  // matches were measured green on that same mutant too — `headRefOid` survives
+  // in the headline and in "Keep the `headRefOid` read", and `pr_head` in the
+  // desync verdict and the `<pr_head>` ancestry command — so both are anchored
+  // to their own line here.
+  assert.match(step1(), /\n\s+printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\\n%s\\n'/);
+  assert.match(step1(), /\n\s+"\$\(gh pr view <pr> --json headRefOid -q \.headRefOid\)" "\$out"/);
 });
 
 // #903's expensive half. Close-and-reopen is the usual remedy for a desynced PR
@@ -177,7 +188,10 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 test("step 4 says why --merge is load-bearing, not merely which flag to type", () => {
   assert.match(step4(), /\*\*`--merge` \(no-ff\) is load-bearing, not stylistic/);
   assert.match(step4(), /has no second parent — not a merge commit/);
-  assert.match(step4(), /exits \*\*2\*\*/);
+  // pins the VALUE, not the markdown around it: a cosmetic reflow dropping the
+  // bold must not red a correct document. Still discriminating — measured,
+  // `exits **1**` reds this assert both with and without the bold.
+  assert.match(step4(), /exits\s+\**2\**/);
 });
 
 test("step 4 expects the fallback path to disprove, not to silently count as proved", () => {
