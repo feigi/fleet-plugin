@@ -393,33 +393,41 @@ test("the refuter prompt interpolates the same read rules", () => {
 // The names are DERIVED from the source rather than listed here. A hardcoded
 // list protects a function only if someone remembered to add its name, and
 // twice nobody did: #140 shipped with `snapshotMissing` absent from it, and
-// #653 found every function `review-pr-unrun.test.mjs` and
-// `review-pr-testcmd.test.mjs` lift still absent long after those files were
-// written. Deriving covers the next function added to review-pr.js on arrival.
+// #653 found the list had frozen at exactly the names lifted by the two files
+// that wrote it — this one and review-pr-snapshot-path.test.mjs. Every function
+// a LATER lift file came to depend on was unguarded, so a duplicate placed
+// after the real declaration stayed invisible to the very file lifting it.
+// Deriving covers the next top-level `function` on arrival, in each form one
+// can be written in here: `async`, a generator star, any spacing around the
+// name. Not `export function` — review-pr.js compiles as a function body inside
+// the harness VM, so a second `export` is a syntax error rather than a silent
+// rebind, and the parse test at the bottom of this file is what reds on it.
 //
 // Top-level `function` only. The values other files lift with a `const` regex
-// — `DEFAULT_DIMENSIONS`, `verifiersFor` — are excluded because they cannot
-// carry this bug: a second `const` of the same name in the same scope is a
-// SyntaxError rather than a silent rebind, so it can never hoist past the real
-// one, and the parse test at the bottom of this file is what catches it.
+// — `DEFAULT_DIMENSIONS`, `verifiersFor` — are excluded for the same reason: a
+// second `const` of the same name in the same scope is a SyntaxError, so it can
+// never hoist past the real one, and that same parse test catches it.
 //
-// Known ceiling: a string literal whose content begins at column 0 with
-// `function name(` would be counted as a declaration. Nothing in review-pr.js
-// does that today — the derivation returns the same set as a bare
-// `grep -c "^function "` — and narrowing it further would cost the property
-// that an unnamed new function is covered automatically.
+// Known ceiling: the `^` anchor is the whole mechanism, so a string literal
+// whose content begins a line with a declaration is counted as one. Whole-line
+// comments cannot reach here, since `CODE` is stripped, but a template
+// literal's interior is real text. Nothing in review-pr.js puts a declaration
+// at the start of a line inside one today, and narrowing further would cost the
+// property that a function nobody thought to list is covered anyway.
 function topLevelFunctionNames(code) {
-  return [...code.matchAll(/^function (\w+)\(/gm)].map((m) => m[1]);
+  return [...code.matchAll(/^(?:async[ \t]+)?function[ \t*]+(\w+)[ \t]*\(/gm)].map((m) => m[1]);
 }
 
 test("each function is declared exactly once at top level", () => {
   const names = topLevelFunctionNames(CODE);
-  // Without this the test is vacuous on a restructure that matches nothing:
-  // `matchAll` yields an empty list rather than throwing, so the loop below
-  // would pass without inspecting a single declaration. Deliberately a
-  // non-emptiness check and not a count — the lift helpers above already fail
-  // by name when the function they need is gone, and a pinned total would go
-  // stale on the next function added.
+  // A floor, not a count. `matchAll` yields an empty list rather than throwing,
+  // so with nothing here the loop below would inspect no declaration and still
+  // pass. It is a backstop rather than this file's first line of defence — the
+  // module-scope lifts above name the functions they need and throw before any
+  // test registers, so a derivation gutted today reds there first and louder.
+  // A pinned total was rejected on purpose: the count has only ever grown, and
+  // a `>=` decays silently as it does — the hardcoded-list failure above
+  // wearing a different operator.
   assert.ok(
     names.length > 0,
     "no top-level function declarations found in review-pr.js — this guard is not looking at anything",
