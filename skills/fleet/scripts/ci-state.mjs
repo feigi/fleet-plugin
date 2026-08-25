@@ -414,9 +414,6 @@ function expectedJobs(file) {
   return ids;
 }
 
-const expected = noCi ? [] : expectedJobs(workflowFile);
-if (!noCi) vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
-
 // --- Find the run bound to this head --------------------------------------
 // `--limit 1` is wrong: the newest run on a branch is frequently a label or
 // policy workflow, which hides the CI result entirely. Filter by workflow, then
@@ -441,6 +438,12 @@ if (noCi) {
       : `no workflows configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
   );
 } else {
+  // Derived here rather than above the no-ci fork: `expected` is read on this
+  // arm alone, and the payload carries `missing`, not `expected`. Kept as this
+  // arm's first statement — expectedJobs() refuses on an underivable workflow,
+  // and that refusal belongs before the run query rather than after it.
+  const expected = expectedJobs(workflowFile);
+  vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
   const runs = runJson(
     "gh",
     ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt"],

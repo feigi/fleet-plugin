@@ -63,18 +63,21 @@ const RUN_VIEW = JSON.stringify({
 // unreadable: repo-relative files OR directories chmod'ed 0o000 for the run and
 // restored after, so a permission probe cannot leave an undeletable tmpdir.
 // cwd: repo-relative directory to run from, for the repo-root anchoring test.
+// git: `false` leaves the fixture outside any repo, for the routes that have to
+// answer without a repo root.
 // pr: the `--pr` value, defaulting to the digits every other fixture wants;
 // `null` omits the flag entirely, for the tests that probe how the argument
 // itself is refused rather than what it selects.
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, git = true } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
-  // never the cwd, so the fixture has to be a real repo. No remote is added:
-  // the behind-count block still degrades to null as before.
-  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
+  // never the cwd, so a fixture that reaches discovery has to be a real repo.
+  // No remote is added: the behind-count block still degrades to null as
+  // before.
+  if (git) spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
   const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
   for (const [rel, content] of Object.entries(repoFiles)) {
     const full = join(repoDir, rel);
@@ -204,78 +207,35 @@ test("two workflow files share the target name: ambiguous, dies (exit 2) rather 
   assert.match(r.stderr, /pass --workflow-file to pick one/);
 });
 
-test("explicit --workflow-file bypasses discovery; an unreadable target still dies with exit 2 (unchanged)", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every file");
-  const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
-  const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
-  const wfDir = join(repoDir, ".github", "workflows");
-  mkdirSync(wfDir, { recursive: true });
-  const wf = join(wfDir, "ci.yml");
-  writeFileSync(wf, CI_WORKFLOW);
-  chmodSync(wf, 0o000);
-  const gh = join(binDir, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
-  const ghLog = join(binDir, "gh.log");
-  writeFileSync(ghLog, "");
-  const prViewFile = join(binDir, "pr-view.json");
-  writeFileSync(prViewFile, PR_VIEW);
-  const env = {
-    ...process.env,
-    PATH: `${binDir}:${process.env.PATH}`,
-    GH_LOG: ghLog,
-    PR_VIEW_FILE: prViewFile,
-    RUN_LIST_FILE: "",
-    RUN_VIEW_FILE: "",
-  };
-  try {
-    const r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", "--workflow-file", wf], { cwd: repoDir, encoding: "utf8", env });
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /cannot read/);
-  } finally {
-    chmodSync(wf, 0o644);
-    rmSync(repoDir, { recursive: true, force: true });
-    rmSync(binDir, { recursive: true, force: true });
-  }
-});
-
-test("discovery-time unreadable candidate fails closed (exit 2) instead of reading as no-ci", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every file");
-  const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
-  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" }); // discovery anchors on the repo root
-  const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
-  const wfDir = join(repoDir, ".github", "workflows");
-  mkdirSync(wfDir, { recursive: true });
-  const wf = join(wfDir, "ci.yml"); // matches the default --workflow "CI" by name, if readable
-  writeFileSync(wf, CI_WORKFLOW);
-  chmodSync(wf, 0o000);
-  const gh = join(binDir, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
-  const ghLog = join(binDir, "gh.log");
-  writeFileSync(ghLog, "");
-  const prViewFile = join(binDir, "pr-view.json");
-  writeFileSync(prViewFile, PR_VIEW);
-  const env = {
-    ...process.env,
-    PATH: `${binDir}:${process.env.PATH}`,
-    GH_LOG: ghLog,
-    PR_VIEW_FILE: prViewFile,
-    RUN_LIST_FILE: "",
-    RUN_VIEW_FILE: "",
-  };
-  try {
-    // No --workflow-file: discovery must scan the directory, hit the
-    // unreadable candidate, and die rather than silently reporting no-ci.
-    const r = spawnSync(process.execPath, [SCRIPT, "--pr", "42"], { cwd: repoDir, encoding: "utf8", env });
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /cannot read/);
-  } finally {
-    chmodSync(wf, 0o644);
-    rmSync(repoDir, { recursive: true, force: true });
-    rmSync(binDir, { recursive: true, force: true });
-  }
-});
+// Both routes to an unreadable workflow file refuse with exit 2, and they
+// refuse at different depths: discovery opens each candidate as it scans, while
+// an explicit --workflow-file target is not read until expectedJobs(). Kept as
+// two cases because that difference is the point — a fix that closes only the
+// scan leaves the explicit route reading the file as absent, and absent is the
+// one shape that can be declared away as no-ci.
+//
+// The explicit route also runs OUTSIDE a repo — the second discrimination these
+// two cases carry. Naming the file answers the question without a repo root, so
+// a root lookup made eager again refuses a caller who never asked for
+// discovery, and nothing else in this file runs the script from a non-repo cwd.
+// The refusal is asserted down to its errno because `cannot read` alone is also
+// what a path that never existed produces: drift between the argument and the
+// fixture would leave this case pinning absence, the shape above.
+for (const [route, args, opts] of [
+  ["the discovery scan", [], {}],
+  ["an explicit --workflow-file", ["--workflow-file", ".github/workflows/ci.yml"], { git: false }],
+]) {
+  test(`an unreadable workflow file reached through ${route}: exit 2, never no-ci`, (t) => {
+    if (process.getuid?.() === 0) return t.skip("root reads every file");
+    const r = run(args, {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      unreadable: [".github/workflows/ci.yml"],
+      ...opts,
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read [^\n]*: EACCES: permission denied/);
+  });
+}
 
 // --- Error policy (#111): only a genuinely absent workflow set is `no-ci` ---
 // The verdict must be reachable one way only: `.github/workflows/` absent, or
@@ -347,12 +307,24 @@ test("discovery is anchored to the repo root, not the cwd — a subdirectory ans
   assert.equal(r.payload.verdict, "green");
 });
 
+// expectedJobs() refuses on the assumption its derivation rests on, and that
+// refusal has to land before the run query — the answer it would otherwise
+// spend a REST read on is one it has already decided it cannot give. Nothing
+// else in this file reaches the derivation's die() at all, so the gh log is
+// what pins the order rather than the refusal alone.
+const CI_WORKFLOW_NAMED_JOB = CI_WORKFLOW.replace("  check:\n", "  check:\n    name: Check\n");
+
+test("an invalid job derivation refuses before the run list is ever requested", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW_NAMED_JOB } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /derivation invalid/);
+  assert.doesNotMatch(r.log, /run list/, `the derivation must refuse before the query, and gh was asked: ${r.log}`);
+});
+
 // --- The not-green detectors, one negative case each ------------------------
-// Every fixture above is green, so the four `reasons.push` branches this PR
-// relocated into the `else` arm were never entered: deleting any one of them
-// left the whole suite passing, and each deletion is a silent false green
-// reaching board.mjs's mapCi() and the merge bot's gate. The relocation itself
-// was covered; the detectors' true branches were not.
+// No fixture above enters the `reasons.push` branches in the `else` arm, so
+// none of them can catch one being deleted — and each such deletion is a silent
+// false green reaching board.mjs's mapCi() and the merge bot's gate.
 
 const TWO_JOB_WORKFLOW = `name: CI
 on: [pull_request]
@@ -527,6 +499,32 @@ test("PR info missing headRefOid: exit 2 naming the field, never a silent \"unde
   assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
 });
 
+// Each identifying field is guarded on its type AND on its emptiness, and
+// neither clause is reachable through the other: an empty string satisfies the
+// type check, a number satisfies the emptiness check. The sibling above feeds
+// an ABSENT field, which both clauses refuse at once — so it pins neither.
+// What a lost clause costs is the field flowing on: `branch` becomes the empty
+// string or a number and `gh run list --branch` asks for the wrong branch,
+// while `prHead` becomes a value no run's headSha can equal, which reads as
+// the superseded-SHA case rather than as a reply that could not be trusted.
+for (const [what, field, headRefName, headRefOid] of [
+  ["an empty branch name", "headRefName", "", PR_HEAD],
+  ["a non-string branch name", "headRefName", 42, PR_HEAD],
+  ["an empty head sha", "headRefOid", BRANCH, ""],
+  ["a non-string head sha", "headRefOid", BRANCH, 42],
+]) {
+  test(`PR info carrying ${what}: exit 2 naming the field, never a verdict built on it`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      prView: JSON.stringify({ headRefName, headRefOid, state: "OPEN", mergeStateStatus: "CLEAN" }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /pr view/);
+    assert.match(r.stderr, new RegExp(field));
+    assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
+  });
+}
+
 test("run list returns an error object, not an array: exit 2, never the crash from runs.filter", () => {
   // The ticket's own reproduction: gh exits 0 printing an error body where
   // --json databaseId,headSha,... normally produces an array.
@@ -570,6 +568,82 @@ test("a job entry in the run view is null: exit 2, never the crash reading j.nam
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /job entry 0 is not an object/);
 });
+
+// The refusal names a POSITION, and a fixture whose malformed element sits
+// first is satisfied by a guard that only answers "is one of them bad". Each
+// site carries a well-formed element ahead of the bad one so the reported
+// index has to be derived rather than guessed. Nothing reads the index today;
+// it is the diagnostic a human gets for a reply gh really sent, so being wrong
+// about which element was malformed sends them to the wrong one.
+test("a run list row after a well-formed one is malformed: the refusal names that row's position", () => {
+  const [current] = JSON.parse(RUN_LIST);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([current, null]),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /run list row 1 is not an object/);
+});
+
+test("a job entry after a well-formed one is malformed: the refusal names that entry's position", () => {
+  const view = JSON.parse(RUN_VIEW);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ ...view, jobs: [...view.jobs, null] }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /job entry 1 is not an object/);
+});
+
+// The direction these guards get wrong on their own: what they wrongly REFUSE.
+// Every fixture above is malformed by construction, so none of them can show
+// that a well-formed reply carrying more than one row still reaches a verdict
+// — and more than one row is the shape gh returns for any branch with a run
+// history, the normal case rather than an edge one. A guard tightened past it
+// refuses a working invocation, which costs more than the diagnostic above.
+test("a run list whose rows are all well-formed still reaches a verdict, superseded rows included", () => {
+  const [current] = JSON.parse(RUN_LIST);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([
+      { ...current, databaseId: 2, headSha: "0000000", createdAt: "2025-12-31T00:00:00Z" },
+      current,
+    ]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+});
+
+// isObject is the whole refusal at the row and job level, so each of its
+// clauses is load-bearing alone — at both sites, which take the same two shapes
+// here. Every other malformed row and job fixture in this file is `null`, which
+// the null clause already refuses on its own; an array and a scalar are what
+// separate the other two clauses from decoration. Both degrade quietly rather
+// than crashing, which is why they need pinning: either one yields `undefined`
+// for every field read off it, so the run reports runs and jobs it never saw
+// instead of refusing the reply.
+for (const [what, malformed] of [
+  ["an array", []],
+  ["a scalar", "check"],
+]) {
+  test(`a job entry that is ${what}: exit 2, never read as a job with no fields`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      runView: JSON.stringify({ jobs: [malformed], attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /job entry 0 is not an object/);
+  });
+
+  test(`a run list row that is ${what}: exit 2, never read as a run with no fields`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      runList: JSON.stringify([malformed]),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /run list row 0 is not an object/);
+  });
+}
 
 // The false-positive class the guard must NOT create: an in-progress job's
 // `conclusion` is legitimately `null`, not a missing/wrong-shaped field. If
