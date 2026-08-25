@@ -46,6 +46,14 @@ if [ -n "$GH_FAIL" ]; then
   echo "gh: could not authenticate to github.com (HTTP 401)" >&2
   exit 1
 fi
+# GH_FAIL's one tidy line is the shape that hides #638: it neither overruns the
+# cap nor trims away. This escape emits its value on stderr verbatim — no
+# trailing newline added — so a test can drive the stderr shapes that do:
+# warnings ahead of the real error, and whitespace with no cause in it at all.
+if [ -n "$GH_STDERR" ]; then
+  printf '%s' "$GH_STDERR" >&2
+  exit 1
+fi
 if [ -n "$GH_GARBAGE" ]; then
   echo "Welcome to gh! Run gh auth login to get started."
   exit 0
@@ -79,7 +87,7 @@ function ledgerText(filed) {
 // save(), so the DEFAULT `true` here is a fixture that pre-creates something
 // production never has yet — and it is what hid a #155 regression from the
 // accept-pin below.
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, ghStderr = null, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
     // Inherited git vars outrank both cwd and `-C`, and they reach here from
@@ -135,6 +143,7 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     };
     if (ghFails) env.GH_FAIL = "1";
     if (ghGarbage) env.GH_GARBAGE = "1";
+    if (ghStderr !== null) env.GH_STDERR = ghStderr;
     mkdirSync(bin, { recursive: true });
     symlinkSync(REAL_GIT, join(bin, "git"));
     if (gh) {
@@ -714,6 +723,60 @@ test("gh exiting 0 with unparseable stdout is a failed read, not a clean tracker
   assert.equal(r.json.verdict, "unverified");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   assert.doesNotMatch(r.stderr, /found no related issues/, "never claim the tracker was searched clean");
+});
+
+// The three tests below pin what `tracker.error` CARRIES, not merely that it is
+// present. `execFileSync` runs gh with an explicit `stdio` that does not
+// forward the child's stderr, so this field is the only copy of the cause that
+// exists anywhere — a cause dropped here is dropped for good (#638).
+//
+// Each asserts `verdict` and `tracker.ok` as well: this arm's contract is that
+// only the diagnostic prose moves, and the dedupe guard's whole payload reads
+// off those two fields.
+
+test("a gh stderr that overruns the cap keeps the end, where the cause is, and says it was cut", () => {
+  // gh prints its warnings before the error that killed it, so keeping the
+  // FIRST bytes throws the cause away and hands back a string cut mid-word
+  // that reads as complete.
+  const noise = Array.from({ length: 40 }, (_, i) => `gh: warning line ${i + 1} ${"-".repeat(60)}`).join("\n");
+  const r = run(UNFILED_SUBJECT, { filed: [], ghStderr: `${noise}\ngh: FATAL — HTTP 403 rate limit exceeded, resets at 14:02 UTC\n` });
+  assert.equal(r.status, 0, "an unreadable tracker still degrades rather than blocking the filing");
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.json.tracker.error, /FATAL — HTTP 403 rate limit exceeded/, "the error gh actually died of must survive the cap");
+  assert.match(r.json.tracker.error, /^…/, "a clipped string with no marker reads as the whole of what gh printed");
+  // Still capped. The field ships on stdout inside a machine-parsed contract,
+  // so unbounded gh stderr in it is a payload problem however the cause is
+  // chosen — 500 is the ceiling the script names, marker included.
+  assert.ok(r.json.tracker.error.length <= 500, `the cause must stay bounded, got ${r.json.tracker.error.length}`);
+});
+
+test("a gh that fails with a whitespace-only stderr still names a cause", () => {
+  // Whitespace-only stderr is truthy, so it wins a choice made before the trim
+  // and then trims away to nothing — the warning line then has an empty
+  // parenthesis where the reason belongs, and exit 0 carries no cause at all.
+  const r = run(UNFILED_SUBJECT, { filed: [], ghStderr: "\n \n" });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.json.tracker.error, /\S/, "a failure whose stderr held no cause must fall through to one that does");
+  assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED \(\)/, "the warning must never print an empty cause");
+  assert.match(r.stderr, /TRACKER NOT CHECKED/);
+});
+
+test("a gh stderr short enough to fit reaches the caller unchanged", () => {
+  // The must-ACCEPT half: a marker on a string that was never cut is a fresh
+  // false signal, and re-choosing the cause must not rewrite one that was
+  // already fine.
+  const r = run(UNFILED_SUBJECT, { filed: [], ghStderr: "gh: HTTP 403 rate limit exceeded, resets at 14:02 UTC\n" });
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.equal(
+    r.json.tracker.error,
+    "gh: HTTP 403 rate limit exceeded, resets at 14:02 UTC",
+    "trimmed at the ends and otherwise exactly what gh printed",
+  );
+  assert.doesNotMatch(r.json.tracker.error, /…/, "nothing was cut, so nothing may claim it was");
 });
 
 test("a filed row contained in a longer subject scores on the smaller set, not the union", () => {
