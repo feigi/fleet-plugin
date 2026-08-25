@@ -389,11 +389,69 @@ test("the refuter prompt interpolates the same read rules", () => {
 // lift regex's non-global `.match` grabs the FIRST declaration while JS runs
 // the LAST — the tests exercise the real guard while review-pr.js executes the
 // no-op. Only the duplicate-BEFORE case, the harmless one, was ever caught.
+//
+// The names are DERIVED from the source rather than listed here. A hardcoded
+// list protects a function only if someone remembered to add its name, and
+// twice nobody did: #140 shipped with `snapshotMissing` absent from it, and
+// #653 found every function `review-pr-unrun.test.mjs` and
+// `review-pr-testcmd.test.mjs` lift still absent long after those files were
+// written. Deriving covers the next function added to review-pr.js on arrival.
+//
+// Top-level `function` only. The values other files lift with a `const` regex
+// — `DEFAULT_DIMENSIONS`, `verifiersFor` — are excluded because they cannot
+// carry this bug: a second `const` of the same name in the same scope is a
+// SyntaxError rather than a silent rebind, so it can never hoist past the real
+// one, and the parse test at the bottom of this file is what catches it.
+//
+// Known ceiling: a string literal whose content begins at column 0 with
+// `function name(` would be counted as a declaration. Nothing in review-pr.js
+// does that today — the derivation returns the same set as a bare
+// `grep -c "^function "` — and narrowing it further would cost the property
+// that an unnamed new function is covered automatically.
+function topLevelFunctionNames(code) {
+  return [...code.matchAll(/^function (\w+)\(/gm)].map((m) => m[1]);
+}
+
 test("each function is declared exactly once at top level", () => {
-  for (const name of ["usableDiff", "readRules", "snapshotMissing"]) {
-    const hits = CODE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
-    assert.equal(hits.length, 1, `${name} is declared ${hits.length} times`);
+  const names = topLevelFunctionNames(CODE);
+  // Without this the test is vacuous on a restructure that matches nothing:
+  // `matchAll` yields an empty list rather than throwing, so the loop below
+  // would pass without inspecting a single declaration. Deliberately a
+  // non-emptiness check and not a count — the lift helpers above already fail
+  // by name when the function they need is gone, and a pinned total would go
+  // stale on the next function added.
+  assert.ok(
+    names.length > 0,
+    "no top-level function declarations found in review-pr.js — this guard is not looking at anything",
+  );
+  for (const name of new Set(names)) {
+    const hits = names.filter((n) => n === name).length;
+    assert.equal(hits, 1, `${name} is declared ${hits} times`);
   }
+});
+
+// The other half of the guard: what it must NOT refuse. A name may legitimately
+// appear more than once — as a shadowing local, a nested declaration, a method
+// on an object literal, or inside a string — and none of those can hoist over
+// the real declaration. If the guard red on them, the next honest edit to
+// review-pr.js would fail a test with no way to satisfy it.
+test("the declared-exactly-once guard accepts the benign repeats of a name", () => {
+  const benign = [
+    "function unrunReason(review) {",
+    '  const unrunReason = "a shadowing local, not a declaration";',
+    "  function unrunReason(nested) { return nested; }",
+    "  const handlers = {",
+    "    unrunReason(review) { return null; },",
+    "  };",
+    "  log(`the text function unrunReason( inside a template literal`);",
+    "  return unrunReason;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    topLevelFunctionNames(benign),
+    ["unrunReason"],
+    "the guard counts a benign repeat as a second declaration — an honest edit to review-pr.js cannot go green",
+  );
 });
 
 // Nothing pinned this line, and its own comment says the feature is unobservable
