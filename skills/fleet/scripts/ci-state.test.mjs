@@ -716,6 +716,28 @@ test("the outage payload reports no CI state it could not observe", () => {
   }
 });
 
+// #890: the same one-line/one-terminator contract the verdict payload is held to
+// below, at the other call site that writes a payload to stdout. emit() appends
+// no newline of its own, so each site supplies its own: supplying none runs this
+// payload together with whatever the caller polling a rate-limited PR prints
+// next, and supplying two ends the output early for a reader that treats a blank
+// line as the end of it. Both were green here before this assertion — the
+// quota-refusal tests above all read `payload`, and the harness parses that from
+// a TRIMMED stdout, so every one of them is blind to the terminator by
+// construction.
+//
+// Compared against a re-serialisation of the payload this very run emitted
+// rather than against a literal copy of it, which is what keeps the assertion
+// about the terminator alone: rewording a reason, or adding a field, changes
+// both sides together and stays green, while any change to the trailing bytes
+// reds. A literal would instead have to be re-typed every time the refusal text
+// moved, and would red for the wrong reason when it was.
+test("the rate-limited payload is emitted byte for byte too: one line, one trailing newline", () => {
+  const r = ghFailure(RATE_LIMIT_STDERR);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, `${JSON.stringify(r.payload)}\n`);
+});
+
 // --- #840: a non-numeric --pr must refuse, never ship an unnamed payload -----
 // `--pr` was validated for truthiness alone, so `--pr abc` reached both payload
 // sites. Each builds `pr: Number(pr)`, and `JSON.stringify(NaN)` is `null` — the
