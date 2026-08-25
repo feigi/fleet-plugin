@@ -559,6 +559,51 @@ test("a job entry in the run view is null: exit 2, never the crash reading j.nam
   assert.match(r.stderr, /job entry 0 is not an object/);
 });
 
+// The refusal names a POSITION, and a fixture whose malformed element sits
+// first is satisfied by a guard that only answers "is one of them bad". Each
+// site carries a well-formed element ahead of the bad one so the reported
+// index has to be derived rather than guessed. Nothing reads the index today;
+// it is the diagnostic a human gets for a reply gh really sent, so being wrong
+// about which element was malformed sends them to the wrong one.
+test("a run list row after a well-formed one is malformed: the refusal names that row's position", () => {
+  const [current] = JSON.parse(RUN_LIST);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([current, null]),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /run list row 1 is not an object/);
+});
+
+test("a job entry after a well-formed one is malformed: the refusal names that entry's position", () => {
+  const view = JSON.parse(RUN_VIEW);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ ...view, jobs: [...view.jobs, null] }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /job entry 1 is not an object/);
+});
+
+// The direction these guards get wrong on their own: what they wrongly REFUSE.
+// Every fixture above is malformed by construction, so none of them can show
+// that a well-formed reply carrying more than one row still reaches a verdict
+// — and more than one row is the shape gh returns for any branch with a run
+// history, the normal case rather than an edge one. A guard tightened past it
+// refuses a working invocation, which costs more than the diagnostic above.
+test("a run list whose rows are all well-formed still reaches a verdict, superseded rows included", () => {
+  const [current] = JSON.parse(RUN_LIST);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([
+      { ...current, databaseId: 2, headSha: "0000000", createdAt: "2025-12-31T00:00:00Z" },
+      current,
+    ]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+});
+
 // isObject is the whole refusal at the row and job level, so each of its
 // clauses is load-bearing alone. Every malformed row and job fixture elsewhere
 // in this file is `null`, which the null clause already refuses on its own —
