@@ -49,24 +49,35 @@ For each labeled PR clearing the hold rule, lowest first:
 1. If the PR is behind `origin/main`, update it **server-side first**: `gh pr update-branch <pr> --rebase`. That's an API call, not a push — no local git command runs, so the force-push classifier denial this step used to hit (`git push --force-with-lease`, judged and intermittently denied per invocation — 2 allowed / 2 denied on byte-identical invocations in one session; `settings.json` has since gained an `autoMode.allow` entry for exactly that command, so adding one is not the missing fix) never enters. The call is async; poll for the head to move:
 
    ```bash
-   pre=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+   branch=$(gh pr view <pr> --json headRefName -q .headRefName)
+   ref="refs/heads/$branch"
+   pre=$(git ls-remote origin "$ref" | cut -f1)
+   [ -n "$pre" ] || { echo "no such remote ref: $ref"; exit 2; }
    out=$(gh pr update-branch <pr> --rebase 2>&1); rc=$?
    post=$pre
    if [ "$rc" -eq 0 ]; then
      for _ in $(seq 1 60); do                 # 5 min cap, never an unbounded `until`
-       post=$(gh pr view <pr> --json headRefOid -q .headRefOid)
-       [ "$post" != "$pre" ] && break
+       post=$(git ls-remote origin "$ref" | cut -f1)
+       [ -n "$post" ] && [ "$post" != "$pre" ] && break
        sleep 5
      done
    fi
-   printf 'rc=%s pre=%s post=%s\n%s\n' "$rc" "$pre" "$post" "$out"
+   printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\n%s\n' \
+     "$rc" "$branch" "$pre" "$post" \
+     "$(gh pr view <pr> --json headRefOid -q .headRefOid)" "$out"
    ```
+
+   **Poll `git ls-remote`, not `gh pr view headRefOid`** — the PR object's head is precisely the field that desyncs, so polling it asks the one source that can be wrong about the thing you are waiting for. Measured, feigi/claude-config#903: the rebase landed and moved the branch ref, `headRefOid` stayed on the pre-rebase SHA with `mergeable_state: unknown` and no CI run on the new head, and the loop burned all 60 iterations reading a landed rebase as un-landed — straight into the fallback, whose local rebase would then have replayed commits the remote already carried. `ls-remote` reads the ref itself and carries no local state, the same reason step 3 already prefers it over a cached behind-count. Keep the `headRefOid` read in the printf: it is no longer the gate, and its *disagreement* with `post` is the desync signal you want on the record.
 
    **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the three outcomes off `rc` and `post`:
 
    - `rc=0` and `post != pre` → the rebase landed. Hold `pre` and `post`, step 4's proof needs both.
    - Non-zero `rc` carrying `UNPROCESSABLE: There are no new commits on the base branch` → it was already current, so `pre` and `post` are simply equal. Shouldn't happen here since you only call this when behind.
    - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
+
+   **`post != pre` with `pr_head` still on `pre` is the desync, and it is the one state that needs a controller.** The rebase landed; GitHub's PR object did not follow. CI is bound to the stale head or absent entirely, so the merge gate cannot clear no matter how long you wait, and no merge-bot action fixes it — do not retry the rebase, and do not rebase locally, because the remote is already correct. Report it and stop.
+
+   **The controller's remedy is close-and-reopen, and it has a precondition that must be checked FIRST.** Reopening requires the PR's recorded head to still be reachable from the branch — and a rebase orphans it by construction, which is the very event that produced the desync. So before closing anything, run `git merge-base --is-ancestor <pr_head> origin/<branch>`. Non-ancestor → **do not close**: GitHub refuses to reopen a PR whose head is unreachable (measured on #903 — three reopen attempts, `Could not open the pull request` each time), and the only recovery is opening a replacement PR from the same branch, which loses the review thread and every label on it. Close-and-reopen is normally reversible; past an orphaning rebase it is a one-way door.
 
    This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
 

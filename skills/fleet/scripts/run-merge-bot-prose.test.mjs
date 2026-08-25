@@ -138,6 +138,36 @@ test("step 1 names the correct upstream for proving a post-rebase worktree stale
   assert.match(step1(), /\*\*not\*\* `git cherry origin\/main HEAD`/);
 });
 
+// #903: the poll read `gh pr view <pr> --json headRefOid` — the one field that
+// desyncs from the branch it is meant to be watching. Measured on this repo:
+// `gh pr update-branch --rebase` landed and moved the ref to 221f4e9 while
+// headRefOid stayed on the pre-rebase 8bc2cc4 with no CI run on the new head,
+// so the poll read a landed rebase as un-landed for all 60 iterations and fell
+// through to the local-rebase fallback — which would have replayed commits the
+// remote already carried. Both halves pinned: the ref read must be PRESENT, and
+// the sentence naming which source is authoritative must survive with it. The
+// second assert is what stops a future edit reverting the mechanism while
+// leaving a now-lying rationale behind.
+test("step 1 polls the branch ref, not the PR object's head", () => {
+  // anchored to the POLL assignment inside the loop, not to any ls-remote in
+  // step 1 — the `pre=` line uses the same command, so a bare presence match
+  // stays green when only the loop body is reverted. Measured: it did.
+  assert.match(step1(), /\n\s+post=\$\(git ls-remote origin "\$ref" \| cut -f1\)/);
+  assert.match(step1(), /\*\*Poll `git ls-remote`, not `gh pr view headRefOid`\*\*/);
+});
+
+// #903's expensive half. Close-and-reopen is the usual remedy for a desynced PR
+// and is normally reversible — but a rebase orphans the recorded head by
+// construction, and that is the very event that produced the desync. Measured:
+// three reopen attempts on #903 each returned `Could not open the pull request`,
+// and the only recovery was a replacement PR (#908), losing the review thread
+// and every label on it. The precondition is the whole rule, so it is pinned
+// alongside the verdict it forces.
+test("step 1 requires an ancestry check before closing a desynced PR", () => {
+  assert.match(step1(), /git merge-base --is-ancestor <pr_head> origin\/<branch>/);
+  assert.match(step1(), /Non-ancestor → \*\*do not close\*\*/);
+});
+
 test("step 4 expects the fallback path to disprove, not to silently count as proved", () => {
   assert.match(step4(), /A `rebase-fallback-#<pr>` merge is expected to disprove here/);
   assert.match(step4(), /never as `proved`/);
