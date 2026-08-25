@@ -235,7 +235,7 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the pair below pins each rule where the other
+// least four tokens — and the tests below pin each rule where the other
 // cannot cover for it. Same-size sets are where the two rules come apart, and
 // the tests above reach that case only through rows built for other purposes.
 //
@@ -263,6 +263,29 @@ test("equal token sets match below the subset floor — the floor gates the subs
   assert.equal(r.status, 1);
   assert.equal(r.json.found, true);
   assert.match(r.json.match, /^#902 /);
+});
+
+test("a strict subset exactly at the subset floor is a match — the floor is pinned from above (#899)", () => {
+  // The floor is a lower bound, so the refusal beneath it anchors one side
+  // only: raise the floor and matches quietly stop happening. That is the
+  // direction `check` is deliberately biased toward — a duplicate someone
+  // closes rather than a finding silently lost — which is exactly why a
+  // raised floor disturbs nothing else here. Acceptance AT the floor is the
+  // observation that notices, and it has to be a STRICT subset: an equal pair
+  // qualifies under the equal-size rule as well, so the floor would no longer
+  // be what decides and the mutation would have nothing to move.
+  //
+  // Plain words, no punctuation, on both sides. The subject's token count is
+  // the whole subject of this pin, so it must not shift when norm() changes
+  // how it folds punctuation — otherwise this reds for a reason it does not
+  // name. A match also returns before the tracker query is built, so nothing
+  // in term selection or the near-miss scoring can reach this either.
+  const r = run("quorum lease drains retry", {
+    filed: ["#903 retry budget drains the shared quorum lease"],
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.json.found, true);
+  assert.match(r.json.match, /^#903 /);
 });
 
 test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
