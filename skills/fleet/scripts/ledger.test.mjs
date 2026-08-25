@@ -235,18 +235,22 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the same-size refusal, the equal-set acceptance
-// below the floor, and the acceptance at the floor are what pin those rules
-// where neither covers for the other. Same-size sets are where the two rules
-// come apart, and the tests above reach that case only through rows built
-// for other purposes. The empty-subject usage failure shares this fence but
-// dies before isMatch is reached, so it pins neither rule.
+// least four tokens — and the equal-set acceptance below the floor and the
+// acceptance at the floor are what pin those rules, each sitting where the
+// other rule cannot account for the outcome. Same-size sets are where the two
+// rules come apart, and the tests above reach that case only through rows
+// built for other purposes.
+//
+// Two tests share this fence without pinning either rule. The same-size
+// refusal runs four tokens against four, so both size rules pass and only the
+// subset conjunct refuses it — that conjunct is what it pins, and it is the
+// same-size case worth pinning. The empty-subject usage failure dies before
+// isMatch is reached, so it reaches neither rule.
 //
 // A same-size match at or above the floor is deliberately NOT pinned here: it
 // satisfies both rules at once, so no single-rule mutation can red it and it
-// discriminates nothing. The refusal below is the same-size case worth
-// pinning, and an equal set under the floor is an acceptance only one rule
-// can explain.
+// discriminates nothing. An equal set under the floor is an acceptance only
+// one rule can explain.
 // ---------------------------------------------------------------------------
 
 test("a same-size four-token near-miss differing in one token is not a match (#888)", () => {
@@ -301,9 +305,9 @@ test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
 // ---------------------------------------------------------------------------
 // Direction normalisation (#899 review). isMatch() orders the pair by size
 // before either acceptance rule reads it, so both rules always measure the
-// smaller set. A fixture whose checked subject is already the smaller side —
-// or level with the filed row — gets the same answer either way, which is why
-// hardcoding the ordering away leaves the rest of this file green.
+// smaller set. Hardcoding the ordering away leaves the rest of this file
+// green because no other fixture reaches a match through the mirror
+// orientation — not because of how their sizes happen to fall.
 // ---------------------------------------------------------------------------
 
 test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the floor measures", () => {
