@@ -121,8 +121,25 @@ keep() { kept="${kept}{\"branch\":$(jfield "$1"),\"reason\":$(jfield "$2")}," ; 
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
-for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
-           awk '$2=="[gone]"{print $1}'); do
+#
+# %(refname) and a strip, never %(refname:short): the short form is
+# ambiguity-aware, and where a TAG shares a branch's name it stops shortening
+# and emits `heads/<name>` instead (measured, git 2.50.1 Apple Git-155). That
+# string names no branch — `git branch -D` answers "branch not found" — and it
+# does not build the `refs/heads/$b` key the worktree lookup below matches on
+# either, so $wt comes back empty and the main-checkout, .git-linkage, dirty and
+# ignored-files guards all stand down for precisely the branch whose name got
+# away from them. %(refname) is always refs/heads/<name>, so the strip yields
+# the bare name for every branch, ambiguous or not.
+#
+# The $2=="[gone]" field test is deliberately untouched, and it still selects
+# the same branches: a space is not legal in a branch name (measured — git
+# refuses `has space` as invalid), so the name is always the whole of $1, and a
+# branch with no upstream leaves $2 empty rather than matching. The tracking
+# forms that DO carry a space, `[ahead 1]` and its siblings, split so that $2
+# holds `[ahead` — not `[gone]` either way. #634
+for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
+           awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); do
 
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
@@ -136,7 +153,25 @@ for b in $(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/h
   # one: its `+` line makes grep exit 0 and always keeps. -D is authorized by
   # this check and by nothing else, so an unanswerable probe must KEEP, the
   # same fail-closed shape the worktree `status` check below already uses.
-  if ! cherry=$(git cherry "$base" "$b" 2>&1); then
+  # `refs/heads/$b`, never a bare `$b`. Restoring the bare name above makes a
+  # branch that shares its name with a tag ambiguous AS A REV again, and git
+  # resolves an ambiguous one by preferring refs/tags/ over refs/heads/
+  # (measured, git 2.50.1 Apple Git-155). This probe would then answer about the
+  # TAG's commit while `git branch -D` below deletes the BRANCH — and a tag
+  # sitting on a merged commit reports clean for a branch whose commits exist
+  # nowhere else. -D is authorized by this check and by nothing else, so that
+  # reads straight through to destroying them: measured on a fixture, the
+  # enumeration fix alone turned a branch this script currently KEEPS into
+  # `REAPED`, at exit 0, with an empty kept[]. Qualifying changes nothing for an
+  # ordinary branch — both spellings name the same commit — and it is the same
+  # key the worktree lookup below already builds. The BRANCH side is the only
+  # side qualified here, and qualifying it does not make the check unfoolable:
+  # `$base` reaches this same `git cherry` exactly as BASE_REF spells it, so a
+  # local tag carrying that spelling outranks the remote-tracking ref and the
+  # probe answers about the TAG — measured, an unmerged [gone] branch REAPED at
+  # exit 0 with an empty kept[]; open as #924. "By nothing else" bounds what
+  # ELSE authorizes -D, not whether this check itself can be wrong. #634
+  if ! cherry=$(git cherry "$base" "refs/heads/$b" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
   fi
