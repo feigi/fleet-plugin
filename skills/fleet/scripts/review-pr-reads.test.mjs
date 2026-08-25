@@ -389,11 +389,77 @@ test("the refuter prompt interpolates the same read rules", () => {
 // lift regex's non-global `.match` grabs the FIRST declaration while JS runs
 // the LAST — the tests exercise the real guard while review-pr.js executes the
 // no-op. Only the duplicate-BEFORE case, the harmless one, was ever caught.
+//
+// The names are DERIVED from the source rather than listed here. A hardcoded
+// list protects a function only if someone remembered to add its name, and
+// twice nobody did: #140 shipped with `snapshotMissing` absent from it, and
+// #653 found the list had frozen at exactly the names lifted by the two files
+// that wrote it — this one and review-pr-snapshot-path.test.mjs. Every function
+// a LATER lift file came to depend on was unguarded, so a duplicate placed
+// after the real declaration stayed invisible to the very file lifting it.
+// Deriving covers the next top-level `function` on arrival, in each form one
+// can be written in here: `async`, a generator star, any spacing around the
+// name. Not `export function` — review-pr.js compiles as a function body inside
+// the harness VM, so a second `export` is a syntax error rather than a silent
+// rebind, and the parse test at the bottom of this file is what reds on it.
+//
+// Top-level `function` only. The values other files lift with a `const` regex
+// — `DEFAULT_DIMENSIONS`, `verifiersFor` — are excluded for the same reason: a
+// second `const` of the same name in the same scope is a SyntaxError, so it can
+// never hoist past the real one, and that same parse test catches it.
+//
+// Known ceiling: the `^` anchor is the whole mechanism, so a string literal
+// whose content begins a line with a declaration is counted as one. Whole-line
+// comments cannot reach here, since `CODE` is stripped, but a template
+// literal's interior is real text. Nothing in review-pr.js puts a declaration
+// at the start of a line inside one today, and narrowing further would cost the
+// property that a function nobody thought to list is covered anyway.
+function topLevelFunctionNames(code) {
+  return [...code.matchAll(/^(?:async[ \t]+)?function[ \t*]+(\w+)[ \t]*\(/gm)].map((m) => m[1]);
+}
+
 test("each function is declared exactly once at top level", () => {
-  for (const name of ["usableDiff", "readRules", "snapshotMissing"]) {
-    const hits = CODE.match(new RegExp(`^function ${name}\\(`, "gm")) || [];
-    assert.equal(hits.length, 1, `${name} is declared ${hits.length} times`);
+  const names = topLevelFunctionNames(CODE);
+  // A floor, not a count. `matchAll` yields an empty list rather than throwing,
+  // so with nothing here the loop below would inspect no declaration and still
+  // pass. It is a backstop rather than this file's first line of defence — the
+  // module-scope lifts above name the functions they need and throw before any
+  // test registers, so a derivation gutted today reds there first and louder.
+  // A pinned total was rejected on purpose: the count has only ever grown, and
+  // a `>=` decays silently as it does — the hardcoded-list failure above
+  // wearing a different operator.
+  assert.ok(
+    names.length > 0,
+    "no top-level function declarations found in review-pr.js — this guard is not looking at anything",
+  );
+  for (const name of new Set(names)) {
+    const hits = names.filter((n) => n === name).length;
+    assert.equal(hits, 1, `${name} is declared ${hits} times`);
   }
+});
+
+// The other half of the guard: what it must NOT refuse. A name may legitimately
+// appear more than once — as a shadowing local, a nested declaration, a method
+// on an object literal, or inside a string — and none of those can hoist over
+// the real declaration. If the guard red on them, the next honest edit to
+// review-pr.js would fail a test with no way to satisfy it.
+test("the declared-exactly-once guard accepts the benign repeats of a name", () => {
+  const benign = [
+    "function unrunReason(review) {",
+    '  const unrunReason = "a shadowing local, not a declaration";',
+    "  function unrunReason(nested) { return nested; }",
+    "  const handlers = {",
+    "    unrunReason(review) { return null; },",
+    "  };",
+    "  log(`the text function unrunReason( inside a template literal`);",
+    "  return unrunReason;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    topLevelFunctionNames(benign),
+    ["unrunReason"],
+    "the guard counts a benign repeat as a second declaration — an honest edit to review-pr.js cannot go green",
+  );
 });
 
 // Nothing pinned this line, and its own comment says the feature is unobservable
