@@ -205,7 +205,19 @@ function newestTranscriptMs(dir) {
 // Read one agent transcript into the shape the pure module wants. Single pass —
 // a long review agent's transcript is megabytes and this runs every tick.
 // Malformed lines are skipped rather than fatal: a transcript being appended to
-// WHILE we read it will have a torn last line, every tick.
+// WHILE we read it will have a torn last line, every tick. That reason reaches
+// the FINAL element of the split and no other, so only that one is skipped in
+// silence. A line anywhere earlier can never be completed by a later append, so
+// it is still malformed on every tick after — a real fault, and one that costs
+// spend rather than nothing, so it warns once per transcript path. Warn-once is
+// safe here for a reason warnedSkips cannot lend: warnedSkips' message carries a
+// COUNT, which is why it needs `skipped` reaching the browser every tick to keep
+// that number live. This message carries none — it says this file's spend may be
+// incomplete — and a second tear in the same file makes that no more true, so
+// there is no number here that can go stale.
+// Ceiling: a transcript whose writer has already exited has no legitimate torn
+// last line either, but readAgent cannot tell a live writer from a finished one,
+// so that line keeps passing in silence. Strictly better than warning on none.
 //
 // ONE assistant API turn is written as SEVERAL jsonl lines — one per content
 // block (thinking, text, each tool_use) — and every one of those lines repeats
@@ -236,6 +248,8 @@ function newestTranscriptMs(dir) {
 // reason warnedSkips gives below: `serve` rebuilds every ~15s, and a broken
 // sidecar is broken on every tick.
 const warnedMeta = new Set();
+// Keyed on the transcript's FULL PATH, for the reason warnedSkips gives below.
+const warnedLines = new Set();
 function readAgent(file, metaFile) {
   let meta = {};
   try {
@@ -262,9 +276,19 @@ function readAgent(file, metaFile) {
   let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
   const entries = [];
   const turnById = new Map();
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  const lines = readFileSync(file, "utf8").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (!line) continue;
-    let j; try { j = JSON.parse(line); } catch { continue; }
+    let j;
+    try { j = JSON.parse(line); }
+    catch (e) {
+      if (i !== lines.length - 1 && !warnedLines.has(file)) {
+        warnedLines.add(file);
+        console.error(`${NAME}: ${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${e.message}`);
+      }
+      continue;
+    }
     // `message.content` is an array of blocks on tool-bearing turns but a plain
     // STRING on ordinary prose turns — the first cut assumed an array and threw
     // on the very first user line, which the catch below turned into a silent

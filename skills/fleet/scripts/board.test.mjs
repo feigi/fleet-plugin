@@ -347,6 +347,109 @@ test("a broken sidecar warns ONCE across ticks, not once per tick", () => {
   assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
 });
 
+// #606: the per-line catch inside readAgent was position-blind. Its comment
+// justified the skip with one cause — the torn last line a transcript being
+// appended to has on every tick — but applied it to every line in the split.
+// Measured before the fix on a 3-turn transcript, cache_creation 100/200/300:
+// a mid-file tear read 400 and a tail tear read 300, both with `skipped` 0 and
+// zero bytes on stderr, so the never-expected fault and the expected one were
+// indistinguishable to anyone watching.
+//
+// Raw-text sibling of fixture(): these two pin opposite sides of one
+// discriminator, and the TRAILING NEWLINE is the whole difference between them
+// — fixture() always writes one, which is exactly the case that must stay
+// silent. One jsonl line per turn HERE, so a lost line is a lost turn and the
+// cacheWrite assertions below are exact. A real multi-line turn degrades instead
+// of vanishing: usage is billed once, on the first SURVIVING line carrying that
+// message.id, so cache_creation / cache_read / maxCtx come through whole — but
+// the tear still costs that line's tool_use blocks, and tearing the line that
+// holds the largest output_tokens snapshot drops the turn's output to the
+// largest that survived (measured on a 1/1/300 turn: 300 -> 1).
+function rawFixture(text) {
+  const dir = mkdtempSync(join(tmpdir(), "spend-"));
+  writeFileSync(join(dir, "agent-x.jsonl"), text);
+  return dir;
+}
+const oneLineTurn = (id, cw) => JSON.stringify({
+  type: "assistant",
+  message: { id, usage: { input_tokens: 0, cache_creation_input_tokens: cw, cache_read_input_tokens: 0, output_tokens: 7 }, content: [{ type: "text" }] },
+});
+const TORN = '{"type":"assist';
+// Hoisted rather than spelled out at each use: three tests below feed the SAME
+// mid-file tear, and two of them exist only to re-run the first's exact input.
+// Spelled out per site, one can be edited and the others stay green — measured,
+// the whole 1158-test suite passes with the copies drifted apart.
+const MIDFILE_TEAR = [oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n";
+
+test("a transcript line damaged away from the tail is reported, not swallowed", () => {
+  // The real-fault half. The damaged line sits BETWEEN two good turns, so the
+  // assertion also covers the ticket's second requirement: the surrounding
+  // turns' spend is still accounted rather than lost with it.
+  const dir = rawFixture(MIDFILE_TEAR);
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /agent-x\.jsonl/);
+  assert.equal(s.totals.cacheWrite, 1500);
+  // Booked, not skipped — a damaged line costs its own turn, never the agent.
+  assert.equal(s.skipped, 0);
+});
+
+test("a torn LAST line stays silent — the tear every tick legitimately produces", () => {
+  // The false-positive half, and the reason the discriminator has to exist at
+  // all: `serve` rebuilds every ~15s, so warning per bad line would print a
+  // line every tick for every transcript still being appended to. No trailing
+  // newline — the torn write is the final element of the split.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.deepEqual(errs, []);
+  // ...and everything before the tear still parsed.
+  assert.equal(s.totals.cacheWrite, 1000);
+});
+
+test("a damaged mid-file line warns ONCE across ticks, not once per tick", () => {
+  // Same flood argument as the sidecar's warnedMeta gate: a transcript that is
+  // damaged is damaged on every tick, so a single call cannot see the gate.
+  const dir = rawFixture(MIDFILE_TEAR);
+  const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
+});
+
+test("two damaged transcripts in one dir each get their own warning", () => {
+  // The gate is a Set keyed on the FULL PATH, and the dedup test above cannot
+  // see that: it holds ONE path constant across two ticks, which a single
+  // module-level boolean satisfies identically. Measured — under that boolean
+  // the dedup test still fails, but only because an earlier test in this file
+  // already set the flag, so it discriminates by execution order rather than by
+  // anything it builds. Two paths in one tick is the shape that actually pins
+  // per-path keying: a bare-filename key or a global flag silences the second.
+  const dir = rawFixture(MIDFILE_TEAR);
+  writeFileSync(join(dir, "agent-y.jsonl"), MIDFILE_TEAR);
+  const errs = withStderr(() => { gatherSpend({ dir }); });
+  assert.equal(errs.length, 2, "expected one line per damaged transcript, got " + JSON.stringify(errs));
+  assert.equal(errs.filter((e) => /agent-x\.jsonl/.test(e)).length, 1, JSON.stringify(errs));
+  assert.equal(errs.filter((e) => /agent-y\.jsonl/.test(e)).length, 1, JSON.stringify(errs));
+});
+
+test("a tail tear that later moves mid-file is reported on the tick it moves", () => {
+  // Where warnedLines.add sits is load-bearing and no test above can see it:
+  // all three hold the file's SHAPE constant across ticks, so moving the add
+  // out of the position check — making a legitimate tail tear consume the
+  // file's one warning — leaves the whole suite green while permanently
+  // silencing the real fault. Tick 1 is that legitimate live tail tear (no
+  // trailing newline); tick 2 is the SAME tear after the transcript grew, which
+  // is the sequence `serve` produces every ~15s.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 1: a torn tail is legitimate, stay silent");
+  writeFileSync(join(dir, "agent-x.jsonl"), MIDFILE_TEAR);
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one stderr line on tick 2, got " + JSON.stringify(errs));
+  assert.match(errs[0], /agent-x\.jsonl/);
+  assert.equal(s.totals.cacheWrite, 1500);
+});
+
 test("an unreadable dir reports an error rather than posing as an empty run", () => {
   // The distinction that hid the path bug: a hidden panel meant both "nothing
   // yet" and "this is broken", so the broken case never surfaced.
