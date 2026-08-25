@@ -468,12 +468,16 @@ reporting `ledger read parse failed` and serving a blind cockpit for a whole run
 (#246). Every use above is a recovery path, so a payload that arrives short
 lands exactly where a lost class or a settled `ruled:` is unrecoverable — which
 is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each
-reach a pipe whole. Those four are what is fixed and what is pinned.
+reach a pipe whole.
 
-**Do not read that as "#246 is closed".** `check` is pinned on a pipe nowhere:
-its terminal exit now falls through like the four above, but its ALREADY FILED
-exit still cuts its payload mid-branch (#808) — the exit code survives there,
-so gate on the code and do not trust that payload.
+`check` reaches a pipe whole at both of its exits too. Its ALREADY FILED exit
+sits mid-branch, where falling through would run the near-miss ranking and the
+tracker search that exit exists to skip — so `check`'s branch is a function now,
+where `process.exitCode` carries the code and a `return` is what skips them
+(#808). No payload this script prints is abandoned to `process.exit()` any more,
+and the suite drives both of `check`'s arms through a pipe on a payload the
+ledger sizes rather than argv. So trust that payload — and read `verdict`,
+because a searched-and-clean tracker and one that was never read share exit 0.
 
 The consumer side raised its cliff rather than removing it. `board.mjs` reads
 `ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's

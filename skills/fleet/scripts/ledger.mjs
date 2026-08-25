@@ -168,21 +168,21 @@ const data = load();
 // The chain is `else if` so that not exiting does not send a good subcommand
 // on into the unknown-subcommand die() below it.
 //
-// `check` is swept at its terminal exit and not at its already-filed one. The
-// terminal exit was the last statement of its branch, so it became an
-// exitCode assignment like the branches above and its codes are unchanged.
-// The already-filed exit sits mid-branch: falling through there would go on
-// to run the near-miss ranking and the tracker search that exit exists to
-// skip, so removing it needs the branch extracted into a function first
-// (#808).
+// `check` reaches both of its exits that way too, though only one of them
+// could be an assignment where it stood. Its terminal exit was the last
+// statement of its branch and became one directly. Its already-filed exit sits
+// mid-branch, where falling through would run the near-miss ranking and the
+// tracker search that exit exists to skip — so `check`'s branch is a function
+// now (runCheck, below the chain), and a `return` is what skips them (#808).
 //
-// That remaining site truncates for real, and its payload is bounded by the
-// LEDGER, not by argv: `match` is a row read straight out of `data.filed`, so
-// the bound is the width of whatever `filed` was given — and `filed` caps
-// nothing. Measured, an ordinary four-word `check` against a ledger holding
-// one wide filed row is cut at the pipe buffer. What it exits with there is
-// still 1, the ALREADY FILED signal callers gate on, so that site loses the
-// payload under a correct code rather than #246's corrupt-payload-as-success.
+// What that leaves is a property of every payload this file emits rather than
+// of whichever branches a sweep happened to reach: none of them reaches
+// process.exit(), and none of their exit codes moved in getting there. A
+// `check` arm is the one to re-read this against, because its payload is
+// bounded by the LEDGER rather than by argv — `match` is a row read straight
+// out of `data.filed`, and `near` is sliced from it — so both arms reach the
+// cut on a ledger no caller can bound, which is why they are the arms the
+// suite drives through a pipe.
 if (cmd === "read") {
   console.log(JSON.stringify(data));
 } else if (cmd === "row") {
@@ -217,6 +217,19 @@ if (cmd === "read") {
   save(data);
   console.log(JSON.stringify({ pr, decision, total: data.ruled.length }));
 } else if (cmd === "check") {
+  runCheck();
+} else {
+  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
+}
+
+// `check` alone of the subcommands leaves its arm early: the already-filed
+// answer is complete before the near-miss ranking and the tracker query below
+// it, whose results that answer would only discard. A function is what makes
+// leaving early expressible — `process.exitCode` and a `return`, reaching the
+// same exit by the same path every other subcommand takes, where an arm of the
+// chain had only `process.exit()` and the payload it abandoned (#808).
+// Hoisted, so the dispatch chain above stays the file's spine.
+function runCheck() {
   // The first check of a run legitimately has no file yet, so absence alone
   // cannot be an error — but a silent "safe to file" for every check when
   // the path is simply wrong (typo'd --file) is a fail-open that no caller
@@ -274,7 +287,19 @@ if (cmd === "read") {
     // non-zero but weaker: tracker rows to review, not a ruling. A caller that
     // checks only the exit status stops on both, which errs toward not
     // duplicating.
-    process.exit(1);
+    //
+    // exitCode + return, not exit(): the payload above is `match`, a row read
+    // straight out of the ledger, and `filed` caps neither the subject it
+    // stores nor the ledger it stores it into — so this is the branch whose
+    // payload is bounded by the LEDGER rather than by argv, and measured, an
+    // ordinary four-word check against one wide filed row arrived cut at the
+    // pipe buffer. The code it arrived under was already this 1, so what the
+    // exit lost was the payload alone, the `verdict` field parsing consumers
+    // read included (#808). The `return` is what keeps the ranking and the
+    // tracker query below unreached; nothing after it assigns exitCode on
+    // this path, so 1 is what the process leaves with.
+    process.exitCode = 1;
+    return;
   }
 
   // Near-miss reporting. The subset match above answers exactly one question —
@@ -621,6 +646,4 @@ if (cmd === "read") {
   // ~230 KB against a four-word argv arrived cut at exit 0, the "clean, safe
   // to file" signal.
   process.exitCode = verdict === "tracker-hit" ? 3 : 0;
-} else {
-  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
 }

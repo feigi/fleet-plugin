@@ -143,9 +143,15 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       chmodSync(ghPath, 0o755);
     }
     // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
-    // readable at all, and `check`'s stderr stays far under the ~64 KiB pipe
-    // buffer where `console.error` + `process.exit()` starts dropping writes
-    // (measured on candidates.mjs, issue #132) — so these assertions are honest.
+    // readable at all. spawnSync drains stdout and stderr concurrently, so the
+    // child never blocks on a full pipe, and no `check` arm reaches its exit
+    // through process.exit(), which is what dropped queued writes past the
+    // ~64 KiB pipe buffer (measured on candidates.mjs, issue #132) and
+    // abandoned the payload with them (#246, #808) — so these assertions are
+    // honest. The ceiling that is left is spawnSync's own maxBuffer, 1 MiB per
+    // stream by default: past it the child is killed and the capture arrives
+    // short under a null exit code. The #808 fixtures run well past the pipe
+    // buffer and stay under that cap; widen one and that is what gives.
     const scriptArgs = noFile ? ["check", ...args, subject] : ["--file", file, "check", ...args, subject];
     const r = spawnSync(process.execPath, [SCRIPT, ...scriptArgs], {
       encoding: "utf8",
@@ -1375,4 +1381,107 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
   assert.equal(unknown.status, 2, `an unknown subcommand must still exit 2; got ${unknown.status}\n${unknown.stderr}`);
   assert.match(unknown.stderr, /unknown subcommand 'reed'/);
   assert.equal(unknown.stdout, "", "a refusal must not also emit a payload");
+});
+
+// ── `check` on a pipe (#808) ─────────────────────────────────────────────────
+//
+// The sweep above cannot reach `check`: it drives the three subcommands whose
+// payload echoes an argv tail, and `check`'s does not. Its wide field is
+// `match` — a row read straight back out of `data.filed` — so the fixture that
+// makes it oversized is a wide LEDGER, not a wide argv, and no ceiling on an
+// argv element applies. `filed` caps neither the subject it stores nor the
+// ledger it stores it into, so an ordinary four-word `check` reaches the cut
+// against a ledger holding one wide row.
+//
+// Both arms are driven, because the exit these pin is mid-branch. The
+// already-filed arm leaves early, and the arm below it is everything that
+// early departure exists to skip — a restructure that gets the departure
+// wrong breaks one or the other, and only exercising both tells them apart.
+//
+// run() spawns through spawnSync, whose stdout is a pipe, so these run the
+// defect's own path rather than a simulation of it. Its parse is the
+// assertion: a truncated payload leaves `json` null, which is what the
+// oversized cases below test for, quoting the byte count rather than naming
+// the pipe — an empty or polluted stdout fails to parse just as badly.
+const WIDE_FILED_ROW = `#4242 ${"alpha bravo charlie delta ".repeat(8000).trim()}`;
+
+test("check hands a pipe its whole ALREADY FILED payload, at its unchanged exit 1 (#808)", () => {
+  assert.ok(
+    Buffer.byteLength(WIDE_FILED_ROW) > OVERSIZED,
+    `the filed row must be far past the pipe buffer or this test pins nothing, got ${Buffer.byteLength(WIDE_FILED_ROW)} bytes`,
+  );
+  const r = run("alpha bravo charlie delta", { filed: [WIDE_FILED_ROW] });
+  // Exit first: this is the ALREADY FILED signal callers gate on, and it is
+  // the one thing the defect never moved — a fix that delivers the payload by
+  // weakening the signal would trade a corrupt payload for a duplicate filing.
+  assert.equal(r.status, 1, `the ALREADY FILED signal must not move; got ${r.status}\n${r.stderr.slice(0, 400)}`);
+  assert.ok(
+    r.json,
+    `check's already-filed payload did not parse — ${Buffer.byteLength(r.stdout)} bytes on stdout at exit ${r.status}`,
+  );
+  assert.equal(r.json.match, WIDE_FILED_ROW, "the payload parsed but lost the filed row it exists to name");
+  assert.equal(r.json.verdict, "already-filed");
+});
+
+// What the early departure exists to SKIP, asserted on the payload rather than
+// on `gh` alone. The tracker query is only half of it: the near-miss ranking
+// runs entirely in this process and never touches `gh`, so a run that never
+// invoked it is no evidence the ranking was skipped. The key set is, and it
+// also catches the opposite restructure — one that reaches the wider arm's
+// fields and merges them in.
+test("check's ALREADY FILED payload carries the already-filed shape alone (#808)", () => {
+  const r = run("Non-zero column audit 11 rows", { filed: [FILED_114, FILED_131], hits: [HIT_114] });
+  assert.equal(r.status, 1, `got ${r.status}\n${r.stderr}`);
+  assert.ok(r.json, `already-filed payload did not parse — ${Buffer.byteLength(r.stdout)} bytes on stdout`);
+  assert.deepEqual(
+    Object.keys(r.json).sort(),
+    ["found", "ledger", "match", "subject", "verdict"],
+    "the already-filed arm must not pick up the fields of the arm it departs before",
+  );
+  assert.equal(r.ghRan, false, "the tracker search stays skipped");
+  // The emission's own shape — a score follows the phrase — rather than the
+  // bare word, so a filed row that happens to use it cannot trip this.
+  assert.doesNotMatch(r.stderr, /near-miss \d/, "the near-miss ranking stays skipped");
+});
+
+// The other half, and the one the arm above can only be tested against: input
+// this must still ACCEPT and carry all the way through. Every case above stops
+// early, and a restructure that stopped early ALWAYS would pass all of them —
+// so the arm past the departure gets an oversized payload of its own. `near`
+// is sliced from `data.filed`, so it is ledger-bounded exactly as `match` is.
+//
+// The rows share content words with the subject without matching it: each
+// carries a term the subject lacks and the subject carries one they lack, so
+// neither token set is the other's subset and the exact path cannot fire —
+// while the overlap that ranks them stays well above zero.
+test("check hands a pipe its whole not-filed payload, and still reaches the tracker (#808)", () => {
+  const filed = ["alpha", "bravo", "charlie"].map(
+    (tag, i) => `#${800 + i} ${"delta echo foxtrot ".repeat(6000).trim()} ${tag}`,
+  );
+  const r = run("delta echo foxtrot zulu", { filed, hits: [] });
+  assert.equal(r.status, 0, `a ledger with no exact match and a tracker that returns nothing stays exit 0; got ${r.status}\n${r.stderr.slice(0, 400)}`);
+  assert.ok(
+    r.json,
+    `check's not-filed payload did not parse — ${Buffer.byteLength(r.stdout)} bytes on stdout at exit ${r.status}`,
+  );
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(r.json.near)) > OVERSIZED,
+    `the near-miss rows must be far past the pipe buffer or this test pins nothing, got ${Buffer.byteLength(JSON.stringify(r.json.near))} bytes`,
+  );
+  // The peer of the already-filed arm's shape pin, and not symmetric with it:
+  // that one guards against fields LEAKING in, which the design-spec row above
+  // already catches on its own. This one guards against a field going missing,
+  // which that row cannot see — it reads the emitted keys, so a key that stops
+  // being emitted stops being checked. `subject` is the one field of this arm
+  // no other test reads, so dropping it is the mutation that survives the
+  // whole suite otherwise.
+  assert.deepEqual(
+    Object.keys(r.json).sort(),
+    ["found", "ledger", "match", "near", "nearTotal", "subject", "tracker", "verdict"],
+    "the not-filed arm must still carry every field it names",
+  );
+  assert.equal(r.json.found, false, "none of these rows is a match, or the ranking below them never runs");
+  assert.deepEqual(r.json.near.map((n) => n.row), filed, "the payload parsed but lost the near-miss rows it ranked");
+  assert.equal(r.ghRan, true, "the arm past the early departure must still reach the tracker query");
+  assert.equal(r.json.verdict, "clean");
 });
