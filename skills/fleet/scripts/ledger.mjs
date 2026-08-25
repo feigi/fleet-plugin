@@ -20,16 +20,18 @@ const NAME = "ledger";
 // here: this file splices flags out of argv with its own wording (#362).
 const die = makeDie(NAME);
 
-// The cause of a failed child process, for the probes below whose diagnostic is
-// the only copy of it — each either pipes or silences the child's stderr, so
-// nothing it printed reaches a terminal (#638).
+// The cause of a failed child process, for `check`'s repository probe and its
+// tracker query — each captures the child's stderr instead of forwarding it, so
+// what the child printed reaches no terminal and this string is the only copy
+// of it (#638).
 //
 // Trim BEFORE choosing, not after. A whitespace-only stderr is truthy, so it
 // wins a choice made on the raw values and then trims away to nothing, leaving
 // the reader an empty parenthesis where the reason belongs; choosing on the
-// trimmed text falls through to the next candidate instead. `??` inside the
-// map, not `||`, so a candidate that is absent and one that is blank reach that
-// choice the same way rather than through `String(undefined)`.
+// trimmed text falls through to the next candidate instead. `?? ""` per
+// candidate, so a field that is absent contributes nothing — where the same
+// choice made with `||` around a `String()` hands back the text `undefined` as
+// the cause when no candidate is set at all (measured).
 //
 // Keep the END when it overruns, and say so. A CLI prints its warnings ahead of
 // the error that killed it, so keeping the first bytes discards the cause and
@@ -526,10 +528,10 @@ function runCheck() {
       // reaches no terminal and this string is the only place the cause is
       // ever seen (the same call the gh catch below makes, #176). Capped for
       // the same reason too: it ships on stdout inside `tracker.error` — see
-      // cause(), which owns both the cap and the choice between git's two
-      // places to put a reason. Empty here is a tolerable answer where it is
-      // not for gh below: the message this interpolates into still names the
-      // probe that failed and the path it failed on.
+      // cause(), which owns both the cap and the choice between the fields a
+      // failed git can put a reason in. Empty here is a tolerable answer where
+      // it is not for the gh catch below: the message this interpolates into
+      // still names the probe that failed and the path it failed on.
       //
       // Either way there is no repository for the query to bind to — the same
       // state as this process's own cwd not being a repo, which already
@@ -610,14 +612,17 @@ function runCheck() {
         // cap and which end of an overrunning stderr survives it.
         //
         // stderr first, then the message: on a non-zero exit Node builds the
-        // message out of the same bytes, prefixed by the command, so it is the
-        // longer copy of the cause rather than a smaller fallback (#176). It
-        // earns its place on the arms that have no stderr at all — a spawn
-        // Node aborted, a timeout, gh output this file refused to parse — and
-        // on the one that has stderr with no cause in it. The literal last
-        // resort is unreachable through gh today and stays anyway: an empty
-        // `tracker.error` is what makes the warning below name no reason, which
-        // is the whole defect this arm was filed for.
+        // message out of the same bytes prefixed by the command, so it is the
+        // LONGER copy of the cause, not a smaller fallback (#176, measured
+        // again here). It earns its place on the failures that carry no stderr
+        // field at all — a spawn Node aborted, a timeout, and the output this
+        // file refused to parse or refused the shape of — and on a stderr with
+        // no cause in it, where it still names the command that failed.
+        //
+        // Nothing this arm can currently throw reaches the literal last resort:
+        // every failure that lands here carries a message. It stays because an
+        // empty `tracker.error` is precisely what makes the warning below name
+        // no reason, which is the defect this arm was filed for.
         //
         // `hits` omitted here too, same reason as the no-terms branch above:
         // the search never ran, so there is no empty result to report.
