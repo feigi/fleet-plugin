@@ -238,6 +238,41 @@ test("a fetch that succeeds but leaves origin/<branch> unresolvable is exit 2 at
   assert.doesNotMatch(stderr, /cannot fetch/, "the fetch passed — this is the guard after it");
 });
 
+test("a rev-parse that cannot resolve origin/<branch> is fatal — the script stops rather than answering off an empty tip", (t) => {
+  // #580, the defect #574 fixed one guard up. The case above asserts exit 2, no
+  // JSON, this guard's own message and git's cause — and every one of those
+  // survives downgrading this guard's `die` to a warning. With it advisory `tip`
+  // is empty, the script runs ON, and the `cat-file -e` guard below kills it:
+  // exit 2 again, no stdout again, and this guard's own line still sitting on
+  // stderr. Measured — the whole suite stayed green under that mutant, so no
+  // conjunction of those three can see whether this guard was fatal.
+  //
+  // What only fatality produces is the absence of progress. The `tip =` trace is
+  // echoed on the line after this guard, so it appears if and only if execution
+  // got past it, and it is pinned verbatim by "a healthy run stays quiet", so it
+  // cannot be reworded out from under this assertion unseen. git's own `ambiguous
+  // argument` is the other bracket: it proves rev-parse ran and failed HERE,
+  // rather than this test passing off an earlier guard that stopped the script
+  // before it. Neither bracket names a `die` string, so rewording any guard's
+  // message — this one included — leaves both standing.
+  const w = repo(t);
+  // The fixture of the case above: with no refspec configured the fetch still
+  // succeeds, into FETCH_HEAD, so deleting the tracking ref leaves this guard to
+  // fire while the one before it passes.
+  git(w, "config", "--unset", "remote.origin.fetch");
+  git(w, "update-ref", "-d", "refs/remotes/origin/main");
+
+  const { code, json, stderr } = verify(w, "main", "0".repeat(40));
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /ambiguous argument 'origin\/main'/, "rev-parse ran and failed here, not some earlier guard");
+  assert.doesNotMatch(
+    stderr,
+    /origin\/main tip =/,
+    "a ref that does not resolve must stop the script, not warn and carry an empty tip onward",
+  );
+});
+
 test("an object that is present but is not a commit is not reported as absent", (t) => {
   const w = repo(t);
   const tree = git(w, "rev-parse", "HEAD^{tree}");
