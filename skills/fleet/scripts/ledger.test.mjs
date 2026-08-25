@@ -143,9 +143,15 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       chmodSync(ghPath, 0o755);
     }
     // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
-    // readable at all, and `check`'s stderr stays far under the ~64 KiB pipe
-    // buffer where `console.error` + `process.exit()` starts dropping writes
-    // (measured on candidates.mjs, issue #132) — so these assertions are honest.
+    // readable at all. spawnSync drains stdout and stderr concurrently, so the
+    // child never blocks on a full pipe, and no `check` arm reaches its exit
+    // through process.exit(), which is what dropped queued writes past the
+    // ~64 KiB pipe buffer (measured on candidates.mjs, issue #132) and
+    // abandoned the payload with them (#246, #808) — so these assertions are
+    // honest. The ceiling that is left is spawnSync's own maxBuffer, 1 MiB per
+    // stream by default: past it the child is killed and the capture arrives
+    // short under a null exit code. The #808 fixtures run well past the pipe
+    // buffer and stay under that cap; widen one and that is what gives.
     const scriptArgs = noFile ? ["check", ...args, subject] : ["--file", file, "check", ...args, subject];
     const r = spawnSync(process.execPath, [SCRIPT, ...scriptArgs], {
       encoding: "utf8",
@@ -1453,7 +1459,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
     (tag, i) => `#${800 + i} ${"delta echo foxtrot ".repeat(6000).trim()} ${tag}`,
   );
   const r = run("delta echo foxtrot zulu", { filed, hits: [] });
-  assert.equal(r.status, 0, `a clean ledger with an unreachable tracker hit stays exit 0; got ${r.status}\n${r.stderr.slice(0, 400)}`);
+  assert.equal(r.status, 0, `a ledger with no exact match and a tracker that returns nothing stays exit 0; got ${r.status}\n${r.stderr.slice(0, 400)}`);
   assert.ok(
     r.json,
     `check's not-filed payload did not parse — ${Buffer.byteLength(r.stdout)} bytes on stdout at exit ${r.status}`,
@@ -1461,6 +1467,18 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
   assert.ok(
     Buffer.byteLength(JSON.stringify(r.json.near)) > OVERSIZED,
     `the near-miss rows must be far past the pipe buffer or this test pins nothing, got ${Buffer.byteLength(JSON.stringify(r.json.near))} bytes`,
+  );
+  // The peer of the already-filed arm's shape pin, and not symmetric with it:
+  // that one guards against fields LEAKING in, which the design-spec row above
+  // already catches on its own. This one guards against a field going missing,
+  // which that row cannot see — it reads the emitted keys, so a key that stops
+  // being emitted stops being checked. `subject` is the one field of this arm
+  // no other test reads, so dropping it is the mutation that survives the
+  // whole suite otherwise.
+  assert.deepEqual(
+    Object.keys(r.json).sort(),
+    ["found", "ledger", "match", "near", "nearTotal", "subject", "tracker", "verdict"],
+    "the not-filed arm must still carry every field it names",
   );
   assert.equal(r.json.found, false, "none of these rows is a match, or the ranking below them never runs");
   assert.deepEqual(r.json.near.map((n) => n.row), filed, "the payload parsed but lost the near-miss rows it ranked");
