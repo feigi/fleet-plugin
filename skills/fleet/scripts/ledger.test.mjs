@@ -235,9 +235,14 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the block below pins each rule where the other
+// least four tokens — and the pair below pins each rule where the other
 // cannot cover for it. Same-size sets are where the two rules come apart, and
 // the tests above reach that case only through rows built for other purposes.
+//
+// A same-size match is deliberately NOT pinned here: it satisfies both rules
+// at once, so no single-rule mutation can red it and it discriminates
+// nothing. The refusal below is the same-size case worth pinning, and an
+// equal set under the floor is the acceptance only one rule can explain.
 // ---------------------------------------------------------------------------
 
 test("a same-size four-token near-miss differing in one token is not a match (#888)", () => {
@@ -245,13 +250,6 @@ test("a same-size four-token near-miss differing in one token is not a match (#8
   assert.equal(r.status, 0);
   assert.equal(r.json.found, false);
   assert.equal(r.json.match, null);
-});
-
-test("a same-size four-token reordering of a filed row is a match, exit 1 (#888)", () => {
-  const r = run("retry under drains quorum", { filed: ["#901 quorum drains under retry"] });
-  assert.equal(r.status, 1);
-  assert.equal(r.json.found, true);
-  assert.match(r.json.match, /^#901 /);
 });
 
 test("equal token sets match below the subset floor — the floor gates the subset rule alone (#888)", () => {
