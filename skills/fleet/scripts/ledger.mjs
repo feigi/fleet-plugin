@@ -272,8 +272,9 @@ function runCheck() {
     // instead of following it: a pair qualifying under neither is refused
     // without walking the smaller set, one qualifying under either is walked
     // once. Testing set equality as a separate walk, as this did, re-walked a
-    // same-size near-miss for an answer the first walk had already produced —
-    // equal sizes are exactly the case where the two walks are the same walk.
+    // same-size near-miss that cleared the subset floor for an answer the
+    // first walk had already produced — equal sizes are exactly the case
+    // where the two walks are the same walk.
     return (small.size === big.size || small.size >= 4) && small.isSubsetOf(big);
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
