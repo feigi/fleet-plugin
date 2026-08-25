@@ -49,24 +49,36 @@ For each labeled PR clearing the hold rule, lowest first:
 1. If the PR is behind `origin/main`, update it **server-side first**: `gh pr update-branch <pr> --rebase`. That's an API call, not a push — no local git command runs, so the force-push classifier denial this step used to hit (`git push --force-with-lease`, judged and intermittently denied per invocation — 2 allowed / 2 denied on byte-identical invocations in one session; `settings.json` has since gained an `autoMode.allow` entry for exactly that command, so adding one is not the missing fix) never enters. The call is async; poll for the head to move:
 
    ```bash
-   pre=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+   branch=$(gh pr view <pr> --json headRefName -q .headRefName)
+   ref="refs/heads/$branch"
+   pre=$(git ls-remote origin "$ref" | cut -f1)
+   [ -n "$pre" ] || { echo "no such remote ref: $ref"; exit 2; }
    out=$(gh pr update-branch <pr> --rebase 2>&1); rc=$?
    post=$pre
    if [ "$rc" -eq 0 ]; then
      for _ in $(seq 1 60); do                 # 5 min cap, never an unbounded `until`
-       post=$(gh pr view <pr> --json headRefOid -q .headRefOid)
-       [ "$post" != "$pre" ] && break
+       post=$(git ls-remote origin "$ref" | cut -f1)
+       [ -n "$post" ] && [ "$post" != "$pre" ] && break
        sleep 5
      done
    fi
-   printf 'rc=%s pre=%s post=%s\n%s\n' "$rc" "$pre" "$post" "$out"
+   printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\n%s\n' \
+     "$rc" "$branch" "$pre" "$post" \
+     "$(gh pr view <pr> --json headRefOid -q .headRefOid)" "$out"
    ```
 
-   **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the three outcomes off `rc` and `post`:
+   **Poll `git ls-remote`, not `gh pr view headRefOid`** — the PR object's head is precisely the field that desyncs, so polling it asks the one source that can be wrong about the thing you are waiting for. Measured, feigi/claude-config#903: the rebase landed and moved the branch ref, `headRefOid` stayed on the pre-rebase SHA with `mergeable_state: unknown` and no CI run on the new head, and the loop burned all 60 iterations reading a landed rebase as un-landed — straight into the fallback, whose local rebase would then have replayed commits the remote already carried. `ls-remote` reads the ref itself and carries no local state, the same reason the `fetch.prune` note below re-derives a reading from `git ls-remote origin` rather than trusting a number measured while the ref was missing. Keep the `headRefOid` read in the printf: it is no longer the gate, and its *disagreement* with `post` is the desync signal you want on the record.
 
-   - `rc=0` and `post != pre` → the rebase landed. Hold `pre` and `post`, step 4's proof needs both.
+   **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the four outcomes off `rc` and `post`:
+
+   - `rc=0`, `post` **non-empty**, and `post != pre` → the rebase landed. Hold `pre` and `post`, step 4's proof needs both.
    - Non-zero `rc` carrying `UNPROCESSABLE: There are no new commits on the base branch` → it was already current, so `pre` and `post` are simply equal. Shouldn't happen here since you only call this when behind.
    - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
+   - **`post` empty once the cap runs out** → the ref read failed; this is never "the rebase landed". An empty `post` satisfies `post != pre` all by itself, so without this row a failed `ls-remote` is classified as success — the same hole `[ -n "$pre" ]` closes on the way in, and the loop's own `[ -n "$post" ]` is why an empty read cannot break out early. Take the fallback below, and report the ref as unreadable rather than as a head that never moved.
+
+   **`post != pre` with `pr_head` still on `pre` is the desync, and it is the one state that needs a controller.** The rebase landed; GitHub's PR object did not follow. CI is bound to the stale head or absent entirely, so the merge gate cannot clear no matter how long you wait, and no merge-bot action fixes it — do not retry the rebase, and do not rebase locally, because the remote is already correct. Report it and stop.
+
+   **The controller's remedy is close-and-reopen, and it has a precondition that must be checked FIRST.** Reopening requires the PR's recorded head to still be reachable from the branch — and a rebase orphans it by construction, which is the very event that produced the desync. So before closing anything, run `git merge-base --is-ancestor <pr_head> origin/<branch>`. Non-ancestor → **do not close**: GitHub refuses to reopen a PR whose head is unreachable (measured on #903 — three reopen attempts, `Could not open the pull request` each time), and the only recovery is opening a replacement PR from the same branch, which loses the review thread and every label on it. Close-and-reopen is normally reversible; past an orphaning rebase it is a one-way door.
 
    This also repairs a branch carrying a merge commit — GitHub's rebase drops those too.
 
@@ -145,6 +157,8 @@ For each labeled PR clearing the hold rule, lowest first:
    never exist.
 
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
+
+   **`--merge` (no-ff) is load-bearing, not stylistic — and do not let a content claim reach you worded as a graph-shape one.** It always writes a **two-parent** merge commit, even where the branch is trivially fast-forwardable, and step 5's proof *requires* that: `prove-merge.sh` dies at `has no second parent — not a merge commit` and exits **2** on a single-parent merge. Exit 2 is "could not evaluate the claim at all", not "the claim is false" — so a real fast-forward leaves you with no proof to report and a halt, not a failed proof. Measured on #908: a controller brief predicted "the merge will be a fast-forward", and the merge tree *was* byte-identical to the reviewed head (`988f29d1`, `git diff <pin> <merge>` empty) — but the commit still had two parents, which is the only reason the proof was available. "The merge adds nothing" is a statement about content; **never write it as "fast-forward", which is a statement about shape, and which would have broken step 5.**
 
    **Prove which head landed.** A rebase-then-merge leaves no trace of *which* version went in, and "I rebased" is exactly the claim asserted without doing it:
 
