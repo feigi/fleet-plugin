@@ -17,10 +17,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, statSync, openSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ci-state.mjs", import.meta.url));
 
@@ -68,7 +69,7 @@ const RUN_VIEW = JSON.stringify({
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "" } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so the fixture has to be a real repo. No remote is added:
@@ -108,14 +109,39 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
     restore.push([full, statSync(full).mode & 0o777]);
     chmodSync(full, 0o000);
   }
+  // readOnlyStdout: hand the child a stdout it cannot write to, so its first
+  // write fails with EBADF rather than by racing a reader. CLOSING fd 1 does
+  // not do it — libuv reopens a closed standard fd onto /dev/null and the write
+  // then succeeds (measured), which is why this opens /dev/null read-only and
+  // passes that fd instead. spawnSync then reports no stdout for the child at
+  // all, so the eager parse below has nothing to read and skips.
+  const roStdout = readOnlyStdout ? openSync("/dev/null", "r") : null;
   let r;
   try {
-    r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], { cwd: join(repoDir, cwd), encoding: "utf8", env });
+    r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], {
+      cwd: join(repoDir, cwd),
+      encoding: "utf8",
+      env,
+      ...(roStdout === null ? {} : { stdio: ["ignore", roStdout, "pipe"] }),
+    });
   } finally {
+    if (roStdout !== null) closeSync(roStdout);
     for (const [full, mode] of restore.reverse()) chmodSync(full, mode);
   }
   const log = readFileSync(ghLog, "utf8");
-  const payload = r.stdout.trim() ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
+  // Parsing eagerly is what lets every other test assert straight off `payload`,
+  // and a parse failure throwing here is the right default: it names a malformed
+  // payload at the test that produced it. The pipe-survival tests are the one
+  // exception — unparsed stdout is precisely their subject, so they opt out and
+  // assert on the raw bytes themselves.
+  let payload = null;
+  if (r.stdout && r.stdout.trim()) {
+    try {
+      payload = JSON.parse(r.stdout.trim().split("\n").pop());
+    } catch (e) {
+      if (!tolerateUnparsedStdout) throw e;
+    }
+  }
   rmSync(repoDir, { recursive: true, force: true });
   rmSync(binDir, { recursive: true, force: true });
   return { ...r, payload, log };
@@ -771,4 +797,202 @@ test("--pr omitted still answers with the usage line, not the numeric complaint"
   assert.match(r.stderr, /usage: ci-state\.mjs --pr <number>/);
   assert.doesNotMatch(r.stderr, /needs a number/, "an omitted --pr is a different mistake from a malformed one");
   assert.equal(r.log, "", `a usage refusal must also precede any gh read, and gh was asked: ${r.log}`);
+});
+
+// --- The verdict payload has to survive a pipe ------------------------------
+// `console.log` + `process.exit()` loses whatever is still queued: on a pipe the
+// stdout write is asynchronous, the kernel accepts one buffer's worth
+// synchronously, and process.exit() discards the remainder rather than draining
+// it. The payload is then cut mid-JSON while the exit code arrives intact, so a
+// caller that reads the code sees a normal verdict and a caller that parses
+// stdout gets nothing it can use. emitRateLimited() already writes its payload
+// with writeSync for this reason; these tests hold the verdict payload to the
+// same standard.
+//
+// The mode under test is a PIPE specifically. spawnSync's default stdio is one
+// (measured: the same payload reaches a file fd whole and a pipe cut), which is
+// why these can reuse run() — a harness that captured stdout to a file would
+// pass whether or not the script was ever fixed.
+const PIPE_BUFFER_BYTES = 65536;
+
+// Derived rather than written as a literal number of jobs: the property that
+// matters is "past one buffer", and a hardcoded count silently stops clearing
+// the cliff the moment the id shape or the payload's other fields change. The
+// ids are shaped the way expectedJobs() derives them, and carry no job-level
+// `name:`, which that derivation refuses.
+function jobsClearingPipeBuffer() {
+  const ids = [];
+  for (let joined = 0; joined <= PIPE_BUFFER_BYTES * 2; ) {
+    const id = `generated-job-${String(ids.length).padStart(6, "0")}-padding-padding`;
+    ids.push(id);
+    joined += id.length + ", ".length; // how the absent-jobs reason joins them
+  }
+  return ids;
+}
+
+const workflowWithJobs = (ids) =>
+  `name: CI\non: [pull_request]\njobs:\n${ids.map((id) => `  ${id}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`).join("")}`;
+
+const runViewAllSucceeded = (ids) =>
+  JSON.stringify({
+    jobs: ids.map((name) => ({ name, status: "completed", conclusion: "success" })),
+    attempt: 1,
+    status: "completed",
+    conclusion: "success",
+    headSha: PR_HEAD,
+  });
+
+// --quiet is the mode the controller's CI Monitor polls in, and it drops `jobs`
+// and `missing` — so this also pins that the payload still outgrows the buffer
+// on the hot path, through `reasons` alone, where the absent-job reason names
+// every job it could not find.
+test("a not-green verdict payload larger than one pipe buffer reaches the caller whole", () => {
+  const ids = jobsClearingPipeBuffer();
+  const r = run(["--quiet"], {
+    repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
+    tolerateUnparsedStdout: true,
+  });
+  let payload;
+  try {
+    payload = JSON.parse(r.stdout);
+  } catch (e) {
+    assert.fail(`verdict payload did not survive the pipe: ${r.stdout.length} bytes, ${e.message}`);
+  }
+  assert.ok(
+    r.stdout.length > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer (${r.stdout.length} bytes), so this test would pass without proving anything`,
+  );
+  assert.equal(payload.verdict, "not-green");
+  assert.equal(r.status, 1, r.stderr);
+});
+
+// The other direction, and the one a fix for the above can newly break. writeSync
+// throws where console.log swallows — on a saturated non-blocking pipe it raises
+// EAGAIN — and an uncaught throw here would skip the exit call entirely, dropping
+// the process to exit 1: the code this script reserves for not-green. A green PR
+// would then be reported as failing CI, which is worse than the truncation being
+// fixed. Green is also the only verdict that can carry a large payload without
+// `reasons`, so this is what exercises the write with `jobs` doing the growing.
+test("a green verdict payload larger than one pipe buffer still exits 0, gate not inverted", () => {
+  const ids = jobsClearingPipeBuffer();
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
+    runView: runViewAllSucceeded(ids),
+    tolerateUnparsedStdout: true,
+  });
+  let payload;
+  try {
+    payload = JSON.parse(r.stdout);
+  } catch (e) {
+    assert.fail(`verdict payload did not survive the pipe: ${r.stdout.length} bytes, ${e.message}`);
+  }
+  assert.ok(
+    r.stdout.length > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer (${r.stdout.length} bytes), so this test would pass without proving anything`,
+  );
+  assert.equal(payload.verdict, "green");
+  assert.equal(r.status, 0, r.stderr);
+});
+
+// What the write must NOT change on every payload that was never at risk. console.log
+// appends exactly one newline and writeSync appends none of its own, so the
+// replacement has to supply it — supplying none concatenates the payload with
+// whatever a caller prints next, and supplying two breaks a reader that treats a
+// blank line as end of output. Pinned as exact bytes rather than "parses", which
+// all three spellings would satisfy.
+test("a payload that never reaches the buffer is emitted byte for byte as before: one line, one trailing newline", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${JSON.stringify(r.payload)}\n`);
+});
+
+// The guard emit() puts around its write is what the comment above emit() calls
+// not optional, and until here nothing in this repo EXECUTED it: deleting the
+// try/catch outright and running this file, and then the whole fleet suite, left
+// both green (measured). The two tests above prove a SUCCESSFUL oversized write
+// survives; neither makes the write fail, so the mechanism was pinned by prose
+// alone. arg.test.mjs pins die()'s structurally identical guard this same way.
+//
+// The failure is forced deterministically rather than by racing a reader: the
+// child's stdout is /dev/null opened READ-only, so the first writeSync raises
+// EBADF. A different errno from the EAGAIN in the field, and the same and only
+// thing emit() promises about either — the message may be lost, the exit code
+// may not.
+//
+// Green is the discriminating verdict, and the only one that discriminates: with
+// the guard, the payload is lost and exit 0 still lands; without it the EBADF
+// propagates, skips the process.exit() the tail is about to make, and Node falls
+// through to its default exit 1 — a green PR reported to the fleet's merge gate
+// as failing CI. That is the #299/#328 inversion itself, reproduced without the
+// race, so this discriminates on a machine where EAGAIN never fires. Measured
+// both ways: guarded exit 0, guard removed exit 1.
+test("emit() keeps the green exit code when its own write throws — the guard executed, not lifted", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW }, readOnlyStdout: true });
+  assert.equal(r.status, 0, `exit ${r.status}: emit()'s write threw and took the green verdict with it`);
+});
+
+// The verdict SUMMARY goes to fd 2, and fd 2 is the fd vlog's console.error has
+// already initialised a stream for — which is what puts it in O_NONBLOCK. A
+// non-blocking write to a full pipe SHORT-WRITES: it returns the count it
+// managed and throws nothing, so the catch above never fires and nothing is
+// logged. Measured against this same fixture before emit() consumed that return
+// value: the line arrived cut at one buffer with its trailing newline gone, in
+// this quiet mode and in the verbose one, while stdout and the exit code came
+// through untouched — the one channel the tests above cannot speak for.
+//
+// Completeness is asserted by CONTENT, before the size guard rather than after.
+// The absent-job reason ends with the last id it joined, so a cut line simply
+// does not end with it; a truncated line is also exactly one buffer long, which
+// would fail a `> PIPE_BUFFER_BYTES` guard and blame the fixture for a defect in
+// the script. Ordered this way each failure names its own cause.
+test("the verdict line on stderr survives past one pipe buffer, its reasons whole", () => {
+  const ids = jobsClearingPipeBuffer();
+  const r = run(["--quiet"], {
+    repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
+    tolerateUnparsedStdout: true,
+  });
+  const line = r.stderr.split("\n").find((l) => l.includes("verdict="));
+  assert.ok(line, `no verdict line on stderr at all, in ${r.stderr.length} bytes`);
+  assert.ok(
+    line.endsWith(ids[ids.length - 1]),
+    `verdict line cut mid-reason at ${Buffer.byteLength(line)} bytes: it does not reach the last job it names`,
+  );
+  assert.ok(
+    Buffer.byteLength(line) > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer on stderr (${Buffer.byteLength(line)} bytes), so this test would pass without proving anything`,
+  );
+  assert.equal(r.status, 1, "the exit code must survive the write it follows");
+});
+
+// The shape pin. The test above executes the catch, and this one pins the LOOP
+// the catch sits inside — the two are independent: a body that catches
+// faithfully and still calls writeSync once satisfies the behavioural test and
+// reintroduces the short write, because a short write never throws.
+//
+// Derived through stripComments() rather than matched against raw source, and
+// deliberately not with a cleverer anchor: a `/m` regex over raw source is
+// satisfied by the correct shape sitting in a block comment, and `^(?!\s*//)`
+// closes neither escape (both measured, and strip-comments.mjs's own header
+// records them). Each fragment is anchored at a line start and joined with
+// `\s*^\s*` so a comment line added inside emit() does not redden this, and no
+// fragment is terminated with `$`, which over-fires on a trailing comment.
+//
+// The count assertion is what names the FILE when emit() is renamed or deleted:
+// the regex alone would then fail as an opaque match-against-undefined, and this
+// says which source to go and look at. It is deliberately not defending against
+// a shadowing second declaration — measured, a duplicate `function emit` at this
+// file's top level is a SyntaxError ("Identifier 'emit' has already been
+// declared") and the module system refuses it before any test runs, so the
+// lift-takes-first/JS-runs-last hazard does not reach this shape.
+test("emit() still consumes writeSync's return value — the loop, not just the catch", () => {
+  const source = stripComments(readFileSync(SCRIPT, "utf8"));
+  assert.equal(
+    source.match(/^\s*function emit\(/gm)?.length,
+    1,
+    "ci-state.mjs declares emit() more than once, or not at all — the pin below reads the first and the script runs the last",
+  );
+  assert.match(
+    source,
+    /^\s*function emit\(fd, text\) \{\s*^\s*let buf = Buffer\.from\(text\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(fd, buf\)\);/m,
+  );
 });
