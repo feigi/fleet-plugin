@@ -455,15 +455,30 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
 // The downgrade does not emit a malformed payload. `branch_j`, `sha_j` and
 // `tip_j` are assigned by one `&&` chain, so the first `jstr` that fails
 // short-circuits the rest and leaves those names unset; with the guard advisory
-// the `printf` references one and `set -u` aborts the shell at **exit 1** —
-// which this script's contract reads as "the sha is NOT reachable". Measured on
-// this fixture, whose sha IS reachable: unmutated gives exit 2 with the guard's
-// own line, the mutant gives exit 1 with `sha_j: unbound variable`, and neither
-// prints anything on stdout. An unparseable payload would at least fail the
-// caller's parse. A bare exit 1 is a confident wrong verdict, and
-// `run-team/SKILL.md` answers it by flagging the member, withholding the
-// enqueue and holding the ticket until a maintainer rules — spent on a SHA that
-// was on the branch the whole time.
+// the `printf` references one and `set -u` aborts the shell. Measured on this
+// fixture, whose sha IS reachable, stdout empty in every run: unmutated,
+// /bin/sh (macOS bash 3.2.57) and /bin/dash alike exit 2 with the guard's own
+// line. Downgraded, /bin/sh aborts at exit 1 saying `sha_j: unbound variable`,
+// and /bin/dash aborts at exit 2 saying `sha_j: parameter not set`.
+//
+// Exit 1 is what this script's contract reads as "the sha is NOT reachable", so
+// under a bash-family `sh` the downgrade is a confident wrong verdict. An
+// unparseable payload would at least fail the caller's parse; a bare exit 1
+// instead has `run-team/SKILL.md` flag the member, withhold the enqueue and
+// hold the ticket until a maintainer rules — spent on a SHA that was on the
+// branch the whole time.
+//
+// Which abort it is, though, is the shell's to choose and not this script's,
+// and dash's lands on 2 — the very status a firing guard returns. `verify`
+// spawns a bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
+// `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
+// therefore pins this guard on a developer's Mac and waves the mutant through
+// on the runner that gates the merge. `sha_j` is what discriminates instead.
+// It reaches stderr only from that nounset abort — measured under /bin/sh and
+// /bin/dash, no healthy run, no genuine `not reachable`, no ordinary `die` and
+// no firing of this guard puts it there — while a shell aborting on it names
+// it first and words the rest however it likes. Matching a wording pins the
+// shell that uses that wording and no other.
 //
 // `jstr` escapes through a `sed`/`tr` pipeline, so shadowing `sed` breaks the
 // escaper without touching git. The git shims elsewhere in this file cannot
@@ -517,8 +532,8 @@ test("an escaper that cannot run is exit 2, never the exit 1 that means `not rea
   assert.equal(json, null, "no verdict may be printed for a payload that was never escaped");
   assert.doesNotMatch(
     stderr,
-    /unbound variable/,
-    "the guard must stop the script, not warn and leave the payload `printf` reading names the `&&` chain never assigned",
+    /sha_j/,
+    "the guard must stop the script, not warn and leave the payload `printf` reading names the `&&` chain never assigned. The NAME, never the wording: bash says `sha_j: unbound variable` at exit 1 and dash `sha_j: parameter not set` at exit 2, so a wording match and the exit-2 assertion each pass on the mutant under the shell CI actually runs.",
   );
 });
 
