@@ -986,6 +986,65 @@ test("the verdict line on stderr survives past one pipe buffer, its reasons whol
   assert.equal(r.status, 1, "the exit code must survive the write it follows");
 });
 
+// #901: the verdict summary is the emit() call site on fd 2, and the terminator
+// contract already held at the payload sites on stdout was never pinned here.
+// emit() appends no newline of its own, so each call site supplies its own:
+// supplying none runs this line together with whatever the caller prints next,
+// and supplying an extra ends the output early for a reader that treats a blank
+// line as the end of it.
+//
+// The completeness assertion covering this same line cannot stand in for that.
+// It locates the line by splitting stderr on "\n", and splitting on the
+// terminator is what discards it — every segment that yields is the content
+// BETWEEN newlines, so no wording of an assertion over that segment can see
+// whether the line was terminated at all. Measured before this test existed:
+// dropping the trailing newline left this file green.
+//
+// fd 2 also carries the vlog trace stream and gh's own forwarded stderr, so it
+// has no single expected byte string and the whole-stream equality the stdout
+// pins use has no equivalent here. This isolates the line instead — it locates
+// the summary by the verdict and reasons THIS run reported, then reads the
+// bytes on either side of it. Deriving the expected text from the emitted
+// payload rather than from a literal copy is what keeps the assertions about
+// the newlines alone: rewording a reason or adding a payload field moves both
+// sides together and stays green, as does rewording any trace.
+//
+// The LEADING newline is insurance for forwarded child stderr still draining
+// through the async stream without having ended its line — arg.mjs's die()
+// documents the same shape for the same reason. That RACE is what does not
+// reproduce here: the text before the summary has already ended its own line,
+// in this fixture a vlog trace and under --quiet git's forwarded `error: No
+// such remote 'origin'`. The BYTE is another matter — against already-ended
+// text the leading newline leaves a blank line and dropping it leaves none —
+// so it is pinned below, doubled as well as missing. What that leaves
+// untested is the mid-line landing the newline exists to prevent, not the
+// newline itself.
+test("the verdict summary on stderr carries exactly one newline of its own on each side", () => {
+  const r = run([]);
+  assert.ok(
+    r.payload.reasons.length,
+    "fixture no longer produces a reason, so the summary derived below would carry an em dash the script omits when reasons is empty, and this test would fail on the lookup rather than on the terminator",
+  );
+  const summary = `ci-state: verdict=${r.payload.verdict} — ${r.payload.reasons.join("; ")}`;
+  const at = r.stderr.indexOf(summary);
+  assert.ok(at >= 0, `the verdict summary is not on stderr as emitted, in ${JSON.stringify(r.stderr)}`);
+  const before = r.stderr.slice(0, at);
+  assert.equal(
+    before.match(/\n*$/)[0].length,
+    2,
+    `the summary's own leading newline must leave exactly one blank line after the already-ended text before it, which runs ${JSON.stringify(before.slice(-40))}`,
+  );
+  const after = r.stderr.slice(at + summary.length);
+  assert.ok(
+    after.startsWith("\n"),
+    `the verdict summary is unterminated: it runs straight into ${JSON.stringify(after.slice(0, 40))}`,
+  );
+  assert.ok(
+    !after.startsWith("\n\n"),
+    "the verdict summary's terminator is doubled, ending the stream early for a reader that stops at a blank line",
+  );
+});
+
 // The shape pin. The test above executes the catch, and this one pins the LOOP
 // the catch sits inside — the two are independent: a body that catches
 // faithfully and still calls writeSync once satisfies the behavioural test and
