@@ -266,7 +266,10 @@ test("worktree-audit: a worktree gone from disk is named verbatim as MISSING", (
 // `keep()`'s reason is the single line eleven call sites converge on, and seven
 // of them interpolate a worktree path. Neither number is worth trusting from
 // prose — this comment shipped "four", which is the count of the sites that do
-// NOT interpolate one (129, 139, 308, 328). Re-derive both instead:
+// NOT interpolate one: the cherry-probe-failed, unmerged-commits,
+// worktree-remove-refused and branch-delete-failed reasons. Those four were
+// cited by line number here and the numbers had already drifted off every one
+// of them; naming them is what #129 asks for. Re-derive both counts instead:
 //   grep -c 'keep "\$b"' reap.sh                    # 11
 //   grep 'keep "\$b"' reap.sh | grep -c '\$wt'      # 7
 // reap only considers a branch whose
