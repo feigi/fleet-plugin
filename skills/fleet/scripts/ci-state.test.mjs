@@ -347,6 +347,20 @@ test("discovery is anchored to the repo root, not the cwd — a subdirectory ans
   assert.equal(r.payload.verdict, "green");
 });
 
+// expectedJobs() refuses on the assumption its derivation rests on, and that
+// refusal has to land before the run query — the answer it would otherwise
+// spend a REST read on is one it has already decided it cannot give. Nothing
+// else in this file reaches the derivation's die() at all, so the gh log is
+// what pins the order rather than the refusal alone.
+const CI_WORKFLOW_NAMED_JOB = CI_WORKFLOW.replace("  check:\n", "  check:\n    name: Check\n");
+
+test("an invalid job derivation refuses before the run list is ever requested", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW_NAMED_JOB } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /derivation invalid/);
+  assert.doesNotMatch(r.log, /run list/, `the derivation must refuse before the query, and gh was asked: ${r.log}`);
+});
+
 // --- The not-green detectors, one negative case each ------------------------
 // Every fixture above is green, so the four `reasons.push` branches this PR
 // relocated into the `else` arm were never entered: deleting any one of them
