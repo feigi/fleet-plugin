@@ -235,9 +235,10 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the tests below pin each rule where the other
-// cannot cover for it. Same-size sets are where the two rules come apart, and
-// the tests above reach that case only through rows built for other purposes.
+// least four tokens — and the tests in this section pin each rule where the
+// other cannot cover for it. Same-size sets are where the two rules come
+// apart, and the tests above reach that case only through rows built for
+// other purposes.
 //
 // A same-size match is deliberately NOT pinned here: it satisfies both rules
 // at once, so no single-rule mutation can red it and it discriminates
@@ -292,6 +293,36 @@ test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
   const r = run("— — —", { filed: [FILED_114] });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /normalised subject is empty/);
+});
+
+// ---------------------------------------------------------------------------
+// Direction normalisation (#899 review). isMatch() orders the pair by size
+// before either acceptance rule reads it, so both rules always measure the
+// smaller set. The rules are symmetric once that ordering has happened, which
+// is what lets a fixture arriving already in order pass either way.
+// ---------------------------------------------------------------------------
+
+test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the floor measures", () => {
+  // Dropping the ordering — hardcoding the pair as (subject, filed) so the
+  // rules read whichever set arrived first — leaves every other fixture in
+  // this file green. This is the mirror orientation, where the FILED row is
+  // the smaller set. The `#NNN` strip in ledger.mjs is there to keep that
+  // orientation reachable at all, and says so in its own rationale; until
+  // this, nothing measured it.
+  //
+  // Sized clear of the floor deliberately. At exactly four tokens a raised
+  // floor reds this too, and it would then be pinning the boundary a
+  // neighbouring test already owns rather than the ordering. Above the floor
+  // the ordering is the only thing left that can move it.
+  //
+  // Plain words on both sides, as the token counts are load-bearing and must
+  // not shift when norm() changes how it folds punctuation.
+  const r = run("the retry budget drains the shared quorum lease under sustained load", {
+    filed: ["#904 retry budget drains quorum lease"],
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.json.found, true);
+  assert.match(r.json.match, /^#904 /);
 });
 
 // ---------------------------------------------------------------------------
