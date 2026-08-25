@@ -54,6 +54,16 @@ if [ -n "$GH_STDERR" ]; then
   printf '%s' "$GH_STDERR" >&2
   exit 1
 fi
+# A gh that prints and then HANGS past the script's own 20 s timeout. \`exec\`,
+# and an absolute path: PATH is the stub's own directory (see run()), which
+# holds only \`gh\` and \`git\`, so a bare \`sleep\` would exit 127 and this
+# would test a broken gh instead of a hanging one. \`exec\` puts the sleep in
+# the shell's own process so execFileSync's SIGTERM lands on it directly
+# rather than orphaning it to outlive the test.
+if [ -n "$GH_HANG" ]; then
+  printf '%s' "$GH_HANG" >&2
+  exec /bin/sleep 25
+fi
 if [ -n "$GH_GARBAGE" ]; then
   echo "Welcome to gh! Run gh auth login to get started."
   exit 0
@@ -87,7 +97,7 @@ function ledgerText(filed) {
 // save(), so the DEFAULT `true` here is a fixture that pre-creates something
 // production never has yet — and it is what hid a #155 regression from the
 // accept-pin below.
-function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, ghStderr = null, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
+function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = false, ghStderr = null, ghHang = null, gh = true, args = [], gitRepo = true, noFile = false, procCwd = null, ledgerDirExists = true, ledgerBody = null, spawnEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-"));
   try {
     // Inherited git vars outrank both cwd and `-C`, and they reach here from
@@ -144,6 +154,7 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     if (ghFails) env.GH_FAIL = "1";
     if (ghGarbage) env.GH_GARBAGE = "1";
     if (ghStderr !== null) env.GH_STDERR = ghStderr;
+    if (ghHang !== null) env.GH_HANG = ghHang;
     mkdirSync(bin, { recursive: true });
     symlinkSync(REAL_GIT, join(bin, "git"));
     if (gh) {
@@ -725,7 +736,7 @@ test("gh exiting 0 with unparseable stdout is a failed read, not a clean tracker
   assert.doesNotMatch(r.stderr, /found no related issues/, "never claim the tracker was searched clean");
 });
 
-// The three tests below pin what `tracker.error` CARRIES, not merely that it is
+// The tests below pin what `tracker.error` CARRIES, not merely that it is
 // present. `execFileSync` runs gh with an explicit `stdio` that does not
 // forward the child's stderr, so this field is the only copy of the cause that
 // exists anywhere — a cause dropped here is dropped for good (#638).
@@ -749,6 +760,13 @@ test("a gh stderr that overruns the cap keeps the end, where the cause is, and s
   // so unbounded gh stderr in it is a payload problem however the cause is
   // chosen — 500 is the ceiling the script names, marker included.
   assert.ok(r.json.tracker.error.length <= 500, `the cause must stay bounded, got ${r.json.tracker.error.length}`);
+  // Astral input too. The cap is on `.length`, which counts UTF-16 code UNITS,
+  // so a tail sliced by code POINTS keeps up to twice as many — measured 999
+  // under the remedy proposed for the lone surrogate this cut can leave behind.
+  // The ASCII fixture above cannot see that: there one code point is one code
+  // unit, and the suite stays green while the payload ships 999 characters.
+  const astral = run(UNFILED_SUBJECT, { filed: [], ghStderr: "\u{1F525}".repeat(400) });
+  assert.ok(astral.json.tracker.error.length <= 500, `the cap counts code units, got ${astral.json.tracker.error.length}`);
 });
 
 test("a gh that fails with a whitespace-only stderr still names a cause", () => {
@@ -759,7 +777,6 @@ test("a gh that fails with a whitespace-only stderr still names a cause", () => 
   assert.equal(r.status, 0);
   assert.equal(r.json.tracker.ok, false);
   assert.equal(r.json.verdict, "unverified");
-  assert.match(r.json.tracker.error, /\S/, "a failure whose stderr held no cause must fall through to one that does");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED \(\)/, "the warning must never print an empty cause");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
   // Non-empty is not enough to pin the fall-through: the last-resort literal
@@ -791,7 +808,47 @@ test("a gh stderr short enough to fit reaches the caller unchanged", () => {
     "gh: HTTP 403 rate limit exceeded, resets at 14:02 UTC",
     "trimmed at the ends and otherwise exactly what gh printed",
   );
-  assert.doesNotMatch(r.json.tracker.error, /…/, "nothing was cut, so nothing may claim it was");
+});
+
+test("a gh stderr of exactly the cap reaches the caller unchanged — the cut is ABOVE CAUSE_MAX, not at it", () => {
+  // The cap's own boundary, which every other fixture here misses by hundreds
+  // of characters: the overrunning one is ~3400, the accept-unchanged one ~54.
+  // So `>` to `>=` marks a cause as cut when nothing was cut, and measured,
+  // that one-character mutation passes the entire suite.
+  //
+  // `printf '%s'` adds no newline and neither end of the fixture is
+  // whitespace, so cause()'s trim is a no-op here and exactly CAUSE_MAX
+  // characters reach the comparison. The em dash is one UTF-16 code unit, so
+  // `.length` and the character count agree.
+  const head = "gh: FATAL — HTTP 403 rate limit exceeded, resets at 14:02 UTC ";
+  const exact = head + "-".repeat(500 - head.length - 1) + ".";
+  assert.equal(exact.length, 500, "test setup: the fixture must BE the cap, or this pins nothing");
+  const r = run(UNFILED_SUBJECT, { filed: [], ghStderr: exact });
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.equal(r.json.tracker.error, exact, "a cause exactly at the cap is not over it — nothing cut, nothing marked");
+});
+
+test("a gh that hangs after printing names the timeout, not whatever it last warned about", () => {
+  // Costs the full 20 s the script waits, and cannot cost less: that timeout is
+  // execFileSync's own, on the parent side, so no stub can shorten it. It buys
+  // the one failure class where this catch's ordering is observable at all —
+  // every other abort Node performs leaves `e.stderr` undefined, so the thrown
+  // message wins there whichever field is asked for first.
+  //
+  // Measured before this pin existed: this exact shape reported
+  // `tracker.error = "gh: warning: using cached credentials for github.com"`
+  // and named the 20-second stall nowhere, in the payload or in the operator
+  // warning (#638).
+  const r = run(UNFILED_SUBJECT, { filed: [], ghHang: "gh: warning: using cached credentials for github.com\n" });
+  assert.equal(r.status, 0, "a hung tracker still degrades rather than blocking the filing");
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(
+    r.json.tracker.error,
+    /ETIMEDOUT/,
+    "the abort is named in the thrown message alone; a stray warning on stderr must not stand in for it",
+  );
 });
 
 test("a filed row contained in a longer subject scores on the smaller set, not the union", () => {
@@ -1056,6 +1113,41 @@ test("an explicit ledger outside any git repository reports the tracker unchecke
     /not a git repository/,
     "and it must carry git's OWN reason — the probe pipes git's stderr, so this string is the only place the cause is ever seen",
   );
+});
+
+test("a repository probe that fails behind an overrunning git stderr keeps the end, where the cause is", () => {
+  // #638's second call site, the one the ticket names alongside the gh catch.
+  // This probe pipes git's stderr too, so `tracker.error` is the only copy of
+  // it that exists anywhere. Real git puts the reason LAST — it echoes the
+  // offending input first and the line saying what actually killed it comes
+  // after — so keeping the FIRST bytes hands back the padding and drops the
+  // cause.
+  //
+  // Driven through the REAL git the fixture symlinks, in a directory that IS a
+  // repository: an oversized command-line config key. ledger.mjs scrubs
+  // GIT_DIR and GIT_WORK_TREE off this probe and nothing else, so a malformed
+  // ambient GIT_CONFIG_* reaches it — which is what makes the shape reachable
+  // in production and not merely constructible in a fixture.
+  //
+  // The two matches below are git's own wording. A git that words either
+  // differently reds here rather than degrading quietly, which is the
+  // direction to fail in.
+  const r = run(UNFILED_SUBJECT, {
+    filed: [],
+    spawnEnv: { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "z".repeat(600), GIT_CONFIG_VALUE_0: "x" },
+  });
+  assert.equal(r.ghRan, false, "the probe failed, so there is no repository for the query to bind to");
+  assert.equal(r.status, 0, "an unresolvable repository still degrades rather than blocking the filing");
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.json.tracker.error, /cannot resolve the ledger's repository/, "attributed to the probe, not to gh");
+  assert.match(
+    r.json.tracker.error,
+    /unable to parse command-line config/,
+    "git's own last line is the cause — keeping the first bytes drops it for the echoed input ahead of it",
+  );
+  assert.match(r.json.tracker.error, /: …/, "a clipped cause with no marker reads as the whole of what git printed");
+  assert.doesNotMatch(r.json.tracker.error, /z{500}/, "the cause must stay bounded — 600 padding characters went in");
 });
 
 test("the documented flow — no --file, run from inside the repo — is unchanged: tracker still gets checked", () => {

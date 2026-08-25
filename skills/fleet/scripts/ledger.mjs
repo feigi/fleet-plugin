@@ -614,10 +614,31 @@ function runCheck() {
         // stderr first, then the message: on a non-zero exit Node builds the
         // message out of the same bytes prefixed by the command, so it is the
         // LONGER copy of the cause, not a smaller fallback (#176, measured
-        // again here). It earns its place on the failures that carry no stderr
-        // field at all — a spawn Node aborted, a timeout, and the output this
-        // file refused to parse or refused the shape of — and on a stderr with
-        // no cause in it, where it still names the command that failed.
+        // again here). The message earns its place wherever stderr holds no
+        // cause — and stderr holds none in three shapes, only one of which is
+        // the field being absent: no `stderr` property at all on the output
+        // this file refused to parse or refused the shape of, the property
+        // present but `undefined` on a spawn Node never started, and present
+        // but EMPTY on a child killed before it printed. Measured on Node
+        // v26.7.0 — "carries no stderr field at all" covered the first shape
+        // only. It also earns its place on a stderr with no cause in it, where
+        // it still names the command that failed.
+        //
+        // Except where Node aborted the child, and there the order flips.
+        // `e.code` carries the abort — ETIMEDOUT, ENOENT, EACCES — and Node
+        // does not set it on an ordinary non-zero exit, so it separates the
+        // failures gh explained for itself from the ones only Node can
+        // explain. A timeout is named in `e.code` and `e.message` and NOWHERE
+        // in `e.stderr`, which on a timeout holds whatever gh printed before
+        // the kill: measured end to end, a gh that warned about cached
+        // credentials and then hung reported that warning as the cause of a
+        // 20-second stall and named the timeout nowhere (#638). The flip moves
+        // exactly one failure, the timeout that printed something — the other
+        // aborts leave `e.stderr` undefined, so the message already won there.
+        // A Node that did set `e.code` on a plain non-zero exit would degrade
+        // to "Command failed" plus those same bytes, the longer copy; the
+        // accept-unchanged test below pins that string exactly, so it would
+        // say so loudly rather than this arm drifting in silence.
         //
         // Nothing this arm can currently throw reaches the literal last resort:
         // every failure that lands here carries a message. It stays because an
@@ -626,7 +647,7 @@ function runCheck() {
         //
         // `hits` omitted here too, same reason as the no-terms branch above:
         // the search never ran, so there is no empty result to report.
-        tracker = { ok: false, query, error: cause(e.stderr, e.message) || "gh failed without saying why" };
+        tracker = { ok: false, query, error: (e.code ? cause(e.message, e.stderr) : cause(e.stderr, e.message)) || "gh failed without saying why" };
       }
     }
   }
