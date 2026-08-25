@@ -47,6 +47,11 @@ const git = (cwd, ...args) =>
 // Absolute path to the real git, for the one test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+// Absolute path to the real sed, for the passthrough shim that controls the
+// broken-escaper case. Resolved out here, where PATH is still the real one, and
+// quoted at the exec, for the reasons the git shims below record at length.
+const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
   git(w, "commit", "-q", "--allow-empty", "-m", msg);
@@ -440,6 +445,105 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
   assert.equal(r.status, 0);
   assert.equal(r.stdout, `{"branch":"fix/119-json-sh-extract","sha":"${head}","reachable":true,"tip":"${head}"}\n`,
     "byte-identical to what this script has always emitted for a name with nothing to escape");
+});
+
+// #884: the escaping guard's FATALITY, which every case above is blind to. They
+// each assert what a WORKING escaper produces, so none of them reaches the
+// `|| die` that covers the escaper failing — measured, downgrading it to a
+// message-preserving warning left this whole suite green.
+//
+// The downgrade does not emit a malformed payload. `branch_j`, `sha_j` and
+// `tip_j` are assigned by one `&&` chain, so the first `jstr` that fails
+// short-circuits the rest and leaves those names unset; with the guard advisory
+// the `printf` references one and `set -u` aborts the shell at **exit 1** —
+// which this script's contract reads as "the sha is NOT reachable". Measured on
+// this fixture, whose sha IS reachable: unmutated gives exit 2 with the guard's
+// own line, the mutant gives exit 1 with `sha_j: unbound variable`, and neither
+// prints anything on stdout. An unparseable payload would at least fail the
+// caller's parse. A bare exit 1 is a confident wrong verdict, and
+// `run-team/SKILL.md` answers it by flagging the member, withholding the
+// enqueue and holding the ticket until a maintainer rules — spent on a SHA that
+// was on the branch the whole time.
+//
+// `jstr` escapes through a `sed`/`tr` pipeline, so shadowing `sed` breaks the
+// escaper without touching git. The git shims elsewhere in this file cannot
+// reach this guard: every failure they inject kills the run before the payload
+// is built.
+//
+// Two brackets stand in for a progress marker this guard does not have — the
+// script prints nothing between the escaping and the `printf` it protects. The
+// `IS reachable` trace is echoed only once merge-base has answered, so it
+// proves the run cleared every earlier guard, and the shim's own line proves
+// the escaper is what failed. Between them, no other guard can produce this
+// signature. The trace is pinned verbatim by "a healthy run stays quiet", so it
+// cannot be reworded out from under this assertion unseen, and no assertion
+// here names a `die` message — rewording any of them, this guard's own
+// included, leaves the pin standing.
+
+/** A dir holding a `sed` shim with the given body, prepended to PATH. */
+function sedShim(t, body) {
+  const bin = mkdtempSync(join(tmpdir(), "verify-sha-sed-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return `${bin}:${ENV.PATH ?? process.env.PATH}`;
+}
+
+test("an escaper that cannot run is exit 2, never the exit 1 that means `not reachable`", (t) => {
+  const w = repo(t);
+  const head = commit(w, "work that really landed");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json, stderr } = verify(w, "main", head, {
+    ...ENV,
+    PATH: sedShim(t, 'echo "sed: outage" >&2\nexit 1'),
+  });
+
+  // Whether this fixture measured the guard at all is settled before its
+  // verdict is read: an assertion that fails masks every one after it, and
+  // "the shim broke something else" and "the guard is not fatal" are not
+  // interchangeable diagnoses.
+  assert.match(stderr, /sed: outage/, "the escaper ran and failed, which is the failure under test");
+  assert.match(
+    stderr,
+    /IS reachable on origin\/main/,
+    "merge-base answered — this is the guard after it, not an earlier one the shim happened to break",
+  );
+
+  assert.equal(
+    code,
+    2,
+    "a payload that could not be escaped is `the question could not be answered`. Exit 1 would report a sha that IS on the branch as missing from it, and the controller would flag the member and hold its ticket for a maintainer's ruling.",
+  );
+  assert.equal(json, null, "no verdict may be printed for a payload that was never escaped");
+  assert.doesNotMatch(
+    stderr,
+    /unbound variable/,
+    "the guard must stop the script, not warn and leave the payload `printf` reading names the `&&` chain never assigned",
+  );
+});
+
+test("a shadowed `sed` that works is answered normally — the guard refuses only a real outage", (t) => {
+  // The false-positive half, and the control the case above needs: shadowing
+  // `sed` on PATH is not by itself fatal to this script. Same fixture and the
+  // same shadowed name, a passthrough body — so the exit 2 up there is the
+  // escaper failing, not the shim's mere presence. Without this, that case
+  // could be measuring a PATH it broke wholesale and still read green.
+  const w = repo(t);
+  const head = commit(w, "ordinary");
+  git(w, "push", "-q", "origin", "main");
+
+  const r = spawnSync("sh", [SCRIPT, "main", head], {
+    cwd: w,
+    env: { ...ENV, PATH: sedShim(t, `exec "${REAL_SED}" "$@"`) },
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0, "the sha IS reachable — a working escaper must not change the verdict");
+  assert.equal(
+    r.stdout,
+    `{"branch":"main","sha":"${head}","reachable":true,"tip":"${head}"}\n`,
+    "byte-identical to the payload this script emits with no shim in the way",
+  );
 });
 
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
