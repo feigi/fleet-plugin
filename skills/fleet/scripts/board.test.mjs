@@ -347,6 +347,66 @@ test("a broken sidecar warns ONCE across ticks, not once per tick", () => {
   assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
 });
 
+// #606: the per-line catch inside readAgent was position-blind. Its comment
+// justified the skip with one cause — the torn last line a transcript being
+// appended to has on every tick — but applied it to every line in the split.
+// Measured before the fix on a 3-turn transcript, cache_creation 100/200/300:
+// a mid-file tear read 400 and a tail tear read 300, both with `skipped` 0 and
+// zero bytes on stderr, so the never-expected fault and the expected one were
+// indistinguishable to anyone watching.
+//
+// Raw-text sibling of fixture(): these two pin opposite sides of one
+// discriminator, and the TRAILING NEWLINE is the whole difference between them
+// — fixture() always writes one, which is exactly the case that must stay
+// silent. One jsonl line per turn, so a lost line is a lost turn: with a turn
+// spanning several lines, a later line carrying the same message.id bills it
+// anyway and the tear costs nothing.
+function rawFixture(text) {
+  const dir = mkdtempSync(join(tmpdir(), "spend-"));
+  writeFileSync(join(dir, "agent-x.jsonl"), text);
+  return dir;
+}
+const oneLineTurn = (id, cw) => JSON.stringify({
+  type: "assistant",
+  message: { id, usage: { input_tokens: 0, cache_creation_input_tokens: cw, cache_read_input_tokens: 0, output_tokens: 7 }, content: [{ type: "text" }] },
+});
+const TORN = '{"type":"assist';
+
+test("a transcript line damaged away from the tail is reported, not swallowed", () => {
+  // The real-fault half. The damaged line sits BETWEEN two good turns, so the
+  // assertion also covers the ticket's second requirement: the surrounding
+  // turns' spend is still accounted rather than lost with it.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n");
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /agent-x\.jsonl/);
+  assert.equal(s.totals.cacheWrite, 1500);
+  // Booked, not skipped — a damaged line costs its own turn, never the agent.
+  assert.equal(s.skipped, 0);
+});
+
+test("a torn LAST line stays silent — the tear every tick legitimately produces", () => {
+  // The false-positive half, and the reason the discriminator has to exist at
+  // all: `serve` rebuilds every ~15s, so warning per bad line would print a
+  // line every tick for every transcript still being appended to. No trailing
+  // newline — the torn write is the final element of the split.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.deepEqual(errs, []);
+  // ...and everything before the tear still parsed.
+  assert.equal(s.totals.cacheWrite, 1000);
+});
+
+test("a damaged mid-file line warns ONCE across ticks, not once per tick", () => {
+  // Same flood argument as the sidecar's warnedMeta gate: a transcript that is
+  // damaged is damaged on every tick, so a single call cannot see the gate.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n");
+  const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
+});
+
 test("an unreadable dir reports an error rather than posing as an empty run", () => {
   // The distinction that hid the path bug: a hidden panel meant both "nothing
   // yet" and "this is broken", so the broken case never surfaced.
