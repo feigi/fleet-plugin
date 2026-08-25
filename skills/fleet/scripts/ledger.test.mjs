@@ -235,15 +235,17 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the tests in this section pin each rule where the
-// other cannot cover for it. Same-size sets are where the two rules come
-// apart, and the tests above reach that case only through rows built for
-// other purposes.
+// least four tokens — and the same-size refusal, the equal-set acceptance
+// below the floor, and the acceptance at the floor are what pin those rules
+// where neither covers for the other. Same-size sets are where the two rules
+// come apart, and the tests above reach that case only through rows built
+// for other purposes. The empty-subject usage failure shares this fence but
+// dies before isMatch is reached, so it pins neither rule.
 //
 // A same-size match is deliberately NOT pinned here: it satisfies both rules
 // at once, so no single-rule mutation can red it and it discriminates
 // nothing. The refusal below is the same-size case worth pinning, and an
-// equal set under the floor is the acceptance only one rule can explain.
+// equal set under the floor is an acceptance only one rule can explain.
 // ---------------------------------------------------------------------------
 
 test("a same-size four-token near-miss differing in one token is not a match (#888)", () => {
@@ -298,22 +300,24 @@ test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
 // ---------------------------------------------------------------------------
 // Direction normalisation (#899 review). isMatch() orders the pair by size
 // before either acceptance rule reads it, so both rules always measure the
-// smaller set. The rules are symmetric once that ordering has happened, which
-// is what lets a fixture arriving already in order pass either way.
+// smaller set. A fixture whose checked subject is already the smaller side —
+// or level with it — gets the same answer either way, which is why hardcoding
+// the ordering away leaves the rest of this file green.
 // ---------------------------------------------------------------------------
 
 test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the floor measures", () => {
   // Dropping the ordering — hardcoding the pair as (subject, filed) so the
-  // rules read whichever set arrived first — leaves every other fixture in
-  // this file green. This is the mirror orientation, where the FILED row is
-  // the smaller set. The `#NNN` strip in ledger.mjs is there to keep that
-  // orientation reachable at all, and says so in its own rationale; until
-  // this, nothing measured it.
+  // checked subject is always taken as the smaller set — leaves every other
+  // fixture in this file green. This is the mirror orientation, where the
+  // FILED row is the smaller set. The `#NNN` strip in ledger.mjs is there to
+  // keep that orientation reachable at all, and says so in its own rationale;
+  // until this, no fixture built one.
   //
   // Sized clear of the floor deliberately. At exactly four tokens a raised
   // floor reds this too, and it would then be pinning the boundary a
-  // neighbouring test already owns rather than the ordering. Above the floor
-  // the ordering is the only thing left that can move it.
+  // neighbouring test already owns rather than the ordering. Clear of the
+  // floor, the ordering moves it — so does disabling the `#NNN` strip, which
+  // is what makes this orientation reachable at all.
   //
   // Plain words on both sides, as the token counts are load-bearing and must
   // not shift when norm() changes how it folds punctuation.
