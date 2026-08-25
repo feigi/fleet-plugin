@@ -224,6 +224,68 @@ test("an uncorrupted repo keeps an unmerged [gone] branch for unmerged commits",
   assert.equal(branchExists(w, "feature/unmerged"), true, "unmerged commits keep the branch alive");
 });
 
+// The two tests below share one fixture move: giving a branch a TAG of the
+// same name, pointed at `main`. Both halves of that are load-bearing.
+//
+// The name collision is what breaks the enumeration. `%(refname:short)` is
+// ambiguity-aware — with both refs present it stops shortening to the bare name
+// and emits `heads/<name>` (measured here on git 2.50.1, Apple Git-155). That
+// string is not a branch `git branch -D` can find, and it does not match the
+// `refs/heads/$b` key the worktree lookup builds either, so every worktree
+// guard silently stands down for it (#634).
+//
+// Pointing the tag at `main` — a merged commit — is what makes the pair
+// DISCRIMINATING rather than merely representative. Git resolves a bare
+// ambiguous name as a rev by preferring `refs/tags/` over `refs/heads/`, so
+// anything that hands the bare name to a rev-taking command reaches the tag's
+// merged commit instead of the branch's. A merge probe that does so reports
+// clean for a branch that is not merged at all. That is why the unmerged case
+// below is the one that has to stay red for a fix that only changes the
+// enumeration: correcting the name without qualifying the rev converts a
+// branch that is currently kept into one that is deleted.
+test("a merged [gone] branch sharing its name with a tag is reaped, and reported under its bare branch name (#634)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const tagged = git(w, "rev-parse", "main");
+  git(w, "tag", "feature/merged", "main");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json.reaped,
+    ["feature/merged"],
+    "the payload names the branch that was deleted; `heads/feature/merged` is a string git would not accept back",
+  );
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(stderr, /heads\/feature\/merged/, "no operator-facing line may name the unusable prefixed form");
+  assert.equal(branchExists(w, "feature/merged"), false, "a same-named tag must not strand a genuinely merged branch");
+  assert.equal(git(w, "rev-parse", "refs/tags/feature/merged"), tagged, "reaping a branch must leave the tag alone");
+});
+
+test("a same-named tag on a merged commit must not authorize reaping an UNMERGED [gone] branch (#634)", (t) => {
+  const w = repo(t);
+  const sha = unmergedGoneBranch(w, "feature/unmerged", "solo work");
+  // Merged, and reachable under the branch's own name as a rev — the two
+  // properties that together let a tag answer a question asked about a branch.
+  git(w, "tag", "feature/unmerged", "main");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json.reaped,
+    [],
+    "the merge probe must read the branch it is about to delete, never a same-named tag that happens to be merged",
+  );
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/unmerged");
+  assert.equal(json.kept[0].reason, "unmerged commits");
+  assert.match(stderr, /KEEP feature\/unmerged — unmerged commits/);
+  assert.equal(branchExists(w, "feature/unmerged"), true, "the branch — and its only copy of the commit — must survive");
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/unmerged"), sha, "the commit itself is untouched");
+});
+
 test("a git cherry that dies is KEPT, never reaped — an unanswerable probe authorizes nothing (#264)", (t) => {
   const w = repo(t);
   const sha = unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
