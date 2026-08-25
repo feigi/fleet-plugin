@@ -1009,24 +1009,31 @@ test("the verdict line on stderr survives past one pipe buffer, its reasons whol
 // terminator alone: rewording a reason or adding a payload field moves both
 // sides together and stays green, as does rewording any trace.
 //
-// The LEADING newline is deliberately not pinned, and cannot be from this
-// harness. It is insurance for forwarded child stderr still draining through the
-// async stream without having ended its line (arg.mjs's die() documents the same
-// shape for the same reason). Once that drain has completed — which it has in
-// every run this harness produces, verbose or --quiet, since `git remote get-url
-// origin` fails and forwards its own terminated line first — the preceding text
-// has already ended the line, so a summary emitted without a leading newline is
-// byte-indistinguishable from one emitted with it. Pinning it needs the drain
-// race itself, which does not reproduce here.
-test("the verdict summary on stderr carries exactly one trailing newline of its own", () => {
+// The LEADING newline is insurance for forwarded child stderr still draining
+// through the async stream without having ended its line — arg.mjs's die()
+// documents the same shape for the same reason. That RACE is what does not
+// reproduce here: the text before the summary has already ended its own line,
+// in this fixture a vlog trace and under --quiet git's forwarded `error: No
+// such remote 'origin'`. The BYTE is another matter — against already-ended
+// text the leading newline leaves a blank line and dropping it leaves none —
+// so it is pinned below, doubled as well as missing. What that leaves
+// untested is the mid-line landing the newline exists to prevent, not the
+// newline itself.
+test("the verdict summary on stderr carries exactly one newline of its own on each side", () => {
   const r = run([]);
   assert.ok(
     r.payload.reasons.length,
-    "fixture no longer produces a reason, so this test would pass without exercising the text the summary joins",
+    "fixture no longer produces a reason, so the summary derived below would carry an em dash the script omits when reasons is empty, and this test would fail on the lookup rather than on the terminator",
   );
   const summary = `ci-state: verdict=${r.payload.verdict} — ${r.payload.reasons.join("; ")}`;
   const at = r.stderr.indexOf(summary);
   assert.ok(at >= 0, `the verdict summary is not on stderr as emitted, in ${JSON.stringify(r.stderr)}`);
+  const before = r.stderr.slice(0, at);
+  assert.equal(
+    before.match(/\n*$/)[0].length,
+    2,
+    `the summary's own leading newline must leave exactly one blank line after the already-ended text before it, which runs ${JSON.stringify(before.slice(-40))}`,
+  );
   const after = r.stderr.slice(at + summary.length);
   assert.ok(
     after.startsWith("\n"),
