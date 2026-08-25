@@ -267,9 +267,15 @@ function runCheck() {
   // both count as a match, catching real near-duplicate rewordings without
   // matching short generic overlaps.
   const isMatch = (filedTokens) => {
-    if (filedTokens.size === target.size && [...filedTokens].every((t) => target.has(t))) return true;
     const [small, big] = filedTokens.size <= target.size ? [filedTokens, target] : [target, filedTokens];
-    return small.size >= 4 && [...small].every((t) => big.has(t));
+    // Both acceptance rules are size tests, so they gate the subset walk
+    // instead of following it: a pair qualifying under neither is refused
+    // without walking the smaller set, one qualifying under either is walked
+    // once. Testing set equality as a separate walk, as this did, re-walked a
+    // same-size near-miss that cleared the subset floor for an answer the
+    // first walk had already produced — equal sizes are exactly the case
+    // where the two walks are the same walk.
+    return (small.size === big.size || small.size >= 4) && small.isSubsetOf(big);
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
   // finding's subject. Left in, it becomes a stray token the checked subject

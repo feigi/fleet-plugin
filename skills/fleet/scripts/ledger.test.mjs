@@ -232,6 +232,39 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
   assert.equal(r.json.match, null);
 });
 
+// ---------------------------------------------------------------------------
+// The two acceptance rules at their boundaries (#888). isMatch() accepts on
+// either of two rules — equal token sets at any size, or a subset from at
+// least four tokens — and the pair below pins each rule where the other
+// cannot cover for it. Same-size sets are where the two rules come apart, and
+// the tests above reach that case only through rows built for other purposes.
+//
+// A same-size match is deliberately NOT pinned here: it satisfies both rules
+// at once, so no single-rule mutation can red it and it discriminates
+// nothing. The refusal below is the same-size case worth pinning, and an
+// equal set under the floor is the acceptance only one rule can explain.
+// ---------------------------------------------------------------------------
+
+test("a same-size four-token near-miss differing in one token is not a match (#888)", () => {
+  const r = run("quorum drains under retry", { filed: ["#901 quorum drains under replay"] });
+  assert.equal(r.status, 0);
+  assert.equal(r.json.found, false);
+  assert.equal(r.json.match, null);
+});
+
+test("equal token sets match below the subset floor — the floor gates the subset rule alone (#888)", () => {
+  // The floor exists to stop a short generic overlap matching everything, and
+  // it is a condition of the SUBSET rule only: equal sets are already as
+  // specific as a match gets, so they qualify at any size. Folding the two
+  // rules into one guarded expression is the edit that can silently lose
+  // this, and nothing else in this file builds an equal set small enough to
+  // notice.
+  const r = run("pipe truncates payload", { filed: ["#902 payload truncates pipe"] });
+  assert.equal(r.status, 1);
+  assert.equal(r.json.found, true);
+  assert.match(r.json.match, /^#902 /);
+});
+
 test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
   const r = run("— — —", { filed: [FILED_114] });
   assert.equal(r.status, 2);
