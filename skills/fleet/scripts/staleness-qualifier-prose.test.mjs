@@ -7,6 +7,13 @@
 // a heavy job skipped for any other reason is an unverified suite, and this is
 // the clause standing between that and a label.
 //
+// It happened a second time, the same way round and one document over: PR #881
+// reworded the SKILL.md side to add the `solely` qualifier and the pointer to
+// the five-condition note, and left review-and-fix.md step 6 — the label gate
+// itself — saying neither. CLAUSE pinned only the shared substring, so the
+// suite stayed green through exactly the drift it exists to catch. The anchor
+// now carries the qualifier, which is what makes a one-sided reword red.
+//
 // That same commit — `283d985`, `Closes #182` — took a SECOND residue out of
 // the same step-6 line: the mechanism behind "which a behind PR never reaches",
 // leaving the consequence with nothing to rest on. #196 asked for both back, so
@@ -72,7 +79,8 @@ function rule(name, anchor) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-const CLAUSE = "a `skipped` heavy job is behind-count staleness";
+const CLAUSE =
+  "a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer";
 const MECHANISM = "a `rebase-check` red or heavy jobs `skipped` off the behind-count hold it short of full green";
 
 const REVIEW_AND_FIX = "skills/fleet/commands/review-and-fix.md";

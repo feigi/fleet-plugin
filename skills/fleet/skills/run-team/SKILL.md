@@ -710,7 +710,7 @@ multi-select**, and **a judgement the evidence cannot settle**.
   and the wave's first act on a behind PR is a rebase** — which is destructive to
   a worktree someone is in, the same hazard the reaping rule names. The label
   lands at duty 3 and the finisher's report is duty 4, so the gap is the normal
-  case, not a rarity: it fired on every labelled PR in one run. Wait for that
+  case, not a rarity — the duty order produces it, not luck. Wait for that
   report before dispatching the bot. Waiting is nearly free — a PR already
   labelled is not blocking anything, and its behind-count is expired on arrival
   either way.
@@ -1061,7 +1061,13 @@ nothing leaves it no gate at all.
 > The job log names the condition — and because the staleness condition exits
 > before the merge-commit condition is evaluated, the log is silent on that one
 > by construction, so measure it separately with
-> `git rev-list --merges --count "$BASE..HEAD"`.
+> `git fetch origin && git rev-list --merges --count "origin/<base>..HEAD"` —
+> keep the fetch, or a stale local `origin/<base>` widens the range over the
+> base's own merge commits and reports a merge commit this branch never added.
+> A non-zero count does not send you to a local rebase either: the merge bot's
+> step-1 `gh pr update-branch --rebase` drops merge commits too
+> (`run-merge-bot.md` step 1), so both conditions clear on that one server-side
+> rebase. What it buys you is knowing the red was never solely staleness.
 >
 > **Run `<testCmd>` from the worktree before committing**, copied verbatim.
 > `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
