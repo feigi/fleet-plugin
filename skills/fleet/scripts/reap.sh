@@ -164,7 +164,13 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
   # enumeration fix alone turned a branch this script currently KEEPS into
   # `REAPED`, at exit 0, with an empty kept[]. Qualifying changes nothing for an
   # ordinary branch — both spellings name the same commit — and it is the same
-  # key the worktree lookup below already builds. #634
+  # key the worktree lookup below already builds. The BRANCH side is the only
+  # side qualified here, and qualifying it does not make the check unfoolable:
+  # `$base` reaches this same `git cherry` exactly as BASE_REF spells it, so a
+  # local tag carrying that spelling outranks the remote-tracking ref and the
+  # probe answers about the TAG — measured, an unmerged [gone] branch REAPED at
+  # exit 0 with an empty kept[]; open as #924. "By nothing else" bounds what
+  # ELSE authorizes -D, not whether this check itself can be wrong. #634
   if ! cherry=$(git cherry "$base" "refs/heads/$b" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
