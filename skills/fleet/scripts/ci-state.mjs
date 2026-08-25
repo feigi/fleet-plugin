@@ -76,19 +76,38 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // that reader — it takes exit 2 as a failed read whatever was printed on the
 // way out, and carries its previous CI value for the PR forward instead.
 //
-// writeSync, for die()'s reason in arg.mjs: the child's forwarded stderr may
-// still be draining through the async stream process.exit() discards.
+// Every write this script makes on its way out goes through here, for die()'s
+// reason in arg.mjs: on a pipe, console.log/console.error hand the bytes to an
+// ASYNC stream, and process.exit() discards whatever is still queued rather than
+// draining it. The kernel takes one pipe buffer synchronously and the rest is
+// dropped, so a payload past that size is cut mid-JSON while the exit code
+// arrives intact — the caller reading the code sees a normal verdict and the
+// caller parsing stdout gets bytes it cannot parse. writeSync goes straight to
+// the fd, so it survives. It also takes no newline of its own, which is why
+// every caller supplies the one console.log used to append.
+//
+// The catch is what keeps the exit code honest, and it is not optional. Once a
+// reader is slow enough to leave this fd saturated and non-blocking, writeSync
+// throws EAGAIN where console.log swallowed the failure; uncaught, that throw
+// would skip the process.exit() the caller is about to make and drop the process
+// to exit 1 — the code this script reserves for not-green. Losing the bytes is
+// the behaviour that was already there. Losing a green verdict would be new, and
+// worse than the truncation being fixed here.
+function emit(fd, text) {
+  try {
+    writeSync(fd, text);
+  } catch {
+    // The message may be lost; the exit code that follows it must not be.
+  }
+}
+
 function emitRateLimited(query) {
   const payload = {
     pr: Number(pr),
     verdict: "rate-limited",
     reasons: [`${query} was refused by the GitHub API rate limit — no CI state was read. A quota refusal clears on its own: re-probe rather than reading this as a CI verdict`],
   };
-  try {
-    writeSync(1, `${JSON.stringify(payload)}\n`);
-  } catch {
-    // The payload may be lost; die()'s exit code below must not be.
-  }
+  emit(1, `${JSON.stringify(payload)}\n`);
 }
 
 function run(cmd, args) {
@@ -534,7 +553,7 @@ if (behind === null) {
 // a pass or a red. reasons.length is never 0 here: the no-ci branch above
 // always pushes exactly one, whichever way --declare-no-ci went.
 const verdict = noCi ? "no-ci" : reasons.length === 0 ? "green" : "not-green";
-console.error(`\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}`);
+emit(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}\n`);
 
 // Compact, single-line: the consumer is an agent/script parsing JSON, and the
 // pretty view already went to stderr. On the quiet hot path drop `jobs` and
@@ -542,7 +561,7 @@ console.error(`\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.j
 // are pure duplication in the two longest-lived contexts that poll this.
 const payload = { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
 if (!quiet) Object.assign(payload, { jobs, missing });
-console.log(JSON.stringify(payload));
+emit(1, `${JSON.stringify(payload)}\n`);
 
 // Exit vocabulary unchanged: 0 only when the gate is satisfied, 1 when it is
 // not, 2 (via die(), above) only when the question could not be answered at
