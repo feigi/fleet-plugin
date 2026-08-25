@@ -997,16 +997,16 @@ test("the verdict line on stderr survives past one pipe buffer, its reasons whol
 // It locates the line by splitting stderr on "\n", and splitting on the
 // terminator is what discards it — every segment that yields is the content
 // BETWEEN newlines, so no wording of an assertion over that segment can see
-// whether the line was terminated at all. Measured: dropping the trailing
-// newline leaves this file green.
+// whether the line was terminated at all. Measured before this test existed:
+// dropping the trailing newline left this file green.
 //
 // fd 2 also carries the vlog trace stream and gh's own forwarded stderr, so it
 // has no single expected byte string and the whole-stream equality the stdout
 // pins use has no equivalent here. This isolates the line instead — it locates
-// the summary by the verdict and reasons THIS run reported, then reads only the
-// bytes on its far side. Deriving the expected text from the emitted payload
-// rather than from a literal copy is what keeps the assertion about the
-// terminator alone: rewording a reason or adding a payload field moves both
+// the summary by the verdict and reasons THIS run reported, then reads the
+// bytes on either side of it. Deriving the expected text from the emitted
+// payload rather than from a literal copy is what keeps the assertions about
+// the newlines alone: rewording a reason or adding a payload field moves both
 // sides together and stays green, as does rewording any trace.
 //
 // The LEADING newline is insurance for forwarded child stderr still draining
