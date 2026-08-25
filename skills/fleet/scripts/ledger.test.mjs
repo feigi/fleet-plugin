@@ -762,6 +762,21 @@ test("a gh that fails with a whitespace-only stderr still names a cause", () => 
   assert.match(r.json.tracker.error, /\S/, "a failure whose stderr held no cause must fall through to one that does");
   assert.doesNotMatch(r.stderr, /TRACKER NOT CHECKED \(\)/, "the warning must never print an empty cause");
   assert.match(r.stderr, /TRACKER NOT CHECKED/);
+  // Non-empty is not enough to pin the fall-through: the last-resort literal
+  // satisfies that on its own, and measured, it does — with the choice made on
+  // the raw values again, this test read green off that literal while the
+  // reader had lost the command. Pin the thing only the thrown message can
+  // supply: the argv gh was given.
+  assert.match(
+    r.json.tracker.error,
+    /issue list --search/,
+    "the cause must be the thrown message, which names the command that failed",
+  );
+  assert.doesNotMatch(
+    r.json.tracker.error,
+    /without saying why/,
+    "the last resort is for a failure carrying no diagnostic anywhere, not for one whose message names the command",
+  );
 });
 
 test("a gh stderr short enough to fit reaches the caller unchanged", () => {
