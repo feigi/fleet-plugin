@@ -207,9 +207,14 @@ function newestTranscriptMs(dir) {
 // Malformed lines are skipped rather than fatal: a transcript being appended to
 // WHILE we read it will have a torn last line, every tick. That reason reaches
 // the FINAL element of the split and no other, so only that one is skipped in
-// silence. A line anywhere earlier was written whole and damaged afterwards —
-// a real fault, and one that costs spend rather than nothing, so it warns once
-// per transcript path (the rule warnedMeta and warnedSkips already follow).
+// silence. A line anywhere earlier can never be completed by a later append, so
+// it is still malformed on every tick after — a real fault, and one that costs
+// spend rather than nothing, so it warns once per transcript path. Warn-once is
+// safe here for a reason warnedSkips cannot lend: warnedSkips' message carries a
+// COUNT, which is why it needs `skipped` reaching the browser every tick to keep
+// that number live. This message carries none — it says this file's spend may be
+// incomplete — and a second tear in the same file makes that no more true, so
+// there is no number here that can go stale.
 // Ceiling: a transcript whose writer has already exited has no legitimate torn
 // last line either, but readAgent cannot tell a live writer from a finished one,
 // so that line keeps passing in silence. Strictly better than warning on none.
