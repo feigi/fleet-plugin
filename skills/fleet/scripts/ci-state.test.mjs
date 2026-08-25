@@ -204,78 +204,26 @@ test("two workflow files share the target name: ambiguous, dies (exit 2) rather 
   assert.match(r.stderr, /pass --workflow-file to pick one/);
 });
 
-test("explicit --workflow-file bypasses discovery; an unreadable target still dies with exit 2 (unchanged)", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every file");
-  const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
-  const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
-  const wfDir = join(repoDir, ".github", "workflows");
-  mkdirSync(wfDir, { recursive: true });
-  const wf = join(wfDir, "ci.yml");
-  writeFileSync(wf, CI_WORKFLOW);
-  chmodSync(wf, 0o000);
-  const gh = join(binDir, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
-  const ghLog = join(binDir, "gh.log");
-  writeFileSync(ghLog, "");
-  const prViewFile = join(binDir, "pr-view.json");
-  writeFileSync(prViewFile, PR_VIEW);
-  const env = {
-    ...process.env,
-    PATH: `${binDir}:${process.env.PATH}`,
-    GH_LOG: ghLog,
-    PR_VIEW_FILE: prViewFile,
-    RUN_LIST_FILE: "",
-    RUN_VIEW_FILE: "",
-  };
-  try {
-    const r = spawnSync(process.execPath, [SCRIPT, "--pr", "42", "--workflow-file", wf], { cwd: repoDir, encoding: "utf8", env });
-    assert.equal(r.status, 2);
+// Both routes to an unreadable workflow file refuse with exit 2, and they
+// refuse at different depths: discovery opens each candidate as it scans, while
+// an explicit --workflow-file target is not read until expectedJobs(). Kept as
+// two cases because that difference is the point — a fix that closes only the
+// scan leaves the explicit route reading the file as absent, and absent is the
+// one shape that can be declared away as no-ci.
+for (const [route, args] of [
+  ["the discovery scan", []],
+  ["an explicit --workflow-file", ["--workflow-file", ".github/workflows/ci.yml"]],
+]) {
+  test(`an unreadable workflow file reached through ${route}: exit 2, never no-ci`, (t) => {
+    if (process.getuid?.() === 0) return t.skip("root reads every file");
+    const r = run(args, {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      unreadable: [".github/workflows/ci.yml"],
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.match(r.stderr, /cannot read/);
-  } finally {
-    chmodSync(wf, 0o644);
-    rmSync(repoDir, { recursive: true, force: true });
-    rmSync(binDir, { recursive: true, force: true });
-  }
-});
-
-test("discovery-time unreadable candidate fails closed (exit 2) instead of reading as no-ci", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every file");
-  const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
-  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" }); // discovery anchors on the repo root
-  const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
-  const wfDir = join(repoDir, ".github", "workflows");
-  mkdirSync(wfDir, { recursive: true });
-  const wf = join(wfDir, "ci.yml"); // matches the default --workflow "CI" by name, if readable
-  writeFileSync(wf, CI_WORKFLOW);
-  chmodSync(wf, 0o000);
-  const gh = join(binDir, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
-  const ghLog = join(binDir, "gh.log");
-  writeFileSync(ghLog, "");
-  const prViewFile = join(binDir, "pr-view.json");
-  writeFileSync(prViewFile, PR_VIEW);
-  const env = {
-    ...process.env,
-    PATH: `${binDir}:${process.env.PATH}`,
-    GH_LOG: ghLog,
-    PR_VIEW_FILE: prViewFile,
-    RUN_LIST_FILE: "",
-    RUN_VIEW_FILE: "",
-  };
-  try {
-    // No --workflow-file: discovery must scan the directory, hit the
-    // unreadable candidate, and die rather than silently reporting no-ci.
-    const r = spawnSync(process.execPath, [SCRIPT, "--pr", "42"], { cwd: repoDir, encoding: "utf8", env });
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /cannot read/);
-  } finally {
-    chmodSync(wf, 0o644);
-    rmSync(repoDir, { recursive: true, force: true });
-    rmSync(binDir, { recursive: true, force: true });
-  }
-});
+  });
+}
 
 // --- Error policy (#111): only a genuinely absent workflow set is `no-ci` ---
 // The verdict must be reachable one way only: `.github/workflows/` absent, or
