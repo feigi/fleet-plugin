@@ -83,21 +83,43 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // dropped, so a payload past that size is cut mid-JSON while the exit code
 // arrives intact — the caller reading the code sees a normal verdict and the
 // caller parsing stdout gets bytes it cannot parse. writeSync goes straight to
-// the fd, so it survives. It also takes no newline of its own, which is why
-// every caller supplies the one console.log used to append.
+// the fd, which is what survives process.exit(). It also takes no newline of its
+// own, which is why every caller supplies the one console.log used to append.
+//
+// One writeSync is not enough, which is why this loops on the count it returns.
+// Initialising a stream for an fd — what vlog's console.error does to fd 2 —
+// puts that fd in O_NONBLOCK, and a non-blocking write to a pipe whose reader
+// has left it full SHORT-WRITES: it returns the count it managed and throws
+// nothing at all. A single call therefore cut the verdict line at one buffer
+// with no throw for the catch to see and nothing logged — the failure the catch
+// cannot cover, because the write reported success. Measured on this platform:
+// asking for 200000 bytes on an fd a console.error had touched delivered 65536
+// and returned normally, where the same write on an untouched fd blocks until
+// the whole of it lands. Consuming the return value makes both fds behave the
+// way the untouched one does.
 //
 // The catch is what keeps the exit code honest, and it is not optional. Once a
 // reader is slow enough to leave this fd saturated and non-blocking, writeSync
 // throws EAGAIN where console.log swallowed the failure; uncaught, that throw
 // would skip the process.exit() the caller is about to make and drop the process
-// to exit 1 — the code this script reserves for not-green. Losing the bytes is
-// the behaviour that was already there. Losing a green verdict would be new, and
-// worse than the truncation being fixed here.
+// to exit 1 — the code this script reserves for not-green. EAGAIN says the
+// buffer is momentarily full, not that the write failed, so it waits for the
+// reader and retries; every other code returns and loses the bytes, which is the
+// behaviour that was already there. Losing a green verdict would be new, and
+// worse than the truncation being fixed here. The wait is what keeps that retry
+// from spinning: against a reader asleep three seconds, a bare `continue` burned
+// a full core for the whole stall where the 1ms wait burned almost none, both
+// delivering the same bytes.
 function emit(fd, text) {
-  try {
-    writeSync(fd, text);
-  } catch {
-    // The message may be lost; the exit code that follows it must not be.
+  let buf = Buffer.from(text);
+  while (buf.length) {
+    try {
+      buf = buf.subarray(writeSync(fd, buf));
+    } catch (e) {
+      // The message may be lost; the exit code that follows it must not be.
+      if (e.code !== "EAGAIN") return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    }
   }
 }
 
