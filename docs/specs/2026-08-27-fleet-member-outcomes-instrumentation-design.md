@@ -114,8 +114,13 @@ would destroy it.
 
 ```
 session  run_date  role  member  model  effort  ticket  pr
-tokens_cache_create  tokens_out  wall_s  turns  errored
+tokens_cache_create  tokens_out  wall_s  turns  errored  agent
 ```
+
+`agent` is the member's transcript id (the `agent-<id>` filename stem) and is
+**appended last on purpose**: every read-out command in this document and in the
+tsv header indexes by position (`$1` session, `$3` role, `$5` model), so a column
+inserted anywhere else would silently re-point all of them.
 
 **Every column is derivable from transcripts alone.** That is a hard constraint,
 not a preference: a column the controller must hand-fill cannot survive a
@@ -138,8 +143,17 @@ Two columns an earlier draft carried are deliberately absent:
   be wrong for every historical row. Nothing needs to be marked; the pairing is
   a query.
 
-- `session` + `member` are the idempotency key. A row is replaced, never
+- `session` + `agent` are the idempotency key. A row is replaced, never
   duplicated, when the scraper re-runs over a session it has already seen.
+
+  **It was `session` + `member` until this was measured, and that key silently
+  destroyed 44.6% of the corpus.** `member` is `meta.name ?? meta.agentType`, and
+  an UNNAMED dispatch has no `name` — so every unnamed agent in a session collapses
+  onto one key. Measured 2026-08-27 over all 155 member-dispatching sessions:
+  2,694 members scraped, 1,492 rows survived the merge, 1,202 lost, 85 sessions
+  affected, worst single session losing 49. The transcript id is the only
+  per-member identifier that is unique, stable across re-scrapes, and already on
+  disk — which is what an idempotency key has to be.
 - `role` comes from `classifyRole` in `compute-spend.mjs`, imported rather than
   re-derived, so the two files cannot fork on what a "reviewer" is.
 - `model` is normalized. Raw values on disk today include `claude-opus-5`,

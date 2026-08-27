@@ -641,7 +641,7 @@ export function parseTsv(text) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test skills/fleet/scripts/member-outcomes.test.mjs`
-Expected: PASS, 27 tests
+Expected: PASS, 28 tests
 
 - [ ] **Step 5: Commit**
 
@@ -740,7 +740,7 @@ if (process.argv[1] && process.argv[1].endsWith("member-outcomes.mjs")) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test skills/fleet/scripts/member-outcomes.test.mjs`
-Expected: PASS, 30 tests
+Expected: PASS, 31 tests
 
 - [ ] **Step 5: Create the metrics file with its header**
 
