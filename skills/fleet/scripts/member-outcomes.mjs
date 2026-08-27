@@ -106,11 +106,16 @@ export function rowsForSession(sessionDir) {
   let newest = 0;
   for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
     try {
+      // Sample the mtime for EVERY transcript, not only the ones that yield a
+      // row: run_date is the newest transcript this session wrote, and a
+      // dropped member (synthetic-only, unreadable meta) still wrote a file.
+      // Sampling only survivors dates the session from an older file, which
+      // across midnight is the wrong day.
+      newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
       const jsonl = readFileSync(join(dir, f), "utf8");
       const meta = JSON.parse(readFileSync(join(dir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
       const row = readMember(jsonl, meta);
       if (!row) continue;
-      newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
       rows.push(row);
     } catch { /* one member's loss, not the session's */ }
   }

@@ -189,3 +189,20 @@ test("a session directory with no subagents dir yields no rows and does not thro
   const root = mkdtempSync(join(tmpdir(), "mo-"));
   assert.deepEqual(rowsForSession(root), []);
 });
+
+test("a member that yields no row still dates the session, and its siblings survive", () => {
+  // A <synthetic>-only member is dropped, but it DID write a transcript: its
+  // mtime is part of when this session ran. Sampling mtime only for surviving
+  // members would date the session from the older sibling.
+  const dir = fixture([
+    ["impl-580", assistant("claude-opus-5", "xhigh"), meta()],
+    ["impl-581", assistant("<synthetic>", "xhigh"), meta({ agentType: "impl-581", name: "impl-581" })],
+  ]);
+  const newer = join(dir, "subagents", "agent-aimpl-581.jsonl");
+  utimesSync(newer, new Date("2026-08-26T09:00:00Z"), new Date("2026-08-26T09:00:00Z"));
+
+  const rows = rowsForSession(dir);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].member, "impl-580");
+  assert.equal(rows[0].run_date, "2026-08-26");
+});
