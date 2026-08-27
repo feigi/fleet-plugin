@@ -183,7 +183,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const argv = process.argv.slice(2);
   const fileIdx = argv.indexOf("--file");
   const file = fileIdx >= 0 ? argv[fileIdx + 1] : "docs/metrics/member-outcomes.tsv";
-  const dirs = argv.filter((a, i) => !a.startsWith("--") && i !== fileIdx + 1);
+  // fileIdx is -1 when --file is absent, which makes fileIdx + 1 equal 0 — the
+  // FIRST positional argument, not a real index into argv. Without the
+  // fileIdx < 0 guard this filters out the session dir itself, and the bare
+  // form (the one the spec, the backfill loop and run-team's phase-3
+  // instruction all use) always exits 2.
+  const dirs = argv.filter((a, i) => !a.startsWith("--") && (fileIdx < 0 || i !== fileIdx + 1));
   if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
   if (!file || file.startsWith("--")) die("--file needs a path");
 

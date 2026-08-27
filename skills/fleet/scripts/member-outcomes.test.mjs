@@ -308,3 +308,18 @@ test("importing the module never runs the CLI, even from a file whose name ends 
   assert.equal(r.stdout.trim(), "claude-opus-5");
   assert.equal(r.stderr, "");
 });
+
+test("the documented bare form works — no --file needed", () => {
+  // `member-outcomes.mjs <session-dir>` is the form the spec, the backfill loop
+  // and run-team's phase-3 instruction all use. It exited 2 for every input
+  // until the filter stopped treating `fileIdx + 1` as a real index when
+  // --file is absent.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const cwd = mkdtempSync(join(tmpdir(), "mo-cwd-"));
+  mkdirSync(join(cwd, "docs", "metrics"), { recursive: true });
+  const r = spawnSync(process.execPath, [CLI, dir], { encoding: "utf8", cwd });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
+  const written = readFileSync(join(cwd, "docs", "metrics", "member-outcomes.tsv"), "utf8");
+  assert.match(written, /impl-580/);
+});
