@@ -114,7 +114,7 @@ would destroy it.
 
 ```
 session  run_date  role  member  model  effort  ticket  pr
-tokens_cache_create  tokens_out  wall_s  turns  errored  agent
+tokens_cache_create  tokens_out  wall_s  turns  agent
 ```
 
 `agent` is an OPAQUE JOIN KEY: it exists so a re-scrape can replace a row instead
@@ -165,6 +165,14 @@ Two columns an earlier draft carried are deliberately absent:
   `claude-haiku-4-5-20251001`, `claude-sonnet-5`, `claude-opus-4-8`,
   `claude-opus-4-7`, bare `opus`/`sonnet`/`haiku`, and `<synthetic>`.
   `<synthetic>` rows are dropped, not mapped — they are not a model.
+  Precisely: the bare aliases and the `[1m]` context variant live in
+  **`meta.json`**, which is the REQUESTED tier. This scraper reads
+  `message.model`, the EFFECTIVE one, where measurement found only versioned ids
+  and `<synthetic>` — no aliases, no brackets. So "normalized" here means
+  dropping `<synthetic>` and stripping `[1m]` defensively; it does **not** mean
+  a bare `opus` is resolved to `claude-opus-5`. Nothing needs that until
+  something reads `meta.model`, and whoever writes it should know it is a real
+  gap rather than assume it is covered.
 - `effort` is read from the per-message `"effort"` field in the member's JSONL.
   It is **not** in `meta.json`: across 400 sampled `*.meta.json` the key set is
   `agentType`, `description`, `spawnDepth`, `toolUseId`, `model`,
@@ -177,8 +185,22 @@ Two columns an earlier draft carried are deliberately absent:
   never carries `effort` at all, so both halves of a frontmatter-declared tier
   are invisible there. A member answering "probe" proves a dispatch completed and
   nothing more. This binds the scraper, the pins, and every read-out below.
-- `errored` is whether the member's transcript ends without a completed final
-  turn — a stall or a terminal API failure, not a code defect.
+- **There is no `errored` column, and the reasoning is worth keeping.** It was
+  specified as "the transcript ends without a completed final turn — a stall or
+  a terminal API failure". What a scraper can actually detect is a transcript
+  whose last line is torn mid-write, which is a different thing: it says the
+  file was read while the member was still writing to it. So the column read
+  `no` on all 2,702 rows of the first corpus, including all 34 transcripts that
+  carried a real terminal API failure, and it flipped back to `no` on the next
+  re-scrape of any row that had said `yes`. A value that describes WHEN the
+  scraper ran does not belong in a file whose unit is a dispatched member. The
+  detection is kept — a torn read still cannot lose a member — and reported on
+  stderr instead.
+- `tokens_cache_create`, `tokens_out` and `turns` are PER-TURN, folded on
+  `message.id`, the same fold `board.mjs` performs. One assistant turn is
+  written as several jsonl lines, one per content block, each repeating the same
+  usage object; summing per line overcounts, and it overcounts unevenly across
+  models, which corrupts the comparison this file exists for.
 - No verdict columns. Ever. That is the whole point of the split.
 
 ### Superseded generations are a separate population
@@ -221,8 +243,14 @@ directory, emit rows.
 node skills/fleet/scripts/member-outcomes.mjs "$SESSION_DIR"
 
 # every session on disk — a loop, not a feature
-ls -d ~/.claude/projects/*/*/ | xargs -n1 node skills/fleet/scripts/member-outcomes.mjs
+ls -d ~/.claude/projects/*/*/subagents/ | xargs -n1 node skills/fleet/scripts/member-outcomes.mjs
 ```
+
+The loop enumerates `*/subagents/`, not `*/`. `ls -d ~/.claude/projects/*/*/`
+lists every session directory — 253 as of 2026-08-27 — of which only 155 hold a
+`subagents/`, so the wider glob feeds the scraper ~98 paths it now refuses with
+exit 2, leaving `xargs` at exit 123 on an otherwise clean backfill. The
+population named two sections below was always the narrower one.
 
 There is deliberately **no `--backfill` mode**. Backfill is the same call in a
 shell loop, so there is no one-shot code path to delete once the back catalogue
@@ -247,6 +275,21 @@ day — because most sessions dispatch nobody. The figure above counts
 actually walks. Re-verified 2026-08-27 after the probe work: 155 / 2,687 / 2,109,
 i.e. one further session and the drift of a single day.
 
+> **The recount pinned the wrong denominator, corrected in review the same day.**
+> Everything above is the count of transcripts sitting DIRECTLY in a
+> `subagents/` dir. A Workflow's fan-out writes one level deeper —
+> `subagents/workflows/wf_<id>/agent-<id>.jsonl` — and there are 2,894 of those
+> across 37 sessions, so the real member-transcript population is **5,617, not
+> 2,687**. Counting `ls -d .../subagents/` is precisely what hides them: the
+> nested files live under a directory the glob matches, not under one it lists.
+>
+> The shipped scraper walks both depths. The miss mattered beyond arithmetic —
+> the nested half is almost entirely `workflows/review-pr.js`'s specialists, and
+> that file pins `model: "sonnet"` on three of its six dimensions, so the half
+> being dropped was the half where model is deliberately VARIED. A model ranking
+> drawn from the flat half alone is drawn from the non-varied half, which is the
+> opposite of what this document asks the corpus for.
+
 | role | members | | model | members |
 |---|---|---|---|---|
 | specialist | 1416 | | claude-opus-5 | 1802 |
@@ -260,6 +303,13 @@ i.e. one further session and the drift of a single day.
 fold ~700 members into specialist/other. The shipped scraper's own distribution is
 recorded in plan 1, Task 9. The claim the table supports — that the review side
 carries the volume — survives; the specialist number does not.
+
+**Both columns are also drawn from the flat half only** (see the correction
+above), so both are roughly half-size against the shipped corpus, and the model
+column is skewed as well as small: the excluded half runs 17.0% sonnet against
+the flat half's 10.5%. The shipped file reads 5,393 rows — opus-5 3,829, haiku
+786, sonnet 739, opus-4-8 23, opus-4-7 16. Do not reconcile against this table;
+it is a dated record of what the probe saw, kept for that.
 
 † Unlike every other row, this one is method-sensitive, and the figure is a raw
 occurrence count rather than a member count. Counting each member by the FIRST

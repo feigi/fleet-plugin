@@ -2,6 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **This plan is a dated record of the argument, not the shipped schema.** Review
+> on 2026-08-27 changed three things after it was written, so the dictated code
+> below no longer matches `member-outcomes.mjs` and is kept as history rather
+> than rewritten. Read the shipped file, and `docs/metrics/member-outcomes.tsv`'s
+> own header, for what is true:
+>
+> 1. **The `errored` column does not exist.** Every `errored` in this plan —
+>    the row shape, the `turns > 0 && lastTs === firstTs` rule, the fixture, the
+>    `COLUMNS` list, the header prose — is superseded. What the scraper can
+>    detect is a torn read, which describes when the scrape ran rather than
+>    anything about the member; it is reported on stderr and never stored.
+> 2. **Token columns are folded on `message.id`.** The plan sums `message.usage`
+>    per jsonl line. One turn is several lines repeating one usage object, so
+>    that overcounted `cache_creation` by 176% and `turns` by 141%, unevenly
+>    across models. `board.mjs` already folded; the two must not fork.
+> 3. **The walk is recursive.** The plan reads `subagents/*.jsonl`; a Workflow's
+>    fan-out writes one level deeper, and that is roughly half the corpus.
+
 **Goal:** Record which model and effort every fleet member ran at, for every run,
 into a regenerable metrics file — and backfill it from the 154 sessions on disk
 that dispatched at least one member (`ls -d ~/.claude/projects/*/*/subagents/`;
@@ -904,9 +922,22 @@ scraper, not as news:
   merge-bot ~252, other ~75, sizing ~22. Note `memory` and `sizing` are real roles
   the classifier returns; the design doc's earlier table omits them and folds their
   members elsewhere, so do not reconcile against that table
+
+  > **These figures were computed against a one-level walk and are ~half the
+  > shipped population — do not use them as the sanity check.** The scraper walks
+  > `subagents/workflows/wf_<id>/` too, which is 2,894 further transcripts across
+  > 37 sessions, nearly all of them specialists. So `specialist ~878` was
+  > calibrated against the very defect it was meant to catch: a divergence of
+  > hundreds was the normal state, and the rule "a divergence of hundreds, or a
+  > role missing entirely, is a defect" could never fire on it. The shipped
+  > corpus is 5,393 rows. Recount before citing, and count both depths.
 - models, measured 2026-08-27: `claude-opus-5` ~1803,
   `claude-haiku-4-5-20251001` ~581, `claude-sonnet-5` ~278, plus 23
-  `claude-opus-4-8` and 16 `claude-opus-4-7`.
+  `claude-opus-4-8` and 16 `claude-opus-4-7`. **Flat half only — the shipped
+  file reads 3,829 / 786 / 739 / 23 / 16.** The excluded half was not a random
+  sample of the included one: it runs 17.0% sonnet against 10.5%, because
+  `workflows/review-pr.js` pins `model: "sonnet"` on three of its six
+  dimensions. That is the half where model VARIES.
   **Those last two are superseded generations and are a separate population** —
   never pool them into an "opus" bucket and never read them as a cheap tier.
   Pricing falls with each generation, so an older Opus is not cheaper than the

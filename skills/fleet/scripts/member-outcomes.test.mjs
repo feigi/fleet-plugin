@@ -64,10 +64,14 @@ test("an unrecognised name yields blanks, never a guess", () => {
 });
 
 const line = (o) => JSON.stringify(o);
-const assistant = (model, effort, usage = {}) => line({
+// `id` is the API turn id. Real transcripts carry one on EVERY assistant line
+// (measured: 0 of 127,102 without), and several lines of one turn repeat it —
+// which is why the fixtures below must be able to set it. Omitting it here
+// leaves each line its own turn, the shape every pre-existing fixture assumes.
+const assistant = (model, effort, usage = {}, id) => line({
   type: "assistant", isSidechain: true, effort,
   timestamp: "2026-08-25T07:14:12.147Z",
-  message: { model, usage: { cache_creation_input_tokens: 0, output_tokens: 0, ...usage } },
+  message: { ...(id ? { id } : {}), model, usage: { cache_creation_input_tokens: 0, output_tokens: 0, ...usage } },
 });
 const meta = (o = {}) => ({ agentType: "impl-580", description: "Implement ticket 580", name: "impl-580", spawnDepth: 0, ...o });
 
@@ -81,17 +85,50 @@ test("model and effort come off the transcript, not the meta", () => {
   ].join("\n"), meta());
   assert.equal(row.model, "claude-opus-5");
   assert.equal(row.effort, "xhigh");
-  assert.equal(row.errored, "no");
+  assert.equal(row.torn, false);
 });
 
-test("usage sums across turns", () => {
+test("usage sums across turns — lines with distinct ids are distinct turns", () => {
   const row = readMember([
-    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 100, output_tokens: 7 }),
-    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 250, output_tokens: 3 }),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 100, output_tokens: 7 }, "msg_1"),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 250, output_tokens: 3 }, "msg_2"),
   ].join("\n"), meta());
   assert.equal(row.tokensCacheCreate, 350);
   assert.equal(row.tokensOut, 10);
   assert.equal(row.turns, 2);
+});
+
+test("usage is billed ONCE per message.id — one turn is many jsonl lines", () => {
+  // THE defect this pins: one assistant API turn is written as several lines,
+  // one per content block, and every one repeats the same message.id AND the
+  // same usage object. Summing per LINE overcounted cache_creation by 176% and
+  // `turns` by 141% across all 2,723 real transcripts, and the overcount is
+  // MODEL-DEPENDENT (opus-5 2.81x, sonnet-5 2.39x) because blocks-per-turn
+  // tracks how tool-heavy a turn is. That tilts the cost comparison this file
+  // exists to support, so it is not a rescale.
+  //
+  // Mutation this must survive: reverting to `cache += ...; turns++` per line.
+  // That reads 900 / 3 here instead of 300 / 1.
+  const blocks = [
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 300, output_tokens: 5 }, "msg_same"),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 300, output_tokens: 40 }, "msg_same"),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 300, output_tokens: 12 }, "msg_same"),
+  ];
+  const row = readMember(blocks.join("\n"), meta());
+  assert.equal(row.tokensCacheCreate, 300, "cache_creation is billed once per turn, not once per block");
+  assert.equal(row.turns, 1, "three content blocks are ONE turn");
+  // output_tokens is a streaming snapshot, so the LARGEST value is the final
+  // one. Summing would read 57.
+  assert.equal(row.tokensOut, 40, "output_tokens takes the max across the turn's lines, not the sum");
+});
+
+test("a line with no message.id is its own turn — the honest reading of nothing to fold on", () => {
+  const row = readMember([
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 100, output_tokens: 7 }),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 100, output_tokens: 7 }),
+  ].join("\n"), meta());
+  assert.equal(row.turns, 2);
+  assert.equal(row.tokensCacheCreate, 200);
 });
 
 test("a torn final line is skipped, not fatal", () => {
@@ -104,20 +141,26 @@ test("a torn final line is skipped, not fatal", () => {
   assert.equal(row.turns, 1);
 });
 
-test("errored keys on the LAST line being torn, not on how many turns there were", () => {
-  // Distinct timestamps on purpose: the replaced rule keyed on
-  // firstTs === lastTs and would answer "no" to BOTH cases here, so this is
-  // the assertion that actually discriminates the two rules.
+test("torn keys on the LAST line, and is NOT a column", () => {
+  // `torn` says the file was read while the member was still writing to it. It
+  // is a property of WHEN the scraper ran, not of the member — re-scraping the
+  // same finished transcript flips it back — so it rides on the row for
+  // rowsForSession() to count and reaches stderr, never the schema. The old
+  // `errored` column read "no" on all 2,702 rows, including all 34 transcripts
+  // carrying a real terminal API failure, and needed four header lines to stop
+  // readers taking it for a reliability signal.
+  assert.equal(COLUMNS.includes("errored"), false, "torn-ness is a scrape artifact, not a member fact");
+
   const at = (ts) => line({
     type: "assistant", isSidechain: true, effort: "xhigh", timestamp: ts,
-    message: { model: "claude-opus-5", usage: { cache_creation_input_tokens: 0, output_tokens: 0 } },
+    message: { id: `msg_${ts}`, model: "claude-opus-5", usage: { cache_creation_input_tokens: 0, output_tokens: 0 } },
   });
 
   const endsTorn = readMember(
     [at("2026-08-25T07:14:12.147Z"), at("2026-08-25T07:15:00.000Z"), '{"type":"assis'].join("\n"),
     meta(),
   );
-  assert.equal(endsTorn.errored, "yes");
+  assert.equal(endsTorn.torn, true);
 
   // A torn line in the MIDDLE is a hiccup, not a stall: the next good line
   // resets it.
@@ -125,7 +168,7 @@ test("errored keys on the LAST line being torn, not on how many turns there were
     [at("2026-08-25T07:14:12.147Z"), '{"type":"assis', at("2026-08-25T07:15:00.000Z")].join("\n"),
     meta(),
   );
-  assert.equal(recovers.errored, "no");
+  assert.equal(recovers.torn, false);
 });
 
 test("a member with no effort field records blank, not a default", () => {
@@ -208,10 +251,70 @@ test("a member that yields no row still dates the session, and its siblings surv
   assert.equal(rows[0].run_date, "2026-08-26");
 });
 
+test("a Workflow's nested fan-out is scraped too, keyed on its path-relative stem", () => {
+  // Transcripts live at TWO depths. A one-level readdir saw 2,723 files and
+  // missed 2,894 under subagents/workflows/wf_<id>/ across 37 sessions — 52% of
+  // the corpus, and specifically `workflows/review-pr.js`'s specialists, which
+  // is the population where model is DELIBERATELY varied (that file pins
+  // `model: "sonnet"` on three of its six dimensions). No fixture had a nested
+  // directory, so 1,223 tests passed over a scraper that saw half the disk.
+  //
+  // Mutation this must survive: dropping `{ recursive: true }`. That reads 1.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const wf = join(dir, "subagents", "workflows", "wf_abc123");
+  mkdirSync(wf, { recursive: true });
+  writeFileSync(join(wf, "agent-anested.jsonl"), assistant("claude-sonnet-5", "xhigh"));
+  writeFileSync(join(wf, "agent-anested.meta.json"),
+    JSON.stringify({ agentType: "pr-review-toolkit:code-reviewer", description: "Review PR 943", spawnDepth: 1 }));
+
+  const rows = rowsForSession(dir);
+  assert.equal(rows.length, 2);
+  const nested = rows.find((r) => r.model === "claude-sonnet-5");
+  assert.ok(nested, "the nested transcript produced a row");
+  // The stem carries the path, which is what keeps `agent` unique across the
+  // two depths — and what let this widening REPLACE existing rows rather than
+  // duplicate them, since a FLAT stem is unchanged by recursing.
+  assert.equal(nested.agent, "workflows/wf_abc123/agent-anested");
+  assert.equal(rows.find((r) => r.model === "claude-opus-5").agent, "agent-aimpl-580");
+});
+
+test("role comes from classifyRole and is not invented here", () => {
+  // `role` had no assertion anywhere: it is the GROUPING column of the header's
+  // pair query, so a classifyRole regression moved every bucket in the read-out
+  // while the suite stayed green.
+  const dir = fixture([
+    ["impl-580", assistant("claude-opus-5", "xhigh"), meta()],
+    ["mb", assistant("claude-opus-5", "xhigh"),
+      meta({ agentType: "merge-bot-3", name: "merge-bot-3", description: "merge wave 3" })],
+    ["spec", assistant("claude-opus-5", "xhigh"),
+      meta({ agentType: "general-purpose", name: undefined, description: "Review PR 943 correctness", spawnDepth: 1 })],
+  ]);
+  const byMember = Object.fromEntries(rowsForSession(dir).map((r) => [r.member, r.role]));
+  assert.equal(byMember["impl-580"], "implementer");
+  assert.equal(byMember["merge-bot-3"], "merge-bot");
+  // spawnDepth >= 1 is a reviewer's fan-out, not the member's own name.
+  assert.equal(byMember["general-purpose"], "specialist");
+});
+
+test("a row whose cell count is wrong is REFUSED, never padded", () => {
+  // Padding put "" in the LAST column, `agent` — a key rowsForSession can never
+  // produce, so mergeRows could never replace it. Three measured routes there,
+  // all exit 0: a torn last line became a permanent phantom that re-scraping
+  // could not heal, git conflict markers became three data rows, and adding one
+  // column ahead of `agent` collapsed 2,702 rows to 156.
+  //
+  // Mutation this must survive: restoring `cells[i] ?? ""`.
+  const short = ["s1", "2026-08-25", "memory"].join("\t");
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 13/);
+  assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
+  // A long row is refused too — that is the schema-drift direction.
+  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /14 fields/);
+});
+
 const row = (o = {}) => ({
   session: "s1", run_date: "2026-08-25", role: "implementer", member: "impl-580",
   model: "claude-opus-5", effort: "xhigh", ticket: "580", pr: "",
-  tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, errored: "no",
+  tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1,
   // Default agent tracks the default/overridden member, so fixtures that vary
   // only `member` still get distinct transcript ids, and fixtures that share
   // the default member (untouched) still key as the SAME agent.
@@ -360,7 +463,69 @@ test("the documented bare form works — no --file needed", () => {
   mkdirSync(join(cwd, "docs", "metrics"), { recursive: true });
   const r = spawnSync(process.execPath, [CLI, dir], { encoding: "utf8", cwd });
   assert.equal(r.status, 0);
-  assert.match(r.stderr, /wrote 1 rows to/);
+  assert.match(r.stderr, /scraped 1 of 1 members \(0 dropped\)/);
   const written = readFileSync(join(cwd, "docs", "metrics", "member-outcomes.tsv"), "utf8");
   assert.match(written, /impl-580/);
+});
+
+test("the run reports its own YIELD, not just the file's size", () => {
+  // `wrote N rows` printed merged.length — the whole corpus — so a session where
+  // every member dropped printed the same reassuring line as a healthy one.
+  // Measured: a real 2-member session whose metas were missing wrote
+  // "wrote 2702 rows", exit 0, byte-identical to full success.
+  //
+  // Mutation this must survive: printing merged.length alone.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  // A sibling transcript with no meta.json — the real drop shape: 6 such files
+  // are on disk, one of them 58 KB of opus-5 work carrying a pr=647 join key.
+  writeFileSync(join(dir, "subagents", "agent-aorphan.jsonl"), assistant("claude-opus-5", "xhigh"));
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  writeFileSync(out, formatTsv([row({ session: "other", member: "impl-1" })]));
+
+  const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stderr, /scraped 1 of 2 members \(1 dropped\)/);
+  // The file total is still reported, and is deliberately a DIFFERENT number
+  // from the yield — that difference is the whole point.
+  assert.match(r.stderr, /holds 2 rows/);
+});
+
+test("an unreadable subagents/ is a refusal, not a silent no-op", () => {
+  // The old existsSync guard closed only the ENOENT half. A regular FILE named
+  // `subagents` (ENOTDIR) walked past it into rowsForSession's catch, which
+  // returned [], and the run exited 0 having written nothing.
+  //
+  // Mutation this must survive: `existsSync(join(sessionDir, "subagents"))`.
+  const root = mkdtempSync(join(tmpdir(), "mo-notdir-"));
+  writeFileSync(join(root, "subagents"), "");
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const r = spawnSync(process.execPath, [CLI, root, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /ENOTDIR/);
+  assert.equal(existsSync(out), false);
+});
+
+test("a corpus this schema cannot read is refused before anything is rewritten", () => {
+  // Reading an out-of-schema file used to pad it and rewrite it, converting a
+  // human's unresolved merge conflict into confident-looking data.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const conflicted = "# hdr\n<<<<<<< HEAD\n" + formatTsv([row()]) + "=======\n>>>>>>> theirs\n";
+  writeFileSync(out, conflicted);
+  const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /malformed row/);
+  assert.equal(readFileSync(out, "utf8"), conflicted, "the file is left exactly as found");
+});
+
+test("the header's blank lines and paragraph order survive a rewrite", () => {
+  // Collecting every `#` line from anywhere hoisted a below-data note to the
+  // top and dropped the blank separators, silently, while the comment promised
+  // "preserved verbatim".
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const header = "# first paragraph\n\n# second paragraph\n";
+  writeFileSync(out, header);
+  spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(readFileSync(out, "utf8").startsWith(header), true);
 });
