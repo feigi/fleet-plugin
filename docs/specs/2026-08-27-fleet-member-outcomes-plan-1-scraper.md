@@ -893,12 +893,20 @@ awk -F'\t' '!/^#/ {n[$6]++} END{for (k in n) print n[k], (k==""?"(blank)":k)}' d
 
 Expected, measured at `c82c5a5` — treat a large divergence as a bug in the
 scraper, not as news:
-- ~2,100 rows (2,102 members had both model and effort recoverable; rows with no
-  usable model are dropped)
-- roles ranked: specialist ~1416, reviewer ~376, finisher ~289, merge-bot ~255,
-  implementer ~255
-- models: `claude-opus-5` ~1802, `claude-haiku-4-5-20251001` ~567,
-  `claude-sonnet-5` ~262, plus ~23 `claude-opus-4-8` and ~16 `claude-opus-4-7`.
+- **~2,700 rows.** A row is dropped only when the member has NO usable model, so
+  the row count is members-with-a-model — NOT the 2,102 "model AND effort
+  recoverable" figure the design doc quotes for a different purpose. Measured
+  2026-08-27 by running this scraper over every session: **2,701 rows, of which
+  2,120 carry a non-blank effort.** Quoting the model+effort number here would
+  make a correct scraper look ~600 rows short and trip the defect rule below.
+- roles ranked, measured with THIS code (`classifyRole` from `compute-spend.mjs`):
+  specialist ~878, memory ~680, finisher ~283, reviewer ~256, implementer ~255,
+  merge-bot ~252, other ~75, sizing ~22. Note `memory` and `sizing` are real roles
+  the classifier returns; the design doc's earlier table omits them and folds their
+  members elsewhere, so do not reconcile against that table
+- models, measured 2026-08-27: `claude-opus-5` ~1803,
+  `claude-haiku-4-5-20251001` ~581, `claude-sonnet-5` ~278, plus 23
+  `claude-opus-4-8` and 16 `claude-opus-4-7`.
   **Those last two are superseded generations and are a separate population** —
   never pool them into an "opus" bucket and never read them as a cheap tier.
   Pricing falls with each generation, so an older Opus is not cheaper than the
