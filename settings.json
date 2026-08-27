@@ -12,7 +12,10 @@
       "Bash(/Users/chris/.claude/skills/fleet/scripts/:*)",
       "EnterWorktree",
       "ExitWorktree",
-      "Bash(git worktree:*)"
+      "Bash(git worktree:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh issue close:*)"
     ],
     "defaultMode": "auto"
   },
