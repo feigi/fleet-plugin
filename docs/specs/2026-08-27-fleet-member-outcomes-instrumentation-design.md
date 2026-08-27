@@ -256,6 +256,11 @@ i.e. one further session and the drift of a single day.
 | merge-bot | 255 | | claude-opus-4-7 | 16 |
 | other | 80 | | `<synthetic>` (dropped) | 14† |
 
+**These role counts predate `classifyRole`'s `memory` and `sizing` buckets** and
+fold ~700 members into specialist/other. The shipped scraper's own distribution is
+recorded in plan 1, Task 9. The claim the table supports — that the review side
+carries the volume — survives; the specialist number does not.
+
 † Unlike every other row, this one is method-sensitive, and the figure is a raw
 occurrence count rather than a member count. Counting each member by the FIRST
 `"model"` on its transcript yields 2, not 14 — `<synthetic>` also appears on later
@@ -383,6 +388,13 @@ whatever the rows happen to say:
   in whatever cites it.
 - **Minimum n before reading anything**: ≥10 within-run pairs spanning ≥5
   distinct `run_date`s. Below that, report the count and stop.
+  **Count pairs within one member-name SHAPE.** The raw query returns 93 pairs on
+  the backfilled corpus, of which 60 are role `memory` — `memory-proxy` against
+  `memory-housekeeper`, two different agent definitions whose tiers are pinned in
+  their own frontmatter and never varied by anyone. Those register as pairs in
+  every session forever and carry no signal. Same-shape pairs are 33, of which
+  implementers — the only role Part 2 varies — are 16. Read the implementer count,
+  not the total.
 - **Blank covariate excludes the row** from a stratified comparison. Rows whose
   PR predates the four new columns can rank models overall; they cannot enter a
   stratified pair.

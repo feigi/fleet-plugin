@@ -496,10 +496,23 @@ refill is level-triggered, so there are no implementer waves. **Append one row t
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
-**Then record the run's member facts — do not author them.** Run
-`node skills/fleet/scripts/member-outcomes.mjs "$SESSION_DIR"` once, where
-`$SESSION_DIR` is this run's session directory under `~/.claude/projects/`. It
-derives every row from the subagent transcripts the harness already wrote, so a
+**Then record the run's member facts — do not author them.** Derive this run's
+session directory with the helper that already knows the path encoding, then run
+the scraper once:
+
+```bash
+SESSION_DIR="$(node -e 'import("./skills/fleet/scripts/board.mjs").then(m => console.log(m.findSubagentsDir()))')"
+node skills/fleet/scripts/member-outcomes.mjs "$SESSION_DIR"
+```
+
+`findSubagentsDir` (`skills/fleet/scripts/board.mjs:172`) encodes the cwd the way
+Claude Code does — `/Users/x/.claude` becomes `-Users-x--claude`, double dash — and
+hand-guessing that path is why the fleet's own panel once rendered nothing here. The
+scraper accepts either that directory or its parent session directory, prints how
+many rows it wrote, and refuses a path with no `subagents/` inside, so a wrong path
+fails loudly instead of writing nothing and exiting 0.
+
+It derives every row from the subagent transcripts the harness already wrote, so a
 second run over the same session changes nothing and a re-run after a member is
 re-dispatched picks the new transcript up. **Never hand-edit
 `docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the

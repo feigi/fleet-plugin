@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -275,6 +275,47 @@ test("no session dir is a refusal, not a silent no-op", () => {
   assert.equal(r.stdout, "");
 });
 
+test("the subagents/ dir and its parent session dir scrape the same rows", () => {
+  // findSubagentsDir() (board.mjs) returns the subagents dir; a human types
+  // the session dir. Both spellings must reach the same rows.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const outSession = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const outSubagents = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const bySession = spawnSync(process.execPath, [CLI, dir, "--file", outSession], { encoding: "utf8" });
+  const bySubagents = spawnSync(process.execPath, [CLI, join(dir, "subagents"), "--file", outSubagents], { encoding: "utf8" });
+  assert.equal(bySession.status, 0);
+  assert.equal(bySubagents.status, 0);
+  assert.equal(readFileSync(outSession, "utf8"), readFileSync(outSubagents, "utf8"));
+});
+
+test("a directory with no subagents/ under it is a refusal, not a silent no-op", () => {
+  // A wrong guess used to exit 0 having written nothing, because
+  // rowsForSession() catches the readdir failure and returns [].
+  const empty = mkdtempSync(join(tmpdir(), "mo-empty-"));
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const r = spawnSync(process.execPath, [CLI, empty, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /subagents/);
+  assert.equal(existsSync(out), false);
+});
+
+test("--file=<path> is refused, not silently ignored", () => {
+  // --file wants a SPACE-separated value, not `=`. Without a check, this never
+  // sets fileIdx, so it silently writes the PRODUCTION metrics file instead of
+  // the path the operator asked for.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const r = spawnSync(process.execPath, [CLI, dir, "--file=/tmp/x.tsv"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--file/);
+});
+
+test("an unrecognised flag is refused, not silently dropped", () => {
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const r = spawnSync(process.execPath, [CLI, dir, "--wat"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--wat/);
+});
+
 test("a run writes rows, and a second run over the same session changes nothing", () => {
   const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
   const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
@@ -319,7 +360,7 @@ test("the documented bare form works — no --file needed", () => {
   mkdirSync(join(cwd, "docs", "metrics"), { recursive: true });
   const r = spawnSync(process.execPath, [CLI, dir], { encoding: "utf8", cwd });
   assert.equal(r.status, 0);
-  assert.equal(r.stderr, "");
+  assert.match(r.stderr, /wrote 1 rows to/);
   const written = readFileSync(join(cwd, "docs", "metrics", "member-outcomes.tsv"), "utf8");
   assert.match(written, /impl-580/);
 });

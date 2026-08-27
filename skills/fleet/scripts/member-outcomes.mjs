@@ -3,7 +3,7 @@
 // docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 
 import { classifyRole } from "./compute-spend.mjs";
 
@@ -116,8 +116,9 @@ export function rowsForSession(sessionDir) {
       const meta = JSON.parse(readFileSync(join(dir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
       const row = readMember(jsonl, meta);
       if (!row) continue;
-      // `member` (meta.name ?? meta.agentType) is blank for every unnamed
-      // dispatch, so it is not unique within a session — the `agent-<id>`
+      // `member` (meta.name ?? meta.agentType) COLLIDES for every unnamed
+      // dispatch — they all fall back to the same agentType ("general-purpose"),
+      // not to blank — so it is not unique within a session. The `agent-<id>`
       // filename stem is the only per-member identifier that is.
       const agent = f.replace(/\.jsonl$/, "");
       rows.push({ agent, ...row });
@@ -139,9 +140,10 @@ const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
 };
 const field = (c) => FIELD[c] ?? c;
-// Keyed on the transcript id, not the member name: `member` is blank for
-// every unnamed dispatch, so it collapses distinct members onto one key.
-// `agent` is the `agent-<id>` filename stem — unique and stable per member.
+// Keyed on the transcript id, not the member name: `member` collides on the
+// agentType fallback for every unnamed dispatch, so it collapses distinct
+// members onto one key. `agent` is the `agent-<id>` filename stem — unique and
+// stable per member.
 const key = (r) => `${r.session}\0${r.agent}`;
 
 // Replace-by-key, not append. This is what makes a phase-3 re-run and a full
@@ -183,6 +185,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const argv = process.argv.slice(2);
   const fileIdx = argv.indexOf("--file");
   const file = fileIdx >= 0 ? argv[fileIdx + 1] : "docs/metrics/member-outcomes.tsv";
+  // An unrecognised `--flag` is silently dropped by the dirs filter below
+  // rather than refused — worst case `--file=/tmp/x.tsv` (no such flag;
+  // --file wants a SPACE, not `=`) never sets fileIdx, so this would silently
+  // write the production metrics file instead of the path the operator asked
+  // for.
+  const bad = argv.find((a) => a.startsWith("--") && a !== "--file");
+  if (bad) die(`unknown option ${bad} (did you mean --file <path>?)`);
+
   // fileIdx is -1 when --file is absent, which makes fileIdx + 1 equal 0 — the
   // FIRST positional argument, not a real index into argv. Without the
   // fileIdx < 0 guard this filters out the session dir itself, and the bare
@@ -192,11 +202,22 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
   if (!file || file.startsWith("--")) die("--file needs a path");
 
+  // findSubagentsDir() (board.mjs) returns .../<session>/subagents; a human
+  // types the session dir instead. Accept both rather than making the caller
+  // remember which.
+  const arg = dirs[0].replace(/\/+$/, "");
+  const sessionDir = basename(arg) === "subagents" ? dirname(arg) : arg;
+  // A wrong guess (nonexistent dir, or the wrong sibling) used to exit 0
+  // having scraped and written nothing, because rowsForSession() catches the
+  // readdir failure and returns []. Refuse it loudly instead.
+  if (!existsSync(join(sessionDir, "subagents"))) die(`no subagents/ under ${sessionDir}`);
+
   // Header comments are preserved verbatim across the rewrite: they carry the
   // read-out commands and the blank-means-unknown rule, and the rewrite is
   // routine (every re-scrape), so losing them would be a slow, silent erasure.
   const prev = existsSync(file) ? readFileSync(file, "utf8") : "";
   const header = prev.split("\n").filter((l) => l.startsWith("#")).join("\n");
-  const merged = mergeRows(parseTsv(prev), rowsForSession(dirs[0]));
+  const merged = mergeRows(parseTsv(prev), rowsForSession(sessionDir));
   writeFileSync(file, (header ? header + "\n" : "") + formatTsv(merged));
+  process.stderr.write(`${NAME}: wrote ${merged.length} rows to ${file}\n`);
 }

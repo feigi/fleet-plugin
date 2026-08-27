@@ -23,9 +23,12 @@
 # one and an older Sonnet is dearer. Pooling inverts the cost ordering this
 # file exists to measure.
 #
-# `errored` is a stall or terminal API failure, NOT a code defect. Whether the
-# work was any good is a verdict, and verdicts live in tier-outcomes.tsv, joined
-# on `pr`.
+# `errored` marks a transcript whose LAST line was torn mid-write — i.e. the file
+# was scraped while the member was still writing to it. It is a live-scrape
+# artifact, NOT a record of stalls or terminal API failures: a member that stalled
+# and stopped leaves a syntactically complete file and reads as `no`. Do not read
+# an all-`no` column as evidence that no run ever stalled. Whether the work was any
+# good is a verdict, and verdicts live in tier-outcomes.tsv, joined on `pr`.
 #
 # A within-run PAIR — the only unconfounded comparison — is a session+role that
 # ran more than one model. Nothing is labelled; the pairing is a query:

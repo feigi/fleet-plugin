@@ -1049,8 +1049,10 @@ git commit -m "feat(run-team): phase 3 runs the member-outcomes scraper after ru
 
 ## Done when
 
-- `node --test skills/fleet/scripts/` passes.
-- `docs/metrics/member-outcomes.tsv` holds ~2,100 backfilled rows.
+- `node --test "skills/fleet/scripts/*.test.mjs"` passes.
+- `docs/metrics/member-outcomes.tsv` holds ~2,700 backfilled rows (2,702 at
+  backfill time; the model-AND-effort subset is ~2,120 and is a different
+  population).
 - Re-running the scraper over any session produces a zero-line diff.
 - Nothing in the repo asks a human to write a row into `member-outcomes.tsv`.
 
