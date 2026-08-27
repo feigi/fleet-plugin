@@ -496,6 +496,16 @@ refill is level-triggered, so there are no implementer waves. **Append one row t
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
+**Then record the run's member facts — do not author them.** Run
+`node skills/fleet/scripts/member-outcomes.mjs "$SESSION_DIR"` once, where
+`$SESSION_DIR` is this run's session directory under `~/.claude/projects/`. It
+derives every row from the subagent transcripts the harness already wrote, so a
+second run over the same session changes nothing and a re-run after a member is
+re-dispatched picks the new transcript up. **Never hand-edit
+`docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the
+role classifier changes, and a hand-entered value would not survive that. The
+verdict for a PR still goes to `tier-outcomes.tsv`, by hand, as before.
+
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
 shell reorder are not comparable units. Finding-counts are not comparable either:
