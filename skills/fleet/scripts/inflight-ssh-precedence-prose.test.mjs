@@ -28,6 +28,13 @@ import { between, phrase } from "./prose-pin.mjs";
 // spliced INSIDE a pinned clause reddens them; a whole new sentence appended
 // beside one does not. Reflow stays green by design — the words are pinned, not
 // their layout.
+//
+// The negative pin is a word test, so it cannot tell the claim from a mention of
+// it: a future sentence in probe 2 recounting what the comment USED to say would
+// redden it. Measured, and accepted — that history belongs here and on the
+// commit, not in the script. Measured too, and deliberately not refused: "on top
+// of" without "land" stays green, so probe 2 keeps the phrase for the
+// non-precedence claims it already makes.
 const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
 
 // Same one-liner as inflight-citation-prose.test.mjs, deliberately duplicated
