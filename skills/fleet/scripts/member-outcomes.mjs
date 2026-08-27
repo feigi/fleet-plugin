@@ -14,11 +14,21 @@ export function normalizeModel(raw) {
 }
 
 // A member's name is the only place its unit of work is recorded — nothing
-// writes ticket or PR into meta.json. Four live finisher spellings all book a
-// PR: `fix-pr-<n>`, `review-pr-<n>`, `finisher-pr-<n>`, `finish-pr-<n>`, plus
-// `finisher-<n>` and `finish-<n>` without the `-pr-` infix. `merge-bot-<n>` is
-// deliberately excluded: its number is a WAVE index. The `-b`, `-c`, `-d` retry
-// suffixes are stripped first, because a re-dispatched member works the same unit.
+// writes ticket or PR into meta.json.
+//
+// FOUR finisher spellings are live on disk, measured 2026-08-27 across every
+// meta.json: finisher-pr-<n> 163, finish-pr-<n> 58, finisher-<n> 44,
+// finish-<n> 18. All four book a PR, and matching only the first cost 120 of
+// 283 finisher members their join key to tier-outcomes.tsv. The fix-pr-<n> and
+// review-pr-<n> families share the first pattern only because the infix is the
+// same — they are NOT finisher spellings. #326 tracks picking a canonical
+// finisher name; this function reads what is actually on disk rather than
+// waiting for that.
+//
+// merge-bot-<n> is deliberately excluded: its number is a WAVE index, and
+// booking it as a pr would join the row to an unrelated PR's verdict. A single
+// trailing lowercase letter is a retry suffix (-b, -c and -d all observed) and
+// is stripped first, because a re-dispatched member works the same unit.
 export function parseMemberName(name) {
   const s = String(name ?? "").trim().replace(/-[a-z]$/, "");
   let m = /^(?:fix|review|finish|finisher)-pr-(\d+)$/.exec(s);
