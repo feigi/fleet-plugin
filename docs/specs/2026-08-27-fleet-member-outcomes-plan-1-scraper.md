@@ -1022,7 +1022,11 @@ removed is pinning nothing.
 
 - [ ] **Step 6: Run the whole fleet suite**
 
-Run: `node --test skills/fleet/scripts/`
+Run: `node --test "skills/fleet/scripts/*.test.mjs"` — **quote the glob**. The
+directory form `node --test skills/fleet/scripts/` reports a FAILING TEST rather
+than a bad invocation (measured again 2026-08-27: `✖ skills/fleet/scripts` /
+`'test failed'`, exit 0), so it looks exactly like the regression this step
+exists to catch.
 Expected: PASS. If `implementer-model-tier.test.mjs` fails, you changed the
 phase-2 slice it anchors on — that is Part 2's territory, not this plan's.
 
