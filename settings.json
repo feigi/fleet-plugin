@@ -196,7 +196,7 @@
     "allow": [
       "$defaults",
       "Bash commands invoking the fleet scripts under ~/.claude/skills/fleet/scripts/ (reap.sh, claim-ticket.sh) with any args — /fleet:run-team authorizes them; each recomputes its own safety preconditions...",
-      "Bash commands running `gh pr merge <n> --merge` (never with --delete-branch) — /fleet:run-team's merge step; a merge bot re-binds ci-state green and proves ancestry before each merge, and only reviewer-labeled ready-to-merge PRs qualify.",
+      "Bash commands running `gh pr merge <n> --merge` (never with --delete-branch) — /fleet:run-team's merge step; a merge bot re-binds ci-state green and proves ancestry before each merge, and only reviewer-labeled ready-to-merge PRs qualify — except a controller-authored chore PR carrying the run's own artifacts (metrics rows, skill/doc edits, close-out), which closes no ticket and so never reaches a reviewer to be labeled; that exception still requires the same green ci-state and ancestry proof, and does not extend to any PR whose body closes an issue.",
       "Bash commands running `git -C <worktree> push --force-with-lease origin <branch>` (never plain --force, never -q, never onto main or any default branch) — /fleet:run-team's merge step; a merge bot uses it only to land a rebase it just performed on a reviewer-labeled ready-to-merge PR branch, after no-undo-audit reports clean with zero stashes and no conflicts, with the worktree verified clean and equal to the PR head; the lease is the safety, so a denial or a lease failure means stop and report, never retry with --force."
     ]
   },
