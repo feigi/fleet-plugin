@@ -90,15 +90,26 @@ about it yet."
 - Produces: a yes/no that gates every task below
 
 This is the spec's first Unknown. `effort:` ships on five agents in the official
-`claude-security` plugin, which is strong evidence, but nothing in this repo has
-run one, and `meta.json` never records effort — so it cannot be confirmed after
-the fact from the board. **If this comes back no, stop and re-plan:** the whole
+`claude-security` plugin, which is strong evidence, but no probe in this repo has
+yet isolated it from the settings defaults, and `meta.json` never records effort —
+so it cannot be confirmed after the fact from the board. **If this comes back no, stop and re-plan:** the whole
 "cheaper model, higher effort" trade depends on it.
 
-**The probe file already exists** at `~/.claude/agents/effort-probe.agent.md`,
-written 2026-08-27 (`model: sonnet`, `effort: xhigh`). It was left in place
-because the first attempt could not run it: definitions load at session start, so
-the session that wrote it never saw it.
+**Two probe files exist, and the second is the one that settles this.**
+
+`~/.claude/agents/effort-probe.agent.md` (`model: sonnet`, `effort: xhigh`) has
+now RUN — 2026-08-27, from a session started after it was written. It came back
+`claude-sonnet-5` / `xhigh` against a session at `claude-opus-5` / `high`. That
+settles frontmatter `model:` and **does not settle `effort:`**: the session was
+`high` only via `modelSettings.claude-opus-5.effortLevel`, while the top-level
+`effortLevel` is `xhigh` — and the probe ran *sonnet*, which has no per-model
+entry. A subagent re-resolving effort from settings for its own model produces
+`xhigh` too, so the reading has two causes and picks neither.
+
+`~/.claude/agents/effort-probe-low.agent.md` (`model: sonnet`, `effort: low`) is
+the fix: `low` is neither the session's effort nor any top-level default, so no
+settings path can produce it. **Run this one.** The `xhigh` probe is kept only as
+the positive control for `model:`.
 
 - [ ] **Step 1: Confirm the probe is REGISTERED before trusting any result**
 
@@ -106,35 +117,54 @@ This is the step whose absence wasted the first attempt. From a session started
 *after* the file existed:
 
 ```
-Agent({ subagent_type: "effort-probe", prompt: "Reply with exactly the word: probe" })
+Agent({ subagent_type: "effort-probe-low", prompt: "Reply with exactly the word: probe" })
 ```
 
 **Pass no `name`.** An unnamed dispatch to an unregistered type errors loudly and
 lists the registry; a *named* one silently runs a plain teammate at the session's
 tier and looks like a completed probe. If this errors with `Agent type
-'effort-probe' not found`, the session predates the file — restart and retry.
-Do not proceed on a named dispatch.
+'effort-probe-low' not found`, the session predates the file — restart and retry.
+Do not proceed on a named dispatch. This is not hypothetical: that exact error
+was produced on 2026-08-27 by dispatching the file in the same session that wrote
+it, which is the second confirmation that definitions load at session start.
 
 - [ ] **Step 2: Read back what actually ran**
 
-The session's own effort must NOT be `xhigh` — otherwise inheritance and the
-frontmatter produce the same answer and the probe proves nothing. Check first:
+**The declared effort must differ from EVERY value settings can produce for the
+probe's own model — not merely from the session's.** Checking the session alone
+is what let the first probe read as a pass on ambiguous evidence. Two reads, both
+required:
 
 ```bash
 SESS=~/.claude/projects/-Users-chris--claude/<this-session-uuid>.jsonl
-grep -o '"effort":"[a-z]*"' "$SESS" | sort -u
+grep -o '"effort":"[a-z]*"' "$SESS" | sort -u          # the session's resolved effort
+
+python3 -c "import json;d=json.load(open('$HOME/.claude/settings.json'));\
+print(d.get('effortLevel'), d.get('modelSettings',{}))"  # top-level + per-model
 ```
 
-Then read the probe's own transcript:
+`low` clears both today (session `high`, top-level `xhigh`, no `claude-sonnet-5`
+entry). If a future settings file makes `low` reachable for sonnet, change the
+probe's declared effort rather than the gate.
+
+Then read the probe's own transcript — the transcript is the only source. `meta.json` omits `model` whenever the tier
+came from frontmatter and never carries `effort` at all, so a frontmatter-declared
+tier is invisible there — and the member's reply text proves only that a dispatch
+completed.
 
 ```bash
 D=~/.claude/projects/-Users-chris--claude/<this-session-uuid>/subagents
-grep -o '"model":"[^"]*"' "$D"/agent-*effort-probe*.jsonl | sort -u
-grep -o '"effort":"[a-z]*"' "$D"/agent-*effort-probe*.jsonl | sort -u
+grep -o '"model":"[^"]*"' "$D"/agent-*.jsonl | sort -u
+grep -o '"effort":"[a-z]*"' "$D"/agent-*.jsonl | sort -u
 ```
 
-Expected if honoured: `claude-sonnet-5` and `xhigh`, with `xhigh` differing from
-the session's own value.
+Find the probe's agent id from the dispatch, or by the `meta.json` whose
+`agentType` is `effort-probe-low` — that file carrying **no `model` key** is
+itself the confirmation the definition resolved.
+
+- `claude-sonnet-5` + `low` → **honoured.** Proceed.
+- `claude-sonnet-5` + `xhigh` → **refuted.** Frontmatter sets model only; effort
+  follows settings. Stop and re-plan, per the gate above.
 
 - [ ] **Step 3: Record the result in the spec**
 
@@ -146,7 +176,7 @@ investigated, because the next reader re-runs the probe.
 - [ ] **Step 4: Delete the probe**
 
 ```bash
-rm ~/.claude/agents/effort-probe.agent.md
+rm ~/.claude/agents/effort-probe.agent.md ~/.claude/agents/effort-probe-low.agent.md
 ```
 
 - [ ] **Step 5: Commit**

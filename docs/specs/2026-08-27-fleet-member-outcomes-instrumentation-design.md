@@ -152,6 +152,12 @@ Two columns an earlier draft carried are deliberately absent:
   `parentAgentId`, `name`, `taskKind`, `teamName`, `color`, `planModeRequired`,
   `permissionMode`, `customAgentType` — and no effort. A future harness change
   that adds it there would be welcome but must not be assumed.
+- **Every tier claim is read from the member's JSONL — never from `meta.json`,
+  never from what the member replied.** `meta.json` omits `model` entirely when
+  the tier came from frontmatter (measured 2026-08-27 on `effort-probe`) and
+  never carries `effort` at all, so both halves of a frontmatter-declared tier
+  are invisible there. A member answering "probe" proves a dispatch completed and
+  nothing more. This binds the scraper, the pins, and every read-out below.
 - `errored` is whether the member's transcript ends without a completed final
   turn — a stall or a terminal API failure, not a code defect.
 - No verdict columns. Ever. That is the whole point of the split.
@@ -366,23 +372,34 @@ are. No report script until the data proves one is needed.
 
 ## Unknowns, deliberately not closed here
 
-- **Whether frontmatter `effort:` is honoured. STILL OPEN — probed 2026-08-27 and
-  the probe could not run.** An `effort-probe` definition (`model: sonnet`,
-  `effort: xhigh`) was written mid-session and dispatched from a session running
-  `claude-opus-5`/`high`. It executed at `claude-opus-5`/`high` — but that is
-  **not** a refutation: `effort-probe` is absent from the agent registry
-  (`Agent type 'effort-probe' not found` on a second, unnamed dispatch), because
-  **agent definitions are loaded at session start** and the file was created
-  after. The definition never resolved, so nothing about `effort:` was tested.
-  Re-run the probe from a FRESH session; `~/.claude/agents/effort-probe.agent.md`
-  is left in place for exactly that.
+- **Whether frontmatter `effort:` is honoured. PARTIALLY SETTLED 2026-08-27 —
+  `model:` confirmed again, `effort:` still not isolated.** Re-run from a session
+  started *after* the file existed, so `effort-probe` (`model: sonnet`,
+  `effort: xhigh`) resolved this time. Its `meta.json` reads
+  `agentType: effort-probe` with **no `model` key** — the tell of a resolved
+  definition rather than a silent fallback, exactly as the hazard below predicts.
+  Its transcript: `claude-sonnet-5`, `effort: xhigh`, dispatched from a session
+  running `claude-opus-5` at `high`. **The model half is settled by measurement.**
 
-  **What the same probe DID establish: frontmatter `model:` is honoured.**
-  `memory-proxy` (frontmatter `model: haiku`) ran
-  `claude-haiku-4-5-20251001` inside this `claude-opus-5` session, and
-  `memory-housekeeper` (`model: opus`) ran `claude-opus-5`. So the model half of
-  every declaration in Part 2 rests on measurement. Only the effort half is
-  provisional.
+  **The effort half is confounded, and Plan 2 Task 1's stated criterion does not
+  catch it.** That task gates on "the session's own effort must NOT be `xhigh`";
+  it was `high`, so the probe reads as a pass. But the session is `high` only
+  because `settings.json` carries `modelSettings.claude-opus-5.effortLevel: high`
+  over a top-level `effortLevel: xhigh`. The probe ran **sonnet**, which has no
+  per-model entry — so a subagent that re-resolves effort from settings for its
+  own model lands on `xhigh` with the frontmatter doing nothing. Both mechanisms
+  predict the observed row. A probe whose declared effort merely differs from the
+  parent session's is not enough; it must differ from **every** value the
+  settings can produce for the probe's own model.
+
+  **The decisive probe already exists**: `~/.claude/agents/effort-probe-low.agent.md`
+  (`model: sonnet`, `effort: low`), written 2026-08-27 and left in place. `low` is
+  neither the session's `high` nor the top-level `xhigh`, so reading `low` back
+  settles the question and reading `xhigh` refutes it. It could not run in the
+  session that wrote it — **definitions load at session start, re-confirmed the
+  same day**: an unnamed dispatch returned `Agent type 'effort-probe-low' not
+  found` and listed a registry holding `effort-probe` (written before that session
+  began) but not it. Run it first thing in a fresh session.
 
 - **A named dispatch with an unknown `subagent_type` FAILS SILENTLY.** Measured
   2026-08-27, and it is the reason the probe above was nearly misread.
