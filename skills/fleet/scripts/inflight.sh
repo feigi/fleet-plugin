@@ -382,8 +382,12 @@ echo "\$ git ls-remote --heads origin" >&2
 # exactly as this probe appends them, a user ConnectTimeout of 3 cut the
 # connection at 3.0s and one of 25 at 25.0s, the 10s set here applying only
 # where the user set none. So the bound degrades to whatever bound the user
-# asked for — ssh still terminates on its own, at their value, and no case here
-# hangs. Ordering these first would bound the probe at its own value instead,
+# asked for, and terminates only where that value does. Measured on the same
+# listener: a user ConnectTimeout of 0 is accepted, wins by the same rule and
+# left the probe still connecting at 40s, where the 10s set here cut at 10.2s —
+# unbounded, through the user's own config, which is the #92 hang again. Closing
+# that needs the bound outside git that the https origin also waits on, #346.
+# Ordering these first would bound the probe at its own value instead,
 # at the cost of silently overriding a deliberate proxy or timeout config: a
 # real regression traded for a hypothetical one, so it is not done.
 #

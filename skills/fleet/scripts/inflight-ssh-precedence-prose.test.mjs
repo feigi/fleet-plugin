@@ -91,7 +91,7 @@ test("probe 2 documents the BatchMode=no opt-out and what GIT_TERMINAL_PROMPT=0 
 test("probe 2 never describes its options as landing on top of the user's (#350)", () => {
   assert.doesNotMatch(
     probe2(),
-    /lands?\s+on\s+top\s+of/,
+    /land(s|ing)?\s+on\s+top\s+of/i,
     "the override framing is back in probe 2's comment — ssh is first-wins, so options appended after the user's own are defaults the user overrides, and this phrasing states the reverse of what was measured",
   );
 });
