@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeModel, parseMemberName } from "./member-outcomes.mjs";
+import { normalizeModel, parseMemberName, readMember } from "./member-outcomes.mjs";
 
 test("a versioned model id is kept verbatim", () => {
   assert.equal(normalizeModel("claude-opus-5"), "claude-opus-5");
@@ -57,4 +57,65 @@ test("a retry suffix does not change what the name identifies", () => {
 test("an unrecognised name yields blanks, never a guess", () => {
   assert.deepEqual(parseMemberName("size candidate 7"), { ticket: "", pr: "" });
   assert.deepEqual(parseMemberName(""), { ticket: "", pr: "" });
+});
+
+const line = (o) => JSON.stringify(o);
+const assistant = (model, effort, usage = {}) => line({
+  type: "assistant", isSidechain: true, effort,
+  timestamp: "2026-08-25T07:14:12.147Z",
+  message: { model, usage: { cache_creation_input_tokens: 0, output_tokens: 0, ...usage } },
+});
+const meta = (o = {}) => ({ agentType: "impl-580", description: "Implement ticket 580", name: "impl-580", spawnDepth: 0, ...o });
+
+test("model and effort come off the transcript, not the meta", () => {
+  // meta.json never records effort, and records model only when the dispatch
+  // supplied one — a frontmatter-resolved member has no `model` key at all.
+  // The transcript is the only source that answers both.
+  const row = readMember([
+    assistant("claude-opus-5", "xhigh"),
+    assistant("claude-opus-5", "xhigh"),
+  ].join("\n"), meta());
+  assert.equal(row.model, "claude-opus-5");
+  assert.equal(row.effort, "xhigh");
+  assert.equal(row.errored, "no");
+});
+
+test("usage sums across turns", () => {
+  const row = readMember([
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 100, output_tokens: 7 }),
+    assistant("claude-opus-5", "xhigh", { cache_creation_input_tokens: 250, output_tokens: 3 }),
+  ].join("\n"), meta());
+  assert.equal(row.tokensCacheCreate, 350);
+  assert.equal(row.tokensOut, 10);
+  assert.equal(row.turns, 2);
+});
+
+test("a torn final line is skipped, not fatal", () => {
+  // A transcript can be read while it is still being written.
+  const row = readMember(
+    assistant("claude-opus-5", "xhigh", { output_tokens: 5 }) + '\n{"type":"assis',
+    meta(),
+  );
+  assert.equal(row.tokensOut, 5);
+  assert.equal(row.turns, 1);
+  assert.equal(row.errored, "yes");
+});
+
+test("a member with no effort field records blank, not a default", () => {
+  // haiku carries no effort control at all. Defaulting to the session's value
+  // would assert something never measured.
+  const row = readMember(assistant("claude-haiku-4-5-20251001", undefined), meta());
+  assert.equal(row.effort, "");
+});
+
+test("a transcript whose only model is <synthetic> yields no row", () => {
+  assert.equal(readMember(assistant("<synthetic>", "xhigh"), meta()), null);
+});
+
+test("mixed models record the LAST — a mid-run switch is the tier it finished at", () => {
+  const row = readMember([
+    assistant("claude-opus-5", "xhigh"),
+    assistant("claude-sonnet-5", "xhigh"),
+  ].join("\n"), meta());
+  assert.equal(row.model, "claude-sonnet-5");
 });
