@@ -37,6 +37,21 @@ code, only on its existence.
 - **Never `tools:` without `Agent`.** A `tools:` list that omits `Agent` costs the
   member its delegation, silently and with no error
   (`references/member-lifecycle.md:7`). Omit the key entirely.
+- **A new agent definition is invisible until a session restart, and a NAMED
+  dispatch to an unregistered type fails SILENTLY.** Measured 2026-08-27.
+  Definitions load at session start. `Agent({ name: "impl-580", subagent_type:
+  "fleet-implementer" })` in the session that created the file does not error —
+  it runs a plain named teammate at the SESSION's tier, which is precisely the
+  silent drift this plan's pins exist to prevent, and the pins cannot catch it
+  because they check files rather than dispatches. The identical call *without*
+  `name` errors loudly and lists the registry.
+
+  **So after creating any definition here: restart the session before dispatching
+  it, then verify from the member's own `meta.json`** — a resolved definition
+  writes `agentType: fleet-implementer` and **no** `model` key; a silent fallback
+  writes `agentType: impl-580` **with** a `model` key. Checking the transcript's
+  model alone cannot tell the two apart whenever the declared tier happens to
+  equal the session's, which is exactly the no-op case Task 2 creates on purpose.
 - **First commit changes no behaviour.** A config change and a measurement change
   landing together is unreadable. Declarations first, movement second.
 - Repo root is the worktree `.worktrees/member-outcomes`, branch
@@ -80,26 +95,30 @@ run one, and `meta.json` never records effort — so it cannot be confirmed afte
 the fact from the board. **If this comes back no, stop and re-plan:** the whole
 "cheaper model, higher effort" trade depends on it.
 
-- [ ] **Step 1: Write a throwaway probe agent**
+**The probe file already exists** at `~/.claude/agents/effort-probe.agent.md`,
+written 2026-08-27 (`model: sonnet`, `effort: xhigh`). It was left in place
+because the first attempt could not run it: definitions load at session start, so
+the session that wrote it never saw it.
 
-```bash
-cat > ~/.claude/agents/effort-probe.agent.md <<'EOF'
----
-name: effort-probe
-description: Throwaway probe confirming frontmatter effort is honoured. Delete after use.
-model: sonnet
-effort: xhigh
----
+- [ ] **Step 1: Confirm the probe is REGISTERED before trusting any result**
 
-Reply with exactly the word: probe
-EOF
+This is the step whose absence wasted the first attempt. From a session started
+*after* the file existed:
+
+```
+Agent({ subagent_type: "effort-probe", prompt: "Reply with exactly the word: probe" })
 ```
 
-- [ ] **Step 2: Dispatch it and read back what actually ran**
+**Pass no `name`.** An unnamed dispatch to an unregistered type errors loudly and
+lists the registry; a *named* one silently runs a plain teammate at the session's
+tier and looks like a completed probe. If this errors with `Agent type
+'effort-probe' not found`, the session predates the file — restart and retry.
+Do not proceed on a named dispatch.
 
-Dispatch one agent with `subagent_type: "effort-probe"` from a session whose own
-effort is NOT `xhigh` — otherwise inheritance and the frontmatter produce the
-same answer and the probe proves nothing. Check the session's effort first:
+- [ ] **Step 2: Read back what actually ran**
+
+The session's own effort must NOT be `xhigh` — otherwise inheritance and the
+frontmatter produce the same answer and the probe proves nothing. Check first:
 
 ```bash
 SESS=~/.claude/projects/-Users-chris--claude/<this-session-uuid>.jsonl

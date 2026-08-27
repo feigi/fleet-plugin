@@ -366,12 +366,32 @@ are. No report script until the data proves one is needed.
 
 ## Unknowns, deliberately not closed here
 
-- **Whether frontmatter `effort:` is honoured.** It ships on five agents in an
-  official marketplace plugin, which is strong evidence, but nothing in this repo
-  has run one. `meta.json` never records effort, so the board cannot confirm it
-  after the fact. Confirm once by hand on the first declared-tier run:
-  `grep -o '"effort":"[a-z]*"' <member>.jsonl | sort -u`. Until that read exists,
-  every effort claim in this design is provisional.
+- **Whether frontmatter `effort:` is honoured. STILL OPEN — probed 2026-08-27 and
+  the probe could not run.** An `effort-probe` definition (`model: sonnet`,
+  `effort: xhigh`) was written mid-session and dispatched from a session running
+  `claude-opus-5`/`high`. It executed at `claude-opus-5`/`high` — but that is
+  **not** a refutation: `effort-probe` is absent from the agent registry
+  (`Agent type 'effort-probe' not found` on a second, unnamed dispatch), because
+  **agent definitions are loaded at session start** and the file was created
+  after. The definition never resolved, so nothing about `effort:` was tested.
+  Re-run the probe from a FRESH session; `~/.claude/agents/effort-probe.agent.md`
+  is left in place for exactly that.
+
+  **What the same probe DID establish: frontmatter `model:` is honoured.**
+  `memory-proxy` (frontmatter `model: haiku`) ran
+  `claude-haiku-4-5-20251001` inside this `claude-opus-5` session, and
+  `memory-housekeeper` (`model: opus`) ran `claude-opus-5`. So the model half of
+  every declaration in Part 2 rests on measurement. Only the effort half is
+  provisional.
+
+- **A named dispatch with an unknown `subagent_type` FAILS SILENTLY.** Measured
+  2026-08-27, and it is the reason the probe above was nearly misread.
+  `Agent({ name: "x", subagent_type: "<unregistered>" })` does not error — it
+  runs a plain named teammate at the SESSION's tier. The same dispatch *without*
+  `name` errors loudly and lists the registry. The tell is in `meta.json`: a
+  resolved definition writes `agentType: <definition-name>` and **no** `model`
+  key; a silent fallback writes `agentType: <the name you passed>` **with** a
+  `model` key. This is a live hazard for Part 2 — see its Global Constraints.
 - **Whether `opts.model` beats `agentType` frontmatter in workflow `agent()`.**
   Open since the #211 spec; `review-pr.js:364-370` still carries the UNVERIFIED
   note. It does not block this work — no fleet dimension is sent both — but the
