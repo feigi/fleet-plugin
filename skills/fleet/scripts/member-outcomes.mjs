@@ -169,19 +169,23 @@ export function parseTsv(text) {
 }
 
 import { writeFileSync, existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { makeDie } from "./arg.mjs";
 
 const NAME = "member-outcomes";
 
-// Only runs as a CLI, never on import — the test file imports the pure helpers.
-if (process.argv[1] && process.argv[1].endsWith("member-outcomes.mjs")) {
+// Only runs as a CLI, never on import — the test file and any wrapper import
+// the pure helpers. Exact identity, not a suffix match: fleet-tick.test.mjs
+// records a copy under an unresolved path silently never running main(), and a
+// suffix test additionally fires for any file ending in this one's name.
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const die = makeDie(NAME);
   const argv = process.argv.slice(2);
   const fileIdx = argv.indexOf("--file");
   const file = fileIdx >= 0 ? argv[fileIdx + 1] : "docs/metrics/member-outcomes.tsv";
   const dirs = argv.filter((a, i) => !a.startsWith("--") && i !== fileIdx + 1);
-  if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]", 2);
-  if (!file || file.startsWith("--")) die("--file needs a path", 2);
+  if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
+  if (!file || file.startsWith("--")) die("--file needs a path");
 
   // Header comments are preserved verbatim across the rewrite: they carry the
   // read-out commands and the blank-means-unknown rule, and the rewrite is

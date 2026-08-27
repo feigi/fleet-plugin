@@ -294,3 +294,17 @@ test("the header survives a rewrite", () => {
   spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
   assert.match(readFileSync(out, "utf8"), /^# keep me$/m);
 });
+
+test("importing the module never runs the CLI, even from a file whose name ends with its own", () => {
+  // The guard used to be a suffix match, so a wrapper called
+  // run-member-outcomes.mjs tripped the CLI block on import: it wrote a file
+  // and exited 2 in a process that only wanted the helpers.
+  const dir = mkdtempSync(join(tmpdir(), "mo-wrap-"));
+  const wrapper = join(dir, "run-member-outcomes.mjs");
+  writeFileSync(wrapper, `import { normalizeModel } from ${JSON.stringify(CLI)};\n`
+    + `console.log(normalizeModel("claude-opus-5"));\n`);
+  const r = spawnSync(process.execPath, [wrapper], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), "claude-opus-5");
+  assert.equal(r.stderr, "");
+});
