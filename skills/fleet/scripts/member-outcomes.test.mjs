@@ -37,6 +37,9 @@ test("every pr-shaped member name yields a PR and no ticket", () => {
   assert.deepEqual(parseMemberName("fix-pr-662"), { ticket: "", pr: "662" });
   assert.deepEqual(parseMemberName("review-pr-555"), { ticket: "", pr: "555" });
   assert.deepEqual(parseMemberName("finisher-pr-904"), { ticket: "", pr: "904" });
+  assert.deepEqual(parseMemberName("finish-pr-601"), { ticket: "", pr: "601" });
+  assert.deepEqual(parseMemberName("finisher-532"), { ticket: "", pr: "532" });
+  assert.deepEqual(parseMemberName("finish-567"), { ticket: "", pr: "567" });
 });
 
 test("merge-bot's number is a WAVE, so it is neither ticket nor pr", () => {
@@ -48,6 +51,7 @@ test("merge-bot's number is a WAVE, so it is neither ticket nor pr", () => {
 test("a retry suffix does not change what the name identifies", () => {
   // run-team spawns `impl-<N>-b` when a member is re-dispatched.
   assert.deepEqual(parseMemberName("impl-580-b"), { ticket: "580", pr: "" });
+  assert.deepEqual(parseMemberName("finisher-pr-903-c"), { ticket: "", pr: "903" });
 });
 
 test("an unrecognised name yields blanks, never a guess", () => {

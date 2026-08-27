@@ -14,13 +14,16 @@ export function normalizeModel(raw) {
 }
 
 // A member's name is the only place its unit of work is recorded — nothing
-// writes ticket or PR into meta.json. `merge-bot-<n>` is deliberately excluded:
-// its number is a WAVE index, and booking it as a pr would join the row to an
-// unrelated PR's verdict. The `-b` retry suffix is stripped first, because a
-// re-dispatched member works the same unit.
+// writes ticket or PR into meta.json. Four live finisher spellings all book a
+// PR: `fix-pr-<n>`, `review-pr-<n>`, `finisher-pr-<n>`, `finish-pr-<n>`, plus
+// `finisher-<n>` and `finish-<n>` without the `-pr-` infix. `merge-bot-<n>` is
+// deliberately excluded: its number is a WAVE index. The `-b`, `-c`, `-d` retry
+// suffixes are stripped first, because a re-dispatched member works the same unit.
 export function parseMemberName(name) {
   const s = String(name ?? "").trim().replace(/-[a-z]$/, "");
-  let m = /^(?:fix|review|finisher)-pr-(\d+)$/.exec(s);
+  let m = /^(?:fix|review|finish|finisher)-pr-(\d+)$/.exec(s);
+  if (m) return { ticket: "", pr: m[1] };
+  m = /^finish(?:er)?-(\d+)$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^impl-(\d+)$/.exec(s);
   if (m) return { ticket: m[1], pr: "" };
