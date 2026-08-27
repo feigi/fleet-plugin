@@ -1,0 +1,38 @@
+# One row per dispatched fleet member per run. DERIVED, NOT AUTHORED: every row
+# is produced by skills/fleet/scripts/member-outcomes.mjs from the harness's own
+# subagent transcripts. Re-running the scraper REPLACES rows in place, and the
+# whole file may be regenerated when the role classifier changes.
+#
+# NEVER hand-edit a row, and never add a column that a human must fill. A
+# hand-entered value cannot survive a regeneration, which is exactly why the
+# verdicts live in tier-outcomes.tsv instead. See
+# docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
+#
+# BLANK MEANS UNKNOWN, never zero and never "no". `effort` is blank for models
+# that carry no effort control; `ticket`/`pr` are blank when the member name
+# does not identify one (merge-bot's number is a WAVE).
+#
+# `agent` is an OPAQUE JOIN KEY — the member's transcript id, used so a re-scrape
+# REPLACES a row instead of duplicating it. It is not for display, not for
+# grouping, and not domain data. Group on session, role, member and model.
+#
+# SUPERSEDED GENERATIONS ARE A SEPARATE POPULATION. Rows carrying an older
+# generation (claude-opus-4-7, claude-opus-4-8) must never be pooled with the
+# current one under an "opus" label, and never read as a cheaper tier: pricing
+# falls with each generation, so an older Opus is not cheaper than the current
+# one and an older Sonnet is dearer. Pooling inverts the cost ordering this
+# file exists to measure.
+#
+# `errored` is a stall or terminal API failure, NOT a code defect. Whether the
+# work was any good is a verdict, and verdicts live in tier-outcomes.tsv, joined
+# on `pr`.
+#
+# A within-run PAIR — the only unconfounded comparison — is a session+role that
+# ran more than one model. Nothing is labelled; the pairing is a query:
+#   awk -F'\t' '!/^#/ {k=$1 FS $3; if (!(k FS $5 in s)) {s[k FS $5]; n[k]++}} \
+#     END{for (k in n) if (n[k] > 1) print k}' docs/metrics/member-outcomes.tsv
+#
+# Rows by model:
+#   awk -F'\t' '!/^#/ {n[$5]++} END{for (k in n) print n[k], k}' docs/metrics/member-outcomes.tsv
+#
+# session	run_date	role	member	model	effort	ticket	pr	tokens_cache_create	tokens_out	wall_s	turns	errored	agent

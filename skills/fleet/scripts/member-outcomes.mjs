@@ -167,3 +167,27 @@ export function parseTsv(text) {
       return r;
     });
 }
+
+import { writeFileSync, existsSync } from "node:fs";
+import { makeDie } from "./arg.mjs";
+
+const NAME = "member-outcomes";
+
+// Only runs as a CLI, never on import — the test file imports the pure helpers.
+if (process.argv[1] && process.argv[1].endsWith("member-outcomes.mjs")) {
+  const die = makeDie(NAME);
+  const argv = process.argv.slice(2);
+  const fileIdx = argv.indexOf("--file");
+  const file = fileIdx >= 0 ? argv[fileIdx + 1] : "docs/metrics/member-outcomes.tsv";
+  const dirs = argv.filter((a, i) => !a.startsWith("--") && i !== fileIdx + 1);
+  if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]", 2);
+  if (!file || file.startsWith("--")) die("--file needs a path", 2);
+
+  // Header comments are preserved verbatim across the rewrite: they carry the
+  // read-out commands and the blank-means-unknown rule, and the rewrite is
+  // routine (every re-scrape), so losing them would be a slow, silent erasure.
+  const prev = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const header = prev.split("\n").filter((l) => l.startsWith("#")).join("\n");
+  const merged = mergeRows(parseTsv(prev), rowsForSession(dirs[0]));
+  writeFileSync(file, (header ? header + "\n" : "") + formatTsv(merged));
+}

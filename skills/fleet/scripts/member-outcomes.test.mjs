@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { normalizeModel, parseMemberName, readMember, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv } from "./member-outcomes.mjs";
 
 test("a versioned model id is kept verbatim", () => {
@@ -263,4 +264,33 @@ test("two UNNAMED members of one session are two rows, not one", () => {
   const b = row({ agent: "agent-bbbb", member: "general-purpose" });
   const merged = mergeRows([], [a, b]);
   assert.equal(merged.length, 2);
+});
+
+const CLI = new URL("./member-outcomes.mjs", import.meta.url).pathname;
+
+test("no session dir is a refusal, not a silent no-op", () => {
+  const r = spawnSync(process.execPath, [CLI], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /member-outcomes/);
+  assert.equal(r.stdout, "");
+});
+
+test("a run writes rows, and a second run over the same session changes nothing", () => {
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const run = () => spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(run().status, 0);
+  const first = readFileSync(out, "utf8");
+  assert.equal(run().status, 0);
+  assert.equal(readFileSync(out, "utf8"), first);
+});
+
+test("the header survives a rewrite", () => {
+  // The header carries the read-out commands and the blank-means-unknown rule.
+  // A rewrite that drops it strands every reader.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  writeFileSync(out, "# keep me\n");
+  spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.match(readFileSync(out, "utf8"), /^# keep me$/m);
 });
