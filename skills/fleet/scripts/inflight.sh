@@ -365,13 +365,39 @@ echo "\$ git ls-remote --heads origin" >&2
 # accept-then-silent case rides on ConnectTimeout alone, so shortening
 # ServerAlive does not tighten it and dropping ConnectTimeout removes it.
 #
-# A user's own ssh command is honoured, not replaced — options land on top of
-# whatever GIT_SSH_COMMAND, core.sshCommand or GIT_SSH already says (falling
-# back to plain "ssh"), so a configured identity file or proxy command still
-# runs. All three, because git's own precedence is GIT_SSH_COMMAND >
+# A user's own ssh command is honoured, not replaced — these options are
+# appended to whatever GIT_SSH_COMMAND, core.sshCommand or GIT_SSH already says
+# (falling back to plain "ssh"), so a configured identity file or proxy command
+# still runs. All three, because git's own precedence is GIT_SSH_COMMAND >
 # core.sshCommand > GIT_SSH: setting GIT_SSH_COMMAND here without consulting
 # GIT_SSH would silently drop a wrapper the user had working before this
 # probe was bounded at all.
+#
+# Appended, so they are defaults the user's own command overrides, never a
+# ceiling over it: ssh takes the FIRST value of a repeated -o, so an option
+# their command already carries is the one that applies and the value set here
+# is discarded. Measured, OpenSSH_10.2p1: `ssh -o ConnectTimeout=45 -o
+# ConnectTimeout=10 -G` reports connecttimeout 45; and against the
+# accept-then-silent listener, with these options appended to a user command
+# exactly as this probe appends them, a user ConnectTimeout of 3 cut the
+# connection at 3.0s and one of 25 at 25.0s, the 10s set here applying only
+# where the user set none. So the bound degrades to whatever bound the user
+# asked for — ssh still terminates on its own, at their value, and no case here
+# hangs. Ordering these first would bound the probe at its own value instead,
+# at the cost of silently overriding a deliberate proxy or timeout config: a
+# real regression traded for a hypothetical one, so it is not done.
+#
+# The same rule makes BatchMode a user opt-out. A command carrying
+# `-o BatchMode=no` keeps it and ssh goes back to asking, which
+# GIT_TERMINAL_PROMPT=0 does not reach — that suppresses git's own credential
+# prompt, not ssh's. Measured with GIT_TERMINAL_PROMPT=0 set throughout: with
+# this probe's BatchMode=yes alone, an unknown host key fails at once ("Host key
+# verification failed"); with a user's BatchMode=no ahead of it and a terminal
+# reachable, ssh sat on "Are you sure you want to continue connecting" until
+# killed — the unattended hang #92 exists to stop. Reachable is the operative
+# word: with no terminal available it aborts rather than waiting. Honoured
+# anyway, because it is the user's explicit setting; this records what that
+# costs rather than warning about a choice they made on purpose.
 #
 # http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
 # that goes quiet — abort if it sits under 1000 bytes/s for 10s.
