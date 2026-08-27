@@ -496,6 +496,49 @@ refill is level-triggered, so there are no implementer waves. **Append one row t
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
+**Then record the run's member facts — do not author them.** Scrape EVERY session
+directory for this cwd, not one:
+
+```bash
+PROJECT_DIR="$(node -e 'import("./skills/fleet/scripts/board.mjs").then(m => console.log(m.encodeProjectDir(process.cwd())))')"
+for d in "$HOME/.claude/projects/$PROJECT_DIR"/*/subagents; do
+  node skills/fleet/scripts/member-outcomes.mjs "$d"
+done
+```
+
+`encodeProjectDir` (`skills/fleet/scripts/board.mjs:153`) encodes the cwd the way
+Claude Code does — `/Users/x/.claude` becomes `-Users-x--claude`, double dash — and
+hand-guessing that path is why the fleet's own panel once rendered nothing here.
+
+**Do not narrow this to "this run's session" with `findSubagentsDir`.** That helper
+answers a different question — the session with the NEWEST transcript for this cwd,
+which is not the same as the one you are in. Measured 2026-08-27: 86 sessions share
+`~/.claude`, and 17 of the 21 days with any subagent activity had two or more of them
+writing. A second Claude session dispatching anything while you reach this step wins
+the tie, and the run then re-scrapes a stranger's members, prints a plausible row
+count and exits 0 while its own facts are never recorded. Looping every session dir
+costs a few seconds, cannot pick wrong, and is idempotent by construction.
+
+The scraper accepts either a `subagents/` directory or its parent session directory,
+and refuses a path it cannot read — a missing, unreadable or non-directory
+`subagents/` all exit 2 — so a wrong path fails loudly instead of writing nothing and
+exiting 0. It reports the run's own YIELD, `scraped N of M members (D dropped)`,
+alongside the file's total: read the yield, because the total is the whole corpus and
+looks healthy even when every member of this session dropped.
+
+It derives every row from the subagent transcripts the harness already wrote — both
+the flat ones and a Workflow's nested `subagents/workflows/wf_*/` fan-out — so a
+second run over the same session changes nothing and a re-run after a member is
+re-dispatched picks the new transcript up. **Never hand-edit
+`docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the
+role classifier changes, and a hand-entered value would not survive that. The
+verdict for a PR still goes to `tier-outcomes.tsv`, by hand, as before.
+
+Both files are the run's own artifacts and neither commits itself. Carry them to
+main the same way the run carries any other controller-authored change; leaving a
+regenerated 5,000-row corpus uncommitted in the checkout is how it gets discarded by
+the next `git checkout` with nothing to show it ever ran.
+
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
 shell reorder are not comparable units. Finding-counts are not comparable either:
