@@ -8,7 +8,7 @@ description: Use before implementing ticket — decides how much process work ne
 Judge ticket **as written**, not as hoped. Torn between rows → take heavier —
 process depth, not admissibility.
 
-Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises.
+Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
 | Row | Signal | Path |
 |---|---|---|
