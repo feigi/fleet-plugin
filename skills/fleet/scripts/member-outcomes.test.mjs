@@ -207,10 +207,14 @@ test("a member that yields no row still dates the session, and its siblings surv
   assert.equal(rows[0].run_date, "2026-08-26");
 });
 
-const row = (o) => ({
+const row = (o = {}) => ({
   session: "s1", run_date: "2026-08-25", role: "implementer", member: "impl-580",
   model: "claude-opus-5", effort: "xhigh", ticket: "580", pr: "",
-  tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, errored: "no", ...o,
+  tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, errored: "no",
+  // Default agent tracks the default/overridden member, so fixtures that vary
+  // only `member` still get distinct transcript ids, and fixtures that share
+  // the default member (untouched) still key as the SAME agent.
+  agent: `agent-a${o.member ?? "impl-580"}`, ...o,
 });
 
 test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {
@@ -249,4 +253,14 @@ test("a blank field round-trips as blank, never as zero", () => {
   // look like a free one.
   const parsed = parseTsv(formatTsv([row({ effort: "" })]));
   assert.equal(parsed[0].effort, "");
+});
+
+test("two UNNAMED members of one session are two rows, not one", () => {
+  // meta.name is absent for an unnamed dispatch, so `member` falls back to
+  // agentType and every unnamed agent in a session shares it. Keying on the
+  // member name collapsed 1,202 of 2,694 real members into their siblings.
+  const a = row({ agent: "agent-aaaa", member: "general-purpose" });
+  const b = row({ agent: "agent-bbbb", member: "general-purpose" });
+  const merged = mergeRows([], [a, b]);
+  assert.equal(merged.length, 2);
 });

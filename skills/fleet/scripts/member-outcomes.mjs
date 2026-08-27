@@ -116,7 +116,11 @@ export function rowsForSession(sessionDir) {
       const meta = JSON.parse(readFileSync(join(dir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
       const row = readMember(jsonl, meta);
       if (!row) continue;
-      rows.push(row);
+      // `member` (meta.name ?? meta.agentType) is blank for every unnamed
+      // dispatch, so it is not unique within a session — the `agent-<id>`
+      // filename stem is the only per-member identifier that is.
+      const agent = f.replace(/\.jsonl$/, "");
+      rows.push({ agent, ...row });
     } catch { /* one member's loss, not the session's */ }
   }
   const session = basename(sessionDir);
@@ -126,7 +130,7 @@ export function rowsForSession(sessionDir) {
 
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
-  "tokens_cache_create", "tokens_out", "wall_s", "turns", "errored",
+  "tokens_cache_create", "tokens_out", "wall_s", "turns", "errored", "agent",
 ];
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
@@ -135,7 +139,10 @@ const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
 };
 const field = (c) => FIELD[c] ?? c;
-const key = (r) => `${r.session}\0${r.member}`;
+// Keyed on the transcript id, not the member name: `member` is blank for
+// every unnamed dispatch, so it collapses distinct members onto one key.
+// `agent` is the `agent-<id>` filename stem — unique and stable per member.
+const key = (r) => `${r.session}\0${r.agent}`;
 
 // Replace-by-key, not append. This is what makes a phase-3 re-run and a full
 // regeneration both safe, and it is the reason no backfill-only code path is
