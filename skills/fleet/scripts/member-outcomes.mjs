@@ -123,3 +123,40 @@ export function rowsForSession(sessionDir) {
   const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
   return rows.map((r) => ({ session, run_date, ...r }));
 }
+
+export const COLUMNS = [
+  "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
+  "tokens_cache_create", "tokens_out", "wall_s", "turns", "errored",
+];
+
+// Row objects use camelCase; the file uses snake_case. One map, one direction
+// each, so a rename cannot silently drop a column.
+const FIELD = {
+  tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
+};
+const field = (c) => FIELD[c] ?? c;
+const key = (r) => `${r.session}\0${r.member}`;
+
+// Replace-by-key, not append. This is what makes a phase-3 re-run and a full
+// regeneration both safe, and it is the reason no backfill-only code path is
+// needed: the idempotency backfill wants is the idempotency a re-run wants.
+export function mergeRows(existing, incoming) {
+  const by = new Map((existing ?? []).map((r) => [key(r), r]));
+  for (const r of incoming ?? []) by.set(key(r), r);
+  return [...by.values()].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+}
+
+export function formatTsv(rows) {
+  return rows.map((r) => COLUMNS.map((c) => String(r[field(c)] ?? "")).join("\t")).join("\n") + "\n";
+}
+
+export function parseTsv(text) {
+  return String(text ?? "").split("\n")
+    .filter((l) => l.trim() && !l.startsWith("#"))
+    .map((l) => {
+      const cells = l.split("\t");
+      const r = {};
+      COLUMNS.forEach((c, i) => { r[field(c)] = cells[i] ?? ""; });
+      return r;
+    });
+}

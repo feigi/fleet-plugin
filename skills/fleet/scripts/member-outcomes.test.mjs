@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeModel, parseMemberName, readMember, rowsForSession } from "./member-outcomes.mjs";
+import { normalizeModel, parseMemberName, readMember, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv } from "./member-outcomes.mjs";
 
 test("a versioned model id is kept verbatim", () => {
   assert.equal(normalizeModel("claude-opus-5"), "claude-opus-5");
@@ -205,4 +205,48 @@ test("a member that yields no row still dates the session, and its siblings surv
   assert.equal(rows.length, 1);
   assert.equal(rows[0].member, "impl-580");
   assert.equal(rows[0].run_date, "2026-08-26");
+});
+
+const row = (o) => ({
+  session: "s1", run_date: "2026-08-25", role: "implementer", member: "impl-580",
+  model: "claude-opus-5", effort: "xhigh", ticket: "580", pr: "",
+  tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, errored: "no", ...o,
+});
+
+test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {
+  const merged = mergeRows([row({ model: "opus" })], [row({ model: "claude-opus-5" })]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].model, "claude-opus-5");
+});
+
+test("re-scraping one session leaves every other session untouched", () => {
+  // The failure this guards: a backfill loop that rewrites the file per session
+  // and drops the previous session each time.
+  const merged = mergeRows(
+    [row({ session: "s0", member: "impl-1" }), row({ session: "s1", member: "impl-580" })],
+    [row({ session: "s1", member: "impl-580", turns: 9 })],
+  );
+  assert.equal(merged.length, 2);
+  assert.equal(merged.find((r) => r.session === "s0").member, "impl-1");
+  assert.equal(merged.find((r) => r.session === "s1").turns, 9);
+});
+
+test("output order is stable, so a regeneration produces no spurious diff", () => {
+  const a = formatTsv(mergeRows([], [row({ member: "impl-9" }), row({ member: "impl-1" })]));
+  const b = formatTsv(mergeRows([], [row({ member: "impl-1" }), row({ member: "impl-9" })]));
+  assert.equal(a, b);
+});
+
+test("a tsv round-trips", () => {
+  // formatTsv does not sort (only mergeRows does), so the round-trip preserves
+  // input order. Ordering itself is pinned by the "output order is stable" test.
+  const rows = [row(), row({ session: "s2", member: "fix-pr-662", role: "reviewer", ticket: "", pr: "662" })];
+  assert.deepEqual(parseTsv(formatTsv(rows)).map((r) => r.member), ["impl-580", "fix-pr-662"]);
+});
+
+test("a blank field round-trips as blank, never as zero", () => {
+  // Blank means UNKNOWN. Reading it back as 0 would make an unmeasured member
+  // look like a free one.
+  const parsed = parseTsv(formatTsv([row({ effort: "" })]));
+  assert.equal(parsed[0].effort, "");
 });
