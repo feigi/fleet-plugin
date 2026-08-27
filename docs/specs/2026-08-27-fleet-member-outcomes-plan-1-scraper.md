@@ -3,8 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Record which model and effort every fleet member ran at, for every run,
-into a regenerable metrics file — and backfill it from the 154 sessions already
-on disk.
+into a regenerable metrics file — and backfill it from the 154 sessions on disk
+that dispatched at least one member (`ls -d ~/.claude/projects/*/*/subagents/`;
+the count of session directories is far larger and is not the population here).
 
 **Architecture:** One script, `skills/fleet/scripts/member-outcomes.mjs`,
 exporting pure functions and wrapping them in a thin CLI. It reads a session's
@@ -263,6 +264,14 @@ disk. Task 5 does the file reading.
 `taskKind`, `teamName`, `color`, `planModeRequired`, `permissionMode`,
 `customAgentType`, and no effort.
 
+**`model` must come off the transcript too, and this is not merely tidiness.**
+Measured 2026-08-27: `meta.json` carries `model` only when the DISPATCH supplied
+it. A member resolved from an agent definition writes four keys — `agentType`,
+`description`, `toolUseId`, `spawnDepth` — and no `model` at all. Part 2 declares
+the implementer's tier in exactly that way, so a scraper falling back to
+`meta.model` would go blank on precisely the members this whole exercise exists
+to measure.
+
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
@@ -277,8 +286,9 @@ const assistant = (model, effort, usage = {}) => line({
 const meta = (o = {}) => ({ agentType: "impl-580", description: "Implement ticket 580", name: "impl-580", spawnDepth: 0, ...o });
 
 test("model and effort come off the transcript, not the meta", () => {
-  // meta.json records model but never effort, so the transcript is the only
-  // source that can answer both — which is why this takes JSONL at all.
+  // meta.json never records effort, and records model only when the dispatch
+  // supplied one — a frontmatter-resolved member has no `model` key at all.
+  // The transcript is the only source that answers both.
   const row = readMember([
     assistant("claude-opus-5", "xhigh"),
     assistant("claude-opus-5", "xhigh"),
@@ -601,7 +611,7 @@ const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
 };
 const field = (c) => FIELD[c] ?? c;
-const key = (r) => `${r.session} ${r.member}`;
+const key = (r) => `${r.session}\0${r.member}`;
 
 // Replace-by-key, not append. This is what makes a phase-3 re-run and a full
 // regeneration both safe, and it is the reason no backfill-only code path is
@@ -852,7 +862,7 @@ git commit -m "test(member-outcomes): pin the tsv header against COLUMNS and its
 
 ---
 
-### Task 9: Backfill the 154 sessions on disk
+### Task 9: Backfill the 154 member-dispatching sessions on disk
 
 **Files:**
 - Modify: `docs/metrics/member-outcomes.tsv` (data only)

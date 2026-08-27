@@ -237,13 +237,15 @@ i.e. one further session and the drift of a single day.
 | merge-bot | 255 | | claude-opus-4-7 | 16 |
 | other | 80 | | `<synthetic>` (dropped) | 14† |
 
-† Unlike every other row, this one is method-sensitive: counting each member by
-the FIRST `"model"` in its transcript yields 2 rather than 14, so `<synthetic>`
-evidently also appears on later messages of members that opened under a real
-model. Immaterial to the design — the rows are dropped either way — but a
-scraper that counts one way and a reader who counts the other will disagree, so
-the scraper's rule is: **one model per member, the first one on the transcript.**
-
+† Unlike every other row, this one is method-sensitive, and the figure is a raw
+occurrence count rather than a member count. Counting each member by the FIRST
+`"model"` on its transcript yields 2, not 14 — `<synthetic>` also appears on later
+turns of members that opened under a real model. **Plan 1's `readMember()` settles
+which rule the scraper uses and neither of those counts describes it**: `if (norm)
+model = norm` skips every `<synthetic>` turn, so a member is recorded under its
+LAST non-synthetic model, and only a member with no real model on any turn drops.
+The drop rule is unchanged; what varies is how many members you think it removes,
+which is at most 14 and at least 2.
 Model varies usefully. **Effort does not**: `xhigh` 2039 rows against `high` 67.
 So the back catalogue can support a model comparison on day one and **cannot
 answer the effort question at all**. Effort only becomes measurable once controls
