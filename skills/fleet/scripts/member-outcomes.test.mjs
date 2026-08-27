@@ -98,7 +98,30 @@ test("a torn final line is skipped, not fatal", () => {
   );
   assert.equal(row.tokensOut, 5);
   assert.equal(row.turns, 1);
-  assert.equal(row.errored, "yes");
+});
+
+test("errored keys on the LAST line being torn, not on how many turns there were", () => {
+  // Distinct timestamps on purpose: the replaced rule keyed on
+  // firstTs === lastTs and would answer "no" to BOTH cases here, so this is
+  // the assertion that actually discriminates the two rules.
+  const at = (ts) => line({
+    type: "assistant", isSidechain: true, effort: "xhigh", timestamp: ts,
+    message: { model: "claude-opus-5", usage: { cache_creation_input_tokens: 0, output_tokens: 0 } },
+  });
+
+  const endsTorn = readMember(
+    [at("2026-08-25T07:14:12.147Z"), at("2026-08-25T07:15:00.000Z"), '{"type":"assis'].join("\n"),
+    meta(),
+  );
+  assert.equal(endsTorn.errored, "yes");
+
+  // A torn line in the MIDDLE is a hiccup, not a stall: the next good line
+  // resets it.
+  const recovers = readMember(
+    [at("2026-08-25T07:14:12.147Z"), '{"type":"assis', at("2026-08-25T07:15:00.000Z")].join("\n"),
+    meta(),
+  );
+  assert.equal(recovers.errored, "no");
 });
 
 test("a member with no effort field records blank, not a default", () => {
