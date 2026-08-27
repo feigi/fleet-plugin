@@ -370,7 +370,7 @@ test("the label's asterisks may close BEFORE the colon as well as after it", () 
 // other test in this file accepts that gap rather than closing it. This one
 // closes it for the dependency scan specifically, since #58 asks for it by
 // name: when a real `gojq` binary is reachable (`go install
-// github.com/itchyny/gojq/cmd/gojq@latest`), the STUB runs the fixtures
+// github.com/itchyny/gojq/cmd/gojq@v0.12.19`), the STUB runs the fixtures
 // through it instead of system jq, so the regex is checked against the exact
 // engine gh uses — not merely a same-family stand-in. No `gojq` on this
 // machine → skip, loudly, rather than silently passing on the weaker engine.
@@ -397,7 +397,7 @@ function findGojq() {
   return isGojq(candidate) ? candidate : null;
 }
 const GOJQ = findGojq();
-const SKIP_WITHOUT_GOJQ = { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@latest to run this check" };
+const SKIP_WITHOUT_GOJQ = { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@v0.12.19 to run this check" };
 
 test(
   "dependency forms hold under gojq, the engine gh actually applies — not only system jq",

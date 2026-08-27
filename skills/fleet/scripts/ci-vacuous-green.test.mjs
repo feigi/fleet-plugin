@@ -196,11 +196,22 @@ test("a routed check's own exit status still reaches the job", () => {
 // install did not produce is already loud, since findGojq() throws on a
 // GOJQ_BIN that is not gojq rather than falling back to a skip.
 test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
-  const ci = flat(readFileSync(CI_YML, "utf8"));
+  // Strip `#` comments before matching. A commented-out line still CONTAINS the
+  // literal every assertion below looks for, so against the raw file they cannot
+  // tell a live command from a dead one — and the mutation that matters here,
+  // commenting out the wiring, is exactly the one that hands the engine gates
+  // back their skip. Both comment forms, because killing only whole-line ones
+  // leaves the trailing form as the same hole.
+  const ci = flat(
+    readFileSync(CI_YML, "utf8")
+      .split("\n")
+      .map((l) => l.replace(/(^|\s)#.*$/, ""))
+      .join("\n"),
+  );
 
   assert.ok(
     phrase("go install github.com/itchyny/gojq/cmd/gojq@v0.12.19").test(ci),
-    "the Tests job no longer installs the gojq the engine gates resolve — they are back to skipping",
+    "the Install gojq step no longer installs the gojq the engine gates resolve — they are back to skipping",
   );
   // `@latest` installs a gojq that satisfies the gate while changing what the
   // gate measures, with no commit here to say so.
