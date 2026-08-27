@@ -2,16 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make each fleet role's model and effort an explicit, pinned declaration
-instead of an accident of the session, then dispatch one implementer per wave at
-the alternate tier so the comparison is never again confounded with the calendar.
+**Goal:** Make the **implementer's** model and effort an explicit, pinned
+declaration instead of an accident of the session, then dispatch one implementer
+per wave at the alternate tier so the comparison is never again confounded with
+the calendar.
 
 **Architecture:** Agent-definition frontmatter is the only mechanism that
 decouples model from effort — the `Agent` tool takes `model` but has no `effort`
 parameter, so an Agent-dispatched member always inherits the session's effort.
-Declaring a role's tier in frontmatter changes nothing on the first commit (each
+Declaring the tier in frontmatter changes nothing on the first commit (the
 declaration states what already happens); the change is that the tier becomes
 readable and pinnable. Only then does one implementer per wave move.
+
+**Scope: implementers only.** Reviewer, finisher and merge-bot are deliberately
+not declared — maintainer's call, 2026-08-27. Their rows are still recorded by
+Part 1's scraper, so the review side (the larger cost, and the acknowledged next
+target) accumulates history for free while no decision is made about it.
 
 **Tech Stack:** Markdown agent definitions under `~/.claude/agents/`, `node:test`
 prose pins, no runtime code.
@@ -41,15 +47,20 @@ code, only on its existence.
 
 ```bash
 gh issue create --repo feigi/claude-config \
-  --title "Declare per-role fleet tiers in frontmatter, and pair within each run" \
+  --title "Declare the implementer tier in frontmatter, and pair within each run" \
   --label ready-for-agent \
   --body "Spec: docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md
 Part 2 of 2. Depends on the Part 1 scraper being merged.
 
-Declares each role's model+effort in an agent definition (the only mechanism
-that decouples the two — the Agent tool has no effort parameter), then moves one
-implementer per wave to the alternate tier so tier stops being confounded with
-calendar date. Closes #864 and #472 along the way."
+Declares the implementer's model+effort in an agent definition (the only
+mechanism that decouples the two — the Agent tool has no effort parameter), then
+moves one implementer per wave to the alternate tier so tier stops being
+confounded with calendar date. Closes #864 and #472 along the way.
+
+Implementers ONLY. Reviewer/finisher/merge-bot are not declared here — their
+rows are recorded by the Part 1 scraper regardless, so the review side (84% of
+run cost, the bigger prize) accumulates history without a decision being made
+about it yet."
 ```
 
 ---
@@ -308,100 +319,7 @@ git commit -m "test(fleet): pin the implementer tier at its declaration, not onl
 
 ---
 
-### Task 4: Declare the remaining roles
-
-**Files:**
-- Create: `agents/fleet-reviewer.agent.md`, `agents/fleet-finisher.agent.md`,
-  `agents/fleet-merge-bot.agent.md`
-- Modify: `skills/fleet/skills/run-team/SKILL.md` (their dispatch sites)
-- Modify: `skills/fleet/scripts/implementer-model-tier.test.mjs`
-
-**Interfaces:**
-- Consumes: the pattern from Tasks 2-3
-- Produces: subagent types `fleet-reviewer`, `fleet-finisher`, `fleet-merge-bot`
-
-Same shape as Task 2, three times: bare alias, both keys, no `tools:`. Each
-declares what that role runs at *today*, so this is again a behavioural no-op.
-Verify per role against the data before committing:
-
-```bash
-awk -F'\t' '!/^#/ {print $3, $5, $6}' docs/metrics/member-outcomes.tsv \
-  | sort | uniq -c | sort -rn
-```
-
-**Specialists are out of scope.** Their tiers live in `workflows/review-pr.js`
-(`snapshotModel`, the three `model: "sonnet"` dimensions, and the two that take a
-vendored `opus` frontmatter pin), and that file is a workflow, not an agent
-definition. Changing it is a separate ticket — note it and move on. Do not widen
-this plan to reach it.
-
-- [ ] **Step 1: Write the three definitions**
-
-```bash
-for r in reviewer finisher merge-bot; do
-  cat > "agents/fleet-$r.agent.md" <<EOF
----
-name: fleet-$r
-description: A /fleet:run-team $r. Dispatched by the controller, never invoked directly.
-model: opus
-effort: xhigh
----
-
-Follow the dispatch brief you were given. It is the whole of your task.
-EOF
-done
-```
-
-Correct each `description` by hand afterwards — a generated one-liner is not a
-description, and the roles differ. Adjust `model`/`effort` per role if Step 2's
-data shows a role runs at something else today.
-
-- [ ] **Step 2: Verify each is a no-op**
-
-Run the `awk` above. For each role, the declaration must match the dominant
-observed `model`+`effort` pair. Any mismatch means the declaration changes
-behaviour — reconcile before committing, or the next task's measurement is
-confounded by this one.
-
-- [ ] **Step 3: Wire the three dispatch sites**
-
-```bash
-grep -n "fix-pr-\|finisher-pr-\|merge-bot-" skills/fleet/skills/run-team/SKILL.md | head -20
-```
-
-Add `subagent_type` at each, keeping the existing `name` convention.
-
-- [ ] **Step 4: Extend the pins to all four definitions**
-
-Generalise Task 3's tests over a list rather than copy-pasting four times:
-
-```javascript
-for (const role of ["implementer", "reviewer", "finisher", "merge-bot"]) {
-  test(`fleet-${role} declares a bare-alias model, an effort, and no tools list`, () => {
-    const fm = readFileSync(join(REPO, "agents", `fleet-${role}.agent.md`), "utf8").split("---")[1];
-    const model = /^model:\s*(\S+)$/m.exec(fm)?.[1];
-    assert.ok(["opus", "sonnet", "haiku"].includes(model), `${role}: pinned or missing model: ${model}`);
-    assert.match(fm, /^effort:\s*\S+$/m, `${role}: no effort declared`);
-    assert.doesNotMatch(fm, /^tools:/m, `${role}: a tools list drops the Agent tool`);
-  });
-}
-```
-
-- [ ] **Step 5: Run the suite**
-
-Run: `node --test skills/fleet/scripts/`
-Expected: PASS
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add agents/fleet-*.agent.md skills/fleet/skills/run-team/SKILL.md skills/fleet/scripts/implementer-model-tier.test.mjs
-git commit -m "feat(fleet): declare reviewer, finisher and merge-bot tiers; pin all four (#N)"
-```
-
----
-
-### Task 5: The within-run pairing rule
+### Task 4: The within-run pairing rule
 
 **Files:**
 - Create: `agents/fleet-implementer-alt.agent.md`
@@ -538,7 +456,7 @@ git commit -m "feat(run-team): one alternate-tier implementer per wave, unlabell
 
 ---
 
-### Task 6: The four difficulty columns on `tier-outcomes.tsv`
+### Task 5: The four difficulty columns on `tier-outcomes.tsv`
 
 **Files:**
 - Modify: `docs/metrics/tier-outcomes.tsv` (header only — no row is rewritten)
@@ -598,7 +516,7 @@ git commit -m "feat(tier-outcomes): record sizing and diff profile per ruled PR;
 
 ---
 
-### Task 7: Reconcile the stale tier-guard prose
+### Task 6: Reconcile the stale tier-guard prose
 
 **Files:**
 - Modify: `skills/fleet/skills/run-team/SKILL.md` (the tier-guard section)
@@ -659,7 +577,7 @@ git commit -m "docs(run-team): recount the tier-guard figures and describe withi
 
 ## Done when
 
-- Every fleet role's model and effort is declared in frontmatter, as a bare
+- The **implementer** model and effort are declared in frontmatter, as a bare
   alias, pinned by a test that fails when the declaration changes.
 - One implementer per wave runs at the alternate tier, unlabelled.
 - `tier-outcomes.tsv` records the two difficulty covariates going forward, with
@@ -668,12 +586,25 @@ git commit -m "docs(run-team): recount the tier-guard figures and describe withi
 
 ## Explicitly NOT done here
 
+- **No declarations for reviewer, finisher or merge-bot.** Maintainer's call,
+  2026-08-27: implementers only for now. Three agent definitions that no
+  experiment uses are three more files to keep true for no return, and every
+  role declared at once means an observed effect has four candidate causes.
+  Their rows are still recorded by Part 1's scraper at zero cost, so the history
+  accumulates whether or not anything is declared.
+- **No review-side tiering, despite it being the bigger prize.** Review work has
+  measured at 84% of a run's cache-write tokens and specialists are 1416 of the
+  2,671 members on disk, so this is the acknowledged next target — not an
+  oversight. Specialist tiers live in `workflows/review-pr.js`, not in agent
+  definitions, so reaching them is a different change with a different blast
+  radius. Separate ticket, after the implementer question resolves.
 - **No new guard, and no automatic revert.** The spec's read-out rules gate on
   ≥10 within-run pairs across ≥5 run dates. Below that, report the count and
   stop. Writing policy against data that does not exist yet is how the last guard
   ended up firing with n=1 on the control side.
+- **No pairing-rate taper.** One per wave is a starting rate and the intent is to
+  pair less often later, but the rate to taper to is exactly what the first ≥10
+  pairs are for. Choosing it now would repeat the last guard's mistake.
 - **No effort experiment.** Both implementer definitions share one effort on
   purpose. Varying effort is a separate change, after the model question
   resolves.
-- **No specialist tiering.** Those live in `workflows/review-pr.js`, not in agent
-  definitions. Separate ticket.

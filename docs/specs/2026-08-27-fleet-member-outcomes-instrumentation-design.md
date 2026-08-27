@@ -273,9 +273,20 @@ Two hazards, both real:
 
 ### Vary one role at a time
 
-Implementer first. Every other role stays declared-and-fixed, so an observed
-effect has one candidate cause. Rows are recorded for all roles regardless — the
-cost of recording a role is zero once the scraper runs.
+**Implementers only, and for now that means implementers alone even get a
+declaration.** Maintainer's call, 2026-08-27: the other roles are not declared in
+Part 2 at all. An observed effect then has one candidate cause, and three agent
+definitions that no experiment is using are three files to keep true for nothing.
+
+**Rows are still recorded for every role**, because the scraper costs nothing per
+role. This matters more than it sounds: reviews are the dominant cost —
+review-side work has measured at 84% of a run's cache-write tokens, and
+specialists are 1416 of the 2,671 members on disk — so the review side is the
+larger prize and an acknowledged future target. Deferring it does not mean
+flying blind when it comes up: by then there will be months of reviewer,
+specialist and finisher rows already accumulated, at no cost and with no decision
+made in advance. Recording is cheap and reversible; declaring and varying is
+neither.
 
 ### The control is within-run
 
@@ -301,7 +312,17 @@ That is deliberate. A hand-set `control` column would be un-regenerable, and one
 derived against today's declared tiers would mislabel every historical row.
 
 The cost is honest and recurring: one member per run executes at a tier the
-maintainer may not prefer. That is the price of ever knowing.
+maintainer may not prefer. That is the price of ever knowing. Accepted
+2026-08-27.
+
+**One per wave is a starting rate, not a permanent tax.** The intent is to pair
+less often once enough pairs exist — the sampling rate is a dial, and a
+comparison does not need one pair per run forever to stay unconfounded. **Do not
+build the taper now.** The natural moment to revisit is the read-out gate below
+(≥10 within-run pairs across ≥5 run dates): at that point there is data to say
+what rate is sufficient, and choosing one before then would be the same mistake
+as the last guard — a threshold picked in advance of any evidence. Until then the
+rate stays at one per wave.
 
 ## Read-out
 
