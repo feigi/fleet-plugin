@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeModel, parseMemberName, readMember } from "./member-outcomes.mjs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { normalizeModel, parseMemberName, readMember, rowsForSession } from "./member-outcomes.mjs";
 
 test("a versioned model id is kept verbatim", () => {
   assert.equal(normalizeModel("claude-opus-5"), "claude-opus-5");
@@ -141,4 +144,48 @@ test("mixed models record the LAST — a mid-run switch is the tier it finished 
     assistant("claude-sonnet-5", "xhigh"),
   ].join("\n"), meta());
   assert.equal(row.model, "claude-sonnet-5");
+});
+
+function fixture(members) {
+  const root = mkdtempSync(join(tmpdir(), "mo-"));
+  const dir = join(root, "sess-abc", "subagents");
+  mkdirSync(dir, { recursive: true });
+  for (const [name, jsonl, meta] of members) {
+    writeFileSync(join(dir, `agent-a${name}.jsonl`), jsonl);
+    writeFileSync(join(dir, `agent-a${name}.meta.json`), JSON.stringify(meta));
+    utimesSync(join(dir, `agent-a${name}.jsonl`), new Date("2026-08-25T09:00:00Z"), new Date("2026-08-25T09:00:00Z"));
+  }
+  return join(root, "sess-abc");
+}
+
+test("one row per member, stamped with the session and its run date", () => {
+  const dir = fixture([
+    ["impl-580", assistant("claude-opus-5", "xhigh"), meta()],
+    ["merge-bot-12", assistant("claude-opus-5", "xhigh"), meta({ agentType: "merge-bot-12", name: "merge-bot-12", description: "merge bot wave 12" })],
+  ]);
+  const rows = rowsForSession(dir);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].session, "sess-abc");
+  assert.equal(rows[0].run_date, "2026-08-25");
+});
+
+test("a member with no .jsonl is skipped without losing its siblings", () => {
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  mkdirSync(join(dir, "subagents"), { recursive: true });
+  writeFileSync(join(dir, "subagents", "agent-aorphan.meta.json"), JSON.stringify(meta()));
+  assert.equal(rowsForSession(dir).length, 1);
+});
+
+test("an unparseable meta does not take the whole session down", () => {
+  // board.mjs skips a bad transcript rather than blacking out the panel; same
+  // rule here, for the same reason.
+  const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+  writeFileSync(join(dir, "subagents", "agent-abad.jsonl"), assistant("claude-opus-5", "xhigh"));
+  writeFileSync(join(dir, "subagents", "agent-abad.meta.json"), "{not json");
+  assert.equal(rowsForSession(dir).length, 1);
+});
+
+test("a session directory with no subagents dir yields no rows and does not throw", () => {
+  const root = mkdtempSync(join(tmpdir(), "mo-"));
+  assert.deepEqual(rowsForSession(root), []);
 });

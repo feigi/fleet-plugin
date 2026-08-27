@@ -2,6 +2,9 @@
 // subagent transcripts: no clock, no network, no gh. See
 // docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
 
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
+
 import { classifyRole } from "./compute-spend.mjs";
 
 // `<synthetic>` is not a model — it is the harness labelling a turn it
@@ -86,4 +89,32 @@ export function readMember(jsonlText, meta) {
     // firstTs === lastTs and mislabelled every one-turn member as a stall.
     errored: torn ? "yes" : "no",
   };
+}
+
+// Walks one session's subagents dir. Every failure is per-member: one unreadable
+// transcript or unparseable meta must not cost the other sixteen members their
+// rows. board.mjs takes the same stance on the same files.
+//
+// run_date comes from the newest transcript's mtime rather than a clock read, so
+// a backfill run in December still dates an August session in August.
+export function rowsForSession(sessionDir) {
+  const dir = join(sessionDir, "subagents");
+  let names;
+  try { names = readdirSync(dir); } catch { return []; }
+
+  const rows = [];
+  let newest = 0;
+  for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
+    try {
+      const jsonl = readFileSync(join(dir, f), "utf8");
+      const meta = JSON.parse(readFileSync(join(dir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
+      const row = readMember(jsonl, meta);
+      if (!row) continue;
+      newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
+      rows.push(row);
+    } catch { /* one member's loss, not the session's */ }
+  }
+  const session = basename(sessionDir);
+  const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
+  return rows.map((r) => ({ session, run_date, ...r }));
 }
