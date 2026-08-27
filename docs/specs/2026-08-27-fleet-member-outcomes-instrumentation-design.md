@@ -28,7 +28,7 @@ The fleet dispatches six kinds of member and records the tier of none of them.
 controller. `impl-580.meta.json` records `"model": "claude-opus-5[1m]"` — even
 the context variant carries through.
 
-Nothing reads that back. `scripts/implementer-model-tier.test.mjs:19-21` states
+Nothing reads that back. `skills/fleet/scripts/implementer-model-tier.test.mjs:20-21` states
 the gap plainly: `board.mjs` parses `message.usage` off the subagent JSONL and
 drops `message.model` on the same line. The tier a member ran at is written to
 disk by the harness and discarded by the fleet.
@@ -82,7 +82,7 @@ and one file can only carry one.
 | can be deleted | yes | no |
 
 The facts file must be regenerable because its classifier has already been wrong
-once: `scripts/compute-spend.mjs:30-36` records that classifying on `spawnDepth`
+once: `skills/fleet/scripts/compute-spend.mjs:30-36` records that classifying on `spawnDepth`
 alone swept phase-0 sizing agents into `specialist` and moved the review-spend
 headline from 83% to 87% — "the one number anyone acts on". When a classifier bug
 like that is fixed, every past row is wrong and regeneration is the correct
@@ -217,8 +217,16 @@ Tested against fixture session directories, in the style of
 
 ### What backfill can and cannot buy
 
-Measured across all sessions on disk at `c82c5a5`: **154 sessions, 2,671 member
-transcripts, 2,102 with both `model` and `effort` recoverable.**
+Measured across all sessions on disk at `c82c5a5`: **154 sessions that dispatched
+at least one member, 2,671 member transcripts, 2,102 with both `model` and
+`effort` recoverable.**
+
+The denominator matters and cost a recount to pin down. `ls -d
+~/.claude/projects/*/*/` counts every session directory — 253 of them the next
+day — because most sessions dispatch nobody. The figure above counts
+`ls -d ~/.claude/projects/*/*/subagents/`, which is the population the scraper
+actually walks. Re-verified 2026-08-27 after the probe work: 155 / 2,687 / 2,109,
+i.e. one further session and the drift of a single day.
 
 | role | members | | model | members |
 |---|---|---|---|---|
@@ -227,7 +235,14 @@ transcripts, 2,102 with both `model` and `effort` recoverable.**
 | finisher | 289 | | claude-sonnet-5 | 262 |
 | implementer | 255 | | claude-opus-4-8 | 23 |
 | merge-bot | 255 | | claude-opus-4-7 | 16 |
-| other | 80 | | `<synthetic>` (dropped) | 14 |
+| other | 80 | | `<synthetic>` (dropped) | 14† |
+
+† Unlike every other row, this one is method-sensitive: counting each member by
+the FIRST `"model"` in its transcript yields 2 rather than 14, so `<synthetic>`
+evidently also appears on later messages of members that opened under a real
+model. Immaterial to the design — the rows are dropped either way — but a
+scraper that counts one way and a reader who counts the other will disagree, so
+the scraper's rule is: **one model per member, the first one on the transcript.**
 
 Model varies usefully. **Effort does not**: `xhigh` 2039 rows against `high` 67.
 So the back catalogue can support a model comparison on day one and **cannot
@@ -429,7 +444,7 @@ are. No report script until the data proves one is needed.
   question — the controller has the value in hand at ruling time — but not the
   discipline one: it is one more field to fill correctly, every run, and a
   guessed value is worse than a blank. The header must say so.
-- **Canonical finisher name.** `compute-spend.mjs:17-20` records that both
+- **Canonical finisher name.** `skills/fleet/scripts/compute-spend.mjs:14-20` records that both
   `finish-<n>` and `finisher-pr-<n>` are live and `SKILL.md`'s naming list
   mentions neither (#326). The scraper inherits that ambiguity by importing
   `classifyRole`; it does not fix it.
