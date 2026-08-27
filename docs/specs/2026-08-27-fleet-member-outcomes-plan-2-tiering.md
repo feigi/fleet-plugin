@@ -37,17 +37,21 @@ code, only on its existence.
 - **Never `tools:` without `Agent`.** A `tools:` list that omits `Agent` costs the
   member its delegation, silently and with no error
   (`references/member-lifecycle.md:7`). Omit the key entirely.
-- **A new agent definition is invisible until a session restart, and a NAMED
-  dispatch to an unregistered type fails SILENTLY.** Measured 2026-08-27.
-  Definitions load at session start. `Agent({ name: "impl-580", subagent_type:
+- **A new agent definition is invisible for a short while after it is written,
+  and a NAMED dispatch to an unregistered type fails SILENTLY.** Measured
+  2026-08-27, corrected the same day: the registry rescans *during* a session,
+  with latency, so a definition written and dispatched in one breath can lose the
+  race — `effort-probe-low` was refused, then ran unchanged minutes later, with
+  no restart. `Agent({ name: "impl-580", subagent_type:
   "fleet-implementer" })` in the session that created the file does not error —
   it runs a plain named teammate at the SESSION's tier, which is precisely the
   silent drift this plan's pins exist to prevent, and the pins cannot catch it
   because they check files rather than dispatches. The identical call *without*
   `name` errors loudly and lists the registry.
 
-  **So after creating any definition here: restart the session before dispatching
-  it, then verify from the member's own `meta.json`** — a resolved definition
+  **So after creating any definition here: dispatch it unnamed once as a
+  registration check, retrying on `not found` rather than restarting, and then
+  verify from the member's own `meta.json`** — a resolved definition
   writes `agentType: fleet-implementer` and **no** `model` key; a silent fallback
   writes `agentType: impl-580` **with** a `model` key. Checking the transcript's
   model alone cannot tell the two apart whenever the declared tier happens to
@@ -80,60 +84,39 @@ about it yet."
 
 ---
 
-### Task 1: Confirm frontmatter `effort:` is actually honoured
+### Task 1: Confirm frontmatter `effort:` is actually honoured — DONE 2026-08-27
 
 **Files:**
 - Create: none (measurement only)
+- Delete: both probe definitions, done
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: a yes/no that gates every task below
+- Produces: a yes/no that gates every task below → **YES**
 
-This is the spec's first Unknown. `effort:` ships on five agents in the official
-`claude-security` plugin, which is strong evidence, but no probe in this repo has
-yet isolated it from the settings defaults, and `meta.json` never records effort —
-so it cannot be confirmed after the fact from the board. **If this comes back no, stop and re-plan:** the whole
-"cheaper model, higher effort" trade depends on it.
+**Result: frontmatter carries BOTH halves.** Measured from session `d054b300`
+(`claude-opus-5`, effort `high`), two unnamed dispatches:
 
-**Two probe files exist, and the second is the one that settles this.**
+| probe | frontmatter | transcript |
+|---|---|---|
+| `effort-probe` | `model: sonnet`, `effort: xhigh` | `claude-sonnet-5`, `xhigh` |
+| `effort-probe-low` | `model: sonnet`, `effort: low` | `claude-sonnet-5`, `low` |
 
-`~/.claude/agents/effort-probe.agent.md` (`model: sonnet`, `effort: xhigh`) has
-now RUN — 2026-08-27, from a session started after it was written. It came back
-`claude-sonnet-5` / `xhigh` against a session at `claude-opus-5` / `high`. That
-settles frontmatter `model:` and **does not settle `effort:`**: the session was
-`high` only via `modelSettings.claude-opus-5.effortLevel`, while the top-level
-`effortLevel` is `xhigh` — and the probe ran *sonnet*, which has no per-model
-entry. A subagent re-resolving effort from settings for its own model produces
-`xhigh` too, so the reading has two causes and picks neither.
+Every task below is unblocked. The design spec's Unknown #1 records the same
+result and the reasoning; this section keeps the method, because the method is
+what a future probe of the same shape has to copy.
 
-`~/.claude/agents/effort-probe-low.agent.md` (`model: sonnet`, `effort: low`) is
-the fix: `low` is neither the session's effort nor any top-level default, so no
-settings path can produce it. **Run this one.** The `xhigh` probe is kept only as
-the positive control for `model:`.
+**The first probe was not sufficient, and the original gate would have accepted
+it.** This task used to require only that "the session's own effort must NOT be
+`xhigh`". It was `high`, so probe 1 read as a pass — but the session is `high`
+only via `modelSettings.claude-opus-5.effortLevel`, over a top-level
+`effortLevel: xhigh`, and probe 1 ran *sonnet*, which has no per-model entry. A
+subagent re-resolving effort from settings for its own model produces `xhigh`
+too. Same row, two causes, no verdict.
 
-- [ ] **Step 1: Confirm the probe is REGISTERED before trusting any result**
-
-This is the step whose absence wasted the first attempt. From a session started
-*after* the file existed:
-
-```
-Agent({ subagent_type: "effort-probe-low", prompt: "Reply with exactly the word: probe" })
-```
-
-**Pass no `name`.** An unnamed dispatch to an unregistered type errors loudly and
-lists the registry; a *named* one silently runs a plain teammate at the session's
-tier and looks like a completed probe. If this errors with `Agent type
-'effort-probe-low' not found`, the session predates the file — restart and retry.
-Do not proceed on a named dispatch. This is not hypothetical: that exact error
-was produced on 2026-08-27 by dispatching the file in the same session that wrote
-it, which is the second confirmation that definitions load at session start.
-
-- [ ] **Step 2: Read back what actually ran**
-
-**The declared effort must differ from EVERY value settings can produce for the
-probe's own model — not merely from the session's.** Checking the session alone
-is what let the first probe read as a pass on ambiguous evidence. Two reads, both
-required:
+**The rule that replaces it:** a probe's declared effort must be unreachable by
+**every** settings path for the probe's own model — not merely different from the
+parent session's. Read both before dispatching:
 
 ```bash
 SESS=~/.claude/projects/-Users-chris--claude/<this-session-uuid>.jsonl
@@ -143,48 +126,32 @@ python3 -c "import json;d=json.load(open('$HOME/.claude/settings.json'));\
 print(d.get('effortLevel'), d.get('modelSettings',{}))"  # top-level + per-model
 ```
 
-`low` clears both today (session `high`, top-level `xhigh`, no `claude-sonnet-5`
-entry). If a future settings file makes `low` reachable for sonnet, change the
-probe's declared effort rather than the gate.
+`low` cleared both on the day: session `high`, top-level `xhigh`, no
+`claude-sonnet-5` entry.
 
-Then read the probe's own transcript — the transcript is the only source. `meta.json` omits `model` whenever the tier
-came from frontmatter and never carries `effort` at all, so a frontmatter-declared
-tier is invisible there — and the member's reply text proves only that a dispatch
-completed.
+**Dispatch unnamed, and retry on `not found`.** An unnamed dispatch to an
+unregistered type errors loudly and lists the registry; a *named* one silently
+runs a plain teammate at the session's tier and looks like a completed probe.
+A `not found` does **not** mean the session predates the file — definitions are
+picked up by a rescan during the session, with latency. `effort-probe-low` was
+written, dispatched, refused, and then ran unchanged minutes later. Wait and
+retry; a restart is not needed, and recording the miss as "definitions load at
+session start" is how this document carried a wrong claim twice.
+
+**Read the tier from the JSONL, never from `meta.json` or the reply.**
+`meta.json` for a resolved definition holds `agentType`, `description`,
+`toolUseId`, `spawnDepth` — **no `model`** (the dispatch supplied none) and never
+any `effort`. The reply text proves a dispatch completed and nothing else.
 
 ```bash
 D=~/.claude/projects/-Users-chris--claude/<this-session-uuid>/subagents
-grep -o '"model":"[^"]*"' "$D"/agent-*.jsonl | sort -u
-grep -o '"effort":"[a-z]*"' "$D"/agent-*.jsonl | sort -u
+grep -o '"model":"[^"]*"' "$D"/agent-<id>.jsonl | sort -u
+grep -o '"effort":"[a-z]*"' "$D"/agent-<id>.jsonl | sort -u
 ```
 
-Find the probe's agent id from the dispatch, or by the `meta.json` whose
-`agentType` is `effort-probe-low` — that file carrying **no `model` key** is
-itself the confirmation the definition resolved.
-
-- `claude-sonnet-5` + `low` → **honoured.** Proceed.
-- `claude-sonnet-5` + `xhigh` → **refuted.** Frontmatter sets model only; effort
-  follows settings. Stop and re-plan, per the gate above.
-
-- [ ] **Step 3: Record the result in the spec**
-
-Replace the first bullet of the spec's "Unknowns" section with what was measured
-— the date, the session's effort, the probe's effort, and the verdict. An
-unknown that was resolved and left written as unknown is worse than one never
-investigated, because the next reader re-runs the probe.
-
-- [ ] **Step 4: Delete the probe**
-
-```bash
-rm ~/.claude/agents/effort-probe.agent.md ~/.claude/agents/effort-probe-low.agent.md
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md
-git commit -m "docs(spec): resolve the frontmatter-effort unknown by measurement (#N)"
-```
+That `meta.json` carries **no `model` key** is itself the confirmation the
+definition resolved rather than falling back — see the silent-fallback hazard in
+Global Constraints.
 
 ---
 

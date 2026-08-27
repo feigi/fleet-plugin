@@ -372,34 +372,44 @@ are. No report script until the data proves one is needed.
 
 ## Unknowns, deliberately not closed here
 
-- **Whether frontmatter `effort:` is honoured. PARTIALLY SETTLED 2026-08-27 —
-  `model:` confirmed again, `effort:` still not isolated.** Re-run from a session
-  started *after* the file existed, so `effort-probe` (`model: sonnet`,
-  `effort: xhigh`) resolved this time. Its `meta.json` reads
-  `agentType: effort-probe` with **no `model` key** — the tell of a resolved
-  definition rather than a silent fallback, exactly as the hazard below predicts.
-  Its transcript: `claude-sonnet-5`, `effort: xhigh`, dispatched from a session
-  running `claude-opus-5` at `high`. **The model half is settled by measurement.**
+- **Whether frontmatter `effort:` is honoured. SETTLED YES, 2026-08-27, by
+  measurement.** Two probes from session `d054b300` (`claude-opus-5`, effort
+  `high`), both dispatched unnamed so an unregistered type would have errored
+  rather than silently run a teammate:
 
-  **The effort half is confounded, and Plan 2 Task 1's stated criterion does not
-  catch it.** That task gates on "the session's own effort must NOT be `xhigh`";
-  it was `high`, so the probe reads as a pass. But the session is `high` only
-  because `settings.json` carries `modelSettings.claude-opus-5.effortLevel: high`
-  over a top-level `effortLevel: xhigh`. The probe ran **sonnet**, which has no
-  per-model entry — so a subagent that re-resolves effort from settings for its
-  own model lands on `xhigh` with the frontmatter doing nothing. Both mechanisms
-  predict the observed row. A probe whose declared effort merely differs from the
-  parent session's is not enough; it must differ from **every** value the
-  settings can produce for the probe's own model.
+  | probe | frontmatter | transcript |
+  |---|---|---|
+  | `effort-probe` | `model: sonnet`, `effort: xhigh` | `claude-sonnet-5`, `xhigh` |
+  | `effort-probe-low` | `model: sonnet`, `effort: low` | `claude-sonnet-5`, `low` |
 
-  **The decisive probe already exists**: `~/.claude/agents/effort-probe-low.agent.md`
-  (`model: sonnet`, `effort: low`), written 2026-08-27 and left in place. `low` is
-  neither the session's `high` nor the top-level `xhigh`, so reading `low` back
-  settles the question and reading `xhigh` refutes it. It could not run in the
-  session that wrote it — **definitions load at session start, re-confirmed the
-  same day**: an unnamed dispatch returned `Agent type 'effort-probe-low' not
-  found` and listed a registry holding `effort-probe` (written before that session
-  began) but not it. Run it first thing in a fresh session.
+  The first settles `model:` and **only** `model:`. Its `xhigh` has two possible
+  causes: the frontmatter, or a re-resolution from `settings.json`, whose
+  top-level `effortLevel` is `xhigh` — the session reads `high` only via
+  `modelSettings.claude-opus-5.effortLevel`, and sonnet has no per-model entry.
+  Differing from the parent session's effort is therefore **not** a sufficient
+  control, which is the trap Plan 2 Task 1 originally gated on.
+
+  The second closes it. `low` is reachable from no settings path here — not the
+  session's `high`, not the top-level `xhigh`, and there is no `claude-sonnet-5`
+  entry to supply it. It can only have come from the frontmatter. **Both halves
+  of a declared tier are honoured, and the "cheaper model, higher effort" trade
+  Part 2 depends on is real.**
+
+  Both probe definitions were deleted once this was recorded; the transcripts
+  under `~/.claude/projects/-Users-chris--claude/d054b300-*/subagents/` are the
+  evidence, and re-deriving it costs two throwaway definitions and two dispatches.
+
+- **Agent definitions are picked up by a rescan DURING a session, not only at
+  session start — but not instantly.** Corrected 2026-08-27, having been asserted
+  the other way twice in this document's own history. `effort-probe-low` was
+  written mid-session; a dispatch moments later failed with `Agent type
+  'effort-probe-low' not found` listing a registry that held `effort-probe`
+  (written earlier) but not it. The registry then picked it up unprompted a short
+  time later and the same dispatch succeeded. So a definition written and
+  dispatched in one breath races the rescan: **on `not found`, wait and retry
+  before concluding anything — do not restart the session, and above all do not
+  record the miss as a property of the harness.** The earlier attempt that
+  concluded "definitions load at session start" was reading this race.
 
 - **A named dispatch with an unknown `subagent_type` FAILS SILENTLY.** Measured
   2026-08-27, and it is the reason the probe above was nearly misread.
