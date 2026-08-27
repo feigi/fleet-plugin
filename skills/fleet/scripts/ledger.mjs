@@ -20,6 +20,32 @@ const NAME = "ledger";
 // here: this file splices flags out of argv with its own wording (#362).
 const die = makeDie(NAME);
 
+// The cause of a failed child process, for `check`'s repository probe and its
+// tracker query — each captures the child's stderr instead of forwarding it, so
+// what the child printed reaches no terminal and this string is the only copy
+// of it (#638).
+//
+// Trim BEFORE choosing, not after. A whitespace-only stderr is truthy, so it
+// wins a choice made on the raw values and then trims away to nothing, leaving
+// the reader an empty parenthesis where the reason belongs; choosing on the
+// trimmed text falls through to the next candidate instead. `?? ""` per
+// candidate, so a field that is absent contributes nothing — where the same
+// choice made with `||` around a `String()` hands back the text `undefined` as
+// the cause when no candidate is set at all (measured).
+//
+// Keep the END when it overruns, and say so. A CLI prints its warnings ahead of
+// the error that killed it, so keeping the first bytes discards the cause and
+// hands back a string cut mid-word that reads as the whole of what was printed
+// — the marker is what stops it reading that way. Capped either way, marker
+// included: every caller ships this inside a machine-parsed payload on stdout,
+// where a megabyte of child stderr is a problem however the cause was chosen.
+const CAUSE_MAX = 500;
+function cause(...candidates) {
+  const raw = candidates.map((c) => String(c ?? "").trim()).find(Boolean);
+  if (!raw) return "";
+  return raw.length > CAUSE_MAX ? `…${raw.slice(-(CAUSE_MAX - 1))}` : raw;
+}
+
 // There is ONE ledger per run, and it lives in the main checkout. Members run
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
 // exist — `check` then warns and reports every subject as safe to file, which
@@ -501,13 +527,17 @@ function runCheck() {
       // because this call leaves stdio at the default pipe, so git's stderr
       // reaches no terminal and this string is the only place the cause is
       // ever seen (the same call the gh catch below makes, #176). Capped for
-      // the same reason too: it ships on stdout inside `tracker.error`.
+      // the same reason too: it ships on stdout inside `tracker.error` — see
+      // cause(), which owns both the cap and the choice between the fields a
+      // failed git can put a reason in. Empty here is a tolerable answer where
+      // it is not for the gh catch below: the message this interpolates into
+      // still names the probe that failed and the path it failed on.
       //
       // Either way there is no repository for the query to bind to — the same
       // state as this process's own cwd not being a repo, which already
       // degrades via the generic `!tracker.ok` branch below. Reuse that: no
       // gh invocation, no separate "unchecked" shape.
-      const why = String(repoCheck.error ? repoCheck.error.message : repoCheck.stderr || "").trim().slice(0, 500);
+      const why = cause(repoCheck.error && repoCheck.error.message, repoCheck.stderr);
       tracker = { ok: false, query, error: `cannot resolve the ledger's repository (${ledgerDir})${why ? `: ${why}` : ""}` };
     } else {
       const ghCwd = repoCheck.stdout.trim();
@@ -578,10 +608,46 @@ function runCheck() {
         // ever seen. What it must not be is unbounded: it lands in
         // `tracker.error`, which ships on stdout as part of a machine-parsed
         // contract, and a megabyte of gh stderr inside a JSON field is a payload
-        // problem wherever the forwarding argument lands.
+        // problem wherever the forwarding argument lands. cause() owns both that
+        // cap and which end of an overrunning stderr survives it.
+        //
+        // stderr first, then the message: on a non-zero exit Node builds the
+        // message out of the same bytes prefixed by the command, so it is the
+        // LONGER copy of the cause, not a smaller fallback (#176, measured
+        // again here). The message earns its place wherever stderr holds no
+        // cause — and stderr holds none in three shapes, only one of which is
+        // the field being absent: no `stderr` property at all on the output
+        // this file refused to parse or refused the shape of, the property
+        // present but `undefined` on a spawn Node never started, and present
+        // but EMPTY on a child killed before it printed. Measured on Node
+        // v26.7.0 — "carries no stderr field at all" covered the first shape
+        // only. It also earns its place on a stderr with no cause in it, where
+        // it still names the command that failed.
+        //
+        // Except where Node aborted the child, and there the order flips.
+        // `e.code` carries the abort — ETIMEDOUT, ENOENT, EACCES — and Node
+        // does not set it on an ordinary non-zero exit, so it separates the
+        // failures gh explained for itself from the ones only Node can
+        // explain. A timeout is named in `e.code` and `e.message` and NOWHERE
+        // in `e.stderr`, which on a timeout holds whatever gh printed before
+        // the kill: measured end to end, a gh that warned about cached
+        // credentials and then hung reported that warning as the cause of a
+        // 20-second stall and named the timeout nowhere (#638). The flip moves
+        // exactly one failure, the timeout that printed something — the other
+        // aborts leave `e.stderr` undefined, so the message already won there.
+        // A Node that did set `e.code` on a plain non-zero exit would degrade
+        // to "Command failed" plus those same bytes, the longer copy; the
+        // accept-unchanged test below pins that string exactly, so it would
+        // say so loudly rather than this arm drifting in silence.
+        //
+        // Nothing this arm can currently throw reaches the literal last resort:
+        // every failure that lands here carries a message. It stays because an
+        // empty `tracker.error` is precisely what makes the warning below name
+        // no reason, which is the defect this arm was filed for.
+        //
         // `hits` omitted here too, same reason as the no-terms branch above:
         // the search never ran, so there is no empty result to report.
-        tracker = { ok: false, query, error: String(e.stderr || e.message).trim().slice(0, 500) };
+        tracker = { ok: false, query, error: (e.code ? cause(e.message, e.stderr) : cause(e.stderr, e.message)) || "gh failed without saying why" };
       }
     }
   }
