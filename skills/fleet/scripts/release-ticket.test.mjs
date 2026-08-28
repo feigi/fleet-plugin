@@ -355,6 +355,41 @@ test("a commit that exists nowhere else blocks, and `git cherry` says so", (t) =
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// #387: a `die` firing after a `block` used to discard every accumulated
+// blocker whole — exit 2, prose on stderr, and no JSON receipt on stdout at
+// all, so a caller that already had a real finding computed got none of it.
+// Drive exactly that shape: the ahead check blocks first (one real finding
+// accumulated into `$blockers`), then `git cherry` itself fails, which is the
+// die this fix reaches. The shim is matched on argv, never on content — `git
+// cherry origin/main ...` is the only call this script makes whose first two
+// words are "cherry origin/main".
+test("a die after a block still emits the accumulated blockers, not a bare exit 2 (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const { code, json, stderr } = release(r, c);
+  const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
+
+  assert.equal(code, 2, "still a die, not the exit 1 a plain blocked verdict uses");
+  assert.notEqual(json, null, "a receipt is still printed — die used to exit before any printf");
+  assert.equal(json.released, false);
+  assert.equal(json.label, null, "the label is read after every one of these dies can fire, so it cannot be known here");
+  assert.equal(json.applied, true, "the flag value survives, even though nothing was attempted");
+  assert.equal(json.blockers.length, 2, `the ahead finding and the die's own cause, both: ${json.blockers}`);
+  assert.match(json.blockers[0], /^1 commit\(s\) ahead of origin\/main$/, "the finding computed before the die is not dropped");
+  assert.equal(json.blockers[1], cause, "and the die's own cause is appended last, exactly where `block` would have put it");
+  assert.match(stderr, new RegExp(cause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "stderr prose is unchanged");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// The control this fix must not break: a die with nothing accumulated stays
+// exactly as it was — no `$blockers` reference reached at all, so the check is
+// exercised by the existing "an unreachable remote" and ".git file" cases below
+// (each asserts `json === null` for a die on a claim with no blocker computed
+// yet), not repeated here.
+
 test("a dirty worktree blocks on its own", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");

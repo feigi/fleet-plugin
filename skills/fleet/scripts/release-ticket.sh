@@ -45,7 +45,34 @@ set -eu
 export LC_ALL=C
 
 NAME=release-ticket
-die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
+# A `die` firing after a `block` used to discard every accumulated blocker —
+# exit 2, prose on stderr, and no JSON receipt at all, so a caller that already
+# had real findings computed got none of them. `$blockers` does not exist yet
+# for every early die in this script (before json.sh is sourced below, before
+# `blockers=""` is assigned further down), so the guard is on non-empty rather
+# than assumed to exist — that keeps the case with nothing accumulated
+# byte-identical to today: no `$blockers` reference is even reached.
+#
+# Approach 2 (#387): print the same receipt shape the blocked checkpoint and
+# `halt` already use, with `$1` appended to `$blockers` exactly as `block`
+# would have recorded it — not a new schema, and not a second write. Approach 1
+# (emit the receipt as soon as blockers goes non-empty, before whatever can
+# die) was ruled out: it lets a run print a receipt and then keep going and
+# fail anyway, which is a run with two writes or a receipt describing a state
+# the run then left. `label` is `null` here as it is at that checkpoint — the
+# label is read after every one of these dies can fire, so this receipt cannot
+# claim to know it. `$blockers` already ends in a trailing comma (`block`'s own
+# accumulator does that), so splicing the newly-escaped `$1` straight after it
+# needs no separator of its own.
+die() {
+  if [ -n "${blockers:-}" ]; then
+    block_j=$(jstr "$1") &&
+      printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s"%s"]}\n' \
+        "$issue" "$branch_j" "$branch_rw" "$wt_j" "$wt_rw" "$apply" "$blockers" "$block_j"
+  fi
+  printf '%s: %s\n' "$NAME" "$1" >&2
+  exit 2
+}
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
