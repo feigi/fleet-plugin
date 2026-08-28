@@ -35,9 +35,9 @@ export function normalizeModel(raw) {
 // finish-<n> 18. All four book a PR, and matching only the first cost 120 of
 // 283 finisher members their join key to tier-outcomes.tsv. The fix-pr-<n> and
 // review-pr-<n> families share the first pattern only because the infix is the
-// same — they are NOT finisher spellings. #326 tracks picking a canonical
-// finisher name; this function reads what is actually on disk rather than
-// waiting for that.
+// same — they are NOT finisher spellings. `finisher-pr-<n>` is the canonical
+// name run-team now fixes (#326); the other three stay matched because the runs
+// that used them are already in the record.
 //
 // merge-bot-<n> is deliberately excluded: its number is a WAVE index, and
 // booking it as a pr would join the row to an unrelated PR's verdict. A single

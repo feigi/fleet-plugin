@@ -13,11 +13,18 @@
 // recovered from how the controller named the work. Depth first: anything the
 // controller did not spawn directly is a specialist, whatever it calls itself.
 // Then description patterns, which are controller-authored and stable because
-// run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`, `merge-bot-<n>`).
-// The finisher is the exception, and :46 is why this matters: run-team/SKILL.md's
-// naming list does not mention it at all, and both `finish-<n>` and
-// `finisher-pr-<n>` are live. So :46 keys on an OBSERVED convention, not a fixed
-// one — pick a canonical name and document it in both places (#326).
+// run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`,
+// `finisher-pr-<n>`, `merge-bot-<n>`).
+//
+// The finisher branch below also matches member names run-team does NOT fix.
+// `finisher-pr-<n>` is the canonical spelling and the only one the naming list
+// authorises; `finish-<n>`, `finish-pr-<n>` and `finisher-<n>` are spellings
+// earlier runs actually dispatched. Matching those is deliberate compatibility
+// with that history, NOT drift to be cleaned up: drop one and a member named
+// that way books as "other" whenever its description does not happen to say
+// "finish pr" too, moving the headline for runs already recorded.
+// member-outcomes.mjs matches the same four names, and its comment carries the
+// measurement (#326).
 export function classifyRole(meta) {
   const type = String(meta?.agentType ?? "");
   const desc = String(meta?.description ?? "");
