@@ -377,12 +377,61 @@ test("a die after a block still emits the accumulated blockers, not a bare exit 
   assert.equal(json.released, false);
   assert.equal(json.label, null, "the label is read after every one of these dies can fire, so it cannot be known here");
   assert.equal(json.applied, true, "the flag value survives, even though nothing was attempted");
+  // `die` has its OWN inlined printf, not shared with `halt`, the blocked
+  // checkpoint or the success receipt, so nothing else in this file pins these
+  // two fields for THIS emitter: hardcoding either here passed the whole suite.
+  // `git worktree list --porcelain` reports the realpath, which on macOS is not
+  // the /var symlink the fixture built.
+  assert.equal(json.branch, c.branch, "the receipt names the claim's branch, not a literal from a copy-paste");
+  assert.equal(json.worktree, realpathSync(c.wt), "and the worktree path git listed, likewise");
   assert.equal(json.blockers.length, 2, `the ahead finding and the die's own cause, both: ${json.blockers}`);
   assert.match(json.blockers[0], /^1 commit\(s\) ahead of origin\/main$/, "the finding computed before the die is not dropped");
   assert.equal(json.blockers[1], cause, "and the die's own cause is appended last, exactly where `block` would have put it");
   assert.match(stderr, new RegExp(cause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "stderr prose is unchanged");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
+
+// The same die-after-block path with `--apply` withheld. Without it nothing in
+// the suite discriminates the receipt's `applied` field from a hardcoded
+// `true`: this path is reached exactly once, and `release` defaults the flag
+// on, so a die printf that ignored `$apply` entirely stayed green across all
+// 98 cases in this file.
+test("the die receipt's applied field is the flag, not a constant (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const { code, json } = release(r, c, { apply: false });
+
+  assert.equal(code, 2, "a dry run still dies here — the scan is what failed");
+  assert.notEqual(json, null, "and still prints its receipt");
+  assert.equal(json.applied, false, "the flag is reported as passed, not as the default the other case happens to use");
+  assert.equal(json.blockers.length, 2, `the same two findings a dry run computes: ${json.blockers}`);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// `die`'s guard is `[ -n "${blockers:-}" ]`, and `set -u` is satisfied by an
+// INHERITED value just as well as by one the run computed. An ambient variable
+// of that name therefore took the guard true on an early die — before `$issue`
+// exists — and the receipt printf aborted on `issue: unbound variable`, losing
+// the very diagnostic the die is there to print. Any non-empty value does it:
+// `[ -n ]` tests non-emptiness, not JSON validity, so `[]` is as fatal as
+// `[x]`. The pin is on the PROSE and not on the exit code, because the code the
+// defect produced is platform-asymmetric — bash-as-/bin/sh gave 1, dash gave 2 —
+// and a code pin measured on one of them says nothing about CI running the
+// other.
+for (const inherited of ["[]", "[x]", '"x",']) {
+  test(`an inherited blockers=${inherited} does not silence an early die (#387)`, () => {
+    const res = spawnSync("sh", [SCRIPT], {
+      env: { ...process.env, blockers: inherited },
+      encoding: "utf8",
+    });
+    assert.match(res.stderr, /release-ticket: usage: release-ticket\.sh/, "the usage diagnostic still prints");
+    assert.doesNotMatch(res.stderr, /unbound variable|parameter not set/, "and the die is not itself killed by set -u");
+    assert.equal(res.stdout, "", "no half-written receipt: this die has nothing accumulated to report");
+  });
+}
 
 // The control this fix must not break: a die with nothing accumulated stays
 // exactly as it was — no `$blockers` reference reached at all, so the check is
