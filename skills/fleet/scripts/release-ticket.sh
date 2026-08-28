@@ -45,13 +45,25 @@ set -eu
 export LC_ALL=C
 
 NAME=release-ticket
+
+# Assigned HERE, above `die`, and not next to `block` where the accumulator is
+# otherwise used: `die`'s guard below reads `$blockers`, and `set -u` is
+# satisfied by an INHERITED value just as well as by one this run computed. An
+# ambient environment variable named `blockers` therefore took the guard true on
+# every early die — before `$issue` is assigned at all — and the receipt printf
+# then died on `issue: unbound variable`, losing the diagnostic the die exists
+# to print. A plain assignment overrides whatever was inherited, so the guard
+# once again means "this run accumulated something". The exit code that mistake
+# produced is platform-asymmetric (bash-as-/bin/sh gives 1, dash gives 2), which
+# is why the pin in the tests is on the prose and not on a number.
+blockers=""
+
 # A `die` firing after a `block` used to discard every accumulated blocker —
 # exit 2, prose on stderr, and no JSON receipt at all, so a caller that already
-# had real findings computed got none of them. `$blockers` does not exist yet
-# for every early die in this script (before json.sh is sourced below, before
-# `blockers=""` is assigned further down), so the guard is on non-empty rather
-# than assumed to exist — that keeps the case with nothing accumulated
-# byte-identical to today: no `$blockers` reference is even reached.
+# had real findings computed got none of them. The guard is on non-empty rather
+# than on existence, which keeps every early die — before json.sh is sourced
+# below, before anything is accumulated — byte-identical to today: no
+# `$blockers` reference is even reached.
 #
 # Approach 2 (#387): print the same receipt shape the blocked checkpoint and
 # `halt` already use, with `$1` appended to `$blockers` exactly as `block`
@@ -381,7 +393,6 @@ halt() {
   exit 2
 }
 
-blockers=""
 # Assigned first, exactly as `halt` does above: a `$(jstr …)` spliced straight
 # into the accumulator is not a simple command, so `set -e` reads only the
 # assignment and a failed escape would abort at exit 1 — this script's blocked
