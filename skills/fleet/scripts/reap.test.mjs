@@ -886,6 +886,7 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
   assert.deepEqual(json, {
     applied: false,
     reaped: [],
+    worktreesRemoved: [],
     kept: [{ branch: "fix/119-json-sh-extract", reason: "unmerged commits" }],
   });
 });
@@ -1202,9 +1203,16 @@ test("a dying `git worktree list` still reaps what it can, and quotes git for wh
     ["feature/b-merged"],
     "a lookup nobody could answer must not change what gets reaped — that ruling is not this ticket's",
   );
-  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept.length, 2);
   assert.equal(json.kept[0].branch, "feature/a-merged");
   assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  // The worktree sweep reads the same dead registry, and says so rather than
+  // reporting an empty enumeration as "no branchless worktrees" — the silence
+  // #381 exists to end, reachable here by a different route (the sweep is the
+  // one place in this script that takes `git worktree list`'s own status).
+  assert.equal(json.kept[1].branch, null, "a sweep that never named a worktree has no branch to blame");
+  assert.match(json.kept[1].reason, /^cannot enumerate worktrees/);
+  assert.match(json.kept[1].reason, /worktree list exploded/, "git's own words, not just the label");
   assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload, not just the terminal");
   assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
   assert.match(stderr, /KEEP feature\/a-merged — branch delete failed: /);
@@ -1236,15 +1244,21 @@ test("quotes and backslashes in git's stderr still round-trip through the new re
 
 test("an ordinary run's payload is byte-for-byte what it has always been (#391)", (t) => {
   // The false-positive half. Nothing here fails, so nothing has a cause to
-  // quote and the whole payload must be unchanged — a fix that starts
+  // quote and the payload must carry no reason at all — a fix that starts
   // decorating healthy reasons is as wrong as one that reports none.
+  //
+  // `worktreesRemoved` is the one field this healthy run does gain (#381), and
+  // it is a statement of fact rather than a decoration: the branch sweep really
+  // did remove that directory, and a key that named only the removals no branch
+  // accounted for would leave a reader unable to tell an absent removal from an
+  // unreported one.
   const w = repo(t);
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
 
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], kept: [] });
+  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], worktreesRemoved: [wt], kept: [] });
   assert.doesNotMatch(stderr, /KEEP/);
   assert.doesNotMatch(stderr, /registration/, "a successful removal says nothing about registrations");
   assert.equal(existsSync(wt), false);
@@ -1273,7 +1287,12 @@ test("the dry run removes nothing, and still cannot predict a refusal (#391)", (
   assert.equal(code, 0);
   assert.deepEqual(
     json,
-    { applied: false, reaped: ["feature/a-healthy", "feature/b-locked"], kept: [] },
+    {
+      applied: false,
+      reaped: ["feature/a-healthy", "feature/b-locked"],
+      worktreesRemoved: [healthy, locked],
+      kept: [],
+    },
     "the dry run still promises the reap it cannot know will be refused",
   );
   assert.ok(stderr.includes(`    would remove worktree ${healthy}`), `the dry run's own line is unchanged: ${stderr}`);
@@ -1329,7 +1348,11 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, []);
-  assert.equal(json.kept.length, 1);
+  // The worktree sweep below runs the starved `worktree list` again and reports
+  // that it could not enumerate; the entry under test is still the registry
+  // probe's, and the sweep's must not be mistaken for it.
+  assert.equal(json.kept.length, 2);
+  assert.match(json.kept[1].reason, /^cannot enumerate worktrees/);
   assert.match(
     json.kept[0].reason,
     /cannot tell whether the registration survived/,
@@ -1339,7 +1362,14 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
   assert.doesNotMatch(json.kept[0].reason, /registration intact/, "nor the reassuring one");
   assert.match(json.kept[0].reason, /locked working tree/, "git's reason for the refusal still reaches the payload");
   assert.equal(branchExists(w, "feature/merged"), true);
-  assert.equal(readFileSync(counter, "utf8"), "2", "fixture: the probe really was the call that got starved");
+  // The probe was reached and starved, which is what this fixture has to
+  // establish. Not an exact figure: the worktree sweep at the foot of the
+  // script runs `worktree list` again, so a pinned total would fail whenever a
+  // part of the script unrelated to this refusal gains or loses a call.
+  assert.ok(
+    Number(readFileSync(counter, "utf8")) >= 2,
+    "fixture: the probe really was a call that got starved, not the lookup that preceded it",
+  );
 });
 
 // Same reason as the cherry-probe pin above, and the same derivation: the
@@ -1376,4 +1406,48 @@ test("the design spec's script-surface row carries both refusal states this scri
   for (const state of states) {
     assert.ok(row.includes(state), `the spec row must quote the refusal state verbatim, and does not carry "${state}".\nrow: ${row}`);
   }
+});
+
+// Detached-worktree coverage (#381). The [gone]-branch sweep above locates a
+// worktree by the `branch refs/heads/<name>` line `git worktree list
+// --porcelain` prints for it. A worktree at detached HEAD has no such line
+// (measured, git 2.50.1 Apple Git-155: it prints `worktree`, `HEAD <sha>` and
+// `detached`), so it was not refused — it was not considered, and the sweep
+// reaped the branch and walked past the directory with no `would remove
+// worktree` line and no `kept` entry to say so. That is the fleet's normal
+// path, not an oddity: the merge bot rebases server-side to avoid the
+// force-push the classifier denies, and the permitted way to move the local
+// checkout onto the rewritten head leaves it detached.
+
+/**
+ * A merged `[gone]` branch whose linked worktree has been moved off it onto a
+ * bare sha — the merge bot's `git checkout --detach` shape. Returns the
+ * worktree's absolute path.
+ *
+ * `wt` overrides the `.worktrees/` home for the same reason
+ * `mergedGoneBranchWithWorktree` takes one: the `--ignored` keep is exempted
+ * inside that home, so a test that exercises it has to live elsewhere.
+ */
+function detachedMergedWorktree(w, name, msg, wt = join(w, ".worktrees", name)) {
+  const dir = mergedGoneBranchWithWorktree(w, name, msg, wt);
+  git(dir, "checkout", "-q", "--detach", "HEAD");
+  return dir;
+}
+
+test("a detached worktree whose HEAD is merged is removed, not walked past (#381)", (t) => {
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  assert.ok(existsSync(wt), "fixture");
+  assert.match(git(w, "worktree", "list"), /\(detached HEAD\)/, "fixture: the worktree must really be detached");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.equal(existsSync(wt), false, "the directory the branch sweep cannot see must still be removed");
+  assert.deepEqual(json.worktreesRemoved, [wt]);
+  assert.deepEqual(json.kept, [], "a removal is not a keep");
+  assert.ok(stderr.includes(`    REMOVED worktree ${wt}`), `the removal must be reported: ${stderr}`);
+  // The registration goes with it, or the in-flight probe still reads the
+  // ticket as taken — the whole cost this ticket exists to stop.
+  assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
 });
