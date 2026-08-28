@@ -392,11 +392,19 @@ config has no `globalSetup`, so there is no stack to collide on).
 
 ## Phase 2 — dispatch implementers
 
-**Dispatch every implementer at the session's tier — omit `model` on the Agent
-call, whatever the class.** That omission is the whole mechanism, and a member
-dispatched with `model` set does not get it back. It holds only while the
-implementer's subagent type carries no `model:` frontmatter — an omitted `model`
-takes the *agent definition's* tier first and the session's only after.
+**Dispatch every implementer as `subagent_type: "fleet-implementer"`, and still
+omit `model` on the Agent call, whatever the class.** The tier now lives in that
+definition's frontmatter (`agents/fleet-implementer.agent.md`), which is what an
+omitted `model` takes first — the session's tier applies only when the definition
+names none, and a member dispatched with `model` set does not get the declared
+tier back. Omitting `model` is therefore still the mechanism; what changed is
+that the tier it resolves to is now declared and pinned rather than inherited by
+accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
+spend classifier and `member-outcomes.mjs` read it.
+
+**The declaration names a bare alias (`opus`), never a versioned id.** An alias
+tracks the newest generation; a pinned id rots into a superseded one that is
+weaker AND more expensive, because pricing falls with each generation.
 
 **`class=routine` → `sonnet` was REVERTED on 2026-08-16, by the guard below
 firing.** Both halves were met on the accumulated `docs/metrics/tier-outcomes.tsv`:
