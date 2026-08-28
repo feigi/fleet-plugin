@@ -1318,7 +1318,9 @@ a minute apart showed *different* mutants, so a member's report and any single
    status anywhere to notice, and nothing downstream re-derives the release
    label. Count only those three — the PR carries other labels, `ready-to-merge`
    itself among them once you add it, so a PR wearing one release label beside
-   them passes unchanged.
+   them passes unchanged. A repo that defines none of the three does not gate on
+   one — `gh label list` settles that, and it is no licence to skip the read
+   where they exist.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
 

@@ -92,7 +92,7 @@ git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 
 Closes #N"
-gh pr edit --add-label patch                 # own command, own exit status
+gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
 
 `Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.

@@ -67,9 +67,12 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
     /timeout|timed out|backgrounded/,
     "step 7 no longer names the timeout the split exists for, so the split reads as an arbitrary extra call",
   );
+  // Not a bare `own exit status`: the command block's own trailing comment
+  // carries that phrase, so the loose form stayed GREEN with the prose rationale
+  // rewritten to "a tidier shape" — measured. Pin the sentence, not the words.
   assert.match(
     s,
-    /own exit status/,
+    phrase("it has its own exit status and fails loudly"),
     "step 7 no longer says the separate command carries its own exit status — the whole reason it is separate",
   );
 });
