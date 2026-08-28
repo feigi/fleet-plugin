@@ -1505,11 +1505,25 @@ const sshStub = (dir, name = "user-ssh-stub.sh") => {
 // (that one terminates on ConnectTimeout, so it never sees the ServerAlive
 // pair either). Splitting on whitespace is exactly right for the stub's
 // `printf '%s\n' "$*"`, which is argv joined by single spaces.
-const assertBoundOptions = (log) => {
+// `userOpt` names the option standing in for the user's own command, and is
+// asserted by POSITION, not membership. That the bound options come LAST is the
+// whole mechanism probe 2's comment rests on — ssh takes the first value of a
+// repeated -o, so they are defaults only while the user's own options precede
+// them. Membership cannot see it: measured, moving the appended block ahead of
+// the user's command left every test here green, turning the comment into a lie
+// with the suite still fully passing.
+const assertBoundOptions = (log, userOpt) => {
   const words = readFileSync(log, "utf8").split(/\s+/);
   for (const opt of ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=5", "ServerAliveCountMax=2"]) {
     assert.ok(words.includes(opt),
       `bound option missing from the invoked command: ${opt} — invoked as: ${words.join(" ")}`);
+  }
+  if (userOpt) {
+    const user = words.indexOf(userOpt);
+    assert.ok(user >= 0,
+      `the user's own configured command must survive, not be replaced — invoked as: ${words.join(" ")}`);
+    assert.ok(user < words.indexOf("ConnectTimeout=10"),
+      `the bound options must be appended after the user's own command, or they override it instead of defaulting under it — invoked as: ${words.join(" ")}`);
   }
   return words;
 };
@@ -1534,8 +1548,7 @@ test("probe 2: an existing GIT_SSH_COMMAND is honoured, with the bound options a
     { cwd: repo, env: { ...env, GIT_SSH_COMMAND: `${stub} -o UserMarker=1` }, encoding: "utf8" });
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
-  const words = assertBoundOptions(log);
-  assert.ok(words.includes("UserMarker=1"), "the user's own configured command must survive, not be replaced");
+  assertBoundOptions(log, "UserMarker=1");
 });
 
 // The middle tier of the same fallback. Unlike GIT_SSH_COMMAND it is a git
@@ -1554,8 +1567,7 @@ test("probe 2: a core.sshCommand is honoured, with the bound options added on to
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
-  const words = assertBoundOptions(log);
-  assert.ok(words.includes("UserMarker=1"), "the configured command must survive, not be replaced");
+  assertBoundOptions(log, "UserMarker=1");
 });
 
 // The last tier, and the one this probe regressed: git's precedence is
@@ -1575,6 +1587,29 @@ test("probe 2: a legacy GIT_SSH wrapper is honoured, with the bound options adde
   assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
 
   assertBoundOptions(log);
+});
+
+// The marker option the tier tests use has no counterpart in the appended tail,
+// so ordering is all they can observe. Here the user sets a key this probe also
+// sets, which is the case probe 2's comment is actually about: ssh takes the
+// FIRST value of a repeated -o, so the occurrence that applies must be the
+// user's value and not this probe's. Asserted on the invoked command rather
+// than on ssh's own resolution, which the stub never reaches — what the stub
+// records is the argv git builds, and that ordering is the only part of the
+// rule this script controls.
+test("probe 2: a user's own colliding -o comes first, so ssh resolves theirs", (t) => {
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const { stub, log } = sshStub(repo);
+
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, GIT_SSH_COMMAND: `${stub} -o ConnectTimeout=45` }, encoding: "utf8" });
+  assert.equal(r.status, 2, "the stub always fails, so this is 'could not look', never free");
+
+  const words = readFileSync(log, "utf8").split(/\s+/);
+  assert.equal(words.find((w) => w.startsWith("ConnectTimeout=")), "ConnectTimeout=45",
+    `the user's own ConnectTimeout must be the first one ssh sees, or this probe silently overrides a timeout they set on purpose — invoked as: ${words.join(" ")}`);
 });
 
 // The two tiers where the script names the program itself rather than
