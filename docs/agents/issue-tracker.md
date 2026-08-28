@@ -36,7 +36,9 @@ Not bare `gh issue view <N> --comments` — non-interactively that prints only t
 comments, and nothing at all when there are none, dropping the title and body
 either way, exit 0, so the loss is silent. The `## Agent Brief` comment is
 authoritative over the issue body. Honor its `Respec` block — it may
-explicitly rule out hypotheses the body raises.
+explicitly rule out hypotheses the body raises. Read the issue **before
+touching code**: with the repo in front of you, still undecided or needing
+human hands you do not have → bail, name the cause, do not implement.
 
 ## Wayfinding operations
 
