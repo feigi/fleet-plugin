@@ -23,6 +23,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 
@@ -2040,4 +2041,116 @@ test("probe 2: an https origin whose handshake never completes is bounded, exit 
   assert.match(r.stderr, /did not finish within/,
     "the timeout gets its own reason: a probe that was killed and one that was refused are different facts, and before this bound existed the only failure surface was reached when ls-remote RETURNED, so a stall was indistinguishable from a slow link");
   assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+});
+
+// The control, and the reason this whole change is not simply "kill it sooner":
+// a watchdog that turns a working slow fetch into exit 2 is worse than the hang
+// it replaces, because exit 2 is a verdict the fleet acts on. The stub here is a
+// REAL working transport — it serves the fixture's own bare repo through
+// `git upload-pack` — delayed on the way in. So the case exercises the accept
+// path with genuine refs coming back, not a mock of one.
+//
+// Paired with its own sensitivity control below, and neither is worth much
+// alone: an accept-only case passes just as well against a watchdog that never
+// fires at all, which is to say against no watchdog, and would have passed
+// before this change existed.
+const slowSsh = (dir, bare, seconds) => {
+  const stub = join(dir, "slow-ssh.sh");
+  writeFileSync(stub, `#!/bin/sh\nsleep ${seconds}\nexec git upload-pack '${bare}'\n`);
+  chmodSync(stub, 0o755);
+  return stub;
+};
+
+test("probe 2: a slow but working link keeps its ordinary verdict, budget or no budget", (t) => {
+  const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
+  const stub = slowSsh(repo, join(repo, "..", "remote.git"), 3);
+  git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const r = spawnSync("sh", [SCRIPT, "41"], {
+    cwd: repo, encoding: "utf8", timeout: 60_000,
+    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "20" },
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 1,
+    "the branch is really on the remote, so the verdict is `taken` — a bound that reports exit 2 here has invented an outage on a link that worked");
+  assert.deepEqual(JSON.parse(r.stdout).hits, ["remote-branch"],
+    "and the hit is probe 2's own, established from refs the slow transport really returned");
+});
+
+// The other half of that pair: the same working transport, a budget under the
+// delay. Without this, the case above cannot tell a watchdog that spares slow
+// links from one that was never armed.
+test("probe 2: the budget is what spares the slow link, not the absence of a watchdog", (t) => {
+  const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
+  const stub = slowSsh(repo, join(repo, "..", "remote.git"), 3);
+  git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+
+  const r = spawnSync("sh", [SCRIPT, "41"], {
+    cwd: repo, encoding: "utf8", timeout: 60_000,
+    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "1" },
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2, "under the delay, the same transport is cut off and the answer is `could not look`");
+  assert.match(r.stderr, /did not finish within/);
+});
+
+// The ssh case this issue gained after it was filed: probe 2 appends its options
+// after the user's own command and ssh takes the FIRST value of a repeated -o,
+// so a user ConnectTimeout of 0 wins and is accepted rather than rejected —
+// leaving the accept-then-silent case riding on nothing, since the ServerAlive
+// pair never arms before the banner exchange. Honouring that setting is
+// deliberate and unchanged; what changed is that the call around it is bounded.
+test("probe 2: a user ConnectTimeout of 0 no longer leaves the probe unbounded", async (t) => {
+  const port = await silentListener(t);
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `ssh://git@127.0.0.1:${port}/x/y.git`);
+
+  const started = Date.now();
+  const r = spawnSync("sh", [SCRIPT, "8"], {
+    cwd: repo, encoding: "utf8", timeout: 30_000,
+    env: { ...env, GIT_SSH_COMMAND: "ssh -o ConnectTimeout=0", INFLIGHT_LS_REMOTE_TIMEOUT: "5" },
+  });
+
+  assert.equal(r.error, undefined,
+    `the caller was held to its own backstop — the ssh the fetch spawned outlived it holding stderr: ${JSON.stringify(r)}`);
+  assert.notEqual(r.signal, "SIGTERM", "the script's own bound must fire, not the test's backstop");
+  assert.ok(Date.now() - started < 30_000, "must terminate on its own bound, not the test's backstop");
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /did not finish within/);
+});
+
+// The surface the issue names in passing, and the one no git-side variable
+// reaches: GIT_TERMINAL_PROMPT=0 suppresses git's OWN credential prompt, not an
+// externally configured helper, and neither lowSpeed key times a helper's
+// execution. A keychain dialog or an OAuth device-code flow is this shape; a
+// helper that simply never answers stands in for both.
+//
+// The 401 is what makes git consult the helper at all — without a challenge the
+// request never reaches the credential path and the case would pass vacuously.
+test("probe 2: a credential helper that never answers is bounded like any other stall", async (t) => {
+  const server = createHttpServer((_req, res) => {
+    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="git"' });
+    res.end("denied");
+  });
+  t.after(() => new Promise((res) => server.close(res)));
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `http://127.0.0.1:${server.address().port}/x/y.git`);
+  const helper = join(repo, "mute-helper.sh");
+  writeFileSync(helper, "#!/bin/sh\nsleep 300\n");
+  chmodSync(helper, 0o755);
+  git(repo, env, "config", "credential.helper", helper);
+
+  const started = Date.now();
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, INFLIGHT_LS_REMOTE_TIMEOUT: "5" }, encoding: "utf8", timeout: 30_000 });
+
+  assert.equal(r.error, undefined,
+    `the caller was held to its own backstop — the helper outlived the fetch still holding stderr, which is exactly what killing the fetch alone would leave: ${JSON.stringify(r)}`);
+  assert.ok(Date.now() - started < 30_000, "must terminate on its own bound, not the test's backstop");
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /did not finish within/);
 });
