@@ -570,6 +570,15 @@ else
       # behind, so the dirty check above already answers for them; they are
       # listed anyway because a state git records is cheaper to test than to
       # argue about.
+      # `2>/dev/null`, NOT the `2>&1` the reasons above fold in, because this
+      # capture is used as a PATH and theirs are used as message text. Measured
+      # (PR #985 review): a `~/.gitconfig` with a key outside any section makes
+      # every git command print `error: key does not contain a section: …` to
+      # stderr AT EXIT 0, so `2>&1` returns that line glued in front of the git
+      # dir, `[ -e "$gitdir/$op" ]` then matches nothing, and this very guard
+      # waves through a worktree holding an interrupted rebase — removed, state
+      # and all. The same change on the status probe reads every clean worktree
+      # as dirty forever.
       if ! gitdir=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null); then
         keep "" "worktree $wt could not be read"
         continue
