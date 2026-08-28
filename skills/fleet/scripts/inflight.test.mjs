@@ -18,12 +18,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
-import { createServer as createHttpServer } from "node:http";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 
@@ -2043,6 +2042,85 @@ test("probe 2: an https origin whose handshake never completes is bounded, exit 
   assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
 });
 
+// The default budget and the shorten-only rule, which every other case here
+// leaves untouched: they all BUY a short budget, so `ls_budget=30` and the
+// `-lt` clamp are never the operative path. Measured on the tree before this
+// case existed — raising the default tenfold AND flipping the clamp to `-gt 0`
+// left the whole inflight suite green, both mutants passing 89/89. The property
+// the comment beside that clamp argues, that the knob cannot become "one more
+// way for configuration to remove the bound", shipped with nothing holding it.
+//
+// This is the only case that pays the real 30s, and it is worth the wall clock
+// because it pins both halves at once: a value far above the default has to be
+// REFUSED, which leaves the reported budget at 30 and the wait at 30 rather
+// than the 600 asked for. Either mutant lengthens the real wait past this
+// case's own backstop and reddens it.
+test("probe 2: INFLIGHT_LS_REMOTE_TIMEOUT cannot lengthen the default budget", async (t) => {
+  const port = await silentListener(t);
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `https://127.0.0.1:${port}/x/y.git`);
+
+  const started = Date.now();
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, INFLIGHT_LS_REMOTE_TIMEOUT: "600" }, encoding: "utf8", timeout: 90_000 });
+
+  assert.equal(r.error, undefined,
+    `the caller was held to its own backstop, so the 600 was taken as a budget rather than refused: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /did not finish within 30s/,
+    "the override may only SHORTEN: a value above the default is ignored and the default 30s is what the watchdog reports — a knob that could lengthen the budget is one more way for configuration to remove the bound, the very defect the ssh half of #346 reports");
+  assert.ok(Date.now() - started < 60_000,
+    "and the wait really was the default budget, not the 600s asked for");
+});
+
+// kill_tree's awk closure has no other test at its own level: the five cases in
+// this block reach it only by letting a real fetch hang, which is slow and,
+// worse, blind to the thing the `do { … } while (grew)` loop exists for.
+// Measured — collapsing that loop to a single pass still kills the whole
+// subtree when `ps` prints parents before children, which is what `ps -A` does
+// on an ordinary machine, so every e2e case above stays green on the mutant.
+// Only a canned table with a child row AHEAD of its parent (the shape pid
+// wraparound produces) discriminates, and only this test feeds one.
+//
+// The function is lifted out of inflight.sh by its own braces rather than
+// re-typed, so this cannot drift into testing a copy. `ps` is shadowed on PATH
+// the way the awk/tr/python3 fork-failure cases here already do it; `kill` has
+// to be a shell FUNCTION instead, because it is a builtin and a file on PATH is
+// never consulted. The `-9` escalation is dropped on the floor — the set is
+// what is under test, and it is the same set both signals go to.
+const killTreeOn = (t, table, root) => {
+  const dir = mkdtempSync(join(tmpdir(), "inflight-killtree-"));
+  t.after(() => execFileSync("rm", ["-rf", dir]));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "ps"), `#!/bin/sh\ncat '${join(dir, "table")}'\n`);
+  chmodSync(join(bin, "ps"), 0o755);
+  writeFileSync(join(dir, "table"), table);
+
+  const body = readFileSync(SCRIPT, "utf8").match(/^kill_tree\(\) \{\n[\s\S]*?^\}$/m);
+  assert.ok(body, "kill_tree() is no longer a top-level function in inflight.sh — update this test");
+  writeFileSync(join(dir, "fn.sh"), body[0]);
+
+  const r = spawnSync("sh", ["-c",
+    `kill() { [ "$1" = -9 ] || printf '%s\\n' "$*"; }\n. '${join(dir, "fn.sh")}'\nkill_tree ${root}`],
+    { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 10_000 });
+  assert.equal(r.status, 0, `kill_tree exited non-zero: ${JSON.stringify(r)}`);
+  return r.stdout.trim().split(/\s+/).filter(Boolean).sort((a, b) => a - b);
+};
+
+test("kill_tree signals the whole subtree, however the snapshot is ordered", (t) => {
+  assert.deepEqual(killTreeOn(t, "100 1\n200 100\n300 200\n400 1\n", 100), ["100", "200", "300"],
+    "a chain two levels deep, parents first");
+  assert.deepEqual(killTreeOn(t, "300 200\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
+    "the same chain with every child ahead of its parent — the case a single-pass walk gets wrong");
+  assert.deepEqual(killTreeOn(t, "500 400\n300 100\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
+    "branching, and an unrelated tree that must not be swept in");
+  assert.deepEqual(killTreeOn(t, "100 1\n200 1\n", 100), ["100"],
+    "a root with no descendants is still signalled");
+  assert.deepEqual(killTreeOn(t, "200 1\n300 200\n", 999), ["999"],
+    "a root absent from the snapshot falls back to itself, never to nothing");
+});
+
 // The control, and the reason this whole change is not simply "kill it sooner":
 // a watchdog that turns a working slow fetch into exit 2 is worse than the hang
 // it replaces, because exit 2 is a verdict the fleet acts on. The stub here is a
@@ -2053,17 +2131,18 @@ test("probe 2: an https origin whose handshake never completes is bounded, exit 
 // Paired with its own sensitivity control below, and neither is worth much
 // alone: an accept-only case passes just as well against a watchdog that never
 // fires at all, which is to say against no watchdog, and would have passed
-// before this change existed.
-const slowSsh = (dir, bare, seconds) => {
-  const stub = join(dir, "slow-ssh.sh");
-  writeFileSync(stub, `#!/bin/sh\nsleep ${seconds}\nexec git upload-pack '${bare}'\n`);
+// before this change existed. The stub delays 3s, which is the constant the
+// pair's two budgets — 20 above it, 1 below it — are chosen against.
+const slowSsh = (repo) => {
+  const stub = join(repo, "slow-ssh.sh");
+  writeFileSync(stub, `#!/bin/sh\nsleep 3\nexec git upload-pack '${join(repo, "..", "remote.git")}'\n`);
   chmodSync(stub, 0o755);
   return stub;
 };
 
 test("probe 2: a slow but working link keeps its ordinary verdict, budget or no budget", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo, join(repo, "..", "remote.git"), 3);
+  const stub = slowSsh(repo);
   git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
@@ -2083,7 +2162,7 @@ test("probe 2: a slow but working link keeps its ordinary verdict, budget or no 
 // links from one that was never armed.
 test("probe 2: the budget is what spares the slow link, not the absence of a watchdog", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo, join(repo, "..", "remote.git"), 3);
+  const stub = slowSsh(repo);
   git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
@@ -2129,16 +2208,28 @@ test("probe 2: a user ConnectTimeout of 0 no longer leaves the probe unbounded",
 //
 // The 401 is what makes git consult the helper at all — without a challenge the
 // request never reaches the credential path and the case would pass vacuously.
+//
+// And it DID, until this server was moved out of process. `spawnSync` blocks
+// this process's event loop for the whole child run, so a `node:http` server
+// running HERE accepts at the kernel level and can never serve a
+// response: measured, the handler ran zero times and mute-helper.sh was never
+// executed, leaving a case that only re-tested "an http origin that never
+// answers" — which `http.lowSpeedTime=10` bounds on its own, so it stayed green
+// even with kill_tree's subtree walk neutered. The 401 has to come from a
+// process that is still scheduled while spawnSync holds this one.
+const challengeServer = async (t) => {
+  const srv = spawn(process.execPath, ["-e",
+    `const s=require("node:http").createServer((q,r)=>{r.writeHead(401,{"WWW-Authenticate":'Basic realm="git"'});r.end("denied")});s.listen(0,"127.0.0.1",()=>console.log(s.address().port))`],
+    { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => srv.kill());
+  return await new Promise((res) => srv.stdout.once("data", (d) => res(d.toString().trim())));
+};
+
 test("probe 2: a credential helper that never answers is bounded like any other stall", async (t) => {
-  const server = createHttpServer((_req, res) => {
-    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="git"' });
-    res.end("denied");
-  });
-  t.after(() => new Promise((res) => server.close(res)));
-  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  const port = await challengeServer(t);
 
   const { repo, env } = fixture(t, 8, { origin: "none" });
-  git(repo, env, "remote", "add", "origin", `http://127.0.0.1:${server.address().port}/x/y.git`);
+  git(repo, env, "remote", "add", "origin", `http://127.0.0.1:${port}/x/y.git`);
   const helper = join(repo, "mute-helper.sh");
   writeFileSync(helper, "#!/bin/sh\nsleep 300\n");
   chmodSync(helper, 0o755);

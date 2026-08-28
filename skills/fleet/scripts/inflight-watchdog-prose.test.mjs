@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 // #346 asked for one thing that no behaviour test can hold: that the fate of
 // the per-transport knobs be DECIDED rather than left implicit. The watchdog
@@ -23,13 +23,6 @@ import { between, phrase } from "./prose-pin.mjs";
 // green by design — the words are pinned, not their layout.
 const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
 
-// Same one-liner as the other prose files here, deliberately duplicated rather
-// than hoisted: a shell comment block wraps at `#`, so a pinned phrase can break
-// across lines with the comment gutter, not whitespace, at the break — `\s+`
-// does not span a `#`. Strip the gutter and rejoin with the single inter-word
-// space a wrap point replaces.
-const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
-
 // Bounded by the http paragraph's own opening and by the first construct that
 // follows the comment block. Probe 2 is the only place in this script that
 // discusses http transport options, but the bounds are what stop a later block
@@ -39,6 +32,25 @@ const httpRationale = () =>
     between(
       INFLIGHT,
       "# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound",
+      "base_ssh=$(git config --get core.sshCommand",
+      "inflight.sh",
+    ),
+  );
+
+// The negative pins get a WIDER slice than the positive ones, and that is the
+// whole point of separating them. The stale sentence this PR deleted lived in
+// the SSH paragraph, above the http heading — so run over `httpRationale` the
+// two `doesNotMatch` pins below missed it entirely: measured, reinserting
+// "Closing that needs a bound outside git … An https origin can still hold a
+// fleet slot" into the ssh paragraph left both of them green. A negative pin
+// scoped narrower than the prose it forbids forbids nothing. The positive pins
+// stay on the narrow slice, where a bound at both ends is what stops an
+// unrelated block from satisfying them.
+const probe2Rationale = () =>
+  stripHashGutter(
+    between(
+      INFLIGHT,
+      "# ssh: BatchMode=yes refuses any interactive prompt",
       "base_ssh=$(git config --get core.sshCommand",
       "inflight.sh",
     ),
@@ -59,7 +71,7 @@ test("probe 2's comment states that the per-transport knobs are kept, and why", 
 // now false, and false in the most expensive direction: it would send the next
 // reader off to implement the watchdog that the same comment block introduces.
 test("probe 2's comment no longer defers the bound to a ticket this script now carries", () => {
-  const text = httpRationale();
+  const text = probe2Rationale();
   assert.doesNotMatch(text, phrase("Closing that needs a bound outside git"),
     "the bound is no longer needed, it is present — this wording describes the tree as it stood before the watchdog");
   assert.doesNotMatch(text, /can still hold a fleet slot/,

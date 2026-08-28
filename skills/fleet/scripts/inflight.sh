@@ -102,14 +102,15 @@ remote=""
 local_b=""
 wt=""
 
-# The two temp files, and the ONE EXIT trap that removes them. `sh` keeps a
+# The three temp files, and the ONE EXIT trap that removes them. `sh` keeps a
 # single EXIT trap, so a second `trap … EXIT` further down does not add a
 # handler — it REPLACES this one, silently leaking whatever the first was going
-# to remove. Both files are therefore declared here and cleaned here rather
+# to remove. All three are therefore declared here and cleaned here rather
 # than each probe installing its own. Declared empty, too, so the trap can run
-# under `set -u` after a `die` that fired before either was created.
+# under `set -u` after a `die` that fired before any was created.
 errfile=""
 wtfile=""
+wdfile=""
 # `${…:+}` so a file that was never created contributes no argument at all
 # rather than an empty one, and `rm -f` with no operands is specified to exit 0.
 #
@@ -121,12 +122,12 @@ wtfile=""
 # status survives and the cleanup failure is still said out loud rather than
 # swallowed by a bare `|| :`.
 #
-# `printf`, not `echo`: $errfile and $wtfile are mktemp paths, and `echo`
-# expands a backslash in one. It returns 0 just as `echo` did, so the status
-# argument above is unchanged. Format string double-quoted because the trap
-# body is already single-quoted.
-trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ||
-  printf "%s: could not remove %s %s\n" "$NAME" "$errfile" "$wtfile" >&2' EXIT
+# `printf`, not `echo`: these are mktemp paths, and `echo` expands a backslash
+# in one. It returns 0 just as `echo` did, so the status argument above is
+# unchanged. Format string double-quoted because the trap body is already
+# single-quoted.
+trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ${wdfile:+"$wdfile"} ||
+  printf "%s: could not remove %s %s %s\n" "$NAME" "$errfile" "$wtfile" "$wdfile" >&2' EXIT
 
 # Probe 1 — a PR that is actually ABOUT this ticket.
 #
@@ -456,6 +457,23 @@ base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
 # Ceiling: with no `ps` to read, this falls back to the named process alone and
 # a helper can survive it. That is the pre-#346 behaviour for that one case, not
 # a new failure, and it is preferred over signalling a set derived from nothing.
+# But it is not silent: the fallback records itself in $wdfile so the reason
+# printed downstream can say the bound may not have held. A degraded kill that
+# reads exactly like a clean one is the defect #346 asks this script not to
+# have — measured, `ps` shimmed to exit 127 produced byte-identical stderr to
+# the healthy run while a `git remote-https` survived and held the caller for
+# its whole cap. `${wdfile:-/dev/null}` because kill_tree also runs before that
+# file exists and on the path where mktemp is not reached at all.
+#
+# TERM then KILL, with no pause between them: a descendant that traps TERM
+# otherwise holds the fetch's inherited stderr and the caller hangs past the
+# budget anyway — measured against a GIT_SSH_COMMAND wrapper doing `trap '' TERM`,
+# the caller sat out its full 30s backstop with the script long since exited.
+# A `sleep 1` between the two signals, the obvious shape, does NOT work here:
+# the watchdog subshell is itself killed through this same function while it
+# would be inside that sleep, so the KILL never lands. Which signal git actually
+# dies of is no longer load-bearing — $wdfile, not the exit status, is what says
+# the watchdog fired.
 kill_tree() {
   kin=$1
   if snap=$(ps -A -o pid=,ppid= 2>/dev/null); then
@@ -468,10 +486,15 @@ kill_tree() {
                      doomed[pid[i]] = 1; grew = 1
                    }
                } while (grew)
-            for (p in doomed) printf "%s ", p }') || kin=$1
+            for (p in doomed) printf "%s ", p }') ||
+      { kin=$1; printf 'degraded ' >>"${wdfile:-/dev/null}" || :; }
+  else
+    printf 'degraded ' >>"${wdfile:-/dev/null}" || :
   fi
   # shellcheck disable=SC2086  # a pid list, and word splitting is how kill reads it
   kill $kin 2>/dev/null || :
+  # shellcheck disable=SC2086
+  kill -9 $kin 2>/dev/null || :
 }
 # The budget. Above what the ssh options can spend before they give up on their
 # own — ConnectTimeout plus the ServerAlive pair's whole run — so this never
@@ -485,8 +508,18 @@ ls_budget=30
 # defect the ssh half of #346 reports, and reproducing it here to be convenient
 # would be its own bug. A value that is not a positive integer is not an error
 # and not a bound either — the default stands.
+#
+# `??????*` is that last clause holding for a digit string too large for the
+# shell's integer. Without it `[` is handed the value and contradicts the
+# sentence above out loud: measured, `sh` says `[: 99999999999999999999:
+# integer expression expected` and dash says `[: Illegal number:` — a raw
+# diagnostic naming a line number rather than the variable, on the same stderr
+# that carries this script's own reasons. Six digits, not twenty: anything from
+# 100000 up was going to be ignored by the `-lt` below regardless, so the arm
+# costs no reachable value and leaves the five-digit forms `[` reads correctly
+# (029 among them) taking the same path they always did.
 case ${INFLIGHT_LS_REMOTE_TIMEOUT:-} in
-  '' | *[!0-9]*) : ;;
+  '' | *[!0-9]* | ??????*) : ;;
   *) if [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -gt 0 ] &&
        [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -lt "$ls_budget" ]; then
        ls_budget=$INFLIGHT_LS_REMOTE_TIMEOUT
@@ -495,40 +528,77 @@ esac
 # Backgrounded and waited on, rather than polled: `wait` returns the moment the
 # fetch does, so a reachable origin pays nothing for the bound being here. The
 # sleeper is what enforces it, and it is killed by the same subtree walk as the
-# fetch — its own `sleep` is a child, and leaving that behind would put a
-# process on this script's stderr for the rest of the budget on the path where
-# everything went right.
+# fetch — its own `sleep` is a child, and an orphaned sleeper does not sit
+# harmlessly: it wakes at the end of its budget and fires kill_tree at a pid
+# this script no longer owns, which after a budget's worth of pid churn can be
+# an unrelated process — and, since #346, an unrelated SUBTREE. It cannot leak
+# onto this script's stderr whatever else it does, because the `>/dev/null 2>&1`
+# below is on the sleeper itself and both its descriptors are already closed.
 #
 # `wait` is captured through an explicit `|| ls_status=$?`, and `set -e` is why:
 # a bare `wait` on a killed child aborts this subshell at that line, which is
 # after the fetch is dealt with but before the sleeper is, and the sleeper would
 # be the leak. The status is then carried out by an explicit `exit` rather than
 # by whatever the block happens to end with.
+#
+# $wdfile is how the watchdog says it fired, and it has to be a file: the
+# sleeper is a background grandchild of the command substitution below, so
+# nothing it sets in a variable reaches this shell and its own exit status is
+# discarded. The marker is written BEFORE kill_tree, never after, because `wait`
+# returns the instant the fetch dies and would otherwise race the write.
+#
+# A file this probe WANTS, not one it needs. Probe 2 is the one probe that
+# answers when mktemp is broken — #185 fixed that deliberately and
+# inflight.test.mjs pins it — so a failed mktemp costs the sharper wording
+# below, never the verdict. The old exit-status inference is what the wording
+# falls back to there.
+wdfile=$(mktemp) || wdfile=""
 ls_rc=0
 heads=$(
   GIT_TERMINAL_PROMPT=0 \
   GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin &
   ls_pid=$!
-  { sleep "$ls_budget"; kill_tree "$ls_pid"; } >/dev/null 2>&1 &
+  { sleep "$ls_budget"; printf 'fired ' >>"$wdfile" || :; kill_tree "$ls_pid"; } >/dev/null 2>&1 &
   wd_pid=$!
   ls_status=0
   wait "$ls_pid" || ls_status=$?
   kill_tree "$wd_pid"
   exit "$ls_status"
 ) || ls_rc=$?
+wdnote=""
 if [ "$ls_rc" -ne 0 ]; then
+  if [ -n "$wdfile" ]; then
+    wdnote=$(cat "$wdfile" 2>/dev/null || true)
+  elif [ "$ls_rc" -eq 143 ] || [ "$ls_rc" -eq 137 ]; then
+    # No marker to read, so the signal number is all there is — the weaker test
+    # this branch used before the marker existed, kept only for the path where
+    # mktemp failed. It cannot tell our SIGTERM from anyone else's, but
+    # reporting a real stall as a refusal is the worse of the two errors. 137
+    # as well as 143, because kill_tree escalates and git can lose the race.
+    wdnote="fired"
+  fi
   # A killed fetch and a refused one are different facts and get different
   # words. Before this bound existed the only failure surface here was reached
   # when `ls-remote` RETURNED, so a probe that never returned reached no label
   # at all and a stall was indistinguishable from a slow link to the caller.
-  # SIGTERM is what separates them: git does not exit on that signal by itself,
-  # and the watchdog sends nothing else.
-  if [ "$ls_rc" -eq 143 ]; then
-    add_unknown "remote" "git ls-remote did not finish within ${ls_budget}s and was killed, so whether #$n has a remote branch is unknown"
-  else
-    add_unknown "remote" "git ls-remote failed, so whether #$n has a remote branch is unknown"
-  fi
+  #
+  # $wdfile is what separates them. Reading "the watchdog fired" off an exit
+  # status of 143 inferred it from a signal number this script does not own:
+  # measured, a fetch SIGTERM'd from OUTSIDE at 4s under the default budget was
+  # reported as `did not finish within 30s`, naming a budget only 4s of wall
+  # clock had run against. The marker is written by the watchdog and by nothing
+  # else, so it answers what the exit status was being asked to guess — and it
+  # keeps answering now that kill_tree escalates to SIGKILL and git can just as
+  # well come back 137.
+  kt_note=""
+  case $wdnote in
+    *degraded*) kt_note=", though the process table could not be read, so a transport helper may still be running" ;;
+  esac
+  case $wdnote in
+    *fired*) add_unknown "remote" "git ls-remote did not finish within ${ls_budget}s and was killed${kt_note}, so whether #$n has a remote branch is unknown" ;;
+    *) add_unknown "remote" "git ls-remote failed, so whether #$n has a remote branch is unknown" ;;
+  esac
   return 1
 fi
 # One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
