@@ -474,16 +474,23 @@ base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
 # would be inside that sleep, so the KILL never lands. Which signal git actually
 # dies of is no longer load-bearing — $wdfile, not the exit status, is what says
 # the watchdog fired.
+#
+# The `do { … } while (grew)` fixpoint is not decoration. `for (p in parent)`
+# visits keys in unspecified order, so a single pass misses any descendant the
+# iteration reaches before its own parent has been marked. `ps -A` prints
+# parents first, which is exactly why every end-to-end case here stays green on
+# that mutant; the canned-table case in inflight.test.mjs, which feeds a table
+# with each child AHEAD of its parent, is the only thing that holds it.
 kill_tree() {
   kin=$1
   if snap=$(ps -A -o pid=,ppid= 2>/dev/null); then
     kin=$(printf '%s\n' "$snap" | awk -v root="$1" '
-      { parent[$1] = $2; pid[++rows] = $1 }
+      { parent[$1] = $2 }
       END { doomed[root] = 1
             do { grew = 0
-                 for (i = 1; i <= rows; i++)
-                   if (!(pid[i] in doomed) && (parent[pid[i]] in doomed)) {
-                     doomed[pid[i]] = 1; grew = 1
+                 for (p in parent)
+                   if (!(p in doomed) && (parent[p] in doomed)) {
+                     doomed[p] = 1; grew = 1
                    }
                } while (grew)
             for (p in doomed) printf "%s ", p }') ||
