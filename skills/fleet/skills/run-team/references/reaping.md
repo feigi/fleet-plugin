@@ -26,6 +26,21 @@ Every precondition recomputed **inside** same command as delete:
 - **A cherry that cannot answer is a KEEP.** Capture git's output; never pipe git itself: `cmd | grep -q` takes grep's exit status, never cmd's, so a `git cherry` that dies (rc 128 — one unreadable loose object is enough) prints nothing, grep exits 1, and a dead probe reads identical to "nothing unmerged" (verified, git 2.50.1). Unanswerable probe authorizes no delete — same fail-closed shape as `worktree remove` below. Read the `+` anchored, too: the capture folds stderr in, so an unanchored match reads a `+` in a diagnostic as a commit. Pinned by a test.
 - **`worktree remove` without `--force`.** Refuses on modifications *and* untracked files, so double-covers dirty check. Refusal is finding to report, never something to force past.
 
+## Why a second sweep, over worktrees rather than branches
+
+Above walk finds branch's worktree by `branch refs/heads/<name>` line `git worktree list --porcelain` prints. Worktree at detached HEAD carries no such line — so it was not refused, it was **not considered**, which is why no-silent-caps rule did not fire either: branch reaped, no `would remove worktree` line, no `kept` entry, directory left on disk. Measured live during merge wave.
+
+**Now ordinary path, not oddity.** Merge bot rebases server-side to avoid force-push classifier denies (#149). That rewrites branch on server, so local checkout must move to new head — and permitted way to do that leaves it **detached**. Every PR merged that way lands here, per wave, compounding: stale worktree still answers `git worktree list`, in-flight probe reads worktree as live claim, already-merged ticket reads as taken, queue quietly shrinks.
+
+So `reap.sh` enumerates worktrees git lists with **no `branch` line at all** and decides each on own state:
+
+- **`git cherry` against `origin/main`, never `merge-base --is-ancestor`.** Branch was rebased before it merged, so tip fully upstream is patch-equivalent, not ancestor — ancestry answers no for exactly work that is safe. Subject is full object id off porcelain, so no refname shadows it.
+- **Absent `branch` line is not by itself detached HEAD.** git prints none for worktree whose HEAD it cannot resolve either, reporting null object id instead — four measured corruption routes for admin `HEAD` (#179). Nothing about such worktree decidable, so report and leave. Null id alone is not the test: unborn branch is legitimate null id and DOES carry `branch` line.
+- **A git operation in progress is a keep, and git is no backstop for it.** Measured, git 2.50.1 (Apple Git-155): `worktree remove` *without* `--force` removes worktree holding interrupted rebase, and one holding bisect, at rc 0. Both detach, both leave `status --porcelain` empty — so every other check passes them and sequencer state, todo list and original head go with directory. Interrupted rebase is exactly how fleet worktree wanders off its branch (see `release-ticket.sh`'s own stray guard).
+- **Every decline is a `kept` entry, `branch` null.** No branch to name. Gap was invisible precisely because nothing was reported.
+- **Removals join `worktreesRemoved[]`, from both sweeps.** One meaning, no qualifier: a key naming only removals no branch accounted for would leave reader unable to tell absent removal from unreported one.
+- **Not fixed in merge bot.** Re-attaching worktree after rebase puts invariant where it only helps paths that remember to do it, and next permitted-command change moves problem again.
+
 ## Why reap declines a claim that was never dispatched
 
 Undispatched claim = `in-progress` label + worktree + branch, no PR. `reap.sh` skips it, correctly: no merge happened, so no remote branch was ever deleted, so branch is not `[gone]` and the `for-each-ref` filter never selects it. Forced past that, `git cherry` is empty and `-D` unauthorized. Reap's evidence is "merged upstream"; this branch never went anywhere.

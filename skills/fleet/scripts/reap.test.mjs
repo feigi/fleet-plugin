@@ -1770,3 +1770,35 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   assert.equal(existsSync(live), true);
   assert.equal(branchExists(w, "feature/live"), true);
 });
+
+// Same reason and the same derivation as the cherry-probe and refusal-state
+// pins above. This one guards the safety claim a reader is most likely to draw
+// wrong: git refuses a removal on modified and untracked files, so a reader who
+// knows that would assume it also refuses one mid-operation. It does not, and
+// the row has to say which decline covers that.
+test("the design spec's script-surface row carries the in-progress decline this sweep emits (#381)", (t) => {
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  git(wt, "bisect", "start", "HEAD", "HEAD~1");
+
+  const { json } = runReap(w, ["--apply"]);
+
+  // Everything from the label up to the state git named: the path is the
+  // caller's to vary and the state is one of several, so neither can be carried
+  // by a document.
+  const label = /(has a git operation in progress) \(/.exec(json.kept[0]?.reason ?? "");
+  assert.ok(label, `fixture must reach the in-progress decline: ${json.kept[0]?.reason}`);
+
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  assert.ok(
+    row.includes(label[1]),
+    `the spec row must quote this decline verbatim, and does not carry "${label[1]}".\nrow: ${row}`,
+  );
+  // The payload shape a reader parses against, stated where the reasons are.
+  assert.ok(row.includes("worktreesRemoved[]"), `the row must state the key this sweep writes.\nrow: ${row}`);
+});
