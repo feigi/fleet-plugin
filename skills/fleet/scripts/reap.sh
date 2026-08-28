@@ -86,6 +86,12 @@ git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve
 
 reaped=""
 kept=""
+# Every worktree this run removed, by path, whether a branch accounted for it or
+# not. One meaning, so the key needs no qualifier: the sweep below reaps
+# worktrees no `reaped` branch names, and a payload that recorded only those
+# would leave a reader guessing whether the branch sweep's removals were absent
+# because none happened or because nothing reports them (#381).
+removed=""
 # `jstr`'s output wrapped in the quotes JSON needs, or the literal `null` where
 # it could not render. `die` is the wrong answer at both call sites below: by
 # the time either accumulator is written this script may already have deleted
@@ -117,7 +123,19 @@ jfield() {
   fi
 }
 
-keep() { kept="${kept}{\"branch\":$(jfield "$1"),\"reason\":$(jfield "$2")}," ; printf '    KEEP %s — %s\n' "$1" "$2" >&2; }
+# An empty `$1` is the worktree sweep at the foot of this script, which has no
+# branch to name: the field becomes JSON `null` rather than `""`, the value
+# `jfield` already emits for a field it could not render, so no consumer meets a
+# type here it did not already have to handle. Every reason that sweep produces
+# ABOUT a worktree names its path, which is why the stderr label can fall back
+# to a placeholder without losing which worktree was kept — the two it produces
+# before the enumeration succeeds ("cannot enumerate worktrees", "could not read
+# the worktrees git listed") name none because none was established.
+keep() {
+  if [ -n "$1" ]; then kb=$(jfield "$1"); else kb=null; fi
+  kept="${kept}{\"branch\":$kb,\"reason\":$(jfield "$2")},"
+  printf '    KEEP %s — %s\n' "${1:-(no branch)}" "$2" >&2
+}
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
@@ -351,6 +369,7 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
     else
       printf '    would remove worktree %s\n' "$wt" >&2
     fi
+    removed="${removed}$(jfield "$wt"),"
   fi
 
   if [ "$apply" = true ]; then
@@ -375,14 +394,257 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
   reaped="${reaped}$(jfield "$b"),"
 done
 
+# Second sweep: the worktrees the branch sweep above cannot see AT ALL.
+#
+# That sweep locates a worktree by the `branch refs/heads/<name>` line
+# `git worktree list --porcelain` prints for it, so a worktree carrying no such
+# line was never refused — it was never considered, which is why the
+# no-silent-caps rule did not fire either: no `would remove worktree` line, no
+# `kept` entry, and the directory left on disk while its branch was reaped
+# (#381, measured live during a merge wave). A stale worktree still answers
+# `git worktree list` and inflight.sh reads one as a live claim, so an
+# already-merged ticket then reads as taken and the candidate queue shrinks
+# with nothing reporting it.
+#
+# What leaves a fleet worktree detached is NOT recorded here, deliberately. An
+# earlier draft of this comment blamed the merge bot's server-side rebase (#149)
+# and that mechanism is measured false: in a later wave the bot reported
+# `path=rebase` for #969, #970 and #972, and a `reap.sh` dry run immediately
+# after printed `would remove worktree` for all three — a line only an ATTACHED
+# worktree reaches. run-merge-bot.md says the same for that step: the API
+# rebased the remote, not your checkout, which is left attached and merely
+# stale. The shape is observed; the route to it is not established, and
+# release-ticket.sh names a different one (an interrupted rebase) it did
+# measure. This sweep decides on the state git reports, never on how it got
+# there, so nothing below depends on the answer.
+#
+# Deliberately a second sweep rather than a shared helper over the guard chain
+# above. The two differ in more than their subject: there is no branch to name
+# in a reason, none to delete afterwards, the merged probe takes a bare object
+# id instead of a refname, and the in-progress guard below has no business on a
+# `[gone]` branch, where a stale sequencer file would strand a worktree whose PR
+# has already merged. Same call reap.sh and release-ticket.sh already make for
+# their two copies of `gone()`, for the opposite reason: there the callers
+# differ in nothing else.
+if ! wt_list=$(git worktree list --porcelain 2>&1); then
+  keep "" "cannot enumerate worktrees — a branchless one would go unreported: $(printf '%s' "$wt_list" | tr '\n' ' ')"
+# `h" "p`, an object id and a path: the id is fixed-width hex with no space in
+# it, so the shell splits the pair on the first space and the path keeps the
+# rest — the whole rest, since `substr($0,10)` is what reads it, never awk's
+# `$2`, or a checkout under a directory with a space in its name reads as a
+# different path. A record git printed no `HEAD` line for leaves the id empty,
+# which the null-object-id arm below already answers for.
+#
+# `bare` sets the same exclusion flag a `branch` line does. A bare repo used as
+# a worktree root prints `worktree <path>` then `bare` and NOTHING else — no
+# HEAD, no branch (measured, git 2.50.1 Apple Git-155) — so without this it
+# arrived below with an empty id and was reported with the null-object-id arm's
+# diagnosis, "has an unresolvable HEAD", which is false: git can say exactly
+# what it holds, a bare repo holds no working tree at all. It is never a
+# `[gone]`-branch worktree and there is nothing there to remove.
+#
+# Status taken, not swallowed: this pipeline's last command is the awk, so an
+# awk that could not run leaves `$detached` empty and every branchless worktree
+# goes unmentioned — this ticket's own defect, committed inside its fix. The
+# swallow the branch sweep above leaves deliberately is a different trade: there
+# an empty answer still reaps the branch, here it silently reaps nothing.
+elif ! detached=$(printf '%s\n' "$wt_list" |
+       awk '/^worktree /{if (p != "" && !skip) print h" "p; p=substr($0,10); h=""; skip=0; next}
+            /^HEAD /{h=$2}
+            /^branch /{skip=1}
+            /^bare$/{skip=1}
+            END{if (p != "" && !skip) print h" "p}'); then
+  keep "" "could not read the worktrees git listed — a branchless one would go unreported"
+else
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    head=${entry%% *}
+    wt=${entry#* }
+
+    # The main checkout, answered before the ownership bound below so it keeps
+    # the reason that is true of it rather than the one true of every stranger.
+    # It reaches this sweep whenever it is itself detached, it is never under
+    # `.worktrees/`, and this test needs nothing the probes below establish —
+    # both operands are false for a path that does not exist. Still ahead of the
+    # linkage test for the reason the branch sweep records (#82): that test would
+    # otherwise call the main checkout's `.git` DIRECTORY a broken linkage.
+    if [ -d "$wt/.git" ] && [ -f "$wt/.git/HEAD" ]; then
+      keep "" "worktree $wt is the main checkout — cannot remove it"
+      continue
+    fi
+
+    # The ownership bound, and the first thing asked of anything else. The branch sweep above
+    # authorises a delete on evidence the PR merged — `%(upstream:track)` reads
+    # exactly `[gone]`, the remote branch deleted. This sweep has no such
+    # evidence to read: branchless, clean and patch-equivalent to `$base` also
+    # describes a human's `git worktree add --detach` scratch checkout that was
+    # never a fleet ticket, and without this bound `--apply` deleted it
+    # (measured, PR #985 review: the same fixture survives the branch-only
+    # script and is DELETED by the branchless one). `*/.worktrees/*` is the
+    # fleet's own worktree home — the set #381 describes — and the same key
+    # claim-ticket.sh builds its paths under.
+    #
+    # A `keep`, never a silent `continue`: a directory this script looked at and
+    # walked past with nothing said is the exact defect #381 exists to end, and
+    # the reason has to survive being read by someone who expected a removal.
+    #
+    # It is also why this sweep carries no `--ignored` probe, unlike the branch
+    # sweep: that probe exists to protect a .env or a scratch note in a worktree
+    # OUTSIDE this home, and no such worktree reaches past this bound.
+    case "$wt" in
+      */.worktrees/*) : ;;
+      *)
+        keep "" "worktree $wt is not a fleet worktree — outside .worktrees/, so nothing here says its work has landed"
+        continue
+        ;;
+    esac
+
+    # An absent `branch` line is not by itself a detached checkout: git also
+    # emits none for a worktree whose HEAD it could not resolve, which it
+    # reports as the null object id — a `chmod 000` or garbage admin `HEAD`
+    # file, a dangling symlink or a directory standing in for one. Those are
+    # the four routes #179 measured against release-ticket.sh's own lookup, and
+    # they empty this key exactly as a detached HEAD does. Nothing about such a
+    # worktree can be decided — there is no commit to probe for merged-ness —
+    # so it is reported and left, the same fail-closed direction the cherry
+    # checks take. The conjunction release-ticket.sh's `unresolved_head` makes
+    # in one place is made here in two: the enumeration above already
+    # established this record carries no `branch` line, which is what keeps an
+    # unborn branch — a legitimate null id that DOES carry one — out of this
+    # arm entirely.
+    case "$head" in
+      *[!0]*) : ;;
+      *)
+        keep "" "worktree $wt has an unresolvable HEAD — git cannot say what it holds"
+        continue
+        ;;
+    esac
+
+    # `git cherry`, never `git merge-base --is-ancestor`: the branch was rebased
+    # before it merged, so its tip is patch-equivalent to what landed rather
+    # than an ancestor of it, and ancestry answers no for work that is fully
+    # upstream. Captured, never piped into `grep -q`, for the reason the branch
+    # sweep above records: the pipeline would take grep's status and a probe
+    # that died would read identically to a clean one. `$head` is a full object
+    # id, so no refname can shadow it the way #634 measured for a bare branch
+    # name.
+    if ! cherry=$(git cherry "$base" "$head" 2>&1); then
+      keep "" "cherry probe failed — cannot tell if worktree $wt is merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
+      continue
+    fi
+    if printf '%s\n' "$cherry" | grep -q '^+'; then
+      keep "" "worktree $wt holds commits that exist nowhere else"
+      continue
+    fi
+
+    if [ -e "$wt" ]; then
+      # The remaining guards the branch sweep above documents, in the same order
+      # and for the same measured reasons — the main checkout already answered
+      # for above, the linkage established before anything git says through
+      # `$wt` is trusted (#128), and existence settled by this `if` so a deleted
+      # directory never reaches a status call that would read as dirty forever
+      # (#83).
+      if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
+        keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
+        continue
+      fi
+      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
+        keep "" "worktree $wt could not be read"
+        continue
+      fi
+      if [ -n "$status_out" ]; then
+        keep "" "dirty worktree $wt"
+        continue
+      fi
+
+      # A guard the branch sweep needs no copy of, and the one thing on this
+      # path git is no backstop for. Measured here, git 2.50.1 (Apple Git-155):
+      # `git worktree remove` WITHOUT `--force` removes a worktree holding an
+      # interrupted rebase, and one holding a bisect, at exit 0 — both leave
+      # `git status --porcelain` empty, so every check above passes and the
+      # sequencer state, the todo list and the original head go with the
+      # directory. Both operations also DETACH, which is precisely how they
+      # arrive in this sweep and nowhere else: release-ticket.sh's prose already
+      # names the interrupted rebase as the way a fleet worktree wanders off its
+      # branch. The remaining sequencer states leave staged or unmerged paths
+      # behind, so the dirty check above already answers for them; they are
+      # listed anyway because a state git records is cheaper to test than to
+      # argue about.
+      # `2>/dev/null`, NOT the `2>&1` the reasons above fold in, because this
+      # capture is used as a PATH and theirs are used as message text. Measured
+      # (PR #985 review): a `~/.gitconfig` with a key outside any section makes
+      # every git command print `error: key does not contain a section: …` to
+      # stderr AT EXIT 0, so `2>&1` returns that line glued in front of the git
+      # dir, `[ -e "$gitdir/$op" ]` then matches nothing, and this very guard
+      # waves through a worktree holding an interrupted rebase — removed, state
+      # and all. The same change on the status probe reads every clean worktree
+      # as dirty forever.
+      if ! gitdir=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null); then
+        keep "" "worktree $wt could not be read"
+        continue
+      fi
+      busy=
+      for op in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+        if [ -e "$gitdir/$op" ]; then busy=$op; fi
+      done
+      if [ -n "$busy" ]; then
+        keep "" "worktree $wt has a git operation in progress ($busy) — removing it discards state no commit holds"
+        continue
+      fi
+
+      # No `--ignored` probe here, unlike the branch sweep: the ownership bound
+      # at the head of this loop already refused every worktree outside
+      # `.worktrees/`, and inside it the branch sweep exempts the probe anyway —
+      # a fleet worktree's ignored files are machine-generated, and keeping on
+      # them would strand every one of them.
+    elif ! gone "$wt"; then
+      keep "" "cannot tell whether worktree $wt exists"
+      continue
+    fi
+
+    if [ "$apply" = true ]; then
+      # No `--force`, and the same registry re-read the branch sweep documents:
+      # a non-zero exit is no proof the removal had no effect, so the reason
+      # names what the REGISTRY answered and claims nothing about what is left
+      # on disk.
+      if ! err=$(git worktree remove "$wt" 2>&1); then
+        if ! reg=$(git worktree list --porcelain 2>&1); then
+          state="cannot tell whether the registration survived"
+        elif printf '%s\n' "$reg" | grep -qxF "worktree $wt"; then
+          state="registration intact"
+        else
+          state="registration cleared"
+        fi
+        # `$wt` interpolated, unlike the branch sweep's byte-identical twin: there
+        # `keep "$b"` names the subject, here the branch field is `null` and
+        # git's own message for a locked worktree carries no path, so two
+        # refusals in one run were byte-identical and an operator could not tell
+        # which worktree was kept (measured, PR #985 review, two locked
+        # worktrees).
+        keep "" "worktree $wt remove refused ($state): $(printf '%s' "$err" | tr '\n' ' ')"
+        continue
+      fi
+      # A line of its own, unlike the branch sweep's silent success: there is no
+      # `REAPED <branch>` here to stand in for it, and a removal nothing prints
+      # is the silence this ticket exists to end.
+      printf '    REMOVED worktree %s\n' "$wt" >&2
+    else
+      printf '    would remove worktree %s\n' "$wt" >&2
+    fi
+    removed="${removed}$(jfield "$wt"),"
+  done <<EOF
+$detached
+EOF
+fi
+
 # Payload first, prune after (#265): `git worktree prune` used to be the last
 # command of the guard below — an AND-OR list then — so under `set -eu` ITS
 # OWN failure, not just a false `[ apply = true ]`, reached -e and aborted the
 # script before this printf ever ran, after the branches above were already
 # deleted. The caller lost the only record of what happened. Printing first
 # means that record survives regardless of what the prune does.
-printf '{"applied":%s,"reaped":[%s],"kept":[%s]}\n' \
-  "$apply" "${reaped%,}" "${kept%,}"
+printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s]}\n' \
+  "$apply" "${reaped%,}" "${removed%,}" "${kept%,}"
 
 # An `if`, not `[ ... ] && { ... }`: with the printf moved above it this guard
 # is the script's LAST command, and an AND-OR list whose test is false has
