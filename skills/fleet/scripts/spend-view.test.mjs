@@ -33,11 +33,15 @@ for (const [name, re] of [
 // Slice to renderSpend's own body before matching, and drop comment lines: a
 // whole-file assert.match is satisfied by any mention anywhere, including a
 // commented-out one.
-// Parameter names are matched as `\w+` throughout, never as the literal `sp`.
-// Renaming a parameter is not a defect, and a lift that misses because of one
-// throws where node registers no test at all — the file's whole total drops in
-// silence rather than reporting a named failure.
-const renderSpend = HTML.match(/^function renderSpend\((\w+)\) \{[\s\S]*?^\}$/m);
+// Parameter names are matched as `\w+` throughout, never as the literal `sp`,
+// and the whitespace around a declaration's name and paren is matched as `\s`,
+// never as the literal single space. Neither a rename nor a reformat is a
+// defect, and a lift that misses because of one throws where node registers no
+// test at all — the file's whole total drops in silence rather than reporting a
+// named failure. The duplicate guard above is deliberately `\s`-tolerant in the
+// same places: loosening only that one lets a reformatted declaration pass the
+// count and then die in the lift.
+const renderSpend = HTML.match(/^function\s+renderSpend\s*\((\w+)\)\s*\{[\s\S]*?^\}$/m);
 const renderSpendBody = renderSpend
   ? renderSpend[0].split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")
   : "";
@@ -55,8 +59,8 @@ test("renderSpend routes through spendView rather than re-deriving the branch", 
   // anchored on the argument being followed by `.` or `)` is evaded by
   // `if (sp && sp.error)`, by `if (sp?.error)`, and by `const { error } = sp`.
   const bodySansCall = renderSpendBody
-    .replace(/^function renderSpend\(\w+\) \{/m, "")
-    .replace(/=\s*spendView\(\w+\);/, "");
+    .slice(renderSpendBody.indexOf("{") + 1)          // drop the signature
+    .replace(/=\s*spendView\(\w+\);/, "");             // and the one legitimate use
   assert.doesNotMatch(bodySansCall, new RegExp(`\\b${renderSpend[1]}\\b`));
 });
 
@@ -67,6 +71,16 @@ test("renderSpend routes through spendView rather than re-deriving the branch", 
 // appends an empty `spend-wrap` every tick at run start — the #371 behaviour
 // itself, a box where the panel must render nothing — or swap the two column
 // lists, or the two header strings, and nothing goes red.
+//
+// Matched against a whitespace-collapsed body: where a line breaks is not
+// wiring, and a pin that reds on a reflow is a false alarm that trains the next
+// reader to loosen it. `flat` is the idiom the *-prose.test.mjs files here use,
+// plus paren-adjacent trimming, because the reflow a long call actually gets is
+// a wrap straight after `(` — which collapsing alone leaves as `spendRows( host,`
+// and every pin below would then miss. Spacing after a comma is left as the one
+// space the collapse produces; the pins are written with it.
+const renderSpendFlat = renderSpendBody
+  .replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")");
 for (const [claim, re] of [
   ["the hidden decision appends nothing", /if \(\w+\.kind === "hidden"\) return;/],
   ["a text-only decision reaches the DOM", /el\("div", "spend-wrap", \w+\.text\)/],
@@ -77,7 +91,7 @@ for (const [claim, re] of [
   ["the tool column is fed the tool list", /spendRows\(\w+, \w+\.tools,/],
 ]) {
   test(`renderSpend wires the decision through: ${claim}`, () => {
-    assert.match(renderSpendBody, re);
+    assert.match(renderSpendFlat, re);
   });
 }
 
@@ -93,7 +107,7 @@ test("board.html's inline script parses", () => {
 // lift takes both. Left out, `k` is a ReferenceError rather than a wrong answer —
 // it fails loud rather than pinning a stale result.
 const K_SRC = HTML.match(/^const k = .*;$/m);
-const VIEW_SRC = HTML.match(/^function spendView\(\w+\) \{[\s\S]*?^\}$/m);
+const VIEW_SRC = HTML.match(/^function\s+spendView\s*\(\w+\)\s*\{[\s\S]*?^\}$/m);
 
 test("board.html still declares k and spendView in the shape this file lifts", () => {
   // Named, and outside the lift itself: asserting inside it throws before node
