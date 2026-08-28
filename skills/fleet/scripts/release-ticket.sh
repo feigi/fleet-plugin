@@ -75,12 +75,28 @@ blockers=""
 # label is read after every one of these dies can fire, so this receipt cannot
 # claim to know it. `$blockers` already ends in a trailing comma (`block`'s own
 # accumulator does that), so splicing the newly-escaped `$1` straight after it
-# needs no separator of its own.
+# needs no separator of its own — which is done in the ARGUMENT, so this format
+# string stays byte-identical to the blocked checkpoint's rather than growing a
+# second blockers slot only this one caller uses.
+#
+# The `||` arm is the receipt's only voice. `|| die` is what `block` and `halt`
+# use and is unavailable here — it would recurse — so a bare `&&` chain left BOTH
+# its failures mute: a failed `jstr`, and a failed write. The second is the worse
+# one and is not a silent degrade at all: with the chain as the last command
+# before `fi`, a receipt printf that cannot write (closed fd, EIO, a full disk on
+# a redirect) takes `set -e` and kills the function before its own stderr prose
+# below, so the die reason vanishes and the script exits 1 — this script's
+# `NOT released` verdict, fabricated out of a write error. Measured on /bin/sh
+# (bash 3.2), /bin/dash and bash 5.3; zsh alone survived it. The arm ends the
+# list so nothing is left to trip, and it names neither failure specifically,
+# because `a && b || c` fires `c` for both and this file does not report a cause
+# it did not measure.
 die() {
   if [ -n "${blockers:-}" ]; then
-    block_j=$(jstr "$1") &&
-      printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s"%s"]}\n' \
-        "$issue" "$branch_j" "$branch_rw" "$wt_j" "$wt_rw" "$apply" "$blockers" "$block_j"
+    die_j=$(jstr "$1") &&
+      printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
+        "$issue" "$branch_j" "$branch_rw" "$wt_j" "$wt_rw" "$apply" "${blockers}\"$die_j\"" ||
+      printf '%s: no JSON receipt for #%s — the escape or the write failed\n' "$NAME" "$issue" >&2
   fi
   printf '%s: %s\n' "$NAME" "$1" >&2
   exit 2
