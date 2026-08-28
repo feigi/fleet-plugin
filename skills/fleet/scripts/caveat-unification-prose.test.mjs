@@ -1,8 +1,10 @@
 // #23. `next-ticket` and `sizing-a-ticket` both open by telling the reader to
 // fetch a ticket with the same `gh issue view --json title,body,comments` form,
-// and both then have to say which text wins and which wrong forms lose. Those
-// sentences were stated once each, independently, so one fact had two wordings
-// and only one of the two files carried the wrong-forms caveat at all.
+// and both then have to say which text wins and which wrong forms lose. Two
+// different failure shapes, not one: the brief-outranks-body sentence was
+// duplicated with nothing holding the copies together, though they read
+// identically; the wrong-forms caveat was absent from `sizing-a-ticket`
+// altogether.
 //
 // These pin AGREEMENT rather than a literal, so a deliberate reword applied to
 // both files stays green while a reword applied to one reddens. That is the
@@ -11,12 +13,15 @@
 // `run-team/SKILL.md` and `docs/agents/issue-tracker.md` are deliberately not
 // compared here. `run-team`'s copy sits inside a verbatim subagent prompt that
 // has to carry its own context and cannot reference anything, so it is prose
-// for a different audience; `issue-tracker.md` is pinned for its own content by
-// `issue-tracker-prose.test.mjs` under #79.
+// for a different audience. `issue-tracker.md`'s brief-outranks-body and
+// `Respec` rules are pinned by `issue-tracker-prose.test.mjs` under #79, but
+// its wrong-forms caveat is pinned by nothing, and is deliberately left that
+// way here: the four-site decision #23's last comment asks for is not made in
+// this ticket.
 //
-// THE CEILING, same as `issue-tracker-prose.test.mjs`: this proves the two
-// clauses AGREE. It cannot prove either is correct — a wrong sentence written
-// into both files agrees with itself and passes here.
+// THE CEILING: this proves the two clauses AGREE. It cannot prove either is
+// correct — a wrong sentence written into both files agrees with itself and
+// passes here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -34,9 +39,13 @@ const SIZING = skill("sizing-a-ticket");
 // either file may hard-wrap its copy at any width, and a rewrap is not drift.
 // Without this the pin refuses a pair whose prose is identical and whose line
 // breaks are not — a wrong refusal, and the one this comparison could newly
-// introduce.
+// introduce. Normalized BEFORE `between` locates the anchors, not after it
+// returns: `between` finds them with `indexOf` on literal text, so a wrap
+// landing mid-anchor would redden the pin on the anchor itself, where no amount
+// of normalizing the slice can help. Scoped to this file rather than pushed
+// into `between`, whose other callers pass anchors chosen against raw layout.
 const clause = (text, from, to, what) =>
-  between(text, from, to, what).split(/\s+/).join(" ");
+  between(text.split(/\s+/).join(" "), from, to, what);
 
 // Bounded at both ends: `between` asserts each anchor is present in each file,
 // so a clause deleted from one side reddens on the missing anchor rather than
@@ -59,15 +68,28 @@ test("both skills state the brief-outranks-body rules in one wording", () => {
   assert.equal(brief(SIZING, "sizing-a-ticket"), brief(NEXT, "next-ticket"));
 });
 
+// Each rewrap asserts it changed something: chained blindly, a fixture whose
+// source sentence was reworded silently stops rewrapping and the test goes on
+// passing against unwrapped prose.
+const rewrap = (text, at, into) => {
+  const out = text.replace(at, into);
+  assert.notEqual(out, text, `the rewrap fixture no longer matches the file at "${at}" — update it`);
+  return out;
+};
+
 test("a rewrapped copy still counts as agreement", () => {
   // The accept case for the normalization above. Feeding the comparison prose
   // it MUST accept is the only thing that pins reflow-safety; a suite of
   // already-agreeing single-line inputs would pass with the normalization
   // deleted.
-  const rewrapped = SIZING.replace(
-    "Not `--json body` (body only,",
-    "Not `--json body`\n  (body   only,",
+  // Two breaks, because they fail differently: one inside the slice, and one
+  // ACROSS the `to` anchor — the second is the case a slice-only normalization
+  // cannot survive, so a fixture that only ever wraps between the anchors
+  // passes with the anchors still wrap-brittle.
+  const rewrapped = rewrap(
+    rewrap(SIZING, "Not `--json body` (body only,", "Not `--json body`\n  (body   only,"),
+    "exit 0 — silent loss).",
+    "exit 0 — silent\n  loss).",
   );
-  assert.notEqual(rewrapped, SIZING, "the rewrap fixture no longer matches the file — update it");
   assert.equal(caveat(rewrapped, "rewrapped sizing-a-ticket"), caveat(NEXT, "next-ticket"));
 });
