@@ -406,11 +406,20 @@ spend classifier and `member-outcomes.mjs` read it.
 tracks the newest generation; a pinned id rots into a superseded one that is
 weaker AND more expensive, because pricing falls with each generation.
 
-**One implementer per wave goes at the alternate tier.** Dispatch it exactly as
-the others but with `subagent_type: "fleet-implementer-alt"`. Pick the ticket
+**One implementer per staged wave goes at the alternate tier — one per phase-0
+staging batch, never one per refill.** Dispatch it exactly as the others but
+with `subagent_type: "fleet-implementer-alt"`. Pick the ticket
 that is most ordinary — never the hardest, never the one whose ticket the rest
 of the run depends on — and do not tell the member it is a control: a member
 that knows it is being measured is not measuring the same thing.
+
+**Count the rate against phase-0 staging, because "wave" is not a dispatch
+unit.** An ordinary refill re-enters phase 1 then 2 for a single slot and starts
+no new wave — the guard below says it outright, "refill is level-triggered, so
+there are no implementer waves" — so a rule counted per refill would put roughly
+half the fleet on the alternate tier. Phase 0 *does* re-run mid-run whenever the
+pool empties, and each of those stagings is a fresh wave that carries its own
+alternate-tier member.
 
 **Do not label it anywhere.** The pairing is a query over
 `docs/metrics/member-outcomes.tsv` — a `session`+`role` carrying more than one
@@ -457,7 +466,13 @@ rows, and **all three passed**, which is the direction opposite the raw split.
 Three is still not a result. **What replaces this argument going forward is the
 within-run pairing above**: one implementer per wave at the alternate tier makes
 tier orthogonal to date by construction, so the question stops depending on
-whichever rows history happened to leave.
+whichever rows history happened to leave. **Orthogonal to date, and to nothing
+else** — the alternate member is picked as the most ordinary ticket in its wave
+and never the hardest, while the top tier absorbs every remaining ticket
+including all of the hardest, so the pairing trades the calendar confound for a
+difficulty one that runs in a known direction. That is why the four covariates
+exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
+reading it as a tier result, never on the raw split.
 
 `minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of
 the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet` (#714, #750).
@@ -528,9 +543,13 @@ header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
 The row's last four fields are the ticket's difficulty, and they are what lets a
-tier comparison condition on the thing that swamps it. `sizing` is phase 0's
-own `light`/`heavy` verdict for this ticket, recorded at claim time; `profile`,
-`loc` and `files` all come from `diff-stats.mjs` over the merged diff. **A value
+tier comparison condition on the thing that swamps it. `sizing` is the
+**member's** own `light`/`heavy` verdict from its phase-2 `sizing-a-ticket`
+run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`);
+`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
+diff. **Phase 0 does not size anything** — it shortlists, phase 1 claims, and
+the sizing run happens inside the member after both, which is why the verdict
+has to travel in the PR body rather than being something you already hold. **A value
 not in hand is left BLANK, never estimated** — blank reads as unknown and drops
 the row from a stratified comparison, while a guess reads as measured and
 poisons one. Blank still means the field is WRITTEN and empty: append all
@@ -729,8 +748,11 @@ number, worktree abs path, branch, and each of these verbatim:
 >
 > Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with
 > `Closes #N` in the body and exactly one release label — `patch`/`minor`/`major`,
-> the *label*, not the branch *type*. Report the PR number and head SHA to the
-> controller, then exit. Never apply `ready-to-merge`, never merge.
+> the *label*, not the branch *type*. **Put your step-6 sizing verdict in the PR
+> body on its own line, `Sizing: light` or `Sizing: heavy`** — the controller
+> records it as a difficulty covariate when it rules your review, and the PR body
+> is the only place it survives your exit. Report the PR number and head SHA to
+> the controller, then exit. Never apply `ready-to-merge`, never merge.
 
 Each rule in the enumerate-and-declare block is load-bearing, for a different
 reason.

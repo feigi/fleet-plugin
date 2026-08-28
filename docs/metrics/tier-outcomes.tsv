@@ -25,10 +25,17 @@
 #                          acceptance criteria unmet, or reintroducing its defect
 # minted_false_claim yes = the diff added a factual claim (comment/doc/test name)
 #                          that measured false, beyond any inherited from the ticket
-# sizing                 = phase 0's light/heavy verdict for this ticket, recorded
-#                          at claim time
-# profile                = diff-stats.mjs profile for the merged diff (docs-only/
-#                          single-file/small/tests-only/production)
+# sizing                 = the member's own light/heavy verdict from its phase-2
+#                          `sizing-a-ticket` run, read off the PR body's
+#                          `Sizing:` line. NOT phase 0's — phase 0 shortlists,
+#                          phase 1 claims, and the sizing run happens after both,
+#                          inside the member.
+# profile                = diff-stats.mjs profile for the merged diff, copied
+#                          verbatim from what it prints (empty/docs/tests-only/
+#                          single-file/small/production). `docs`, never
+#                          "docs-only" — that is the separate `docsOnly` boolean
+#                          on the same object, and two spellings for one stratum
+#                          split the group this column exists to compare.
 # loc                    = lines changed, and files = files touched, both from
 #                          diff-stats.mjs
 #

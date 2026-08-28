@@ -137,3 +137,85 @@ test("SKILL.md's ruling step names all four covariates and says a missing one st
     "the ruling step names the covariates without saying where three of them come from",
   );
 });
+
+test("the documented `profile` value set is exactly what diff-stats.mjs emits", () => {
+  // Restating an enum in prose is how it drifts: the first draft of this header
+  // said `docs-only`, which the script never emits — `docsOnly` is a separate
+  // boolean on the same stats object — and omitted `empty`, which the CLI does
+  // reach on a genuine zero-file PR. Two spellings for one stratum split the
+  // group the column exists to compare, and nothing here noticed, because the
+  // pins above cover the column NAMES and not their values.
+  //
+  // So derive rather than restate. Both halves are guarded: an unguarded
+  // `.match()[0]` at module scope takes the whole file down on a reformat that
+  // changed no behaviour, which is why this lives inside the test and asserts
+  // before it indexes.
+  const src = readFileSync(join(REPO, "skills", "fleet", "scripts", "diff-stats.mjs"), "utf8");
+  const emitted = [...src.matchAll(/^\s*(?:else\s+)?(?:if\s*\([^)]*\)\s*)?profile = "([a-z-]+)";/gm)].map((m) => m[1]);
+  assert.ok(emitted.length >= 5, `diff-stats.mjs profile ladder not found — got ${emitted.length}`);
+
+  // The header is wrapped across comment lines, so normalise before reading the
+  // parenthetical: strip the `# ` gutter, join, drop whitespace inside the list.
+  const flat = HEADER.replace(/^#\s?/gm, "").replace(/\n/g, " ");
+  const hit = /it prints \(([^)]+)\)/.exec(flat);
+  assert.ok(hit, "the header no longer lists the `profile` value set in parentheses");
+  const documented = hit[1].replace(/\s+/g, "").split("/").filter(Boolean);
+
+  assert.deepEqual(
+    [...documented].sort(),
+    [...new Set(emitted)].sort(),
+    "the header's `profile` value set and diff-stats.mjs's ladder disagree",
+  );
+});
+
+test("the header forbids the `docs-only` spelling the script never emits", () => {
+  // The narrow trap, kept separate from the set comparison above: a future edit
+  // could satisfy the set while dropping the warning, and "docs-only" is the
+  // spelling every other paragraph in the repo uses as an English adjective —
+  // which is exactly why it reached this header as a value in the first place.
+  assert.match(HEADER, /never\s*\n?#?\s*"docs-only"/, "the header no longer warns off the `docs-only` spelling");
+});
+
+test("the sizing verdict has a stated collection channel, and it is not phase 0", () => {
+  // The column shipped described as "phase 0's light/heavy verdict ... recorded
+  // at claim time", which is wrong twice — phase 0 shortlists (`## Phase 0 —
+  // shortlist`), phase 1 claims, and the sizing run happens inside the member in
+  // phase 2 — and named no channel at all. With the adjacent rule "a value not in
+  // hand is left BLANK, never estimated", that made the covariate correct-to-omit
+  // on every row forever: documented as the thing a tier comparison must condition
+  // on, and uncollectable.
+  const at = RUN_TEAM.indexOf("**Guard: accumulate per PR");
+  const end = RUN_TEAM.indexOf("**Then record the run's member facts", at);
+  const slice = RUN_TEAM.slice(at, end);
+  // Negative pinned on the ATTRIBUTION, not on one phrasing of it: the first
+  // draft of this test forbade the literal `sizing` is phase 0's and stayed
+  // green under a reworded restatement of the same error.
+  const sizingSentence = /`sizing`[^.]{0,120}/i.exec(slice)?.[0] ?? "";
+  assert.ok(sizingSentence, "the ruling step no longer describes `sizing` at all");
+  assert.doesNotMatch(
+    sizingSentence,
+    /phase 0/i,
+    `the ruling step attributes sizing to phase 0 again — phase 0 shortlists, it does not size: ${sizingSentence}`,
+  );
+  assert.match(
+    sizingSentence,
+    /member/i,
+    "the ruling step no longer says the sizing verdict is the member's",
+  );
+  assert.match(
+    slice,
+    /PR body|Sizing:/,
+    "the ruling step no longer says where the controller reads the sizing verdict from",
+  );
+});
+
+test("the dispatch brief tells the member to emit the Sizing line the ruling step reads", () => {
+  // Both ends or neither: a ruling step that reads `Sizing:` off a PR body no
+  // member was told to write is the same blank column with more words. Pinned
+  // apart from the reader above so dropping either end reds.
+  assert.match(
+    RUN_TEAM,
+    /`Sizing: light` or `Sizing: heavy`/,
+    "the dispatch brief no longer tells the member to put its sizing verdict in the PR body",
+  );
+});

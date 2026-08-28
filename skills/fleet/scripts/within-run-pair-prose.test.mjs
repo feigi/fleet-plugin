@@ -111,3 +111,58 @@ test("the alternate definition differs from the default in MODEL ONLY", () => {
     "the alternate definition names the same model as the default — the pair compares nothing",
   );
 });
+
+test("phase 2 binds the rate to phase-0 staging and excludes refills", () => {
+  // The rate was expressed in a unit the guard below declares nonexistent for
+  // implementers ("refill is level-triggered, so there are no implementer
+  // waves"), and the pin above binds the WORDS, not a countable rule. Measured:
+  // appending either explicit resolution — "one wave per run; mid-run refills do
+  // not start a new wave" and "each refilled slot begins its own wave" — left all
+  // five assertions GREEN, and those two readings differ by roughly an order of
+  // magnitude in how much of the fleet runs at the alternate tier.
+  //
+  // So pin the exclusion, which is the half that disambiguates. Both orders, so
+  // a legitimate rewording survives.
+  const slice = dispatch();
+  assert.match(
+    slice,
+    /never one per refill|no new wave|starts\s+no new wave/i,
+    "phase 2 no longer excludes refills from the rate — the count is ambiguous again",
+  );
+  assert.match(
+    slice,
+    /phase-0 stag|staged wave/i,
+    "phase 2 no longer names phase-0 staging as the unit the rate is counted against",
+  );
+});
+
+// The difficulty caveat lives in the counter-evidence section, past this file's
+// dispatch slice, so it needs its own anchor pair.
+const counterEvidence = () =>
+  section("within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence");
+
+test("the orthogonality claim is scoped — date only, not difficulty", () => {
+  // The claim itself is literally true and narrowly scoped, so this is not a
+  // false-claim pin. It is the caveat that goes missing: the alternate member is
+  // chosen as the most ordinary ticket and never the hardest, while the top tier
+  // absorbs every remaining ticket including all of the hardest. That makes tier
+  // SYSTEMATICALLY correlated with difficulty, in a known direction — a different
+  // hazard from the "difficulty adds noise" the covariates are elsewhere sold as
+  // handling, and the one a reader who trusts "by construction" will skip.
+  const slice = counterEvidence();
+  assert.match(
+    slice,
+    /never the hardest/,
+    "the counter-evidence section no longer says the alternate tier skips the hardest ticket",
+  );
+  assert.match(
+    slice,
+    /difficulty/i,
+    "the orthogonality claim no longer names difficulty as the confound it does NOT remove",
+  );
+  assert.match(
+    slice,
+    /`sizing`\/`profile`\/`loc`\/`files`|condition a pair comparison/i,
+    "the caveat no longer routes the reader to the covariates before reading a pair",
+  );
+});
