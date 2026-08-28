@@ -355,6 +355,127 @@ test("a commit that exists nowhere else blocks, and `git cherry` says so", (t) =
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// #387: a `die` firing after a `block` used to discard every accumulated
+// blocker whole — exit 2, prose on stderr, and no JSON receipt on stdout at
+// all, so a caller that already had a real finding computed got none of it.
+// Drive exactly that shape: the ahead check blocks first (one real finding
+// accumulated into `$blockers`), then `git cherry` itself fails, which is the
+// die this fix reaches. The shim is matched on argv, never on content — `git
+// cherry origin/main ...` is the only call this script makes whose first two
+// words are "cherry origin/main".
+test("a die after a block still emits the accumulated blockers, not a bare exit 2 (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const { code, json, stderr } = release(r, c);
+  const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
+
+  assert.equal(code, 2, "still a die, not the exit 1 a plain blocked verdict uses");
+  assert.notEqual(json, null, "a receipt is still printed — die used to exit before any printf");
+  assert.equal(json.released, false);
+  assert.equal(json.label, null, "the label is read after every one of these dies can fire, so it cannot be known here");
+  assert.equal(json.applied, true, "the flag value survives, even though nothing was attempted");
+  // `die` has its OWN inlined printf, not shared with `halt`, the blocked
+  // checkpoint or the success receipt, so nothing else in this file pins these
+  // two fields for THIS emitter: hardcoding either here passed the whole suite.
+  // `git worktree list --porcelain` reports the realpath, which on macOS is not
+  // the /var symlink the fixture built.
+  assert.equal(json.branch, c.branch, "the receipt names the claim's branch, not a literal from a copy-paste");
+  assert.equal(json.worktree, realpathSync(c.wt), "and the worktree path git listed, likewise");
+  assert.equal(json.blockers.length, 2, `the ahead finding and the die's own cause, both: ${json.blockers}`);
+  assert.match(json.blockers[0], /^1 commit\(s\) ahead of origin\/main$/, "the finding computed before the die is not dropped");
+  assert.equal(json.blockers[1], cause, "and the die's own cause is appended last, exactly where `block` would have put it");
+  assert.match(stderr, new RegExp(cause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "stderr prose is unchanged");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// The same die-after-block path with `--apply` withheld. Without it nothing in
+// the suite discriminates the receipt's `applied` field from a hardcoded
+// `true`: this path is reached exactly once, and `release` defaults the flag
+// on, so a die printf that ignored `$apply` entirely stayed green across all
+// 98 cases in this file.
+test("the die receipt's applied field is the flag, not a constant (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const { code, json } = release(r, c, { apply: false });
+
+  assert.equal(code, 2, "a dry run still dies here — the scan is what failed");
+  assert.notEqual(json, null, "and still prints its receipt");
+  assert.equal(json.applied, false, "the flag is reported as passed, not as the default the other case happens to use");
+  assert.equal(json.blockers.length, 2, `the same two findings a dry run computes: ${json.blockers}`);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// A receipt printf that cannot WRITE is a second failure mode, separate from
+// #387's: `set -e` used to kill `die` on it before the function reached its own
+// `printf … >&2`, so the die reason vanished and the script exited 1 — a code
+// this script DEFINES as `NOT released — nothing was touched`, fabricated out of
+// a write error. Measured on /bin/sh (bash 3.2.57), /bin/dash and bash 5.3.15;
+// only zsh survived it. The `||` arm closes it, but incidentally, so this pins
+// it directly: closing fd 1 is the portable way to make the write fail with a
+// healthy `jstr` (`stdio: "ignore"` opens /dev/null, whose writes succeed).
+// Pinned on the prose and the exit code together — here the code IS the defect,
+// unlike the inherited-`blockers` cases below where it is platform-asymmetric.
+test("a receipt that cannot be written still leaves the die reason and exit 2 (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const res = spawnSync("sh", ["-c", 'exec >&-; exec sh "$@"', "sh", SCRIPT, ...c.args, "--apply"], {
+    cwd: r.w,
+    env: r.env(),
+    encoding: "utf8",
+  });
+
+  const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
+  assert.equal(res.status, 2, "not the 1 this script uses for `NOT released`, which no write error may fabricate");
+  assert.ok(
+    res.stderr.includes(`release-ticket: ${cause}`),
+    // Pinned WITH the script's own `$NAME:` prefix, not on the bare cause. bash
+    // 3.2 as /bin/sh flushes the failed stdout receipt to stderr, and that
+    // receipt embeds this same cause inside its `"blockers":[…]` — so a bare
+    // `includes(cause)` is satisfied by the leaked JSON and stays green with
+    // `die`'s own printf deleted. Measured: that mutant passes under macOS
+    // /bin/sh unpinned, and fails under /bin/sh, dash and zsh once prefixed.
+    `the die reason survives the failed write in the script's own voice: ${JSON.stringify(res.stderr)}`,
+  );
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+// `die`'s guard is `[ -n "${blockers:-}" ]`, and `set -u` is satisfied by an
+// INHERITED value just as well as by one the run computed. An ambient variable
+// of that name therefore took the guard true on an early die — before `$issue`
+// exists — and the receipt printf aborted on `issue: unbound variable`, losing
+// the very diagnostic the die is there to print. Any non-empty value does it:
+// `[ -n ]` tests non-emptiness, not JSON validity, so `[]` is as fatal as
+// `[x]`. The pin is on the PROSE and not on the exit code, because the code the
+// defect produced is platform-asymmetric — bash-as-/bin/sh gave 1, dash gave 2 —
+// and a code pin measured on one of them says nothing about CI running the
+// other.
+for (const inherited of ["[]", "[x]", '"x",']) {
+  test(`an inherited blockers=${inherited} does not silence an early die (#387)`, () => {
+    const res = spawnSync("sh", [SCRIPT], {
+      env: { ...process.env, blockers: inherited },
+      encoding: "utf8",
+    });
+    assert.match(res.stderr, /release-ticket: usage: release-ticket\.sh/, "the usage diagnostic still prints");
+    assert.doesNotMatch(res.stderr, /unbound variable|parameter not set/, "and the die is not itself killed by set -u");
+    assert.equal(res.stdout, "", "no half-written receipt: this die has nothing accumulated to report");
+  });
+}
+
+// The control this fix must not break: a die with nothing accumulated stays
+// exactly as it was — no `$blockers` reference reached at all, so the check is
+// exercised by the existing "an unreachable remote" and ".git file" cases below
+// (each asserts `json === null` for a die on a claim with no blocker computed
+// yet), not repeated here.
+
 test("a dirty worktree blocks on its own", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");

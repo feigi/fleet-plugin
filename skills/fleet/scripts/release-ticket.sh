@@ -45,7 +45,62 @@ set -eu
 export LC_ALL=C
 
 NAME=release-ticket
-die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
+
+# Assigned HERE, above `die`, and not next to `block` where the accumulator is
+# otherwise used: `die`'s guard below reads `$blockers`, and `set -u` is
+# satisfied by an INHERITED value just as well as by one this run computed. An
+# ambient environment variable named `blockers` therefore took the guard true on
+# every early die — before `$issue` is assigned at all — and the receipt printf
+# then died on `issue: unbound variable`, losing the diagnostic the die exists
+# to print. A plain assignment overrides whatever was inherited, so the guard
+# once again means "this run accumulated something". The exit code that mistake
+# produced is platform-asymmetric (bash-as-/bin/sh gives 1, dash gives 2), which
+# is why the pin in the tests is on the prose and not on a number.
+blockers=""
+
+# A `die` firing after a `block` used to discard every accumulated blocker —
+# exit 2, prose on stderr, and no JSON receipt at all, so a caller that already
+# had real findings computed got none of them. The guard is on non-empty rather
+# than on existence, which keeps every early die — before json.sh is sourced
+# below, before anything is accumulated — byte-identical to today: no
+# `$blockers` reference is even reached.
+#
+# Approach 2 (#387): print the same receipt shape the blocked checkpoint and
+# `halt` already use, with `$1` appended to `$blockers` exactly as `block`
+# would have recorded it — not a new schema, and not a second write. Approach 1
+# (emit the receipt as soon as blockers goes non-empty, before whatever can
+# die) was ruled out: it lets a run print a receipt and then keep going and
+# fail anyway, which is a run with two writes or a receipt describing a state
+# the run then left. `label` is `null` here as it is at that checkpoint — the
+# label is read after every one of these dies can fire, so this receipt cannot
+# claim to know it. `$blockers` already ends in a trailing comma (`block`'s own
+# accumulator does that), so splicing the newly-escaped `$1` straight after it
+# needs no separator of its own — which is done in the ARGUMENT, so this format
+# string stays byte-identical to the blocked checkpoint's rather than growing a
+# second blockers slot only this one caller uses.
+#
+# The `||` arm is the receipt's only voice. `|| die` is what `block` and `halt`
+# use and is unavailable here — it would recurse — so a bare `&&` chain left BOTH
+# its failures mute: a failed `jstr`, and a failed write. The second is the worse
+# one and is not a silent degrade at all: with the chain as the last command
+# before `fi`, a receipt printf that cannot write (closed fd, EIO, a full disk on
+# a redirect) takes `set -e` and kills the function before its own stderr prose
+# below, so the die reason vanishes and the script exits 1 — this script's
+# `NOT released` verdict, fabricated out of a write error. Measured on /bin/sh
+# (bash 3.2), /bin/dash and bash 5.3; zsh alone survived it. The arm ends the
+# list so nothing is left to trip, and it names neither failure specifically,
+# because `a && b || c` fires `c` for both and this file does not report a cause
+# it did not measure.
+die() {
+  if [ -n "${blockers:-}" ]; then
+    die_j=$(jstr "$1") &&
+      printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
+        "$issue" "$branch_j" "$branch_rw" "$wt_j" "$wt_rw" "$apply" "${blockers}\"$die_j\"" ||
+      printf '%s: no JSON receipt for #%s — the escape or the write failed\n' "$NAME" "$issue" >&2
+  fi
+  printf '%s: %s\n' "$NAME" "$1" >&2
+  exit 2
+}
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
@@ -354,7 +409,6 @@ halt() {
   exit 2
 }
 
-blockers=""
 # Assigned first, exactly as `halt` does above: a `$(jstr …)` spliced straight
 # into the accumulator is not a simple command, so `set -e` reads only the
 # assignment and a failed escape would abort at exit 1 — this script's blocked
