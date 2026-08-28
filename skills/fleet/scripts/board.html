@@ -87,6 +87,51 @@ function spendRows(host, items, { label, value, pct, highlight }) {
   }
 }
 
+// Which of the spend panel's outcomes the tri-state `spend` contract lands on,
+// and the strings that outcome needs — as a value, with no DOM touched. The
+// branching lives here rather than in renderSpend below because this page has no
+// other test seam: it is served as one self-contained file, so a test reaches
+// this decision only by lifting it out of the source and calling it directly,
+// which spend-view.test.mjs does. That gap is not academic — the falsy-cacheWrite
+// case below shipped broken and its fix shipped untested, because until this
+// split there was nothing a test could call (#371).
+//
+// `kind` is the tag the renderer switches on; "hidden" appends nothing at all.
+// Both text-only outcomes carry the same `text` field because both render as one
+// `spend-wrap` div, differing only in wording.
+function spendView(sp) {
+  if (!sp) return { kind: "hidden" }; // genuinely nothing yet — normal at run start
+  // A read failure is a bug the operator has to act on, and it used to look
+  // exactly like an idle run. stderr is not a channel here: the board is
+  // launched backgrounded and the operator is watching this page, not a log.
+  if (sp.error) return { kind: "error", text: "spend unavailable: " + sp.error };
+  // Zeroes would read as "this run was free", a worse lie than absence — but a
+  // skipped count is not a zero, and hiding it here re-created the exact
+  // conflation this panel exists to remove: "3 of 4 transcripts unreadable"
+  // rendered identically to "nothing yet". stderr does not cover it (see
+  // above), so the note goes out on its own, without the zeroed two-column body.
+  if (!sp.totals || !sp.totals.cacheWrite) {
+    return sp.skipped
+      ? { kind: "note", text: `${sp.skipped} transcripts skipped; no spend recorded yet` }
+      : { kind: "hidden" };
+  }
+  return {
+    kind: "panel",
+    lede: `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`,
+    note: (sp.skipped ? `${sp.skipped} transcripts skipped; ` : "") + "ranked on cache-creation; tool split is attributed, not billed",
+    // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
+    // number: only a turn FOLLOWING a tool result can be charged to a tool, and an
+    // agent's first turn — usually its single largest write — follows nothing. Say
+    // what fraction is covered, so the two columns are not read as one base.
+    // `!= null` rather than truthiness, so a genuine 0% still says so.
+    toolHeading: sp.attributedPct != null
+      ? `by tool — ${sp.attributedPct.toFixed(0)}% of cache-write attributed`
+      : "by tool",
+    roles: sp.roles || [],
+    tools: (sp.tools || []).slice(0, 8),
+  };
+}
+
 // Two views of one run: WHO spent it (role) and WHAT it went on (tool). The two
 // percentage columns do NOT share a base — role pct is over total cache-write,
 // tool pct is over the attributable subset only (turns following a tool result).
@@ -94,51 +139,29 @@ function spendRows(host, items, { label, value, pct, highlight }) {
 function renderSpend(sp) {
   const host = document.getElementById("spend");
   host.innerHTML = "";
-  if (!sp) return; // genuinely nothing yet — normal at run start
-  // A read failure is a bug the operator has to act on, and it used to look
-  // exactly like an idle run. stderr is not a channel here: the board is
-  // launched backgrounded and the operator is watching this page, not a log.
-  if (sp.error) {
-    host.append(el("div", "spend-wrap", "spend unavailable: " + sp.error));
-    return;
-  }
-  // Zeroes would read as "this run was free", a worse lie than absence — but a
-  // skipped count is not a zero, and hiding it here re-created the exact
-  // conflation this panel exists to remove: "3 of 4 transcripts unreadable"
-  // rendered identically to "nothing yet". stderr does not cover it (see
-  // above), so the note goes out on its own, without the zeroed two-column body.
-  if (!sp.totals || !sp.totals.cacheWrite) {
-    if (sp.skipped) host.append(el("div", "spend-wrap", `${sp.skipped} transcripts skipped; no spend recorded yet`));
-    return;
-  }
+  const v = spendView(sp);
+  if (v.kind === "hidden") return;
+  if (v.kind !== "panel") { host.append(el("div", "spend-wrap", v.text)); return; }
 
   const wrap = el("div", "spend-wrap");
   const hd = el("div", "spend-hd");
   hd.append(el("h2", null, "spend"));
-  hd.append(el("span", "lede",
-    `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`));
-  hd.append(el("span", "note",
-    (sp.skipped ? `${sp.skipped} transcripts skipped; ` : "") + "ranked on cache-creation; tool split is attributed, not billed"));
+  hd.append(el("span", "lede", v.lede));
+  hd.append(el("span", "note", v.note));
   wrap.append(hd);
 
   const cols = el("div", "spend-cols");
   const byRole = el("div");
   byRole.append(el("h3", null, "by role"));
-  spendRows(byRole, sp.roles || [], {
+  spendRows(byRole, v.roles, {
     label: (r) => `${r.role} ×${r.agents}`,
     value: (r) => k(r.cacheWrite),
     pct: (r) => r.pct,
     highlight: (r) => r.role === "reviewer" || r.role === "specialist",
   });
   const byTool = el("div");
-  // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
-  // number: only a turn FOLLOWING a tool result can be charged to a tool, and an
-  // agent's first turn — usually its single largest write — follows nothing. Say
-  // what fraction is covered, so the two columns are not read as one base.
-  byTool.append(el("h3", null, sp.attributedPct != null
-    ? `by tool — ${sp.attributedPct.toFixed(0)}% of cache-write attributed`
-    : "by tool"));
-  spendRows(byTool, (sp.tools || []).slice(0, 8), {
+  byTool.append(el("h3", null, v.toolHeading));
+  spendRows(byTool, v.tools, {
     label: (t) => `${t.tool} ×${t.calls}`,
     value: (t) => k(t.cacheWrite),
     pct: (t) => t.pct,
