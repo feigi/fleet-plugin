@@ -238,8 +238,29 @@ set -f
 # through "." here gives it the same expansion, the same test-file shape, and
 # the same node_modules prune as every other invocation. (#97)
 [ \$# -gt 0 ] || set -- .
+# A flag counts toward \$#, so an argv of flags alone clears the bare-form
+# default and then contributes nothing for the loop to expand: argv reached
+# \`exec node --test\` holding only flags, which is node's own discovery and the
+# same vacuous pass the bare-form default exists to refuse. \$operand records
+# whether any argument named something to run, so the flags-only refusal can
+# tell that argv from a bare one, which the bare-form default has already
+# turned into ".". Assigned rather than assumed empty, because an exported
+# \$operand in the caller's environment would otherwise disarm the refusal.
+# Refusing rather than defaulting: prepending "." ahead of node's own flags
+# reorders argv, which needs its own measurement, and no briefed workflow
+# passes flags alone. (#352)
+operand=
 for arg do
   shift
+  # A flag is the only shape that names nothing to run: a directory expands, an
+  # existing file passes through escaped, a quoted glob is node's to expand, and
+  # a typo is refused outright. Existence is asked first so this classification
+  # agrees with the branch that consumes the argument, which tests \`-d\` and
+  # \`-e\` before it reads anything as a flag. No measured input separates the
+  # two answers: a dash-spelled path is refused whatever this says — by find,
+  # which reads it as an option, or by node, which does the same — so the term
+  # buys agreement, not a working invocation.
+  case "\$arg" in -*) [ -e "\$arg" ] && operand=1 ;; *) operand=1 ;; esac
   if [ -d "\$arg" ]; then
     # Zero matches must refuse. Appending nothing does not run nothing — it
     # leaves argv empty, and bare \`node --test\` then discovers the whole
@@ -457,6 +478,12 @@ for arg do
     set -- "\$@" "\$arg"
   fi
 done
+# Argv holding no path is what node answers with its own discovery, and that is
+# the vacuous pass this runner refuses everywhere else — a zero-match expansion,
+# a path that does not exist, and an underivable test command all refuse rather
+# than guess. POSIX's \`--\` is refused by the same rule: it reaches the flag
+# pass-through and is no more a path than a flag is.
+[ -n "\$operand" ] || { printf "agent-test: no test file or directory in the arguments — refusing rather than falling through to node's own discovery\n" >&2; exit 1; }
 SH
   fi
 

@@ -753,6 +753,39 @@ test("runner: a node --test flag reaches node instead of being read as a path", 
   assert.doesNotMatch(typo.stderr, /agent-test:/, typo.stdout + typo.stderr);
 });
 
+// #352: a flag counts toward `$#`, so an argv of flags alone cleared the
+// bare-form default, contributed no path operand, and reached node holding
+// only flags. That is node's own default discovery — which does not recognise
+// the `.spec.` form — so this fixture reported zero tests run at exit 0, the
+// vacuous pass this runner refuses everywhere else. It refuses here too rather
+// than defaulting: prepending the default AHEAD of node's own flags reorders
+// argv, and no briefed workflow passes flags alone.
+//
+// `--` is in the list because POSIX's end-of-options marker reaches the same
+// pass-through arm as a flag, and is no more a path than one.
+//
+// Both directions, because a suite that only feeds a new refusal invalid input
+// pins neither: the ACCEPT case below rides the same flag alongside a real
+// operand, on the same fixture, so a refusal that swallowed the flag
+// pass-through would be red here rather than invisible. The bare form — the
+// other thing this guard could wrongly refuse — is pinned by the `.spec.`
+// cases below.
+//
+// The fixture is the issue's own repro, and it is what discriminates: under
+// node's discovery a `.spec.` file is not a test, so the pre-fix runner exited
+// 0. A `.test.mjs` fixture would have run green both ways and pinned nothing.
+test("runner: an argv of flags alone refuses instead of reaching node's own discovery", () => {
+  const a = apply({ "t/a.spec.mjs": PASSES });
+  for (const argv of [["--test-concurrency=1"], ["--"], ["--test-only", "--test-reporter=tap"]]) {
+    const r = a.run(...argv);
+    assert.notEqual(r.status, 0, `${argv.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /agent-test: no test file or directory/, argv.join(" "));
+  }
+  const ok = a.run("--test-concurrency=1", "t/a.spec.mjs");
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
 // The deliberately preserved escape hatch: `set -f` above stops the *shell*
 // from touching this, so a literal `*` reaches the runner exactly as the
 // glob-detection guard requires — spawnSync never invokes a shell, so this
