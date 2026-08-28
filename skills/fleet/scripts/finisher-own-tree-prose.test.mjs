@@ -29,23 +29,28 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team"
 // the same duty as verifying it by reading the diff, and duty 2 is where the
 // finisher already reads. Anchored on the two duties' own opening text, so a
 // renumber or a move out of the duty list reds rather than passing vacuously.
+const DUTY1_START = "1. **Audit the worktree**";
 const DUTY2_START = "2. **Confirm every deferral";
 const DUTY2_END = "3. Add `ready-to-merge`";
 
-function duty2() {
-  const at = RUN_TEAM.indexOf(DUTY2_START);
-  assert.notEqual(at, -1, `finisher duty 2 opener ('${DUTY2_START}') moved — update this test`);
-  const end = RUN_TEAM.indexOf(DUTY2_END, at);
-  assert.notEqual(end, -1, `finisher duty 3 opener ('${DUTY2_END}') moved — update this test`);
-  return RUN_TEAM.slice(at, end);
-}
-
 // Markdown hard-wraps at ~80 columns and this text is a list continuation, so
 // every phrase can split across a line with leading indent re-injected at the
-// wrap point. Flattening makes the wrap invisible to a phrase match.
-function duty2Text() {
-  return duty2().replace(/\n[ \t]*/g, " ");
+// wrap point. Flattening makes the wrap invisible to a phrase match — so a
+// pure rewrap, words untouched, cannot red a pin here. Every match in this
+// file goes through it; a raw-RUN_TEAM assertion is reflow-brittle and reds
+// with a message implying the prose was weakened when nothing was.
+const flat = (s) => s.replace(/\n[ \t]*/g, " ");
+
+function between(start, end) {
+  const at = RUN_TEAM.indexOf(start);
+  assert.notEqual(at, -1, `finisher duty opener ('${start}') moved — update this test`);
+  const to = RUN_TEAM.indexOf(end, at);
+  assert.notEqual(to, -1, `finisher duty opener ('${end}') moved — update this test`);
+  return flat(RUN_TEAM.slice(at, to));
 }
+
+const duty1Text = () => between(DUTY1_START, DUTY2_START);
+const duty2Text = () => between(DUTY2_START, DUTY2_END);
 
 test("the mutation gate runs in a worktree the finisher adds itself, at its dispatch pin", () => {
   const text = duty2Text();
@@ -70,10 +75,25 @@ test("the mutation gate runs in a worktree the finisher adds itself, at its disp
   // alone is not a unique path: a PR with a second finisher collides, and
   // `worktree add` on an occupied path fails closed into a halt with a purely
   // mechanical cause.
+  //
+  // Read the path OFF the add and require the remove to name it back. The
+  // token appears twice, so a bare match on the scoping is satisfied by
+  // either occurrence alone: strip it from just one command and add/remove
+  // silently target different paths, which is undetectable in both
+  // directions. Mismatched, the remove either refuses (rc 128, tree leaked)
+  // or succeeds against a differently-scoped path and takes a sibling
+  // finisher's tree with it.
+  const added = text.match(/git worktree add --detach ([^`]*?) <your dispatch pin>/);
+  assert.ok(added, "no `git worktree add --detach <path> <your dispatch pin>` left to read a path out of");
+  assert.match(
+    added[1],
+    /^<scratch>\/pr<N>\/finish-<your member name>$/,
+    "the throwaway tree's path no longer carries the member name — the scratch root is shared, so two finishers on one PR collide on it",
+  );
   assert.match(
     text,
-    /<scratch>\/pr<N>\/finish-<your member name>/,
-    "the throwaway tree's path no longer carries the member name — the scratch root is shared, so two finishers on one PR collide on it",
+    new RegExp(`git worktree remove --force ${added[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    "the remove names a different path than the add — either the remove refuses and the tree leaks, or it removes a differently-scoped tree that is not this finisher's",
   );
 });
 
@@ -145,6 +165,15 @@ test("independent re-verification survives — the gate still mutates and runs t
     /<testCmd>/,
     "the gate no longer runs the suite itself — reading the fix-applier's recorded result is the option this ticket's ruling rejected",
   );
+  // A placeholder nobody substitutes is not a gate. `<testCmd>` reaches the
+  // finisher only through the controller's prompt — there is no fleet-finisher
+  // agent definition to carry a default — and the runbook's pass-list named
+  // the workflow and the fix-applier only, so the gate shipped unenforceable.
+  assert.match(
+    duty1Text(),
+    /Give it `<testCmd>` too[^.]*duty 2's mutation gate runs it/,
+    "the controller is no longer told to hand the finisher a `<testCmd>` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
+  );
 });
 
 test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clipped", () => {
@@ -155,7 +184,7 @@ test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clippe
   // two-cause block is already owned by finisher-pin-race-prose.test.mjs — not
   // re-pinned here.)
   assert.match(
-    RUN_TEAM,
+    duty1Text(),
     /Dirty or diverged halts the finisher \*here\*, before the label/,
     "duty 1's dirty-or-diverged halt no longer reads as before — check it was not weakened while giving the gate its own tree",
   );

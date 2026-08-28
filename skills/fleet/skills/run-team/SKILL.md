@@ -1103,7 +1103,8 @@ site's reason rather than copying a shared one.
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
-workflow and to the fix-applier so both gates run one command. Omit it from the
+workflow, to the fix-applier, and to the finisher — whose duty-2 mutation gate
+runs it too — so every gate runs one command. Omit it from the
 workflow args and `review-pr.js` now DERIVES it from the repo under review
 (#142) instead of defaulting to a fixed string — refusing outright if it
 can't; the fix-applier has no such fallback, so substituting `<testCmd>` with
@@ -1280,7 +1281,10 @@ a minute apart showed *different* mutants, so a member's report and any single
    harmless and labels anyway has substituted the rule's purpose for the rule,
    and you find out at merge time. **Give it the two-cause block below,
    verbatim** — a bare SHA mismatch names no cause, and the halt report needs
-   one.
+   one. **Give it `<testCmd>` too** — the same string you passed the workflow
+   and the fix-applier — because duty 2's mutation gate runs it and nothing
+   else hands the finisher one; substituted with nothing it leaves that gate
+   no command at all.
 2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
    the merge.** The test is a durable home, not a tracker number: a tracker
    issue and a committed in-tree comment both qualify, and for a finding whose
