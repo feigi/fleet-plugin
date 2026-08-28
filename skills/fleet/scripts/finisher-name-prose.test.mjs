@@ -4,14 +4,16 @@
 // written down nowhere (#326).
 //
 // The fix-applier's own presence in the same paragraph is pinned separately, in
-// review-path-default.test.mjs at the site that dispatches it. These are not
-// duplicates: that one guards one name against deletion, these guard the list
-// against disagreeing with the module that reads it.
+// review-path-default.test.mjs by "the member-naming rule still names the
+// fix-applier". These are not duplicates: that one guards one name against
+// deletion, these guard the list against disagreeing with the module that
+// reads it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { classifyRole } from "./compute-spend.mjs";
+import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
@@ -21,22 +23,25 @@ const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 // next editor to work around it.
 const flat = (s) => s.replace(/\s+/g, " ");
 
-const SKILL = flat(read("skills", "fleet", "skills", "run-team", "SKILL.md"));
-const LIFECYCLE = flat(read("skills", "fleet", "skills", "run-team", "references", "member-lifecycle.md"));
+// Read RAW, not flattened: the slice below ends at the blank line that closes
+// the paragraph, and flattening collapses it away. Flattening happens after.
+const SKILL = read("skills", "fleet", "skills", "run-team", "SKILL.md");
+const LIFECYCLE = read("skills", "fleet", "skills", "run-team", "references", "member-lifecycle.md");
 const SPEND = flat(read("skills", "fleet", "scripts", "compute-spend.mjs"));
 
 const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finisher-pr-<pr#>", "merge-bot-<wave#>"];
 
-// Sliced to the naming SENTENCE, never file-wide: run-team mentions the finisher
-// in its narrative dozens of times, and any of those hits would satisfy a
-// file-wide match, leaving this list free to lose the name with the pin green.
-function namingSentence(doc, label) {
-  const at = doc.indexOf("Names follow");
-  assert.notEqual(at, -1, `${label}: the naming list's lead-in moved — update this test`);
-  const end = doc.indexOf(".", at);
-  assert.notEqual(end, -1, `${label}: the naming list's sentence never ends — update this test`);
-  return doc.slice(at, end);
-}
+// Sliced to the naming PARAGRAPH, never file-wide: run-team mentions the
+// finisher in its narrative dozens of times, and any of those hits would
+// satisfy a file-wide match, leaving this list free to lose the name with the
+// pin green. The paragraph, not the sentence: ending the slice at the first "."
+// truncates on any inner period — an abbreviation, or the
+// references/member-lifecycle.md pointer this very paragraph already carries —
+// which reds the pin and reports every name as removed while none was. A blank
+// line outlives a rewrap the way a sentence boundary does not. `between` is the
+// shared two-ended slicer the rest of this directory already uses, and it
+// carries the "update this test" guard for either anchor moving.
+const namingSentence = (doc, label) => flat(between(doc, "Names follow", "\n\n", label));
 
 test("both member-naming lists name every member, the finisher included", () => {
   // Both, not just the runbook's: SKILL.md's list ends by pointing at
@@ -69,9 +74,13 @@ test("every name compute-spend calls stable-because-run-team-fixes-it is one run
   const cited = [...m[1].matchAll(/`([a-z-]+)-<n>`/g)].map((x) => x[1]);
   assert.ok(cited.length > 0, `no member names parsed out of the comment's list: ${m[1]}`);
   assert.ok(cited.includes("finisher-pr"), "the finisher is missing from the list the comment claims run-team fixes");
+  // The naming list, not the whole file — which is what the comment above says
+  // this checks. A name cited here reaches SKILL.md's narrative without ever
+  // being added to the list, and a file-wide haystack scores that as a hit.
+  const list = namingSentence(SKILL, "run-team/SKILL.md");
   for (const role of cited) {
     assert.match(
-      SKILL,
+      list,
       new RegExp("`" + role + "-<(?:issue|pr|wave)#>`"),
       `compute-spend.mjs claims run-team fixes \`${role}-<n>\`, but run-team's naming list never mentions it`,
     );
@@ -80,21 +89,19 @@ test("every name compute-spend calls stable-because-run-team-fixes-it is one run
 
 test("classifyRole still accepts every finisher spelling the record contains", () => {
   // The other half. Documenting one canonical name must not narrow what the
-  // classifier accepts: all four of these were really dispatched and are in
+  // classifier accepts: all five of these were really dispatched and are in
   // docs/metrics/member-outcomes.tsv, and a member that stops classifying as a
   // finisher books as "other" and moves the spend headline for a run already
   // recorded. The descriptions deliberately carry no finisher word — the
-  // agentType has to carry the match, or this passes for the wrong reason.
-  for (const type of ["finisher-pr-945", "finish-pr-751", "finisher-933", "finish-315"]) {
+  // agentType has to carry the match, or this passes for the wrong reason. The
+  // last is a retry suffix: the same member's second attempt, not a different
+  // name, and the record carries it under that exact agentType. It is the only
+  // one of the five that reds when the match is anchored to a trailing number.
+  for (const type of ["finisher-pr-945", "finish-pr-751", "finisher-933", "finish-315", "finisher-pr-958-b"]) {
     assert.equal(
       classifyRole({ spawnDepth: 0, agentType: type, description: "Apply reviewer findings" }),
       "finisher",
       `\`${type}\` is a spelling the record contains and must stay classifiable`,
     );
   }
-  // A retry suffix is the same member's second attempt, not a different name.
-  assert.equal(
-    classifyRole({ spawnDepth: 0, agentType: "finisher-pr-958-b", description: "Apply reviewer findings" }),
-    "finisher",
-  );
 });

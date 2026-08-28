@@ -127,16 +127,17 @@ test("depth-0 fleet roles come off the controller's naming convention", () => {
   assert.equal(classifyRole({ spawnDepth: 0, description: "something else entirely" }), "other");
 });
 
-test("finish-<n> agentType classifies as finisher — the controller's actual naming convention", () => {
-  // run-team dispatches finishers as agentType `finish-<n>`, not the literal
-  // words "finish pr" or "finisher". The description deliberately does NOT
-  // start with `finish-`: it is the agentType that has to carry the match, so
-  // an implementation keying on `description` alone fails here.
+test("finish-<n> agentType classifies as finisher — a historical spelling that must stay classifiable", () => {
+  // `finisher-pr-<n>` is the canonical finisher name (#326); `finish-<n>` is a
+  // spelling earlier runs actually dispatched and recorded runs still have to
+  // classify. The match has to come off the agentType, not the literal words
+  // "finish pr" or "finisher": the description deliberately does NOT start with
+  // `finish-`, so an implementation keying on `description` alone fails here.
   assert.equal(classifyRole({ agentType: "finish-436", description: "Apply reviewer findings for PR 436" }), "finisher");
   // ...and the `^` has to be a real anchor: `finish-` mid-string is not a
   // finisher. Without this, dropping the anchor leaves the case above green.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Rework the finish-label docs" }), "other");
-  // A two-ticket finisher is dispatched as `finish-<n>-<m>`, so the pattern has
+  // A two-ticket finisher was dispatched as `finish-<n>-<m>`, so the pattern has
   // to match on the prefix rather than on a `finish-<digits>` shape. Its
   // description carries no finisher word either, for the same reason as above.
   assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-424-425", description: "Apply reviewer findings for PR 424 and 425" }), "finisher");
