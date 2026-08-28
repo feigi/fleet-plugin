@@ -102,7 +102,17 @@ function mergedGoneBranchWithWorktree(w, name, msg, wt = join(w, ".worktrees", n
  * `rm -rf /scratch`). The registry entry itself survives, so any
  * listed-vs-registered count stays balanced.
  */
-function relocate(w, wt, dest) {
+/**
+ * The `<git-common-dir>/worktrees/<id>` directory git keeps `$wt`'s admin
+ * files in — its `gitdir` pointer, its `HEAD`, and the sequencer state of any
+ * operation running inside it.
+ *
+ * Found by reading the `gitdir` pointers rather than by guessing the id from
+ * the directory name: git derives that id from the basename and disambiguates
+ * collisions, so a fixture that spelled it by hand would silently address the
+ * wrong entry the first time two worktrees shared a basename.
+ */
+function adminEntry(w, wt) {
   const admin = join(w, ".git", "worktrees");
   // realpathSync: git canonicalises what it writes into `gitdir`, and on macOS
   // a tmpdir path reaches this suite as /var/... while git recorded
@@ -112,7 +122,11 @@ function relocate(w, wt, dest) {
     (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === target,
   );
   assert.ok(name, `fixture: no registry entry points at ${wt}`);
-  writeFileSync(join(admin, name, "gitdir"), `${dest}/.git\n`);
+  return join(admin, name);
+}
+
+function relocate(w, wt, dest) {
+  writeFileSync(join(adminEntry(w, wt), "gitdir"), `${dest}/.git\n`);
   rmSync(wt, { recursive: true, force: true });
   return dest;
 }
@@ -1450,4 +1464,309 @@ test("a detached worktree whose HEAD is merged is removed, not walked past (#381
   // The registration goes with it, or the in-flight probe still reads the
   // ticket as taken — the whole cost this ticket exists to stop.
   assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
+});
+
+test("a DIRTY detached worktree is kept with a reason, never removed (#381)", (t) => {
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted, exists nowhere else\n");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(join(wt, "scratch.txt")), true, "the uncommitted file must survive the run");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "there is no branch to name, and `` would claim there were one");
+  assert.equal(json.kept[0].reason, `dirty worktree ${wt}`);
+  assert.ok(stderr.includes("KEEP"), "silently skipping it is the defect, not the fix");
+});
+
+test("a detached worktree holding commits that exist nowhere else is kept (#381)", (t) => {
+  // The safety this sweep turns on. `git cherry`, not `merge-base
+  // --is-ancestor`: the branch this worktree came from was rebased before it
+  // merged, so a tip that is fully upstream is patch-equivalent rather than an
+  // ancestor, and ancestry would keep every one of them. Here the commit
+  // really is unique, and the probe has to say so.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const sole = commit(wt, "sole copy, nowhere else");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `worktree ${wt} holds commits that exist nowhere else`);
+  assert.equal(git(wt, "rev-parse", "HEAD"), sole, "the commit is still reachable from the worktree");
+});
+
+test("a detached worktree whose HEAD git cannot resolve is kept, never swept (#381, #179)", (t) => {
+  // An absent `branch` line is what this sweep enumerates on, and a worktree
+  // whose admin `HEAD` is unreadable has none either — git reports the null
+  // object id instead (measured on four corruption routes for #179). Nothing
+  // about such a worktree can be decided, so it is reported and left.
+  //
+  // Garbage content, not a `chmod`: identical signature in the porcelain, and
+  // it reproduces as any user, so the fixture neither leaks a permission bit
+  // on failure nor goes vacuous under euid 0.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(adminEntry(w, wt), "HEAD"), "not an object id\n");
+  assert.match(
+    git(w, "worktree", "list", "--porcelain"),
+    /HEAD 0{40}/,
+    "fixture: git must report the null object id for this worktree",
+  );
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `worktree ${wt} has an unresolvable HEAD — git cannot say what it holds`);
+});
+
+test("a detached worktree with a BISECT in progress is kept — git is no backstop here (#381)", (t) => {
+  // Measured, git 2.50.1 (Apple Git-155): `git worktree remove` WITHOUT
+  // `--force` removes this at exit 0. A bisect detaches and leaves the tree
+  // clean, so the enumeration, the merged probe and the dirty check all pass it
+  // through, and only the in-progress guard stands between it and a removal
+  // that discards the bisect's state.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  git(wt, "bisect", "start", "HEAD", "HEAD~1");
+  assert.ok(existsSync(join(adminEntry(w, wt), "BISECT_LOG")), "fixture: the bisect must really be running");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the in-progress guard can keep it");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /has a git operation in progress \(BISECT_LOG\)/);
+});
+
+test("a detached worktree with an INTERRUPTED REBASE is kept — the shape that reaches this sweep (#381)", (t) => {
+  // release-ticket.sh's prose already names the interrupted rebase as the way
+  // a fleet worktree wanders off its branch, and this is where it lands. The
+  // exec fails without moving HEAD, so the merged probe still reads clean and
+  // the guard is what answers — the same discrimination the bisect case makes,
+  // through the other sequencer directory.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  spawnSync("git", ["rebase", "-q", "-i", "--exec", "false", "HEAD~1"], {
+    cwd: wt,
+    env: { ...ENV, GIT_SEQUENCE_EDITOR: "true" },
+  });
+  assert.ok(existsSync(join(adminEntry(w, wt), "rebase-merge")), "fixture: the rebase must really be stopped");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the in-progress guard can keep it");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /has a git operation in progress \(rebase-merge\)/);
+});
+
+test("a detached MAIN checkout is kept, with the reason that is true on this path (#381)", (t) => {
+  // The main checkout has no `branch` line either once it is detached, so this
+  // sweep enumerates it. Removing it is impossible and there is no branch of
+  // ours checked out in it to delete, so the reason says only the first — and
+  // it must be answered before the linkage guard below it, whose `-f` test
+  // would call the main checkout's `.git` DIRECTORY a broken linkage (#82).
+  const w = repo(t);
+  git(w, "checkout", "-q", "--detach", "HEAD");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `worktree ${w} is the main checkout — cannot remove it`);
+  assert.doesNotMatch(json.kept[0].reason, /linkage/, "the linkage guard must not get to misdescribe it");
+  assert.equal(existsSync(join(w, ".git")), true);
+});
+
+test("a detached worktree whose .git file is gone is kept, never removed as clean (#381, #128)", (t) => {
+  // Delete a worktree's `.git` and `git -C` does not fail: it walks UP to the
+  // enclosing repo and answers about THAT at rc 0, which the status call would
+  // otherwise believe is this worktree's own clean status.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(wt, "precious.txt"), "untracked, and git can no longer see it\n");
+  rmSync(join(wt, ".git"));
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /^worktree .* has no \.git linkage — /);
+  assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "untracked, and git can no longer see it\n");
+});
+
+test("a NON-FLEET detached worktree holding an ignored file is kept, never removed (#381)", (t) => {
+  // `git worktree remove` refuses on modified and untracked files but deletes
+  // IGNORED ones silently, so outside `.worktrees/` — where an ignored file is
+  // a .env or a scratch note that exists nowhere else — the `--ignored` probe
+  // is the only thing left. Every earlier guard passes by construction.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed", join(w, "..", "outside"));
+  writeFileSync(join(wt, ".env"), "SECRET=exists nowhere else\n");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the --ignored probe can keep it");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /^ignored files present in .*: \.env$/);
+  assert.equal(readFileSync(join(wt, ".env"), "utf8"), "SECRET=exists nowhere else\n", "the precious file must survive");
+});
+
+test("a NON-FLEET detached worktree with NO ignored file is removed — the control for the case above (#381)", (t) => {
+  // Without this, the test above passes on a sweep that keeps every non-fleet
+  // worktree unconditionally: it would pin the `.worktrees/` arm of the case,
+  // not the `--ignored` probe inside it. Same fixture, one difference.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed", join(w, "..", "outside"));
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [wt]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(existsSync(wt), false);
+});
+
+test("a detached worktree whose directory was deleted by hand still has its registration cleared (#381)", (t) => {
+  // The registration is what inflight.sh reads as a live claim, and it outlives
+  // the directory: `worktree list --porcelain` keeps the entry, annotated
+  // prunable, after an `rm -rf`. `git worktree remove` accepts such an entry at
+  // rc 0, so the established-absent case needs no branch of its own.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  rmSync(wt, { recursive: true, force: true });
+  assert.match(git(w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the stale registration must still be listed");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [wt]);
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
+});
+
+test("a detached worktree behind an unreadable parent is kept, never removed as absent (#381, #83)", (t) => {
+  // `-e` is false both for a directory that is gone and for one inside a prefix
+  // this script may not search, and only the first is nothing to protect. The
+  // walk up to the nearest existing ancestor is what makes "not there" a
+  // measurement — reused here, not re-answered, so the two sweeps cannot drift.
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(wt, "unpushed.txt"), "work behind the wall\n");
+  const parent = join(w, ".worktrees");
+
+  // Restored inline, not in a teardown hook: `repo`'s own cleanup is
+  // registered first and would run against a directory it still cannot enter.
+  chmodSync(parent, 0o000);
+  const { code, json } = runReap(w, ["--apply"]);
+  chmodSync(parent, 0o755);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `cannot tell whether worktree ${wt} exists`);
+});
+
+test("a detached worktree under a path containing a space is found and removed whole (#381)", (t) => {
+  // The porcelain prints the path raw, so the enumeration reads the whole rest
+  // of the line and the shell splits the pair on the object id's single space
+  // — never on the path's. Read any other way, this worktree is a different,
+  // nonexistent path and every guard above runs against it.
+  const w = repo(t, "work dir");
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  assert.ok(wt.includes(" "), "fixture");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [wt], "the path must arrive whole, not truncated at the space");
+  assert.equal(existsSync(wt), false);
+  assert.ok(stderr.includes(`    REMOVED worktree ${wt}`));
+});
+
+test("a detached worktree under a path containing a space is found DIRTY and kept (#381)", (t) => {
+  // The other half of the pair above: truncation is not visible from the
+  // removal alone, because a guard that ran against a nonexistent path passes
+  // it. Here the guard has to see the real directory to answer at all.
+  const w = repo(t, "work dir");
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `dirty worktree ${wt}`);
+  assert.equal(existsSync(wt), true);
+});
+
+test("the dry run reports the detached worktree it would remove, removes nothing, and exits 0 (#381, #265)", (t) => {
+  // The exit-status control for everything this ticket added. #265's own
+  // criterion is that no path in this script exits 1, and its fix works by
+  // keeping the `apply` guard the LAST command of the file; a sweep spliced in
+  // ahead of the payload is exactly the kind of edit that relocates that
+  // defect onto the default mode nobody runs under test. Both fixtures are
+  // load-bearing: the removable one pins that a dry run still promises the
+  // removal, the kept one that a keep on this path is not what makes it exit 0.
+  const w = repo(t);
+  const removable = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const dirty = detachedMergedWorktree(w, "docs/80-other", "more work that landed");
+  writeFileSync(join(dirty, "scratch.txt"), "uncommitted\n");
+
+  const { code, json, stderr } = runReap(w, []);
+
+  assert.equal(code, 0, "the default dry run reports its verdict at 0, never a bare 1");
+  assert.equal(json.applied, false);
+  assert.deepEqual(json.worktreesRemoved, [removable], "the dry run still promises the removal");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `dirty worktree ${dirty}`);
+  assert.ok(stderr.includes(`    would remove worktree ${removable}`));
+  assert.doesNotMatch(stderr, /REMOVED worktree/, "a dry run removes nothing");
+  assert.equal(existsSync(removable), true, "a dry run must not remove the worktree it COULD have removed");
+  assert.equal(existsSync(dirty), true);
+});
+
+test("an attached worktree is never touched by the branchless sweep (#381)", (t) => {
+  // The accept side of the enumeration itself. A worktree on a branch carries a
+  // `branch` line, so the sweep must not see it at all — including one on a
+  // live branch that is not `[gone]`, which nothing in this script may remove.
+  const w = repo(t);
+  git(w, "worktree", "add", "-q", join(w, ".worktrees", "live"), "-b", "feature/live", "main");
+  const live = join(w, ".worktrees", "live");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [] });
+  assert.doesNotMatch(stderr, /KEEP/, "a worktree on a live branch is not a finding");
+  assert.equal(existsSync(live), true);
+  assert.equal(branchExists(w, "feature/live"), true);
 });
