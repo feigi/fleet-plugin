@@ -33,20 +33,25 @@ for (const [name, re] of [
 // Slice to renderSpend's own body before matching, and drop comment lines: a
 // whole-file assert.match is satisfied by any mention anywhere, including a
 // commented-out one.
-const renderSpendBody = (() => {
-  const m = HTML.match(/^function renderSpend\(sp\) \{[\s\S]*?^\}$/m);
-  assert.ok(m, "board.html no longer declares renderSpend(sp) as a top-level function — update this test");
-  return m[0].split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-})();
+// Parameter names are matched as `\w+` throughout, never as the literal `sp`.
+// Renaming a parameter is not a defect, and a lift that misses because of one
+// throws where node registers no test at all — the file's whole total drops in
+// silence rather than reporting a named failure.
+const renderSpend = HTML.match(/^function renderSpend\((\w+)\) \{[\s\S]*?^\}$/m);
+const renderSpendBody = renderSpend
+  ? renderSpend[0].split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")
+  : "";
 
 test("renderSpend routes through spendView rather than re-deriving the branch", () => {
+  assert.ok(renderSpend, "board.html no longer declares renderSpend as a top-level function — update this test");
   // Without this the whole decision can be disconnected in one token and every
   // case below still passes, against a function the page never calls.
   // The call, not the name it is bound to — a renamed local is not a defect.
-  assert.match(renderSpendBody, /=\s*spendView\(sp\);/);
+  assert.match(renderSpendBody, /=\s*spendView\(\w+\);/);
   // The tri-state must not be re-tested in the renderer; that is what the split
-  // removed. `v.kind` may be read freely, `sp` may not be branched on again.
-  assert.doesNotMatch(renderSpendBody, /if \(!?sp[.)]/);
+  // removed. The decision's own fields may be read freely, the raw argument may
+  // not be branched on again.
+  assert.doesNotMatch(renderSpendBody, new RegExp(`if \\(!?${renderSpend[1]}[.)]`));
 });
 
 test("board.html's inline script parses", () => {
@@ -60,12 +65,20 @@ test("board.html's inline script parses", () => {
 // `spendView` closes over `k`, a module-level const declared above it, so the
 // lift takes both. Left out, `k` is a ReferenceError rather than a wrong answer —
 // it fails loud rather than pinning a stale result.
-const spendView = (() => {
-  const kSrc = HTML.match(/^const k = .*;$/m);
-  const viewSrc = HTML.match(/^function spendView\(sp\) \{[\s\S]*?^\}$/m);
-  assert.ok(kSrc && viewSrc, "board.html no longer declares k and spendView as expected — update this test");
-  return new Function(`${kSrc[0]}\n${viewSrc[0]}\nreturn spendView;`)();
-})();
+const K_SRC = HTML.match(/^const k = .*;$/m);
+const VIEW_SRC = HTML.match(/^function spendView\(\w+\) \{[\s\S]*?^\}$/m);
+
+test("board.html still declares k and spendView in the shape this file lifts", () => {
+  // Named, and outside the lift itself: asserting inside it throws before node
+  // registers anything, which drops the file's total to zero and reports one
+  // file-level error instead of telling you which claim stopped holding.
+  assert.ok(K_SRC, "board.html no longer declares `k` as a one-line top-level const — update this test");
+  assert.ok(VIEW_SRC, "board.html no longer declares spendView as a top-level function — update this test");
+});
+
+const spendView = K_SRC && VIEW_SRC
+  ? new Function(`${K_SRC[0]}\n${VIEW_SRC[0]}\nreturn spendView;`)()
+  : () => { throw new Error("spendView could not be lifted from board.html — see the shape test above"); };
 
 // A run whose transcripts all read fine. Fields are the ones gatherSpend returns.
 const ok = (o = {}) => ({
