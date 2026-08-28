@@ -72,6 +72,27 @@ test("renderSpend routes through spendView rather than re-deriving the branch", 
 // itself, a box where the panel must render nothing — or swap the two column
 // lists, or the two header strings, and nothing goes red.
 //
+// Each column is pinned by ONE match that carries its heading and its rows
+// together, and the backreference on the host local is the whole of it: a pin
+// on the heading plus a separate pin on the list does not pin that the two
+// belong to the same column, because each is satisfied by the OTHER column's
+// call. Measured on the two-pin form: swapping the two lists, swapping the two
+// headings, and feeding both calls the same host each left this file fully
+// green, and a role column rendering the tool list is what the block exists to
+// catch. The host stays `\w+` — renaming the local is not a defect; what is
+// pinned is that the local a heading is appended to is the local its rows go
+// to. Adjacency of those two statements is part of the pin: a wrapped
+// `append(` survives the collapse below — the optional comma is the trailing
+// one such a wrap picks up — but a statement spliced between a heading and its
+// rows reds it, and that is a restructure worth reading, not a reflow.
+//
+// Left unpinned on purpose: the two `spendRows` option objects. Swapping those
+// is green here, and it is the one wiring break that cannot pass for correct on
+// the page — the callbacks read `.tool`/`.calls` off role rows and `.role`/
+// `.agents` off tool rows, so every label in the column reads `undefined`,
+// where a column silently fed the other list looks like a plausible panel.
+// Pinning them would tie this file to the spelling of four callbacks.
+//
 // Matched against a whitespace-collapsed body: where a line breaks is not
 // wiring, and a pin that reds on a reflow is a false alarm that trains the next
 // reader to loosen it. `flat` is the idiom the *-prose.test.mjs files here use,
@@ -86,9 +107,8 @@ for (const [claim, re] of [
   ["a text-only decision reaches the DOM", /el\("div", "spend-wrap", \w+\.text\)/],
   ["the lede string fills the lede slot", /el\("span", "lede", \w+\.lede\)/],
   ["the note string fills the note slot", /el\("span", "note", \w+\.note\)/],
-  ["the tool heading fills the tool heading", /el\("h3", null, \w+\.toolHeading\)/],
-  ["the role column is fed the role list", /spendRows\(\w+, \w+\.roles,/],
-  ["the tool column is fed the tool list", /spendRows\(\w+, \w+\.tools,/],
+  ["the role list fills the column headed `by role`", /(\w+)\.append\(el\("h3", null, "by role"\),?\); spendRows\(\1, \w+\.roles,/],
+  ["the tool list fills the column headed by the tool heading", /(\w+)\.append\(el\("h3", null, \w+\.toolHeading\),?\); spendRows\(\1, \w+\.tools,/],
 ]) {
   test(`renderSpend wires the decision through: ${claim}`, () => {
     assert.match(renderSpendFlat, re);
