@@ -1562,14 +1562,10 @@ cherry origin/main` to authorize `-D`, worktree removal without `--force` — an
 reports reaped and kept-with-reason counts. Update the reaped tickets' ledger rows
 in the same step. See references/reaping.md.
 
-**It sweeps detached worktrees too, and that is the path your merges take.** The
-merge bot's server-side rebase leaves the local checkout detached, and a
-detached worktree has no branch association for the `[gone]` walk to find — so
-the branch was reaped and the directory silently left, per wave. `reap.sh` now
-enumerates the worktrees git lists with no branch at all and decides each on its
-own state, removing the clean and fully-upstream ones and reporting the rest
-with a reason. Read its `worktreesRemoved` alongside `reaped`: a wave that reaps
-branches and removes no worktrees is a finding, not a quiet success.
+**It sweeps detached worktrees too — the shape a `[gone]` walk structurally
+cannot see.** Bounded to `.worktrees/`, so a checkout of yours outside it is
+reported, never removed. Read `worktreesRemoved` alongside `reaped`: a wave that
+reaps branches and removes no worktrees is a finding, not a quiet success.
 See references/reaping.md.
 
 **Do not invoke `commit-commands:clean_gone`.** It runs `git branch -D` and
