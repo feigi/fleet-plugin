@@ -406,6 +406,23 @@ spend classifier and `member-outcomes.mjs` read it.
 tracks the newest generation; a pinned id rots into a superseded one that is
 weaker AND more expensive, because pricing falls with each generation.
 
+**One implementer per wave goes at the alternate tier.** Dispatch it exactly as
+the others but with `subagent_type: "fleet-implementer-alt"`. Pick the ticket
+that is most ordinary — never the hardest, never the one whose ticket the rest
+of the run depends on — and do not tell the member it is a control: a member
+that knows it is being measured is not measuring the same thing.
+
+**Do not label it anywhere.** The pairing is a query over
+`docs/metrics/member-outcomes.tsv` — a `session`+`role` carrying more than one
+distinct `model`. A hand-set column would not survive that file's regeneration,
+and one derived against today's declared tiers would mislabel every historical
+row.
+
+**Why one per wave and not a week of one tier followed by a week of the other:**
+tier would then be confounded with calendar date and therefore with prompt
+evolution, which is exactly the state #864 documents and the reason the rows
+already on disk cannot answer the question they were collected for.
+
 **`class=routine` → `sonnet` was REVERTED on 2026-08-16, by the guard below
 firing.** Both halves were met on the accumulated `docs/metrics/tier-outcomes.tsv`:
 the floor (8 `class=routine` PRs spanning 3 distinct `run_date`s) and the trigger
