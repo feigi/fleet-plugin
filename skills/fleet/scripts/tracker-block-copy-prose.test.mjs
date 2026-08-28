@@ -42,13 +42,27 @@ const TRACKER = read("docs", "agents", "issue-tracker.md");
 // Names the block by its opening clause. Semantic, and the one clause both
 // files must share for either to be the block at all.
 const OPENER = "Read the issue with `gh issue view <N>";
+const SKILL_END = /^\*\*Re-derive the ticket's claims against/;
+const TRACKER_END = /^#/;
+// The block's last line in run-team, used only to append after it. A fixture
+// anchor, not a slice anchor — it is guarded for staleness where it is used.
+const TAIL = "> human hands you do not have → bail, name the cause, do not implement.";
 
-// The far end of the slice is found STRUCTURALLY — the paragraph break — and
-// never by a closing phrase. A phrase anchor stops the slice at today's last
-// sentence, so a sentence appended after it falls outside BOTH slices and the
-// pin passes with the copy already behind. That is the exact drift this test
-// exists to catch, so the end of the slice is the one place it cannot take the
-// convenient route.
+// The far end of the slice is anchored on the first thing that is NOT this
+// rule, and never on the block's own last sentence. A closing-phrase anchor
+// stops the slice at today's last sentence, so a sentence appended after it
+// falls outside BOTH slices and the pin passes with the copy already behind.
+// The paragraph break is that same mistake one level up, and it shipped: #374's
+// review appended a whole new `>` paragraph beside the block in run-team only
+// and every test here stayed green while the tracker was genuinely behind.
+// Anchoring past the rule instead puts growth of any size — sentence or
+// paragraph — INSIDE the slice, where the equality pin sees it.
+//
+// The two anchors differ because the two files hold the block differently: in
+// the tracker it owns a `##` section, so the next heading ends it; in run-team
+// it is one blockquote rule among siblings, so the rule that follows it does.
+// Both are SEMANTIC, like the opener, and both are guarded below — an anchor
+// that goes stale reddens loudly rather than silently widening the slice.
 //
 // Paragraphs are split, unquoted and whitespace-normalized BEFORE the opener is
 // looked for, so neither end of the slice depends on where a line happens to
@@ -61,7 +75,7 @@ const OPENER = "Read the issue with `gh issue view <N>";
 // run-team's verbatim prompt, not part of the text being copied. Stripped
 // before the paragraph split too, so a `>`-only separator line still closes the
 // paragraph rather than joining two.
-function block(text, what) {
+function block(text, what, end) {
   const paragraphs = text
     .split("\n")
     .map((l) => l.replace(/^>\s?/, ""))
@@ -70,21 +84,28 @@ function block(text, what) {
     // Whitespace-normalized for the reason `prose-pin.mjs`'s `phrase()` is:
     // these two files hard-wrap the same prose at different widths TODAY, so
     // without this the pin refuses the copy it is supposed to accept.
-    .map((p) => p.split(/\s+/).join(" ").trim());
+    .map((p) => p.split(/\s+/).join(" ").trim())
+    .filter((p) => p);
   // Exactly one, not the first: a second paragraph opening the same way is a
   // second copy, and `find` would compare one of them and leave the other free
   // to say anything.
   const hits = paragraphs.filter((p) => p.startsWith(OPENER));
   assert.equal(hits.length, 1, `${what}: expected exactly one paragraph opening "${OPENER}", found ${hits.length} — update this test`);
+  const rest = paragraphs.slice(paragraphs.indexOf(hits[0]) + 1);
+  // Guarded, or a stale end anchor runs the slice to EOF and swallows the whole
+  // rest of the file: still red, but red about the wrong thing.
+  const stop = rest.findIndex((p) => end.test(p));
+  assert.notEqual(stop, -1, `${what}: nothing after the block matches ${end} — the end anchor is stale, update this test`);
+  const slice = [hits[0], ...rest.slice(0, stop)];
   // Positive control. Both slices coming back empty is how an equality pin
   // passes while asserting nothing, and a stale anchor is how they would get
   // there; the check above only proves the paragraph STARTS somewhere.
   assert.ok(hits[0].length > OPENER.length, `${what}: the block slice is no longer than its opener — the extractor is broken, not the docs`);
-  return hits[0];
+  return slice.join("\n");
 }
 
-const source = () => block(SKILL, "run-team/SKILL.md");
-const copy = () => block(TRACKER, "docs/agents/issue-tracker.md");
+const source = (text = SKILL) => block(text, "run-team/SKILL.md", SKILL_END);
+const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRACKER_END);
 
 test("the tracker's copy of the issue-read block carries the block whole", () => {
   // Equality, not containment: every stale copy this section has produced has
@@ -109,5 +130,15 @@ test("a rewrapped copy still matches", () => {
   // paragraph.
   const rewrapped = TRACKER.replace(OPENER, OPENER.replace(" ", "\n   "));
   assert.notEqual(rewrapped, TRACKER, "the rewrap fixture no longer matches the tracker — update it");
-  assert.equal(block(rewrapped, "rewrapped tracker"), source());
+  assert.equal(copy(rewrapped), source());
+});
+
+test("upstream growth arriving as a new paragraph beside the block reddens", () => {
+  // The hole the paragraph break left, and the reason the end anchor moved past
+  // the rule: growth does not have to land inside the block's last paragraph.
+  // Test 1 covers the sentence-sized case; this is the same drift one size up,
+  // and under the paragraph-break slice it passed.
+  const grown = SKILL.replace(TAIL, `${TAIL}\n>\n> If the ticket names a linked PR, read that PR's diff too.`);
+  assert.notEqual(grown, SKILL, "the growth fixture no longer matches run-team's block — update it");
+  assert.notEqual(source(grown), copy());
 });
