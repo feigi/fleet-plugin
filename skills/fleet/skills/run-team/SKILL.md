@@ -435,31 +435,37 @@ still what a future control would be drawn from.
 
 **Read the counter-evidence before restoring it.** Recount from the file before
 citing it — these figures are a snapshot, not a live count, and a doc-only
-append lands a row without touching this paragraph. **As of PR #747,
-2026-08-21, 50 rows:** the file now holds 33 `class=routine` PRs across 8
-distinct `run_date`s, so the floor is long since met, and 5 of them carry
-`closed_own_ticket` `no` (#452, #466, #536 at `sonnet`; #693, #707 at `opus`),
+append lands a row without touching this paragraph. **As of 2026-08-28, 103
+rows:** the file holds 66 `class=routine` PRs across 14 distinct `run_date`s,
+so the floor is long since met, and 6 of them carry `closed_own_ticket` `no`,
 so the trigger is met too. **Firing changes nothing: the action is "revert
 `class=routine` to top tier" and that revert already happened on 2026-08-16.**
 The guard is in its fired state and has no further move; the live question is
-the opposite one, restoring a cheaper tier, which this guard does not decide.
+the opposite one, restoring a cheaper tier, which this guard does not decide
+and which no row on file settles.
 
-The raw split now favours the top tier — 3 failures in 9 `routine`/`sonnet`
-rows against 2 in 24 `routine`/`opus`. **Do not read that as a tier result.**
-8 of the 9 `sonnet` rows fall on 2026-08-13 to 08-17 and 23 of the 24 `opus`
-rows on 08-18 to 08-21, so tier is very nearly confounded with calendar date
-and therefore with prompt evolution — the dispatch prompts gained rules
-throughout that window. The one row that breaks the confound is **PR #714**
-(2026-08-20, `routine` at `sonnet`, maintainer-authorized as a deliberate
-control, run against current prompts): it **passed**. That is n=1 in the
-direction opposite the raw split.
+The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
+rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.**
+Tier remains largely confounded with calendar date and therefore with prompt
+evolution: 8 of the 11 `sonnet` rows fall on 2026-08-13 to 08-17, before the
+window in which 54 of the 55 `opus` rows were run, and the dispatch prompts
+gained rules throughout. The confound is **weakened, not resolved.** Three
+`sonnet` rows now break it rather than one — **#714** (2026-08-20, a
+maintainer-authorized deliberate control) and **#750** and **#751**
+(2026-08-21) — all three run against prompts of the same vintage as the `opus`
+rows, and **all three passed**, which is the direction opposite the raw split.
+Three is still not a result. **What replaces this argument going forward is the
+within-run pairing above**: one implementer per wave at the alternate tier makes
+tier orthogonal to date by construction, so the question stops depending on
+whichever rows history happened to leave.
 
-`minted_false_claim` **now discriminates and no longer reads "always yes"** —
-9 of the 33 `routine` rows carry `no` (#601, #656, #663, #674, #688, #692,
-#693, #726 at `opus`; #714 at `sonnet`). Read it as a property of the TICKET
-before the tier: a pure code simplification need not add prose, while a
-correction ticket adds prose by construction. The honest summary is that the guard fired on the criterion the
-maintainer chose in advance, not that the cheaper tier has been shown worse.
+`minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of
+the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet` (#714, #750).
+Read it as a property of the TICKET before the tier: a pure code simplification
+need not add prose, while a correction ticket adds prose by construction. The
+honest summary is unchanged and is the reason this paragraph exists: the guard
+fired on the criterion the maintainer chose in advance, not on a demonstration
+that the cheaper tier is worse.
 
 **No class recorded → record `class=unknown`, never a guess.** Since the revert
 every class dispatches the same way, so a lost class no longer misprices a
@@ -595,20 +601,40 @@ it. **Only a same-class comparison across tiers is informative**, and the old
 rule could not produce one, since no routine ticket ever ran at top tier.
 
 **That last sentence is no longer true, and this is the part to re-read.** Since
-the revert every routine ticket runs at top tier, so the file now holds 24
-`routine`/`opus` rows against 9 `routine`/`sonnet` (as of PR #747, 2026-08-21 —
-recount before citing). The same-class comparison the paragraph above calls the
-only informative one therefore EXISTS now. It is still not clean: the two groups
-are split almost exactly by calendar date, so it measures prompt evolution at
-least as much as tier. The counter-evidence paragraph earlier in this section
-carries the split and the one deliberate control that cuts against it.
+the revert every routine ticket runs at top tier, so the file now holds 55
+`routine`/`opus` rows against 11 `routine`/`sonnet` (as of 2026-08-28, 103 rows
+— recount before citing). The same-class comparison the paragraph above calls
+the only informative one therefore EXISTS now. It is still not clean: the two
+groups are split almost entirely by calendar date, so it measures prompt
+evolution at least as much as tier. The counter-evidence paragraph earlier in
+this section carries the split and the three rows that cut against it. Recount
+both, and every other figure in this section, with:
+
+```bash
+grep -vc '^#' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {n++; d[$1]=1; if($6=="no") no++} \
+  END{print n, length(d), no+0}' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
+  END{for(k in t) print k, t[k], f[k]+0}' docs/metrics/tier-outcomes.tsv
+```
+
+**These rows are the historical corpus, and nothing appended to them fixes the
+confound.** What fixes it is the within-run pairing in the dispatch rule above:
+from now on every wave contributes a `sonnet` and an `opus` implementer run
+against the same prompts on the same day, so the comparison stops depending on
+which tier history happened to leave in which week. Read the pairs, not the
+whole-file split, once there are enough of them.
 
 **So read what the guard actually established: routine tickets sometimes fail to
 close their own ticket. Not that `sonnet` caused it.** The revert is the
-pre-committed rule being honoured, not a measurement. Restoring a cheap tier —
-or answering the question properly — needs a deliberate control, some
-`class=routine` tickets dispatched at top tier, which is a change to the
-dispatch rule and therefore the maintainer's call, not yours.
+pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
+still the maintainer's call and still a change to the dispatch rule — but the
+deliberate control it used to require is no longer something anyone has to
+authorize one ticket at a time: the alternate-tier dispatch above produces one
+per wave by construction. **Do not read the pairs early.** Report the count and
+stop until there are at least ten of them across five or more distinct
+`run_date`s; below that, a pair count is a number, not evidence, and the last
+guard fired with n=1 on the control side.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot
