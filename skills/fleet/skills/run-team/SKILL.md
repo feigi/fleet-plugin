@@ -69,7 +69,8 @@ you cannot confirm was received, re-check the artifacts it governed.
 **Name every member.** The name makes it a team member, and membership is what
 carries the `Agent` tool. Omit it → the member loses delegation with no error.
 Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
-`review-pr-<pr#>`, `merge-bot-<wave#>`. See references/member-lifecycle.md.
+`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<wave#>`. See
+references/member-lifecycle.md.
 
 **Inverts one level down: members must name their children `undefined`.** A named
 member passing a `name` fails with `teammates cannot spawn teammates`, so
