@@ -1992,3 +1992,52 @@ test("a missing json.sh exits 2, never the exit 1 that means `taken`", (t) => {
   assert.equal(r.stdout, "",
     "no payload — a verdict was never established, so there is nothing to report");
 });
+
+// --- #346: the bound outside git.
+//
+// #92 asked that an unattended probe never hang; PR #332 answered it with git's
+// own transport knobs, which reach only part of the class. What they miss is
+// re-derived here rather than quoted: against the accept-then-silent listener
+// below, with `http.lowSpeedLimit=1000 -c http.lowSpeedTime=10` set exactly as
+// probe 2 sets them, an `https` origin was still running when a 30s harness cap
+// killed it — curl's low-speed timer never arms because the TLS handshake never
+// completes, so no transfer is ever under way for it to time.
+//
+// So the bound has to come from outside git: background the fetch, kill it at a
+// budget. `INFLIGHT_LS_REMOTE_TIMEOUT` is how these cases buy a short budget
+// instead of paying the default one per test; it can only ever shorten, which
+// is what keeps it from being a new way to remove the bound — the very shape of
+// defect the ssh half of this issue reports.
+//
+// Every case here asserts `r.error` is unset alongside its exit code, and that
+// is not belt-and-braces. `spawnSync` waits on the inherited stdio pipes as well
+// as on the pid, so a transport helper that outlives the fetch holds the caller
+// for the full backstop with the answer already written and the direct child
+// already reaped — status set, `signal` null, and only `error`/elapsed able to
+// see it. Measured against this exact listener: killing the fetch process alone
+// left a `git remote-https` holding stderr and the caller sat out its whole cap.
+const silentListener = async (t) => {
+  const server = createServer(); // accept, hold open, send nothing back
+  t.after(() => new Promise((res) => server.close(res)));
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  return server.address().port;
+};
+
+test("probe 2: an https origin whose handshake never completes is bounded, exit 2", async (t) => {
+  const port = await silentListener(t);
+  const { repo, env } = fixture(t, 8, { origin: "none" });
+  git(repo, env, "remote", "add", "origin", `https://127.0.0.1:${port}/x/y.git`);
+
+  const started = Date.now();
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, INFLIGHT_LS_REMOTE_TIMEOUT: "5" }, encoding: "utf8", timeout: 30_000 });
+
+  assert.equal(r.error, undefined,
+    `the caller was held to its own backstop — either the script never terminated, or something it spawned outlived it still holding stderr: ${JSON.stringify(r)}`);
+  assert.notEqual(r.signal, "SIGTERM", "the script's own bound must fire, not the test's backstop");
+  assert.ok(Date.now() - started < 30_000, "must terminate on its own bound, not the test's backstop");
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /did not finish within/,
+    "the timeout gets its own reason: a probe that was killed and one that was refused are different facts, and before this bound existed the only failure surface was reached when ls-remote RETURNED, so a stall was indistinguishable from a slow link");
+  assert.match(r.stderr, /whether #8 has a remote branch is unknown/);
+});
