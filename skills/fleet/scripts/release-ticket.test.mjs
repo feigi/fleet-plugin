@@ -411,6 +411,34 @@ test("the die receipt's applied field is the flag, not a constant (#387)", (t) =
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// A receipt printf that cannot WRITE is a second failure mode, separate from
+// #387's: `set -e` used to kill `die` on it before the function reached its own
+// `printf … >&2`, so the die reason vanished and the script exited 1 — a code
+// this script DEFINES as `NOT released — nothing was touched`, fabricated out of
+// a write error. Measured on /bin/sh (bash 3.2.57), /bin/dash and bash 5.3.15;
+// only zsh survived it. The `||` arm closes it, but incidentally, so this pins
+// it directly: closing fd 1 is the portable way to make the write fail with a
+// healthy `jstr` (`stdio: "ignore"` opens /dev/null, whose writes succeed).
+// Pinned on the prose and the exit code together — here the code IS the defect,
+// unlike the inherited-`blockers` cases below where it is platform-asymmetric.
+test("a receipt that cannot be written still leaves the die reason and exit 2 (#387)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "the member's work", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const res = spawnSync("sh", ["-c", 'exec >&-; exec sh "$@"', "sh", SCRIPT, ...c.args, "--apply"], {
+    cwd: r.w,
+    env: r.env(),
+    encoding: "utf8",
+  });
+
+  const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
+  assert.equal(res.status, 2, "not the 1 this script uses for `NOT released`, which no write error may fabricate");
+  assert.ok(res.stderr.includes(cause), `the die reason survives the failed write: ${JSON.stringify(res.stderr)}`);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
 // `die`'s guard is `[ -n "${blockers:-}" ]`, and `set -u` is satisfied by an
 // INHERITED value just as well as by one the run computed. An ambient variable
 // of that name therefore took the guard true on an early die — before `$issue`
