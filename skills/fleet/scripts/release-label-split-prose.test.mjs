@@ -38,13 +38,15 @@ const finisherLabelDuty = () =>
 
 test("next-ticket's step 7 writes the label with a command of its own, not a flag on the create", () => {
   const s = step7();
-  const create = s.match(/^gh pr create.*$/m);
-  assert.ok(create, "step 7 no longer shows a `gh pr create` command — update this test");
+  // The whole command, not its first physical line: the create's body string
+  // spans lines, so a line-anchored match never sees `--label` folded onto the
+  // body-closing continuation — the very fold this asserts against.
+  const create = between(s, "gh pr create", "\ngh pr edit", "step 7 create command");
 
   // The defect in one assertion: a flag on the create shares the create's fate,
   // and that fate is a timeout with no exit status.
   assert.doesNotMatch(
-    create[0],
+    create,
     /--label/,
     "step 7 folds `--label` back into `gh pr create` — a timed-out create then opens the PR with the label silently unapplied",
   );
@@ -62,9 +64,12 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
     phrase("Never fold `--label` into the create"),
     "step 7 lost the instruction against folding the label into the create",
   );
+  // Not a `/timeout|backgrounded/` keyword search: that is polarity-blind and
+  // slice-wide — it stayed GREEN with the mechanism sentence replaced by one
+  // NEGATING it, satisfied by the word "timeout" in the paragraph's tail clause.
   assert.match(
     s,
-    /timeout|timed out|backgrounded/,
+    phrase("outruns the caller's tool timeout is backgrounded with the PR already open"),
     "step 7 no longer names the timeout the split exists for, so the split reads as an arbitrary extra call",
   );
   // Not a bare `own exit status`: the command block's own trailing comment
@@ -145,5 +150,18 @@ test("the solo labelling step gates on the release label too — the fleet finis
     step6,
     phrase("exactly one release label"),
     "step 6 labels `ready-to-merge` without asserting a release label, so the standalone path still ships PRs with none",
+  );
+  // The same two halves test 4 pins on the fleet path. A count with no halt
+  // reads the labels back and labels anyway; a halt with no naming is the
+  // bare-SHA-mismatch failure shape this file's neighbours already record.
+  assert.match(
+    step6,
+    /[Zz]ero or more than one/,
+    "step 6 covers only one of the two failures — a PR wearing two release labels gets `ready-to-merge`, or a bare PR does",
+  );
+  assert.match(
+    step6,
+    /naming which|says which|report(s|ing)? which/,
+    "step 6 may halt without naming what it found, leaving the standalone path's halt unactionable",
   );
 });
