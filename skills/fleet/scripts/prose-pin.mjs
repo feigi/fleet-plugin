@@ -14,3 +14,9 @@ export function between(text, from, to, what) {
 // is often hard-wrapped, so any inter-word space in the source may be a
 // newline plus indent. Regex metacharacters in the phrase are escaped first.
 export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
+
+// A shell comment block wraps at `#`, so a pinned phrase can break across lines
+// with the comment gutter, not whitespace, at the break — `\s+` does not span a
+// `#`. Strip the gutter and rejoin with the single inter-word space a wrap point
+// replaces.
+export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");

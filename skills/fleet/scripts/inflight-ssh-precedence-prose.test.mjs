@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 // #350. Probe 2's ssh-hardening comment said its options "land on top of"
 // whatever the user's own ssh command already says. That reads as override, and
@@ -36,13 +36,6 @@ import { between, phrase } from "./prose-pin.mjs";
 // of" without "land" stays green, so probe 2 keeps the phrase for the
 // non-precedence claims it already makes.
 const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
-
-// Same one-liner as inflight-citation-prose.test.mjs, deliberately duplicated
-// rather than hoisted: a shell comment block wraps at `#`, so a pinned phrase
-// can break across lines with the comment gutter, not whitespace, at the break
-// — `\s+` does not span a `#`. Strip the gutter and rejoin with a single space,
-// exactly the inter-word space a wrap point replaces.
-const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
 
 // Bounded at both ends, by the probe's own heading and by the first construct
 // the comment documents. inflight.sh discusses ssh options in probe 2 alone,

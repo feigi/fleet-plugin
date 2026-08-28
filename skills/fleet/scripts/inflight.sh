@@ -102,14 +102,15 @@ remote=""
 local_b=""
 wt=""
 
-# The two temp files, and the ONE EXIT trap that removes them. `sh` keeps a
+# The three temp files, and the ONE EXIT trap that removes them. `sh` keeps a
 # single EXIT trap, so a second `trap … EXIT` further down does not add a
 # handler — it REPLACES this one, silently leaking whatever the first was going
-# to remove. Both files are therefore declared here and cleaned here rather
+# to remove. All three are therefore declared here and cleaned here rather
 # than each probe installing its own. Declared empty, too, so the trap can run
-# under `set -u` after a `die` that fired before either was created.
+# under `set -u` after a `die` that fired before any was created.
 errfile=""
 wtfile=""
+wdfile=""
 # `${…:+}` so a file that was never created contributes no argument at all
 # rather than an empty one, and `rm -f` with no operands is specified to exit 0.
 #
@@ -121,12 +122,12 @@ wtfile=""
 # status survives and the cleanup failure is still said out loud rather than
 # swallowed by a bare `|| :`.
 #
-# `printf`, not `echo`: $errfile and $wtfile are mktemp paths, and `echo`
-# expands a backslash in one. It returns 0 just as `echo` did, so the status
-# argument above is unchanged. Format string double-quoted because the trap
-# body is already single-quoted.
-trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ||
-  printf "%s: could not remove %s %s\n" "$NAME" "$errfile" "$wtfile" >&2' EXIT
+# `printf`, not `echo`: these are mktemp paths, and `echo` expands a backslash
+# in one. It returns 0 just as `echo` did, so the status argument above is
+# unchanged. Format string double-quoted because the trap body is already
+# single-quoted.
+trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ${wdfile:+"$wdfile"} ||
+  printf "%s: could not remove %s %s %s\n" "$NAME" "$errfile" "$wtfile" "$wdfile" >&2' EXIT
 
 # Probe 1 — a PR that is actually ABOUT this ticket.
 #
@@ -385,8 +386,9 @@ echo "\$ git ls-remote --heads origin" >&2
 # asked for, and terminates only where that value does. Measured on the same
 # listener: a user ConnectTimeout of 0 is accepted, wins by the same rule and
 # left the probe still connecting at 40s, where the 10s set here cut at 10.2s —
-# unbounded, through the user's own config, which is the #92 hang again. Closing
-# that needs the bound outside git that the https origin also waits on, #346.
+# unbounded, through the user's own config, which is the #92 hang again. The
+# watchdog below is what now bounds that case, since it bounds the call rather
+# than the transport and so does not depend on any value ssh resolved (#346).
 # Ordering these first would bound the probe at its own value instead,
 # at the cost of silently overriding a deliberate proxy or timeout config: a
 # real regression traded for a hypothetical one, so it is not done.
@@ -401,7 +403,12 @@ echo "\$ git ls-remote --heads origin" >&2
 # killed — the unattended hang #92 exists to stop. Reachable is the operative
 # word: with no terminal available it aborts rather than waiting. Honoured
 # anyway, because it is the user's explicit setting; this records what that
-# costs rather than warning about a choice they made on purpose.
+# costs rather than warning about a choice they made on purpose. The watchdog
+# below is what now ends that wait, and it is the only thing here that can:
+# the prompt is ssh's, so no git-side variable reaches it, and the setting that
+# opens it is the user's own, so overriding it is not on offer either. No test
+# covers this one — the exposure needs a reachable terminal, and the harness
+# runs without one, where ssh aborts at once instead of asking (#346).
 #
 # http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
 # that goes quiet — abort if it sits under 1000 bytes/s for 10s.
@@ -410,22 +417,195 @@ echo "\$ git ls-remote --heads origin" >&2
 # weaker bound than the ssh side, not a counterpart to it. Measured against the
 # same accept-then-silent listener: a plain http origin aborts at 10.0s
 # ("Operation too slow"), but an https one never starts a transfer at all — the
-# TLS handshake does not complete, so the timer never arms and ls-remote ran
-# past 120s. A dropped SYN costs curl's own 75s default on either scheme, and
-# git exposes no connect knob to shorten it (`git help config` lists only these
-# two http timing keys; http.connectTimeout does not exist). So an https origin
-# can still hold a fleet slot the way #92 describes. Closing that needs a bound
-# outside git — background the call and kill it — which is #346, not another -c.
+# TLS handshake does not complete, so the timer never arms and the call outlived
+# every cap put on it. Nothing here reaches the connect phase either, on either
+# scheme: `git help config` lists lowSpeedLimit and lowSpeedTime as its whole
+# http timing vocabulary, and `git config --get http.connectTimeout` finds no
+# such key to read. What is left of connect is curl's own default, which this
+# script does not set and cannot shorten.
+#
+# Hence the watchdog below, and hence these knobs are no longer the bound. They
+# stay anyway, and that is a decision rather than an oversight (#346): each one
+# fails earlier than the watchdog and in git's own words, which is the more
+# useful thing to read on a terminal, and dropping them would make every ssh
+# stall wait out the full budget where ConnectTimeout ends it in a fraction of
+# that. Defence in depth costs nothing here — the watchdog does not care whether
+# they fired, and neither reads the other's state.
 base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
 # GIT_SSH is a program PATH, not a command line, so it is quoted rather than
 # pasted raw: git runs GIT_SSH_COMMAND through a shell, which would otherwise
 # split a path containing spaces into a program and its arguments.
 [ -n "$base_ssh" ] || base_ssh="${GIT_SSH:+\"$GIT_SSH\"}"
 [ -n "$base_ssh" ] || base_ssh=ssh
-if ! heads=$(GIT_TERMINAL_PROMPT=0 \
-    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
-    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin); then
-  add_unknown "remote" "git ls-remote failed, so whether #$n has a remote branch is unknown"
+# Kill $1 and everything descended from it. Killing the named process alone is
+# not enough and not a near miss: git hands the transport to a helper, and that
+# helper inherits this script's stderr. Measured against the accept-then-silent
+# listener, killing only the `ls-remote` process left a `git remote-https`
+# holding that pipe — the script had already written its answer and exited, and
+# the caller still sat until its own cap expired, reading as a hang in a script
+# that had in fact terminated. So the subtree is the unit, not the process.
+#
+# A process group would say this in one signal, but `set -m` is how a POSIX
+# shell asks for one and it is not available where this runs: measured, dash
+# with no controlling terminal answers "can't access tty; job control turned
+# off" and the group kill then fails, and dash is `/bin/sh` on the Linux this
+# suite runs under.
+#
+# The snapshot is taken BEFORE anything is signalled, because killing the root
+# reparents its children and the links this walk follows are gone by then.
+#
+# Ceiling: with no `ps` to read, this falls back to the named process alone and
+# a helper can survive it. That is the pre-#346 behaviour for that one case, not
+# a new failure, and it is preferred over signalling a set derived from nothing.
+# But it is not silent: the fallback records itself in $wdfile so the reason
+# printed downstream can say the bound may not have held. A degraded kill that
+# reads exactly like a clean one is the defect #346 asks this script not to
+# have — measured, `ps` shimmed to exit 127 produced byte-identical stderr to
+# the healthy run while a `git remote-https` survived and held the caller for
+# its whole cap. `${wdfile:-/dev/null}` because kill_tree also runs before that
+# file exists and on the path where mktemp is not reached at all.
+#
+# TERM then KILL, with no pause between them: a descendant that traps TERM
+# otherwise holds the fetch's inherited stderr and the caller hangs past the
+# budget anyway — measured against a GIT_SSH_COMMAND wrapper doing `trap '' TERM`,
+# the caller sat out its full 30s backstop with the script long since exited.
+# A `sleep 1` between the two signals, the obvious shape, does NOT work here:
+# the watchdog subshell is itself killed through this same function while it
+# would be inside that sleep, so the KILL never lands. Which signal git actually
+# dies of is no longer load-bearing — $wdfile, not the exit status, is what says
+# the watchdog fired.
+#
+# The `do { … } while (grew)` fixpoint is not decoration. `for (p in parent)`
+# visits keys in unspecified order, so a single pass misses any descendant the
+# iteration reaches before its own parent has been marked. `ps -A` prints
+# parents first, which is exactly why every end-to-end case here stays green on
+# that mutant; the canned-table case in inflight.test.mjs, which feeds a table
+# with each child AHEAD of its parent, is the only thing that holds it.
+kill_tree() {
+  kin=$1
+  if snap=$(ps -A -o pid=,ppid= 2>/dev/null); then
+    kin=$(printf '%s\n' "$snap" | awk -v root="$1" '
+      { parent[$1] = $2 }
+      END { doomed[root] = 1
+            do { grew = 0
+                 for (p in parent)
+                   if (!(p in doomed) && (parent[p] in doomed)) {
+                     doomed[p] = 1; grew = 1
+                   }
+               } while (grew)
+            for (p in doomed) printf "%s ", p }') ||
+      { kin=$1; printf 'degraded ' >>"${wdfile:-/dev/null}" || :; }
+  else
+    printf 'degraded ' >>"${wdfile:-/dev/null}" || :
+  fi
+  # shellcheck disable=SC2086  # a pid list, and word splitting is how kill reads it
+  kill $kin 2>/dev/null || :
+  # shellcheck disable=SC2086
+  kill -9 $kin 2>/dev/null || :
+}
+# The budget. Above what the ssh options can spend before they give up on their
+# own — ConnectTimeout plus the ServerAlive pair's whole run — so this never
+# preempts a bound that would have produced git's own diagnostic, and short
+# enough that a stalled probe does not hold a fleet slot the way #92 describes.
+# `ls-remote` moves refs and no objects, so this is generous for the work.
+ls_budget=30
+# The override exists so the tests can buy a short budget instead of paying the
+# default one per case. It can only ever SHORTEN: a knob that could lengthen it
+# would be one more way for configuration to remove the bound, which is the
+# defect the ssh half of #346 reports, and reproducing it here to be convenient
+# would be its own bug. A value that is not a positive integer is not an error
+# and not a bound either — the default stands.
+#
+# `??????*` is that last clause holding for a digit string too large for the
+# shell's integer. Without it `[` is handed the value and contradicts the
+# sentence above out loud: measured, `sh` says `[: 99999999999999999999:
+# integer expression expected` and dash says `[: Illegal number:` — a raw
+# diagnostic naming a line number rather than the variable, on the same stderr
+# that carries this script's own reasons. Six digits, not twenty: anything from
+# 100000 up was going to be ignored by the `-lt` below regardless, so the arm
+# costs no reachable value and leaves the five-digit forms `[` reads correctly
+# (029 among them) taking the same path they always did.
+case ${INFLIGHT_LS_REMOTE_TIMEOUT:-} in
+  '' | *[!0-9]* | ??????*) : ;;
+  *) if [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -gt 0 ] &&
+       [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -lt "$ls_budget" ]; then
+       ls_budget=$INFLIGHT_LS_REMOTE_TIMEOUT
+     fi ;;
+esac
+# Backgrounded and waited on, rather than polled: `wait` returns the moment the
+# fetch does, so a reachable origin pays nothing for the bound being here. The
+# sleeper is what enforces it, and it is killed by the same subtree walk as the
+# fetch — its own `sleep` is a child, and an orphaned sleeper does not sit
+# harmlessly: it wakes at the end of its budget and fires kill_tree at a pid
+# this script no longer owns, which after a budget's worth of pid churn can be
+# an unrelated process — and, since #346, an unrelated SUBTREE. It cannot leak
+# onto this script's stderr whatever else it does, because the `>/dev/null 2>&1`
+# below is on the sleeper itself and both its descriptors are already closed.
+#
+# `wait` is captured through an explicit `|| ls_status=$?`, and `set -e` is why:
+# a bare `wait` on a killed child aborts this subshell at that line, which is
+# after the fetch is dealt with but before the sleeper is, and the sleeper would
+# be the leak. The status is then carried out by an explicit `exit` rather than
+# by whatever the block happens to end with.
+#
+# $wdfile is how the watchdog says it fired, and it has to be a file: the
+# sleeper is a background grandchild of the command substitution below, so
+# nothing it sets in a variable reaches this shell and its own exit status is
+# discarded. The marker is written BEFORE kill_tree, never after, because `wait`
+# returns the instant the fetch dies and would otherwise race the write.
+#
+# A file this probe WANTS, not one it needs. Probe 2 is the one probe that
+# answers when mktemp is broken — #185 fixed that deliberately and
+# inflight.test.mjs pins it — so a failed mktemp costs the sharper wording
+# below, never the verdict. The old exit-status inference is what the wording
+# falls back to there.
+wdfile=$(mktemp) || wdfile=""
+ls_rc=0
+heads=$(
+  GIT_TERMINAL_PROMPT=0 \
+  GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
+  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin &
+  ls_pid=$!
+  { sleep "$ls_budget"; printf 'fired ' >>"$wdfile" || :; kill_tree "$ls_pid"; } >/dev/null 2>&1 &
+  wd_pid=$!
+  ls_status=0
+  wait "$ls_pid" || ls_status=$?
+  kill_tree "$wd_pid"
+  exit "$ls_status"
+) || ls_rc=$?
+wdnote=""
+if [ "$ls_rc" -ne 0 ]; then
+  if [ -n "$wdfile" ]; then
+    wdnote=$(cat "$wdfile" 2>/dev/null || true)
+  elif [ "$ls_rc" -eq 143 ] || [ "$ls_rc" -eq 137 ]; then
+    # No marker to read, so the signal number is all there is — the weaker test
+    # this branch used before the marker existed, kept only for the path where
+    # mktemp failed. It cannot tell our SIGTERM from anyone else's, but
+    # reporting a real stall as a refusal is the worse of the two errors. 137
+    # as well as 143, because kill_tree escalates and git can lose the race.
+    wdnote="fired"
+  fi
+  # A killed fetch and a refused one are different facts and get different
+  # words. Before this bound existed the only failure surface here was reached
+  # when `ls-remote` RETURNED, so a probe that never returned reached no label
+  # at all and a stall was indistinguishable from a slow link to the caller.
+  #
+  # $wdfile is what separates them. Reading "the watchdog fired" off an exit
+  # status of 143 inferred it from a signal number this script does not own:
+  # measured, a fetch SIGTERM'd from OUTSIDE at 4s under the default budget was
+  # reported as `did not finish within 30s`, naming a budget only 4s of wall
+  # clock had run against. The marker is written by the watchdog and by nothing
+  # else, so it answers what the exit status was being asked to guess — and it
+  # keeps answering now that kill_tree escalates to SIGKILL and git can just as
+  # well come back 137.
+  kt_note=""
+  case $wdnote in
+    *degraded*) kt_note=", though the process table could not be read, so a transport helper may still be running" ;;
+  esac
+  case $wdnote in
+    *fired*) add_unknown "remote" "git ls-remote did not finish within ${ls_budget}s and was killed${kt_note}, so whether #$n has a remote branch is unknown" ;;
+    *) add_unknown "remote" "git ls-remote failed, so whether #$n has a remote branch is unknown" ;;
+  esac
   return 1
 fi
 # One awk, not `awk | sed | grep | paste`. A pipeline hides every status but its
