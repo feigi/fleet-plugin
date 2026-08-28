@@ -92,9 +92,12 @@ git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 
 Closes #N"
+gh pr edit --add-label patch                 # own command, own exit status
 ```
 
-`Closes #N` closes issue on merge. Repo gating on release label → add exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
+`Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
+
+**Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened (#375). Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
 
 **Session ends here.** Merge happens later, elsewhere: `/fleet:review-and-fix` → maintainer adds `ready-to-merge` → `/fleet:run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for merge that won't happen this session.
 

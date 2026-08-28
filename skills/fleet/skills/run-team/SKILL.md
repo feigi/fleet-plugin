@@ -748,8 +748,13 @@ number, worktree abs path, branch, and each of these verbatim:
 > `next-ticket` **step 6**, which is that sizing run.
 >
 > Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with
-> `Closes #N` in the body and exactly one release label — `patch`/`minor`/`major`,
-> the *label*, not the branch *type*. **Put your step-6 sizing verdict in the PR
+> `Closes #N` in the body, then `gh pr edit --add-label` as its own command
+> carrying exactly one release label — `patch`/`minor`/`major`, the *label*, not
+> the branch *type*. **Never fold `--label` into the create**: a create that
+> outruns your tool timeout is backgrounded with the PR already open, its flags
+> unapplied and no exit status for you to react to, so the label goes missing
+> and every later gate still reads the PR as correctly opened. Separate, the
+> label write has its own exit status and fails loudly. **Put your step-6 sizing verdict in the PR
 > body on its own line, `Sizing: light` or `Sizing: heavy`** — the controller
 > records it as a difficulty covariate when it rules your review, and the PR body
 > is the only place it survives your exit. Report the PR number and head SHA to
@@ -1304,7 +1309,16 @@ a minute apart showed *different* mutants, so a member's report and any single
    had correctly edited — the PR's whole point — and a finisher reading that
    literally halts a correct PR. It caught the error instead, and said so; do
    not rely on that.
-3. Add `ready-to-merge`.
+3. Add `ready-to-merge` — after reading the PR's labels back
+   (`gh pr view <pr> --json labels`) and finding **exactly one** release label,
+   `patch`/`minor`/`major`. Zero or more than one halts the finisher before the
+   label, naming which it found. This is the backstop for a label lost wherever
+   it was lost, a hand-created PR included: a `gh pr create` that outran its
+   caller's tool timeout leaves the PR open with the flag unapplied and no exit
+   status anywhere to notice, and nothing downstream re-derives the release
+   label. Count only those three — the PR carries other labels, `ready-to-merge`
+   itself among them once you add it, so a PR wearing one release label beside
+   them passes unchanged.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
 
