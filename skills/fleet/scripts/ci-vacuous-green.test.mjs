@@ -183,3 +183,41 @@ test("a routed check's own exit status still reaches the job", () => {
   // failure and the job passes regardless.
   assert.ok(!/continue-on-error:\s*true/.test(src), "a step that cannot fail the job cannot check anything either");
 });
+
+// --- the Tests step provisions the engine its gates need -----------------------
+// #337. A different shape of the same vacuous green, and the reason this pin
+// lives here rather than beside the gate it protects: candidates.test.mjs gates
+// its engine-parity tests on a resolvable gojq binary, and a gate that resolves
+// none SKIPS — which node counts as a test and reports under a `fail 0` summary.
+// So the wiring below can be deleted with the whole suite still green, and only
+// the `skipped` count moves. That is what this test refuses.
+//
+// It pins the wiring, not the paths' agreement: GOJQ_BIN naming a binary the
+// install did not produce is already loud, since findGojq() throws on a
+// GOJQ_BIN that is not gojq rather than falling back to a skip.
+test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
+  // Strip `#` comments before matching. A commented-out line still CONTAINS the
+  // literal every assertion below looks for, so against the raw file they cannot
+  // tell a live command from a dead one — and the mutation that matters here,
+  // commenting out the wiring, is exactly the one that hands the engine gates
+  // back their skip. Both comment forms, because killing only whole-line ones
+  // leaves the trailing form as the same hole.
+  const ci = flat(
+    readFileSync(CI_YML, "utf8")
+      .split("\n")
+      .map((l) => l.replace(/(^|\s)#.*$/, ""))
+      .join("\n"),
+  );
+
+  assert.ok(
+    phrase("go install github.com/itchyny/gojq/cmd/gojq@v0.12.19").test(ci),
+    "the Install gojq step no longer installs the gojq the engine gates resolve — they are back to skipping",
+  );
+  // `@latest` installs a gojq that satisfies the gate while changing what the
+  // gate measures, with no commit here to say so.
+  assert.ok(!/gojq[^\s]*@latest/.test(ci), "the gojq install is floating again — pin the version");
+  assert.ok(
+    phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
+    "the Tests step no longer names the binary, so a failed provision skips quietly instead of failing the job",
+  );
+});

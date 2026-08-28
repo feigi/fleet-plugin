@@ -201,7 +201,38 @@ jobs:
       # pattern through literally, node globs it itself, finds nothing, and
       # exits 0 having run not one test. No node flag fails a zero-test run,
       # so the shell has to be the guard.
+      # gh applies `--jq` with its own embedded gojq (RE2), not the system jq
+      # the candidates stub execs, so candidates.test.mjs gates its engine-parity
+      # tests on a real gojq binary being resolvable — and a gate that does not
+      # resolve one SKIPS, which is green. Without this the only executable
+      # checks that the `--jq` programs hold under the production engine never
+      # ran here (#337).
+      # Provisioned after the checkers above rather than beside setup-node: a
+      # shellcheck or syntax failure then fails the job without paying for the
+      # toolchain.
+      # `cache: false` because setup-go's cache keys off a go.sum, and this repo
+      # has no Go module — there is nothing to key on.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      # Pinned rather than `@latest`: a gojq release would otherwise change what
+      # the engine gate MEANS without any commit here, which is the same silent
+      # drift the pin on the node version above exists to stop.
+      - name: Install gojq
+        env:
+          GOBIN: ${{ runner.temp }}/gojq
+        run: go install github.com/itchyny/gojq/cmd/gojq@v0.12.19
+
       - name: Tests
+        env:
+          # Naming the binary, rather than leaving findGojq() to probe PATH and
+          # $(go env GOPATH)/bin, is what makes a failed provision LOUD: that
+          # function hard-fails on a GOJQ_BIN that is not gojq, so a step that
+          # silently produced nothing reds the job instead of handing the engine
+          # gates back their skip.
+          GOJQ_BIN: ${{ runner.temp }}/gojq/gojq
         run: |
           shopt -s failglob
           node --test skills/fleet/scripts/*.test.mjs
