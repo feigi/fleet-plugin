@@ -238,8 +238,37 @@ set -f
 # through "." here gives it the same expansion, the same test-file shape, and
 # the same node_modules prune as every other invocation. (#97)
 [ \$# -gt 0 ] || set -- .
+# A flag counts toward \$#, so an argv of flags alone clears the bare-form
+# default and then contributes nothing for the loop to expand: argv reached
+# \`exec node --test\` holding only flags, which is node's own discovery and the
+# same vacuous pass the bare-form default exists to refuse. \$operand records
+# whether any argument named something to run, so the flags-only refusal can
+# tell that argv from a bare one, which the bare-form default has already
+# turned into ".". Assigned rather than assumed empty, because an exported
+# \$operand in the caller's environment would otherwise disarm the refusal.
+# Refusing rather than defaulting: prepending "." ahead of node's own flags
+# reorders argv, which needs its own measurement, and no briefed workflow
+# passes flags alone. (#352)
+operand=
 for arg do
   shift
+  # Judged on the argument's shape, not on what that shape resolves to: a
+  # directory expands, an existing file passes through escaped, a quoted glob is
+  # node's to expand whether or not it matches anything, and a typo is refused
+  # outright. A flag is the one shape that can name nothing at all.
+  # The \`[ -e ]\` term is what keeps this classification in step with the
+  # branch that consumes the argument below, which settles \`-d\` and then
+  # \`-e\` before it reads anything as a flag — that branch is where existence
+  # genuinely comes first; here the \`-*\` shape has to match before the term is
+  # reached at all.
+  # Agreement is the whole of what it buys, never a working invocation: a
+  # dash-spelled path is refused either way, and the term settles only WHICH
+  # refusal a caller sees. Measured on a runner built from this emitter, with a
+  # file named \`-dash.spec.mjs\` present and named as the sole argument: with
+  # the term, node reads it as an option and exits 9 with \`node: bad option\`;
+  # without it, the argument classifies as a flag and the refusal below exits 1
+  # in this runner's own voice.
+  case "\$arg" in -*) [ -e "\$arg" ] && operand=1 ;; *) operand=1 ;; esac
   if [ -d "\$arg" ]; then
     # Zero matches must refuse. Appending nothing does not run nothing — it
     # leaves argv empty, and bare \`node --test\` then discovers the whole
@@ -457,6 +486,20 @@ for arg do
     set -- "\$@" "\$arg"
   fi
 done
+# Argv holding no path is what node answers with its own discovery, and that is
+# the vacuous pass this runner exists to refuse — a path that does not exist and
+# an underivable test command both refuse rather than guess. POSIX's \`--\` is
+# refused by the same rule: it reaches the flag pass-through and is no more a
+# path than a flag is.
+# The quoted-glob arm is the one deliberate exemption, not an oversight, and
+# this guard does not close it. The shell is not expanding that argument
+# (\`set -f\` above), node is, and this runner never learns the match count: it
+# hands argv to node through \`exec\`, which has no return path. So a glob
+# matching nothing still classifies as an operand here, reaches node, and exits
+# 0 having run nothing — measured. That is the ceiling the file branch already
+# states above, and closing it would mean running node rather than \`exec\`ing
+# it, so that it could read the summary back. Separate change.
+[ -n "\$operand" ] || { printf "agent-test: no test file or directory in the arguments — refusing rather than falling through to node's own discovery\n" >&2; exit 1; }
 SH
   fi
 
