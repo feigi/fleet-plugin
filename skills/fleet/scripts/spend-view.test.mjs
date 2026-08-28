@@ -21,7 +21,7 @@ const HTML = readFileSync(join(import.meta.dirname, "board.html"), "utf8");
 // invisible to every lift); the call-site pin, so the page still routes through
 // what is pinned; and the parse check, so the script the browser gets is valid.
 for (const [name, re] of [
-  ["spendView", /^function spendView\(/gm],
+  ["spendView", /^function\s+spendView\s*\(/gm],
   ["k", /^const k = /gm],
 ]) {
   test(`board.html declares ${name} exactly once at top level`, () => {
@@ -49,10 +49,37 @@ test("renderSpend routes through spendView rather than re-deriving the branch", 
   // The call, not the name it is bound to — a renamed local is not a defect.
   assert.match(renderSpendBody, /=\s*spendView\(\w+\);/);
   // The tri-state must not be re-tested in the renderer; that is what the split
-  // removed. The decision's own fields may be read freely, the raw argument may
-  // not be branched on again.
-  assert.doesNotMatch(renderSpendBody, new RegExp(`if \\(!?${renderSpend[1]}[.)]`));
+  // removed. The decision's own fields may be read freely; the raw argument
+  // reaches exactly one place, the spendView call, and nowhere else. Matching
+  // `if (…)` shapes instead pins one spelling of a re-derivation: a pattern
+  // anchored on the argument being followed by `.` or `)` is evaded by
+  // `if (sp && sp.error)`, by `if (sp?.error)`, and by `const { error } = sp`.
+  const bodySansCall = renderSpendBody
+    .replace(/^function renderSpend\(\w+\) \{/m, "")
+    .replace(/=\s*spendView\(\w+\);/, "");
+  assert.doesNotMatch(bodySansCall, new RegExp(`\\b${renderSpend[1]}\\b`));
 });
+
+// The test above pins that the decision is REACHED; these pin that each field
+// lands in its own slot. Without them the panel can be miswired one token at a
+// time and every case below still passes, because those only ever look at what
+// spendView RETURNS: drop the hidden branch and a `kind:"hidden"` decision
+// appends an empty `spend-wrap` every tick at run start — the #371 behaviour
+// itself, a box where the panel must render nothing — or swap the two column
+// lists, or the two header strings, and nothing goes red.
+for (const [claim, re] of [
+  ["the hidden decision appends nothing", /if \(\w+\.kind === "hidden"\) return;/],
+  ["a text-only decision reaches the DOM", /el\("div", "spend-wrap", \w+\.text\)/],
+  ["the lede string fills the lede slot", /el\("span", "lede", \w+\.lede\)/],
+  ["the note string fills the note slot", /el\("span", "note", \w+\.note\)/],
+  ["the tool heading fills the tool heading", /el\("h3", null, \w+\.toolHeading\)/],
+  ["the role column is fed the role list", /spendRows\(\w+, \w+\.roles,/],
+  ["the tool column is fed the tool list", /spendRows\(\w+, \w+\.tools,/],
+]) {
+  test(`renderSpend wires the decision through: ${claim}`, () => {
+    assert.match(renderSpendBody, re);
+  });
+}
 
 test("board.html's inline script parses", () => {
   // An extraction is a restructure of this file's script; a broken one would not
@@ -109,7 +136,7 @@ test("a success object with no cache-write but a non-zero skipped count reports 
   // THE REGRESSION THIS FILE EXISTS FOR. renderSpend used to return early on a
   // falsy cacheWrite and swallow `skipped` with it, so a run whose transcripts
   // were unreadable rendered identically to a run that had not started. The fix
-  // shipped in 234e668 with nothing to pin it.
+  // shipped with nothing to pin it.
   assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 3 })),
     { kind: "note", text: "3 transcripts skipped; no spend recorded yet" });
   // Same conflation one step earlier: totals absent entirely rather than zeroed.
@@ -157,11 +184,14 @@ test("the tool column is capped and both columns tolerate a missing list", () =>
 });
 
 test("an error with an empty message is currently routed to success and hidden — enumerated, not fixed (#371)", () => {
-  // Reachable: gatherSpend's outer catch returns `{ error: e.message }`, and
-  // e.message is "" for any error thrown without one. The discriminant is
-  // truthiness, so `{ error: "" }` misses the error branch, finds no totals, and
-  // hides — the same "a bug looks like an idle run" conflation the error branch
-  // exists to remove. NOT changed here: #371 rules the contract reshape out of
+  // A contract/code divergence, measured here rather than a claim about live
+  // traffic: gatherSpend's outer catch returns `{ error: e.message }`, and
+  // e.message is "" for any error thrown without one, so the contract admits the
+  // shape. The discriminant is truthiness, so `{ error: "" }` misses the error
+  // branch, finds no totals, and hides — the same "a bug looks like an idle run"
+  // conflation the error branch exists to remove. Whether any producer actually
+  // throws a message-less error into that catch is not established here.
+  // NOT changed here: #371 rules the contract reshape out of
   // scope and requires rendering to be unchanged. This pins today's routing so
   // the follow-up flips one assertion instead of discovering the case again.
   assert.deepEqual(spendView({ error: "" }), { kind: "hidden" });
