@@ -435,7 +435,16 @@ test("a receipt that cannot be written still leaves the die reason and exit 2 (#
 
   const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
   assert.equal(res.status, 2, "not the 1 this script uses for `NOT released`, which no write error may fabricate");
-  assert.ok(res.stderr.includes(cause), `the die reason survives the failed write: ${JSON.stringify(res.stderr)}`);
+  assert.ok(
+    res.stderr.includes(`release-ticket: ${cause}`),
+    // Pinned WITH the script's own `$NAME:` prefix, not on the bare cause. bash
+    // 3.2 as /bin/sh flushes the failed stdout receipt to stderr, and that
+    // receipt embeds this same cause inside its `"blockers":[…]` — so a bare
+    // `includes(cause)` is satisfied by the leaked JSON and stays green with
+    // `die`'s own printf deleted. Measured: that mutant passes under macOS
+    // /bin/sh unpinned, and fails under /bin/sh, dash and zsh once prefixed.
+    `the die reason survives the failed write in the script's own voice: ${JSON.stringify(res.stderr)}`,
+  );
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
