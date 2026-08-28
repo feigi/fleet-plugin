@@ -2073,6 +2073,29 @@ test("probe 2: INFLIGHT_LS_REMOTE_TIMEOUT cannot lengthen the default budget", a
     "and the wait really was the default budget, not the 600s asked for");
 });
 
+// The other end of the same guard, and it needs no stall: the comment beside it
+// says an unusable value "is not an error", and until the digit-count arm landed
+// the shell contradicted that sentence out loud. `*[!0-9]*` catches `5s` and
+// `-1` but passes any all-digit string straight into `[`, which then reports a
+// value it cannot represent — naming a LINE NUMBER, not the variable, on the
+// same stderr this script writes its own reasons to.
+//
+// Both wordings are refused, because only one of them is reachable from here:
+// `sh` on darwin says "integer expression expected" and the dash that is
+// `/bin/sh` on CI says "Illegal number", so a pin written against either one
+// alone is vacuous on the other platform.
+test("probe 2: a budget too large for the shell's integer is ignored, and says nothing", (t) => {
+  const { repo, env } = fixture(t, 8, { remoteBranches: ["main", "fix/other-thing"] });
+  const r = spawnSync("sh", [SCRIPT, "8"],
+    { cwd: repo, env: { ...env, INFLIGHT_LS_REMOTE_TIMEOUT: "99999999999999999999" }, encoding: "utf8", timeout: 30_000 });
+
+  assert.equal(r.status, 0,
+    "an unusable value is not an error — the default stands and the probe still answers");
+  assert.equal(JSON.parse(r.stdout).taken, false, "and answers with the verdict it would have reached anyway");
+  assert.doesNotMatch(r.stderr, /integer expression expected|Illegal number/,
+    "`[` must never be handed a value too large for the shell's integer: a raw diagnostic naming a line number is the guard's comment being contradicted on the surface the guard writes to");
+});
+
 // kill_tree's awk closure has no other test at its own level: the five cases in
 // this block reach it only by letting a real fetch hang, which is slow and,
 // worse, blind to the thing the `do { … } while (grew)` loop exists for.
