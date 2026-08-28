@@ -215,7 +215,9 @@ source, and it can never move a ticket.
   timestamps (deterministic — `now` is an argument).
 - **Serve loop + HTTP**: one smoke test — boot the server, `fetch /board.json`,
   assert the model shape.
-- **The page**: manual (vanilla, no build); not unit-tested.
+- **The page**: manual (vanilla, no build). The spend panel's branch decision
+  is extracted as a pure `spendView` and unit-tested by `spend-view.test.mjs`
+  (#371); the DOM rendering around it is not.
 
 ## Open questions
 
