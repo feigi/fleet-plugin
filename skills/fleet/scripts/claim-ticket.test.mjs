@@ -757,12 +757,19 @@ test("runner: a node --test flag reaches node instead of being read as a path", 
 // bare-form default, contributed no path operand, and reached node holding
 // only flags. That is node's own default discovery — which does not recognise
 // the `.spec.` form — so this fixture reported zero tests run at exit 0, the
-// vacuous pass this runner refuses everywhere else. It refuses here too rather
+// vacuous pass this runner exists to refuse. It refuses here too rather
 // than defaulting: prepending the default AHEAD of node's own flags reorders
 // argv, and no briefed workflow passes flags alone.
 //
 // `--` is in the list because POSIX's end-of-options marker reaches the same
 // pass-through arm as a flag, and is no more a path than one.
+//
+// `-v` is in the list because a corpus spelled entirely with double dashes
+// cannot tell the classification pattern `-*` from `--*`: narrow it to `--*`
+// and every double-dash entry here is still refused exactly as before, while a
+// lone `-v` classifies as an operand, reaches node, and exits 0 having printed
+// its version and run nothing — the vacuous pass again, one argv shape over.
+// Measured in both directions against that one-token mutation.
 //
 // Both directions, because a suite that only feeds a new refusal invalid input
 // pins neither: the ACCEPT case below rides the same flag alongside a real
@@ -776,7 +783,7 @@ test("runner: a node --test flag reaches node instead of being read as a path", 
 // 0. A `.test.mjs` fixture would have run green both ways and pinned nothing.
 test("runner: an argv of flags alone refuses instead of reaching node's own discovery", () => {
   const a = apply({ "t/a.spec.mjs": PASSES });
-  for (const argv of [["--test-concurrency=1"], ["--"], ["--test-only", "--test-reporter=tap"]]) {
+  for (const argv of [["--test-concurrency=1"], ["-v"], ["--"], ["--test-only", "--test-reporter=tap"]]) {
     const r = a.run(...argv);
     assert.notEqual(r.status, 0, `${argv.join(" ")}: ${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /agent-test: no test file or directory/, argv.join(" "));
