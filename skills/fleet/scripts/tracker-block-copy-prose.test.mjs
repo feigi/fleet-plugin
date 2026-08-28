@@ -20,7 +20,7 @@
 //
 // #23's `caveat-unification-prose.test.mjs` deliberately left this pair out,
 // on the ground that `run-team`'s copy sits inside a verbatim subagent prompt
-// written for a different audience. That holds for the two SKILL files it does
+// written for a different audience. That holds for the SKILL files it does
 // compare, which paraphrase; it does not hold here, because the tracker
 // section is not a paraphrase of the block but a reproduction of it, differing
 // today only in wrap width and the prompt's quote markers. Comparing whole is
