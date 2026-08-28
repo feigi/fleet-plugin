@@ -1103,7 +1103,8 @@ site's reason rather than copying a shared one.
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test skills/fleet/scripts/*.test.mjs`. Pass the same string to the
-workflow and to the fix-applier so both gates run one command. Omit it from the
+workflow, to the fix-applier, and to the finisher — whose duty-2 mutation gate
+runs it too — so every gate runs one command. Omit it from the
 workflow args and `review-pr.js` now DERIVES it from the repo under review
 (#142) instead of defaulting to a fixed string — refusing outright if it
 can't; the fix-applier has no such fallback, so substituting `<testCmd>` with
@@ -1280,7 +1281,10 @@ a minute apart showed *different* mutants, so a member's report and any single
    harmless and labels anyway has substituted the rule's purpose for the rule,
    and you find out at merge time. **Give it the two-cause block below,
    verbatim** — a bare SHA mismatch names no cause, and the halt report needs
-   one.
+   one. **Give it `<testCmd>` too** — the same string you passed the workflow
+   and the fix-applier — because duty 2's mutation gate runs it and nothing
+   else hands the finisher one; substituted with nothing it leaves that gate
+   no command at all.
 2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
    the merge.** The test is a durable home, not a tracker number: a tracker
    issue and a committed in-tree comment both qualify, and for a finding whose
@@ -1309,6 +1313,48 @@ a minute apart showed *different* mutants, so a member's report and any single
    had correctly edited — the PR's whole point — and a finisher reading that
    literally halts a correct PR. It caught the error instead, and said so; do
    not rely on that.
+
+   **Whatever you verify by RUNNING, run in a tree nobody else owns.**
+   Independently re-running the ticket's acceptance mutation — loosen the
+   regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,
+   watch it redden, discard — is the half of this duty reading a diff cannot
+   do, and it stays. But it **writes**, and the PR's worktree belongs to
+   another member. Measured on #380: a finisher was inside that worktree at the
+   instant the fix-applier announced one more clause to land, and neither
+   ordering is detectable afterwards from the diff — a restore lands on the
+   uncommitted clause and destroys it silently, or the mutant is still in the
+   tree when the fix-applier commits and a deliberately broken guard ships as
+   the fix, in a commit nothing re-reviews. So take your own:
+   `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`,
+   mutate and run `<testCmd>` in there, then
+   `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
+   **At your dispatch pin, never at the fetched branch tip** — duty 1 just
+   proved the owned worktree sits at that pin, and `PR headRefOid` may carry
+   commits no reviewer read, the substitution the halt block's head-equality
+   check rejects for the same reason. The member name is in the path because
+   the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
+   collides whenever a PR gets a second finisher, and `worktree add` on an
+   occupied path fails closed into a halt with a purely mechanical cause.
+
+   **Remove it on every path, the failing ones included** — a mutant that comes
+   back green, a suite that will not start, your own halt at any duty. `--force`
+   is required and is right only here: the tree is deliberately dirty when you
+   are done, so a plain `git worktree remove` refuses it (`contains modified or
+   untracked files`, rc 128, directory left on disk — measured, git 2.50.1),
+   while everywhere else in this runbook that refusal is a finding precisely
+   because the dirt may be someone's only copy. Here nothing in it is anyone's.
+   Nothing sweeps a leak for you either: `reap.sh`'s branchless sweep is bounded
+   to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
+   it reports and never collects. `claim-ticket.sh` writes `./agent-test` only
+   into a worktree it freshly claims, so the tree you added has none — run
+   `<testCmd>` in it, per **A reused worktree may lack the runner** above.
+
+   **None of this licenses a write to the owned worktree.** Duty 1 is a read;
+   you never restore that tree, because you never wrote to it. A controller
+   instruction to restore mutated paths there is an instruction to perform the
+   silent-destruction ordering above — report it back, do not run it. One
+   finisher refused exactly that instruction live, on the grounds it could not
+   prove the diff was its own; that was judgement, and this is the rule.
 3. Add `ready-to-merge` — after reading the PR's labels back
    (`gh pr view <pr> --json labels`) and finding **exactly one** release label,
    `patch`/`minor`/`major`. Zero or more than one halts the finisher before the
