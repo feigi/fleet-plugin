@@ -42,7 +42,8 @@ const renderSpendBody = (() => {
 test("renderSpend routes through spendView rather than re-deriving the branch", () => {
   // Without this the whole decision can be disconnected in one token and every
   // case below still passes, against a function the page never calls.
-  assert.match(renderSpendBody, /^  const v = spendView\(sp\);$/m);
+  // The call, not the name it is bound to — a renamed local is not a defect.
+  assert.match(renderSpendBody, /=\s*spendView\(sp\);/);
   // The tri-state must not be re-tested in the renderer; that is what the split
   // removed. `v.kind` may be read freely, `sp` may not be branched on again.
   assert.doesNotMatch(renderSpendBody, /if \(!?sp[.)]/);
