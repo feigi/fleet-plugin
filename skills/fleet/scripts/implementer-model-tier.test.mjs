@@ -51,7 +51,7 @@ function section(source, startAnchor, endAnchor, label) {
 const step4 = () =>
   section(RUN_TEAM, "4. **Read each survivor in full", "5. **Collision scan", "run-team phase 0 step 4");
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch every implementer at the session's tier", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
+  section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
   section(RUN_TEAM, "**Guard: accumulate per PR", "One named member per ticket", "run-team phase 2 tier guard");
 
@@ -178,16 +178,36 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // own tooling-fix triggers list calls out.
   assert.match(
     slice,
-    /a member\s+dispatched with `model` set does not get it back/,
-    "phase 2 no longer says HOW the session tier is obtained — omitting `model` is the mechanism",
+    /dispatched with `model` set does not get the declared\s+tier back/,
+    "phase 2 no longer says HOW the declared tier is obtained — omitting `model` is still the mechanism",
   );
-  // The omission only reaches the session tier when the subagent type carries no
-  // model of its own; two pr-review-toolkit agents in this repo pin `model: opus`
-  // in frontmatter, so the precondition is not hypothetical.
+  // The omission resolves to the DEFINITION's tier first and the session's only
+  // after. Stated without that ordering, "omit `model`" reads as "inherit the
+  // session", which is what the declaration was written to stop being true.
   assert.match(
     slice,
-    /no `model:` frontmatter/,
-    "phase 2 states the omission mechanism without its precondition",
+    /session's tier applies only when the definition\s+names none/,
+    "phase 2 states the omission mechanism without saying the definition's tier wins first",
+  );
+  // The dispatch rule has to NAME the definition, or the tier is declared
+  // somewhere the reader of this phase can neither find nor audit.
+  assert.match(
+    slice,
+    /subagent_type: "fleet-implementer"/,
+    "phase 2 no longer dispatches the declared subagent type",
+  );
+  assert.match(
+    slice,
+    /agents\/fleet-implementer\.agent\.md/,
+    "phase 2 no longer says WHERE the declared tier lives",
+  );
+  // `name` is orthogonal to `subagent_type` and is what confers team membership
+  // and the Agent tool; both the spend classifier and member-outcomes.mjs read
+  // it. A rewrite that swaps the name for the type silently unmakes the member.
+  assert.match(
+    slice,
+    /Keep `name: impl-<N>`/,
+    "phase 2 no longer keeps the impl-<N> name alongside the subagent type",
   );
 
   // A lost class no longer misprices anything, but it still costs the correction
@@ -314,4 +334,37 @@ test("phase 3 owns the guard — otherwise nothing in the event loop ever runs i
     /tier\s+guard/,
     "no phase 3 event dispatches the tier guard — it is stated in phase 2 and never reached",
   );
+});
+
+// ---------------------------------------------------------------------------
+// THE DECLARATION ITSELF. Every pin above reads SKILL.md, so a tier changed in
+// `agents/fleet-implementer.agent.md` leaves all of them green while the
+// dispatched tier flips — the same silent drift they exist to catch, routed
+// around the document they read. That hazard is why the declaration arrived
+// with these three.
+const frontmatterOf = (name) =>
+  readFileSync(join(REPO, "agents", `${name}.agent.md`), "utf8").split("---")[1] ?? "";
+
+test("the implementer definition declares BOTH a model and an effort", () => {
+  // Declaring one leaves the other inherited from whatever session dispatched
+  // the member, which is the ambiguity the declaration exists to remove — and
+  // frontmatter is the ONLY place the pair can be stated, because the Agent tool
+  // takes `model` and has no effort parameter at all.
+  const fm = frontmatterOf("fleet-implementer");
+  assert.match(fm, /^model:\s*\S+$/m, "the implementer definition declares no model");
+  assert.match(fm, /^effort:\s*\S+$/m, "the implementer definition declares no effort");
+});
+
+test("the declared model is a bare alias, never a pinned version", () => {
+  // A pinned id rots into a superseded generation that is weaker AND dearer:
+  // pricing falls with each generation, so an older Opus is not the cheap
+  // option it looks like. The alias tracks the newest.
+  const model = /^model:\s*(\S+)$/m.exec(frontmatterOf("fleet-implementer"))?.[1];
+  assert.ok(["opus", "sonnet", "haiku"].includes(model), `pinned version: ${model}`);
+});
+
+test("the definition lists no tools — a list would drop the Agent tool", () => {
+  // references/member-lifecycle.md:7 — a `tools:` list that omits `Agent` costs
+  // the member its delegation, silently and with no error. Omit the key.
+  assert.doesNotMatch(frontmatterOf("fleet-implementer"), /^tools:/m);
 });

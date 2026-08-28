@@ -392,11 +392,45 @@ config has no `globalSetup`, so there is no stack to collide on).
 
 ## Phase 2 — dispatch implementers
 
-**Dispatch every implementer at the session's tier — omit `model` on the Agent
-call, whatever the class.** That omission is the whole mechanism, and a member
-dispatched with `model` set does not get it back. It holds only while the
-implementer's subagent type carries no `model:` frontmatter — an omitted `model`
-takes the *agent definition's* tier first and the session's only after.
+**Dispatch every implementer as `subagent_type: "fleet-implementer"`, and still
+omit `model` on the Agent call, whatever the class.** The tier now lives in that
+definition's frontmatter (`agents/fleet-implementer.agent.md`), which is what an
+omitted `model` takes first — the session's tier applies only when the definition
+names none, and a member dispatched with `model` set does not get the declared
+tier back. Omitting `model` is therefore still the mechanism; what changed is
+that the tier it resolves to is now declared and pinned rather than inherited by
+accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
+spend classifier and `member-outcomes.mjs` read it.
+
+**The declaration names a bare alias (`opus`), never a versioned id.** An alias
+tracks the newest generation; a pinned id rots into a superseded one that is
+weaker AND more expensive, because pricing falls with each generation.
+
+**One implementer per staged wave goes at the alternate tier — one per phase-0
+staging batch, never one per refill.** Dispatch it exactly as the others but
+with `subagent_type: "fleet-implementer-alt"`. Pick the ticket
+that is most ordinary — never the hardest, never the one whose ticket the rest
+of the run depends on — and do not tell the member it is a control: a member
+that knows it is being measured is not measuring the same thing.
+
+**Count the rate against phase-0 staging, because "wave" is not a dispatch
+unit.** An ordinary refill re-enters phase 1 then 2 for a single slot and starts
+no new wave — the guard below says it outright, "refill is level-triggered, so
+there are no implementer waves" — so a rule counted per refill would put roughly
+half the fleet on the alternate tier. Phase 0 *does* re-run mid-run whenever the
+pool empties, and each of those stagings is a fresh wave that carries its own
+alternate-tier member.
+
+**Do not label it anywhere.** The pairing is a query over
+`docs/metrics/member-outcomes.tsv` — a `session`+`role` carrying more than one
+distinct `model`. A hand-set column would not survive that file's regeneration,
+and one derived against today's declared tiers would mislabel every historical
+row.
+
+**Why one per wave and not a week of one tier followed by a week of the other:**
+tier would then be confounded with calendar date and therefore with prompt
+evolution, which is exactly the state #864 documents and the reason the rows
+already on disk cannot answer the question they were collected for.
 
 **`class=routine` → `sonnet` was REVERTED on 2026-08-16, by the guard below
 firing.** Both halves were met on the accumulated `docs/metrics/tier-outcomes.tsv`:
@@ -410,31 +444,43 @@ still what a future control would be drawn from.
 
 **Read the counter-evidence before restoring it.** Recount from the file before
 citing it — these figures are a snapshot, not a live count, and a doc-only
-append lands a row without touching this paragraph. **As of PR #747,
-2026-08-21, 50 rows:** the file now holds 33 `class=routine` PRs across 8
-distinct `run_date`s, so the floor is long since met, and 5 of them carry
-`closed_own_ticket` `no` (#452, #466, #536 at `sonnet`; #693, #707 at `opus`),
+append lands a row without touching this paragraph. **As of 2026-08-28, 103
+rows:** the file holds 66 `class=routine` PRs across 14 distinct `run_date`s,
+so the floor is long since met, and 6 of them carry `closed_own_ticket` `no`,
 so the trigger is met too. **Firing changes nothing: the action is "revert
 `class=routine` to top tier" and that revert already happened on 2026-08-16.**
 The guard is in its fired state and has no further move; the live question is
-the opposite one, restoring a cheaper tier, which this guard does not decide.
+the opposite one, restoring a cheaper tier, which this guard does not decide
+and which no row on file settles.
 
-The raw split now favours the top tier — 3 failures in 9 `routine`/`sonnet`
-rows against 2 in 24 `routine`/`opus`. **Do not read that as a tier result.**
-8 of the 9 `sonnet` rows fall on 2026-08-13 to 08-17 and 23 of the 24 `opus`
-rows on 08-18 to 08-21, so tier is very nearly confounded with calendar date
-and therefore with prompt evolution — the dispatch prompts gained rules
-throughout that window. The one row that breaks the confound is **PR #714**
-(2026-08-20, `routine` at `sonnet`, maintainer-authorized as a deliberate
-control, run against current prompts): it **passed**. That is n=1 in the
-direction opposite the raw split.
+The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
+rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.**
+Tier remains largely confounded with calendar date and therefore with prompt
+evolution: 8 of the 11 `sonnet` rows fall on 2026-08-13 to 08-17, before the
+window in which 54 of the 55 `opus` rows were run, and the dispatch prompts
+gained rules throughout. The confound is **weakened, not resolved.** Three
+`sonnet` rows now break it rather than one — **#714** (2026-08-20, a
+maintainer-authorized deliberate control) and **#750** and **#751**
+(2026-08-21) — all three run against prompts of the same vintage as the `opus`
+rows, and **all three passed**, which is the direction opposite the raw split.
+Three is still not a result. **What replaces this argument going forward is the
+within-run pairing above**: one implementer per wave at the alternate tier makes
+tier orthogonal to date by construction, so the question stops depending on
+whichever rows history happened to leave. **Orthogonal to date, and to nothing
+else** — the alternate member is picked as the most ordinary ticket in its wave
+and never the hardest, while the top tier absorbs every remaining ticket
+including all of the hardest, so the pairing trades the calendar confound for a
+difficulty one that runs in a known direction. That is why the four covariates
+exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
+reading it as a tier result, never on the raw split.
 
-`minted_false_claim` **now discriminates and no longer reads "always yes"** —
-9 of the 33 `routine` rows carry `no` (#601, #656, #663, #674, #688, #692,
-#693, #726 at `opus`; #714 at `sonnet`). Read it as a property of the TICKET
-before the tier: a pure code simplification need not add prose, while a
-correction ticket adds prose by construction. The honest summary is that the guard fired on the criterion the
-maintainer chose in advance, not that the cheaper tier has been shown worse.
+`minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of
+the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet` (#714, #750).
+Read it as a property of the TICKET before the tier: a pure code simplification
+need not add prose, while a correction ticket adds prose by construction. The
+honest summary is unchanged and is the reason this paragraph exists: the guard
+fired on the criterion the maintainer chose in advance, not on a demonstration
+that the cheaper tier is worse.
 
 **No class recorded → record `class=unknown`, never a guess.** Since the revert
 every class dispatches the same way, so a lost class no longer misprices a
@@ -495,6 +541,22 @@ refill is level-triggered, so there are no implementer waves. **Append one row t
 `docs/metrics/tier-outcomes.tsv` when you rule each PR's review** (that file's
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
+
+The row's last four fields are the ticket's difficulty, and they are what lets a
+tier comparison condition on the thing that swamps it. `sizing` is the
+**member's** own `light`/`heavy` verdict from its phase-2 `sizing-a-ticket`
+run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`);
+`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
+diff. **Phase 0 does not size anything** — it shortlists, phase 1 claims, and
+the sizing run happens inside the member after both, which is why the verdict
+has to travel in the PR body rather than being something you already hold. **A value
+not in hand is left BLANK, never estimated** — blank reads as unknown and drops
+the row from a stratified comparison, while a guess reads as measured and
+poisons one. Blank still means the field is WRITTEN and empty: append all
+twelve fields on every new row, because a row of some in-between width cannot be
+told apart from a shifted one. The `note` field is free text and now sits before
+those four, so write it with spaces: one tab inside it shifts all four for that
+row alone, and the suite reds on the field count when it does.
 
 **Then record the run's member facts — do not author them.** Scrape EVERY session
 directory for this cwd, not one:
@@ -558,20 +620,40 @@ it. **Only a same-class comparison across tiers is informative**, and the old
 rule could not produce one, since no routine ticket ever ran at top tier.
 
 **That last sentence is no longer true, and this is the part to re-read.** Since
-the revert every routine ticket runs at top tier, so the file now holds 24
-`routine`/`opus` rows against 9 `routine`/`sonnet` (as of PR #747, 2026-08-21 —
-recount before citing). The same-class comparison the paragraph above calls the
-only informative one therefore EXISTS now. It is still not clean: the two groups
-are split almost exactly by calendar date, so it measures prompt evolution at
-least as much as tier. The counter-evidence paragraph earlier in this section
-carries the split and the one deliberate control that cuts against it.
+the revert every routine ticket runs at top tier, so the file now holds 55
+`routine`/`opus` rows against 11 `routine`/`sonnet` (as of 2026-08-28, 103 rows
+— recount before citing). The same-class comparison the paragraph above calls
+the only informative one therefore EXISTS now. It is still not clean: the two
+groups are split almost entirely by calendar date, so it measures prompt
+evolution at least as much as tier. The counter-evidence paragraph earlier in
+this section carries the split and the three rows that cut against it. Recount
+both, and every other figure in this section, with:
+
+```bash
+grep -vc '^#' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {n++; d[$1]=1; if($6=="no") no++} \
+  END{print n, length(d), no+0}' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
+  END{for(k in t) print k, t[k], f[k]+0}' docs/metrics/tier-outcomes.tsv
+```
+
+**These rows are the historical corpus, and nothing appended to them fixes the
+confound.** What fixes it is the within-run pairing in the dispatch rule above:
+from now on every wave contributes a `sonnet` and an `opus` implementer run
+against the same prompts on the same day, so the comparison stops depending on
+which tier history happened to leave in which week. Read the pairs, not the
+whole-file split, once there are enough of them.
 
 **So read what the guard actually established: routine tickets sometimes fail to
 close their own ticket. Not that `sonnet` caused it.** The revert is the
-pre-committed rule being honoured, not a measurement. Restoring a cheap tier —
-or answering the question properly — needs a deliberate control, some
-`class=routine` tickets dispatched at top tier, which is a change to the
-dispatch rule and therefore the maintainer's call, not yours.
+pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
+still the maintainer's call and still a change to the dispatch rule — but the
+deliberate control it used to require is no longer something anyone has to
+authorize one ticket at a time: the alternate-tier dispatch above produces one
+per wave by construction. **Do not read the pairs early.** Report the count and
+stop until there are at least ten of them across five or more distinct
+`run_date`s; below that, a pair count is a number, not evidence, and the last
+guard fired with n=1 on the control side.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot
@@ -666,8 +748,11 @@ number, worktree abs path, branch, and each of these verbatim:
 >
 > Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with
 > `Closes #N` in the body and exactly one release label — `patch`/`minor`/`major`,
-> the *label*, not the branch *type*. Report the PR number and head SHA to the
-> controller, then exit. Never apply `ready-to-merge`, never merge.
+> the *label*, not the branch *type*. **Put your step-6 sizing verdict in the PR
+> body on its own line, `Sizing: light` or `Sizing: heavy`** — the controller
+> records it as a difficulty covariate when it rules your review, and the PR body
+> is the only place it survives your exit. Report the PR number and head SHA to
+> the controller, then exit. Never apply `ready-to-merge`, never merge.
 
 Each rule in the enumerate-and-declare block is load-bearing, for a different
 reason.
