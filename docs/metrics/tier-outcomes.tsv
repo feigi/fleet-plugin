@@ -25,8 +25,27 @@
 #                          acceptance criteria unmet, or reintroducing its defect
 # minted_false_claim yes = the diff added a factual claim (comment/doc/test name)
 #                          that measured false, beyond any inherited from the ticket
+# sizing                 = phase 0's light/heavy verdict for this ticket, recorded
+#                          at claim time
+# profile                = diff-stats.mjs profile for the merged diff (docs-only/
+#                          single-file/small/tests-only/production)
+# loc                    = lines changed, and files = files touched, both from
+#                          diff-stats.mjs
 #
-# run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note
+# THE FOUR COLUMNS ABOVE WERE ADDED 2026-08-28 AND ARE BLANK ON EVERY EARLIER
+# ROW. BLANK MEANS UNKNOWN, never a value. An earlier PR can be counted in a
+# whole-file tally and CANNOT enter a stratified comparison. Never fill one in
+# retroactively: a guessed covariate is worse than an absent one, because it
+# looks measured. They exist because ticket difficulty swamps the tier effect,
+# so a tier comparison that cannot condition on difficulty is reading noise.
+#
+# `note` IS FREE TEXT AND NOW SITS BEFORE FOUR COLUMNS. A tab inside it shifts
+# every one of them for that row and for no other, which no reader would catch.
+# Write the note with spaces, never a tab. Every NEW row carries all twelve
+# fields — an unknown covariate is an EMPTY field, not a truncated row, because
+# a row of some in-between width is indistinguishable from a shifted one.
+#
+# run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note	sizing	profile	loc	files
 2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
 2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
 2026-08-13	452	265	routine	sonnet	no	yes	REGRESSION: moved guard became script's last command, default dry run 0->1 — the exact defect #265 existed to remove; 4 dimensions found it; suite 616-green because all 8 call sites passed --apply

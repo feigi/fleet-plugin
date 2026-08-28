@@ -521,6 +521,18 @@ refill is level-triggered, so there are no implementer waves. **Append one row t
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
+The row's last four fields are the ticket's difficulty, and they are what lets a
+tier comparison condition on the thing that swamps it. `sizing` is phase 0's
+own `light`/`heavy` verdict for this ticket, recorded at claim time; `profile`,
+`loc` and `files` all come from `diff-stats.mjs` over the merged diff. **A value
+not in hand is left BLANK, never estimated** — blank reads as unknown and drops
+the row from a stratified comparison, while a guess reads as measured and
+poisons one. Blank still means the field is WRITTEN and empty: append all
+twelve fields on every new row, because a row of some in-between width cannot be
+told apart from a shifted one. The `note` field is free text and now sits before
+those four, so write it with spaces: one tab inside it shifts all four for that
+row alone, and the suite reds on the field count when it does.
+
 **Then record the run's member facts — do not author them.** Scrape EVERY session
 directory for this cwd, not one:
 
