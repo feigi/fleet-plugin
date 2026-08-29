@@ -180,7 +180,7 @@ const JQ =
   '            .nums\n' +
   '            + (if $nextsec and $item then [$line | scan("#\\\\d+")] else [] end)\n' +
   '            + [ $line\n' +
-  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\s*]*:?[\\\\s*]*(#\\\\d+(?:\\\\s*(?:,|and)?\\\\s*#\\\\d+)*)")\n' +
+  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\s*]*:?[\\\\s*]*(#\\\\d+(?:[\\\\s*]*(?:,|and)?[\\\\s*]*#\\\\d+)*)")\n' +
   '                | .[0]\n' +
   '                | scan("#\\\\d+")\n' +
   '              ]\n' +

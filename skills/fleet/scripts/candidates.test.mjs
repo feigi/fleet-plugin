@@ -377,8 +377,24 @@ test("a bolded REF yields its number — whitespace and asterisks interleave fre
     ticket(4, "Blocked by: **#12**\n"),
     ticket(5, "**Blocked by:** **#12**\n"),
     ticket(6, "Blocked by *#12*\n"),
+    ticket(7, "**Blocked by** : #12\n"),
   ]);
-  assert.deepEqual(rows.map((r) => r.d), [[179], [178], [5], [12], [12], [12]]);
+  assert.deepEqual(rows.map((r) => r.d), [[179], [178], [5], [12], [12], [12], [12]]);
+});
+
+test("a bolded ref AFTER the first one still joins the run — asterisks interleave between refs too", () => {
+  // #439's residual, found reviewing the fix: the separator between the label
+  // and the first ref was widened, the continuation between refs was not, so
+  // the second ref's leading `**` ended the run and the number was dropped —
+  // no error, no warning, the same wrong admission #439 was filed for, one ref
+  // to the right. Revert the continuation and every row here reds.
+  const { rows } = run([
+    ticket(1, "Blocked by **#12** and **#13**\n"),
+    ticket(2, "Blocked by: **#12**, **#13**\n"),
+    ticket(3, "Blocked by #12 and **#13**\n"),
+    ticket(4, "Depends on **#5**, #6\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[12, 13], [12, 13], [12, 13], [5, 6]]);
 });
 
 test("a noun-form Dependencies heading arms a section, at any heading depth and with a trailing colon", () => {
@@ -414,8 +430,12 @@ test("the noun form arms only when it is the WHOLE heading — a Dependency-inje
 test("#208's own brief text yields both of the open blockers it declared in prose", () => {
   // The live wrong admission #439 was filed from: this section reduced to no
   // dependency at all, so a ticket with two open blockers reached the survivor
-  // read as claimable. Both misses are present here at once — a noun-form
-  // heading AND bolded refs — so this fixture reds if either half regresses.
+  // read as claimable. What this fixture pins is the noun-form heading half:
+  // its bolded refs sit on list-item lines inside the armed section, so the
+  // list-item branch reads them whatever the label separator does — revert
+  // that separator to its pre-#439 form and this row stays green, while
+  // reverting the heading gate to the verb forms is what reds it. The
+  // separator half is pinned by the two bolded-ref tests above instead.
   // The `PR #390` bullet is collected too: in-section collection reads every
   // `#N` on a list-item line by construction, and a merged ref is inert at the
   // consumer, which drops a ticket only for a blocker that is still open.
@@ -508,6 +528,9 @@ test(
     // #439's two forms, on the engine that produced the live wrong admission.
     assert.deepEqual(deps("Blocked by **#179**\n"), [179]);
     assert.deepEqual(deps("Blocked by: **#12**\n"), [12]);
+    assert.deepEqual(deps("Blocked by **#12** and **#13**\n"), [12, 13]);
+    assert.deepEqual(deps("Blocked by: **#12**, **#13**\n"), [12, 13]);
+    assert.deepEqual(deps("**Blocked by** : #12\n"), [12]);
     assert.deepEqual(deps("## Dependencies\n\n- #12\n- #13\n"), [12, 13]);
     assert.deepEqual(deps("## Dependency injection\n\n- see #300\n"), []);
     assert.deepEqual(deps("## Blocked by\n\nSee #99 for context\n"), []);
