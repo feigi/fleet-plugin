@@ -109,7 +109,7 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   // un-flattened match reds on a pure reflow — the one thing the header at the
   // top of this file promises stays green.
   const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
-  assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean` or `unverified`/, "the cited section no longer enumerates the verdict values");
+  assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
 test("step 5's exit-code readings agree with the section it cites", () => {
@@ -131,6 +131,17 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // The exit-0 hazard is the one both files must state, not merely agree on:
   // it is the code that reads as permission.
   assert.match(runLedger, /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
+});
+
+test("both filing sites read soft-hit as rows to read rather than as permission", () => {
+  // `soft-hit` exits 0, which is the code an instruction is most likely to read
+  // as a green light — the same hazard `unverified` carries and the same reason
+  // it is pinned above. A verdict no caller understands is worse than the wrong
+  // verdict it replaced (#388), and there are two callers because two different
+  // agents file issues and each reads only its own instructions.
+  assert.match(step5(), /`soft-hit`[\s\S]{0,400}?read the rows/i, "step 5 names soft-hit without telling its reader to read the rows it printed");
+  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+  assert.match(runLedger, /`soft-hit`[\s\S]{0,400}?read\s+them before filing/i, "the cited section names soft-hit without saying what to do about it");
 });
 
 test("the finisher verifies a claimed APPLY against the branch diff, not the applier's word", () => {
