@@ -2677,6 +2677,44 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
 });
 
+test("an ambient GIT_WORK_TREE does not make the linkage guard blame a healthy worktree (#427)", (t) => {
+  // #427: reaches the same class #135 closed above, through the ENVIRONMENT
+  // instead of a hand-written .git. `ENV` scrubs GIT_DIR/GIT_WORK_TREE for
+  // every fixture in this file (so a poisoned suite run cannot go vacuous on
+  // this or any other case) — this is the one fixture that deliberately opts
+  // back in, through `release()`'s own `env` override, to exercise the path
+  // the scrub otherwise makes unreachable. No change to `ENV` itself, so
+  // every other fixture stays scrubbed.
+  //
+  // GIT_WORK_TREE alone is what reproduces (measured): with it ambient,
+  // `git -C "$wt" rev-parse --show-toplevel` answers about the ambient
+  // target instead of $wt, pre-fix. GIT_DIR alone does NOT reproduce this —
+  // with no GIT_WORK_TREE, the work tree falls back to discovery and lands on
+  // $wt regardless (measured) — so GIT_DIR is deliberately left out of this
+  // fixture's override: this test's job is to pin the variable that actually
+  // causes the misdirection, not the pair.
+  //
+  // The target need not even be a git repository — measured: git resolves
+  // `--show-toplevel` to the raw ambient path regardless — so a plain
+  // directory is the whole fixture, not a second repo to maintain.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const elsewhere = join(r.w, "..", "elsewhere");
+  mkdirSync(elsewhere);
+
+  const { code, json } = release(r, c, { env: { GIT_WORK_TREE: elsewhere } });
+
+  // A healthy, fully-releasable claim releasing cleanly is the proof for both
+  // guarded calls at once: `released: true` cannot happen unless the linkage
+  // guard passed AND the dirty check that follows it (`git -C "$wt" status
+  // --porcelain`, reading the same ambient var) reported the worktree's own,
+  // real, clean status rather than an answer about `elsewhere`.
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true, "an ambient GIT_WORK_TREE must not make a healthy claim unreleasable");
+  assert.equal(code, 0);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
 // --- #119: the escaping library this script now sources rather than carries.
 //
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
