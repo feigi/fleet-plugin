@@ -816,6 +816,13 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
   mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
   writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
   symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
+  // A directory whose name merely ENDS in the word. The spelling term above is
+  // bounded to a path segment, so this reaches the resolved check; unbounded,
+  // `*node_modules/*` claimed the argument for the logical guard, whose own
+  // inner test is anchored at `$PWD/node_modules/` and never fired — the
+  // argument left both guards unjudged and node ran the vendored file.
+  mkdirSync(join(a.wt, "vendor_node_modules"), { recursive: true });
+  symlinkSync(join("..", "node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendor_node_modules", "link.test.mjs"));
   for (const spelling of [
     "vendlink.test.mjs",
     "./vendlink.test.mjs",
@@ -823,10 +830,17 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
     "chainlink.test.mjs",
     "dirlink/v.test.mjs",
     "extlink.test.mjs",
+    "vendor_node_modules/link.test.mjs",
   ]) {
     const r = a.run("t/a.test.mjs", spelling);
     assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /resolves inside node_modules — excluded from the run/, spelling);
+    // The resolved target is named, not just the argument: the refusal states
+    // what was applied to THIS path — a caller who spelled a name carrying no
+    // `node_modules` otherwise has to re-run `realpath` to see which link went
+    // where, and reads the bare clause as a rule the runner does not apply to
+    // every spelling (a literal `t/node_modules/pkg/x.test.mjs` still runs,
+    // #401's ruling, deliberately).
+    assert.match(r.stderr, /resolves to \S+, inside node_modules — excluded from the run/, spelling);
   }
 });
 
@@ -836,10 +850,12 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
 // anywhere in its resolution.
 //
 // `sidelink` is the second half: a target that merely SITS BESIDE a vendored
-// tree rather than inside one. `worklink` is the ordinary npm/pnpm workspace
-// shape named by its REAL path — `node_modules/pkg` is a symlink OUT to
-// `packages/pkg`, so a caller naming `packages/pkg/…` names a file that is not
-// vendored at all, and physical resolution is exactly what has to agree. The
+// tree rather than inside one. `packages/pkg/w.test.mjs` is the ordinary
+// npm/pnpm workspace shape, named by its REAL path — there is no symlinked
+// spelling of it to grep for, because that is the point: `node_modules/pkg`
+// is a symlink OUT to `packages/pkg`, so a caller naming `packages/pkg/…`
+// names a file that is not vendored at all, and physical resolution is
+// exactly what has to agree. The
 // same tree spelled `node_modules/pkg/…` is #401's row above, refused by the
 // logical guard this one is deliberately blind to.
 test("runner: a symlink to a non-vendored file still runs", () => {
@@ -863,6 +879,55 @@ test("runner: a symlink to a non-vendored file still runs", () => {
     assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
   }
+});
+
+// The resolved check is asked only of an argument that EXISTS, and that gate is
+// the whole platform pin. BSD `realpath` fails on a nonexistent final component
+// and GNU's succeeds on it, so one input drew opposite verdicts: this spelling
+// reported `does not exist` on macOS and `resolves inside node_modules — not
+// missing` on ubuntu-latest, asserting a missing file was not missing and
+// pre-empting the arm that names it. The whole file ran 77/77 under both
+// semantics, so nothing discriminated them — measured. This row does: green on
+// BSD with the gate or without it, red on GNU without it.
+test("runner: a missing file under a symlinked vendored directory is reported missing", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg"), join(a.wt, "dirlink"));
+  const r = a.run("t/a.test.mjs", "dirlink/nope.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /dirlink\/nope\.test\.mjs does not exist/);
+  assert.doesNotMatch(r.stderr, /node_modules/);
+});
+
+// `realpath` is the one utility this runner reaches for that POSIX does not
+// mandate — release-ticket.sh says so in terms, "none is guaranteed to exist",
+// and dies there rather than guessing. Absent, this guard disarmed whole: the
+// vendored file ran, the run exited 0 reporting `pass 2`, and not one byte
+// reached stderr — #424's own defect restored with no notice. Absence is not a
+// fallback case, it is a question this cannot answer, so it refuses. A stub
+// that exits 127 rather than an emptied PATH, so `sed`, `dirname` and `node`
+// still work and the resolver is the only thing missing.
+test("runner: an unresolvable argument refuses rather than running unchecked", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
+  const bin = mkdtempSync(join(tmpdir(), "no-realpath-"));
+  writeFileSync(join(bin, "realpath"), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
+  // The vendored spelling goes FIRST: every file argument is judged, so the
+  // refusal names whichever one the loop reaches first, and naming this one is
+  // what shows the guard is still armed rather than merely dying early.
+  const r = spawnSync(join(a.wt, "agent-test"), ["vendlink.test.mjs", "t/a.test.mjs"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /cannot resolve vendlink\.test\.mjs — refusing rather than running it unchecked/);
+  assert.doesNotMatch(r.stdout, /(?:ℹ|#) pass/);
 });
 
 // The issue's own second case, verbatim: "and, before PR #75's escape,
