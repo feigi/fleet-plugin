@@ -25,6 +25,32 @@
 # establishes absence instead of inferring it.
 set -eu
 
+# An ambient GIT_WORK_TREE outranks `-C`, not just plain discovery (measured,
+# #427): with GIT_WORK_TREE alone pointing at an unrelated tree, `git -C "$wt"
+# rev-parse --show-toplevel` answers about THAT tree, not `$wt` — the linkage
+# guard below then blames a healthy `.git`, reporting it resolves to whatever
+# the ambient var named. `git -C "$wt" status --porcelain` reads the same
+# poisoned environment and would silently answer for the wrong tree too, just
+# without a guard in front of it to say so. Every other git call in this
+# script (no `-C` at all) is equally hostage to an ambient GIT_DIR retargeting
+# it away from the repository the caller actually invoked this in. Unsetting
+# both here, before anything runs, is the one fix that reaches all of them at
+# once — the same pattern `ledger.mjs` and `inflight.test.mjs` apply by hand
+# per child process, under a comment making the same point: inherited git vars
+# outrank cwd (and, here, outrank `-C` too).
+#
+# GIT_DIR alone does NOT reproduce the linkage guard's misdirection (measured):
+# with no GIT_WORK_TREE, the work tree falls back to the discovery default and
+# `-C "$wt"` still lands on `$wt`. That is a narrower claim than "GIT_DIR is
+# harmless" — left ambient, it still retargets every OTHER git call in this
+# script, the ones with no `-C` to even attempt insulating them.
+#
+# No fleet caller sets either var deliberately before invoking this script
+# (checked: no assignment to GIT_DIR or GIT_WORK_TREE anywhere upstream of
+# `release-ticket.sh` in skills/fleet), so this closes the class with nothing
+# left depending on the ambient value.
+unset GIT_DIR GIT_WORK_TREE
+
 # Byte semantics for the `awk`, `grep`, `sed` and `tr` below — all four really
 # are here, unlike in the siblings this header was copied to. `awk` and `grep`
 # parse `git worktree list --porcelain` (worktree paths and branch names),
