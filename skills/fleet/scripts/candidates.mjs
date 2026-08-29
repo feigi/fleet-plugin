@@ -120,7 +120,15 @@ const EXCLUDE =
 // system jq this file's own tests stub; see #63) has no lookahead, so
 // "capture every ref up to the next heading" cannot be expressed as a single
 // pattern. A heading line (`^#{1,6}\s`) toggles a running "inside a blocking
-// section" flag on when its text names one of the three DECLARATIVE phrases —
+// section" flag on when its text DECLARES one: any of the verb phrases, which
+// end at a word boundary and tolerate trailing text because a heading opening
+// with one is declaring a blocker whatever follows it; or the noun form
+// `Dependencies`/`Dependency`, which must be the WHOLE heading, a trailing
+// `:` aside. The noun form cannot be given the verb forms' tolerance:
+// `## Dependency injection` is an ordinary section title in a code repo, and
+// arming on it would turn every `#N` in its bullets into a blocker the body
+// never declared (#439 — the noun form is the heading #208's brief used, and
+// the gate named the verbs alone, so that section opened nothing).
 // `after` is an inline label only, because `## After the migration` is
 // ordinary narrative and arming on it invents a blocker, while a heading that
 // really does declare one (`## After #12 lands`) still resolves through the
@@ -131,10 +139,14 @@ const EXCLUDE =
 // headed after it, the common shape) from sweeping every later `#N` in the
 // body, inventing a blocker that silently starves the ticket out of the
 // queue. Independently, any line — inside a section or not — carrying the
-// phrase (optionally `**bold**` and/or `:`-suffixed, to-tickets' local-file
-// template writes `**Blocked by:**`) followed by one or more `#N` refs on
-// that same line is read too — the existing inline phrasings (`depends on
-// #5`) are a bold-less, colon-less instance of this same match. Both passes
+// phrase, then any run of whitespace and asterisks around an optional `:`,
+// then one or more `#N` refs on that same line is read too — to-tickets'
+// local-file `**Blocked by:** #12`, the markdown `Blocked by **#179**` that
+// bolds the REF, and the bare `depends on #5` are all instances of that one
+// match. The separator is a combined `[\s*]*` run rather than asterisk groups
+// flanking the colon: those groups sat ahead of the separating whitespace, so
+// they matched only asterisks flush against the phrase, and a space before the
+// bold — where markdown actually puts it — dropped the ref (#439). Both passes
 // are strictly line-local, which the removed `(?:depends on|…)\s+#\d+` regex
 // was not: its `\s+` crossed newlines, so a
 // phrase ending one line with its ref opening the next was collected and now
@@ -146,16 +158,19 @@ const EXCLUDE =
 // it. Verified against real gojq (`go install
 // github.com/itchyny/gojq/cmd/gojq@v0.12.19`) on every form in
 // candidates.test.mjs's dependency-forms fixtures, not only the system jq the
-// STUB there execs. The engines agree on all of them but one: a U+00A0 between
-// label and ref reduces to `[12]` under Oniguruma and `[]` under RE2, because
+// STUB there execs. The engines agree wherever the input is ASCII; they split
+// where a U+00A0 sits between label and ref, bolded or not, which reduces to
+// `[12]` under Oniguruma and `[]` under RE2, because
 // `\s` is Unicode-aware in the first and ASCII-only in the second (see #204).
-// gojq is what gh applies, so `[]` is the production answer — and that single
-// row is the only thing letting the gojq test tell the two engines apart.
+// gojq is what gh applies, so `[]` is the production answer — and those rows
+// are the only thing letting the gojq test tell the two engines apart. The
+// widened separator keeps `\s` rather than spelling an ASCII class, so it
+// inherits that split rather than pre-empting #383, which owns the question.
 const JQ =
   'def depnums:\n' +
   '  (reduce (split("\\n"))[] as $line (\n' +
   '      {insec: false, nums: []};\n' +
-  '      ($line | test("(?i)^#{1,6}\\\\s+(depends on|blocked by|requires)\\\\b")) as $bh\n' +
+  '      ($line | test("(?i)^#{1,6}\\\\s+((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies):?\\\\s*$)")) as $bh\n' +
   '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
   '      | (if $any then $bh else .insec end) as $nextsec\n' +
   '      | ($line | test("^\\\\s*([-*+]|[0-9]+[.)])\\\\s")) as $item\n' +
@@ -165,7 +180,7 @@ const JQ =
   '            .nums\n' +
   '            + (if $nextsec and $item then [$line | scan("#\\\\d+")] else [] end)\n' +
   '            + [ $line\n' +
-  '                | scan("(?i)(?:depends on|blocked by|requires|after)\\\\*{0,2}:?\\\\*{0,2}\\\\s*(#\\\\d+(?:\\\\s*(?:,|and)?\\\\s*#\\\\d+)*)")\n' +
+  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\s*]*:?[\\\\s*]*(#\\\\d+(?:[\\\\s*]*(?:,|and)?[\\\\s*]*#\\\\d+)*)")\n' +
   '                | .[0]\n' +
   '                | scan("#\\\\d+")\n' +
   '              ]\n' +
