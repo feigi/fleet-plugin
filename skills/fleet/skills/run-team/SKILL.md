@@ -1910,9 +1910,10 @@ overlap rates 0.00, and every measured stop over those was survived only by a
 reader who overrode it and searched the tracker by hand — obeying it would have
 dropped a real deferral (#388). It also prints the closest filed rows with an overlap score.
 Those never move the exit code — the same finding gets worded differently by
-whoever finds it second — but a filed row at or above `NEAR_SOFT_HIT` in
-`ledger.mjs` does move the verdict to `soft-hit`, as does a tracker set with no
-scoring row in it. **Exit 0 is not automatically "safe to file":** when `gh`
+whoever finds it second — but once the tracker read succeeds, a filed row at or
+above `NEAR_SOFT_HIT` in `ledger.mjs` does move the verdict to `soft-hit`, as
+does a tracker set with no scoring row in it; a read that failed stays
+`unverified`, which outranks both. **Exit 0 is not automatically "safe to file":** when `gh`
 cannot be reached the answer is ledger-only, and it says `TRACKER NOT CHECKED` —
 an issue filed by an earlier run is invisible to it; and `soft-hit` means rows
 worth reading were found while none of them established a duplicate, so read

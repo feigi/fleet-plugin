@@ -666,9 +666,10 @@ function runCheck() {
     }
   }
 
-  // The best score each half of the answer carries, read once and used by both
-  // the report below and the verdict under it — one derivation, so stderr and
-  // the payload cannot disagree about what was found.
+  // The best score each half of the answer carries, read once off the same
+  // sorted head the report below prints from and the verdict under it uses —
+  // one derivation, so stderr and the payload cannot disagree about what was
+  // found.
   //
   // Both lists are sorted best-first before they are cut, so the leading row
   // carries the best score of everything fetched: a 0 at the head of `hits`

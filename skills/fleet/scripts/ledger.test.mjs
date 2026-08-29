@@ -652,6 +652,7 @@ test("tracker rows the scorer rates 0.00 are advisory, not a hit (#388)", () => 
   assert.equal(r.json.tracker.hits.length, 3, "the rows stay in the payload — they are the caller's evidence, not noise to hide");
   assert.doesNotMatch(r.stderr, /TRACKER HIT/, "stderr is the channel read first; a hard-stop word over advisory rows is the trap itself");
   assert.match(r.stderr, /score 0\.00/, "the score the verdict was derived from has to be visible where the rows are");
+  assert.match(r.stderr, /SOFT HIT/, "the verdict's own stderr line is pinned here like every neighbouring verdict's is");
 });
 
 // The measured self-check: a subject whose tracker rows all score 0.00 while a
@@ -671,6 +672,7 @@ test("a near row above the floor outranks a clean verdict (#388)", () => {
   assert.equal(r.json.verdict, "soft-hit", "clean printed above a row naming the right issue is the defect");
   assert.equal(r.status, 0, "a near-miss stays advisory — it never became a stop");
   assert.match(r.stderr, /near-miss/);
+  assert.match(r.stderr, /SOFT HIT/, "the verdict's own stderr line is pinned here like every neighbouring verdict's is");
 });
 
 test("score-0 tracker rows and a scoring near row read as one soft hit (#388)", () => {
@@ -693,6 +695,21 @@ test("a genuinely novel subject is still clean at exit 0 — the control (#388)"
   assert.equal(r.status, 0);
   assert.ok(r.json.near.length === 1 && r.json.near[0].score > 0 && r.json.near[0].score < 0.2,
     `the fixture must sit below the floor and above zero, got ${JSON.stringify(r.json.near)}`);
+});
+
+test("a near row scoring exactly at the floor is a soft hit (#388)", () => {
+  // The control above sits below the floor and the promoting fixture above it
+  // scores 0.38, so nothing else in this file lands ON 0.2. Without this pair
+  // the floor's VALUE and its INCLUSIVITY are both free: `>=` can become `>`,
+  // and 0.2 can be retuned upward, with the suite green either way.
+  const r = run("quorum drains under retry backoff", {
+    filed: ["#902 quorum vanishes without warning during nightly compaction"],
+    hits: [],
+  });
+  assert.equal(r.json.found, false);
+  assert.equal(r.json.near[0].score, 0.2, `the fixture must sit ON the floor, got ${r.json.near[0].score}`);
+  assert.equal(r.json.verdict, "soft-hit", "the floor is inclusive — the docs promise 'at or above'");
+  assert.equal(r.status, 0);
 });
 
 test("a tracker row that really scores still blocks at exit 3 (#388)", () => {
