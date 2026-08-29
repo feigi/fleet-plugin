@@ -172,14 +172,53 @@ test("step 1 answers a `+` on the server-side path, with the structural reason",
   assert.match(step1(), /structurally unable to enter the merge/);
 });
 
+// (c) WHICH output is clean. An earlier draft of this paragraph called silence
+// the clean answer, which is false for the case the paragraph is about:
+// git-cherry emits a line per commit in `origin/<branch>..HEAD` and marks a
+// patch-equivalent one `-` rather than dropping it, so a worktree that has
+// fetched the rebase reads all-`-` and only an un-fetched one reads nothing
+// (measured 2026-08-29 against real git — scratch repo, branch rebased onto an
+// advanced main and force-pushed, clone left at the pre-rebase head; nothing
+// before that clone fetched, a `-` per rebased commit after, a `+` in both
+// once an unpushed commit was added). Pinned to the rule, not to the shape of
+// either listing: `+` is the signal, its absence is clean.
+test("step 1 defines the probe's clean answer by the absence of `+`, not by silence", () => {
+  assert.match(step1(), /The clean answer is the absence of a `\+`, not the absence of output/);
+  assert.match(step1(), /one that has fetched reads `-` for every rebased commit\. Both are clean/);
+});
+
 // The other half of (b), and the one that costs real work if it rots: the new
 // wording must NOT license skipping the STOP where the hazard is real. On the
-// fallback the bot rebases locally, so an unpushed commit genuinely does ride
-// into the merge. Pinned positively — the STOP's own bullet, intact — rather
-// than by forbidding a word, which would red on an unrelated correct edit.
+// fallback the bot rebases locally and then verifies that local head, so an
+// unpushed commit corrupts what you verify — the STOP's own wording for that
+// hazard is *your rebase would carry into the merge*, and that sentence is
+// what this pins. (The merge itself still takes the remote head there too;
+// the fallback "never needs to reach the remote" and step 4 merges "the
+// pre-rebase head, since nothing here was pushed".) Pinned positively — the
+// verdict and its rationale, both inside the bullet that carries them —
+// rather than by forbidding a word, which would red on an unrelated correct
+// edit.
+//
+// Sliced to the fallback, not to step 1: the citation of that same rationale
+// in the server-side paragraph satisfies a bare step1() match all by itself,
+// so a step1()-wide assertion stayed green with the rationale deleted from the
+// bullet (measured by mutation, 2026-08-29).
+function fallbackBlock() {
+  const start = "**Fallback (server-side rebase unavailable).**";
+  const at = DOC.indexOf(start);
+  assert.notEqual(at, -1, `'${start}' moved — update this test`);
+  const rest = DOC.slice(at + start.length);
+  const end = rest.indexOf("2. Watch checks settle");
+  assert.notEqual(end, -1, "the fallback block's end marker moved — update this test");
+  return start + rest.slice(0, end);
+}
+
 test("the fallback's diverged-worktree STOP survives the primary path's `+` answer", () => {
-  assert.match(step1(), /\*\*Worktree ahead\*\* → STOP, report `worktree-diverged-#<pr>`/);
-  assert.match(step1(), /your rebase would carry into the merge/);
+  assert.match(fallbackBlock(), /\*\*Worktree ahead\*\* → STOP, report `worktree-diverged-#<pr>`/);
+  assert.match(
+    fallbackBlock(),
+    /leaves an unpushed, unreviewed commit that a clean-tree audit passes and your rebase would carry into the merge/,
+  );
 });
 
 // #447 AC-3, and the reason this pin reaches across files: run-team's failure
