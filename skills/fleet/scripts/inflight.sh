@@ -75,6 +75,19 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
+# The bounded, prompt-suppressed git transport (#92, #346, #347). It landed here
+# for probe 2 alone and now lives in net.sh, where every other unattended `git`
+# network call in the fleet reaches it too; net.sh's header holds the reasoning
+# and the measurements. Sourced BELOW json.sh, deliberately: exit 1 from this
+# script means `taken`, and the missing-library refusal every caller shares is
+# already pinned on json.sh's name, so a second lib guard above it would change
+# which file a lone copy of this script blames.
+net_lib="$(dirname "$0")/net.sh"
+[ -r "$net_lib" ] || die "cannot read $net_lib — refusing to answer without the bounded git transport"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=net.sh
+. "$net_lib" || die "$net_lib failed to load"
+
 [ $# -eq 1 ] || die "usage: inflight.sh <issue-number>"
 n=$1
 case "$n" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$n'";; esac
@@ -353,229 +366,21 @@ echo "\$ git ls-remote --heads origin" >&2
 # This is the one network call in the script (probe 1 goes through `gh`, probe
 # 3 never leaves disk), and unattended it must neither prompt nor hang (#92).
 #
-# GIT_TERMINAL_PROMPT=0 covers git's own username/password prompt.
-# Unconditional, not gated on stdin being a tty: this script has a 0/1/2
-# contract, and a human with no cached credential is better served by exit 2
-# naming what is unknown than by a prompt a machine caller never answers.
+# The knobs that suppress the prompt and the watchdog that bounds the call both
+# live in net.sh now, which every unattended `git` network call in the fleet
+# routes through (#347); its header holds the reasoning and the measurements.
+# What stays here is what is true of THIS call: its budget, and how a killed
+# call is reported.
 #
-# A suppressed prompt is not a bound: measured, a stalled transport blocks
-# identically with or without GIT_TERMINAL_PROMPT=0 (killed at 8s, rc 142
-# either way) — prompting and hanging are different failures. `timeout(1)`
-# would be the obvious bound but is GNU coreutils, absent by default here
-# (verified: neither `timeout` nor `gtimeout` on this host's PATH), so the
-# bound comes from git's own transport knobs.
-#
-# ssh: BatchMode=yes refuses any interactive prompt (host key, passphrase)
-# rather than hanging on one, so it doubles as prompt suppression for the ssh
-# case.
-#
-# ConnectTimeout is the option that bounds the stalled transport measured
-# above: it gates the banner exchange, not only the TCP handshake, so a peer
-# that accepts the connection and then never speaks is cut off at
-# ConnectTimeout. Measured against that exact case (OpenSSH_10.2p1, the
-# accept-then-silent listener the test at inflight.test.mjs uses) — both
-# options set: "Connection timed out during banner exchange" at 10.0s;
-# ConnectTimeout alone, ServerAlive dropped: 10.0s, identical; ServerAlive
-# alone, ConnectTimeout dropped: still running at 30s, killed from outside.
-# ServerAlive keepalives only ride an established transport, and here that
-# transport never comes up, so they contribute nothing to this case. Their job
-# is the session that gets past banner and authentication and only then goes
-# quiet, which nothing here exercises.
-#
-# 10s to connect and 2x5s of silence: generous enough for a slow-but-working
-# link, short enough that a stalled probe does not hold a fleet slot for
-# minutes. Retune here if either stops holding — but retune the right one: the
-# accept-then-silent case rides on ConnectTimeout alone, so shortening
-# ServerAlive does not tighten it and dropping ConnectTimeout removes it.
-#
-# A user's own ssh command is honoured, not replaced — these options are
-# appended to whatever GIT_SSH_COMMAND, core.sshCommand or GIT_SSH already says
-# (falling back to plain "ssh"), so a configured identity file or proxy command
-# still runs. All three, because git's own precedence is GIT_SSH_COMMAND >
-# core.sshCommand > GIT_SSH: setting GIT_SSH_COMMAND here without consulting
-# GIT_SSH would silently drop a wrapper the user had working before this
-# probe was bounded at all.
-#
-# Appended, so they are defaults the user's own command overrides, never a
-# ceiling over it: ssh takes the FIRST value of a repeated -o, so an option
-# their command already carries is the one that applies and the value set here
-# is discarded. Measured, OpenSSH_10.2p1: `ssh -o ConnectTimeout=45 -o
-# ConnectTimeout=10 -G` reports connecttimeout 45; and against the
-# accept-then-silent listener, with these options appended to a user command
-# exactly as this probe appends them, a user ConnectTimeout of 3 cut the
-# connection at 3.0s and one of 25 at 25.0s, the 10s set here applying only
-# where the user set none. So the bound degrades to whatever bound the user
-# asked for, and terminates only where that value does. Measured on the same
-# listener: a user ConnectTimeout of 0 is accepted, wins by the same rule and
-# left the probe still connecting at 40s, where the 10s set here cut at 10.2s —
-# unbounded, through the user's own config, which is the #92 hang again. The
-# watchdog below is what now bounds that case, since it bounds the call rather
-# than the transport and so does not depend on any value ssh resolved (#346).
-# Ordering these first would bound the probe at its own value instead,
-# at the cost of silently overriding a deliberate proxy or timeout config: a
-# real regression traded for a hypothetical one, so it is not done.
-#
-# The same rule makes BatchMode a user opt-out. A command carrying
-# `-o BatchMode=no` keeps it and ssh goes back to asking, which
-# GIT_TERMINAL_PROMPT=0 does not reach — that suppresses git's own credential
-# prompt, not ssh's. Measured with GIT_TERMINAL_PROMPT=0 set throughout: with
-# this probe's BatchMode=yes alone, an unknown host key fails at once ("Host key
-# verification failed"); with a user's BatchMode=no ahead of it and a terminal
-# reachable, ssh sat on "Are you sure you want to continue connecting" until
-# killed — the unattended hang #92 exists to stop. Reachable is the operative
-# word: with no terminal available it aborts rather than waiting. Honoured
-# anyway, because it is the user's explicit setting; this records what that
-# costs rather than warning about a choice they made on purpose. The watchdog
-# below is what now ends that wait, and it is the only thing here that can:
-# the prompt is ssh's, so no git-side variable reaches it, and the setting that
-# opens it is the user's own, so overriding it is not on offer either. No test
-# covers this one — the exposure needs a reachable terminal, and the harness
-# runs without one, where ssh aborts at once instead of asking (#346).
-#
-# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
-# that goes quiet — abort if it sits under 1000 bytes/s for 10s.
-#
-# It bounds a transfer already under way and nothing before one, so it is a
-# weaker bound than the ssh side, not a counterpart to it. Measured against the
-# same accept-then-silent listener: a plain http origin aborts at 10.0s
-# ("Operation too slow"), but an https one never starts a transfer at all — the
-# TLS handshake does not complete, so the timer never arms and the call outlived
-# every cap put on it. Nothing here reaches the connect phase either, on either
-# scheme: `git help config` lists lowSpeedLimit and lowSpeedTime as its whole
-# http timing vocabulary, and `git config --get http.connectTimeout` finds no
-# such key to read. What is left of connect is curl's own default, which this
-# script does not set and cannot shorten.
-#
-# Hence the watchdog below, and hence these knobs are no longer the bound. They
-# stay anyway, and that is a decision rather than an oversight (#346): each one
-# fails earlier than the watchdog and in git's own words, which is the more
-# useful thing to read on a terminal, and dropping them would make every ssh
-# stall wait out the full budget where ConnectTimeout ends it in a fraction of
-# that. Defence in depth costs nothing here — the watchdog does not care whether
-# they fired, and neither reads the other's state.
-base_ssh=$(git config --get core.sshCommand 2>/dev/null || true)
-# GIT_SSH is a program PATH, not a command line, so it is quoted rather than
-# pasted raw: git runs GIT_SSH_COMMAND through a shell, which would otherwise
-# split a path containing spaces into a program and its arguments.
-[ -n "$base_ssh" ] || base_ssh="${GIT_SSH:+\"$GIT_SSH\"}"
-[ -n "$base_ssh" ] || base_ssh=ssh
-# Kill $1 and everything descended from it. Killing the named process alone is
-# not enough and not a near miss: git hands the transport to a helper, and that
-# helper inherits this script's stderr. Measured against the accept-then-silent
-# listener, killing only the `ls-remote` process left a `git remote-https`
-# holding that pipe — the script had already written its answer and exited, and
-# the caller still sat until its own cap expired, reading as a hang in a script
-# that had in fact terminated. So the subtree is the unit, not the process.
-#
-# A process group would say this in one signal, but `set -m` is how a POSIX
-# shell asks for one and it is not available where this runs: measured, dash
-# with no controlling terminal answers "can't access tty; job control turned
-# off" and the group kill then fails, and dash is `/bin/sh` on the Linux this
-# suite runs under.
-#
-# The snapshot is taken BEFORE anything is signalled, because killing the root
-# reparents its children and the links this walk follows are gone by then.
-#
-# Ceiling: with no `ps` to read, this falls back to the named process alone and
-# a helper can survive it. That is the pre-#346 behaviour for that one case, not
-# a new failure, and it is preferred over signalling a set derived from nothing.
-# But it is not silent: the fallback records itself in $wdfile so the reason
-# printed downstream can say the bound may not have held. A degraded kill that
-# reads exactly like a clean one is the defect #346 asks this script not to
-# have — measured, `ps` shimmed to exit 127 produced byte-identical stderr to
-# the healthy run while a `git remote-https` survived and held the caller for
-# its whole cap. `${wdfile:-/dev/null}` because kill_tree also runs before that
-# file exists and on the path where mktemp is not reached at all.
-#
-# TERM then KILL, with no pause between them: a descendant that traps TERM
-# otherwise holds the fetch's inherited stderr and the caller hangs past the
-# budget anyway — measured against a GIT_SSH_COMMAND wrapper doing `trap '' TERM`,
-# the caller sat out its full 30s backstop with the script long since exited.
-# A `sleep 1` between the two signals, the obvious shape, does NOT work here:
-# the watchdog subshell is itself killed through this same function while it
-# would be inside that sleep, so the KILL never lands. Which signal git actually
-# dies of is no longer load-bearing — $wdfile, not the exit status, is what says
-# the watchdog fired.
-#
-# The `do { … } while (grew)` fixpoint is not decoration. `for (p in parent)`
-# visits keys in unspecified order, so a single pass misses any descendant the
-# iteration reaches before its own parent has been marked. `ps -A` prints
-# parents first, which is exactly why every end-to-end case here stays green on
-# that mutant; the canned-table case in inflight.test.mjs, which feeds a table
-# with each child AHEAD of its parent, is the only thing that holds it.
-kill_tree() {
-  kin=$1
-  if snap=$(ps -A -o pid=,ppid= 2>/dev/null); then
-    kin=$(printf '%s\n' "$snap" | awk -v root="$1" '
-      { parent[$1] = $2 }
-      END { doomed[root] = 1
-            do { grew = 0
-                 for (p in parent)
-                   if (!(p in doomed) && (parent[p] in doomed)) {
-                     doomed[p] = 1; grew = 1
-                   }
-               } while (grew)
-            for (p in doomed) printf "%s ", p }') ||
-      { kin=$1; printf 'degraded ' >>"${wdfile:-/dev/null}" || :; }
-  else
-    printf 'degraded ' >>"${wdfile:-/dev/null}" || :
-  fi
-  # shellcheck disable=SC2086  # a pid list, and word splitting is how kill reads it
-  kill $kin 2>/dev/null || :
-  # shellcheck disable=SC2086
-  kill -9 $kin 2>/dev/null || :
-}
 # The budget. Above what the ssh options can spend before they give up on their
 # own — ConnectTimeout plus the ServerAlive pair's whole run — so this never
 # preempts a bound that would have produced git's own diagnostic, and short
 # enough that a stalled probe does not hold a fleet slot the way #92 describes.
 # `ls-remote` moves refs and no objects, so this is generous for the work.
-ls_budget=30
-# The override exists so the tests can buy a short budget instead of paying the
-# default one per case. It can only ever SHORTEN: a knob that could lengthen it
-# would be one more way for configuration to remove the bound, which is the
-# defect the ssh half of #346 reports, and reproducing it here to be convenient
-# would be its own bug. A value that is not a positive integer is not an error
-# and not a bound either — the default stands.
 #
-# `??????*` is that last clause holding for a digit string too large for the
-# shell's integer. Without it `[` is handed the value and contradicts the
-# sentence above out loud: measured, `sh` says `[: 99999999999999999999:
-# integer expression expected` and dash says `[: Illegal number:` — a raw
-# diagnostic naming a line number rather than the variable, on the same stderr
-# that carries this script's own reasons. Six digits, not twenty: anything from
-# 100000 up was going to be ignored by the `-lt` below regardless, so the arm
-# costs no reachable value and leaves the five-digit forms `[` reads correctly
-# (029 among them) taking the same path they always did.
-case ${INFLIGHT_LS_REMOTE_TIMEOUT:-} in
-  '' | *[!0-9]* | ??????*) : ;;
-  *) if [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -gt 0 ] &&
-       [ "$INFLIGHT_LS_REMOTE_TIMEOUT" -lt "$ls_budget" ]; then
-       ls_budget=$INFLIGHT_LS_REMOTE_TIMEOUT
-     fi ;;
-esac
-# Backgrounded and waited on, rather than polled: `wait` returns the moment the
-# fetch does, so a reachable origin pays nothing for the bound being here. The
-# sleeper is what enforces it, and it is killed by the same subtree walk as the
-# fetch — its own `sleep` is a child, and an orphaned sleeper does not sit
-# harmlessly: it wakes at the end of its budget and fires kill_tree at a pid
-# this script no longer owns, which after a budget's worth of pid churn can be
-# an unrelated process — and, since #346, an unrelated SUBTREE. It cannot leak
-# onto this script's stderr whatever else it does, because the `>/dev/null 2>&1`
-# below is on the sleeper itself and both its descriptors are already closed.
-#
-# `wait` is captured through an explicit `|| ls_status=$?`, and `set -e` is why:
-# a bare `wait` on a killed child aborts this subshell at that line, which is
-# after the fetch is dealt with but before the sleeper is, and the sleeper would
-# be the leak. The status is then carried out by an explicit `exit` rather than
-# by whatever the block happens to end with.
-#
-# $wdfile is how the watchdog says it fired, and it has to be a file: the
-# sleeper is a background grandchild of the command substitution below, so
-# nothing it sets in a variable reaches this shell and its own exit status is
-# discarded. The marker is written BEFORE kill_tree, never after, because `wait`
-# returns the instant the fetch dies and would otherwise race the write.
-#
+# `INFLIGHT_LS_REMOTE_TIMEOUT` is this call's own override. It can only ever
+# SHORTEN, and the rule with its edge cases is net_budget's, in net.sh.
+ls_budget=$(net_budget 30 "${INFLIGHT_LS_REMOTE_TIMEOUT:-}")
 # A file this probe WANTS, not one it needs. Probe 2 is the one probe that
 # answers when mktemp is broken — #185 fixed that deliberately and
 # inflight.test.mjs pins it — so a failed mktemp costs the sharper wording
@@ -583,28 +388,20 @@ esac
 # falls back to there.
 wdfile=$(mktemp) || wdfile=""
 ls_rc=0
-heads=$(
-  GIT_TERMINAL_PROMPT=0 \
-  GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
-  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote --heads origin &
-  ls_pid=$!
-  { sleep "$ls_budget"; printf 'fired ' >>"$wdfile" || :; kill_tree "$ls_pid"; } >/dev/null 2>&1 &
-  wd_pid=$!
-  ls_status=0
-  wait "$ls_pid" || ls_status=$?
-  kill_tree "$wd_pid"
-  exit "$ls_status"
-) || ls_rc=$?
+heads=$(net_git "$wdfile" "$ls_budget" ls-remote --heads origin) || ls_rc=$?
 wdnote=""
 if [ "$ls_rc" -ne 0 ]; then
   if [ -n "$wdfile" ]; then
-    wdnote=$(cat "$wdfile" 2>/dev/null || true)
-  elif [ "$ls_rc" -eq 143 ] || [ "$ls_rc" -eq 137 ]; then
+    wdnote=$(net_wdnote "$wdfile")
+  elif net_stalled "$ls_rc"; then
     # No marker to read, so the signal number is all there is — the weaker test
     # this branch used before the marker existed, kept only for the path where
     # mktemp failed. It cannot tell our SIGTERM from anyone else's, but
-    # reporting a real stall as a refusal is the worse of the two errors. 137
-    # as well as 143, because kill_tree escalates and git can lose the race.
+    # reporting a real stall as a refusal is the worse of the two errors. That
+    # rule is net_stalled's and net.sh is where it is written down, including
+    # why 137 counts as well as 143 — net_kill_tree escalates to SIGKILL and
+    # git can lose the race. Spelling it out a second time here is how the two
+    # copies come to disagree about which signals mean killed.
     wdnote="fired"
   fi
   # A killed fetch and a refused one are different facts and get different
@@ -618,7 +415,7 @@ if [ "$ls_rc" -ne 0 ]; then
   # reported as `did not finish within 30s`, naming a budget only 4s of wall
   # clock had run against. The marker is written by the watchdog and by nothing
   # else, so it answers what the exit status was being asked to guess — and it
-  # keeps answering now that kill_tree escalates to SIGKILL and git can just as
+  # keeps answering now that net_kill_tree escalates to SIGKILL and git can just as
   # well come back 137.
   kt_note=""
   case $wdnote in

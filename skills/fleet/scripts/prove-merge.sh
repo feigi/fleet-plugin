@@ -46,6 +46,18 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
+
+# The bounded, prompt-suppressed git transport (#92, #346, #347). The fetch
+# below is unattended: with no bound it can prompt for a credential or a host
+# key, or stall on a transport that connects and then goes quiet, and either
+# holds a fleet slot until something outside kills it. net.sh's header holds the
+# reasoning and the measurements. Sourced below json.sh so a lone copy of this
+# script still blames json.sh, the name its missing-library test pins.
+net_lib="$(dirname "$0")/net.sh"
+[ -r "$net_lib" ] || die "cannot read $net_lib — refusing to answer without the bounded git transport"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=net.sh
+. "$net_lib" || die "$net_lib failed to load"
 # Exit 1 is the answer "no"; anything else is git failing to answer, and a proof
 # must never read a failure as a leg it likes.
 is_ancestor() {
@@ -62,7 +74,25 @@ merge=$3
 base=${BASE_REF:-origin/main}
 
 echo "\$ git fetch --quiet origin" >&2
-git fetch --quiet origin || die "fetch failed — refusing to prove a merge on stale refs"
+# 300s, and the number is chosen against the FALSE FAILURE, not against the
+# stall: this fetch moves objects rather than refs, so a cold or large one can
+# legitimately run for minutes, and a bound that turns a working slow link into
+# exit 2 is worse than the hang it replaces — exit 2 is a verdict the controller
+# acts on. Well above any healthy incremental fetch, and still a bound.
+# `FLEET_NET_TIMEOUT` is the shorten-only override the fleet's fetches share;
+# the rule is net_budget's, in net.sh.
+fetch_budget=$(net_budget 300 "${FLEET_NET_TIMEOUT:-}")
+fetch_rc=0
+net_git "" "$fetch_budget" fetch --quiet origin || fetch_rc=$?
+if [ "$fetch_rc" -ne 0 ]; then
+  # A killed fetch and a refused one are different facts and get different
+  # words. Without the split, a transport that stalled reads as a refusal,
+  # naming a cause this script never observed.
+  if net_stalled "$fetch_rc"; then
+    die "git fetch did not finish within ${fetch_budget}s and was killed — refusing to prove a merge on stale refs"
+  fi
+  die "fetch failed — refusing to prove a merge on stale refs"
+fi
 # Nothing below silences git: --quiet and 2>/dev/null discarded the only line
 # that separates the causes, and both guards are silent when they succeed.
 # --verify stays — without it a $base that names a FILE resolves and exits 0.
