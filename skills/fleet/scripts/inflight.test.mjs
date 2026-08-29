@@ -1346,6 +1346,49 @@ test("probe 3: a local-branch filter that could not run is unknown, never free",
   assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
 });
 
+// The LOOKUP that feeds the filter above, and the branch of probe 3 that #415
+// measured as untested: deleting its guard outright — the whole `if ! refs=$(…)`
+// conjunction, which is what an edit that simply forgets one looks like — left
+// this entire file green. That is the hazard `probe_local || :` opens. POSIX
+// exempts a function's whole execution from `set -e` while its status is what an
+// `||` is testing, so a failed `$(…)` neither aborts nor leaves `$refs` unset:
+// it assigns the empty string, which is indistinguishable from "this repo has no
+// branches", and the fall-through prints that as a definite absence. Measured
+// with the guard deleted: exit 0, `unknown:[]`, "no local branch or worktree for
+// #77" — for a ticket whose branch is sitting in `git branch --list`. The wrong
+// direction, since a free verdict puts a second agent on the ticket where a
+// taken one only skips it.
+//
+// This pins the guarded answer, so the mutant reddens here rather than shipping.
+// It does NOT forbid a probe stopping early on a hit it has already recorded:
+// nothing is established at this point in probe 3 — the branch half commits its
+// hit after this lookup, not before — so `hits: []` is the answer, not a rule
+// that a stopped probe must have none.
+test("probe 3: a branch LOOKUP that could not run is unknown, never free", (t) => {
+  const { repo, env, bin } = fixture(t, 77, {});
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/77-slug");
+
+  // Addressed by the subcommand, never by an invocation count: this suite's own
+  // helpers and cleanup shell out to git through this same PATH, so a counted
+  // shim would fire on whichever call happened to be nth. `for-each-ref` is the
+  // one stage of inflight.sh that runs it, so the subcommand names it alone.
+  writeFileSync(join(bin, "git"), `#!/bin/sh
+case "$1" in for-each-ref) exit 1 ;; esac
+exec '${REAL_GIT}' "$@"
+`);
+  chmodSync(join(bin, "git"), 0o755);
+
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /git for-each-ref failed, so whether #77 has a local branch is unknown/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a lookup that could not run never reports 'no'");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+});
+
 test("probe 3: a worktree filter that could not run is unknown, never free", (t) => {
   // Detached for the reason `fixture` is: a branch carrying the same number
   // would let probe 3's branch half answer for its worktree half, and this
