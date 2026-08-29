@@ -2233,7 +2233,7 @@ test("probe 2: a user ConnectTimeout of 0 no longer leaves the probe unbounded",
 // response: measured, the handler ran zero times and mute-helper.sh was never
 // executed, leaving a case that only re-tested "an http origin that never
 // answers" — which `http.lowSpeedTime=10` bounds on its own, so it stayed green
-// even with kill_tree's subtree walk neutered. The 401 has to come from a
+// even with net_kill_tree's subtree walk neutered. The 401 has to come from a
 // process that is still scheduled while spawnSync holds this one.
 const challengeServer = async (t) => {
   const srv = spawn(process.execPath, ["-e",

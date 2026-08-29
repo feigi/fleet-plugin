@@ -24,8 +24,24 @@ const SCRIPT = join(import.meta.dirname, "net.sh");
 // exists for. Measured — collapsing that loop to a single pass still kills the
 // whole subtree when `ps` prints parents before children, which is what `ps -A`
 // does on an ordinary machine, so every end-to-end case there stays green on the
-// mutant. Only a canned table with a child row AHEAD of its parent (the shape
-// pid wraparound produces) discriminates, and only this test feeds one.
+// mutant.
+//
+// What discriminates is NOT the ROW order of the canned table. `for (p in
+// parent)` reads awk's hash order, and the input order does not set it:
+// measured, the same key set fed parents-first and children-first iterated
+// identically, and a child-ahead-of-parent table stays green on the single-pass
+// mutant here. What reds it is a chain whose pids DESCEND from root to leaf —
+// the shape pid wraparound produces — and that is the case below. Measured
+// against the single-pass mutant on every awk reachable from here: one-true-awk
+// 20200816 (darwin's /usr/bin/awk), mawk 1.3.4 (what ubuntu-latest runs) and
+// gawk 5.4.1, red on all three.
+//
+// Ceiling: this is a measurement on three awks, not a proof over all of them.
+// An implementation that iterated these keys leaf-last would survive the mutant
+// here — the ASCENDING chain is the live example of exactly that, green on the
+// mutant under gawk because gawk walks those keys in ascending order, which is
+// already topological. So the descending shape is load-bearing, not cosmetic,
+// and an awk not named above is untested rather than covered.
 //
 // The function is lifted out of net.sh by its own braces rather than
 // re-typed, so this cannot drift into testing a copy. `ps` is shadowed on PATH
@@ -56,8 +72,9 @@ const killTreeOn = (t, table, root) => {
 test("net_kill_tree signals the whole subtree, however the snapshot is ordered", (t) => {
   assert.deepEqual(killTreeOn(t, "100 1\n200 100\n300 200\n400 1\n", 100), ["100", "200", "300"],
     "a chain two levels deep, parents first");
-  assert.deepEqual(killTreeOn(t, "300 200\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
-    "the same chain with every child ahead of its parent — the case a single-pass walk gets wrong");
+  assert.deepEqual(killTreeOn(t, "800 900\n700 800\n600 700\n500 600\n400 1\n", 900),
+    ["500", "600", "700", "800", "900"],
+    "a chain whose pids DESCEND from root to leaf — the case a single-pass walk gets wrong, and the only case here that reds the collapsed fixpoint");
   assert.deepEqual(killTreeOn(t, "500 400\n300 100\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
     "branching, and an unrelated tree that must not be swept in");
   assert.deepEqual(killTreeOn(t, "100 1\n200 1\n", 100), ["100"],
@@ -183,4 +200,9 @@ test("the budget is what spares the slow fetch, not the absence of a watchdog", 
   assert.match(r.stderr, /did not finish within 1s and was killed/,
     "and it says the budget elapsed rather than blaming the fetch, which is the one thing the exit status alone cannot distinguish");
   assert.equal(r.stdout, "", "no payload: nothing was answered");
+  assert.doesNotMatch(r.stderr, /(Terminated|Killed):/,
+    "and the shell's own notice for the job it reaped stays OFF the caller's stderr, above the caller's own reason — "
+    + "without the `2>/dev/null` on net.sh's `wait` this line reads `Terminated: 15  GIT_TERMINAL_PROMPT=0 …` under "
+    + "bash-as-sh and a bare `Killed: 9` under the dash CI runs, both measured. Capitalised, so the script's own "
+    + "`and was killed` is not what this matches");
 });

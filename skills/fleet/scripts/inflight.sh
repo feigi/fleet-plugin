@@ -392,13 +392,16 @@ heads=$(net_git "$wdfile" "$ls_budget" ls-remote --heads origin) || ls_rc=$?
 wdnote=""
 if [ "$ls_rc" -ne 0 ]; then
   if [ -n "$wdfile" ]; then
-    wdnote=$(cat "$wdfile" 2>/dev/null || true)
-  elif [ "$ls_rc" -eq 143 ] || [ "$ls_rc" -eq 137 ]; then
+    wdnote=$(net_wdnote "$wdfile")
+  elif net_stalled "$ls_rc"; then
     # No marker to read, so the signal number is all there is — the weaker test
     # this branch used before the marker existed, kept only for the path where
     # mktemp failed. It cannot tell our SIGTERM from anyone else's, but
-    # reporting a real stall as a refusal is the worse of the two errors. 137
-    # as well as 143, because kill_tree escalates and git can lose the race.
+    # reporting a real stall as a refusal is the worse of the two errors. That
+    # rule is net_stalled's and net.sh is where it is written down, including
+    # why 137 counts as well as 143 — net_kill_tree escalates to SIGKILL and
+    # git can lose the race. Spelling it out a second time here is how the two
+    # copies come to disagree about which signals mean killed.
     wdnote="fired"
   fi
   # A killed fetch and a refused one are different facts and get different
@@ -412,7 +415,7 @@ if [ "$ls_rc" -ne 0 ]; then
   # reported as `did not finish within 30s`, naming a budget only 4s of wall
   # clock had run against. The marker is written by the watchdog and by nothing
   # else, so it answers what the exit status was being asked to guess — and it
-  # keeps answering now that kill_tree escalates to SIGKILL and git can just as
+  # keeps answering now that net_kill_tree escalates to SIGKILL and git can just as
   # well come back 137.
   kt_note=""
   case $wdnote in

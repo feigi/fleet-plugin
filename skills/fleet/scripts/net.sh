@@ -106,11 +106,21 @@ net_budget() {
 # what says the watchdog fired.
 #
 # The `do { … } while (grew)` fixpoint is not decoration. `for (p in parent)`
-# visits keys in unspecified order, so a single pass misses any descendant the
-# iteration reaches before its own parent has been marked. `ps -A` prints
+# visits keys in awk's own hash order, so a single pass misses any descendant
+# the iteration reaches before its own parent has been marked. `ps -A` prints
 # parents first, which is exactly why every end-to-end case here stays green on
-# that mutant; the canned-table case in inflight.test.mjs, which feeds a table
-# with each child AHEAD of its parent, is the only thing that holds it.
+# that mutant.
+#
+# What holds it is the descending-pid chain in net.test.mjs's net_kill_tree
+# case — each child's pid BELOW its parent's, the shape pid wraparound produces.
+# Feeding the rows in a different order does not hold it: the hash order is not
+# the input order, and measured, the same key set fed parents-first and
+# children-first iterated identically, so a child-ahead-of-parent table stays
+# green on the single-pass mutant. The descending chain reds it on every awk
+# reachable from here — one-true-awk 20200816 (darwin's /usr/bin/awk), mawk
+# 1.3.4 (what ubuntu-latest runs) and gawk 5.4.1. An ASCENDING chain is not a
+# substitute: gawk walks those keys in ascending order, which is already
+# topological, so the mutant survives it there.
 net_kill_tree() {
   net_kin=$1
   if net_snap=$(ps -A -o pid=,ppid= 2>/dev/null); then
@@ -167,8 +177,10 @@ net_wdnote() {
 # A caller that owns a temp file gets the sharper test instead: net_wdnote reads
 # a marker written by the watchdog and by nothing else, which is what separates
 # a 30s budget that really elapsed from a 4s kill reported as one. inflight.sh
-# has that file, and keeps it; the scripts with no temp file and no EXIT trap of
-# their own take this, rather than growing one apiece for a wording.
+# has that file, keeps it, and reads it back through net_wdnote; the scripts
+# with no temp file and no EXIT trap of their own take this instead, rather than
+# growing one apiece for a wording — as does inflight.sh itself, on the one path
+# where its own mktemp failed and there is no marker to read.
 net_stalled() {
   [ "$1" -eq 143 ] || [ "$1" -eq 137 ]
 }
@@ -307,12 +319,23 @@ net_git() {
   # The whole body is a SUBSHELL, and that is not style. A caller who captures
   # stdout gets one for free from `$( )`; a caller who does not — the fetches,
   # which write to stderr and are read by their exit status — runs the body in
-  # its own shell, and there the shell REPORTS the sleeper it just reaped:
-  # measured, `verify-sha.sh: line 77: 61980 Terminated: 15 { sleep …` landed on
-  # the script's stderr, between its own trace line and its own result, on a
-  # completely healthy fetch. The notice is the shell's, not the job's, so no
-  # redirection on the job can reach it. `( )` puts every caller on the path the
-  # capturing one was already taking, where nothing prints it.
+  # its own shell, and there the shell REPORTS the SLEEPER it reaped once the
+  # caller runs on past the call: measured, `verify-sha.sh: line 77: 61980
+  # Terminated: 15 { sleep …` landed on the script's stderr, between its own
+  # trace line and its own result, on a completely healthy fetch. The notice is
+  # the shell's, not the job's, so no redirection on the job can reach it; `( )`
+  # is what covers it, by leaving the sleeper behind in a shell that exits
+  # before it would announce anything. Bash-as-sh is the shell that prints it —
+  # measured, dash announces no sleeper with the subshell or without it.
+  #
+  # That is the SLEEPER, and it is the whole of what `( )` buys. The git job is
+  # a separate notice on a separate path: it is reaped by an explicit `wait`,
+  # which announces a signalled child from INSIDE the subshell, onto the same
+  # stderr. Measured on the watchdog-killed path, with the subshell and without
+  # it alike, bash-as-sh printed `Terminated: 15  GIT_TERMINAL_PROMPT=0 …` and
+  # dash a bare `Terminated: 15`, above the caller's own reason — and a caller
+  # that CAPTURES stdout got it too, so there was never a path where nothing
+  # printed it. The `2>/dev/null` on the `wait` below is what covers that one.
   (
   net_wdfile=$1
   net_budget_s=$2
@@ -330,7 +353,7 @@ net_git() {
   { sleep "$net_budget_s"; printf 'fired ' >>"$net_wdfile" || :; net_kill_tree "$net_pid"; } >/dev/null 2>&1 &
   net_wd_pid=$!
   net_status=0
-  wait "$net_pid" || net_status=$?
+  wait "$net_pid" 2>/dev/null || net_status=$?
   net_kill_tree "$net_wd_pid"
   exit "$net_status"
   )

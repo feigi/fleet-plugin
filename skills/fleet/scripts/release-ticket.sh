@@ -764,8 +764,10 @@ fi
 # a branch that exists. git's own message is more useful on the terminal anyway.
 # 30s: `ls-remote` moves refs and no objects, so this is generous for the work,
 # and it is the budget inflight.sh's own `ls-remote` runs on. `FLEET_NET_TIMEOUT`
-# is the shorten-only override the fleet's bounded calls share; the rule is
-# net_budget's, in net.sh.
+# is the shorten-only override this lookup shares with the fleet's fetches — but
+# NOT with inflight.sh's `ls-remote`, which reads `INFLIGHT_LS_REMOTE_TIMEOUT`
+# and nothing else, so shortening this one does not shorten that one. The rule
+# is net_budget's, in net.sh.
 ls_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
 ls_rc=0
 remote=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || ls_rc=$?
