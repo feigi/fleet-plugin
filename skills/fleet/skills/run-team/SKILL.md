@@ -1906,8 +1906,9 @@ Plus two append-only lists:
 error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read
 those and decide. Exit **3** is scored: some row gh returned has to score above
 zero against the subject, because the ANDed query also matches issues the
-overlap rates 0.00, and a hard stop over those was measured dropping real
-findings (#388). It also prints the closest filed rows with an overlap score.
+overlap rates 0.00, and every measured stop over those was survived only by a
+reader who overrode it and searched the tracker by hand — obeying it would have
+dropped a real deferral (#388). It also prints the closest filed rows with an overlap score.
 Those never move the exit code — the same finding gets worded differently by
 whoever finds it second — but a filed row at or above `NEAR_SOFT_HIT` in
 `ledger.mjs` does move the verdict to `soft-hit`, as does a tracker set with no

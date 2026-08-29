@@ -622,14 +622,14 @@ test("a clean ledger and a clean tracker is the only path that reads safe, exit 
 // Both halves were measured wrong in one run: `tracker-hit` over rows this
 // file's own overlap rates 0.00, and `clean` printed directly above near-miss
 // rows that named the right issue. The rows and the scores were computed and
-// printed in both cases — only the verdict ignored them. The two fixtures
-// below are those two measured shapes.
+// printed in both cases — only the verdict ignored them. The fixtures below
+// are those measured shapes.
 //
 // `soft-hit` is the verdict for "signal, not a duplicate finding". It stays on
 // exit 0 deliberately: exit 3's meaning ("the ledger is clean but the tracker
 // has matching rows") is what callers gate on, and near-misses were already
-// ruled advisory rather than blocking (#145, #152). What moves is one shape —
-// a hit set the scorer rates 0.00, which used to force 3.
+// ruled advisory rather than blocking (#145, #152). What moves is the hit set
+// the scorer rates 0.00, which used to force 3.
 // ---------------------------------------------------------------------------
 
 // The wontfix-vocabulary shape: rows that share a filing convention with each
@@ -1860,8 +1860,8 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
   assert.equal(r.json.found, false, "none of these rows is a match, or the ranking below them never runs");
   assert.deepEqual(r.json.near.map((n) => n.row), filed, "the payload parsed but lost the near-miss rows it ranked");
   assert.equal(r.ghRan, true, "the arm past the early departure must still reach the tracker query");
-  // These rows share three of the subject's four content words, so they are
-  // far above the soft-hit floor — the oversized payload and the verdict it
+  // These rows share most of the subject's content words, so they sit far
+  // above the soft-hit floor — the oversized payload and the verdict it
   // carries are the same statement, and the pipe test is what proves the
   // verdict travelled with it.
   assert.equal(r.json.verdict, "soft-hit");

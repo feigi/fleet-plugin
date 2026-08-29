@@ -404,14 +404,14 @@ function runCheck() {
   // value, deliberately named and deliberately here beside the display cap
   // rather than inlined in the verdict below.
   //
-  // Chosen from the rows #388 measured: the ones a reader confirmed adjacent
-  // scored from 0.20 up to 0.45, so a floor at 0.20 admits them, and the rows
-  // it recorded as ordinary vocabulary overlap sat below. That run also
-  // recorded one adjacent row at 0.09, which this floor does not reach — the
-  // floor buys a short answer, never completeness, and the rows themselves stay
-  // printed and stay in the payload at every verdict for exactly that reason.
-  // Raise it and adjacent rows fall back to `clean`; lower it and every check
-  // reporting a soft hit is what gives.
+  // Chosen from the rows #388 measured: the near-misses a reader went on to
+  // confirm as the genuinely adjacent issue scored from 0.20 up to 0.45, so a
+  // floor at 0.20 admits them. #388 also records an adjacent row at 0.09, which
+  // this floor does not reach — the floor buys a short answer, never
+  // completeness, and the rows themselves stay printed and stay in the payload
+  // at every verdict for exactly that reason. Raise it and adjacent rows fall
+  // back to `clean`; lower it and every check reporting a soft hit is what
+  // gives.
   const NEAR_SOFT_HIT = 0.2;
   const rankedNear = data.filed
     .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
@@ -731,9 +731,9 @@ function runCheck() {
   //
   // `soft-hit` is the answer for signal that is not a duplicate finding: rows
   // worth reading, at an exit code that does not claim the filing is settled.
-  // It covers both shapes, because both leave the caller in the same position —
-  // a tracker set with no scoring row, and a filed row at or above the
-  // near-miss floor.
+  // It covers each of those, because they leave the caller in the same
+  // position — a tracker set with no scoring row, or a filed row at or above
+  // the near-miss floor.
   //
   // Order matters. `!tracker.ok` short-circuits before `tracker.hits` is read,
   // which is required: hits is absent, not `[]`, on that branch. `unverified`
@@ -779,9 +779,11 @@ function runCheck() {
   //
   // A hit set scoring 0.00 no longer forces 3 (#388). gh can match an issue
   // body the title-based score cannot see, which is why those rows are still
-  // printed and still shipped in the payload — but a hard stop over rows this
-  // file itself rates zero was measured dropping real findings, and the
-  // instruction the callers carry made that stop binding.
+  // printed and still shipped in the payload — but the instruction the callers
+  // carry makes exit 3 binding, and #388 measured what that costs: every
+  // recorded case of a hard stop over rows this file rates zero was survived
+  // only by a reader who overrode it and searched the tracker by hand, and
+  // obeying it would have dropped a real deferral.
   //
   // exitCode, not exit(): this is the last statement of the branch, so
   // assigning and falling out reaches the same codes by the same path every
