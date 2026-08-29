@@ -97,8 +97,13 @@ function stashSomething(w, name = "h.txt") {
 // and "not filtered at all" all return exactly one line — and dropping either
 // filter from the script leaves the suite green. DECOY_OLD is on the path but
 // before the fork; DECOY_NEW is after the fork but on another file.
-function conflictRepo(t, path) {
-  const c = repo(t);
+// `branch` and `prefix` pass straight through to `repo`, so a case can plant a
+// marker in the branch name or in the worktree path — the two values #431's
+// escape block renders, and the only two a content-selected shim can address
+// there. Both default through `repo`'s own defaults, so every existing caller
+// is unchanged.
+function conflictRepo(t, path, branch, prefix) {
+  const c = repo(t, branch, prefix);
   git(c.w, "checkout", "-q", "main");
   writeFileSync(join(c.w, path), "older, already shared\n");
   git(c.w, "add", "--", `:(literal)${path}`);
@@ -1724,13 +1729,20 @@ test("a missing json.sh is exit 2, not a verdict about the worktree", (t) => {
 // call sites are invoked with identical arguments and only the values passing
 // through them differ. `sed` fails jarr; `tr -d` fails jrewritten and therefore
 // jarr_rewritten, which is the other operand of each `&&` chain.
-function withBrokenEscaper(t, { tool, marker }) {
+//
+// `selector` overrides that default arg match, which is what #431's cases need:
+// `jstr` ends in a `tr` carrying no `-d`, so the two defaults above cannot
+// address it. Passing json.sh's shared scrub set matches BOTH the replacing
+// `tr` that closes `jstr` and the deleting one inside `jrewritten` — which is
+// not ambiguity to route around, because the caller consults `jstr` first and
+// therefore always reports `jstr` as the escaper that failed.
+function withBrokenEscaper(t, { tool, marker, selector }) {
   const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-esc-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const real = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
   // The selector arg is what keeps this off the script's OWN sed/tr calls:
   // `s/^/"/` appears only in jarr's rule list and `-d` only in jrewritten's.
-  const selector = tool === "sed" ? `'s/^/"/'` : "-d";
+  selector = selector ?? (tool === "sed" ? `'s/^/"/'` : "-d");
   writeFileSync(join(bin, tool), `#!/bin/sh
 case " $* " in
   *${selector}*)
@@ -1783,4 +1795,97 @@ test("a jarr_rewritten that cannot answer is exit 2 too — the `&&` chain cover
     "`conflictsRewritten` is what tells the runbook a path is not safe to hand to `git diff` — a run that cannot compute it has not answered");
   assert.match(r.stderr, /could not escape the conflicting paths/);
   assert.equal(r.stdout, "", "no payload: half the pair is not a receipt");
+});
+
+// --- #431: the same broken escaper, one block further down, and the OPPOSITE
+// answer. The three cases above escape `conflicts[]` and `atRisk[]` — findings
+// the operator can obtain nowhere else, and which step 5 of the no-undo runbook
+// hands to `git diff -- <path>`. A run that cannot render those has not
+// answered, so they keep their `die`.
+//
+// `worktree` and `branch` are the other kind. They are echoes of argv: the
+// caller supplied both and still holds them, and by the time this block runs
+// `clean` has been measured, `stash` counted, and both arrays already rendered.
+// A `tr` that has gone missing there used to convert that finished audit into
+// exit 2 with no payload — discarding every real finding over the formatting of
+// two values the caller typed. Each renders independently now and reports JSON
+// `null` when it cannot, which is what #120 shipped for the same class in
+// inflight.sh.
+//
+// `null` is the honest report and not a quieter `""`: a field that could not be
+// escaped has no usable path to hand to `git diff` in any case, and `""` is
+// indistinguishable from a path, which is the false-reassurance direction.
+test("an escaper that cannot render the branch reports it null and still delivers every finding", (t) => {
+  const c = conflictRepo(t, "plain.txt", "fix/1-BOOMBRANCH");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, {
+    tool: "tr", marker: "BOOMBRANCH", selector: `'\\001-\\007\\013\\016-\\037'`,
+  }) });
+
+  assert.equal(r.status, 0,
+    "the worktree was measured clean and every finding survived — exit 2 here would retract a finished audit over a formatter");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.branch, null, "the unrenderable field is null, not a truncated or empty string");
+  assert.equal(r.json.branchRewritten, null,
+    "and its paired flag too — a `false` there would claim nothing was replaced in a value nothing could examine");
+
+  // The point of the whole change: everything the audit established is still on
+  // the payload, and the OTHER escaped field is untouched by its sibling's
+  // failure.
+  assert.equal(r.json.worktree, c.w, "the worktree renders independently and keeps its real value");
+  assert.equal(r.json.worktreeRewritten, false);
+  assert.equal(r.json.clean, true, "measured before the escape ran, and still reported");
+  assert.equal(r.json.stash, 0);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"], "the conflicting path was found and is still named");
+  assert.deepEqual(r.json.conflictsRewritten, [false]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "the commit a careless resolution would eat is still named — that finding is the reason this script exists");
+
+  assert.match(r.stderr, /could not render the branch .*\(jstr\)/,
+    "and the operator is told which field and which escaper, not left to diff the payload against a healthy one");
+});
+
+test("an escaper that cannot say whether the worktree path was rewritten reports it null, leaving the branch intact", (t) => {
+  const c = conflictRepo(t, "plain.txt", undefined, "no-undo-audit-BOOMWT-");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "tr", marker: "BOOMWT" }) });
+
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, null,
+    "`jstr` rendered this path perfectly and `jrewritten` still could not say whether a byte was replaced — an undisclosed rewrite is not a path a reader may trust");
+  assert.equal(r.json.worktreeRewritten, null);
+  assert.equal(r.json.branch, c.branch, "the branch renders independently and is unaffected");
+  assert.equal(r.json.branchRewritten, false);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+
+  // Named separately from `jstr` because the two fail independently: `jstr` can
+  // render a string while `jrewritten` cannot judge it, which is exactly this
+  // case. One shared word would send a debugger to whichever it guessed.
+  assert.match(r.stderr, /could not render the worktree .*\(jrewritten\)/);
+});
+
+// #431's acceptance criterion that lives in prose rather than in the payload: a
+// reader of the runbook has to meet what a `null` field means BEFORE they act
+// on one. Both carriers state it, on the same two lines the linkage pin above
+// anchors on — the runbook's exit-2 paragraph and the design spec's own row.
+//
+// Two phrases, not one, because either alone is satisfied by a rewrite that
+// loses the point. `there is no worktree` alone passes prose that names the
+// misreading without ruling it out; `could not render the path you passed in`
+// alone passes prose that says what the field IS while leaving the dangerous
+// reading unaddressed. The claim is the pair: this is what `null` means, and
+// that is what it does not.
+//
+// Deliberately NOT pinned as one span: the two docs word the surrounding
+// sentence differently on purpose — the runbook bolds its `never` for an
+// operator mid-pass, the spec row does not — and a span pin would force one
+// voice on both or drift into pinning nothing.
+test("both docs rule out reading a null worktree as an absent one", () => {
+  for (const rel of ["../commands/run-merge-bot.md", "../../../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
+    const doc = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    assert.ok(doc.includes("could not render the path you passed in"),
+      `${rel} must say what a null worktree/branch IS — the run could not render the argument the caller supplied — since the field is an echo of argv rather than a finding`);
+    assert.ok(doc.includes('"there is no worktree"'),
+      `${rel} must rule out the false-reassurance reading by name: a null path is not an absent worktree, and an operator who reads it as one skips the proof step believing there was nothing to prove`);
+  }
 });

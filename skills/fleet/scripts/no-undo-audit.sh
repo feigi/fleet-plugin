@@ -556,13 +556,62 @@ fi
 # itself: a substitution that fails contributes an EMPTY argument and printf
 # still exits 0 — and an unquoted `%s` slot then emits `"...Rewritten":,`,
 # malformed JSON at exit 0, which is the failure the receipt exists to rule
-# out. Assigned first, each one is a simple command whose status the `&&` chain
-# can read and this `|| die` can act on.
-wt_j=$(jstr "$wt") && wt_rw=$(jrewritten "$wt") \
-  && branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
-  || die "could not escape the audit fields for $branch"
-printf '{"worktree":"%s","worktreeRewritten":%s,"branch":"%s","branchRewritten":%s,"clean":%s,"stash":%s,"conflicts":[%s],"conflictsRewritten":[%s],"atRisk":[%s],"atRiskRewritten":[%s]}\n' \
-  "$wt_j" "$wt_rw" "$branch_j" "$branch_rw" "$clean" "$stash" \
+# out. Assigned first, each one is a simple command whose status `add_field`
+# can read.
+#
+# `die` is NOT the answer here (#431), unlike the conflicts and at-risk escapes
+# above, and the difference is which kind of value each renders. Those two are
+# FINDINGS — the operator can obtain them nowhere else, and step 5 of the
+# no-undo runbook hands `conflicts[]` straight to `git diff -- <path>`, where an
+# absent list reads as "nothing to prove" rather than "unproven". A run that
+# cannot render them has not answered, so they still abandon the run.
+#
+# `worktree` and `branch` are the other kind: echoes of argv the caller supplied
+# and still holds. By the time this block runs `clean` has been measured,
+# `stash` counted, and both arrays already rendered — so every field this
+# payload carries is established, and a formatter breaking HERE would convert a
+# finished audit into "unanswerable" over the formatting of two values the
+# caller typed. Each renders independently and reports JSON `null` when it
+# cannot, which is what #120 shipped for this same class in inflight.sh. Not a
+# quieter `""`: a field that could not be escaped has no usable path to hand to
+# `git diff` in any case, and `""` is indistinguishable from a path.
+#
+# The message names the escaper as well as the field, because the two fail
+# independently — `jstr` can render a string perfectly while `jrewritten` cannot
+# say whether any byte was replaced (break `tr -d` alone and that is exactly
+# what happens). Naming only the field sends a debugger to whichever it guesses.
+# `printf`, not `echo`: `$branch` is caller text like every other site here.
+#
+# Accumulated into one string rather than four named variables, the shape
+# `inflight.sh`'s `add_evidence` already uses, so each field name is spelled
+# once instead of three times. The trailing comma is kept rather than trimmed —
+# `"clean"` follows immediately — and the slot carrying it is an unquoted `%s`
+# because each value arrives already wrapped in its own quotes or as the bare
+# word `null`, so the format string must not wrap it again. $ev/$rw/$why are
+# scratch: not `local`, which /bin/sh has no builtin for, and nothing reads them
+# outside this function.
+fields=""
+add_field() {
+  why=""
+  if ! ev=$(jstr "$2"); then
+    why=jstr
+  elif ! rw=$(jrewritten "$2"); then
+    why=jrewritten
+  else
+    ev="\"$ev\""
+  fi
+  if [ -n "$why" ]; then
+    ev=null
+    rw=null
+    printf '%s: could not render the %s for %s as JSON (%s) — reported as null\n' \
+      "$NAME" "$1" "$branch" "$why" >&2
+  fi
+  fields="${fields}\"$1\":$ev,\"$1Rewritten\":$rw,"
+}
+add_field worktree "$wt"
+add_field branch "$branch"
+printf '{%s"clean":%s,"stash":%s,"conflicts":[%s],"conflictsRewritten":[%s],"atRisk":[%s],"atRiskRewritten":[%s]}\n' \
+  "$fields" "$clean" "$stash" \
   "$conflicts_json" "$conflicts_rewritten_json" "$at_risk_json" "$at_risk_rewritten_json" \
   || die "could not write the audit for $branch"
 exit "$rc"
