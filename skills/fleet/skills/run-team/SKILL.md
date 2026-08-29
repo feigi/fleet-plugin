@@ -305,8 +305,10 @@ At start, and whenever the pool empties.
    2026-08-16 and every class now dispatches at the session's tier. It still
    earns its read: it selects the **correction-ticket discipline** phase 2
    hands the implementer (settle every restated claim against the tree, keep
-   the diff to the ticket's stated size, no positional references), it
-   partitions `docs/metrics/tier-outcomes.tsv`, and it is what any future tier
+   the diff to the ticket's stated size, no positional references, never a
+   count in prose, and a settling command re-run and written inline for every
+   claim that goes into the commit or PR body), it partitions
+   `docs/metrics/tier-outcomes.tsv`, and it is what any future tier
    control would be drawn from. A row with no class is still `class=unknown`,
    never a guess.
 
@@ -1462,7 +1464,11 @@ command first**, and **no positional references**. A third earns its place here
 count is false the moment the next commit lands, and #768 falsified two of them
 (`the only other chmodSync(..., 0o644)`, already off by one before it; `fails 75
 of the 85 cases`, measured 81 of 91) in a file whose own header records having
-shipped a stale count once already.
+shipped a stale count once already. The immutable-body rule earns the same
+place: **every claim a commit body or a PR body asserts needs its settling
+command re-run at the commit that ships it, and written inline beside it.** A
+relayed enumeration delivers only what it names, so this list is the whole of
+what a controller hands over, never a preface to it.
 
 **One more rule, and the one the diff cannot carry: a claim written into a
 commit body or a PR body needs its settling command re-run at the commit that
@@ -1481,9 +1487,14 @@ figure at all. Measured on #399: `f961cf2` and `acce6ee` both close `Verified:`
 with `86/86 across both test files` naming the suites that read this file, a
 file set the tree does not bear out — `git log -1 --format=%b <sha> | grep -A2
 Verified:` shows what each shipped. Inline is what makes the difference visible:
-a claim carrying the command that produces it can be re-run instead of trusted,
-and a claim whose settling command cannot be written is one to drop rather than
-assert.
+a claim carrying the command that produces it can be re-run instead of trusted.
+A claim whose settling command cannot be written is still not one to assert
+bare: settle it inline, mark it unsettleable from this repo per the citation
+convention above, or drop it. The marker ending is not a loophole but the case
+that convention already sanctions: it directs foreign evidence to be asserted as
+prose saying it cannot be settled from this repo, and that marker is itself what
+tells a later reader not to trust the claim instead of re-deriving it, which is
+the property this rule protects.
 
 **The settling command for "which files read X" must never be a literal-path
 grep.** The path is assembled in more than one spelling here, one of them behind

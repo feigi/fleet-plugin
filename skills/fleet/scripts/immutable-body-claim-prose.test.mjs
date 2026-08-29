@@ -33,6 +33,33 @@
 // fragment and stays green. Measured, not assumed: that mutant was run against
 // this file and passed. Do not read a green run here as "no carve-out was
 // added to this rule".
+//
+// That appended-clause half is the KNOWN ceiling, and it is what #1002 records
+// and measures. A second half is not: a MEANING-CHANGING clause inserted
+// MID-GAP — between the two anchors of one ordered span, touching no pinned
+// fragment — is absorbed wherever that span's `.{0,N}?` still has headroom, and
+// the suite stays green. The tolerance exists so a meaning-PRESERVING copy-edit
+// does not red the pin, and an insertion that changes the rule's meaning inside
+// the same gap is a different case no assertion here sees.
+//
+// Measured on this file, not assumed, and the property is per-gap headroom
+// rather than one every span here has. Re-derive by inserting the literal into
+// `run-team/SKILL.md` and running this file: `unless it names a public source, `
+// in the ranking span's gap stayed green, `nobody relies on ` in the
+// `Verified:` span stayed green, and `, for correction tickets only` in the
+// hand-over span stayed green — while `, unless re-running it is impractical`
+// in the endings span pushed past that gap's cap and RED it.
+//
+// Tightening the gaps is not the fix, and NOT for the reason that first comes to
+// mind. Reflow is not what a tight gap costs: `flatten` collapses whitespace
+// before matching, so re-wrapping the source leaves the gap's flattened length
+// identical. Measured — the endings gap narrowed to its exact content (84
+// chars, zero headroom) stayed GREEN through a hard re-wrap of the whole rule
+// at 42 columns. What a tight gap costs is word-level copy-editing: the same
+// zero-headroom gap RED on inserting the single word `it` into "not one to
+// assert bare". That is a meaning-preserving edit, and a pin that reds on one
+// is a pin the next person to touch this prose weakens or deletes.
+// The mechanism has to change, which is #1002's own conclusion.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -67,6 +94,12 @@ const flatten = (s) =>
 const FROM = "never write a COUNT or a tally into prose";
 const TO = "#### Fallback: hand-dispatched reviewer member";
 const rule = () => flatten(between(RUN_TEAM, FROM, TO, "the immutable-body claim rule"));
+
+// The phase-0 restatement of what phase 2 hands a `class=correction` implementer.
+// A separate slice, far from the rule itself, because that enumeration is a
+// delivery surface in its own right and drifts independently of the block.
+const PHASE0_FROM = "hands the implementer (settle every restated claim";
+const PHASE0_TO = "and it is what any future tier";
 
 test("the rule reaches the immutable body the diff does not carry, and says why review-time is too late", () => {
   const r = rule();
@@ -135,13 +168,36 @@ test("the inline form is bound to what it buys, and to the claim that has to be 
     phrase("the command goes inline, beside the claim"),
     "the rule no longer requires the settling command inline beside the claim it settles",
   );
-  // The pair that makes the rule decidable. "Write the command inline" alone
+  // The endings that make the rule decidable. "Write the command inline" alone
   // leaves a writer with an unsettleable claim no instruction at all, and the
-  // reachable move there is to assert it bare.
+  // reachable move there is to assert it bare. The marker ending is load-bearing
+  // and not decorative: the cross-repo citation convention in this block —
+  // pinned by `cross-repo-citation-prose.test.mjs` — directs foreign evidence to
+  // be asserted as prose saying it cannot be settled from this repo, and a
+  // settle-or-drop binary reads as a ban on exactly that, since a foreign
+  // claim's settling command cannot be written HERE. Pinned as one ordered span
+  // so the binary cannot come back by dropping the marker ending.
   assert.match(
     r,
-    /can be re-run instead of trusted.{0,120}?a claim whose settling command cannot be written is one to drop rather than assert/,
-    "the rule no longer says an unsettleable claim gets dropped — an inline-only rule leaves a writer asserting it bare",
+    /can be re-run instead of trusted.{0,120}?settle it inline, mark it unsettleable from this repo per the citation convention above, or drop it/,
+    "the rule no longer offers the unsettleable-from-this-repo marker as an ending — a settle-or-drop binary bans what the citation convention above sanctions",
+  );
+});
+
+test("the `Verified:` header carries the rationale — a wrong figure under it is worse than none", () => {
+  // The ticket's own "why a rule and not just a fix". Before this assert the
+  // sentence sat in an unpinned gap: the ranking span stops at "leaves the
+  // surrounding reasoning standing" and the worked-instance span starts at
+  // "`f961cf2` and `acce6ee`", so deleting it left the whole suite green.
+  // One ordered span, because `Verified:` alone recurs in this slice and a bare
+  // presence check on it is satisfied by the `f961cf2`/`acce6ee` worked
+  // instance. The single `*` in `*instead of*` is live text here — see the
+  // `flatten` note — and this is the assertion that makes leaving it unstripped
+  // load-bearing.
+  assert.match(
+    rule(),
+    /`Verified:` is the construct a later reader trusts \*instead of\* re-deriving.{0,80}?worse than no figure at all/,
+    "the rule no longer says why `Verified:` is the header that makes a wrong figure worse than none",
   );
 });
 
@@ -187,6 +243,41 @@ test("the literal-path grep is forbidden AND the method that replaces it is give
     r,
     phrase("that answers which ones depend on its contents"),
     "the mutation method no longer states what it settles — depending on a file's contents is a different question from naming its path",
+  );
+});
+
+test("both hand-over enumerations name this rule — a relayed list carries only what it names", () => {
+  // Delivery here is a controller copying an enumeration, not the block:
+  // nothing in this repo renders this block into a member prompt verbatim, so
+  // the enumerated sentences ARE the hand-over. Settle with
+  // `grep -rn "correction-ticket discipline" skills/ agents/` — every hit
+  // selects, annotates or pins the discipline, and none renders it. That a
+  // controller in practice relays the enumeration and leaves the block behind
+  // is a fleet-run observation and cannot be settled from this repo.
+  //
+  // The refuters' point stands and is not the defect: the block already carried
+  // rules these enumerations omit. The anti-count rule was one, absent from the
+  // phase-0 parenthetical before #402 —
+  // `git show 38d9d15:skills/fleet/skills/run-team/SKILL.md | sed -n '303,310p'
+  // | grep -in "count\|tally"` exits 1 — which is why the phase-0 asserts cover
+  // it too.
+  assert.match(
+    rule(),
+    /The immutable-body rule earns the same place.{0,80}?every claim a commit body or a PR body asserts needs its settling command re-run at the commit that ships it, and written inline beside it/,
+    "the hand-over enumeration no longer names this rule as one to give every implementer — a controller relaying the list drops it",
+  );
+  const phase0 = flatten(
+    between(RUN_TEAM, PHASE0_FROM, PHASE0_TO, "the phase-0 hand-over enumeration"),
+  );
+  assert.match(
+    phase0,
+    phrase("a settling command re-run and written inline for every claim that goes into the commit or PR body"),
+    "the phase-0 summary of what phase 2 hands the implementer no longer names the commit/PR-body rule",
+  );
+  assert.match(
+    phase0,
+    phrase("never a count in prose"),
+    "the phase-0 summary lost the anti-count rule — it was absent here before #402 and is the same defect",
   );
 });
 
