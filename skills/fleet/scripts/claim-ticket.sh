@@ -450,7 +450,7 @@ for arg do
       /*) ;;
       *node_modules/*)
         case "\$arg" in */*) argdir="\${arg%/*}" ;; *) argdir="." ;; esac
-        case "\$(cd "\$argdir" 2>/dev/null && pwd)/" in
+        case "\$(CDPATH= cd -- "\$argdir" 2>/dev/null && pwd)/" in
           "\$PWD"/node_modules/*)
             printf 'agent-test: %s is under node_modules — node discards it silently, not a test failure\n' "\$arg" >&2
             exit 1
