@@ -67,11 +67,33 @@ function region() {
   return RUN_TEAM.slice(at + START.length, end);
 }
 
-// Quote markers are stripped and whitespace collapsed before matching, so a
-// pinned span may cross a `>` gutter and a rewrap is not a failure. `phrase()`
-// alone cannot do this: its `\s+` joins do not span a `>`, so every multi-line
-// pin here would red on the wrap points rather than on the meaning.
-const flatten = (s) => s.split("\n").map((l) => l.replace(/^>\s?/, "")).join(" ").split(/\s+/).join(" ").trim();
+// Quote markers and `**` emphasis are stripped and whitespace collapsed before
+// matching, so a pinned span may cross a `>` gutter or a bold boundary, and
+// neither a rewrap nor an emphasis move is a failure. `phrase()` alone cannot
+// do either: its `\s+` joins do not span a `>`, so every multi-line pin here
+// would red on the wrap points rather than on the meaning, and it escapes `*`
+// as a regex metacharacter, which makes the exact position of a `**` seam
+// literal test surface. Measured: narrowing the bold span on the re-derive
+// sentence to `**Re-derive the ticket's claims** against ...` — same words,
+// same order, same meaning — reddened this file with a message claiming
+// `origin/main` was no longer pinned, which was false. A false red on a
+// meaning-preserving copy-edit is how a pin gets deleted by the next person to
+// touch the prose.
+//
+// Only `**` is stripped, deliberately. A single `*` and `_` are live characters
+// in this region — `*.test.mjs` globs and `SNAKE_CASE` identifiers inside code
+// spans — so stripping those would corrupt the text the pins match against
+// rather than normalize it. No `**` appears inside a code span here (measured);
+// if one ever does, this is the line that has to learn about backticks.
+const flatten = (s) =>
+  s
+    .split("\n")
+    .map((l) => l.replace(/^>\s?/, ""))
+    .join(" ")
+    .replace(/\*\*/g, "")
+    .split(/\s+/)
+    .join(" ")
+    .trim();
 
 // Each block is bounded by the opening words of the block that follows it, so a
 // block deleted outright reds on its own anchor and names itself. A closing
@@ -126,6 +148,22 @@ test("the issue-read block carries the command, the caveat that motivates it, an
     phrase("The `## Agent Brief` comment is authoritative over the issue body"),
     "the block no longer says the Agent Brief outranks the issue body, or now says the reverse",
   );
+  // The bail rule, bound to BOTH its timing and its trigger. This is the case
+  // the header says these pins exist for, and it was measured open: the
+  // sentence could be deleted from `run-team/SKILL.md` and
+  // `docs/agents/issue-tracker.md` at once with the whole suite green — the
+  // copy comparison in `tracker-block-copy-prose.test.mjs` agrees with an
+  // identical gutting of both sides, and its only red was its own fixture
+  // going stale, whose message instructs the edit that closes it.
+  //
+  // Bound this way rather than on the word "bail", which survives the inversion
+  // that matters: "→ implement anyway" is the reading that puts an undecided
+  // member into a tree it cannot reason about, and it reds here.
+  assert.match(
+    b,
+    /Read the issue before touching code.{0,60}?still undecided or needing human hands you do not have.{0,40}?bail, name the cause, do not implement/,
+    "the read-before-touching-code rule no longer sends an undecided member to bail instead of implementing",
+  );
 });
 
 test("the re-derive block names origin/main as the reference, and says a contradicted criterion is a bail", () => {
@@ -135,7 +173,7 @@ test("the re-derive block names origin/main as the reference, and says a contrad
   // sentence has been rewritten to send the member at its own working tree.
   assert.match(
     b,
-    phrase("against `origin/main` before implementing** — not the working tree, and not the ticket's line numbers"),
+    phrase("against `origin/main` before implementing — not the working tree, and not the ticket's line numbers"),
     "re-derivation is no longer pinned to origin/main against the working tree and the ticket's line numbers",
   );
   assert.match(
@@ -186,7 +224,7 @@ test("the enumerate-the-class block carries all three of its halves, each with i
   // enumeration order that missed a case its own ticket named in passing.
   assert.match(
     b,
-    phrase("Build that list from **the ticket's own prose first**, then from the mechanism"),
+    phrase("Build that list from the ticket's own prose first, then from the mechanism"),
     "the enumeration order no longer runs from the ticket's prose to the mechanism",
   );
   // Half two: the false-positive question bound to the test it demands. The
@@ -218,31 +256,51 @@ test("the enumerate-the-class block carries all three of its halves, each with i
 });
 
 test("a rewrapped block still matches — these pins refuse drift, not reflow", () => {
-  // The ACCEPT side, and the only thing holding `flatten` open: a suite of
-  // already-matching inputs passes with the normalization deleted. Re-wrapping
-  // a paragraph is not drift, and a pin that reddened on it would be deleted by
-  // the next person who reflowed this file.
+  // The ACCEPT side. Re-wrapping a paragraph is not drift, and a pin that
+  // reddened on it would be deleted by the next person who reflowed this file.
+  //
+  // What this test uniquely holds open, measured rather than assumed: deleting
+  // `flatten`'s gutter strip reds all six tests in this file, not just this one
+  // — every block pin above already spans a `>`. So the five of them hold the
+  // normalization open at TODAY'S wrap points, and this is the only test that
+  // exercises it at wrap points the file does not currently contain. A
+  // `flatten` that handled today's breaks by accident would survive all five.
   //
   // The fixture is DERIVED from the live block, never a quoted line. Measured:
   // the first draft quoted one, and then any reword of that line reddened this
   // test on the fixture guard rather than on the pin — an accept control that
   // reddens on the edits it exists to accept is worse than none.
   const raw = between(region(), "Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
-  const body = raw.replace(/\s+$/, "");
+  // Trimmed back to the BLOCK, not merely to the last non-space character.
+  // `between`'s `to` anchor is the next block's opening words, so `raw` runs
+  // past this block's last line through the blank line and onto the next
+  // block's `>` marker. Measured on the first draft, which trimmed `/\s+$/`:
+  // that leaves the `>` as the last character, the trailing empty word rejoins
+  // as a second space, and the splice merges the two blocks into one line —
+  // rewrapping the right words inside a blockquote that is no longer
+  // well-formed. It also made the staleness guard below VACUOUS, since the
+  // corrupted tail differed from `raw` no matter how the block was wrapped.
+  const body = raw.replace(/\n*>?\s*$/, "");
   // Re-wrapped at a narrower width than the file uses, so every wrap point
   // lands somewhere different from today's. Wrapping at word boundaries, not
   // one word per line: an unconditional break would split the slice's own
   // opening anchor and red this test on the anchor rather than on the pin.
-  const words = body.replace(/\n>\s?/g, " ").split(/\s+/);
+  const words = body.replace(/\n>\s?/g, " ").split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
     const last = acc[acc.length - 1];
     if (last && `${last} ${w}`.length <= 45) acc[acc.length - 1] = `${last} ${w}`;
     else acc.push(w);
     return acc;
   }, []);
-  const narrow = lines.join("\n> ") + raw.slice(body.length);
+  // The separator re-appended explicitly, so the next block still opens its own
+  // paragraph. With `body` bounded to the block this guard is load-bearing
+  // again: it now reds when the source block is already at this width.
+  const narrow = lines.join("\n> ") + "\n\n> ";
   assert.notEqual(narrow, raw, "the rewrap fixture no longer changes the block's wrapping — update it");
-  const flat = flatten(between(RUN_TEAM.replace(raw, narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
+  // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
+  // interpreted in the latter. The commit block carries no `$` today, which is
+  // exactly the kind of thing that stops being true without anyone noticing.
+  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
   assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
   assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });
