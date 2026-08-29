@@ -222,9 +222,27 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // already-matching inputs passes with the normalization deleted. Re-wrapping
   // a paragraph is not drift, and a pin that reddened on it would be deleted by
   // the next person who reflowed this file.
-  const target = "> Commit incrementally as you go. Do not accumulate a large uncommitted diff — if";
-  assert.ok(RUN_TEAM.includes(target), "the rewrap fixture no longer matches the commit block — update it");
-  const rewrapped = RUN_TEAM.replace(target, "> Commit incrementally as you go. Do not accumulate a large\n> uncommitted diff — if");
-  const flat = flatten(between(rewrapped.slice(rewrapped.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
+  //
+  // The fixture is DERIVED from the live block, never a quoted line. Measured:
+  // the first draft quoted one, and then any reword of that line reddened this
+  // test on the fixture guard rather than on the pin — an accept control that
+  // reddens on the edits it exists to accept is worse than none.
+  const raw = between(region(), "Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
+  const body = raw.replace(/\s+$/, "");
+  // Re-wrapped at a narrower width than the file uses, so every wrap point
+  // lands somewhere different from today's. Wrapping at word boundaries, not
+  // one word per line: an unconditional break would split the slice's own
+  // opening anchor and red this test on the anchor rather than on the pin.
+  const words = body.replace(/\n>\s?/g, " ").split(/\s+/);
+  const lines = words.reduce((acc, w) => {
+    const last = acc[acc.length - 1];
+    if (last && `${last} ${w}`.length <= 45) acc[acc.length - 1] = `${last} ${w}`;
+    else acc.push(w);
+    return acc;
+  }, []);
+  const narrow = lines.join("\n> ") + raw.slice(body.length);
+  assert.notEqual(narrow, raw, "the rewrap fixture no longer changes the block's wrapping — update it");
+  const flat = flatten(between(RUN_TEAM.replace(raw, narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
   assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
+  assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });
