@@ -307,6 +307,18 @@ fi
 # `|| :` is what makes this probe's own failure non-fatal to the run: `set -e`
 # would otherwise treat `probe_pr` returning 1 as fatal exactly the way a bare
 # failing command is, which is precisely the abort this whole change removes.
+#
+# ADDING A COMMAND TO probe_pr: `set -e` does not reach inside the body. POSIX
+# exempts a function's whole execution from `-e` while its status is what an
+# `||` is testing, so the `set -eu` up top aborts on nothing in there —
+# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
+# still aborts). A command that feeds a verdict field therefore carries its own
+# `|| { add_unknown "pr" "…"; return 1; }`. Unguarded, its failure leaves the
+# empty result a genuinely free ticket leaves, gets reported as a definite
+# absence, and frees a ticket that is taken — a free verdict puts a second
+# agent on the ticket where a taken one only skips it. A command that cannot
+# change the verdict is the opposite case and must record no unknown, the shape
+# `probe_pr`'s `raw="?"` count already has.
 probe_pr || :
 
 # Probe 2 — a remote branch carrying the number as its own path segment.
@@ -631,6 +643,17 @@ else
   echo "    no remote branch for #$n" >&2
 fi
 }
+# ADDING A COMMAND TO probe_remote: `set -e` does not reach inside the body.
+# POSIX exempts a function's whole execution from `-e` while its status is what
+# an `||` is testing, so the `set -eu` up top aborts on nothing in there —
+# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
+# still aborts). A command that feeds a verdict field therefore carries its own
+# `|| { add_unknown "remote" "…"; return 1; }`. Unguarded, its failure leaves
+# the empty result a genuinely free ticket leaves, gets reported as a definite
+# absence, and frees a ticket that is taken — a free verdict puts a second
+# agent on the ticket where a taken one only skips it. A command that cannot
+# change the verdict is the opposite case and must record no unknown, the shape
+# `probe_pr`'s `raw="?"` count already has.
 probe_remote || :
 
 # Probe 3 — a local worktree or branch.
@@ -919,6 +942,17 @@ elif [ -z "$local_b" ]; then
   echo "    no local branch or worktree for #$n" >&2
 fi
 }
+# ADDING A COMMAND TO probe_local: `set -e` does not reach inside the body.
+# POSIX exempts a function's whole execution from `-e` while its status is what
+# an `||` is testing, so the `set -eu` up top aborts on nothing in there —
+# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
+# still aborts). A command that feeds a verdict field therefore carries its own
+# `|| { add_unknown "local" "…"; return 1; }`. Unguarded, its failure leaves
+# the empty result a genuinely free ticket leaves, gets reported as a definite
+# absence, and frees a ticket that is taken — a free verdict puts a second
+# agent on the ticket where a taken one only skips it. A command that cannot
+# change the verdict is the opposite case and must record no unknown, the shape
+# `probe_pr`'s `raw="?"` count already has.
 probe_local || :
 
 if [ -n "$hits" ]; then
