@@ -437,11 +437,20 @@ for arg do
     # cannot normalize into one — the outer pattern keeps the subshell off
     # every other path. Passing an excluded spelling through would be the
     # same silent drop as the typo case below, for a different reason.
+    # \`-P\` here is not a hardening opportunity, and the omission is not an
+    # oversight (#401). The ordinary npm/pnpm workspace shape is where the two
+    # resolution modes diverge: \`node_modules/pkg\` is itself a symlink to a
+    # sibling real directory (a hoisted or linked workspace package). Physical
+    # resolution follows \`pkg\` OUT of \`node_modules\`, so the pattern below
+    # stops matching, this guard falls through without refusing, and the
+    # argument reaches node unrefused — where it is excluded anyway, on its
+    # own unresolved spelling, silently, at exit 0. That reintroduces #100's
+    # silent drop, minus the loud refusal this guard exists to give it first.
     case "\$arg" in
       /*) ;;
       *node_modules/*)
         case "\$arg" in */*) argdir="\${arg%/*}" ;; *) argdir="." ;; esac
-        case "\$(cd "\$argdir" 2>/dev/null && pwd)/" in
+        case "\$(CDPATH= cd -- "\$argdir" 2>/dev/null && pwd)/" in
           "\$PWD"/node_modules/*)
             printf 'agent-test: %s is under node_modules — node discards it silently, not a test failure\n' "\$arg" >&2
             exit 1

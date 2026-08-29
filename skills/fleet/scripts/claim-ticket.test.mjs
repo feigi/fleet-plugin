@@ -80,6 +80,7 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   delete env.FORCE_COLOR;
   return {
     wt,
+    env,
     text: readFileSync(join(wt, "agent-test"), "utf8"),
     run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
     // The same runner invoked from a subdirectory. Node resolves argv against
@@ -655,6 +656,67 @@ test("runner: a vendored file argument refuses however it is spelled", () => {
     assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /is under node_modules — node discards it silently/, spelling);
   }
+});
+
+// The same guard under an inherited CDPATH, which nothing else in this suite
+// varies. `cd` consults CDPATH before the cwd, so with a decoy on it that
+// holds a same-named `node_modules/plain`, a bare `cd "$argdir"` resolves
+// into the DECOY: the guard's `"$PWD"/node_modules/*` pattern misses, it
+// falls through without refusing, and the vendored file reaches node — which
+// drops it silently at exit 0, #100 back with the refusal removed. `apply()`
+// hands the runner `{...process.env}`, so a developer's CDPATH reaches it.
+// The decoy shape is deliberate over a bare `CDPATH=/tmp`: /bin/sh on macOS
+// (bash 3.2) fails the `cd` outright when no CDPATH entry matches, while
+// /bin/dash falls back to the cwd per POSIX and stays immune — so a
+// non-matching decoy would pin this on the dev platform only. A MATCHING
+// entry diverts both shells, which is what makes this row portable.
+// The sibling directory branch already carries `CDPATH=` for this reason
+// (see claim-ticket.sh, above `root=`); this pins the file branch's copy.
+// Mutation-tested both ways: dropping `CDPATH= ` from the file branch's `cd`
+// reds this row alone, and adding `-P` to it — the mutation the #401 row
+// below pins — leaves this one green.
+test("runner: a vendored file argument refuses under an inherited CDPATH", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "plain");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  const decoy = mkdtempSync(join(tmpdir(), "cdpath-decoy-"));
+  mkdirSync(join(decoy, "node_modules", "plain"), { recursive: true });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t/a.test.mjs", "node_modules/plain/v.test.mjs"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, CDPATH: decoy },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — node discards it silently/);
+});
+
+// #401: nothing above pins the RESOLUTION MODE this guard uses, only its
+// spelling coverage. `cd`/`pwd` without `-P` is logical — it never resolves a
+// symlinked path component — and that is deliberate: it is the same textual
+// resolution node applies to its own argv, so the guard and node agree on
+// which files count as vendored. The ordinary npm/pnpm workspace shape is
+// where the two resolution modes diverge: `node_modules/pkg` is itself a
+// symlink to a sibling real directory (`pkg` hoisted or linked from
+// `packages/`). `pwd -P` there resolves `pkg` OUT of `node_modules`, so the
+// pattern below stops matching, this guard falls through without refusing,
+// and the argument reaches node unrefused — where it is excluded anyway, on
+// its own unresolved spelling, silently, at exit 0. That is #100's silent
+// drop back, minus the loud refusal that is supposed to catch it first.
+// Measured against a scratch copy of this script with `cd`/`pwd` mutated to
+// `cd -P`/`pwd -P` on this guard alone: this is the row that reds, and it
+// stayed red for both `/bin/sh` (bash on macOS) and `/bin/dash` — the two
+// disagree on many things but not on this.
+test("runner: a vendored file behind a symlinked node_modules entry refuses", () => {
+  const a = apply(SUITE);
+  const real = join(a.wt, "packages", "pkg");
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, "v.test.mjs"), PASSES);
+  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
+  symlinkSync(join("..", "packages", "pkg"), join(a.wt, "node_modules", "pkg"));
+  const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — node discards it silently/);
 });
 
 // The other half of the same rule, and the guard against over-widening it.
