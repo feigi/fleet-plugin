@@ -458,6 +458,51 @@ for arg do
         esac
         ;;
     esac
+    # Judged on the argument's RESOLVED path as well (#424) — #186's
+    # directory-branch rule applied to the file arm. A symlink whose own name
+    # carries no \`node_modules\` but whose target is vendored defeats every
+    # term above, and node does not discard it: node RUNS it, so the suite's
+    # result comes to hang on third-party code passing. That is #186's hazard,
+    # not #100's, and it takes #186's remedy rather than another spelling.
+    # Only where the spelling does not already name \`node_modules\`. Those
+    # arguments are the guard above's own input — the deeper-segment and
+    # absolute spellings it deliberately lets through because node runs and
+    # counts them included — and re-judging them here would overturn that
+    # ruling from a second place. Reading disjoint arguments is also what lets
+    # this check be physical while the one above stays logical (#401): the two
+    # never see the same argument, so neither can undo the other's resolution
+    # mode.
+    # \`realpath\` rather than \`cd\`+\`pwd -P\`: \`cd\` resolves symlinked
+    # DIRECTORY components, but a symlink whose own target is a FILE is this
+    # ticket's input and \`cd\` never reaches it. It also follows a chain of
+    # them, and reports a cycle as a failure instead of looping. Where it fails
+    # or is absent \$fresolved is empty, the strip below leaves nothing to
+    # match, and the argument keeps exactly today's treatment — which is what
+    # the arms below depend on, since a quoted glob and a typo both reach here
+    # and neither resolves.
+    # Anchored at the divergence from the runner's own location, as the
+    # directory branch's \$shared walk is: a \`node_modules\` ABOVE the
+    # divergence is an ancestor of the runner too and says nothing about the
+    # argument. Matched absolutely instead, a worktree living under one refused
+    # every file argument as vendored.
+    case "\$arg" in
+      *node_modules/*) ;;
+      *)
+        froot=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
+        fresolved=\$(realpath -- "\$arg" 2>/dev/null)
+        fshared=\$froot
+        while [ -n "\$fshared" ]; do
+          case "\$fresolved" in "\$fshared"/* | "\$fshared") break ;; esac
+          fshared=\${fshared%/*}
+        done
+        case "\${fresolved#"\$fshared"}" in
+          */node_modules/*)
+            printf 'agent-test: %s resolves inside node_modules — excluded from the run, not missing\n' "\$arg" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+    esac
     if [ -e "\$arg" ]; then
       # An existing path is a path, whatever characters it holds. Node globs
       # its own argv, where a literal \`[\` is a bracket expression that cannot

@@ -300,6 +300,10 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
     [[a.wt], 6],
     [["t"], 3],
     [[join(a.wt, "t")], 3],
+    // File arguments too: the file branch grew its own resolved-path check
+    // (#424), so the ancestor that must stay unread is now read by both arms.
+    [["t/a.test.mjs"], 1],
+    [[join(a.wt, "t", "a.test.mjs")], 1],
   ]) {
     const r = a.run(...args);
     assert.equal(r.status, 0, `${JSON.stringify(args)}: ${r.stdout}${r.stderr}`);
@@ -766,6 +770,99 @@ test("runner: the vendored rule is anchored at the cwd, as node's is", () => {
   const ran = a.runFrom("t", "a.test.mjs", "../node_modules/pkg/v.test.mjs");
   assert.equal(ran.status, 0, ran.stdout + ran.stderr);
   assert.match(ran.stdout, /^(?:ℹ|#) pass 2$/m);
+});
+
+// #424: the file-branch sibling of #186. The guard above judges the argument's
+// own SPELLING, and the logical directory that spelling names — which is what
+// node's silent-discard rule reads. A symlink whose name carries no
+// `node_modules` but whose TARGET is vendored passes it untouched, and node
+// then RUNS the vendored file rather than discarding it. So the hazard here is
+// not #100's: there is no silent drop left to make loud. It is #186's —
+// third-party code deciding this suite's result — one `-d` away, and it takes
+// #186's remedy: judge where the argument RESOLVES.
+//
+// Physical resolution, and only where the spelling does not already name
+// `node_modules`. Those spellings are the guard above's own input, the two it
+// deliberately lets run included, and re-judging them from a second place would
+// overturn that ruling; the two checks cover disjoint arguments instead, which
+// is what lets this one be physical while #401's stays logical.
+//
+// Anchored at the divergence from the runner's own location, as the directory
+// branch is: a `node_modules` ABOVE that point is an ancestor of the runner too
+// and says nothing about the argument. The absolute spelling is here because
+// resolution, unlike the directory branch's lexical spelling term, is immune to
+// how the caller named the file — a macOS $TMPDIR reaches the worktree through
+// a symlinked ancestor, so the two spellings share no literal prefix and only
+// the resolved form puts them on the same footing. The outside-the-worktree
+// target is the leg that separates anchoring at the divergence from anchoring
+// at the worktree root: its resolution lands outside the worktree entirely, so
+// a root-anchored guard has nothing left to compare and runs it green — #186's
+// own class, one input over.
+test("runner: a symlink to a vendored file refuses however it is spelled", () => {
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
+  // A chain of file symlinks: node follows it to the vendored file, so a guard
+  // that resolves only one hop reports a clean path node never used.
+  symlinkSync("vendlink.test.mjs", join(a.wt, "chainlink.test.mjs"));
+  // The vendored component reached through a symlinked DIRECTORY, with a real
+  // file as the final component — the half `cd`/`pwd -P` on the argument's own
+  // directory would already have caught, kept so the fix is not narrowed to
+  // final-component links alone.
+  symlinkSync(join("node_modules", "pkg"), join(a.wt, "dirlink"));
+  const outside = mkdtempSync(join(tmpdir(), "outside-"));
+  mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
+  writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
+  symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
+  for (const spelling of [
+    "vendlink.test.mjs",
+    "./vendlink.test.mjs",
+    join(a.wt, "vendlink.test.mjs"),
+    "chainlink.test.mjs",
+    "dirlink/v.test.mjs",
+    "extlink.test.mjs",
+  ]) {
+    const r = a.run("t/a.test.mjs", spelling);
+    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /resolves inside node_modules — excluded from the run/, spelling);
+  }
+});
+
+// The control, and what stops the fix above becoming a blanket refusal of
+// symlinks: the refusal leg alone passes just as well under a guard that
+// refuses every symlinked argument, or every argument with `node_modules`
+// anywhere in its resolution.
+//
+// `sidelink` is the second half: a target that merely SITS BESIDE a vendored
+// tree rather than inside one. `worklink` is the ordinary npm/pnpm workspace
+// shape named by its REAL path — `node_modules/pkg` is a symlink OUT to
+// `packages/pkg`, so a caller naming `packages/pkg/…` names a file that is not
+// vendored at all, and physical resolution is exactly what has to agree. The
+// same tree spelled `node_modules/pkg/…` is #401's row above, refused by the
+// logical guard this one is deliberately blind to.
+test("runner: a symlink to a non-vendored file still runs", () => {
+  const a = apply(SUITE);
+  symlinkSync(join("t", "b.test.mjs"), join(a.wt, "oklink.test.mjs"));
+  const outside = mkdtempSync(join(tmpdir(), "outside-ok-"));
+  mkdirSync(join(outside, "lib", "node_modules"), { recursive: true });
+  writeFileSync(join(outside, "lib", "o.test.mjs"), PASSES);
+  symlinkSync(join(outside, "lib", "o.test.mjs"), join(a.wt, "sidelink.test.mjs"));
+  const real = join(a.wt, "packages", "pkg");
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, "w.test.mjs"), PASSES);
+  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
+  symlinkSync(join("..", "packages", "pkg"), join(a.wt, "node_modules", "pkg"));
+  for (const spelling of [
+    "oklink.test.mjs",
+    "sidelink.test.mjs",
+    "packages/pkg/w.test.mjs",
+  ]) {
+    const r = a.run("t/a.test.mjs", spelling);
+    assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
+  }
 });
 
 // The issue's own second case, verbatim: "and, before PR #75's escape,
