@@ -1,9 +1,12 @@
 // #415. `inflight.sh` sets `set -eu`, then runs each probe as `probe_X || :`.
 // POSIX exempts a function's whole execution from `-e` while its status is what
-// an `||` is testing, so `-e` reaches no line of any probe body. Nothing fails
-// open today — every status-producing command in the three bodies carries its
-// own guard — but the next edit inside a probe is where that stops being true,
-// and an editor adding a command stands at the wrapper.
+// an `||` is testing, so `-e` reaches no command run DIRECTLY in a probe body.
+// It does still reach inside a command substitution there — that is a subshell,
+// and of the three shells only bash carries the exemption into one — which is
+// why the wrappers carve that case out and why these pins cover the carve-out.
+// Nothing fails open today — every status-producing command in the three bodies
+// carries its own guard — but the next edit inside a probe is where that stops
+// being true, and an editor adding a command stands at the wrapper.
 //
 // So all three wrappers carry the rule, and this pins it at all three rather
 // than at whichever one a reader happens to open. That is the failure shape
@@ -45,26 +48,48 @@ const rule = (probe) =>
   stripHashGutter(between(SH, `ADDING A COMMAND TO ${probe}`, `${probe} || :`, "inflight.sh"));
 
 for (const [probe, key] of PROBES) {
-  test(`${probe}'s wrapper says \`set -e\` does not reach inside the body`, () => {
-    assert.match(rule(probe), phrase("`set -e` does not reach inside the body"));
+  test(`${probe}'s wrapper states the \`set -e\` exemption and its limits`, () => {
+    assert.match(rule(probe), phrase("`set -e` does not reach a command run DIRECTLY in the body"));
     // Named as the shells the script actually runs under, because the claim is
     // shell semantics and a reader who assumes it is a bash quirk will discount it.
-    assert.match(rule(probe), phrase("measured under /bin/sh, /bin/dash and /bin/bash"));
+    // "in that shape" is load-bearing: the three-shell measurement covers a
+    // command run directly in the body, and carrying it over to a command
+    // substitution is the overclaim this wording exists to stop.
+    assert.match(rule(probe), phrase("measured in that shape under /bin/sh, /bin/dash and /bin/bash"));
+    // The carve-out itself, pinned separately so the sentence above cannot be
+    // widened back to "does not reach inside the body" — false of the
+    // `heads=$( … )` substitution probe_remote's own body is built around,
+    // under both /bin/sh and /bin/dash.
+    assert.match(rule(probe), phrase("only /bin/bash carries the exemption into one"));
     // `-u` is NOT exempted, and an editor who reads "`set -eu` guards nothing
-    // here" as covering both would skip a guard it does still provide.
-    assert.match(rule(probe), phrase("`-u` is not exempted and still aborts"));
+    // here" as covering both would skip a guard it does still provide. But the
+    // abort is not the loud backstop the bare clause reads as, so where it
+    // lands is pinned with it: advertising a net that reports free is the
+    // #415 defect restated in the prose meant to prevent it.
+    assert.match(rule(probe), phrase("`-u` is exempted at neither level and still aborts"));
+    assert.match(rule(probe), phrase("it exits 0 with no payload — the free verdict"));
   });
 
   test(`${probe}'s wrapper demands a guard naming its own \`${key}\` key`, () => {
     assert.match(rule(probe), phrase("A command that feeds a verdict field therefore carries its own"));
     assert.match(rule(probe), phrase(`add_unknown "${key}"`));
+    // The `; return 1; }` half is what makes the guard a guard. Pinned in the
+    // same span as the key, because a rewrite to `|| add_unknown "K" "…"`
+    // teaches "record the unknown and keep going" — a probe reporting a
+    // definite absence and an unknown from the same run — and every other
+    // assertion in this file stays green through it (measured).
+    assert.match(rule(probe), phrase(`add_unknown "${key}" "…"; return 1; }`));
   });
 
   test(`${probe}'s wrapper names the unsafe direction, not just the failure`, () => {
     // The whole severity argument: an unguarded failure is not a loud abort.
-    assert.match(rule(probe), phrase("gets reported as a definite absence"));
-    assert.match(rule(probe), phrase("frees a ticket that is taken"));
-    assert.match(rule(probe), phrase("a free verdict puts a second agent on the ticket where a taken one only skips it"));
+    // ONE contiguous span, not three independent `phrase` matches: the
+    // invariant lives in the join. An exception clause spliced between "taken"
+    // and "a free verdict" reverses the guidance while leaving all three
+    // fragments intact, and three separate matches stayed green through
+    // exactly that mutation (measured). Same form finisher-pin-race-prose
+    // already uses for this defect class.
+    assert.match(rule(probe), phrase("gets reported as a definite absence, and frees a ticket that is taken — a free verdict puts a second agent on the ticket where a taken one only skips it"));
   });
 
   test(`${probe}'s wrapper exempts a command that cannot change the verdict`, () => {

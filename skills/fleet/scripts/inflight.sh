@@ -308,11 +308,21 @@ fi
 # would otherwise treat `probe_pr` returning 1 as fatal exactly the way a bare
 # failing command is, which is precisely the abort this whole change removes.
 #
-# ADDING A COMMAND TO probe_pr: `set -e` does not reach inside the body. POSIX
-# exempts a function's whole execution from `-e` while its status is what an
-# `||` is testing, so the `set -eu` up top aborts on nothing in there —
-# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
-# still aborts). A command that feeds a verdict field therefore carries its own
+# ADDING A COMMAND TO probe_pr: `set -e` does not reach a command run DIRECTLY
+# in the body. POSIX exempts a function's whole execution from `-e` while its
+# status is what an `||` is testing, so the `set -eu` up top aborts on nothing
+# at that level — measured in that shape under /bin/sh, /bin/dash and
+# /bin/bash. A command substitution in the body is a DIFFERENT shape and does
+# not inherit that result: it is a subshell, and only /bin/bash carries the
+# exemption into one. Under /bin/sh and /bin/dash `-e` stays live in there, so
+# a command added inside a `$( … )` is skipped, the capture silently
+# truncates, and the substitution's own `exit` is replaced by the failing
+# command's status — it never reaches the guard this rule asks for. `-u` is
+# exempted at neither level and still aborts, but that abort is no backstop
+# either: under the EXIT trap installed above it exits 0 with no payload — the
+# free verdict — wherever /bin/sh is bash, as it is here, and under /bin/bash;
+# /bin/dash exits 2.
+# A command that feeds a verdict field therefore carries its own
 # `|| { add_unknown "pr" "…"; return 1; }`. Unguarded, its failure leaves the
 # empty result a genuinely free ticket leaves, gets reported as a definite
 # absence, and frees a ticket that is taken — a free verdict puts a second
@@ -643,11 +653,21 @@ else
   echo "    no remote branch for #$n" >&2
 fi
 }
-# ADDING A COMMAND TO probe_remote: `set -e` does not reach inside the body.
-# POSIX exempts a function's whole execution from `-e` while its status is what
-# an `||` is testing, so the `set -eu` up top aborts on nothing in there —
-# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
-# still aborts). A command that feeds a verdict field therefore carries its own
+# ADDING A COMMAND TO probe_remote: `set -e` does not reach a command run
+# DIRECTLY in the body. POSIX exempts a function's whole execution from `-e`
+# while its status is what an `||` is testing, so the `set -eu` up top aborts
+# on nothing at that level — measured in that shape under /bin/sh, /bin/dash
+# and /bin/bash. A command substitution in the body is a DIFFERENT shape and
+# does not inherit that result: it is a subshell, and only /bin/bash carries
+# the exemption into one. Under /bin/sh and /bin/dash `-e` stays live in
+# there, so a command added inside a `$( … )` is skipped, the capture silently
+# truncates, and the substitution's own `exit` is replaced by the failing
+# command's status — it never reaches the guard this rule asks for. `-u` is
+# exempted at neither level and still aborts, but that abort is no backstop
+# either: under the EXIT trap installed above it exits 0 with no payload — the
+# free verdict — wherever /bin/sh is bash, as it is here, and under /bin/bash;
+# /bin/dash exits 2.
+# A command that feeds a verdict field therefore carries its own
 # `|| { add_unknown "remote" "…"; return 1; }`. Unguarded, its failure leaves
 # the empty result a genuinely free ticket leaves, gets reported as a definite
 # absence, and frees a ticket that is taken — a free verdict puts a second
@@ -942,11 +962,21 @@ elif [ -z "$local_b" ]; then
   echo "    no local branch or worktree for #$n" >&2
 fi
 }
-# ADDING A COMMAND TO probe_local: `set -e` does not reach inside the body.
-# POSIX exempts a function's whole execution from `-e` while its status is what
-# an `||` is testing, so the `set -eu` up top aborts on nothing in there —
-# measured under /bin/sh, /bin/dash and /bin/bash (`-u` is not exempted and
-# still aborts). A command that feeds a verdict field therefore carries its own
+# ADDING A COMMAND TO probe_local: `set -e` does not reach a command run
+# DIRECTLY in the body. POSIX exempts a function's whole execution from `-e`
+# while its status is what an `||` is testing, so the `set -eu` up top aborts
+# on nothing at that level — measured in that shape under /bin/sh, /bin/dash
+# and /bin/bash. A command substitution in the body is a DIFFERENT shape and
+# does not inherit that result: it is a subshell, and only /bin/bash carries
+# the exemption into one. Under /bin/sh and /bin/dash `-e` stays live in
+# there, so a command added inside a `$( … )` is skipped, the capture silently
+# truncates, and the substitution's own `exit` is replaced by the failing
+# command's status — it never reaches the guard this rule asks for. `-u` is
+# exempted at neither level and still aborts, but that abort is no backstop
+# either: under the EXIT trap installed above it exits 0 with no payload — the
+# free verdict — wherever /bin/sh is bash, as it is here, and under /bin/bash;
+# /bin/dash exits 2.
+# A command that feeds a verdict field therefore carries its own
 # `|| { add_unknown "local" "…"; return 1; }`. Unguarded, its failure leaves
 # the empty result a genuinely free ticket leaves, gets reported as a definite
 # absence, and frees a ticket that is taken — a free verdict puts a second
