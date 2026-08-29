@@ -1863,3 +1863,29 @@ test("an escaper that cannot say whether the worktree path was rewritten reports
   // case. One shared word would send a debugger to whichever it guessed.
   assert.match(r.stderr, /could not render the worktree .*\(jrewritten\)/);
 });
+
+// #431's acceptance criterion that lives in prose rather than in the payload: a
+// reader of the runbook has to meet what a `null` field means BEFORE they act
+// on one. Both carriers state it, on the same two lines the linkage pin above
+// anchors on — the runbook's exit-2 paragraph and the design spec's own row.
+//
+// Two phrases, not one, because either alone is satisfied by a rewrite that
+// loses the point. `there is no worktree` alone passes prose that names the
+// misreading without ruling it out; `could not render the path you passed in`
+// alone passes prose that says what the field IS while leaving the dangerous
+// reading unaddressed. The claim is the pair: this is what `null` means, and
+// that is what it does not.
+//
+// Deliberately NOT pinned as one span: the two docs word the surrounding
+// sentence differently on purpose — the runbook bolds its `never` for an
+// operator mid-pass, the spec row does not — and a span pin would force one
+// voice on both or drift into pinning nothing.
+test("both docs rule out reading a null worktree as an absent one", () => {
+  for (const rel of ["../commands/run-merge-bot.md", "../../../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
+    const doc = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    assert.ok(doc.includes("could not render the path you passed in"),
+      `${rel} must say what a null worktree/branch IS — the run could not render the argument the caller supplied — since the field is an echo of argv rather than a finding`);
+    assert.ok(doc.includes('"there is no worktree"'),
+      `${rel} must rule out the false-reassurance reading by name: a null path is not an absent worktree, and an operator who reads it as one skips the proof step believing there was nothing to prove`);
+  }
+});
