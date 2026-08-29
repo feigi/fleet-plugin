@@ -1464,6 +1464,36 @@ count is false the moment the next commit lands, and #768 falsified two of them
 of the 85 cases`, measured 81 of 91) in a file whose own header records having
 shipped a stale count once already.
 
+**One more rule, and the one the diff cannot carry: a claim written into a
+commit body or a PR body needs its settling command re-run at the commit that
+ships it, not at the commit that motivated it — and the command goes inline,
+beside the claim.** The rules above scope to prose the diff restates, and a
+pushed commit body is not in the diff: it cannot be edited, only retracted by a
+later commit, which is itself a fresh unverified historical claim. So the check
+has to sit at write time, and review-time is already too late. The claim types
+are wider than measurement — a line number, a SHA, an **attribution** of who
+said what, a positional reference and a count all rot the same way, and an
+attribution is the worst of them, because the argument it carries collapses
+when it turns out false, while a wrong line number leaves the surrounding
+reasoning standing. `Verified:` is the construct a later reader trusts
+*instead of* re-deriving, so a wrong figure under that header is worse than no
+figure at all. Measured on #399: `f961cf2` and `acce6ee` both close `Verified:`
+with `86/86 across both test files` naming the suites that read this file, a
+file set the tree does not bear out — `git log -1 --format=%b <sha> | grep -A2
+Verified:` shows what each shipped. Inline is what makes the difference visible:
+a claim carrying the command that produces it can be re-run instead of trusted,
+and a claim whose settling command cannot be written is one to drop rather than
+assert.
+
+**The settling command for "which files read X" must never be a literal-path
+grep.** The path is assembled in more than one spelling here, one of them behind
+a local `read` helper, so a grep for the path string answers with the files that
+merely *name* it — comments included — and misses the files that build it.
+Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
+which suites red: that answers which ones **depend on its contents**, which is
+the question a coverage claim actually needs, and it returns a different set
+from any spelling of the grep.
+
 #### Fallback: hand-dispatched reviewer member (no `Workflow` tool)
 
 Only where the workflow is unavailable **or has failed** — never a preference.
