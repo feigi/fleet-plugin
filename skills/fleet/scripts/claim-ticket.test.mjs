@@ -657,6 +657,34 @@ test("runner: a vendored file argument refuses however it is spelled", () => {
   }
 });
 
+// #401: nothing above pins the RESOLUTION MODE this guard uses, only its
+// spelling coverage. `cd`/`pwd` without `-P` is logical — it never resolves a
+// symlinked path component — and that is deliberate: it is the same textual
+// resolution node applies to its own argv, so the guard and node agree on
+// which files count as vendored. The ordinary npm/pnpm workspace shape is
+// where the two resolution modes diverge: `node_modules/pkg` is itself a
+// symlink to a sibling real directory (`pkg` hoisted or linked from
+// `packages/`). `pwd -P` there resolves `pkg` OUT of `node_modules`, so the
+// pattern below stops matching, this guard falls through without refusing,
+// and the argument reaches node unrefused — where it is excluded anyway, on
+// its own unresolved spelling, silently, at exit 0. That is #100's silent
+// drop back, minus the loud refusal that is supposed to catch it first.
+// Measured against a scratch copy of this script with `cd`/`pwd` mutated to
+// `cd -P`/`pwd -P` on this guard alone: this is the row that reds, and it
+// stayed red for both `/bin/sh` (bash on macOS) and `/bin/dash` — the two
+// disagree on many things but not on this.
+test("runner: a vendored file behind a symlinked node_modules entry refuses", () => {
+  const a = apply(SUITE);
+  const real = join(a.wt, "packages", "pkg");
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, "v.test.mjs"), PASSES);
+  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
+  symlinkSync(join("..", "packages", "pkg"), join(a.wt, "node_modules", "pkg"));
+  const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /is under node_modules — node discards it silently/);
+});
+
 // The other half of the same rule, and the guard against over-widening it.
 // Node's exclusion fires only when the argument's normalized RELATIVE form
 // starts with `node_modules/`: a deeper segment and an absolute path are NOT
