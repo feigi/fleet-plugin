@@ -429,7 +429,10 @@ const TIED_SUBJECT = "the merge loop exit code is undocumented in run-merge-bot.
 test("near-misses withheld by the cap are counted, not dropped in silence (#154)", () => {
   const r = run(TIED_SUBJECT, { filed: TIED_FIVE });
   assert.equal(r.status, 0, "reporting the withheld rows must not move a near-miss off exit 0");
-  assert.equal(r.json.verdict, "clean", "the near-miss report is advisory and must not touch the verdict");
+  // The verdict half of this moved with #388: a near-miss at this score IS the
+  // verdict now. What #154 pins here is the reporting of the cut, and that the
+  // rows stay advisory — the exit code above, not the word.
+  assert.equal(r.json.verdict, "soft-hit", "rows scoring this high are the answer, not decoration beside it");
   assert.equal(r.json.near.length, 3, "the display cap itself is unchanged");
   assert.deepEqual(r.json.near.map((n) => n.score), [1, 1, 1], "the fixture must actually tie, or this pins nothing");
   assert.equal(r.json.nearTotal, 5, "the caller must be able to tell 3-of-3 from 3-of-5 from the payload alone");
@@ -530,7 +533,11 @@ const HIT_114 = {
 };
 
 test("an open tracker issue absent from the ledger is reported, not passed as safe", () => {
-  const r = run("candidates.mjs row states the opposite of its code", { filed: [], hits: [HIT_114] });
+  // The subject shares content words with the hit's title on purpose: since
+  // #388 the escalation to exit 3 is the scorer's call, so a subject that
+  // scored 0.00 against this row would be testing the advisory arm under this
+  // test's name.
+  const r = run("Non-zero column audit 11 rows", { filed: [], hits: [HIT_114] });
   assert.equal(r.status, 3, "a tracker hit with a clean ledger is exit 3, not 0");
   assert.equal(r.json.found, false, "the ledger genuinely did not have it — `found` stays ledger-only");
   assert.equal(r.json.tracker.ok, true);
@@ -549,9 +556,13 @@ test("an open tracker issue absent from the ledger is reported, not passed as sa
 // gh reports no total alongside a capped list, so 5-of-5 and 5-of-300 arrive
 // byte-identical. Asking for one more row than is displayed is the whole
 // mechanism: the extra row's presence IS the truncation signal (#154).
+// Titled to score against the subject these fixtures are checked with, but well
+// below the exact-title row below: a filler set scoring 0.00 is the advisory
+// arm since #388, and would take both truncation tests off the blocking exit
+// code they exist to pin.
 const filler = (n) => ({
   number: n,
-  title: "postgres connection pooling exhausted under sustained load",
+  title: "postgres pooling code exhausted under sustained load",
   state: "CLOSED",
   url: `https://github.com/feigi/claude-config/issues/${n}`,
 });
@@ -603,6 +614,117 @@ test("a clean ledger and a clean tracker is the only path that reads safe, exit 
   assert.equal(r.json.tracker.ok, true);
   assert.deepEqual(r.json.tracker.hits, [], "a searched-and-clean tracker reports an empty list, not absent");
   assert.equal(r.json.verdict, "clean");
+});
+
+// ---------------------------------------------------------------------------
+// The verdict consumes the scores the payload already carries (#388).
+//
+// Both halves were measured wrong in one run: `tracker-hit` over rows this
+// file's own overlap rates 0.00, and `clean` printed directly above near-miss
+// rows that named the right issue. The rows and the scores were computed and
+// printed in both cases — only the verdict ignored them. The fixtures below
+// are those measured shapes.
+//
+// `soft-hit` is the verdict for "signal, not a duplicate finding". It stays on
+// exit 0 deliberately: exit 3's meaning ("the ledger is clean but the tracker
+// has matching rows") is what callers gate on, and near-misses were already
+// ruled advisory rather than blocking (#145, #152). What moves is the hit set
+// the scorer rates 0.00, which used to force 3.
+// ---------------------------------------------------------------------------
+
+// The wontfix-vocabulary shape: rows that share a filing convention with each
+// other and nothing with the subject. gh's ANDed query returned them; every one
+// scores 0.00 here.
+const REFUTED_BAND = [340, 356, 280].map((n) => ({
+  number: n,
+  title: `PR #${n} review: the suggestion band, checked`,
+  state: "CLOSED",
+  url: `https://github.com/feigi/claude-config/issues/${n}`,
+}));
+const KB_SUBJECT = "the KB file the skill points at is missing from the plugin bundle";
+
+test("tracker rows the scorer rates 0.00 are advisory, not a hit (#388)", () => {
+  const r = run(KB_SUBJECT, { filed: [], hits: REFUTED_BAND });
+  assert.equal(r.json.tracker.ok, true, "the tracker WAS read — this is not the unverified arm");
+  assert.deepEqual(r.json.tracker.hits.map((h) => h.score), [0, 0, 0], "the fixture must actually score zero, or this pins nothing");
+  assert.equal(r.json.verdict, "soft-hit", "a hit set with no scoring row is not a duplicate finding");
+  assert.equal(r.status, 0, "honouring it as exit 3 is what dropped a real deferral");
+  assert.equal(r.json.tracker.hits.length, 3, "the rows stay in the payload — they are the caller's evidence, not noise to hide");
+  assert.doesNotMatch(r.stderr, /TRACKER HIT/, "stderr is the channel read first; a hard-stop word over advisory rows is the trap itself");
+  assert.match(r.stderr, /score 0\.00/, "the score the verdict was derived from has to be visible where the rows are");
+  assert.match(r.stderr, /SOFT HIT/, "the verdict's own stderr line is pinned here like every neighbouring verdict's is");
+});
+
+// The measured self-check: a subject whose tracker rows all score 0.00 while a
+// filed row scores well above the floor. Reported `tracker-hit` naming the
+// unrelated rows, with the genuinely adjacent one sitting in `near`.
+const UNREL_HITS = [
+  { number: 149, title: "run-merge-bot force-push clobbers a rebased branch", state: "OPEN", url: "https://github.com/feigi/claude-config/issues/149" },
+  { number: 39, title: "cockpit concurrency limit is not honoured", state: "OPEN", url: "https://github.com/feigi/claude-config/issues/39" },
+];
+const NEAR_231 = "#231 ledger check emits verdict clean when the ledger file was never read";
+const VERDICT_SUBJECT = "ledger check verdict ignores the near-miss rows it prints";
+
+test("a near row above the floor outranks a clean verdict (#388)", () => {
+  const r = run(VERDICT_SUBJECT, { filed: [NEAR_231], hits: [] });
+  assert.equal(r.json.found, false, "the near row is not a subset match, or the exact path answers before the verdict does");
+  assert.ok(r.json.near[0].score >= 0.2, `the fixture must clear the floor, got ${r.json.near[0].score}`);
+  assert.equal(r.json.verdict, "soft-hit", "clean printed above a row naming the right issue is the defect");
+  assert.equal(r.status, 0, "a near-miss stays advisory — it never became a stop");
+  assert.match(r.stderr, /near-miss/);
+  assert.match(r.stderr, /SOFT HIT/, "the verdict's own stderr line is pinned here like every neighbouring verdict's is");
+});
+
+test("score-0 tracker rows and a scoring near row read as one soft hit (#388)", () => {
+  const r = run(VERDICT_SUBJECT, { filed: [NEAR_231], hits: UNREL_HITS });
+  assert.equal(r.json.verdict, "soft-hit", "both measured directions land on the same advisory answer");
+  assert.equal(r.status, 0);
+  assert.equal(r.json.tracker.hits.length, 2, "the unrelated rows are still reported");
+  assert.ok(r.json.near[0].score >= 0.2, "and the row that actually matched is still ranked");
+});
+
+test("a genuinely novel subject is still clean at exit 0 — the control (#388)", () => {
+  // A near row BELOW the floor, not an empty ranking: with no scoring row at
+  // all the clean answer holds however the floor moves, and the control pins
+  // nothing. This one scores under the floor and must not promote.
+  const r = run("worktree reap declines a detached checkout it should have released", {
+    filed: ["#901 the cockpit board renders a stale checkout of the pool"],
+    hits: [],
+  });
+  assert.equal(r.json.verdict, "clean", "every check becoming a soft hit is the cost of getting this wrong");
+  assert.equal(r.status, 0);
+  assert.ok(r.json.near.length === 1 && r.json.near[0].score > 0 && r.json.near[0].score < 0.2,
+    `the fixture must sit below the floor and above zero, got ${JSON.stringify(r.json.near)}`);
+});
+
+test("a near row scoring exactly at the floor is a soft hit (#388)", () => {
+  // The control above sits below the floor and the promoting fixture above it
+  // scores 0.38, so nothing else in this file lands ON 0.2. Without this pair
+  // the floor's VALUE and its INCLUSIVITY are both free: `>=` can become `>`,
+  // and 0.2 can be retuned upward, with the suite green either way.
+  const r = run("quorum drains under retry backoff", {
+    filed: ["#902 quorum vanishes without warning during nightly compaction"],
+    hits: [],
+  });
+  assert.equal(r.json.found, false);
+  assert.equal(r.json.near[0].score, 0.2, `the fixture must sit ON the floor, got ${r.json.near[0].score}`);
+  assert.equal(r.json.verdict, "soft-hit", "the floor is inclusive — the docs promise 'at or above'");
+  assert.equal(r.status, 0);
+});
+
+test("a tracker row that really scores still blocks at exit 3 (#388)", () => {
+  const scoring = {
+    number: 388,
+    title: "ledger check verdict ignores near-miss rows",
+    state: "OPEN",
+    url: "https://github.com/feigi/claude-config/issues/388",
+  };
+  const r = run(VERDICT_SUBJECT, { filed: [], hits: [...UNREL_HITS, scoring] });
+  assert.equal(r.json.tracker.hits[0].number, 388, "the scoring row ranks first, whatever order gh returned");
+  assert.ok(r.json.tracker.hits[0].score > 0);
+  assert.equal(r.json.verdict, "tracker-hit", "suppressing the zero rows must not suppress the row beside them");
+  assert.equal(r.status, 3, "the blocking exit code is unchanged for a hit that scores");
+  assert.match(r.stderr, /TRACKER HIT/);
 });
 
 // ── The ledger's own readability (#231) ──────────────────────────────────────
@@ -912,23 +1034,28 @@ for (const [missing, drop] of [["state", ({ state: _s, ...rest }) => rest], ["ur
   });
 }
 
-test("a tracker row missing only its title is still a tracker hit", () => {
+test("a tracker row missing only its title is still reported, not degraded to unverified", () => {
   // The other half of the guard above, and the reason it stops where it does.
   // `title` is the one interpolated field with a defined absent-value — the row
   // builder substitutes `h.title || ""` for it in the row and in the score alike
-  // — so this row is fully describable and blocking on it would trade a real hit
-  // for a non-answer. Without this pin a later "tighten the guard" pass adds
-  // `title` to the predicate and nothing goes red (#232).
+  // — so this row is fully describable and refusing it would trade a real
+  // tracker read for a non-answer. Without this pin a later "tighten the guard"
+  // pass adds `title` to the predicate and nothing goes red (#232).
+  //
+  // Where it lands changed with #388: no title is no tokens, so the row scores
+  // 0.00 and the answer is the advisory one rather than the blocking one. The
+  // row is still read, still described and still shipped — which is the whole
+  // of what #232 asked for. What it must never be is `unverified`.
   const { title: _title, ...noTitle } = HIT_114;
   const r = run("Non-zero column audit 11 rows", { filed: [], hits: [noTitle] });
-  assert.equal(r.status, 3, "a describable row still blocks the filing");
+  assert.equal(r.status, 0, "an unscoreable row is rows to read, not a duplicate finding");
   assert.equal(r.json.tracker.ok, true);
-  assert.equal(r.json.verdict, "tracker-hit");
+  assert.equal(r.json.verdict, "soft-hit");
   assert.equal(r.json.tracker.hits[0].number, 114);
   assert.equal(r.json.tracker.hits[0].title, "", "the absent title reaches the row as the builder's substitute");
   assert.equal(r.json.tracker.hits[0].state, "OPEN");
   assert.equal(r.json.tracker.hits[0].score, 0, "no title is no tokens to score, which the overlap treats as no overlap");
-  assert.match(r.stderr, /TRACKER HIT/);
+  assert.match(r.stderr, /TRACKER ROW — #114 \(OPEN, score 0\.00\)/, "the row still reaches stderr, describing itself and its score");
   assert.doesNotMatch(r.stderr, /undefined/, "an empty title is not an undescribable one");
 });
 
@@ -1750,5 +1877,9 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
   assert.equal(r.json.found, false, "none of these rows is a match, or the ranking below them never runs");
   assert.deepEqual(r.json.near.map((n) => n.row), filed, "the payload parsed but lost the near-miss rows it ranked");
   assert.equal(r.ghRan, true, "the arm past the early departure must still reach the tracker query");
-  assert.equal(r.json.verdict, "clean");
+  // These rows share most of the subject's content words, so they sit far
+  // above the soft-hit floor — the oversized payload and the verdict it
+  // carries are the same statement, and the pipe test is what proves the
+  // verdict travelled with it.
+  assert.equal(r.json.verdict, "soft-hit");
 });

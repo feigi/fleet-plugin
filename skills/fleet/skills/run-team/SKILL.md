@@ -1904,15 +1904,24 @@ Plus two append-only lists:
 
 `check` exits **0** clean, **1** already in this run's filed list, **2** usage
 error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read
-those and decide. It also prints the closest filed rows with an overlap score;
-those are advisory and do not change the exit code, because the same finding
-gets worded differently by whoever finds it second. **Exit 0 is not
-automatically "safe to file":** when `gh` cannot be reached the answer is
-ledger-only, and it says `TRACKER NOT CHECKED` — an issue filed by an earlier
-run is invisible to it. The stdout JSON names that distinction in one field:
-`verdict` is `already-filed`, `tracker-hit`, `clean` or `unverified`. The last
-two both exit 0, so `verdict` is the only thing that tells a searched-and-clean
-tracker from one that was never read.
+those and decide. Exit **3** is scored: some row gh returned has to score above
+zero against the subject, because the ANDed query also matches issues the
+overlap rates 0.00, and every measured stop over those was survived only by a
+reader who overrode it and searched the tracker by hand — obeying it would have
+dropped a real deferral (#388). It also prints the closest filed rows with an overlap score.
+Those never move the exit code — the same finding gets worded differently by
+whoever finds it second — but once the tracker read succeeds, a filed row at or
+above `NEAR_SOFT_HIT` in `ledger.mjs` does move the verdict to `soft-hit`, as
+does a tracker set with no scoring row in it; a read that failed stays
+`unverified`, which outranks both. **Exit 0 is not automatically "safe to file":** when `gh`
+cannot be reached the answer is ledger-only, and it says `TRACKER NOT CHECKED` —
+an issue filed by an earlier run is invisible to it; and `soft-hit` means rows
+worth reading were found while none of them established a duplicate, so read
+them before filing. The stdout JSON names all of that in one field:
+`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or
+`unverified`. Only `already-filed` and `tracker-hit` carry a non-zero code, so
+`verdict` is the only thing that tells a searched-and-clean tracker from one
+that was never read and from one whose rows you have to read yourself.
 
 The ledger half reports its own readability as its own field, `ledger.ok`, the
 peer of `tracker.ok`: false when the file did not exist, and false too when the

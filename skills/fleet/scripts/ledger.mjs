@@ -399,6 +399,20 @@ function runCheck() {
   // admits such a row at a display score of `0.00` (measured), so honest
   // output would need a wider precision, not just a different filter.
   const NEAR_SHOWN = 3;
+  // The floor at which a near-miss stops being decoration and becomes the
+  // verdict's own answer — `soft-hit` rather than `clean` (#388). A tuning
+  // value, deliberately named and deliberately here beside the display cap
+  // rather than inlined in the verdict below.
+  //
+  // Chosen from the rows #388 measured: the near-misses a reader went on to
+  // confirm as the genuinely adjacent issue scored from 0.20 up to 0.45, so a
+  // floor at 0.20 admits them. #388 also records an adjacent row at 0.09, which
+  // this floor does not reach — the floor buys a short answer, never
+  // completeness, and the rows themselves stay printed and stay in the payload
+  // at every verdict for exactly that reason. Raise it and adjacent rows fall
+  // back to `clean`; lower it and every check reporting a soft hit is what
+  // gives.
+  const NEAR_SOFT_HIT = 0.2;
   const rankedNear = data.filed
     .map((row) => ({ row, score: round2(overlap(scored, scoreTokens(subjectOf(row)))) }))
     .filter((n) => n.score > 0)
@@ -652,6 +666,19 @@ function runCheck() {
     }
   }
 
+  // The best score each half of the answer carries, read once off the same
+  // sorted head the report below prints from and the verdict under it uses —
+  // one derivation, so stderr and the payload cannot disagree about what was
+  // found.
+  //
+  // Both lists are sorted best-first before they are cut, so the leading row
+  // carries the best score of everything fetched: a 0 at the head of `hits`
+  // means every row gh returned scored 0, and the withheld near-misses can only
+  // score at or below `rankedNear`'s head. `rankedNear`, not the displayed
+  // slice — the display cap must not be able to move a verdict.
+  const bestHit = tracker.ok && tracker.hits.length ? tracker.hits[0].score : 0;
+  const bestNear = rankedNear.length ? rankedNear[0].score : 0;
+
   for (const n of near) console.error(`${NAME}: near-miss ${n.score.toFixed(2)} — ${n.row}`);
   if (withheld.length) {
     console.error(`${NAME}: ${withheld.length} further near-miss${withheld.length === 1 ? "" : "es"} not shown — highest withheld ${withheld[0].score.toFixed(2)}; the cap dropped them, not the score`);
@@ -663,13 +690,24 @@ function runCheck() {
     // Inside the branch that has already established `hits` is present, so no
     // `?? []` guard is needed. The loop stays FIRST: every hit is listed before
     // the summary that counts them, and a test pins that order.
+    //
+    // The score reaches the row, and the row's own word follows it. `TRACKER
+    // HIT` is imperative, blocking language, and a row the scorer rates 0.00
+    // rendered in it was indistinguishable from a genuine duplicate — measured,
+    // and recovered from only by readers who went and searched the tracker by
+    // hand (#388). Under this heading stderr and the verdict now say the same
+    // thing: a set with a scoring row is a hit, a set without one is rows to
+    // read.
+    const heading = bestHit > 0 ? "TRACKER HIT" : "TRACKER ROW";
     for (const h of tracker.hits) {
-      console.error(`${NAME}: TRACKER HIT — #${h.number} (${h.state}) ${h.title} — ${h.url}`);
+      console.error(`${NAME}: ${heading} — #${h.number} (${h.state}, score ${h.score.toFixed(2)}) ${h.title} — ${h.url}`);
     }
     // `more than N`, never `N`: with the probe row back, the exact count is
     // precisely what is not known, and printing `5` for it is the silent cap
     // restated as a number (#154).
-    console.error(`${NAME}: not in this run's filed list, but ${tracker.truncated ? `more than ${TRACKER_SHOWN}` : tracker.hits.length} tracker issue(s) match '${query}' — review before filing`);
+    console.error(bestHit > 0
+      ? `${NAME}: not in this run's filed list, but ${tracker.truncated ? `more than ${TRACKER_SHOWN}` : tracker.hits.length} tracker issue(s) match '${query}' — review before filing`
+      : `${NAME}: not in this run's filed list; the tracker rows matching '${query}' all score 0.00 against this subject — gh matched something the title-based score cannot see, so read them, but they are not a finding of duplication`);
     if (tracker.truncated) {
       console.error(`${NAME}: the list above is CAPPED at ${TRACKER_SHOWN} — gh returned more and reports no total, so these are the best-scoring of a window gh chose, not of the tracker.`);
     }
@@ -683,10 +721,38 @@ function runCheck() {
     console.error(`${NAME}: not previously filed; tracker search '${query}' (${terms.length} term${terms.length === 1 ? "" : "s"}) returned no matches — not a certification the tracker has nothing on this`);
   }
   // Named explicitly so a consumer does not have to reconstruct it from
-  // `tracker.ok` plus `tracker.hits` — issue #152. `!tracker.ok` short-circuits
-  // before `tracker.hits` is read, which is required: hits is absent, not `[]`,
-  // on that branch.
-  const verdict = !tracker.ok ? "unverified" : tracker.hits.length ? "tracker-hit" : "clean";
+  // `tracker.ok` plus `tracker.hits` — issue #152.
+  //
+  // The scores decide, not the presence of rows (#388). Both halves of the
+  // answer were measured reporting the opposite of what their own numbers said:
+  // `tracker-hit` over rows this file rates 0.00, and `clean` printed directly
+  // above near-miss rows that named the right issue. Nothing new is computed
+  // here — the scores were already in the payload and already on stderr; the
+  // verdict simply stopped ignoring them.
+  //
+  // `soft-hit` is the answer for signal that is not a duplicate finding: rows
+  // worth reading, at an exit code that does not claim the filing is settled.
+  // It covers each of those, because they leave the caller in the same
+  // position — a tracker set with no scoring row, or a filed row at or above
+  // the near-miss floor.
+  //
+  // Order matters. `!tracker.ok` short-circuits before `tracker.hits` is read,
+  // which is required: hits is absent, not `[]`, on that branch. `unverified`
+  // stays ahead of the near-miss floor too — a tracker nobody read is the
+  // weaker answer of the two and may not be dressed up as the stronger one.
+  const verdict = !tracker.ok
+    ? "unverified"
+    : bestHit > 0
+      ? "tracker-hit"
+      : tracker.hits.length || bestNear >= NEAR_SOFT_HIT
+        ? "soft-hit"
+        : "clean";
+  // Exit 0 is what a `check "$s" && gh issue create` chain reads as safe, and
+  // `soft-hit` is precisely the answer that is not — so it is named on stderr
+  // as well as in the payload, in the voice of the decision it asks for.
+  if (verdict === "soft-hit") {
+    console.error(`${NAME}: SOFT HIT — related rows above, none of them established as a duplicate. Read them and decide; do not read this exit code as safe to file.`);
+  }
   // `nearTotal` alongside `near`, and `tracker.truncated` alongside `hits`:
   // both lists are capped and neither cap was previously visible from the
   // payload a consumer parses (#154). They differ in what is knowable —
@@ -703,12 +769,22 @@ function runCheck() {
   // Exit 3 — a new code — for "the ledger is clean but the tracker is not".
   // 1 would mean ALREADY FILED in this run, which a tracker hit does not
   // establish; 2 is taken by die(). Near-misses stay exit 0: they are a ranked
-  // suggestion, not a finding of duplication. Exit 0 covers two states —
-  // "clean" and "unverified" — which `verdict` now names explicitly but the
+  // suggestion, not a finding of duplication. Exit 0 covers "clean",
+  // "unverified" and "soft-hit" alike, which `verdict` names explicitly and the
   // exit code deliberately still does not: minting a code for unverified would
   // break `check "$s" && gh issue create` on every offline run (ruled against
-  // in #152). A hit scoring 0.00 still forces 3: gh matched the issue body,
-  // which the title-based score cannot see.
+  // in #152), and a soft hit is the same kind of answer — advisory rows, no
+  // established duplicate — so it inherits that ruling rather than reopening
+  // it. The exit code is a pure function of `verdict`; only `tracker-hit`
+  // blocks, so a verdict added later leaves 3 alone unless it says so here.
+  //
+  // A hit set scoring 0.00 no longer forces 3 (#388). gh can match an issue
+  // body the title-based score cannot see, which is why those rows are still
+  // printed and still shipped in the payload — but the instruction the callers
+  // carry makes exit 3 binding, and #388 measured what that costs: every
+  // recorded case of a hard stop over rows this file rates zero was survived
+  // only by a reader who overrode it and searched the tracker by hand, and
+  // obeying it would have dropped a real deferral.
   //
   // exitCode, not exit(): this is the last statement of the branch, so
   // assigning and falling out reaches the same codes by the same path every
