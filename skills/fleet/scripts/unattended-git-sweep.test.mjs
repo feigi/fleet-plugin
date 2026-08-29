@@ -43,6 +43,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// This file needs an ambient git WORKING TREE, not just the sources: it asks git
+// what ships rather than walking the directory, so both calls below are fatal
+// where there is no `.git` above them. A checkout and a worktree both have one;
+// a `git archive` extraction does not, and this test alone reds there with
+// `fatal: not a git repository` while every other file in the suite passes. That
+// is the extraction missing a repo, not a defect in the tree under it — a review
+// or CI step that unpacks an archive should run this one against a checkout.
 const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"],
   { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim();
 
