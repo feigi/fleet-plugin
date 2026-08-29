@@ -35,11 +35,17 @@
 // takes".
 //
 // THE CEILING, same as refuter-scratch-prose.test.mjs: these are PRESENCE pins
-// over a bounded slice, each a single regex — one contiguous span, or bounded
-// `.{0,N}` joins — so text spliced INSIDE a pinned clause reddens them
-// (measured both ways). What they cannot catch is a whole new sentence
-// appended AFTER the clause carving out an exception. A reflow stays green by
-// design: the words are pinned, not their layout.
+// over a bounded slice, each a single regex. Every join is `\s+` and no pin
+// carries a `.{0,N}` gap, because a bounded gap is not a join — it is slack,
+// and slack holds a sentence. Measured: the earlier `.{0,200}` gap between the
+// poll ban and its carve-out bridged 107 characters of real prose, so
+// substituting a sentence that reinstates polling for that prose kept all
+// three sites green. A splice inside a `\s+`-joined span cannot: it has
+// nowhere to land. What a presence pin still cannot catch is a whole new
+// sentence appended AFTER the span carving out an exception — that is what the
+// negative pin at the bottom of this file is for, and why it bans the wait
+// vocabulary rather than three literal idioms. A reflow stays green by design:
+// the words are pinned, not their layout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -102,18 +108,21 @@ const SITES = [
 ];
 
 for (const [name, getPrompt] of SITES) {
-  // ONE span from the exit-code rule through the poll ban to the carve-out.
-  // Split into separate assertions these would let a sentence reinstating a
-  // wait loop sit between them and stay green — the same splice defect
-  // refuter-scratch-prose.test.mjs pins against. The carve-out rides in the
-  // same span deliberately: a poll ban with no statement of what a refuter MAY
-  // still do reads as a ban on reading logs at all, and a refuter that cannot
-  // read a finished log cannot verify anything.
+  // ONE span from the exit-code rule through the poll ban to the carve-out,
+  // joined by `\s+` and nothing wider. Split into separate assertions — or
+  // joined by a `.{0,N}` gap, which is the same thing with extra steps — these
+  // would let a sentence reinstating a wait loop sit between them and stay
+  // green; that is the splice defect refuter-scratch-prose.test.mjs pins
+  // against, and it was measured live on all three sites here before this span
+  // was closed. The middle clause is therefore pinned, not skipped over. The
+  // carve-out rides in the same span deliberately: a poll ban with no statement
+  // of what a refuter MAY still do reads as a ban on reading logs at all, and a
+  // refuter that cannot read a finished log cannot verify anything.
   test(`${name}: refuter observes a run synchronously by exit code, never by polling a log`, () => {
     assert.match(
       getPrompt(),
-      /run\s+the\s+command,\s+wait\s+for\s+it,\s+read\s+its\s+exit\s+code\..{0,80}Never\s+poll\s+a\s+log\s+file\s+for\s+a\s+completion\s+marker.{0,200}Reading\s+a\s+log\s+the\s+run\s+has\s+already\s+finished\s+writing\s+is\s+fine/s,
-      "the synchronous-observation rule is broken — either the exit-code rule is gone, or the poll ban is gone (a refuter reaches for `until grep <marker>` and wedges forever on a marker that can never appear), or the carve-out permitting a finished log is gone, or a sentence was spliced between them reinstating a wait",
+      /run\s+the\s+command,\s+wait\s+for\s+it,\s+read\s+its\s+exit\s+code\.\s+Never\s+poll\s+a\s+log\s+file\s+for\s+a\s+completion\s+marker:\s+prefer\s+ONE\s+blocking\s+run\s+to\s+a\s+poll\s+loop,\s+and\s+treat\s+its\s+return\s+as\s+permission\s+to\s+look,\s+never\s+as\s+the\s+answer\.\s+Reading\s+a\s+log\s+the\s+run\s+has\s+already\s+finished\s+writing\s+is\s+fine/,
+      "the synchronous-observation rule is broken — either the exit-code rule is gone, or the poll ban is gone (a refuter reaches for `until grep <marker>` and wedges forever on a marker that can never appear), or the clause preferring one blocking run is gone, or the carve-out permitting a finished log is gone, or a sentence was spliced between them reinstating a wait",
     );
   });
 
@@ -140,24 +149,60 @@ for (const [name, getPrompt] of SITES) {
     );
   });
 
-  // Both clauses in one span: a scope-only rule was measured to catch one of
-  // the two refuted negative claims and NOT the other, whose scope was stated
-  // accurately and was still the wrong scope for the claim.
+  // Both clauses in one span, `\s+`-joined: a scope-only rule was measured to
+  // catch one of the two refuted negative claims and NOT the other, whose scope
+  // was stated accurately and was still the wrong scope for the claim. The two
+  // `.{0,160}` gaps this span used to carry bridged 3 and 27 characters of real
+  // text, so each held room for a sentence retracting the rule between its own
+  // halves.
   test(`${name}: a negative claim states its search scope AND what the pattern would have missed`, () => {
     assert.match(
       getPrompt(),
-      /State\s+your\s+search\s+scope\s+AND\s+what\s+your\s+pattern\s+would\s+have\s+missed\..{0,160}grep\s+over\s+one\s+ref\s+does\s+not\s+support\s+a\s+claim\s+about\s+history.{0,160}token\s+a\s+diff\s+removed\s+does\s+not\s+support\s+a\s+claim\s+that\s+the\s+category\s+is\s+empty/s,
+      /State\s+your\s+search\s+scope\s+AND\s+what\s+your\s+pattern\s+would\s+have\s+missed\.\s+A\s+grep\s+over\s+one\s+ref\s+does\s+not\s+support\s+a\s+claim\s+about\s+history;\s+a\s+pattern\s+built\s+from\s+the\s+token\s+a\s+diff\s+removed\s+does\s+not\s+support\s+a\s+claim\s+that\s+the\s+category\s+is\s+empty/,
       "the negative-claim rule lost a half — stating scope alone does not catch a pattern built from the token a diff removed, which was the measured second refutation",
     );
   });
 
-  // The acceptance criterion is that the idiom appears nowhere as endorsement.
-  // A presence pin cannot express that; this is the negative half.
-  test(`${name}: the refuter prompt never spells the polling idiom as something to do`, () => {
+  // The acceptance criterion is that a wait appears nowhere as endorsement. A
+  // presence pin cannot express that; this is the negative half, and it must
+  // fire regardless of SPELLING — the sentence measured to defeat the old pins
+  // ("poll the log until the marker appears") contains none of the three shell
+  // idioms the ban used to enumerate. So ban the vocabulary instead, after
+  // removing the rule's own two sanctioned mentions of polling. Removing them
+  // hides nothing: both are inside the `\s+`-joined span the first test pins
+  // verbatim, so deleting or rewording either reddens there first. `replace` is
+  // deliberately non-global — a SECOND "poll" is exactly what this catches.
+  test(`${name}: the refuter prompt never spells a wait on a log as something to do`, () => {
+    const rest = getPrompt()
+      .replace(/Never\s+poll\s+a\s+log\s+file\s+for\s+a\s+completion\s+marker/, "")
+      .replace(/prefer\s+ONE\s+blocking\s+run\s+to\s+a\s+poll\s+loop/, "");
     assert.doesNotMatch(
-      getPrompt(),
-      /until\s+grep|while\s+!\s*grep|do\s+sleep/,
-      "the refuter prompt now spells a poll loop — the idiom this brief exists to ban reads as endorsement wherever it appears in an instruction handed to an agent verbatim",
+      rest,
+      /poll|sleep|tail\s+-f|while\s+!|watch(?:ing)?\s+the\s+log|until\s+\S+\s+(?:appears|shows|exists|is\s+written)/i,
+      "the refuter prompt now spells a wait on a log — the idiom this brief exists to ban reads as endorsement wherever it appears in an instruction handed to an agent verbatim, and a reinstatement does not have to reuse the brief's own words to be one",
+    );
+  });
+}
+
+// Every slice above starts at the same anchor, and `between()` takes the FIRST
+// match — by contract, pinned in prose-pin.test.mjs, so the guard cannot go
+// there. Measured on a copy: a partial quote planted earlier is harmless (it
+// either reds on the `to` anchor or widens the slice into a superset that still
+// catches drift), but a VERBATIM copy of the whole pinned span planted earlier
+// silently retargets every pin at the copy, and real drift in the live prompt
+// goes green on all three sites. The anchor is shared with
+// refuter-scratch-prose.test.mjs and review-pr-reads.test.mjs, so this one
+// guard covers their slices too.
+for (const [name, ...p] of [
+  ["run-team/SKILL.md", "skills", "fleet", "skills", "run-team", "SKILL.md"],
+  ["review-and-fix.md", "skills", "fleet", "commands", "review-and-fix.md"],
+  ["review-pr.js", "workflows", "review-pr.js"],
+]) {
+  test(`${name}: the refuter-prompt slice anchor occurs exactly once`, () => {
+    assert.equal(
+      read(...p).split("Try to REFUTE this finding").length - 1,
+      1,
+      `${name} contains "Try to REFUTE this finding" more than once — every pin over this file slices from the FIRST occurrence, so a second copy silently moves what they check away from the live prompt`,
     );
   });
 }
