@@ -2677,6 +2677,93 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
 });
 
+test("an ambient GIT_WORK_TREE does not make the linkage guard blame a healthy worktree (#427)", (t) => {
+  // #427: reaches the same class #135 closed above, through the ENVIRONMENT
+  // instead of a hand-written .git. `ENV` scrubs GIT_DIR/GIT_WORK_TREE for
+  // every fixture in this file (so a poisoned suite run cannot go vacuous on
+  // this or any other case) — this is the one fixture that deliberately opts
+  // back in, through `release()`'s own `env` override, to exercise the path
+  // the scrub otherwise makes unreachable. No change to `ENV` itself, so
+  // every other fixture stays scrubbed.
+  //
+  // GIT_WORK_TREE alone is what reproduces (measured): with it ambient,
+  // `git -C "$wt" rev-parse --show-toplevel` answers about the ambient
+  // target instead of $wt, pre-fix. GIT_DIR alone does NOT reproduce this —
+  // with no GIT_WORK_TREE, the work tree falls back to discovery and lands on
+  // $wt regardless (measured) — so GIT_DIR is deliberately left out of this
+  // fixture's override: this test's job is to pin the variable that actually
+  // causes the misdirection, not the pair. The GIT_DIR half is pinned by the
+  // fixture directly below, which cannot use this guard as its detector and
+  // measures the cross-repository damage instead.
+  //
+  // The target need not even be a git repository — measured: git resolves
+  // `--show-toplevel` to the raw ambient path regardless — so a plain
+  // directory is the whole fixture, not a second repo to maintain.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const elsewhere = join(r.w, "..", "elsewhere");
+  mkdirSync(elsewhere);
+
+  const { code, json, stderr } = release(r, c, { env: { GIT_WORK_TREE: elsewhere } });
+
+  // Exit code first, with stderr as the message: pre-fix the script dies before
+  // it prints any JSON, so reaching for `json.blockers` first fails with a null
+  // deref that names nothing. Measured on the pre-fix tree: `json.blockers`
+  // first gives `TypeError: Cannot read properties of null`, while this order
+  // gives an AssertionError carrying the script's own refusal — the file's
+  // standard at the top, "asserting the blocker it emits, not merely that the
+  // script exited non-zero", applied to a `die` that prints no receipt to
+  // assert against.
+  assert.equal(code, 0, stderr);
+
+  // A healthy, fully-releasable claim releasing cleanly is the proof for both
+  // guarded calls at once: `released: true` cannot happen unless the linkage
+  // guard passed AND the dirty check that follows it (`git -C "$wt" status
+  // --porcelain`, reading the same ambient var) reported the worktree's own,
+  // real, clean status rather than an answer about `elsewhere`.
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true, "an ambient GIT_WORK_TREE must not make a healthy claim unreleasable");
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("an ambient GIT_DIR does not aim the release at another repository (#427)", (t) => {
+  // The other half of `unset GIT_DIR GIT_WORK_TREE`. The case above pins
+  // GIT_WORK_TREE through the linkage guard's two `git -C "$wt"` calls; GIT_DIR
+  // does not reproduce that misdirection at all (measured, in the script's own
+  // comment) — what it retargets is every OTHER git call in the script, none of
+  // which carries a `-C`. So this fixture cannot use the guard as its detector
+  // and measures the damage instead.
+  //
+  // A second clone of the same origin, carrying a branch of the claim's exact
+  // name, is what makes that damage legible: with only GIT_WORK_TREE unset,
+  // discovery follows the ambient GIT_DIR, the script finds the claim's branch
+  // name over THERE, and `git branch -d` — no `-C` either — deletes it in the
+  // wrong repository while reporting `released: true` and leaving this
+  // repository's own directory, worktree and branch all standing. Measured:
+  // both of the last two assertions go red under that mutation, and either
+  // alone would already pin it; the pair is what says the damage is
+  // cross-repository rather than merely a missed release.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const other = join(r.w, "..", "other");
+  execFileSync("git", ["clone", "-q", join(r.w, "..", "origin.git"), other], { env: ENV });
+  git(other, "branch", c.branch);
+  const otherBranches = () =>
+    git(other, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n");
+  assert.ok(otherBranches().includes(c.branch), "fixture: the other repo must carry the claim's branch name");
+
+  const { code, json, stderr } = release(r, c, { env: { GIT_DIR: join(other, ".git") } });
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true, "an ambient GIT_DIR must not make a healthy claim unreleasable");
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.ok(
+    otherBranches().includes(c.branch),
+    `an ambient GIT_DIR must not reach into another repository's branches: ${otherBranches()}`,
+  );
+});
+
 // --- #119: the escaping library this script now sources rather than carries.
 //
 // `.` is a POSIX special builtin, so failing to open its operand aborts a

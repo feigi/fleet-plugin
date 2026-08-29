@@ -44,6 +44,46 @@ set -eu
 # `LC_ALL=C` otherwise changes — have nothing here to act on.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour.
+#
+# An ambient GIT_WORK_TREE outranks `-C`, not just plain discovery (measured,
+# #427): with GIT_WORK_TREE alone pointing at an unrelated tree, `git -C "$wt"
+# rev-parse --show-toplevel` answers about THAT tree, not `$wt` — the linkage
+# guard below then blames a healthy `.git`, reporting it resolves to whatever
+# the ambient var named. `git -C "$wt" status --porcelain` reads the same
+# poisoned environment and would silently answer for the wrong tree too, just
+# without a guard in front of it to say so. Every other git call in this
+# script (no `-C` at all) is equally hostage to an ambient GIT_DIR retargeting
+# it away from the repository the caller actually invoked this in. Unsetting
+# both here, before any of them runs, is the one fix that reaches all of them
+# at once — the same pattern `ledger.mjs` and `inflight.test.mjs` apply by hand
+# per child process, under a comment making the same point: inherited git vars
+# outrank cwd (and, here, outrank `-C` too).
+#
+# GIT_DIR alone does NOT reproduce the linkage guard's misdirection (measured):
+# with no GIT_WORK_TREE, the work tree falls back to the discovery default and
+# `-C "$wt"` still lands on `$wt`. That is a narrower claim than "GIT_DIR is
+# harmless" — left ambient, it still retargets every OTHER git call in this
+# script, the ones with no `-C` to even attempt insulating them.
+#
+# Both halves are pinned, one fixture each: GIT_WORK_TREE by the linkage-guard
+# case, GIT_DIR by `an ambient GIT_DIR does not aim the release at another
+# repository (#427)`. That second fixture measures the damage end-to-end
+# through one of the `-C`-less calls: with only `unset GIT_WORK_TREE` here, the
+# run reports `released: true` after deleting the claim's branch name in a
+# DIFFERENT repository and leaving this repository's three artefacts intact.
+# It pins the class named just above, not a line-by-line proof that every
+# single `-C`-less call is retargeted.
+#
+# No fleet caller sets either var deliberately before invoking this script
+# (checked: no assignment to GIT_DIR or GIT_WORK_TREE anywhere upstream of
+# `release-ticket.sh` in skills/fleet), so this closes the class with nothing
+# left depending on the ambient value.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=release-ticket
 
 # Assigned HERE, above `die`, and not next to `block` where the accumulator is
