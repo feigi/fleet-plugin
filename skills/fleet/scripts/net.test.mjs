@@ -107,3 +107,80 @@ test("net_budget treats an unusable override as no override, in silence", () => 
   assert.equal(budget(30, "029"), "029",
     "five digits or fewer still reach `[`, zero-padded ones included, so 029 IS taken as a bound — and it comes back with its zero on, since the value is echoed rather than renormalised. `sleep 029` and a reported `within 029s` are both the caller asking for 29 seconds and getting them; this pins that the padding is cosmetic, not that it is normalised away");
 });
+
+// The control, and the reason this whole mechanism is not simply "kill it
+// sooner": a bound that turns a working slow fetch into exit 2 is worse than
+// the hang it replaces, because exit 2 is a verdict the controller acts on.
+// inflight.test.mjs holds this pair for the `ls-remote` #346 bounded; #347's
+// four new callers are FETCHES, which move objects rather than refs and so are
+// the ones a budget can plausibly cut short. verify-sha.sh stands in for them
+// here — the smallest of the four, and the only one whose contract separates
+// `no` (exit 1) from `could not answer` (exit 2), so a false failure cannot
+// hide inside the verdict it would corrupt.
+//
+// The transport is REAL: an ssh stub that sleeps and then serves the fixture's
+// own bare repo through `git upload-pack`, so refs genuinely come back. Paired
+// with its sensitivity control below, and neither is worth much alone — an
+// accept-only case passes just as well against a watchdog that never fires,
+// which is to say against no watchdog at all.
+const ENV = {
+  ...process.env,
+  GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_TEMPLATE_DIR: undefined, GIT_INDEX_FILE: undefined,
+  GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
+  GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
+  GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
+};
+const git = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
+
+/** Bare origin + clone with one commit on main, reached through a 3s-slow ssh stub. */
+function slowRepo(t) {
+  const root = mkdtempSync(join(tmpdir(), "net-slow-"));
+  t.after(() => execFileSync("rm", ["-rf", root]));
+  const origin = join(root, "origin.git");
+  const w = join(root, "w");
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
+  execFileSync("git", ["clone", "-q", origin, w], { env: ENV });
+  git(w, "commit", "-q", "--allow-empty", "-m", "root");
+  git(w, "branch", "-M", "main");
+  git(w, "push", "-q", "-u", "origin", "main");
+  const head = git(w, "rev-parse", "HEAD");
+
+  const stub = join(root, "slow-ssh.sh");
+  writeFileSync(stub, `#!/bin/sh\nsleep 3\nexec git upload-pack '${origin}'\n`);
+  chmodSync(stub, 0o755);
+  // example.invalid is never resolved: GIT_SSH_COMMAND replaces ssh outright.
+  // The URL only has to be ssh-SHAPED, which is what routes git to it at all.
+  git(w, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+  return { w, head, stub };
+}
+
+test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget is not a stopwatch on success", (t) => {
+  const { w, head, stub } = slowRepo(t);
+  const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
+    cwd: w, encoding: "utf8", timeout: 60_000,
+    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 0,
+    `the sha really is on the branch and the transport really returned it, so the verdict is `
+    + `reachable — exit 2 here would be an outage invented on a link that worked: ${JSON.stringify(r)}`);
+  assert.equal(JSON.parse(r.stdout).reachable, true, "and the payload is the one an unbounded fetch produced");
+  assert.doesNotMatch(r.stderr, /did not finish within/,
+    "and nothing claims a budget elapsed, which is the wording the failure path owns");
+});
+
+test("the budget is what spares the slow fetch, not the absence of a watchdog", (t) => {
+  const { w, head, stub } = slowRepo(t);
+  const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
+    cwd: w, encoding: "utf8", timeout: 60_000,
+    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2,
+    "under the delay the same transport is cut off, and the answer is `could not answer` — never exit 1, which would report a sha that IS on the branch as missing from it");
+  assert.match(r.stderr, /did not finish within 1s and was killed/,
+    "and it says the budget elapsed rather than blaming the fetch, which is the one thing the exit status alone cannot distinguish");
+  assert.equal(r.stdout, "", "no payload: nothing was answered");
+});

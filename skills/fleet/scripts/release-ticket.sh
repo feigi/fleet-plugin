@@ -160,6 +160,19 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
+# The bounded, prompt-suppressed git transport (#92, #346, #347). The
+# pushed-branch lookup below is unattended: with no bound it can prompt for a
+# credential or a host key, or stall on a transport that connects and then goes
+# quiet, and either holds a fleet slot until something outside kills it.
+# net.sh's header holds the reasoning and the measurements. Sourced below
+# json.sh so a lone copy of this script still blames json.sh, the name its
+# missing-library test pins.
+net_lib="$(dirname "$0")/net.sh"
+[ -r "$net_lib" ] || die "cannot read $net_lib — refusing to act without the bounded git transport"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=net.sh
+. "$net_lib" || die "$net_lib failed to load"
+
 [ $# -ge 3 ] && [ $# -le 4 ] || die "usage: release-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
@@ -749,7 +762,20 @@ fi
 # stderr stays on stderr, never folded into the value: the emptiness of $remote
 # IS the answer, so an SSH host-key notice on a successful query used to read as
 # a branch that exists. git's own message is more useful on the terminal anyway.
-if ! remote=$(git ls-remote --heads origin "refs/heads/$branch"); then
+# 30s: `ls-remote` moves refs and no objects, so this is generous for the work,
+# and it is the budget inflight.sh's own `ls-remote` runs on. `FLEET_NET_TIMEOUT`
+# is the shorten-only override the fleet's bounded calls share; the rule is
+# net_budget's, in net.sh.
+ls_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
+ls_rc=0
+remote=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || ls_rc=$?
+if [ "$ls_rc" -ne 0 ]; then
+  # A killed lookup and a refused one are different facts and get different
+  # words. Both leave the same verdict — the answer is unknown, so nothing is
+  # released — but only one of them names a cause this script observed.
+  if net_stalled "$ls_rc"; then
+    die "git ls-remote did not finish within ${ls_budget}s and was killed, so whether $branch was pushed is unknown"
+  fi
   die "git ls-remote failed, so whether $branch was pushed is unknown"
 fi
 [ -z "$remote" ] || block "branch $branch exists on origin"

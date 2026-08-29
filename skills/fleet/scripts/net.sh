@@ -154,6 +154,25 @@ net_wdnote() {
   cat "$1" 2>/dev/null || true
 }
 
+# net_stalled <status> — was the call most likely killed by the watchdog?
+#
+# The weaker of the two tests, for a caller with no temp file to give. It reads
+# the watchdog's work off a signal number this shell does not own, so it cannot
+# tell our SIGTERM from anyone else's: a call killed from OUTSIDE is reported as
+# a stall. Accepted, and the reason is that both wordings sit under the same
+# verdict — the caller could not answer either way — so the cost is a sentence,
+# never a claim. 137 as well as 143, because net_kill_tree escalates to SIGKILL
+# and git can lose that race.
+#
+# A caller that owns a temp file gets the sharper test instead: net_wdnote reads
+# a marker written by the watchdog and by nothing else, which is what separates
+# a 30s budget that really elapsed from a 4s kill reported as one. inflight.sh
+# has that file, and keeps it; the scripts with no temp file and no EXIT trap of
+# their own take this, rather than growing one apiece for a wording.
+net_stalled() {
+  [ "$1" -eq 143 ] || [ "$1" -eq 137 ]
+}
+
 # net_git <wdfile> <budget> <git arg>... — run one `git` network call
 # unattended: it neither prompts nor outlives <budget> seconds.
 #
@@ -281,9 +300,20 @@ net_wdnote() {
 # `wait` is captured through an explicit `|| net_status=$?`, and `set -e` is
 # why: a bare `wait` on a killed child aborts at that line, which is after the
 # call is dealt with but before the sleeper is, and the sleeper would be the
-# leak. The status is then carried out by an explicit `return` rather than by
-# whatever the function body happens to end with.
+# leak. The status is then carried out by an explicit `exit` rather than by
+# whatever the subshell happens to end with, and the function returns what the
+# subshell exited with.
 net_git() {
+  # The whole body is a SUBSHELL, and that is not style. A caller who captures
+  # stdout gets one for free from `$( )`; a caller who does not — the fetches,
+  # which write to stderr and are read by their exit status — runs the body in
+  # its own shell, and there the shell REPORTS the sleeper it just reaped:
+  # measured, `verify-sha.sh: line 77: 61980 Terminated: 15 { sleep …` landed on
+  # the script's stderr, between its own trace line and its own result, on a
+  # completely healthy fetch. The notice is the shell's, not the job's, so no
+  # redirection on the job can reach it. `( )` puts every caller on the path the
+  # capturing one was already taking, where nothing prints it.
+  (
   net_wdfile=$1
   net_budget_s=$2
   shift 2
@@ -302,5 +332,6 @@ net_git() {
   net_status=0
   wait "$net_pid" || net_status=$?
   net_kill_tree "$net_wd_pid"
-  return "$net_status"
+  exit "$net_status"
+  )
 }
