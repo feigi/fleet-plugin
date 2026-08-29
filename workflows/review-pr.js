@@ -958,6 +958,22 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
 the test, apply the mutation. Do not reason your way to agreement.
 
+Observe that run synchronously — run the command, wait for it, read its exit
+code. Never poll a log file for a completion marker: prefer ONE blocking run to
+a poll loop, and treat its return as permission to look, never as the answer.
+Reading a log the run has already finished writing is fine; waiting on one is
+not. If you match a test reporter's own output, accepting both \`ℹ\` and \`#\` is
+necessary but NOT sufficient — strip SGR escapes first as well. node's prefix
+moves with the node version and with whether stdout is a TTY, and color wraps
+the whole line so it begins with ESC and no prefix anchor matches at all, which
+returns empty at exit 0 — indistinguishable from a hung run and from a run of
+zero tests. For an uncolored baseline use \`env -u FORCE_COLOR\`; \`FORCE_COLOR=\`
+empty still enables color, so it is not a control.
+
+State your search scope AND what your pattern would have missed. A grep over one
+ref does not support a claim about history; a pattern built from the token a
+diff removed does not support a claim that the category is empty.
+
 ${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}

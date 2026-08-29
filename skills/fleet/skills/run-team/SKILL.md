@@ -1137,7 +1137,21 @@ nothing leaves it no gate at all.
 >
 > > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
 > > RUNNING something — compile it, run the test, apply the mutation. Do not
-> > reason your way to agreement. Everything you write — mutants, fixtures,
+> > reason your way to agreement. Observe that run synchronously — run the
+> > command, wait for it, read its exit code. Never poll a log file for a
+> > completion marker: prefer ONE blocking run to a poll loop, and treat its
+> > return as permission to look, never as the answer. Reading a log the run has
+> > already finished writing is fine; waiting on one is not. If you match a test
+> > reporter's own output, accepting both `ℹ` and `#` is necessary but NOT
+> > sufficient — strip SGR escapes first as well. node's prefix moves with the
+> > node version and with whether stdout is a TTY, and color wraps the whole line
+> > so it begins with ESC and no prefix anchor matches at all, which returns
+> > empty at exit 0 — indistinguishable from a hung run and from a run of zero
+> > tests. For an uncolored baseline use `env -u FORCE_COLOR`; `FORCE_COLOR=`
+> > empty still enables color, so it is not a control. State your search scope
+> > AND what your pattern would have missed. A grep over one ref does not
+> > support a claim about history; a pattern built from the token a diff removed
+> > does not support a claim that the category is empty. Everything you write — mutants, fixtures,
 > > scratch repos — goes under `<scratch>/pr<N>/<finding>/` and nowhere else;
 > > the checkout and any worktree are never write targets, though
 > > `git show`/`git archive` at a pinned ref read fine anywhere. Chain the
