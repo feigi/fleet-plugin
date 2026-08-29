@@ -21,42 +21,42 @@ import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 // THE CEILING: presence pins over a bounded slice. Text spliced INSIDE a pinned
 // clause reddens them; a new sentence appended beside one does not. Reflow stays
 // green by design — the words are pinned, not their layout.
-const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
+const NET = readFileSync(join(import.meta.dirname, "net.sh"), "utf8");
 
 // Bounded by the http paragraph's own opening and by the first construct that
-// follows the comment block. Probe 2 is the only place in this script that
+// follows the comment block. net_git's is the only comment in net.sh that
 // discusses http transport options, but the bounds are what stop a later block
 // elsewhere from satisfying these pins with this clause gutted.
 const httpRationale = () =>
   stripHashGutter(
     between(
-      INFLIGHT,
+      NET,
       "# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound",
-      "base_ssh=$(git config --get core.sshCommand",
-      "inflight.sh",
+      "net_base_ssh=$(git config --get core.sshCommand",
+      "net.sh",
     ),
   );
 
 // The negative pins get a WIDER slice than the positive ones, and that is the
 // whole point of separating them. The stale sentence this PR deleted lived in
-// the SSH paragraph, above the http heading — so run over `httpRationale` the
+// the ssh paragraph, above the http heading — so run over `httpRationale` the
 // two `doesNotMatch` pins below missed it entirely: measured, reinserting
 // "Closing that needs a bound outside git … An https origin can still hold a
 // fleet slot" into the ssh paragraph left both of them green. A negative pin
 // scoped narrower than the prose it forbids forbids nothing. The positive pins
 // stay on the narrow slice, where a bound at both ends is what stops an
 // unrelated block from satisfying them.
-const probe2Rationale = () =>
+const transportRationale = () =>
   stripHashGutter(
     between(
-      INFLIGHT,
+      NET,
       "# ssh: BatchMode=yes refuses any interactive prompt",
-      "base_ssh=$(git config --get core.sshCommand",
-      "inflight.sh",
+      "net_base_ssh=$(git config --get core.sshCommand",
+      "net.sh",
     ),
   );
 
-test("probe 2's comment states that the per-transport knobs are kept, and why", () => {
+test("net_git's comment states that the per-transport knobs are kept, and why", () => {
   const text = httpRationale();
   assert.match(text, phrase("stay anyway, and that is a decision rather than an oversight"),
     "#346 required the knobs' fate to be stated outright — a reader must not have to infer it from the fact that the lines are still there");
@@ -66,12 +66,12 @@ test("probe 2's comment states that the per-transport knobs are kept, and why", 
     "the second ground, and the one that makes removal an actual regression rather than a wash");
 });
 
-// The negative half. Before the watchdog, probe 2's comment closed by saying the
+// The negative half. Before the watchdog, this comment closed by saying the
 // gap was still open and named the issue that would close it. That sentence is
 // now false, and false in the most expensive direction: it would send the next
 // reader off to implement the watchdog that the same comment block introduces.
-test("probe 2's comment no longer defers the bound to a ticket this script now carries", () => {
-  const text = probe2Rationale();
+test("net_git's comment no longer defers the bound to a ticket net.sh now carries", () => {
+  const text = transportRationale();
   assert.doesNotMatch(text, phrase("Closing that needs a bound outside git"),
     "the bound is no longer needed, it is present — this wording describes the tree as it stood before the watchdog");
   assert.doesNotMatch(text, /can still hold a fleet slot/,

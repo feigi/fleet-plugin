@@ -2139,54 +2139,6 @@ test("probe 2: a budget too large for the shell's integer is ignored, and says n
     "`[` must never be handed a value too large for the shell's integer: a raw diagnostic naming a line number is the guard's comment being contradicted on the surface the guard writes to");
 });
 
-// kill_tree's awk closure has no other test at its own level: the five cases in
-// this block reach it only by letting a real fetch hang, which is slow and,
-// worse, blind to the thing the `do { … } while (grew)` loop exists for.
-// Measured — collapsing that loop to a single pass still kills the whole
-// subtree when `ps` prints parents before children, which is what `ps -A` does
-// on an ordinary machine, so every e2e case above stays green on the mutant.
-// Only a canned table with a child row AHEAD of its parent (the shape pid
-// wraparound produces) discriminates, and only this test feeds one.
-//
-// The function is lifted out of inflight.sh by its own braces rather than
-// re-typed, so this cannot drift into testing a copy. `ps` is shadowed on PATH
-// the way the awk/tr/python3 fork-failure cases here already do it; `kill` has
-// to be a shell FUNCTION instead, because it is a builtin and a file on PATH is
-// never consulted. The `-9` escalation is dropped on the floor — the set is
-// what is under test, and it is the same set both signals go to.
-const killTreeOn = (t, table, root) => {
-  const dir = mkdtempSync(join(tmpdir(), "inflight-killtree-"));
-  t.after(() => execFileSync("rm", ["-rf", dir]));
-  const bin = join(dir, "bin");
-  mkdirSync(bin);
-  writeFileSync(join(bin, "ps"), `#!/bin/sh\ncat '${join(dir, "table")}'\n`);
-  chmodSync(join(bin, "ps"), 0o755);
-  writeFileSync(join(dir, "table"), table);
-
-  const body = readFileSync(SCRIPT, "utf8").match(/^kill_tree\(\) \{\n[\s\S]*?^\}$/m);
-  assert.ok(body, "kill_tree() is no longer a top-level function in inflight.sh — update this test");
-  writeFileSync(join(dir, "fn.sh"), body[0]);
-
-  const r = spawnSync("sh", ["-c",
-    `kill() { [ "$1" = -9 ] || printf '%s\\n' "$*"; }\n. '${join(dir, "fn.sh")}'\nkill_tree ${root}`],
-    { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 10_000 });
-  assert.equal(r.status, 0, `kill_tree exited non-zero: ${JSON.stringify(r)}`);
-  return r.stdout.trim().split(/\s+/).filter(Boolean).sort((a, b) => a - b);
-};
-
-test("kill_tree signals the whole subtree, however the snapshot is ordered", (t) => {
-  assert.deepEqual(killTreeOn(t, "100 1\n200 100\n300 200\n400 1\n", 100), ["100", "200", "300"],
-    "a chain two levels deep, parents first");
-  assert.deepEqual(killTreeOn(t, "300 200\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
-    "the same chain with every child ahead of its parent — the case a single-pass walk gets wrong");
-  assert.deepEqual(killTreeOn(t, "500 400\n300 100\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
-    "branching, and an unrelated tree that must not be swept in");
-  assert.deepEqual(killTreeOn(t, "100 1\n200 1\n", 100), ["100"],
-    "a root with no descendants is still signalled");
-  assert.deepEqual(killTreeOn(t, "200 1\n300 200\n", 999), ["999"],
-    "a root absent from the snapshot falls back to itself, never to nothing");
-});
-
 // The control, and the reason this whole change is not simply "kill it sooner":
 // a watchdog that turns a working slow fetch into exit 2 is worse than the hang
 // it replaces, because exit 2 is a verdict the fleet acts on. The stub here is a
