@@ -365,6 +365,91 @@ test("the label's asterisks may close BEFORE the colon as well as after it", () 
   assert.deepEqual(rows[0].d, [12]);
 });
 
+test("a bolded REF yields its number — whitespace and asterisks interleave freely between label and ref", () => {
+  // #439: the asterisk groups used to sit ahead of the separating whitespace,
+  // so only asterisks flush against the label matched. Markdown puts them on
+  // the other side of the space, on the ref — which is what #208's brief
+  // wrote, and the scan then read that whole section as no dependency at all.
+  const { rows } = run([
+    ticket(1, "Blocked by **#179** (decides gone shape)\n"),
+    ticket(2, "blocked by **#178**\n"),
+    ticket(3, "Depends on **#5**\n"),
+    ticket(4, "Blocked by: **#12**\n"),
+    ticket(5, "**Blocked by:** **#12**\n"),
+    ticket(6, "Blocked by *#12*\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[179], [178], [5], [12], [12], [12]]);
+});
+
+test("a noun-form Dependencies heading arms a section, at any heading depth and with a trailing colon", () => {
+  // #439's second, independent miss: the gate named the verb forms only, so
+  // the heading #208's brief actually used opened nothing, and the list-item
+  // branch never engaged either. Both routes into that section failed.
+  const { rows } = run([
+    ticket(1, "## Dependencies\n\n- #12\n- #13\n"),
+    ticket(2, "## Dependency\n\n- #12\n"),
+    ticket(3, "### Dependencies:\n\n- #12\n"),
+    ticket(4, "###### Dependencies\n\n- #12\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[12, 13], [12], [12], [12]]);
+});
+
+test("the noun form arms only when it is the WHOLE heading — a Dependency-injection section is prose, not a declaration", () => {
+  // The verb forms end at `\b` and tolerate trailing text, because a heading
+  // opening with `Blocked by` declares one whatever follows it. The noun form
+  // cannot afford that: `## Dependency injection` is an ordinary section title
+  // in a code repo, and arming on it turns every `#N` in its bullets into a
+  // blocker the body never declared, starving the ticket out of the queue —
+  // the same over-fire the list-item restriction exists to prevent. Anchoring
+  // the noun alternative to end-of-line is what keeps these three closed;
+  // widen it to `\b` like its neighbours and this test is what reds.
+  const { rows } = run([
+    ticket(1, "## Dependency injection\n\n- rework the container, see #300\n"),
+    ticket(2, "## Dependencies (blocking)\n\n- #300\n"),
+    ticket(3, "## Dependency injection:\n\n- see #300\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], []]);
+});
+
+test("#208's own brief text yields both of the open blockers it declared in prose", () => {
+  // The live wrong admission #439 was filed from: this section reduced to no
+  // dependency at all, so a ticket with two open blockers reached the survivor
+  // read as claimable. Both misses are present here at once — a noun-form
+  // heading AND bolded refs — so this fixture reds if either half regresses.
+  // The `PR #390` bullet is collected too: in-section collection reads every
+  // `#N` on a list-item line by construction, and a merged ref is inert at the
+  // consumer, which drops a ticket only for a blocker that is still open.
+  const { rows } = run([
+    ticket(208, [
+      "## Dependencies",
+      "",
+      "- Blocked by **#179** (decides `gone()`'s shape, which `Indeterminate` needs), which is itself blocked by **#178**.",
+      "- Vocabulary from **PR #390**.",
+      "",
+      "Recording those as native dependency edges so the fleet does not claim this early.",
+      "",
+    ].join("\n")),
+  ]);
+  assert.deepEqual(rows[0].d, [178, 179, 390]);
+});
+
+test("the phantom-blocker sweep stays closed against the widened label and heading gates", () => {
+  // PR #331 closed these by restricting in-section collection to list-item
+  // lines. #439 loosens the label separator and widens the heading gate,
+  // neither of which touches that restriction — this pins that they did not,
+  // because a regex widened for bold is exactly the change that reopens them.
+  // The noun-form rows carry the same shapes through the newly-armed heading.
+  const { rows } = run([
+    ticket(1, "## Blocked by\n\nSee #99 for context\n"),
+    ticket(2, "## Blocked by\n\n- #1\n\nSome later text mentioning #42\n"),
+    ticket(3, "```\nfixes #77\n```\n"),
+    ticket(4, "## Dependencies\n\n- #12 and then\n  more about #999\n"),
+    ticket(5, "## Dependencies\n\nSee #99 for context\n"),
+    ticket(6, "## Dependencies\n\n- #12\n\n```\ngit log #999\n```\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [1], [], [12], [], [12]]);
+});
+
 // The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
 // applies `--jq` with its embedded gojq (RE2) — a different engine, and every
 // other test in this file accepts that gap rather than closing it. This one
@@ -420,6 +505,12 @@ test(
     assert.deepEqual(deps("depends on #5\n"), [5]);
     assert.deepEqual(deps("Blocked by: #12, #13\n"), [12, 13]);
     assert.deepEqual(deps("## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n"), [12]);
+    // #439's two forms, on the engine that produced the live wrong admission.
+    assert.deepEqual(deps("Blocked by **#179**\n"), [179]);
+    assert.deepEqual(deps("Blocked by: **#12**\n"), [12]);
+    assert.deepEqual(deps("## Dependencies\n\n- #12\n- #13\n"), [12, 13]);
+    assert.deepEqual(deps("## Dependency injection\n\n- see #300\n"), []);
+    assert.deepEqual(deps("## Blocked by\n\nSee #99 for context\n"), []);
     // The discriminator, and the only assertion here system jq cannot satisfy:
     // `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a U+00A0
     // between label and ref reduces to [12] under jq and [] under gojq. Without
@@ -427,6 +518,11 @@ test(
     // `JQ_BIN` plumb would leave this test green having never reached gojq.
     // Keep the `\u00a0` escape: a literal NBSP does not survive being copied.
     assert.deepEqual(deps("Blocked by:\u00a0#12\n"), []);
+    // #439 widened that separator to `[\s*]*` but kept `\s` rather than an
+    // explicit ASCII class (#383 owns that question), so the bolded form
+    // inherits the same split: [12] under Oniguruma, [] under RE2. Keep the
+    // `\u00a0` escape here too — a literal NBSP does not survive being copied.
+    assert.deepEqual(deps("Blocked by:\u00a0**#12**\n"), []);
   },
 );
 
