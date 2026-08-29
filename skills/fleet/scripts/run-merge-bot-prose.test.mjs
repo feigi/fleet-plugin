@@ -138,6 +138,75 @@ test("step 1 names the correct upstream for proving a post-rebase worktree stale
   assert.match(step1(), /\*\*not\*\* `git cherry origin\/main HEAD`/);
 });
 
+// #447. The probe above told the bot to run `git cherry` and then stopped:
+// neither result had an instruction, on the path that is now the default. Two
+// separate rots follow from that, and each is pinned to its own contiguous
+// string rather than to a word appearing somewhere in step 1.
+//
+// (a) The ORDERING must ride in the same sentence as the command. GitHub
+// deletes the remote branch when the PR lands, so `origin/<branch>` stops
+// existing at the merge and a probe run afterwards dies on a missing ref —
+// which reads like the divergence it was meant to rule out. A constraint
+// parked in a later paragraph is one a reader can reach the command without
+// having read, so the assertion below spans command and constraint as one
+// literal run of text and reds if they are split apart.
+test("step 1's staleness probe carries its ordering constraint in the same sentence as the command", () => {
+  assert.match(
+    step1(),
+    /run `git cherry origin\/<branch> HEAD` from the worktree \*\*before the merge, never after\*\*/,
+  );
+  // the reason, without which the constraint is an unexplained rule
+  assert.match(step1(), /GitHub deletes the remote branch when the PR lands/);
+  assert.match(step1(), /fails on a missing ref/);
+});
+
+// (b) The OUTCOME. `+` must be answered on the server-side path, and answered
+// with the structural reason — the path rebases through the API and pushes
+// nothing, and step 4 merges the remote head, so an unpushed local commit
+// cannot enter the merge. The reason is pinned with the verdict on purpose: a
+// bare "no STOP here" is exactly the sentence a later reader would delete for
+// looking unjustified.
+test("step 1 answers a `+` on the server-side path, with the structural reason", () => {
+  assert.match(step1(), /Neither result halts this path/);
+  assert.match(step1(), /this step rebases through the API and pushes nothing/);
+  assert.match(step1(), /structurally unable to enter the merge/);
+});
+
+// The other half of (b), and the one that costs real work if it rots: the new
+// wording must NOT license skipping the STOP where the hazard is real. On the
+// fallback the bot rebases locally, so an unpushed commit genuinely does ride
+// into the merge. Pinned positively — the STOP's own bullet, intact — rather
+// than by forbidding a word, which would red on an unrelated correct edit.
+test("the fallback's diverged-worktree STOP survives the primary path's `+` answer", () => {
+  assert.match(step1(), /\*\*Worktree ahead\*\* → STOP, report `worktree-diverged-#<pr>`/);
+  assert.match(step1(), /your rebase would carry into the merge/);
+});
+
+// #447 AC-3, and the reason this pin reaches across files: run-team's failure
+// table promised `worktree-diverged-#<pr>` for "the worktree ahead of the PR
+// head" with no path qualifier, while the halt itself lives only in the
+// fallback. Whichever file is edited alone, the other goes back to lying.
+const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
+
+// Sliced to the failure table alone. Unbounded, `worktree` and `fallback` both
+// occur freely elsewhere in a file thousands of lines long.
+function failureTable() {
+  const start = "## Failure handling";
+  const at = RUN_TEAM.indexOf(start);
+  assert.notEqual(at, -1, `'${start}' moved — update this test`);
+  const rest = RUN_TEAM.slice(at + start.length);
+  const end = rest.indexOf("A red PR never silently becomes");
+  assert.notEqual(end, -1, "the failure table's end marker moved — update this test");
+  return rest.slice(0, end);
+}
+
+test("run-team scopes the diverged-worktree row to the fallback, not to every merge path", () => {
+  assert.match(
+    failureTable(),
+    /\| Merge bot finds the worktree ahead of the PR head \*\*on the local-rebase fallback\*\* \|/,
+  );
+});
+
 // #903: the poll read `gh pr view <pr> --json headRefOid` — the one field that
 // desyncs from the branch it is meant to be watching. Measured on this repo:
 // `gh pr update-branch --rebase` landed and moved the ref to 221f4e9 while
