@@ -512,6 +512,78 @@ test("CLI: --ledger given an empty value dies rather than falling back to the de
   assert.match(r.stderr, /--ledger needs a value/);
 });
 
+// #468: argPort()/has("open") used to run only inside serve(), so build never
+// evaluated them — `build --port abc` and `build --open=1` were silently
+// IGNORED at exit 0 rather than refused, the one silent-default shape
+// ledger/prev/spend-since/interval (pinned above and in board-cli.test.mjs)
+// did not share. main() now calls both once, ahead of the build/serve
+// dispatch, so these refuse on build too, with the exact wording serve
+// already refuses them with. All three die before gather()'s first gh read
+// (the guard moved above the dispatch, not just above serve()'s own call),
+// so — like the --ledger/--prev cases above — none of these need the gh-stub
+// rig board-cli.test.mjs carries for the guards that fire mid-gather().
+test("CLI: build refuses a trailing --port, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port needs a value/);
+});
+
+test("CLI: build refuses a non-numeric --port, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", "abc"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
+test("CLI: build refuses --open=1, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--open=1"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--open is a boolean flag, not --open=/);
+});
+
+// The ordering half of the same fix, and the one the three cases above cannot
+// see: they pass a malformed flag ALONE, so nothing distinguishes a guard that
+// runs ahead of the build branch's stray() from one that runs after it. Add a
+// stray positional and it does: with the guard moved below that stray() call,
+// this invocation refused with `unexpected argument 'extra'` (measured),
+// naming a trailing token instead of the malformed value the caller actually
+// got wrong. Both orderings still exit 2 — only which real mistake gets named
+// differs, which is exactly what the --prev case above pins for its own flag.
+test("CLI: build refuses a malformed --port ahead of a stray token, naming --port not the stray", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", "abc", "extra"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
+// The other two malformed spellings arg.mjs refuses, which the hoist closes on
+// build alongside the three above. Pinned because a NARROWED hoist keeps the
+// three green while dropping these: measured, `if (process.argv.includes(
+// "--port")) argPort();` — a plausible "only bother when the flag was given" —
+// leaves `build --port=9000` at exit 0 with every other case still refusing.
+test("CLI: build refuses --port=9000, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port=9000"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port needs a space-separated value, not --port=/);
+});
+
+test("CLI: build refuses an empty --port value rather than falling back to the default port", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", ""], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port needs a value/);
+});
+
+// The hoist sits above the `cmd` dispatch, not just above serve()'s own call,
+// so it also changed the no-subcommand path: `board.mjs --port abc` printed
+// the usage line before this fix and names the flag after it (measured, both
+// sides). Sanctioned by #468's Option A ruling — a malformed flag is refused
+// wherever it is written — and unpinned until now: the same narrowing that
+// moves the guards into the `build` branch restores the usage line here while
+// leaving all four `build` cases above green.
+test("CLI: a malformed --port with no subcommand names the flag, not the usage line", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--port", "abc"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
 // #169 review: a --port we cannot use falls back to 8123, and the bind error
 // used to name that substituted default as if the caller had chosen it — it
 // told someone who DID pass --port to "pass --port <n>", pointing them at a

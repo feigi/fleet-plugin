@@ -34,13 +34,17 @@ const stray = makeStray(die);
 // nothing after it silently read the DEFAULT ledger file instead of the one
 // asked for.
 //
-// A guard only fires where the flag is actually READ, and that is not every
-// subcommand. `port` and `open` are read in serve() alone, so `build --port`
-// (trailing), `build --port abc` and `build --open=1` are all IGNORED at exit
-// 0 rather than refused (measured) — the one silent-default shape this list
-// does not close. `ledger`/`prev`/`spend-since`/`interval` are read on the
-// build path too and do refuse there. Pre-existing and not introduced here;
-// said out loud so the list above is not read as "guarded on every path".
+// #468: a guard used to fire only where the flag was actually READ, and that
+// was not every subcommand — `port` and `open` are USED in serve() alone, so
+// `build --port` (trailing), `build --port abc` and `build --open=1` were all
+// IGNORED at exit 0 rather than refused. main() now calls argPort()/
+// has("open") once, ahead of the build/serve dispatch, so both malformed
+// spellings refuse on EVERY subcommand — build just discards the (validated)
+// return value, since nothing on that path has a server to bind or a browser
+// to open. A WELL-FORMED --port/--open on build still does nothing there,
+// same as before this fix: the guard checks the flag's SHAPE, not whether
+// this subcommand has a use for it. `ledger`/`prev`/`spend-since`/`interval`
+// were already read on the build path and already refused there.
 
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
@@ -496,12 +500,13 @@ async function main() {
   // board.test.mjs and board-cli.test.mjs both import from this module, so a
   // module-scope sweep would read the TEST RUNNER's argv.
   //
-  // One set for both subcommands, deliberately. `--port`/`--open` are read
-  // only by serve() and `--prev` only by build, so `build --port 5` is
-  // accepted and ignored — the pre-existing gap the block above already
-  // names. Narrowing the set per subcommand would close it, but that is a
-  // different ticket's fix; refusing a flag this file does accept somewhere
-  // is not this ticket's business.
+  // One set for both subcommands, deliberately. `--port`/`--open` are USED
+  // only by serve() and `--prev` only by build, so a WELL-FORMED `build
+  // --port 5` is accepted and its value simply unused — narrowing the set per
+  // subcommand would close that too, but that is a larger design question
+  // (per-subcommand arg schemas) this ticket does not take; refusing a flag
+  // this file does accept somewhere is not this ticket's business. What
+  // build no longer does is stay silent on a MALFORMED one — see #468 below.
   //
   // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
   // printing the usage line for a missing subcommand. `build`/`serve` carry
@@ -514,6 +519,29 @@ async function main() {
   sweep([...VALUE_FLAGS, "open"]);
   const cmd = process.argv[2];
   const ledgerFile = arg("ledger") || ".fleet/ledger.md";
+
+  // #468: argPort()/has("open") used to run only inside serve(), so `build
+  // --port abc` and `build --open=1` were accepted and silently ignored — the
+  // malformed spellings these guards exist to refuse never ran on that path.
+  // Called here, once, ahead of the build/serve dispatch (and ahead of both
+  // branches' own stray() call, so a malformed value still wins the specific
+  // wording over stray()'s generic one, same ordering rule arg.mjs documents
+  // for every other value guard in this file). Ahead of the `cmd` check too,
+  // so `board.mjs --port abc` with NO subcommand names the flag rather than
+  // falling through to the usage die below — the same precedence the #365
+  // sweep note above claims for a stray, now true of these two guards as
+  // well. Both orderings are pinned in board.test.mjs; before this fix the
+  // no-subcommand shape printed the usage line (measured). The return values are
+  // deliberately discarded on the build path: build has no server to bind or
+  // browser to open, so a WELL-FORMED --port/--open still does nothing here,
+  // exactly like before this fix — only the malformed spellings now refuse.
+  // serve() below still calls its own argPort()/has("open"); re-evaluating a
+  // pure read of argv costs nothing and keeps the EXPORTED serve() validating
+  // its own argv for a caller that skips main(). Nothing in this repo is such
+  // a caller today — every serve() test drives the real CLI, which enters
+  // main() — but serve() is public surface, so the guard stays with it.
+  argPort();
+  has("open");
 
   // #463: sweep() above only refuses a `--`-prefixed token; a bare or
   // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
