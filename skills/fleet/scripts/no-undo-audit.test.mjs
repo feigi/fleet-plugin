@@ -695,7 +695,7 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
-// list empty at rc 0, show-ref rc 0 — but git answers in SEVEN lines there, and
+// list empty at rc 1, show-ref rc 0 — but git answers in SEVEN lines there, and
 // a bad `objects/info/alternates` both adds three more and puts a backslash in
 // them. That fixture is what makes the two hazards of `msg="$msg — $diag";
 // echo "$msg"` observable at once: unfolded newlines put git's text at column 0
@@ -712,6 +712,20 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
   chmodSync(obj, 0o644);
   writeFileSync(obj, "junk\n");
+
+  // The rc both comments name for this state, measured rather than asserted in
+  // prose (#494). `stash list` FAILS here, unlike the states it stays silent
+  // about — and the counting pipeline takes `wc`'s status, so the branch still
+  // fires and the rc is discarded. That discard is why a wrong rc in the prose
+  // above could sit here for as long as it did without a test noticing.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
+  assert.match(
+    readFileSync(SCRIPT, "utf8").replace(/\s+/g, " "),
+    /list empty at rc 1/,
+    "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
+  );
+
   mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
   writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
 
