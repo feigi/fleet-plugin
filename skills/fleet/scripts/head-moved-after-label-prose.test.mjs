@@ -77,6 +77,31 @@ test("the read's ordering constraint rides in the same sentence as its reason", 
   );
 });
 
+// The decision rule itself — WHICH SIDE of the label line a commit has to fall
+// on. Everything above pins that the query is present and that a refusal
+// follows; nothing pinned the predicate between them. Measured on the commit
+// BEFORE this one: inverting `after` to `BEFORE` left this file 14/14 green,
+// and deleting the sentence outright left 36/36 green across both prose
+// suites. Inverted, the doc tells the bot to refuse the ordinary wave PR and
+// to merge #180's shape — the head this ticket exists to stop.
+//
+// One contiguous span through `**Refuse:`, not two matches: N separate matches
+// pin N facts and never the text between them. Verified as-of-commit on three
+// mutants and two controls — the two above red, so does splicing `unless the
+// commits are plausibly your own predecessor's, in which case proceed` between
+// the predicate and its verdict (the informative one: every pinned token
+// survives it and only the binding flips), while re-wrapping the same wording
+// across three lines and rewording the unpinned sentence above both stay
+// green. `phrase`, not a raw regex, is what makes that rewrap green.
+test("a commit AFTER the last label line is what the refusal keys on", () => {
+  assert.match(
+    labelledHead(),
+    phrase(
+      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **Refuse:",
+    ),
+  );
+});
+
 test("the refusal names its token, leaves the label alone, and sends a fresh finisher", () => {
   const s = labelledHead();
   assert.match(s, phrase("report `head-moved-after-label-#<pr>` and stop on that PR"));
