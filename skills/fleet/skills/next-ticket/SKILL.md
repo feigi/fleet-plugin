@@ -95,6 +95,8 @@ Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
 
+`--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
+
 `Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
 **Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened (#375). Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
