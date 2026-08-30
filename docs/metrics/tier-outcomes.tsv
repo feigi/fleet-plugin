@@ -52,6 +52,25 @@
 # fields — an unknown covariate is an EMPTY field, not a truncated row, because
 # a row of some in-between width is indistinguishable from a shifted one.
 #
+# PROVENANCE OF THE 2026-08-29 ROWS — THEY WERE BACKFILLED, BY THE SAME COMMIT
+# THAT RECORDED 2026-08-30, AND THAT COMMIT'S OWN MESSAGE UNDERCOUNTS THEM.
+# Commit e78ca9d appended EIGHT rows to this file: three carrying run_date
+# 2026-08-30 (PRs #1051, #1052, #1054) and five carrying run_date 2026-08-29
+# (PRs #1028, #1030, #1037, #1043, #1044). Its subject and body say three.
+#   git show --stat --format= e78ca9d -- docs/metrics/tier-outcomes.tsv
+#     -> 1 file changed, 8 insertions(+)
+#   git show --format= e78ca9d -- docs/metrics/tier-outcomes.tsv | grep '^+[^+]'
+#     -> those eight rows, five stamped 2026-08-29 and three stamped 2026-08-30
+# The five were outstanding because each of their PRs merged AFTER becf292, the
+# merge that shipped ecbb84e — the 2026-08-29 closeout — so that closeout could
+# not have carried them, and no later closeout was scoped to that run_date.
+#   git log --merges --oneline ecbb84e..e78ca9d
+#     -> the merges of #1028, #1030, #1037, #1043 and #1044 all land after
+#        becf292, the merge of #1027 that shipped the 2026-08-29 closeout
+# The rows themselves are correct and were re-derived. Only e78ca9d's prose is
+# wrong, and a pushed commit body cannot be edited, so this paragraph is where
+# that record lives.
+#
 # run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note	sizing	profile	loc	files
 2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
 2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
