@@ -472,6 +472,18 @@ test("--base followed by another flag is rejected, not read as the string \"--wo
   assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
 });
 
+// #463 fallout: `--workflow-file` is the one flag this file used to read below
+// its guards, in discoverWorkflowFile()'s caller. With the read there, this
+// invocation refused with `unexpected argument 'main'` — --base's innocent
+// value — instead of naming the flag given wrong (measured). The read is a
+// statement above sweep() for that reason; putting it back reds this.
+test("trailing --workflow-file names --workflow-file, not the innocent value of the flag behind it", () => {
+  const r = run(["--workflow-file", "--base", "main"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--workflow-file needs a value/);
+  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+});
+
 test("--base given a whitespace-only value dies rather than comparing against the default base", () => {
   const r = run(["--base", "   "]);
   assert.equal(r.status, 2);

@@ -493,6 +493,19 @@ test("CLI: --ledger followed by another flag is rejected, not read as the string
   assert.match(r.stderr, /--ledger needs a value/);
 });
 
+// #463 fallout, and the one ordering nothing else pins: `--ledger` is read
+// above stray() and always was, so none of the cases above reaches the new
+// guard at all. `--prev` is read inside the `build` branch, where stray() also
+// sits — with the read left below it, this invocation refused with `unexpected
+// argument '9000'`, naming --port's innocent value instead of the flag
+// actually given wrong (measured). Moving the read back below stray() is what
+// this reds on.
+test("CLI: trailing --prev names --prev, not the innocent value of the flag behind it", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--prev", "--port", "9000"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--prev needs a value/);
+});
+
 test("CLI: --ledger given an empty value dies rather than falling back to the default ledger", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger", ""], { encoding: "utf8" });
   assert.equal(r.status, 2);

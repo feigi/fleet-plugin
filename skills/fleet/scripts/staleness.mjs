@@ -44,7 +44,7 @@
 import { execFileSync } from "node:child_process";
 import { writeSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "staleness";
 
@@ -52,6 +52,7 @@ const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
+const stray = makeStray(die);
 
 const path = arg("path");
 const gone = arg("gone");
@@ -77,6 +78,20 @@ if (!path) die("--path <path> is required");
 // verdict that keeps the ticket in the queue — a ticket quoting a flag name
 // is a could-not-check, not a broken invocation.
 sweep(["path", "gone", "present"]);
+
+// #463: the sweep above only ever refuses a `--`-prefixed token, so a bare
+// or single-dash stray rode through in silence here too — measured, `--path
+// README.md --present needle JUNKTOKEN` returned a payload byte-identical to
+// the same invocation without it. This script takes no positional of its
+// own and all three of its flags take a value, so any leftover token is a
+// stray.
+//
+// The shape that makes it worse here than elsewhere is an unquoted needle:
+// `--present two words` takes `two` and discards `words` (measured), then
+// answers with full confidence about a needle the caller never asked about.
+// This verdict feeds ticket selection, where a wrong `fixed`/`live` retires
+// live supply or claims dead work.
+stray(["path", "gone", "present"]);
 
 const mode = gone ? "gone" : "present";
 const needle = gone ?? present;

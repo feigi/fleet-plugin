@@ -203,8 +203,7 @@ export function makeStray(die) {
     for (let i = 0; i < argv.length; i++) {
       const a = argv[i];
       if (a.startsWith("--")) {
-        const name = a.slice(2).split("=")[0];
-        if (!a.includes("=") && valueFlags.includes(name)) i++;
+        if (!a.includes("=") && valueFlags.includes(a.slice(2))) i++;
         continue;
       }
       if (!usedPositional && positionals.includes(a)) {

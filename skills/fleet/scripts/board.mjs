@@ -506,7 +506,12 @@ async function main() {
   // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
   // printing the usage line for a missing subcommand. `build`/`serve` carry
   // no `--` and are never the sweep's business.
-  sweep(["ledger", "prev", "port", "interval", "open", "spend-since"]);
+  // One list rather than the same five names spelled out in the sweep and in
+  // both stray() calls below. `open` is not in it: it is boolean (has()), so
+  // it never has a value token for stray() to skip over, and the sweep needs
+  // the name anyway.
+  const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since"];
+  sweep([...VALUE_FLAGS, "open"]);
   const cmd = process.argv[2];
   const ledgerFile = arg("ledger") || ".fleet/ledger.md";
 
@@ -515,18 +520,25 @@ async function main() {
   // rode along in silence the same way. Below the `cmd` check, deliberately
   // unlike sweep() above it: `board.mjs junk` is an unknown SUBCOMMAND, which
   // the usage die below already names as such, and stray() has no business
-  // relitigating that with its own generic wording. `open` is left out of the
-  // value-flags list — it is boolean (has()), so it never has a value token
-  // to skip over.
+  // relitigating that with its own generic wording.
+  //
+  // Each branch guards itself rather than one call covering both, so the
+  // branch that reads a value flag can read it FIRST — see --prev below.
   if (cmd === "build") {
-    stray(["ledger", "prev", "port", "interval", "spend-since"], ["build", "serve"]);
+    // Above stray(), not below it: measured, with the read below the guard
+    // `board.mjs build --prev --port 9000` refused with `unexpected argument
+    // '9000'`, naming --port's innocent value instead of the flag actually
+    // given wrong. Same ordering arg.mjs documents for the sweep — value
+    // guards first, so the more specific wording wins.
+    const prevFile = arg("prev");
+    stray(VALUE_FLAGS, ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
-    const model = computeBoard(gather({ ledgerFile, prevFile: arg("prev") }));
+    const model = computeBoard(gather({ ledgerFile, prevFile }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
   if (cmd === "serve") {
-    stray(["ledger", "prev", "port", "interval", "spend-since"], ["build", "serve"]);
+    stray(VALUE_FLAGS, ["build", "serve"]);
     await serve({ ledgerFile });
     return;
   }

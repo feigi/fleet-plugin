@@ -247,11 +247,23 @@ const declareNoCi = has("declare-no-ci");
 // arg.mjs, so `--base --quiet` keeps #169's "--base needs a value"; still
 // above the first gh call, which is the next statement.
 //
-// The set is every name this file reads, `--workflow-file` included even
-// though its arg() call sits further down in discoverWorkflowFile()'s caller
-// — the sweep needs the NAME, not the read site. A name missing here refuses
-// a working invocation, which is worse than the bug being fixed.
-sweep(["pr", "base", "workflow", "workflow-file", "declare-no-ci", "quiet"]);
+// The set is every name this file reads. A name missing here refuses a
+// working invocation, which is worse than the bug being fixed.
+//
+// `--workflow-file` is read here rather than where its value is first needed,
+// which is the whole reason the read is a statement of its own: measured,
+// with it below the guards `--pr 42 --workflow-file --base main` refused with
+// `unexpected argument 'main'` — naming --base's innocent value instead of
+// the flag actually given wrong. Immediately above the sweep, not higher, so
+// it cannot take the `--declare-no-ci=` refusal off the boolean guard that
+// words it better.
+const workflowFileArg = arg("workflow-file");
+
+// Split out because stray() must be told which names take a VALUE and the
+// sweep must be told every name at all; the four here are the overlap, and
+// `--declare-no-ci`/`--quiet` are boolean.
+const VALUE_FLAGS = ["pr", "base", "workflow", "workflow-file"];
+sweep([...VALUE_FLAGS, "declare-no-ci", "quiet"]);
 
 // #463: sweep() above only ever refuses a `--`-prefixed token, so a bare or
 // single-dash stray rode along in silence — `--pr 42 basee main` ignored
@@ -262,7 +274,7 @@ sweep(["pr", "base", "workflow", "workflow-file", "declare-no-ci", "quiet"]);
 // this file's concern, but a value on any of THESE three is still skipped
 // rather than read as a stray — nothing here takes one that looks like `-1`,
 // this just keeps the set exact instead of assuming it.
-stray(["pr", "base", "workflow", "workflow-file"]);
+stray(VALUE_FLAGS);
 
 // --- PR facts -------------------------------------------------------------
 const prInfo = runJson(
@@ -380,7 +392,7 @@ function discoverWorkflowFile(dir, workflowName) {
   return null; // directory present, no workflow files in it — genuinely no CI
 }
 
-const workflowFile = arg("workflow-file") || discoverWorkflowFile(workflowsPath(), workflow);
+const workflowFile = workflowFileArg || discoverWorkflowFile(workflowsPath(), workflow);
 // No workflows at all, so this repo has no CI configured for ci-state to read.
 // That is its own verdict (`no-ci`), never the exit code reserved for "the
 // question could not be answered" — every way of failing to READ a workflow
