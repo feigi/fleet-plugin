@@ -61,7 +61,7 @@ __pycache__/
 # Local state flags
 .last-cleanup
 
-# Fleet runtime state — ledger + cockpit board.json/board.html, never committed
+# Fleet runtime state — the ledger, the cockpit board, the instrument pin; never committed
 .fleet/
 # Fleet worktrees claim-ticket.sh creates inside the checkout
 .worktrees/

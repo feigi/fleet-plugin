@@ -84,6 +84,36 @@ Refill = **new** agent, **new** name. `SendMessage` is still right for pinging a
 member for a report it owes, or resuming a truncated reply.
 See references/member-lifecycle.md.
 
+**You read your instruments out of a tree every member can write to — re-check
+them before every gate decision.** Per-member worktrees and `./agent-test`'s port
+derivation protect members from each other; neither protects the main checkout,
+which you run every gate probe out of and which any member can edit. Measured: a
+member edited two files there instead of in its worktree while the CI monitor was
+polling one of them every 120s and a live finisher was using it to decide a
+label. It caught itself; nothing in the fleet would have. That is the silent
+direction — a modified instrument raises no error, shows in no PR and leaves
+nothing in the ledger, and it still returns a verdict, just not necessarily the
+right one, so you have no reason to re-check a script you did not know had
+changed.
+
+- **Pin once**, at phase 0 step 0 below:
+  `~/.claude/skills/fleet/scripts/instruments.sh --pin`.
+- **Re-check before you act on any instrument reading** — a SHA acceptance, a CI
+  verdict, the reconcile, a reap, a label gate:
+  `~/.claude/skills/fleet/scripts/instruments.sh`. **Exit 0 is the only code that
+  lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
+  answer) both refuse: report what it printed and do NOT re-read the
+  instrument** — a guard that fails open on "could not look" protects nothing.
+- **Re-pin only after a change you made deliberately.** The mid-run tooling fix
+  below is the one legitimate writer. Re-pinning to clear a refusal you cannot
+  explain discards the check.
+
+It covers every tracked file under `skills/fleet` — the probes, the libraries
+they source, and these runbooks, which you also read from that tree. It does not
+cover refs, deliberately: `claim-ticket.sh` creates a branch per ticket and
+`reap.sh` deletes them in the ref store every worktree shares, so ordinary work
+moves refs several times a wave and a per-gate refusal on that is noise.
+
 ## Phase 0 — shortlist
 
 At start, and whenever the pool empties.
@@ -100,6 +130,13 @@ At start, and whenever the pool empties.
    prompt without two rules that had merged the day before. Silent by
    construction: stale text reads as authoritative, and the tier guard's own
    floor is re-derived from a stale `tier-outcomes.tsv` at the same time.
+
+   **Pin the instruments, after that fast-forward and before anything reads
+   them.** `~/.claude/skills/fleet/scripts/instruments.sh --pin` records what the
+   scripts and runbooks under `skills/fleet` say right now, which is what every
+   later gate compares against; the rule above says what its exit codes mean.
+   Pinning ahead of the fast-forward pins the superseded text and certifies it
+   for the rest of the run.
 
    **Launch the cockpit.** On the first phase-0 pass only:
    `node ~/.claude/skills/fleet/scripts/board.mjs serve --open &` in the
@@ -1901,8 +1938,12 @@ you superseded; a duplicated rule becomes a contradiction. Exit conditions go in
 section's first paragraph, never its last. Name the mechanism, or name who owns
 the step. Cut before you append.
 
-**Then.** Ledger line, save the rationale, one line to the maintainer. Live
-members hold the old text — re-brief only if it changes what they do *now*.
+**Then.** **Re-pin first** — `~/.claude/skills/fleet/scripts/instruments.sh
+--pin`. You just changed the instrument set under your own check, and this is the
+only edit that legitimately does; skip it and the next gate refuses on your own
+fix, which teaches you to ignore the refusal. Then the ledger line, save the
+rationale, one line to the maintainer. Live members hold the old text — re-brief
+only if it changes what they do *now*.
 
 ## Failure handling
 
