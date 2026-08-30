@@ -3031,11 +3031,12 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
 // main checkout's branch, the main checkout's path, and the stray scan. Each
 // shim picks its victim by a substring of that program's own text, so the other
 // three answer normally and deleting one `|| die` reds the case named after it
-// and nothing else (measured). The two PREDICATE lookups over the same listing,
-// `locked` and `unresolved_head`, are not covered here and cannot be: they
-// answer THROUGH awk's exit status, which `|| die` cannot separate from a real
-// answer. The sites are named by construct throughout, never by line: they have
-// moved every time this file was touched.
+// and nothing else (measured). The PREDICATE lookups over the same listing,
+// `locked` and `unresolved_head`, are covered in the #454 block at the end of
+// this file instead of here: they answer THROUGH awk's exit status, which
+// `|| die` cannot separate from a real answer, so their guard is a different
+// construct and takes its own cases. The sites are named by construct
+// throughout, never by line: they have moved every time this file was touched.
 test("a newline in the slug refuses in the script's own voice, not awk's (#243)", (t) => {
   // The trigger the ticket measured, and it needs no shim — but it is BSD awk's
   // behaviour rather than awk's. Measured: one-true-awk 20200816 rejects a
@@ -3164,4 +3165,116 @@ test("a healthy run says nothing on stderr and still releases (#243)", (t) => {
   assert.equal(second.code, 0, `a branch-only claim must still release: ${second.stderr}`);
   traceOnly(second.stderr, "both lookups empty is an answer, not a failure");
   assert.equal(second.json.released, true);
+});
+
+// --- #454: the two PREDICATE lookups over that same listing refuse too.
+//
+// `locked` and `unresolved_head` answer THROUGH awk's exit status — 0 the
+// condition holds, 1 it does not — so an awk that could not run lands above
+// both, and in condition position that is read as the FALSE answer: the
+// permissive one, in guards whose whole job is to refuse to answer permissively.
+// `|| die` cannot separate those, which is why the block above stops where it
+// does and why these two need the status captured by hand instead.
+//
+// Each helper is guarded once, INSIDE itself, so every call site is covered by
+// construction and no call site changed shape — the `elif` chain the stray arms
+// live in still reads exactly as before, and `set -e` still sees at each site
+// what it saw. One shim case per helper therefore pins both of that helper's
+// callers, and the acceptance case below pins what the guards must still let
+// through.
+test("a LOCK lookup that could not run refuses instead of releasing (#454)", (t) => {
+  // The arm #454 reproduced end to end: without the guard the lock blocker
+  // never fires, the run asks the tracker and goes on to attempt
+  // `git worktree remove`, and the receipt blames the lock rather than the tool
+  // that could not answer. `/^locked/` is this program's own lock test and is
+  // the only occurrence in the script (`grep -cF`), so every other awk here
+  // still answers and only this predicate fails.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  awkShim(r, "/^locked/");
+
+  const { code, json, stderr } = release(r, c);
+  // Exit 2 alone does not discriminate: without the guard the run reaches
+  // `git worktree remove`, fails on the lock and halts, which is also exit 2,
+  // and on that mutant this line, the stderr match and the artefact check all
+  // pass. Only the empty receipt and the untouched tracker below red on it, and
+  // they red independently of one another (measured, both).
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 1 a lock blocker carries");
+  assert.equal(json, null, "refused before any mutation, so there is no receipt to blame the lock in");
+  assert.match(stderr, /^release-ticket: .*locked/m,
+    "the script says which predicate could not answer, in the voice its callers grep for");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true },
+    "and `git worktree remove` is never reached");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("an unresolved-HEAD lookup that could not run refuses instead of guessing (#454)", (t) => {
+  // The sibling predicate, same shape, and the arm this ticket's title names:
+  // without the guard the run falls through to the branch-mismatch `else` and
+  // asserts the worktree "is not on" the claim's branch — about a HEAD that
+  // nothing could read. A stray with an unreadable HEAD is what reaches it:
+  // the porcelain then carries no branch line, so the branch lookup finds
+  // nothing and the suffix key answers instead. `nullhead` is this program's own
+  // null-OID flag and appears in no other awk this script runs.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+  awkShim(r, "nullhead");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not the exit 1 a blocked verdict carries");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /^release-ticket: .*HEAD/m,
+    "the script says which predicate could not answer, in the voice its callers grep for");
+  assert.equal(existsSync(c.wt), true, "the directory is untouched");
+  assert.ok(
+    git(r.w, "worktree", "list", "--porcelain").includes("/.worktrees/9-release-ticket\n"),
+    "and so is the registration — a refusal mutates nothing",
+  );
+  // Not `artefacts`: it reads the registration off the `branch` line, and the
+  // whole point of this fixture is a worktree whose porcelain has none.
+  assert.equal(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    true,
+    "the branch survives too",
+  );
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("with awk healthy both predicates still answer, true and false alike (#454)", (t) => {
+  // The acceptance half, and the false-positive control the two cases above
+  // cannot be: a guard that refused on ANY non-zero status would pass both of
+  // them and red nothing, because rc 1 is not a failure in either predicate —
+  // it is the FALSE answer, which every healthy run gets from at least one of
+  // them. All four answers are exercised here, each by the fixture that is the
+  // only shape producing it.
+  const r = repo(t);
+  const clean = claim(r.w, 9, "release-ticket");
+  const held = claim(r.w, 10, "held-claim");
+  const broken = claim(r.w, 11, "broken-head");
+  git(r.w, "worktree", "lock", held.wt, "--reason", "held by a review");
+  writeFileSync(join(r.w, ".git", "worktrees", "11-broken-head", "HEAD"), "garbage\n");
+
+  // FALSE from both: an ordinary claim is neither locked nor unreadable, so a
+  // guard that refuses on rc 1 takes this one down first.
+  const a = release(r, clean);
+  assert.equal(a.code, 0, `an ordinary release must still go through: ${a.stderr}`);
+  assert.equal(a.json.released, true);
+  assert.deepEqual(a.json.blockers, []);
+
+  // TRUE from `locked`, on the site the ticket reproduced.
+  const b = release(r, held);
+  assert.equal(b.code, 1, `a locked claim is still a blocked verdict, not a refusal: ${b.stderr}`);
+  assert.equal(b.json.released, false);
+  assert.match(b.json.blockers.join("\n"), /is locked — git worktree remove refuses a locked entry/);
+
+  // TRUE from `unresolved_head`, FALSE from `locked` in the same run — the arm
+  // whose whole reason to exist is that the `else` below it cannot tell "on
+  // another branch" from "git could not tell".
+  const unreadable = release(r, broken);
+  assert.equal(unreadable.code, 1,
+    `an unreadable HEAD is still a blocked verdict, not a refusal: ${unreadable.stderr}`);
+  assert.equal(unreadable.json.released, false);
+  assert.match(unreadable.json.blockers.join("\n"), /could not read its HEAD/);
 });
