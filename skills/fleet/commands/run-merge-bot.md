@@ -44,7 +44,7 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 ## The labelled head
 
-`ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — measured on #180, where it stayed put across a push and silently came to sit on a commit nobody had audited. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
+`ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — #180 is the record, and the query below is what reads it: `labeled ready-to-merge`, then commits and a `head_ref_force_pushed`, then `merged`, with no `unlabeled` anywhere between. The label stayed put while the head moved out from under it. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
 
 **Read the timeline before `gh pr update-branch` and before anything else that can move the head.** Your own rebase lands commits after the label by construction, so once you have rebased this read can no longer tell your commits from someone else's:
 
@@ -59,7 +59,7 @@ A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-m
 
 **Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head you read here: it is step 1's `pre`, and step 3 compares against it at the merge instant.
 
-Two things this deliberately does not do. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
+What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
 
 ## Per-PR sequence
 
