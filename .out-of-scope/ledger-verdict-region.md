@@ -1,9 +1,10 @@
 # ledger.mjs's Verdict Region
 
 `skills/fleet/scripts/ledger.mjs` computes a `verdict` — one of `already-filed`,
-`tracker-hit`, `soft-hit`, `clean`, `unverified` — from a nested ternary, with the
-domain existing only as string literals in that expression and in the assertions
-that check it.
+`tracker-hit`, `soft-hit`, `clean`, `unverified` — from two sites: a nested ternary
+that yields every value except `already-filed`, and the early-return literal in the
+exact-match short-circuit that emits that one. The domain exists only as string
+literals across those two sites and in the assertions that check them.
 
 Two proposals against this region are refused: **declaring the verdict domain as a
 constant** (an `ALLOWED_VERDICTS` array, an `isVerdict` predicate, a `switch`), and
@@ -27,11 +28,11 @@ reds `ledger.test.mjs` immediately:
 code: 'ERR_ASSERTION', actual: 'Soft-hit', expected: 'soft-hit'
 ```
 
-All five values are asserted across the suite. A typo, a rename, or a sixth value
-arriving without its tests fails at the point it matters. A `VERDICTS` constant
-would restate what those assertions already kill, and — because nothing constructs
-a verdict from outside this expression — would be a declaration no code path can
-violate without also failing a test.
+Every value in the domain is asserted across the suite. A typo, a rename, or a
+sixth value arriving without its tests fails at the point it matters. A
+`VERDICTS` constant would restate what those assertions already kill, and —
+because nothing constructs a verdict from outside this module — would be a
+declaration no code path can violate without also failing a test.
 
 This is the same ground on which the identical proposal against the sibling script
 was refuted and closed (**#824**): the invariant is enforced by executable tests
@@ -43,9 +44,10 @@ above re-measures it here rather than assuming it transfers.
 
 **Its load-bearing citation does not exist.** The if/else proposal justified itself
 by "the project rule against nested ternaries". Verified: `grep -rniE 'ternar'`
-over `CLAUDE.md`, `docs/` and the skills tree returns nothing. There is no such
-rule. That leaves readability alone, which is not a reason to touch a region whose
-evaluation order is load-bearing.
+over `CLAUDE.md`, `docs/` and the skills tree returns a single hit — a comment in
+`candidates.test.mjs` describing that test's own ternary arms, not a project rule.
+There is no such rule. That leaves readability alone, which is not a reason to
+touch a region whose evaluation order is load-bearing.
 
 **The presence guards are not obviously redundant.** The proposed
 `tracker.hits?.[0]?.score ?? 0` drops a `tracker.ok` re-test that the comment
@@ -65,11 +67,14 @@ its own merits, survived, and is already fixed in `e396577`.
 
 ## What would reopen this
 
-For the domain constant: a verdict value constructed **outside** this expression —
-another module emitting one, or a value read from a payload — at which point there
+For the domain constant: a verdict value constructed **outside this module** —
+another script emitting one, or a value read from a payload — at which point there
 is a boundary for a predicate to guard and the tests no longer cover the whole
-surface. For the restyling: a measured defect traced to the expression's shape, or
-an actual project rule about ternaries, in which case it applies to the tree rather
+surface. Outside the *ternary* is not the bar: the short-circuit already emits one
+there, as `grep -n 'verdict: *"' skills/fleet/scripts/ledger.mjs` shows.
+
+For the restyling: a measured defect traced to the expression's shape, or an
+actual project rule about ternaries, in which case it applies to the tree rather
 than to this file.
 
 Same trade refused in [review-pr-micro-refactors.md](review-pr-micro-refactors.md)

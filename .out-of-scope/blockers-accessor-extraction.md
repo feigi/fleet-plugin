@@ -56,10 +56,11 @@ accessor is the right shape.
 
 ## What would reopen this
 
-A **fifth** site deriving the array body, or a measured defect traced to the
-trailing-comma contract — a receipt that fails to parse, or an entry lost at a
-splice. Either makes the invariant's cost real rather than anticipated. A re-raise
-on duplication count alone is answered above.
+A **further** site deriving the array body — beyond the blocked checkpoint's trim
+and `die`'s splice, the only two derivations the analysis above leaves — or a
+measured defect traced to the trailing-comma contract — a receipt that fails to
+parse, or an entry lost at a splice. Either makes the invariant's cost real
+rather than anticipated. A re-raise on duplication count alone is answered above.
 
 ## Prior requests
 
