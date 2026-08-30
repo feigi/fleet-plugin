@@ -79,6 +79,42 @@ test("the `unknown` path warns that a missing refs/stash file is not an empty st
   assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
 });
 
+// #437 item 3: of the four `unknown` causes, the stash-object-missing one is
+// the one `git stash list` itself refuses to stay silent about. Measured, git
+// 2.50.1: `stash list` against a repo with `rm .git/objects/<stash-sha>`
+// prints nothing on stdout but exits 1 with stderr `fatal: bad object
+// refs/stash` — the other three causes (unreadable reflog, unreadable ref
+// file, malformed ref file) are rc 0 and silent on both streams. So this is
+// the fourth from the "three of four" sentence above, not a fifth thing.
+test("the `unknown` path says the missing-object cause names itself in git's own stderr", () => {
+  assert.match(
+    noUndoAudit(),
+    /The fourth — the stash object itself missing — is not silent: `git stash list`'s own stderr there already ends `fatal: bad object refs\/stash`/,
+  );
+});
+
+// #437 item 1: `git show refs/stash` recovers the entry in the states where
+// `ls -l`/`cat` come back with nothing — measured, git 2.50.1, against the
+// four states the ticket named (unreadable reflog; gc'd then unreadable
+// reflog; gc'd then reflog removed; reflog emptied with the ref intact): all
+// four resolve `git show refs/stash:f` to the stashed content, because the
+// command reaches the ref directly (loose or packed) and never reads the
+// reflog. It fails only where the ref FILE is the broken one — chmod 000, or
+// `printf 'not-a-sha' > refs/stash` — where it answers `invalid object name`
+// (or, unreadable, never even gets that far); measured that in both of those
+// the reflog is untouched and still names the stash SHA as its second field,
+// which `git show <that sha>` then resolves.
+test("the `unknown` path names git show refs/stash as the recovery when the file reads come back empty", () => {
+  assert.match(
+    noUndoAudit(),
+    /`git show refs\/stash` still resolves the ref whether loose or packed, printing `WIP on <branch>` plus the diff/,
+  );
+  assert.match(
+    noUndoAudit(),
+    /it fails only where the ref FILE is itself the broken one — unreadable, or holding text that is not a SHA — and there the SHA `cat` already printed, in the reflog's second field, is what `git show <that sha>` recovers instead/,
+  );
+});
+
 // #376 added a fourth cause whose `ls -l` signature is the OPPOSITE of the
 // three above — the ref file is gone rather than unreadable, so neither the
 // `----------` mode nor the `Permission denied` tell fires, and an operator
