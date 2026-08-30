@@ -30,6 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -170,6 +171,21 @@ test("an empty baseline refuses rather than matching an empty digest", (t) => {
   assert.match(r.stderr, /empty/);
 });
 
+test("an unreadable baseline refuses — unreadable is not unchanged", (t) => {
+  if (process.geteuid?.() === 0) return t.skip("root reads a mode-000 file regardless");
+  const root = repo(t);
+  pin(root);
+  // No mode restored afterwards: `repo`'s own cleanup unlinks it, which needs
+  // write on the directory and nothing at all on the file.
+  chmodSync(join(root, ".fleet", "instruments.sha"), 0o000);
+  // Status only, deliberately. The script reaches this through `[ -r "$base" ]`,
+  // which cannot tell absent from unreadable, so the stderr calls this one "no
+  // baseline" and prescribes `--pin` — the wrong label, filed separately.
+  // Asserting that text would pin the mislabel as the contract; asserting the
+  // refusal pins the half that is right.
+  assert.equal(run(root).status, 2);
+});
+
 test("outside a git checkout it refuses instead of certifying nothing", (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "instruments-bare-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -177,6 +193,12 @@ test("outside a git checkout it refuses instead of certifying nothing", (t) => {
   copyFileSync(SCRIPT, join(root, SET, "scripts", "instruments.sh"));
   const r = run(root, ["--pin"]);
   assert.equal(r.status, 2);
+  // The status alone does not reach this guard. Delete it and the run falls
+  // through to `git ls-files`, which fails on the same non-git path and dies
+  // with the same code — so the message is what tells the two apart, and the
+  // ABSENCE of the downstream one is what says execution stopped here.
+  assert.match(r.stderr, /not inside a git checkout/);
+  assert.doesNotMatch(r.stderr, /ls-files failed/);
 });
 
 test("a checkout with no tracked file under the set refuses to certify it", (t) => {
@@ -209,7 +231,7 @@ test("a bad argument refuses rather than falling through to a check", (t) => {
 test("an untracked dropping under the set is accepted", (t) => {
   const root = repo(t);
   pin(root);
-  writeFileSync(join(root, SET, "scripts", ".DS_Store"), " junk\n");
+  writeFileSync(join(root, SET, "scripts", ".DS_Store"), "\0junk\n");
   writeFileSync(join(root, SET, "scripts", "ci-state.mjs.swp"), "editor\n");
   const r = run(root);
   assert.equal(r.status, 0, r.stderr);

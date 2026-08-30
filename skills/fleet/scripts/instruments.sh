@@ -13,7 +13,9 @@
 # still returns a verdict; it may just not be the right one, and there is no
 # error, no diff in any PR and nothing in the ledger to say so. So this is a
 # DETECTION, not a prevention: pin the set's state at run start, re-check before
-# each gate decision, and refuse rather than read a changed instrument.
+# each gate decision, and refuse rather than read a changed instrument. It
+# compares the tree as it stands against the pin, so a change still present when
+# it runs is caught and one made and reverted between two runs of it is not.
 #
 # Exit 0 unchanged, 1 changed, 2 the question could not be answered.
 #
@@ -102,7 +104,7 @@ git -C "$root" ls-files -z -- "$set" > "$files" \
 # run at all leaves the second one hashing empty input and exiting 0, and the
 # empty-input digest then compares unequal and reads as CHANGED. That is exit 1
 # — a verdict about the tree — off a failure to look. reap.sh shipped this exact
-# bug against `git cherry` (#114) and it deleted branches.
+# bug against `git cherry` (#264) and it deleted branches.
 #
 # `xargs` exits 123 when `shasum` failed on any file, which is how a tracked
 # file deleted from the worktree arrives: as exit 2 naming it, not as a digest
