@@ -1036,6 +1036,130 @@ test("a SIBLING's unresolvable HEAD is not this claim's unresolvable HEAD", (t) 
   assert.equal(code, 1);
 });
 
+test("a MOVED worktree with an unresolvable HEAD blocks instead of releasing silently (#453)", (t) => {
+  // The two blindnesses of the same claim, arriving together. An unresolvable
+  // admin HEAD drops the `branch` line, so `wt` is empty; `git worktree move`
+  // changes the directory, so the `/<issue>-<slug>` suffix key is empty too.
+  // Both empty, the `[ -z "$wt" ] && [ -n "$stray" ]` block never runs at all
+  // and the script released the claim: branch deleted, label dropped,
+  // `released:true` at rc 0, over a directory holding staged work and no longer
+  // reachable as a repository. Either fault alone is already covered — a moved
+  // worktree still on its branch is found by `wt`, an unmoved broken one by the
+  // suffix key — so only the pair reaches this.
+  //
+  // The registry entry is what survives both, and the three fixture assertions
+  // below pin exactly that: the entry keeps its name across the move while the
+  // two porcelain keys the script used to rely on both go away. Without them a
+  // later change to `claim` or to git's own naming could leave this case
+  // passing for a reason that has nothing to do with the arm it is aimed at.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+  git(c.wt, "add", "precious.txt");
+  const moved = join(r.w, ".worktrees", "9-release-ticket-renamed");
+  git(r.w, "worktree", "move", c.wt, moved);
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "HEAD"), "garbage\n");
+
+  const listing = git(r.w, "worktree", "list", "--porcelain");
+  assert.deepEqual(readdirSync(join(r.w, ".git", "worktrees")), ["9-release-ticket"],
+    "fixture: the move does not rename the registry entry — that is the key this arm is now reached by");
+  assert.doesNotMatch(listing, /^branch refs\/heads\/fix\/9-release-ticket$/m,
+    "fixture: the corrupt HEAD took the branch line away, so `wt` is empty");
+  assert.doesNotMatch(listing, /^worktree .*\/9-release-ticket$/m,
+    "fixture: the move took the directory suffix away, so the suffix key alone is empty");
+
+  // BOTH modes. This script is dry-run by default and every other case in this
+  // family passes `--apply`, so a regression reaching only the default mode
+  // would ship green — and the dry run is the half an operator runs first.
+  for (const apply of [false, true]) {
+    const { code, json } = release(r, c, { apply });
+    assert.equal(json.released, false, `apply=${apply}: a claim git cannot identify is not released`);
+    assert.equal(json.applied, apply, `apply=${apply}: the receipt reports the mode it ran in`);
+    assert.equal(json.blockers.length, 1, `apply=${apply}: nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+    assert.match(json.blockers[0], /could not read its HEAD/, `apply=${apply}`);
+    assert.ok(json.blockers[0].includes(realpathSync(moved)),
+      `apply=${apply}: the blocker names the worktree where it is NOW, not where it was claimed: ${json.blockers[0]}`);
+    assert.equal(code, 1, `apply=${apply}: a blocked run is a verdict, not an unanswerable question`);
+  }
+
+  assert.equal(readFileSync(join(moved, "precious.txt"), "utf8"), "work that exists nowhere else\n",
+    "the staged work this ticket exists for is still on disk");
+  assert.equal(artefacts(r, c).branch, true, "the branch that work sits on is still alive");
+});
+
+test("a healthy claim in a MOVED worktree still releases (#453)", (t) => {
+  // The control the widened key must not break, and the failure mode of the
+  // alternative this fix was chosen over: a blanket refusal keyed on the
+  // listing rather than on this claim would block here, where there is nothing
+  // wrong at all. The worktree moved and is still on the claim's branch, so
+  // `wt` finds it and the stray block is gated shut regardless of what the
+  // widened key matched.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const moved = join(r.w, ".worktrees", "9-release-ticket-renamed");
+  git(r.w, "worktree", "move", c.wt, moved);
+
+  const { code, json } = release(r, c);
+  assert.deepEqual(json.blockers, [], "a moved worktree is not a broken one");
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.equal(existsSync(moved), false, "the release removed the worktree at its current path");
+  assert.equal(artefacts(r, c).branch, false, "and deleted the branch");
+});
+
+test("a MOVED sibling with an unresolvable HEAD does not block this claim's release (#453)", (t) => {
+  // The other false-refusal direction, and the reason the rejected alternative
+  // was rejected: a broken worktree somewhere in the listing must not refuse a
+  // claim that has nothing to do with it. The widened key is anchored on this
+  // claim's own registry entry, so the sibling's entry is never consulted.
+  //
+  // The sibling is 99 for the reason the sibling-lock and sibling-HEAD cases
+  // give: `worktree list --porcelain` orders lexicographically, so a `10-`
+  // sibling would have gone by before this claim's lines and a scan that
+  // wrongly answered off the sibling would never be exercised.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const s = claim(r.w, 99, "other-claim");
+  git(r.w, "worktree", "move", s.wt, join(r.w, ".worktrees", "99-other-claim-renamed"));
+  writeFileSync(join(r.w, ".git", "worktrees", "99-other-claim", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.deepEqual(json.blockers, [], "the broken worktree is the sibling's, and this claim is healthy");
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.equal(artefacts(r, s).branch, true, "the sibling's branch is untouched by this claim's release");
+});
+
+test("a claim whose registry entry git renamed is still found by the directory suffix (#453)", (t) => {
+  // Why the entry key is a UNION with the suffix key and not a replacement.
+  // The entry name is not guaranteed to be `<issue>-<slug>`: git derives it
+  // from the directory's basename at `worktree add` and appends a digit when
+  // that name is taken, so a worktree registered earlier under the same
+  // basename leaves this claim as `9-release-ticket1` — and the entry named
+  // `9-release-ticket` then points at the OTHER worktree entirely.
+  //
+  // The decoy sorts after the claim in the porcelain listing, so the suffix key
+  // reaches the claim first. Drop that key and the entry key answers off the
+  // decoy, whose HEAD is fine: the blocker becomes the branch-mismatch `else`
+  // naming the wrong directory, which is what this case is here to red.
+  const r = repo(t);
+  const decoy = join(r.w, ".worktrees", "zz-decoy", "9-release-ticket");
+  git(r.w, "worktree", "add", "-q", decoy, "-b", "decoy/9", "origin/main");
+  const c = claim(r.w, 9, "release-ticket");
+  assert.deepEqual(readdirSync(join(r.w, ".git", "worktrees")).sort(), ["9-release-ticket", "9-release-ticket1"],
+    "fixture: the decoy took the claim's entry name, so git suffixed the claim's");
+  assert.equal(readFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir"), "utf8").trim(),
+    `${realpathSync(decoy)}/.git`, "fixture: the unsuffixed entry names the decoy, not the claim");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+  assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
+    `the blocker names the claim's own worktree, not the decoy: ${json.blockers[0]}`);
+  assert.equal(code, 1);
+});
+
 test("a LOCKED stray with a corrupt HEAD still names the unlock", (t) => {
   // Arm precedence between the top two, which nothing else reaches. The one
   // other locked-stray fixture leaves HEAD readable and `rmSync`s the
