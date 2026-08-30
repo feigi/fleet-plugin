@@ -1191,6 +1191,77 @@ test("a claim whose registry entry git renamed is still found by the directory s
   assert.equal(code, 1);
 });
 
+/**
+ * A stranger that took this claim's registry entry name and was then MOVED.
+ *
+ * The one shape where the entry key reaches a worktree the suffix key never
+ * would: registering the decoy first gives it the entry `<issue>-<slug>` and
+ * suffixes the claim's to `<issue>-<slug>1`, and moving it takes the
+ * `/<issue>-<slug>` directory suffix away, so nothing left in the listing
+ * connects that path to this claim except a name git handed out first-come.
+ * Returns the claim.
+ */
+function movedEntryThief(r) {
+  const decoy = join(r.w, ".worktrees", "9-release-ticket");
+  git(r.w, "worktree", "add", "-q", decoy, "-b", "decoy/9", "origin/main");
+  git(r.w, "worktree", "move", decoy, join(r.w, ".worktrees", "00-moved-decoy"));
+  const c = claim(r.w, 9, "release-ticket");
+  assert.deepEqual(readdirSync(join(r.w, ".git", "worktrees")).sort(), ["9-release-ticket", "9-release-ticket1"],
+    "fixture: the decoy took the claim's entry name, so git suffixed the claim's");
+  assert.equal(readFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir"), "utf8").trim(),
+    `${realpathSync(join(r.w, ".worktrees", "00-moved-decoy"))}/.git`,
+    "fixture: the unsuffixed entry now names the MOVED decoy, whose basename the suffix key cannot match");
+  return c;
+}
+
+test("a MOVED entry thief does not displace the claim's own broken worktree (#453)", (t) => {
+  // The suffix key answers FIRST, and the entry key is a fallback. Shipped as a
+  // plain union with porcelain order deciding between them, the moved decoy
+  // sorts ahead of the claim and wins: the blocker named `00-moved-decoy` and
+  // the branch-mismatch cause, hiding both the claim's own directory and the
+  // real fault. Measured, on this fixture.
+  const r = repo(t);
+  const c = movedEntryThief(r);
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/, "the claim's own HEAD is the fault, not a branch mismatch");
+  assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
+    `the blocker names the claim's own worktree: ${json.blockers[0]}`);
+  assert.doesNotMatch(json.blockers[0], /00-moved-decoy/, "and never the stranger's");
+  assert.equal(code, 1);
+});
+
+test("a MOVED entry thief does not refuse a claim with nothing left to release (#453)", (t) => {
+  // The false refusal, and the one the suffix-key-first ordering alone does NOT
+  // fix: here the suffix key is empty and the entry key is the only one
+  // answering, so trusting it means blocking on a stranger sitting on its own
+  // healthy branch. Measured as a plain union: rc 1, `released:false`, blocked
+  // forever over `00-moved-decoy` — a claim with no worktree, no registration
+  // and nothing to hand-release, permanently refused. That is the same
+  // false-refusal class the sibling case above pins, reached through the entry
+  // key instead of a blanket listing scan, and the sibling case cannot catch it
+  // because its sibling's entry carries a different name.
+  //
+  // What makes the difference is corroboration: the decoy resolves cleanly to
+  // `decoy/9`, so git can tell whose it is and the answer is "not this
+  // claim's". Only an entry-key match whose HEAD git cannot read still blocks.
+  const r = repo(t);
+  const c = movedEntryThief(r);
+  git(r.w, "worktree", "remove", c.wt);
+  git(r.w, "worktree", "prune");
+  assert.deepEqual(readdirSync(join(r.w, ".git", "worktrees")), ["9-release-ticket"],
+    "fixture: nothing of this claim is left — the only entry is the decoy's, under this claim's name");
+
+  const { code, json } = release(r, c);
+  assert.deepEqual(json.blockers, [], "a worktree git resolves to somebody else's branch is not this claim's");
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.equal(git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes("decoy/9"), true,
+    "the decoy's branch is untouched");
+});
+
 test("a LOCKED stray with a corrupt HEAD still names the unlock", (t) => {
   // Arm precedence between the top two, which nothing else reaches. The one
   // other locked-stray fixture leaves HEAD readable and `rmSync`s the
