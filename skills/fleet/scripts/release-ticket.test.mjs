@@ -3031,11 +3031,12 @@ test("a missing json.sh is exit 2, before anything is deleted", (t) => {
 // main checkout's branch, the main checkout's path, and the stray scan. Each
 // shim picks its victim by a substring of that program's own text, so the other
 // three answer normally and deleting one `|| die` reds the case named after it
-// and nothing else (measured). The two PREDICATE lookups over the same listing,
-// `locked` and `unresolved_head`, are not covered here and cannot be: they
-// answer THROUGH awk's exit status, which `|| die` cannot separate from a real
-// answer. The sites are named by construct throughout, never by line: they have
-// moved every time this file was touched.
+// and nothing else (measured). The PREDICATE lookups over the same listing,
+// `locked` and `unresolved_head`, are covered in the #454 block at the end of
+// this file instead of here: they answer THROUGH awk's exit status, which
+// `|| die` cannot separate from a real answer, so their guard is a different
+// construct and takes its own cases. The sites are named by construct
+// throughout, never by line: they have moved every time this file was touched.
 test("a newline in the slug refuses in the script's own voice, not awk's (#243)", (t) => {
   // The trigger the ticket measured, and it needs no shim — but it is BSD awk's
   // behaviour rather than awk's. Measured: one-true-awk 20200816 rejects a

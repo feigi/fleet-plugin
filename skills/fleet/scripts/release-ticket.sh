@@ -325,10 +325,11 @@ fi
 # Every lookup ASSIGNED from the listing is guarded, for the reason the worktree
 # counter above is: left bare, an awk that could not answer ends the run on its
 # own diagnostic, with no line carrying the `release-ticket:` prefix a caller
-# greps stderr for. Not every lookup OVER it, though — `locked` and
-# `unresolved_head` below read the same `$wt_list` through awk and answer
-# THROUGH its exit status, where telling "could not run" from "no match" needs
-# more than a `|| die`.
+# greps stderr for. The lookups OVER it are guarded too, but never this way —
+# `locked` and `unresolved_head` below read the same `$wt_list` through awk and
+# answer THROUGH its exit status, where telling "could not run" from "no match"
+# needs more than a `|| die`. Each captures that status itself and refuses above
+# the range its answer occupies; `locked` carries why (#454).
 #
 # Neither #243 trigger is what makes these guards worth having, and both are
 # narrower than they look. A newline in <slug> reaches the branch lookup as a
@@ -340,9 +341,11 @@ fi
 # it as data (both measured, #582). What the guards actually answer for is an
 # awk that could not run AT ALL, which no locale or implementation rules out.
 #
-# Guarding cannot turn an empty answer into a refusal: none of these programs
-# has a non-zero `exit`, so matching nothing is status 0 (measured), and an
-# absent worktree stays the answer the checks below expect.
+# Guarding these ASSIGNMENTS cannot turn an empty answer into a refusal: none of
+# them has a non-zero `exit`, so matching nothing is status 0 (measured), and an
+# absent worktree stays the answer the checks below expect. The predicates are
+# the opposite case — their `exit` is how they answer at all — which is why the
+# same sentence cannot be written about them and why their guard is not this one.
 wt=$(printf '%s\n' "$wt_list" |
      awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}') ||
   die "could not read the worktree git listed for #$issue"
@@ -557,9 +560,31 @@ gone() {
 # The comparison fell to "not locked", which is the permissive answer in a guard
 # whose whole job is to refuse to answer permissively. ENVIRON does no such
 # processing.
+# And the status is CAPTURED rather than answered with, for the same reason one
+# rung down (#454). This predicate's answer IS awk's exit status — 0 locked, 1
+# not locked — so an awk that could not run lands above both and, called in a
+# condition as both callers must call it, is read as the FALSE answer: "not
+# locked" again, the permissive one. Measured through this script with awk
+# failing only for the program holding this lock test: the lock blocker never
+# fires, the run asks the tracker and reaches `git worktree remove`, and the
+# receipt then blames the lock rather than the tool that could not answer.
+# `set -e` catches none of it — it is ignored throughout a function invoked in a
+# condition, measured on /bin/sh (bash 3.2), /bin/dash, bash 5.3 and zsh — and
+# the `|| die` the assignments above use cannot serve here, because there is no
+# status left over to die on once the answer has consumed it.
+#
+# `&& return 0` ahead of the capture, not a bare pipeline and `rc=$?`: that makes
+# the pipeline a non-final AND-OR element, where `set -e` is ignored in EVERY
+# context, so a bare call outside a condition reaches the guard as well. Written
+# the bare way the same call dies on the pipeline before the guard runs at all,
+# and a fail-open would come back the moment a future caller stopped asking in a
+# condition (both measured, /bin/sh and /bin/dash).
 locked() {
   printf '%s\n' "$wt_list" |
-    P="$1" awk '/^worktree /{cur=(substr($0,10)==ENVIRON["P"])} cur&&/^locked/{f=1} END{exit !f}'
+    P="$1" awk '/^worktree /{cur=(substr($0,10)==ENVIRON["P"])} cur&&/^locked/{f=1} END{exit !f}' && return 0
+  awk_rc=$?
+  [ "$awk_rc" = 1 ] || die "could not read whether the worktree at $1 is locked for #$issue"
+  return 1
 }
 
 # Did git fail to resolve $1's HEAD, rather than find it genuinely detached or
@@ -589,13 +614,22 @@ locked() {
 # carrying the line — the genuine `--detach` fixtures print it too — but because
 # those carry a real sha, so `nullhead` never fires for them and the added
 # trigger has nothing left to flip.
+#
+# The status is captured for the reason `locked` gives, and the permissive
+# answer here is the one this arm exists to stop being given: an awk that could
+# not run reads as "HEAD resolves fine", the run falls through to the
+# branch-mismatch `else`, and the receipt asserts the worktree is not on the
+# claim's branch — about a HEAD nothing could read.
 unresolved_head() {
   printf '%s\n' "$wt_list" |
     P="$1" awk '
       /^worktree /{cur=(substr($0,10)==ENVIRON["P"])}
       cur&&/^HEAD 0+$/{nullhead=1}
       cur&&/^branch /{hasbranch=1}
-      END{exit !(nullhead && !hasbranch)}'
+      END{exit !(nullhead && !hasbranch)}' && return 0
+  awk_rc=$?
+  [ "$awk_rc" = 1 ] || die "could not read whether git can resolve the HEAD of the worktree at $1 for #$issue"
+  return 1
 }
 
 # Is anything at all occupying $1? Not the same question as `gone`, which asks
