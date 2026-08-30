@@ -938,13 +938,14 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
     // it would classify every dimension except the one that failed.
     dimensionsUnrun.push(...unrunEntries(review, d.key));
     return parallel(
-      // `fi` is bound for the scratch path below, and only for it. The fan-out
-      // under a dimension has two axes — findings here, lenses inside — so a
-      // path keyed on the dimension alone is shared by every refuter under it,
-      // not merely by one finding's lenses (#496). No stable per-finding id
-      // exists at this point in the loop to key on instead: `f` carries
-      // claim/file/line, and the `unv<N>` ids are assigned at report assembly,
-      // downstream of here.
+      // `fi` keys the refuter scratch path, and is bound for nothing else. The
+      // fan-out under a dimension nests two axes — the dimension's findings
+      // here, each finding's lenses within — so a path keyed on the dimension
+      // alone is shared by every refuter under it, not merely by one finding's
+      // lenses (#496). The fan-out index is the only per-finding key in scope:
+      // a finding arrives carrying claim/file/line and no id, and this workflow
+      // mints none for it either — the `unv<N>` labels a fix-applier cites are
+      // the consumer's, applied to the buckets this returns.
       (review && review.findings ? review.findings : []).map((f, fi) => () => {
         const n = verifiersFor(f.severity);
         // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
