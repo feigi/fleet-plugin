@@ -1130,6 +1130,37 @@ test("a MOVED sibling with an unresolvable HEAD does not block this claim's rele
   assert.equal(artefacts(r, s).branch, true, "the sibling's branch is untouched by this claim's release");
 });
 
+test("a broken worktree elsewhere does not refuse a claim that has NO worktree of its own (#453)", (t) => {
+  // The false refusal the rejected alternative actually carried, and the one
+  // the sibling case above cannot reach. That alternative blocked whenever `wt`
+  // and `stray` were both empty and ANY linked worktree showed the
+  // unresolvable-HEAD shape — so it fired precisely here, on a claim already
+  // released and pruned, over a worktree belonging to someone else. Measured:
+  // building that sketch onto this file's script reds this case and leaves the
+  // sibling case above green, because there `wt` is set and its gate never
+  // opens.
+  //
+  // A key anchored on this claim's own registry entry cannot reach the
+  // sibling's: the entry is gone with the worktree, so the lookup finds
+  // nothing and the orphan probe answers, exactly as it does with no broken
+  // worktree in the repo at all.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const s = claim(r.w, 99, "other-claim");
+  git(r.w, "worktree", "remove", c.wt);
+  git(r.w, "worktree", "prune");
+  git(r.w, "worktree", "move", s.wt, join(r.w, ".worktrees", "99-other-claim-renamed"));
+  writeFileSync(join(r.w, ".git", "worktrees", "99-other-claim", "HEAD"), "garbage\n");
+  assert.deepEqual(readdirSync(join(r.w, ".git", "worktrees")), ["99-other-claim"],
+    "fixture: this claim has no registry entry left, and the only broken one is the sibling's");
+
+  const { code, json } = release(r, c);
+  assert.deepEqual(json.blockers, [], "nothing of this claim's is broken — the unreadable HEAD is somebody else's");
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.equal(artefacts(r, s).branch, true, "the sibling's branch is untouched");
+});
+
 test("a claim whose registry entry git renamed is still found by the directory suffix (#453)", (t) => {
   // Why the entry key is a UNION with the suffix key and not a replacement.
   // The entry name is not guaranteed to be `<issue>-<slug>`: git derives it
