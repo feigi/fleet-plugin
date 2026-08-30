@@ -587,6 +587,10 @@ test("a worktree that is no longer on the branch blocks instead of releasing aro
   const { code, json } = release(r, c);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /is this claim's but is not on fix\/9-release-ticket/);
+  // The entry search belongs to the unresolved-HEAD arm alone (#455). Here git
+  // resolved the branch and said whose it is, so there is no entry to go
+  // looking for and nothing to search for it with.
+  assert.doesNotMatch(json.blockers[0], /entry with: grep/, "a resolved branch leaves no entry to hunt for");
   assert.equal(json.released, false);
   assert.equal(code, 1);
   assert.deepEqual(r.calls(), [], "and the label is never touched");
@@ -755,8 +759,8 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   // Anchored against the exact branch-mismatch phrase, not a shared word: this
-  // message and the `else`'s both end "... by hand", so a bare /by hand/ check
-  // would pass whichever one fired.
+  // message and the `else`'s both contain "... by hand", so a bare /by hand/
+  // check would pass whichever one fired.
   assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — git just could not tell");
   assert.doesNotMatch(json.blockers[0], /release it by hand/, "distinct message from the branch-mismatch else");
   assert.doesNotMatch(json.blockers[0], /prune/, "not the directory-gone remedy either");
@@ -1079,6 +1083,14 @@ test("a MOVED worktree with an unresolvable HEAD blocks instead of releasing sil
     assert.match(json.blockers[0], /could not read its HEAD/, `apply=${apply}`);
     assert.ok(json.blockers[0].includes(realpathSync(moved)),
       `apply=${apply}: the blocker names the worktree where it is NOW, not where it was claimed: ${json.blockers[0]}`);
+    // The half of #455 this path already answers, and the reason the entry
+    // search below it is not unconditional: the entry key READ the entry, so
+    // the message says its name outright. Handing the operator a search for
+    // something the script has in front of it would be the step backwards.
+    assert.match(json.blockers[0], /registry entry name 9-release-ticket\b/,
+      `apply=${apply}: the entry key names the entry it read: ${json.blockers[0]}`);
+    assert.doesNotMatch(json.blockers[0], /entry with: grep/,
+      `apply=${apply}: and never searches for what it already measured`);
     assert.equal(code, 1, `apply=${apply}: a blocked run is a verdict, not an unanswerable question`);
   }
 
@@ -1260,6 +1272,123 @@ test("a MOVED entry thief does not refuse a claim with nothing left to release (
   assert.equal(code, 0);
   assert.equal(git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes("decoy/9"), true,
     "the decoy's branch is untouched");
+});
+
+test("the unresolved-HEAD blocker hands over a search for the entry, never a name derived from the directory (#455)", (t) => {
+  // The one arm with no remedy to name — measured against a corrupt-HEAD entry,
+  // `git worktree repair` and `git worktree prune -v` both exit 0 with the entry
+  // still there, and `git worktree remove` with and without `--force` both exit
+  // 128 on `'.git' is not a .git file, error code 7`. So "by hand" stands, and
+  // WHICH entry is the only thing this arm has left to hand over.
+  //
+  // It must not derive that from the directory. git takes the entry name from
+  // the directory's basename at `worktree add`, appends a digit when the name is
+  // already taken, and never rewrites it on `git worktree move` — so a name
+  // built from the basename is a path the script never measured, which is the
+  // defect class #179 was filed to remove. This fixture makes all three faults
+  // bite at once: the moved thief holds `9-release-ticket`, so the basename
+  // resolves to the WRONG entry, and two siblings straddle the claim's path in
+  // both directions a substring match is wrong in — `-renamed`'s registered
+  // path EXTENDS the claim's, and the tail sibling's ENDS WITH it, being
+  // registered under a directory that carries the claim's whole path as a tail.
+  // `gitdir` holds exactly one line whose whole content is `<path>/.git`, so
+  // only whole-line equality lands on the claim's entry alone.
+  const r = repo(t);
+  const c = movedEntryThief(r);
+  git(r.w, "worktree", "add", "-q", `${c.wt}-renamed`, "-b", "sib/9", "origin/main");
+  git(r.w, "worktree", "add", "-q", join(r.w, ".worktrees", `tail${realpathSync(c.wt)}`), "-b", "tail/9", "origin/main");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
+  assert.deepEqual(
+    readdirSync(join(r.w, ".git", "worktrees")).sort(),
+    ["9-release-ticket", "9-release-ticket-renamed", "9-release-ticket1", "9-release-ticket2"],
+    "fixture: the basename `9-release-ticket` is the THIEF's entry, and this claim's own is `9-release-ticket1`",
+  );
+  assert.ok(
+    readFileSync(join(r.w, ".git", "worktrees", "9-release-ticket2", "gitdir"), "utf8").trim()
+      .endsWith(`${realpathSync(c.wt)}/.git`),
+    "fixture: the tail sibling's entry ends with the claim's own gitdir line, which a substring search cannot tell apart",
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+  assert.ok(json.blockers[0].includes(realpathSync(c.wt)), `the blocker names this claim's own worktree: ${json.blockers[0]}`);
+
+  // RUN what it printed rather than matching its text: an instruction that
+  // stops working must red here whatever it says, and one that still works
+  // must stay green however it is reworded.
+  const search = json.blockers[0].replace(/^[\s\S]*entry with: /, "");
+  assert.notEqual(search, json.blockers[0], `the blocker says how to find the entry: ${json.blockers[0]}`);
+  assert.deepEqual(
+    execFileSync("sh", ["-c", search], { encoding: "utf8" }).trim().split("\n")
+      .map((p) => p.split("/").slice(-2).join("/")),
+    ["9-release-ticket1/gitdir"],
+    `the search lands on this claim's entry and no other: ${search}`,
+  );
+});
+
+test("the entry search survives a `$` in the worktree path (#455)", (t) => {
+  // `<slug>` is caller-supplied — the same reason the `#243` case pins a newline
+  // in it — and this blocker is the one message in the script that hands over a
+  // SHELL COMMAND. Every other fixture here uses a plain alnum slug, which
+  // leaves the one thing a hand-over string can get wrong untested: interpolated
+  // into DOUBLE quotes, a `$` in the path expands AGAIN when the operator pastes
+  // it, so the search returns empty at rc 1 and reports no entry while the entry
+  // is right there. That is a silent wrong answer, not a visible error, and it
+  // is this arm's own defect one step further out — which is why it is pinned by
+  // RUNNING the emitted command rather than by matching its text.
+  //
+  // git's refname rules accept `$`, `"`, a backtick and `;` alike (measured, git
+  // 2.50.1), so this path is really reachable and not a hypothetical.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release$ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release$ticket", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+
+  const search = json.blockers[0].replace(/^[\s\S]*entry with: /, "");
+  assert.notEqual(search, json.blockers[0], `the blocker says how to find the entry: ${json.blockers[0]}`);
+  assert.deepEqual(
+    execFileSync("sh", ["-c", search], { encoding: "utf8" }).trim().split("\n")
+      .map((p) => p.split("/").slice(-2).join("/")),
+    ["9-release$ticket/gitdir"],
+    `the search lands on this claim's entry and no other: ${search}`,
+  );
+});
+
+test("the entry search treats a regex metacharacter in the path as a character (#455)", (t) => {
+  // What `-F` is for, and nothing else in this file discriminates it: every
+  // other fixture's path is alnum, hyphen and slash only, so grep's literal and
+  // regex readings never diverge and the flag could be dropped with the whole
+  // suite staying green (measured, both before and after the `-x` anchoring).
+  // `-x` does not cover this — it kills the sibling that EXTENDS this path, not
+  // the sibling a wildcard reaches.
+  //
+  // The dot is the metacharacter and `9-axb` is the sibling it reaches: under
+  // regex semantics `9-a.b/.git` whole-line-matches `9-axb/.git`, and the
+  // operator is handed two entries with nothing to choose between them.
+  const r = repo(t);
+  const c = claim(r.w, 9, "a.b");
+  git(r.w, "worktree", "add", "-q", join(r.w, ".worktrees", "9-axb"), "-b", "sib/9", "origin/main");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-a.b", "HEAD"), "garbage\n");
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 1);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+
+  const search = json.blockers[0].replace(/^[\s\S]*entry with: /, "");
+  assert.notEqual(search, json.blockers[0], `the blocker says how to find the entry: ${json.blockers[0]}`);
+  assert.deepEqual(
+    execFileSync("sh", ["-c", search], { encoding: "utf8" }).trim().split("\n")
+      .map((p) => p.split("/").slice(-2).join("/")),
+    ["9-a.b/gitdir"],
+    `the search lands on this claim's entry and no other: ${search}`,
+  );
 });
 
 test("a LOCKED stray with a corrupt HEAD still names the unlock", (t) => {

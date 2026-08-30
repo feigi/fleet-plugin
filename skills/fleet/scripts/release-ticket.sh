@@ -741,6 +741,40 @@ fi
 # Not a fail-open — an entry git could not read is one git drops from the
 # listing, and the listed-vs-registered count above refuses first.
 stray_own="is this claim's"
+# WHICH entry, for the unresolved-HEAD arm alone. That arm is the one fault with
+# no remedy to name — measured on a corrupt-HEAD entry, `git worktree repair`
+# and `git worktree prune -v` both leave it standing at rc 0, and `remove` with
+# and without `--force` both refuse at rc 128 — so "by hand" is the instruction
+# and the only thing left to hand over is where by hand goes.
+#
+# A search, not a name built from the directory. The entry name is git's own,
+# on the two measurements the block above already turns on. So `${stray##*/}`
+# would assert a path this script never read, which is the defect class #179
+# exists to remove, and after a move or behind an entry thief it resolves to
+# somebody else's entry outright.
+#
+# `-x`, not a substring: `gitdir` holds exactly one line whose whole content is
+# `<path>/.git`, so whole-line equality is the precise test and subsumes the
+# `/.git` anchor. A substring is wrong in BOTH directions — it hits a sibling
+# whose directory extends this one (measured: a search for a `9-x` worktree
+# also hits `9-x-renamed`'s entry) and one registered under a path that ends
+# with this one. `-F` because the subject is a path and its metacharacters are
+# not a pattern.
+#
+# SINGLE quotes around both paths, glob outside them, because this string is
+# pasted into a shell and a path is not shell text: under double quotes a `$`
+# in the path expands again when the operator runs it and the search comes back
+# EMPTY at rc 1 — no entry reported while the entry is right there, this arm's
+# own defect one step further out — and an unquoted `$wtroot/*/gitdir` splits
+# on a space. A literal `'` in the path still defeats this, acceptably: it
+# breaks the pasted command LOUDLY (`unexpected EOF`, rc 2, measured) rather
+# than answering wrongly.
+#
+# Empty on the entry key, which read `$wtroot/$issue-$slug/gitdir` itself and
+# puts that name in `$stray_own`: searching for what it already measured would
+# be the step backwards. Assigned before that key can answer, so `$stray` here
+# is the suffix key's or nothing.
+stray_find="; find that entry with: grep -Fxl '$stray/.git' '$wtroot'/*/gitdir"
 if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wtroot/$issue-$slug/gitdir" ]; then
   entry_wt=$(cat "$wtroot/$issue-$slug/gitdir") ||
     die "could not read the worktree registry entry $wtroot/$issue-$slug/gitdir for #$issue"
@@ -752,6 +786,7 @@ if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wtroot/$issue-$slug/gitdir" ]; then
   if [ -n "$entry_stray" ] && unresolved_head "$entry_stray"; then
     stray="$entry_stray"
     stray_own="holds this claim's registry entry name $issue-$slug"
+    stray_find=
   fi
 fi
 
@@ -797,7 +832,7 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   elif gone "$stray"; then
     block "worktree $stray $stray_own and its directory is gone — git worktree prune to clear the registration"
   elif unresolved_head "$stray"; then
-    block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand"
+    block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand$stray_find"
   else
     block "worktree $stray is this claim's but is not on $branch — release it by hand"
   fi
