@@ -251,6 +251,20 @@ test(
 // in board.test.mjs's `--ledger followed by another flag` case, incidental
 // cover a rename would remove, and a name added to the set later has exactly
 // one row obliged to carry it.
+// #468 AC-4: build now validates --port/--open's SHAPE (moved in board.mjs's
+// main(), tested malformed in board.test.mjs, which can drive that case
+// without this file's gh-stub rig because the guard dies before gather()'s
+// first gh read) — but never reads either VALUE. build has no server to bind
+// or browser to open, so a well-formed --port/--open behaves exactly as
+// before this fix: accepted, unused, board built and printed at exit 0. This
+// is the ruling's other half and the one a malformed-only suite cannot see —
+// it must NOT newly refuse a caller who typed the flag correctly.
+test("build: a well-formed --port/--open is accepted and simply unused, per the #468 ruling", () => {
+  const r = runBoard(["--port", "9999", "--open"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).spend.since, null);
+});
+
 test("every flag board.mjs accepts survives the unknown-flag sweep in one build", () => {
   const r = runBoard([
     "--prev", "nope.json",

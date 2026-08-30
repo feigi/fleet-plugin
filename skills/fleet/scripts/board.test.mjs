@@ -512,6 +512,34 @@ test("CLI: --ledger given an empty value dies rather than falling back to the de
   assert.match(r.stderr, /--ledger needs a value/);
 });
 
+// #468: argPort()/has("open") used to run only inside serve(), so build never
+// evaluated them — `build --port abc` and `build --open=1` were silently
+// IGNORED at exit 0 rather than refused, the one silent-default shape
+// ledger/prev/spend-since/interval (pinned above and in board-cli.test.mjs)
+// did not share. main() now calls both once, ahead of the build/serve
+// dispatch, so these refuse on build too, with the exact wording serve
+// already refuses them with. All three die before gather()'s first gh read
+// (the guard moved above the dispatch, not just above serve()'s own call),
+// so — like the --ledger/--prev cases above — none of these need the gh-stub
+// rig board-cli.test.mjs carries for the guards that fire mid-gather().
+test("CLI: build refuses a trailing --port, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port needs a value/);
+});
+
+test("CLI: build refuses a non-numeric --port, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", "abc"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
+});
+
+test("CLI: build refuses --open=1, same message as serve", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--open=1"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--open is a boolean flag, not --open=/);
+});
+
 // #169 review: a --port we cannot use falls back to 8123, and the bind error
 // used to name that substituted default as if the caller had chosen it — it
 // told someone who DID pass --port to "pass --port <n>", pointing them at a
