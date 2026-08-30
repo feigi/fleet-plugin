@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeSync } from "node:fs";
-import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "ci-state";
 
@@ -29,6 +29,7 @@ const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
+const stray = makeStray(die);
 
 // `--quiet` suppresses the diagnostic stream (command echoes, per-job/per-field
 // lines) and drops `jobs` and `missing` from the payload. The controller's CI
@@ -251,6 +252,17 @@ const declareNoCi = has("declare-no-ci");
 // — the sweep needs the NAME, not the read site. A name missing here refuses
 // a working invocation, which is worse than the bug being fixed.
 sweep(["pr", "base", "workflow", "workflow-file", "declare-no-ci", "quiet"]);
+
+// #463: sweep() above only ever refuses a `--`-prefixed token, so a bare or
+// single-dash stray rode along in silence — `--pr 42 basee main` ignored
+// `basee`/`main` and still compared against the default base, the same
+// fail-open harm #365 closed for a misspelled FLAG name. This file takes no
+// positional of its own, so any leftover token is one. `base`/`workflow`/
+// `workflow-file` are named so `--spend-since`-style negative values are not
+// this file's concern, but a value on any of THESE three is still skipped
+// rather than read as a stray — nothing here takes one that looks like `-1`,
+// this just keeps the set exact instead of assuming it.
+stray(["pr", "base", "workflow", "workflow-file"]);
 
 // --- PR facts -------------------------------------------------------------
 const prInfo = runJson(

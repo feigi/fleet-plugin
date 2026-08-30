@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import { makeDie, makeArg, makeHas, makeSweep } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
@@ -26,6 +26,7 @@ const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
+const stray = makeStray(die);
 // `ledger`/`prev`/`spend-since`/`port`/`interval` are all read with `||`/`??`
 // fallbacks, so a trailing flag previously substituted a default in total
 // silence — `--spend-since` with nothing after it silently widened the spend
@@ -509,13 +510,26 @@ async function main() {
   const cmd = process.argv[2];
   const ledgerFile = arg("ledger") || ".fleet/ledger.md";
 
+  // #463: sweep() above only refuses a `--`-prefixed token; a bare or
+  // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
+  // rode along in silence the same way. Below the `cmd` check, deliberately
+  // unlike sweep() above it: `board.mjs junk` is an unknown SUBCOMMAND, which
+  // the usage die below already names as such, and stray() has no business
+  // relitigating that with its own generic wording. `open` is left out of the
+  // value-flags list — it is boolean (has()), so it never has a value token
+  // to skip over.
   if (cmd === "build") {
+    stray(["ledger", "prev", "port", "interval", "spend-since"], ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
     const model = computeBoard(gather({ ledgerFile, prevFile: arg("prev") }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
-  if (cmd === "serve") { await serve({ ledgerFile }); return; }
+  if (cmd === "serve") {
+    stray(["ledger", "prev", "port", "interval", "spend-since"], ["build", "serve"]);
+    await serve({ ledgerFile });
+    return;
+  }
   die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open] [--spend-since <epoch-ms>]");
 }
 
