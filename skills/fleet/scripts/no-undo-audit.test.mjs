@@ -30,6 +30,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
 
@@ -695,7 +696,7 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
-// list empty at rc 0, show-ref rc 0 — but git answers in SEVEN lines there, and
+// list empty at rc 1, show-ref rc 0 — but git answers in SEVEN lines there, and
 // a bad `objects/info/alternates` both adds three more and puts a backslash in
 // them. That fixture is what makes the two hazards of `msg="$msg — $diag";
 // echo "$msg"` observable at once: unfolded newlines put git's text at column 0
@@ -712,6 +713,15 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
   chmodSync(obj, 0o644);
   writeFileSync(obj, "junk\n");
+
+  // The rc both comments name for this state, measured rather than asserted in
+  // prose (#494). `stash list` FAILS here, unlike the states it stays silent
+  // about — and the counting pipeline takes `wc`'s status, so the branch still
+  // fires and the rc is discarded. That discard is why a wrong rc in the prose
+  // above could sit here for as long as it did without a test noticing.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
+
   mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
   writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
 
@@ -725,6 +735,32 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   );
   const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
   assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
+});
+
+// Its own test, not a line inside the behaviour test above: `assert` aborts the
+// whole test function, so a prose drift ahead of `audit(c)` would pre-empt this
+// file's only coverage of the #304 fold and `printf` hazards, and report the
+// comment instead of the behaviour. Measured — with the fold dropped AND the
+// comment reverted, the fold regression went unnamed and only the comment was
+// reported.
+test("no-undo-audit.sh's own comment names the rc the fixture above measures", () => {
+  // Bounded to the paragraph under test, not matched against the whole file: an
+  // unbounded end lets a later, unrelated occurrence of the phrase satisfy this
+  // after the real clause is deleted. Measured — that false green reproduces
+  // against an unbounded match and reds here. The gutter comes off before
+  // `phrase`'s wrap-tolerant `\s+`, because the clause is hard-wrapped and it is
+  // the `#`, not whitespace, that sits at the break.
+  const paragraph = between(
+    stripHashGutter(readFileSync(SCRIPT, "utf8")),
+    "A stash object that is CORRUPT",
+    "`printf`, not `echo`",
+    "no-undo-audit.sh",
+  );
+  assert.match(
+    paragraph,
+    phrase("list empty at rc 1"),
+    "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
+  );
 });
 
 // The other half of #304, and the half a careless append breaks: the `stash

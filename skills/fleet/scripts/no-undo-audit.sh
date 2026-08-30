@@ -387,7 +387,7 @@ if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   #
   # `tr` because `$diag` is not one line. A stash object that is CORRUPT
   # rather than missing (`echo junk > .git/objects/<xx>/<rest>`) reaches this
-  # same branch — list empty at rc 0, show-ref rc 0 — and git says it in 7
+  # same branch — list empty at rc 1, show-ref rc 0 — and git says it in 7
   # lines, 10 with a bad `objects/info/alternates`. Unfolded they land at
   # column 0 in the audit's stderr, which is where only its own `$ git ...`
   # step headers belong. `$()` has already stripped the trailing newline, so
