@@ -938,7 +938,14 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
     // it would classify every dimension except the one that failed.
     dimensionsUnrun.push(...unrunEntries(review, d.key));
     return parallel(
-      (review && review.findings ? review.findings : []).map((f) => () => {
+      // `fi` is bound for the scratch path below, and only for it. The fan-out
+      // under a dimension has two axes — findings here, lenses inside — so a
+      // path keyed on the dimension alone is shared by every refuter under it,
+      // not merely by one finding's lenses (#496). No stable per-finding id
+      // exists at this point in the loop to key on instead: `f` carries
+      // claim/file/line, and the `unv<N>` ids are assigned at report assembly,
+      // downstream of here.
+      (review && review.findings ? review.findings : []).map((f, fi) => () => {
         const n = verifiersFor(f.severity);
         // 0 verifiers → unverified, NOT dropped. The suggestion still reaches
         // the controller; it just skips the adversarial pass HERE, which the
@@ -977,7 +984,18 @@ diff removed does not support a claim that the category is empty.
 ${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
-Scratch: ${scratch}/verify-${d.key}/`,
+Scratch: ${scratch}/verify-${d.key}/f${fi + 1}-l${i + 1}/
+Everything you write — mutants, fixtures, scratch repos — goes there and nowhere
+else. That directory is yours alone: every other refuter of this dimension, on
+this finding and on the others, is given a different one, so a generic filename
+cannot land on a sibling's. The checkout and any worktree are never write
+targets, though \`git show\`/\`git archive\` at a pinned ref read fine anywhere.
+Chain the directory change into the command, \`cd "$D" && git …\`, never
+\`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
+checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
+before \`git init\` it must NOT resolve to the repository, and a fresh scratch
+dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
+before any \`git commit\` it must equal your scratch path.`,
               { label: `verify:${d.key}`, phase: "Verify", effort: verifierEffort, schema: VERDICT_SCHEMA },
             ),
           ),
