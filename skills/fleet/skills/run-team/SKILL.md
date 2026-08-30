@@ -1320,6 +1320,17 @@ including a ruling you have since **withdrawn or reversed**. A withdrawal you
 recorded only in the ledger is undelivered: the member still holds the original
 and will act on it. Relay everything — reversals too — then dispatch.
 
+**An unanswered question from the member is an outbox item, and it blocks
+dispatch with the same weight as a ruling you have already made.** It does not
+feel like one — you have decided nothing yet, so the outbox reads empty — but a
+member waiting on you is a member that will push once you answer, and the SHA
+you are about to pin is exactly what that push moves. Measured on #488's run:
+`fix-pr-488` asked whether to add two pins, and the finisher was held until the
+member acknowledged the answer. That worked because the controller chose to
+hold, not because a rule required it. Answer it, or tell the member you are not
+ruling and it should proceed on its own default — either empties the outbox.
+What does not empty it is noticing the question and dispatching anyway.
+
 **A final report is not proof the member stopped.** Observed twice: a ruling
 relayed after dispatch produced a new commit mid-audit, and a fix-applier that
 reported "nothing outstanding" resumed on a ledger-only withdrawal and was
@@ -1422,6 +1433,18 @@ a minute apart showed *different* mutants, so a member's report and any single
    where they exist.
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
+
+**Once the label is on, take it off before you approve any push.** The label is a
+verdict on the tree the finisher read, and a GitHub label does not follow the
+branch — on #180 it survived a push and came to sit on a commit nobody had
+audited. Remove `ready-to-merge` *first*, then approve: removing the artifact the
+merge bot gates on is the reliable stop, where messaging the bot races it, and a
+label has been observed holding until after an abort message arrived. Then
+dispatch a **fresh** finisher against the new head; the first audit does not
+transfer, since it verified a different tree. The merge bot refuses that head on
+its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
+guard — but its refusal costs a wave and leaves the label lying, which is yours
+to clear either way.
 
 A halt at step 1 has exactly two causes, reading identical from a bare SHA
 mismatch. Give the finisher this verbatim, so it derives the cause itself
@@ -1956,6 +1979,7 @@ only if it changes what they do *now*.
 | Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
+| Merge bot finds the head moved after `ready-to-merge` was applied | `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
 | Member silent or truncated | `SendMessage` to ping or resume — same unit of work |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |

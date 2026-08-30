@@ -42,6 +42,25 @@ Genuinely unclear → **hold**. Waiting costs a label; merging out of order cost
 
 Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one is sloppy. Do the work, report which evidence settled it.
 
+## The labelled head
+
+`ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — #180 is the record, and the query below is what reads it: `labeled ready-to-merge`, then commits and a `head_ref_force_pushed`, then `merged`, with no `unlabeled` anywhere between. The label stayed put while the head moved out from under it. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
+
+**Read the timeline before `gh pr update-branch` and before anything else that can move the head.** Your own rebase lands commits after the label by construction, so once you have rebased this read can no longer tell your commits from someone else's:
+
+```bash
+gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
+  -q '.[] | select((.event == "labeled" and .label.name == "ready-to-merge")
+        or .event == "committed" or .event == "head_ref_force_pushed")
+      | .event + " " + (.sha // .label.name // "")'
+```
+
+A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **Refuse: report `head-moved-after-label-#<pr>` and stop on that PR.** Leave the label where it is — you audited nothing and removing another member's verdict is not yours to do. What clears it is a **fresh** finisher against the new head; the first audit does not transfer, because it verified a different tree.
+
+**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 compares against it at the merge instant and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge.
+
+What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
+
 ## Per-PR sequence
 
 For each labeled PR clearing the hold rule, lowest first:
@@ -137,6 +156,8 @@ For each labeled PR clearing the hold rule, lowest first:
 
 3. Green → re-check immediately before merging (`gh pr view <pr> --json labels,reviewDecision`): the label must still be there (it can be pulled while CI runs) and `reviewDecision` must not be `CHANGES_REQUESTED`. Either fails → skip, say so, move on.
 
+   **Re-derive the head here too, not only the label.** `gh pr view <pr> --json headRefOid -q .headRefOid` must equal the `pre` you recorded at **The labelled head**, or the `post` your own step-1 rebase produced. **Any third SHA is a push that landed while you waited on CI, and no CI gate above can see it**: `ci-state.mjs` selects the run whose `headSha` equals the *current* PR head (`skills/fleet/scripts/ci-state.mjs`, the `r.headSha === prHead` filter), so a member's push plus its own green run satisfies every check in step 2 while the audit behind the label belongs to a tree that is gone. Refuse it the same way — `head-moved-after-label-#<pr>`, label untouched, a fresh finisher against the new head.
+
    **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
 
    ```bash
@@ -190,7 +211,7 @@ Measured over one three-merge wave: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / label-drop-failed-#X / rebase-fallback-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / rebase-fallback-#X / blocked after the pass.
 
 ## No-undo audit (before every rebase)
 
