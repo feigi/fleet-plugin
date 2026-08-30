@@ -30,6 +30,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
 
@@ -720,16 +721,6 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   // above could sit here for as long as it did without a test noticing.
   const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
   assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
-  // Comment markers off before the wrap, then the wrap: the clause lives in a
-  // hard-wrapped comment, so a match against the raw bytes reads a rewrap as a
-  // regression. Measured — flattening whitespace alone leaves `rc # 1` and
-  // false-alarms on a paragraph that says exactly what it said before.
-  const scriptProse = readFileSync(SCRIPT, "utf8").replace(/^[ \t]*#[ \t]?/gm, "").replace(/\s+/g, " ");
-  assert.match(
-    scriptProse,
-    /list empty at rc 1/,
-    "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
-  );
 
   mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
   writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
@@ -744,6 +735,32 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   );
   const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
   assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
+});
+
+// Its own test, not a line inside the behaviour test above: `assert` aborts the
+// whole test function, so a prose drift ahead of `audit(c)` would pre-empt this
+// file's only coverage of the #304 fold and `printf` hazards, and report the
+// comment instead of the behaviour. Measured — with the fold dropped AND the
+// comment reverted, the fold regression went unnamed and only the comment was
+// reported.
+test("no-undo-audit.sh's own comment names the rc the fixture above measures", () => {
+  // Bounded to the paragraph under test, not matched against the whole file: an
+  // unbounded end lets a later, unrelated occurrence of the phrase satisfy this
+  // after the real clause is deleted. Measured — that false green reproduces
+  // against an unbounded match and reds here. The gutter comes off before
+  // `phrase`'s wrap-tolerant `\s+`, because the clause is hard-wrapped and it is
+  // the `#`, not whitespace, that sits at the break.
+  const paragraph = between(
+    stripHashGutter(readFileSync(SCRIPT, "utf8")),
+    "A stash object that is CORRUPT",
+    "`printf`, not `echo`",
+    "no-undo-audit.sh",
+  );
+  assert.match(
+    paragraph,
+    phrase("list empty at rc 1"),
+    "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
+  );
 });
 
 // The other half of #304, and the half a careless append breaks: the `stash
