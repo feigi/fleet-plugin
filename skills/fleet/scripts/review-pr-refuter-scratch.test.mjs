@@ -77,14 +77,14 @@ const RENDER = new Function(...SCOPE, "return `" + refuterTemplate() + "`");
 // One refuter's prompt. `finding` and `lens` are the two fan-out indices; every
 // other argument is fixed, so any difference between two renders is caused by
 // the axis the caller varied and by nothing else.
-function render({ finding = 0, lens = 0, scratch = "/scr", dimension = "correctness" } = {}) {
+function render({ finding = 0, lens = 0, scratch = "/scr" } = {}) {
   return RENDER(
     7,
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
     { path: "/snap", head: "abc1234" },
     null,
     scratch,
-    { key: dimension },
+    { key: "correctness" },
     lens,
     finding,
     () => "READ RULES",
@@ -129,6 +129,22 @@ test("the same lens on two findings of one dimension gets different scratch dire
   );
 });
 
+// AC-1, the mapping rather than the difference. The two pins above assert only
+// that two renders DIFFER, and swapping the two indices at the interpolation
+// satisfies that exactly as well as the correct mapping — measured on this file
+// before this pin existed: the swap kept every test green. The paths do stay
+// distinct, so the collision the ticket names is still prevented; what breaks is
+// the prompt's own account of its path, which tells the refuter that `f<N>` is
+// the finding and `l<N>` the lens. One literal keeps that account true.
+test("the scratch path's f segment is the finding index and its l segment the lens index", () => {
+  assert.equal(
+    scratchLine(render({ finding: 2, lens: 0 })),
+    "Scratch: /scr/verify-correctness/f3-l1/",
+    "the refuter scratch path no longer maps the finding index to `f<N>` and the lens index to `l<N>` — the roles are " +
+      "swapped or the segments renamed, and the prompt's sentence about what its own path means is now false",
+  );
+});
+
 // AC-1's exact wording: the two prompts must differ in the scratch path "and not
 // only in the lens line". Deleting the lens line from both and re-comparing is
 // that sentence as an assertion — without it, a prompt whose only per-refuter
@@ -146,6 +162,13 @@ test("the scratch path is what differs, not merely the lens line", () => {
 // AC-3. The fix ADDS a level; it does not relocate. A path that became unique by
 // moving out of the run's provisioned root would satisfy every difference pin
 // while putting refuter writes somewhere the run never provisioned and never cleans.
+//
+// A prefix alone does not settle "stays under": `/run/scratch/../elsewhere/`
+// carries the prefix and resolves outside it, so the escape is asserted
+// separately. The template branches on neither index today, which makes the six
+// iterations identical; they are kept because the assertion is what would have
+// to hold if it ever did branch, and a loop that already covers both axes costs
+// nothing to keep and is the wrong thing to be re-adding afterwards.
 test("every refuter's scratch path stays under the run's provisioned scratch root", () => {
   for (const finding of [0, 1, 4]) {
     for (const lens of [0, 1]) {
@@ -156,8 +179,33 @@ test("every refuter's scratch path stays under the run's provisioned scratch roo
         `the refuter scratch path for finding ${finding} lens ${lens} left the provisioned scratch root — ` +
           "the run provisions that root per run, and a path outside it is neither isolated across runs nor cleaned up",
       );
+      assert.doesNotMatch(
+        line,
+        /\/\.\.(\/|$)/,
+        `the refuter scratch path for finding ${finding} lens ${lens} climbs out of the provisioned root with a ` +
+          "`..` segment — it keeps the root as a prefix while resolving somewhere the run never provisioned",
+      );
     }
   }
+});
+
+// AC-2, the write ban — the rule that keeps a refuter out of the checkout, and
+// the one the rest of this file's rules exist to make safe. ONE contiguous regex
+// for the reason the cd rule below states, applied to the rule that needs it
+// most: measured on this file before this pin existed, deleting "and nowhere
+// else", deleting the checkout sentence, and splicing an exception between them
+// each left every test green. The span runs from "nowhere else" through "never
+// write targets" into the `git show` exemption, so the exemption bounds the tail
+// instead of leaving it open — the read permission the test below asserts in its
+// own right is what closes this rule.
+test("the rendered refuter prompt bans writing outside the scratch dir in one unbroken clause", () => {
+  assert.match(
+    render(),
+    /goes\s+there\s+and\s+nowhere\s+else\..{0,200}The\s+checkout\s+and\s+any\s+worktree\s+are\s+never\s+write\s+targets,\s+though\s+`git\s+show`\/`git\s+archive`\s+at\s+a\s+pinned\s+ref\s+read\s+fine\s+anywhere/s,
+    "the workflow's refuter prompt no longer confines refuter writes to the scratch directory in one clause — either " +
+      "half is gone, or a sentence between them carves an exception into the rule, which is how commit 020d6ea " +
+      "reached the checkout during the PR #488 fix-applier run",
+  );
 });
 
 // AC-2. Same terms as the two hand-dispatch briefs, which
@@ -211,16 +259,24 @@ test("the rendered refuter prompt still orders a real run, and still permits rea
 // every rendering pin stays green if the call site stops varying them — the
 // "a lift tests a COPY" failure. These two expressions are what make the
 // interpolated names the real fan-out indices.
+//
+// Both patterns are anchored to a line start that no `/` precedes, for two
+// separate reasons. `stripComments` blanks whole-line comments only, so an
+// unanchored match reads a real regression back out of a TRAILING comment on the
+// line that carries it — one syntactic form is not the class. And the leading
+// `\s*` the anchor would normally take is wrong here: the findings fan-out is
+// chained onto an expression, so its `.map(` never begins its own line. Optional
+// whitespace inside the argument lists keeps a reformat of the same call green.
 test("the verify fan-out really binds the two indices the prompt interpolates", () => {
   assert.match(
     CODE,
-    /\.map\(\(f, fi\) =>/,
+    /^[^\n/]*\.map\(\(f,\s*fi\)\s*=>/m,
     "the findings fan-out no longer binds a per-finding index — the prompt may still interpolate `fi`, but it would " +
       "resolve to something the fan-out does not vary, and every finding of a dimension would collide again",
   );
   assert.match(
     CODE,
-    /Array\.from\(\{ length: n \}, \(_, i\) =>/,
+    /^[^\n/]*Array\.from\(\{\s*length:\s*n\s*\},\s*\(_,\s*i\)\s*=>/m,
     "the lens fan-out no longer binds a per-lens index — same failure on the other axis",
   );
 });
