@@ -9,7 +9,8 @@
 // under it, across findings as much as across lenses. Keying on the lens index
 // alone closes one axis and leaves the other: finding A's lens 1 and finding B's
 // lens 1 are two refuters of the same dimension, which is exactly what the
-// ticket's first acceptance criterion forbids. Both axes are pinned below.
+// ticket's criterion on two refuters of one dimension forbids. Both axes are
+// pinned here.
 //
 // WHY THESE PINS RENDER RATHER THAN GREP. The criterion is stated as a property
 // of two RENDERED prompts — they must differ in the scratch path, and not only
@@ -21,12 +22,18 @@
 // refused for every specifier, `require` undefined inside the Workflow
 // sandbox), which is why every pin in this directory lifts rather than imports.
 //
-// THE CEILING, and the reason `pinsCallSite` below exists. Rendering supplies
+// THE CEILING, and the reason a call-site pin is here at all. Rendering supplies
 // the indices from THIS file, so a render-only pin stays green if the call site
-// stops varying them — the "a lift tests a COPY" failure. The call-site pin
-// closes it by asserting the two fan-out expressions really bind the two names
-// the template interpolates. What remains uncovered is the agent's own
-// obedience: nothing here proves a refuter writes where it was told to.
+// stops varying them — the "a lift tests a COPY" failure. The pin over the
+// fan-out expressions closes that by asserting they really bind the two names
+// the template interpolates.
+//
+// Two ceilings remain. Extraction takes the FIRST template matching the anchor,
+// so a second refuter prompt added elsewhere in the file would go unpinned while
+// these stay green — the same first-vs-last hazard measured on this directory's
+// function lifts, where the lift reads the first declaration and JS runs the
+// last. And nothing here reaches the agent's own obedience: these pins settle
+// what a refuter is TOLD, never where it actually writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -125,7 +132,7 @@ test("the same lens on two findings of one dimension gets different scratch dire
 // AC-1's exact wording: the two prompts must differ in the scratch path "and not
 // only in the lens line". Deleting the lens line from both and re-comparing is
 // that sentence as an assertion — without it, a prompt whose only per-refuter
-// text is `Lens N` would satisfy the test above through the lens line alone.
+// text is `Lens N` would satisfy the two difference pins through the lens line alone.
 test("the scratch path is what differs, not merely the lens line", () => {
   const strip = (p) => p.replace(/^Lens .*$/m, "");
   assert.notEqual(
@@ -137,8 +144,8 @@ test("the scratch path is what differs, not merely the lens line", () => {
 });
 
 // AC-3. The fix ADDS a level; it does not relocate. A path that became unique by
-// moving out of the run's provisioned root would satisfy every test above and
-// put refuter writes somewhere the run never provisioned and never cleans.
+// moving out of the run's provisioned root would satisfy every difference pin
+// while putting refuter writes somewhere the run never provisioned and never cleans.
 test("every refuter's scratch path stays under the run's provisioned scratch root", () => {
   for (const finding of [0, 1, 4]) {
     for (const lens of [0, 1]) {
@@ -201,7 +208,7 @@ test("the rendered refuter prompt still orders a real run, and still permits rea
 });
 
 // The lift's ceiling, closed. Rendering binds `i` and `fi` from this file, so
-// every pin above stays green if the call site stops varying them — the
+// every rendering pin stays green if the call site stops varying them — the
 // "a lift tests a COPY" failure. These two expressions are what make the
 // interpolated names the real fan-out indices.
 test("the verify fan-out really binds the two indices the prompt interpolates", () => {
