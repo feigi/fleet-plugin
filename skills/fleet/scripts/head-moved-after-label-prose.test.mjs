@@ -104,7 +104,10 @@ test("the normal path — label applied, head unchanged — is stated as proceed
 test("the pre-rebase head is recorded here, since step 3 compares against it and nothing rebuilds it", () => {
   const s = labelledHead();
   assert.match(s, phrase("Record the head before you rebase"));
-  assert.match(s, /gh pr view <pr> --json headRefOid -q \.headRefOid/);
+  // `phrase`, not a raw regex: this command sits in prose, not in a fenced
+  // block, so a hard-wrap can put a newline between any two of its words.
+  // Measured — the raw form reddened on a same-wording rewrap of the section.
+  assert.match(s, phrase("gh pr view <pr> --json headRefOid -q .headRefOid"));
   assert.match(s, phrase("on an already-current PR it is simply the head you merge"));
 });
 
@@ -135,7 +138,7 @@ test("step 3 says why no CI gate above it can see a push that landed during the 
   // the head comparison looks like a duplicate of the CI binding and gets cut.
   const s = step3();
   assert.match(s, phrase("no CI gate above can see it"));
-  assert.match(s, /`r\.headSha === prHead` filter/);
+  assert.match(s, phrase("`r.headSha === prHead` filter"));
 });
 
 // #493 AC-3, and the reason it reaches into run-team: the merge bot's refusal
