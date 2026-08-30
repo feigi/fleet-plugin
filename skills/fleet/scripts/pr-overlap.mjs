@@ -11,7 +11,7 @@
 
 import { execFileSync } from "node:child_process";
 import { basename, dirname } from "node:path";
-import { makeDie, makeArg, makeSweep } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "pr-overlap";
 
@@ -26,6 +26,7 @@ const NAME = "pr-overlap";
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const sweep = makeSweep(die);
+const stray = makeStray(die);
 
 const a = arg("a");
 const b = arg("b");
@@ -38,6 +39,10 @@ if (!a || !b) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
 // a usage dump to the offending token. Below the usage guard so the usage
 // text still wins where it is the better answer; above the first gh call.
 sweep(["a", "b"]);
+// #463: sweep() above only refuses a `--`-prefixed token; a bare or
+// single-dash one (`--a 5 --b 6 stray`) rode along in silence the same way.
+// This file takes no positional, so any leftover token is a stray.
+stray(["a", "b"]);
 
 function changedFiles(pr) {
   console.error(`$ gh pr diff ${pr} --name-only`);

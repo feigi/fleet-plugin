@@ -272,6 +272,151 @@ for (const { script, argv, stray } of STRAYS) {
   });
 }
 
+// ── #463: a bare or single-dash token nothing reads ──────────────────────
+//
+// The matrix above pins sweep()'s bound: it only ever refuses a
+// `--`-prefixed token, by design (its own comment, and #365's triage ruling
+// that board.mjs's `build`/`serve` must stay out of reach). A bare word or a
+// single dash — the likelier typo, since the caller plainly meant a flag —
+// rode through in total silence: `ci-state.mjs --pr 42 basee main` computed
+// a real, wrong verdict at exit 0/1 against the default base, the same
+// fail-open harm as #365 reached from the positional side. makeStray()
+// closes it because it knows which names take a value, so `-1` on
+// `--spend-since` is not mistaken for one of these.
+//
+// board.mjs is the one row here with a positional of its own, so its cases
+// pair a valid subcommand with an EXTRA stray, rather than replacing the
+// subcommand — an unrecognised subcommand on its own (`board.mjs junk`) is
+// the pre-existing "usage: board.mjs build|serve" die and not this fix's
+// business, per board.mjs's own comment on where stray() is called from.
+// Its second row makes that extra token a DECLARED positional, which is the
+// only shape reaching stray()'s `usedPositional` gate; the token is `serve`
+// after `build` rather than the reverse, because a guard deleted from under
+// the reverse spelling starts a real server and hangs spawnSync instead of
+// failing.
+//
+// staleness.mjs queries git, not gh, so its row's receipt assertion is
+// vacuous and the named token is what discriminates: with the guard deleted
+// the script runs on to a git call that also exits 2, and only the wording
+// tells the two apart.
+const STRAY_POSITIONALS = [
+  { script: "board", argv: ["build", "--ledger", "x", "junk"], stray: "junk" },
+  { script: "ci-state", argv: ["--pr", "42", "basee", "main"], stray: "basee" },
+  { script: "ci-state", argv: ["--pr", "42", "-basee", "main"], stray: "-basee" },
+  { script: "diff-stats", argv: ["--pr", "42", "stray"], stray: "stray" },
+  { script: "pr-overlap", argv: ["--a", "5", "--b", "6", "stray"], stray: "stray" },
+  { script: "board", argv: ["build", "--ledger", "x", "serve"], stray: "serve" },
+  { script: "staleness", argv: ["--path", "README.md", "--present", "needle", "JUNKTOKEN"], stray: "JUNKTOKEN" },
+];
+
+for (const { script, argv, stray } of STRAY_POSITIONALS) {
+  test(`${script}.mjs refuses the stray positional '${stray}' by name, before any query`, () => {
+    const { dir, receipt } = stubGhBin();
+    const r = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
+      { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+    );
+    assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stderr}`);
+    assert.ok(
+      r.stderr.includes(stray),
+      `${script}.mjs refused without naming ${stray}: ${r.stderr}`,
+    );
+    if (existsSync(receipt)) assert.fail(`${script}.mjs reached gh before refusing ${stray}: ${readFileSync(receipt, "utf8")}`);
+  });
+}
+
+// The unit-level rules stray() itself must hold, driven against a throwaway
+// consumer the same way runSweep() drives sweep() — the real call sites are
+// pinned by the STRAY_POSITIONALS matrix and by board.test.mjs's serve-side
+// sibling ("CLI: serve refuses a stray positional the same way build does").
+// Neither half names a position in the file, deliberately: the runSweep()
+// half of this sentence used to say "above", and was wrong.
+function runStray(argv, valueFlags, positionals) {
+  const dir = mkdtempSync(join(tmpdir(), "arg-stray-unit-"));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { makeDie, makeStray } from "./arg.mjs";',
+    'const die = makeDie("probe");',
+    `makeStray(die)(${JSON.stringify(valueFlags)}, ${JSON.stringify(positionals)});`,
+    'console.log("ok");',
+    "",
+  ].join("\n"));
+  return spawnSync(process.execPath, [join(dir, "run.mjs"), ...argv], { encoding: "utf8" });
+}
+
+// The pin the naive widenings both fail, named in #463's own AC: a value that
+// looks like a flag (`startsWith("-")` would refuse it) on a name stray()
+// was TOLD takes one.
+test("stray() accepts a negative value on a declared value flag", () => {
+  const r = runStray(["--spend-since", "-1"], ["spend-since"], []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^ok$/m);
+});
+
+test("stray() accepts the one declared positional and refuses an unrelated extra token", () => {
+  const ok = runStray(["build"], [], ["build", "serve"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  const extra = runStray(["build", "junk"], [], ["build", "serve"]);
+  assert.equal(extra.status, 2, extra.stderr);
+  assert.match(extra.stderr, /unexpected argument 'junk'/);
+});
+
+// The case the test above cannot reach, and the only one that exercises the
+// `usedPositional` gate at all: `junk` is refused by the ordinary
+// unknown-token path, which holds just as well with the gate gone. Measured
+// — dropping `!usedPositional` from makeStray() left arg.test.mjs,
+// board.test.mjs and board-cli.test.mjs entirely green, while
+// `board.mjs serve --port 0 build` went from exit 2 to exit 0 with the
+// server actually starting and `build` silently swallowed.
+test("stray() refuses a second declared positional, not only an unrelated token", () => {
+  const r = runStray(["build", "serve"], [], ["build", "serve"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unexpected argument 'serve'/);
+});
+
+// survived[4]'s gap, at the level it is reachable: `valueFlags` naming exactly
+// the flags that take a value is stated only in prose at each call site, and
+// the dangerous drift — a BOOLEAN flag's name listed there — has no failure of
+// its own. It buys the token after that flag an unconditional skip, so the very
+// stray this guard exists to catch becomes invisible. Both halves are asserted
+// because the hiding half alone stays green under a guard that skips
+// everything.
+test("stray() skips the token after any name in valueFlags — so a boolean flag listed there hides a stray", () => {
+  const hidden = runStray(["--quiet", "junk"], ["quiet"], []);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  const caught = runStray(["--quiet", "junk"], [], []);
+  assert.equal(caught.status, 2, caught.stderr);
+  assert.match(caught.stderr, /unexpected argument 'junk'/);
+});
+
+test("stray() refuses a bare positional on a script that declares none", () => {
+  const r = runStray(["junk"], [], []);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unexpected argument 'junk'/);
+});
+
+test("stray() refuses a single-dash token the same way as a bare word", () => {
+  const r = runStray(["-basee"], [], []);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unexpected argument '-basee'/);
+});
+
+test("stray() refuses a stray that arrives BEFORE a known value flag, not only after", () => {
+  const r = runStray(["junk", "--pr", "42"], ["pr"], []);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unexpected argument 'junk'/);
+});
+
+// `--`-prefixed tokens are never this guard's business, known or not — that
+// is sweep()'s bound, unchanged (#463's own comment on makeStray). Run
+// without sweep() ahead of it, same as runSweep()'s own probe convention, so
+// this proves stray()'s OWN bound rather than sweep() having caught it first.
+test("stray() leaves a `--`-prefixed token alone, even an unknown one", () => {
+  const r = runStray(["--bogus"], [], []);
+  assert.equal(r.status, 0, r.stderr);
+});
+
 // The other half, and the one the ticket calls worse than the bug: a sweep
 // that refuses a working invocation. Each script's own suite drives its full
 // known set through its own stub rig (ci-state.test.mjs, board-cli.test.mjs);

@@ -1,5 +1,5 @@
 // Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has(),
-// sweep().
+// sweep(), stray().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
@@ -115,6 +115,13 @@ export function makeHas(die) {
 // above refuses `--base --other` outright, so there is nothing to skip over and
 // no need to know here which names take a value.
 //
+// #463: that leftover class — a bare or single-dash token nothing reads,
+// `ci-state.mjs --pr 42 basee main` or `-basee` — is not this function's fix,
+// and stays out of scope here for the same reason board.mjs's subcommands are:
+// this sweep still refuses ONLY a `--`-prefixed token, unchanged. makeStray()
+// below covers it instead, because unlike this sweep it DOES need to know
+// which names take a value, to skip over one instead of refusing it.
+//
 // The `=` form is looked up by NAME alone: `--base=main` stays arg()/has()'s to
 // refuse in their own wording, while `--basee=main` is caught here. The token
 // is then echoed verbatim rather than the parsed name, so the refusal quotes
@@ -151,6 +158,59 @@ export function makeSweep(die) {
       if (a.startsWith("--") && !known.includes(a.slice(2).split("=")[0])) {
         die(`unknown flag ${a} — accepted: ${known.map((k) => `--${k}`).join(", ")}`);
       }
+    }
+  };
+}
+
+// #463: sweep() above only ever refuses a `--`-prefixed token — deliberately,
+// per its own comment, because staying ignorant of which names take a value
+// is what keeps it from having to refuse board.mjs's `build`/`serve` or any
+// flag's own value. That leaves the OTHER half of "was a flag given that
+// nothing reads?" open: a bare word or a single dash, which sweep's
+// `startsWith("--")` check was never going to catch — `ci-state.mjs --pr 42
+// basee main` runs the compare against the DEFAULT base and reports a real,
+// wrong verdict at exit 0/1, the same fail-open harm as #365 reached from the
+// positional side rather than the misspelled-flag side. `-basee` is the
+// likelier typo of the two, since the caller plainly meant a flag.
+//
+// Widening sweep's own bound past `--` cannot fix this — #365's triage ruling
+// is explicit that the sweep must never refuse tokens outside it, and
+// board.mjs's subcommands are exactly the shape a widened sweep would catch
+// by mistake. Nor can `startsWith("-")`: it refuses a legitimate negative
+// value such as `--spend-since -1`, which arg() accepts today. The only way
+// to tell a stray from a value is to know, by NAME, which flags take one —
+// so unlike every guard above, this one takes that set as an argument
+// instead of discovering it from argv.
+//
+// `positionals` is the script's own declared grammar for the one slot ahead
+// of its flags — board.mjs's `build`/`serve`; every other caller passes
+// none. Only the FIRST non-flag token can fill that slot; a second one, or
+// any positional at all on a script that declares none, is refused by name.
+//
+// Every `--`-prefixed token here is assumed to have already survived sweep()
+// — callers run this after it, same ordering — so a name outside
+// `valueFlags` is a known boolean flag and consumes nothing, and a name
+// inside it takes the next token as its value unconditionally, whatever that
+// token looks like (that unconditional skip is what lets `--spend-since -1`
+// through instead of reading `-1` as a stray positional). An `=`-joined form
+// (`--pr=5`) is never treated as carrying a value to skip over: has()/arg()
+// already refuse that form, by name, for every flag `valueFlags` lists,
+// wherever the script reads it — before or after this call.
+export function makeStray(die) {
+  return function stray(valueFlags, positionals = []) {
+    const argv = process.argv.slice(2);
+    let usedPositional = false;
+    for (let i = 0; i < argv.length; i++) {
+      const a = argv[i];
+      if (a.startsWith("--")) {
+        if (!a.includes("=") && valueFlags.includes(a.slice(2))) i++;
+        continue;
+      }
+      if (!usedPositional && positionals.includes(a)) {
+        usedPositional = true;
+        continue;
+      }
+      die(`unexpected argument '${a}'`);
     }
   };
 }
