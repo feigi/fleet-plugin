@@ -79,6 +79,58 @@ test("the `unknown` path warns that a missing refs/stash file is not an empty st
   assert.match(noUndoAudit(), /A missing `refs\/stash` file is not an empty stash: `git gc` packs it into `packed-refs`/);
 });
 
+// Whitespace-normalized so a same-words reflow of the audit paragraph cannot
+// false-red these two pins: they hold the two longest spans in this file, and
+// the paragraph is currently one unwrapped line, so a future hard-wrap landing
+// inside a span is the live hazard. Scoped to the #437 pins below on purpose —
+// converting the file's other pins is a separate change.
+const flat = (s) => s.replace(/\s+/g, " ");
+
+// #437 item 3: of the four `unknown` causes, the stash-object-missing one is
+// the one `git stash list` itself refuses to stay silent about. Measured, git
+// 2.50.1: `stash list` against a repo with `rm .git/objects/<stash-sha>`
+// prints nothing on stdout but exits 1 with stderr `fatal: bad object
+// refs/stash`, while the other three causes (unreadable ref file, unreadable
+// reflog, absent ref beside a live reflog) are each rc 0 with no stdout and no
+// stderr. The doc names the cause rather than counting to it: this paragraph
+// already spends "the fourth" on the absent-ref/live-reflog case, so an
+// ordinal here would bind the same word to two members of the same set.
+test("the `unknown` path says the missing-object cause names itself in git's own stderr", () => {
+  assert.match(
+    flat(noUndoAudit()),
+    /The missing-object cause is the one git is not silent about: `git stash list`'s own stderr there already ends `fatal: bad object refs\/stash`/,
+  );
+});
+
+// #437 item 1: `git show refs/stash` recovers the entry in the states where
+// `ls -l`/`cat` come back with nothing — measured, git 2.50.1, over the twelve
+// states {staged, unstaged} x {loose, packed} x {reflog unreadable, reflog
+// blank, reflog removed}: `git show refs/stash` printed the `WIP on <branch>`
+// label in all twelve, but printed NO diff in all six staged ones, because the
+// stash tree equals the index-commit parent and the default `--cc` combined
+// diff suppresses every hunk. `git stash show -p refs/stash` printed the hunk
+// in all twelve, so it is the command the doc names for the content.
+// Both fail only where the ref FILE is the broken one — chmod 000 (`git show`
+// rc 128 `ambiguous argument`, `git stash show -p` rc 1) or `printf
+// 'not-a-sha' > refs/stash` (both, after `ignoring broken ref`) — and measured
+// in both of those the reflog is untouched and still names the stash SHA as
+// its second field, where `git stash show -p <that sha>` printed the hunk
+// staged or not, while `git show <that sha>` again printed none when staged.
+test("the `unknown` path names git show refs/stash as the recovery when the file reads come back empty", () => {
+  assert.match(
+    flat(noUndoAudit()),
+    /`git show refs\/stash` still resolves the ref whether loose or packed, printing the `WIP on <branch>` label/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /it prints no diff beside that label when the stashed change was staged before `git stash`, so read the content with `git stash show -p refs\/stash`, which prints the hunk either way/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /Both fail only where the ref FILE is itself the broken one — unreadable, or holding text that is not a SHA — and there the SHA `cat` already printed, in the reflog's second field, is what `git stash show -p <that sha>` recovers instead/,
+  );
+});
+
 // #376 added a fourth cause whose `ls -l` signature is the OPPOSITE of the
 // three above — the ref file is gone rather than unreadable, so neither the
 // `----------` mode nor the `Permission denied` tell fires, and an operator
