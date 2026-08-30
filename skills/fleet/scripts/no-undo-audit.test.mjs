@@ -720,8 +720,13 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   // above could sit here for as long as it did without a test noticing.
   const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
   assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
+  // Comment markers off before the wrap, then the wrap: the clause lives in a
+  // hard-wrapped comment, so a match against the raw bytes reads a rewrap as a
+  // regression. Measured — flattening whitespace alone leaves `rc # 1` and
+  // false-alarms on a paragraph that says exactly what it said before.
+  const scriptProse = readFileSync(SCRIPT, "utf8").replace(/^[ \t]*#[ \t]?/gm, "").replace(/\s+/g, " ");
   assert.match(
-    readFileSync(SCRIPT, "utf8").replace(/\s+/g, " "),
+    scriptProse,
     /list empty at rc 1/,
     "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
   );
