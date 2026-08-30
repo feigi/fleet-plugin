@@ -655,3 +655,16 @@ test("CLI: serve --open (bare) still reads as present, not swallowed by the `=` 
   const opened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open"]), { ...serveOpts(), timeout: 2000 });
   assert.match(opened.stderr, /open http:\/\/localhost:\d+\/ failed/, opened.stderr);
 });
+
+// #463: sweep() only ever refuses a `--`-prefixed token, so a bare stray
+// alongside a valid subcommand rode through in silence the same way
+// `board.mjs build junk` did — this pins the `serve` side of that fix.
+// stray() sits at the top of the `serve` branch, ahead of serve()'s own
+// port/interval/open reads, so this dies before ever calling listen() —
+// same reasoning as every guard above it in this file, and why serveOpts()'s
+// 20s timeout is a backstop here rather than the expected path.
+test("CLI: serve refuses a stray positional the same way build does", () => {
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "junk"]), serveOpts());
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unexpected argument 'junk'/);
+});
