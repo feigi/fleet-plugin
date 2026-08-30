@@ -3195,6 +3195,11 @@ test("a LOCK lookup that could not run refuses instead of releasing (#454)", (t)
   awkShim(r, "/^locked/");
 
   const { code, json, stderr } = release(r, c);
+  // Exit 2 alone does not discriminate: without the guard the run reaches
+  // `git worktree remove`, fails on the lock and halts, which is also exit 2,
+  // and on that mutant this line, the stderr match and the artefact check all
+  // pass. Only the empty receipt and the untouched tracker below red on it, and
+  // they red independently of one another (measured, both).
   assert.equal(code, 2, "unanswerable is exit 2, not the exit 1 a lock blocker carries");
   assert.equal(json, null, "refused before any mutation, so there is no receipt to blame the lock in");
   assert.match(stderr, /^release-ticket: .*locked/m,
@@ -3267,8 +3272,9 @@ test("with awk healthy both predicates still answer, true and false alike (#454)
   // TRUE from `unresolved_head`, FALSE from `locked` in the same run — the arm
   // whose whole reason to exist is that the `else` below it cannot tell "on
   // another branch" from "git could not tell".
-  const d = release(r, broken);
-  assert.equal(d.code, 1, `an unreadable HEAD is still a blocked verdict, not a refusal: ${d.stderr}`);
-  assert.equal(d.json.released, false);
-  assert.match(d.json.blockers.join("\n"), /could not read its HEAD/);
+  const unreadable = release(r, broken);
+  assert.equal(unreadable.code, 1,
+    `an unreadable HEAD is still a blocked verdict, not a refusal: ${unreadable.stderr}`);
+  assert.equal(unreadable.json.released, false);
+  assert.match(unreadable.json.blockers.join("\n"), /could not read its HEAD/);
 });

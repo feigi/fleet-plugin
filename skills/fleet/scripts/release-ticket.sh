@@ -573,17 +573,19 @@ gone() {
 # the `|| die` the assignments above use cannot serve here, because there is no
 # status left over to die on once the answer has consumed it.
 #
-# `&& return 0` ahead of the capture, not a bare pipeline and `rc=$?`: that makes
-# the pipeline a non-final AND-OR element, where `set -e` is ignored in EVERY
-# context, so a bare call outside a condition reaches the guard as well. Written
-# the bare way the same call dies on the pipeline before the guard runs at all,
-# and a fail-open would come back the moment a future caller stopped asking in a
-# condition (both measured, /bin/sh and /bin/dash).
+# `&& return 0` ahead of the status test, not a bare pipeline whose status the
+# next line reads: that makes the pipeline a non-final AND-OR element, where
+# `set -e` is ignored in EVERY context, so a bare call outside a condition
+# reaches the guard as well. Written the bare way that same call never reaches
+# the guard at all — `set -e` kills the script on the pipeline itself, silently,
+# carrying awk's own status out instead of this guard's exit 2 and its
+# `$NAME`-prefixed diagnostic. Not a fail-open: the bare form answers nothing,
+# it dies unattributably (measured, /bin/sh and /bin/dash, awk exiting 2, 5
+# and 127).
 locked() {
   printf '%s\n' "$wt_list" |
     P="$1" awk '/^worktree /{cur=(substr($0,10)==ENVIRON["P"])} cur&&/^locked/{f=1} END{exit !f}' && return 0
-  awk_rc=$?
-  [ "$awk_rc" = 1 ] || die "could not read whether the worktree at $1 is locked for #$issue"
+  [ $? = 1 ] || die "could not read whether the worktree at $1 is locked for #$issue"
   return 1
 }
 
@@ -615,7 +617,7 @@ locked() {
 # those carry a real sha, so `nullhead` never fires for them and the added
 # trigger has nothing left to flip.
 #
-# The status is captured for the reason `locked` gives, and the permissive
+# The status is tested for the reason `locked` gives, and the permissive
 # answer here is the one this arm exists to stop being given: an awk that could
 # not run reads as "HEAD resolves fine", the run falls through to the
 # branch-mismatch `else`, and the receipt asserts the worktree is not on the
@@ -627,8 +629,7 @@ unresolved_head() {
       cur&&/^HEAD 0+$/{nullhead=1}
       cur&&/^branch /{hasbranch=1}
       END{exit !(nullhead && !hasbranch)}' && return 0
-  awk_rc=$?
-  [ "$awk_rc" = 1 ] || die "could not read whether git can resolve the HEAD of the worktree at $1 for #$issue"
+  [ $? = 1 ] || die "could not read whether git can resolve the HEAD of the worktree at $1 for #$issue"
   return 1
 }
 
