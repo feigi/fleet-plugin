@@ -365,9 +365,57 @@ main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit
 #
 # The directory name is the one part of the claim that does not move, so match
 # on it — by exact suffix, not a pattern, since <slug> is caller-supplied.
+#
+# Except that it DOES move: `git worktree move` renames the directory, and the
+# suffix stops matching (measured, git 2.50.1). On its own that is a miss, not a
+# fault — a moved worktree still on this branch is found by `wt` above. The two
+# together are the fault: a claim whose HEAD git cannot resolve loses its
+# `branch` line, so `wt` is empty, and if it was ALSO moved then `stray` is empty
+# too — both blindnesses from the same claim, and the arms below never run. The
+# script then released it: branch deleted, label dropped, `released:true` at rc
+# 0, over a directory holding staged work and no longer reachable as a
+# repository (measured, on the fixture this file's suite now carries).
+#
+# So key on the registry ENTRY as well, which move does not touch: git names the
+# entry from the directory's basename at `worktree add` and keeps that name
+# afterwards, rewriting only the entry's `gitdir` file to follow the directory
+# (both measured, git 2.50.1). `gitdir` holds `<worktree path>/.git`, and the
+# path git prints in the porcelain is that file's content with `/.git` stripped —
+# echoed VERBATIM, with no canonicalisation of its own (measured: a hand-written
+# `gitdir` naming a path through a symlink is printed back through the symlink),
+# which is what lets the comparison below be byte equality against the listing
+# rather than a second opinion about the same path.
+#
+# A UNION with the suffix key, never a replacement. The entry name is not
+# guaranteed to be `<issue>-<slug>`: git appends a digit when that name is
+# already taken (measured — a second worktree with the same basename registered
+# as `9-x1`), and then only the suffix key can find the claim. Matching an entry
+# named `<issue>-<slug>` narrows nothing that the suffix match had not already
+# admitted, either: both keys select on a directory basename of `<issue>-<slug>`,
+# so an unrelated worktree that happens to carry that basename was already a
+# candidate here and this adds no new ambiguity.
+#
+# Through the ENVIRON, not `-v`, for the reason `locked` gives: this key is a
+# path read off disk, and a `-v` assignment processes escape sequences in it, so
+# a repo under a directory with a backslash in its name would arrive mangled and
+# the comparison would fall to the permissive answer — no match, and back to the
+# silent release this exists to stop. The suffix key stays on `-v`: it is built
+# from argv, which the header's `#243` note already accounts for.
+#
+# Absent entry, unreadable entry, or one pointing somewhere git is not listing:
+# `entry` is empty or matches nothing and the suffix key alone answers, exactly
+# as before. Not a fail-open — an entry git could not read is one git drops from
+# the listing, and the listed-vs-registered count above refuses first.
+entry=""
+if [ -r "$wtroot/$issue-$slug/gitdir" ]; then
+  entry=$(cat "$wtroot/$issue-$slug/gitdir") ||
+    die "could not read the worktree registry entry $wtroot/$issue-$slug/gitdir for #$issue"
+  entry=${entry%/.git}
+fi
 stray=$(printf '%s\n' "$wt_list" |
-        awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
-          if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}') ||
+        E="$entry" awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
+          if (n>1 && (substr(p, length(p)-length(d)+1) == d ||
+                      (ENVIRON["E"] != "" && p == ENVIRON["E"]))) {print p; exit}}') ||
   die "could not scan git's listing for a stray worktree for #$issue"
 
 has_branch=false
