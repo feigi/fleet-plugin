@@ -57,7 +57,7 @@ gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
 
 A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **Refuse: report `head-moved-after-label-#<pr>` and stop on that PR.** Leave the label where it is — you audited nothing and removing another member's verdict is not yours to do. What clears it is a **fresh** finisher against the new head; the first audit does not transfer, because it verified a different tree.
 
-**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head you read here: it is step 1's `pre`, and step 3 compares against it at the merge instant.
+**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 compares against it at the merge instant and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge.
 
 What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
 

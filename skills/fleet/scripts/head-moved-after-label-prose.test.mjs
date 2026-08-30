@@ -97,6 +97,17 @@ test("the normal path — label applied, head unchanged — is stated as proceed
   );
 });
 
+// Step 3's comparison has an operand, and this section is the only place that
+// captures it. Step 1's `pre` exists only where step 1 runs, so a PR already
+// current has none — the instruction has to stand on its own read, and it has
+// to say the read happens BEFORE the rebase or it captures the wrong SHA.
+test("the pre-rebase head is recorded here, since step 3 compares against it and nothing rebuilds it", () => {
+  const s = labelledHead();
+  assert.match(s, phrase("Record the head before you rebase"));
+  assert.match(s, /gh pr view <pr> --json headRefOid -q \.headRefOid/);
+  assert.match(s, phrase("on an already-current PR it is simply the head you merge"));
+});
+
 // The other ACCEPT-side half: the two things the gate deliberately does NOT
 // answer. A hand-added label reads clean here (run-team owns reviewer-only),
 // and a head rebased by an abandoned earlier pass refuses on purpose rather
