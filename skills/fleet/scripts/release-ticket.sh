@@ -365,6 +365,22 @@ main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit
 #
 # The directory name is the one part of the claim that does not move, so match
 # on it — by exact suffix, not a pattern, since <slug> is caller-supplied.
+#
+# Except that it DOES move: `git worktree move` renames the directory, and the
+# suffix stops matching (measured, git 2.50.1). On its own that is a miss, not a
+# fault — a moved worktree still on this branch is found by `wt` above. The two
+# together are the fault: a claim whose HEAD git cannot resolve loses its
+# `branch` line, so `wt` is empty, and if it was ALSO moved then `stray` is empty
+# too — both blindnesses from the same claim, and the arms below never run. The
+# script then released it: branch deleted, label dropped, `released:true` at rc
+# 0, over a directory holding staged work and no longer reachable as a
+# repository (measured, on the fixture this file's suite now carries).
+#
+# The registry ENTRY is what survives a move, and it is the only handle left on
+# such a claim — but an entry is a NAME, and a name cannot prove ownership, so
+# it answers only as a corroborated fallback, below the predicates that
+# corroboration needs — `entry_stray`, after `unresolved_head`. The suffix key
+# here is unchanged, and answers first.
 stray=$(printf '%s\n' "$wt_list" |
         awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
           if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}') ||
@@ -647,6 +663,63 @@ if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
 fi
 
+# The registry ENTRY as a second key for this claim's worktree, consulted ONLY
+# when the suffix key found nothing. `git worktree move` renames the directory
+# and rewrites the entry's `gitdir` file to follow it, but never renames the
+# ENTRY (both measured, git 2.50.1) — so a moved claim whose HEAD git cannot
+# resolve, invisible to `wt` and to the suffix key alike, is still reachable
+# through `$wtroot/$issue-$slug/gitdir`. That file holds `<worktree path>/.git`,
+# and the path git prints in the porcelain is its content with `/.git` stripped,
+# echoed VERBATIM with no canonicalisation of its own (measured: a hand-written
+# `gitdir` naming a path through a symlink is printed back through the symlink),
+# which is what lets the comparison be byte equality against the listing rather
+# than a second opinion about the same path.
+#
+# The entry NAME cannot prove ownership, and the union this fix first shipped
+# assumed it could. git derives the name from the directory's basename at
+# `worktree add` and appends a digit when that name is taken, so an unrelated
+# worktree registered first under `<issue>-<slug>` owns that entry while this
+# claim's is `<issue>-<slug>1`; if that stranger is then MOVED its path no
+# longer carries the suffix, and this key reaches a worktree the suffix key
+# never would. Measured on that fixture, as a plain union: a claim with nothing
+# left to release went from `released:true` at rc 0 to a permanent refusal
+# naming the stranger's directory as this claim's, and a claim whose own HEAD
+# was unreadable had the correct cause over its own directory replaced by the
+# wrong cause over the stranger's. Both are pinned below.
+#
+# So corroborate rather than trust, and let the suffix key answer first. A
+# worktree that resolves to a branch which is not this claim's is demonstrably
+# not this claim's — the `else` arm below says exactly that about it — so it
+# must not refuse the release. One whose HEAD git cannot read MAY genuinely be
+# this claim's, and refusing is the safe direction there; the blocker then
+# states only what the entry establishes, which is the entry NAME.
+#
+# Through the ENVIRON, not `-v`, for the reason `locked` gives: this key is a
+# path read off disk, and a `-v` assignment processes escape sequences in it, so
+# a repo under a directory with a backslash in its name would arrive mangled and
+# the comparison would fall to the permissive answer — no match, and back to the
+# silent release this exists to stop. The suffix key stays on `-v`: it is built
+# from argv, which the header's `#243` note already accounts for.
+#
+# Absent entry, unreadable entry, or one pointing somewhere git is not listing:
+# `entry_stray` is empty and the suffix key alone answers, exactly as before.
+# Not a fail-open — an entry git could not read is one git drops from the
+# listing, and the listed-vs-registered count above refuses first.
+stray_own="is this claim's"
+if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wtroot/$issue-$slug/gitdir" ]; then
+  entry_wt=$(cat "$wtroot/$issue-$slug/gitdir") ||
+    die "could not read the worktree registry entry $wtroot/$issue-$slug/gitdir for #$issue"
+  entry_wt=${entry_wt%/.git}
+  entry_stray=$(printf '%s\n' "$wt_list" |
+                E="$entry_wt" awk '/^worktree /{n++; p=substr($0,10)
+                  if (n>1 && p == ENVIRON["E"]) {print p; exit}}') ||
+    die "could not scan git's listing for a stray worktree for #$issue"
+  if [ -n "$entry_stray" ] && unresolved_head "$entry_stray"; then
+    stray="$entry_stray"
+    stray_own="holds this claim's registry entry name $issue-$slug"
+  fi
+fi
+
 if [ -z "$wt" ] && [ -n "$stray" ]; then
   # Which remedy applies turns on whether that directory is still there, and
   # asking only the registration named the wrong one whenever it is not: the
@@ -678,12 +751,18 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   # about. Below it, the `else` — this arm's whole reason to exist is that the
   # `else` cannot tell "genuinely on some other branch" from "git could not
   # tell", and asserts the former for both.
+  #
+  # `$stray_own` says which key found this worktree, because only the suffix key
+  # establishes that it is this claim's. The `else` keeps the literal: it is the
+  # `! unresolved_head` branch, and the entry key is credited only where
+  # `unresolved_head` is true, so `$stray_own` can never be the entry phrase by
+  # the time control reaches it.
   if locked "$stray"; then
-    block "worktree $stray is this claim's and is locked — git worktree unlock $stray, then prune or remove it"
+    block "worktree $stray $stray_own and is locked — git worktree unlock $stray, then prune or remove it"
   elif gone "$stray"; then
-    block "worktree $stray is this claim's and its directory is gone — git worktree prune to clear the registration"
+    block "worktree $stray $stray_own and its directory is gone — git worktree prune to clear the registration"
   elif unresolved_head "$stray"; then
-    block "worktree $stray is this claim's but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand"
+    block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand"
   else
     block "worktree $stray is this claim's but is not on $branch — release it by hand"
   fi
