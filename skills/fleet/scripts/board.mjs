@@ -526,13 +526,20 @@ async function main() {
   // Called here, once, ahead of the build/serve dispatch (and ahead of both
   // branches' own stray() call, so a malformed value still wins the specific
   // wording over stray()'s generic one, same ordering rule arg.mjs documents
-  // for every other value guard in this file). The return values are
+  // for every other value guard in this file). Ahead of the `cmd` check too,
+  // so `board.mjs --port abc` with NO subcommand names the flag rather than
+  // falling through to the usage die below — the same precedence the #365
+  // sweep note above claims for a stray, now true of these two guards as
+  // well. Both orderings are pinned in board.test.mjs; before this fix the
+  // no-subcommand shape printed the usage line (measured). The return values are
   // deliberately discarded on the build path: build has no server to bind or
   // browser to open, so a WELL-FORMED --port/--open still does nothing here,
   // exactly like before this fix — only the malformed spellings now refuse.
   // serve() below still calls its own argPort()/has("open"); re-evaluating a
-  // pure read of argv costs nothing and keeps serve() callable directly (the
-  // tests do) without going through main() at all.
+  // pure read of argv costs nothing and keeps the EXPORTED serve() validating
+  // its own argv for a caller that skips main(). Nothing in this repo is such
+  // a caller today — every serve() test drives the real CLI, which enters
+  // main() — but serve() is public surface, so the guard stays with it.
   argPort();
   has("open");
 

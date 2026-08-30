@@ -251,6 +251,7 @@ test(
 // in board.test.mjs's `--ledger followed by another flag` case, incidental
 // cover a rename would remove, and a name added to the set later has exactly
 // one row obliged to carry it.
+
 // #468 AC-4: build now validates --port/--open's SHAPE (moved in board.mjs's
 // main(), tested malformed in board.test.mjs, which can drive that case
 // without this file's gh-stub rig because the guard dies before gather()'s
