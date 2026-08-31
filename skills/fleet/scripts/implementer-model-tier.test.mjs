@@ -276,7 +276,11 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // which reads as "no spend recorded". `board.mjs build` emits it at `.spend`
   // (compute-board.mjs's `spend: inputs.spend ?? null`). The doesNotMatch is
   // over a verified-zero baseline and needs the positive companion above it to
-  // stay meaningful.
+  // stay meaningful. Case-sensitive on purpose, and ruled so twice (#529): the
+  // file on disk is lowercase and so is every reference to it, so an `i` flag
+  // would pin a spelling nothing in the repo can write. Settled with
+  // `grep -rio compute-spend --exclude-dir=.git . | grep -v ':compute-spend$'`,
+  // which is empty.
   assert.match(slice, /board\.mjs build/, "the guard no longer names a runnable way to read spend");
   assert.doesNotMatch(
     slice,
@@ -284,10 +288,31 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
     "the guard points at compute-spend.mjs, which has no CLI — it exits 0 printing nothing",
   );
 
-  // Normative, not advisory. Rewriting the lead to "Optional, if you are curious
-  // … you may compare" leaves every other assertion here green, and this repo
-  // runs prose-compression passes that hedge exactly that way.
-  assert.match(slice, /^\*\*Guard: /, "the guard is no longer stated as an imperative");
+  // Normative, not advisory. This repo runs prose-compression passes that hedge
+  // exactly that way.
+  //
+  // A `/^\*\*Guard: /` pin sat here and was DELETED as a tautology (#529) — do
+  // not restore it on finding the guard heading unpinned. `section()` returns
+  // `source.slice(indexOf(startAnchor), end)`, so the slice opens with this
+  // block's start anchor whatever the end anchor is, and that regex carried no
+  // `m` flag: the start anchor alone satisfied it. A lead that breaks it breaks
+  // the anchor too, so `section()` reds first, under its own message.
+  //
+  // Settled by mutation, not argument. Replace the guard lead's
+  // `never conclude inside one run.**` with `never conclude inside one run —
+  // advisory, at your discretion, skip when time is short.**` in
+  // run-team/SKILL.md — the start anchor survives — then run
+  // `node --test skills/fleet/scripts/*.test.mjs`: the suite stays green and
+  // the deleted pin's message appears nowhere in the output. Quote that whole
+  // span, not the `one run.**` tail: the tail is not unique in that SKILL, and
+  // its other hit is the `**Why not decide inside one run.**` heading that
+  // member-outcomes-prose.test.mjs uses as a `section()` end anchor — a global
+  // replace on the tail reds THAT suite, which reads as the deleted pin
+  // catching the hedge. Restore with `cp`, never `git checkout --`.
+  //
+  // That green is the gap tracked on #1111. The hedges below are enumerated by
+  // word and the reworded lead uses none of them; widening the list is ruled
+  // out there, because that instrument was measured failing (#476).
   assert.doesNotMatch(
     slice,
     /\bOptional\b|\byou may\b/i,
