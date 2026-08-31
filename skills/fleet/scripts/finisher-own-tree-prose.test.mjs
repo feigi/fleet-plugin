@@ -176,6 +176,26 @@ test("independent re-verification survives — the gate still mutates and runs t
   );
 });
 
+// #525: duty 1 names `worktree-audit.sh` as the audit to run, and that script
+// takes NO argument and audits every worktree at once. Without the clause, a
+// finisher reads "run worktree-audit.sh" against a runbook full of
+// path-taking siblings, passes this worktree's path, and gets exit 2 — or,
+// before #525's guard, a full audit of every OTHER worktree at exit 0 with
+// the main checkout on top, which is the failure the guard exists to stop.
+// The contract is pinned at the script (worktree-audit.test.mjs), unpinned in
+// the runbook the finisher actually reads.
+test("duty 1 says worktree-audit.sh takes no argument and audits every worktree", () => {
+  // ONE contiguous span: "takes no argument" and "find this worktree's row"
+  // are halves of the same instruction. Matched separately, dropping the
+  // lookup half stays green and leaves a finisher reading the first row —
+  // the main checkout — as if it were this worktree's.
+  assert.match(
+    duty1Text(),
+    /it takes no argument; it audits every worktree in one pass, so find this worktree's row in its output/,
+    "duty 1 no longer says `worktree-audit.sh` takes no argument and audits every worktree — a finisher that passes it this worktree's path gets exit 2, and one that reads the first row reads the main checkout",
+  );
+});
+
 test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clipped", () => {
   // ACCEPT side, and the neighbour check. Duty 1's halt is the guard that
   // caught #389 live; the throwaway tree makes an overlap harmless, which is
