@@ -25,6 +25,53 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
+## When a skill says "compose a PR body"
+
+A closing keyword — `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
+`resolve`, `resolves`, `resolved` — immediately before an issue reference
+creates a closing link, and the fix is to insert a word: write
+`closed issue #219`, or name the issue without the `#`. Narrative prose about
+what a pass already did is otherwise indistinguishable from a deliberate
+`Closes #219`, and two triage-authored PRs shipped one before being corrected
+in place: #370 now reads `closed issue #270` and #382 reads
+`closed issues #219 and #220`, and `gh pr view <N> --json closingIssuesReferences`
+comes back empty for each.
+
+One keyword before a list links exactly the first reference, never the rest —
+recorded on #382, whose body named #219 and #220 and linked only #219, and no
+longer visible there because that body was corrected. Repeating the keyword is
+what links each one: #973's body reads `Closes #971, closes #864, closes #472`
+and its `closingIssuesReferences` comes back with all three. So a body naming
+several issues after a single keyword misfires on all but one and the damage
+looks arbitrary.
+
+Write one deliberate `Closes #N` and give every other issue mention a word in
+front of it. That is how `next-ticket` has fleet implementers open PRs
+(`skills/fleet/skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
+go into one `--body`, so the single keyword there is the deliberate one, and
+their PRs are the model.
+
+After opening a PR, re-query its closing references and compare them against
+what you meant to close, surfacing a mismatch rather than accepting it
+silently:
+
+```sh
+gh pr view <N> --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'
+```
+
+GitHub recomputes closing references lazily, so a query issued immediately
+after the create can read falsely clean — re-query after a pause.
+
+A keyword regex over PR bodies over-reports and never settles this on its own:
+#1028's body carries the string `fixes #77` inside a code span, and GitHub did
+not link #77 — `gh pr view 1028 --json closingIssuesReferences` returns #439,
+the issue that PR set out to close. Compare a regex hit against the linked set
+before calling it a defect.
+
+Closing keywords bind in PR bodies and commit messages only. An issue comment
+may write the adjacency freely — it creates no link, and a rule applied there
+over-reaches and will be ignored.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a GitHub issue.
