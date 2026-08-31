@@ -20,8 +20,18 @@ function double(n) {
 // `assert.ok(m, ...)` branch — a suite built only from those call sites pins
 // nothing about it. Two ways to miss: wrong name, and right name but wrong
 // signature (the regex anchors on `name(signature)` together).
+//
+// The fixture spans lines on purpose: lift()'s pattern ends at `^\}$`, so a
+// one-line `function double(n) { ... }` cannot match it whatever name or
+// signature is asked for, and a refusal forced by that anchor pins neither
+// sub-case. Measured on this file: with `name` and `signature` dropped from
+// the pattern entirely, a one-line fixture leaves this test green.
 test("lift refuses with a message naming the function and signature when nothing matches", () => {
-  const code = `function double(n) { return n * 2; }`;
+  const code = `
+function double(n) {
+  return n * 2;
+}
+`;
   assert.throws(
     () => lift(code, "triple", "n"),
     /review-pr\.js no longer declares triple\(n\) at top level — update this test/,
