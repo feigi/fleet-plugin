@@ -152,6 +152,47 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     /REVERTED on 2026-08-16/,
     "phase 2 no longer records WHEN and WHY the tier binding was removed",
   );
+  // THE POSITIVE SHAPE PIN (#553). The pin above only checks the phrase is
+  // PRESENT somewhere in the slice, so a restoration clause written INSIDE
+  // the note — keeping "was REVERTED on 2026-08-16" intact — still satisfies
+  // it, then rides the exemption below to green: that filter drops any hit
+  // containing "was REVERTED" unconditional on what else the hit says. Pin
+  // the note's own shape instead of narrowing the exemption to the literal
+  // sentence (the rejected remedy — that is the same brittleness the
+  // exemption already warns against two comments down) or slicing the note
+  // out before the scan (the other rejected remedy — a larger change, not
+  // needed once the shape itself is pinned). Isolated to the bold span
+  // itself, not the whole slice, so a present-tense rebinding written
+  // ANYWHERE ELSE in phase 2 stays the rebindings scan's job below.
+  //
+  // This doc's own convention grounds the shape: a dated note states one
+  // action on one date (comment above — "dated and attributed"), so a
+  // restoration smuggled inside it either introduces a further date (when the
+  // restoration happened) or names the state the binding is restored TO.
+  // Settled against a single edit to this note — appending "and is RESTORED
+  // on 2026-08-18, so routine members dispatch at `sonnet` again." — both
+  // checks below fire and name the note, not the scan; a reflow or a
+  // past-tense-only reword of the same note trips neither.
+  const revertNote = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/.exec(slice)?.[0];
+  assert.ok(
+    revertNote,
+    "the revert note's opening clause changed shape enough that this pin can no longer find it — read the slice and update the anchor",
+  );
+  assert.equal(
+    (revertNote.match(/\d{4}-\d{2}-\d{2}/g) ?? []).length,
+    1,
+    "the revert note now names more than one date — a restoration is hiding inside the note the rebindings scan exempts by name",
+  );
+  // ponytail: catches the measured restoration and any dated repeat of it,
+  // plus the specific verb this doc's own restorations are written with; a
+  // same-day, dateless restoration phrased without "restored" is a narrower
+  // gap in the same family the guard test's hedge-word list already accepts
+  // (#476) — widen only on a second measured miss.
+  assert.doesNotMatch(
+    revertNote,
+    /\bRESTORED\b/i,
+    "the revert note now says the binding is RESTORED — a restoration is hiding inside the note the rebindings scan exempts by name",
+  );
   // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
   // stated independently in both places, so restoring either one alone is
   // undetectable without a pin on each. Nothing is assumed between the two
