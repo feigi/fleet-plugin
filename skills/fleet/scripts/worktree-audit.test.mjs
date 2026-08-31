@@ -415,6 +415,22 @@ test("an ordinary worktree is byte-identical — the escaping accepts what it sh
   assert.deepEqual(e, { worktree: wt, branch: "fix/119-json-sh-extract", ahead: 0, dirty: 0, dirtyFiles: [], readable: true });
 });
 
+// #525: this script parses no positional argument — an argument was silently
+// discarded, so a caller who thought they were scoping the audit to one
+// worktree got a full audit of every worktree back at exit 0, first row the
+// main checkout. Refuse instead, same contract as the missing-json.sh case
+// below: exit 2, nothing on stdout.
+test("a positional argument is refused, not silently discarded (#525)", (t) => {
+  const w = repo(t);
+  addWorktree(w, "fix/9-x");
+
+  const r = spawnSync("sh", [SCRIPT, ".worktrees/fix/9-x"], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2, `must refuse, not silently audit everything; stdout: ${r.stdout}`);
+  assert.equal(r.stdout, "", "no half-written array on a refusal");
+  assert.match(r.stderr, /^worktree-audit: takes no arguments; audits every worktree$/m);
+});
+
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
 // non-interactive shell before any `||` on the line can run. This script's
 // contract is exit 0 or exit 2; a missing library must reach the 2.
