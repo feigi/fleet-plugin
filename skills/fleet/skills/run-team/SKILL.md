@@ -924,8 +924,11 @@ multi-select**, and **a judgement the evidence cannot settle**.
   repo has no CI configured and no declaration, and stop. Absence never reads as
   pass. See `review-and-fix.md` step 6.
 - **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
-  guard here once three or more `class=routine` PRs have been ruled since the
-  last check; nothing else in the loop owns it.
+  guard here, on the floor phase 2 defines over the accumulated
+  `docs/metrics/tier-outcomes.tsv` and on no gate of this event's own: a second
+  threshold stated here is a second definition, free to drift from the one that
+  governs, and a throttle would need state nothing on disk records — a schema
+  change with its own ticket. Nothing else in the loop owns it.
 
 **Run the reconcile on the merge-side edges.** Both edges marked above —
 **merge-bot wave reports done** and **Monitor: CI run completes** — end with one
