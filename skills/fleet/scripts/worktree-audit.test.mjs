@@ -421,8 +421,11 @@ test("an ordinary worktree is byte-identical — the escaping accepts what it sh
 // main checkout. Refuse instead, same contract as the missing-json.sh case
 // below: exit 2, nothing on stdout.
 test("a positional argument is refused, not silently discarded (#525)", (t) => {
+  // No `addWorktree` here on purpose: `repo(t)` alone already yields one
+  // auditable worktree (the main checkout), so an un-guarded script still
+  // exits 0 with a non-empty array and the refusal assertion still reds.
+  // Measured — the added worktree changed neither the red nor the green side.
   const w = repo(t);
-  addWorktree(w, "fix/9-x");
 
   const r = spawnSync("sh", [SCRIPT, ".worktrees/fix/9-x"], { cwd: w, env: ENV, encoding: "utf8" });
 
