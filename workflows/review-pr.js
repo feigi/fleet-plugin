@@ -709,10 +709,39 @@ their command failed. Do not modify ${worktree}.`,
 // mechanical probe is the strongest check reachable from here. Measured
 // 2026-08-23; if the harness changes, re-measure with a throwaway workflow
 // rather than re-reading this.
+//
+// The head compare below (#532) is the same expression `usableDiff` runs, and it
+// is a SECOND COPY on purpose: the sandbox above forbids `import`, so a shared
+// helper could not be lifted out of this file by the tests that pin it, and
+// `lift()` evaluates one declaration standalone. The copies are pinned to each
+// other in review-pr-snapshot-path.test.mjs rather than to any literal text, so
+// a change made to one side and not the other reds.
+//
+// What it adds is the CONSEQUENCE, which is the half that was missing. The
+// comparison already existed, in `usableDiff`, where a mismatching `prHead`
+// cost the review its diff and nothing else — so a review handed a tree that
+// was not the PR ran to completion on the fallback read rules and returned
+// findings about code the PR does not contain. Measured: a carried-over
+// worktree re-created with `git worktree add <path> <branch>`, which checks out
+// a leftover LOCAL branch and never consults the remote, sat at a pre-rebase
+// commit whose subject line was byte-identical to the PR head's, with neither
+// commit an ancestor of the other. Nothing downstream could have said so. The
+// diff drop stays where it is: it is the narrower guard and it is still correct
+// for any caller that reaches it.
+//
+// A MISSING `prHead` is deliberately still not disqualifying, for the reason
+// `usableDiff`'s own comment gives — `gh pr view` can fail on its own — and the
+// stakes here are higher, since absent input would now cancel a whole runnable
+// review instead of narrowing one. Absent and mismatching are different cases.
+// The prefix tolerance is load-bearing for the same reason: `head` is relayed
+// by an agent asked for "the HEAD sha" and may be abbreviated, and under a raw
+// `!==` an abbreviated MATCH would refuse the review outright.
 function snapshotMissing(snap) {
   if (!snap || !snap.path || !snap.head) return "the snapshot agent returned no tree — nothing to review";
   if (!snap.pathVerified)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
+  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
+    return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is ${snap.prHead} — refusing to review a commit that is not the PR`;
   return null;
 }
 
