@@ -12,16 +12,20 @@ Routing genuinely moved: on 2026-08-31 `needs-triage` held 5 of 214 open
 issues. The load moved to the other two seats — `ready-for-agent` (194 open,
 125 issues citing `Deferred from PR`) and the maintainer's close ledger.
 
-Measured 2026-08-15→31 over the last 400 closes, all as-of figures:
+Measured 2026-08-15→31, all as-of figures. Universe: the 400 most recently
+created closed **issues** — `gh issue list --state closed --limit 400`, no PRs
+— of which 58 closed before 2026-08-15 and fall outside the window:
 
-- 342 closes, 218 `wontfix` (64%).
+- 342 closes in the window, 218 `wontfix` (64%).
 - 85 of the 218 were records filed **closed** by design — 37
   `PR #N review: the suggestion band, checked` plus 48 legacy
   `REFUTED:`/`Record:` — zero triage cost, working as intended.
 - The remaining **133 were real triage closes: 121 review deferrals, 86 of
-  which had sat open more than three days.**
+  which had sat open more than three days.** The other 12 are not review
+  deferrals — bugs, aggregates, and one legacy review record — and are not
+  the shape described below.
 
-The 133 share a shape. The finding's own claim was that *correct code could be
+The 121 share a shape. The finding's own claim was that *correct code could be
 shaped better* — style, naming, layout, redundancy, a micro-simplification —
 and triage closed each under the repriced bar's own logic: a ticket whose only
 open item is "is this worth doing?" answers itself. The review path files a
@@ -85,5 +89,5 @@ only in an unmerged PR re-fires every run.
   the code, only that the question answered itself.
 - A worth-it call the maintainer might have answered *yes* is deferred until
   rediscovery or a direct hit. That is the trade this decision buys, priced
-  against 133 triage closes in sixteen days.
+  against 121 review-deferral closes in sixteen days.
 - Dedup, labels, phase 0, and 0001's guard are all unchanged.
