@@ -7,8 +7,8 @@ import { lift } from "./lift.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing it
 // executes the workflow. Every value under test is lifted out of the SOURCE TEXT
-// instead — the same technique as `review-pr-testcmd.test.mjs`'s
-// `liftResolveTestCmd`, and the
+// instead — the same technique as `review-pr-testcmd.test.mjs`'s lift of
+// `resolveTestCmd`, and the
 // reason #118 existed: every count claim about `selectDimensions` had to be
 // hand-derived, and two hand-derived comments were wrong.
 //

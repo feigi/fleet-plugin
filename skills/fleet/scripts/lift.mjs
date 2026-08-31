@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 // filesystem/Node.js APIs an `import` would need to resolve, and a failed
 // import bricks the fleet's default review path
 // (docs/specs/2026-08-06-review-pr-specialist-read-rules-design.md:277). This
-// convention — copying the source text rather than importing it — is called
-// TEXT-LIFT pinning elsewhere in this repo's domain notes. Scripts under
+// convention — copying the source text rather than importing it — is what this
+// repo's test headers call text-lift pinning. Scripts under
 // skills/fleet/scripts/ may import each other freely; only the workflow file
 // itself may not be imported, which is why this module is an ordinary import
 // for its callers even though its own reason for existing is that some other
@@ -24,9 +24,11 @@ import assert from "node:assert/strict";
 // stayed green with the duplicate placed after the real declaration, and went
 // red with it placed before (the harmless order, since the real declaration
 // still wins at runtime either way). This function does not guard against
-// that on its own — a "declared exactly once at top level" test does, per
-// caller (see review-pr-reads.test.mjs) — and that guard is deliberately kept
-// OUT of this module: an assertion thrown here at call time would abort
+// that on its own. The guard is a single "declared exactly once at top level"
+// test in review-pr-reads.test.mjs that scans review-pr.js's stripped source,
+// so a lift whose `code` is that same text is covered wherever its caller
+// lives, and a lift from any other source text is covered by nothing. That
+// guard is deliberately kept OUT of this module: an assertion thrown here at call time would abort
 // whichever test file imported it before any of that file's OTHER tests get a
 // chance to register, turning a named failure into an opaque file-level error
 // instead.
@@ -37,7 +39,10 @@ import assert from "node:assert/strict";
 // satisfied by dead code). Passing it in keeps that choice with the caller
 // instead of this module silently picking one.
 export function lift(code, name, signature) {
-  const re = new RegExp(`^function ${name}\\(${signature}\\) \\{[\\s\\S]*?^\\}$`, "m");
+  const re = new RegExp(
+    `^function ${RegExp.escape(name)}\\(${RegExp.escape(signature)}\\) \\{[\\s\\S]*?^\\}$`,
+    "m",
+  );
   const m = code.match(re);
   assert.ok(m, `review-pr.js no longer declares ${name}(${signature}) at top level — update this test`);
   return new Function(`${m[0]}\nreturn ${name};`)();

@@ -9,7 +9,7 @@ import { lift } from "./lift.mjs";
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
 // SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs:23-40`
-// and `review-pr-testcmd.test.mjs`'s `liftResolveTestCmd`, and for the same
+// and `review-pr-testcmd.test.mjs`'s lift of `resolveTestCmd`, and for the same
 // reason: extraction to a module would need `import` to resolve inside the
 // Workflow sandbox, and it does not. That was the documented claim until #538
 // executed it — `import()` refused for any specifier and `require` undefined,
