@@ -27,11 +27,14 @@ import { between, phrase } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
 
-// Starts at this paragraph's own lead, not at the reused-runner paragraph above
-// it: the two are siblings and a slice spanning both lets the runner paragraph's
-// wording satisfy assertions about this one.
-const slice = () =>
-  between(RUN_TEAM, "**A reused worktree may also be on the wrong COMMIT.**", "## Phase 2", "run-team/SKILL.md phase 1");
+// Starts inside this paragraph's own lead, not at the reused-runner paragraph
+// above it: the two are siblings and a slice spanning both lets the runner
+// paragraph's wording satisfy assertions about this one. The start anchor is the
+// shortest fragment that is unique file-wide rather than the whole lead
+// sentence, because `between()` throws "update this test" when its anchor moves
+// — a rename of the anchor reds every test in this file at once, which is loud
+// but says nothing about which claim was lost. A shorter anchor is less of that.
+const slice = () => between(RUN_TEAM, "on the wrong COMMIT", "## Phase 2", "run-team/SKILL.md phase 1");
 
 // The cause, not the symptom. A controller told only "the worktree may be stale"
 // has no reason to prefer one `worktree add` form over another.
