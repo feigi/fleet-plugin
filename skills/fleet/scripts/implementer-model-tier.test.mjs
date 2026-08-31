@@ -298,12 +298,17 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // `m` flag: the start anchor alone satisfied it. A lead that breaks it breaks
   // the anchor too, so `section()` reds first, under its own message.
   //
-  // Settled by mutation, not argument. Replace the guard lead's `one run.**`
-  // with `one run — advisory, at your discretion, skip when time is short.**`
-  // in run-team/SKILL.md — the start anchor survives — then run
+  // Settled by mutation, not argument. Replace the guard lead's
+  // `never conclude inside one run.**` with `never conclude inside one run —
+  // advisory, at your discretion, skip when time is short.**` in
+  // run-team/SKILL.md — the start anchor survives — then run
   // `node --test skills/fleet/scripts/*.test.mjs`: the suite stays green and
-  // the deleted pin's message appears nowhere in the output. Restore with
-  // `cp`, never `git checkout --`.
+  // the deleted pin's message appears nowhere in the output. Quote that whole
+  // span, not the `one run.**` tail: the tail is not unique in that SKILL, and
+  // its other hit is the `**Why not decide inside one run.**` heading that
+  // member-outcomes-prose.test.mjs uses as a `section()` end anchor — a global
+  // replace on the tail reds THAT suite, which reads as the deleted pin
+  // catching the hedge. Restore with `cp`, never `git checkout --`.
   //
   // That green is the gap tracked on #1111. The hedges below are enumerated by
   // word and the reworded lead uses none of them; widening the list is ruled
