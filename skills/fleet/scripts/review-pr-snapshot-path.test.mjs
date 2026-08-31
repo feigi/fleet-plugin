@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, phrase } from "./prose-pin.mjs";
+import { lift } from "./lift.mjs";
 
 // `snap.path` used to reach every specialist prompt and every verifier prompt
 // unchecked: a well-formed string the schema required, but never confirmed to
@@ -28,12 +29,7 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 // against a field dead under a comment — same stripper, same policy here.
 const CODE = stripComments(SOURCE);
 
-function liftSnapshotMissing() {
-  const m = CODE.match(/^function snapshotMissing\(snap\) \{[\s\S]*?^\}$/m);
-  assert.ok(m, "review-pr.js no longer declares snapshotMissing(snap) at top level — update this test");
-  return new Function(`${m[0]}\nreturn snapshotMissing;`)();
-}
-const snapshotMissing = liftSnapshotMissing();
+const snapshotMissing = lift(CODE, "snapshotMissing", "snap");
 
 // The accept case: this is the ONLY shape the review/verify stages may
 // proceed on. A guard's false-positive class (wrongly refusing a healthy

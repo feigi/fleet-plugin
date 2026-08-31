@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
+import { lift } from "./lift.mjs";
 
 // review-pr.js used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
@@ -33,13 +34,9 @@ const CODE = stripComments(SOURCE);
 
 // review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
 // so resolveTestCmd is lifted out of the source text instead — same technique
-// as `select-dimensions.test.mjs` and `review-pr-reads.test.mjs`.
-function liftResolveTestCmd() {
-  const m = CODE.match(/^function resolveTestCmd\(explicit, snap\) \{[\s\S]*?^\}$/m);
-  assert.ok(m, "review-pr.js no longer declares resolveTestCmd(explicit, snap) at top level — update this test");
-  return new Function(`${m[0]}\nreturn resolveTestCmd;`)();
-}
-const resolveTestCmd = liftResolveTestCmd();
+// as `select-dimensions.test.mjs` and `review-pr-reads.test.mjs`, via the
+// shared lift() in lift.mjs.
+const resolveTestCmd = lift(CODE, "resolveTestCmd", "explicit, snap");
 
 test("an explicit override always wins, whatever the snapshot derived", () => {
   assert.equal(resolveTestCmd("npm test --", { testCmd: "node --test" }), "npm test --");
