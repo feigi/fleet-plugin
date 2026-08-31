@@ -160,6 +160,16 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
+# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# contract and the measurements behind it, and json.sh's holds the `[ -r ]`
+# reasoning both guards share. This script reads exit 1 as its own blocked
+# verdict, which is the whole reason that guard is not `|| die` alone.
+wt_lib="$(dirname "$0")/worktree.sh"
+[ -r "$wt_lib" ] || die "cannot read $wt_lib — refusing to act without the worktree readers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=worktree.sh
+. "$wt_lib" || die "$wt_lib failed to load"
+
 # The bounded, prompt-suppressed git transport (#92, #346, #347). The
 # pushed-branch lookup below is unattended: with no bound it can prompt for a
 # credential or a host key, or stall on a transport that connects and then goes
@@ -291,7 +301,17 @@ fi
 # The path is the whole rest of the line, never $2: `worktree list --porcelain`
 # prints it raw, so any checkout living under a directory with a space in it —
 # ordinary on macOS — would otherwise be truncated at the first one.
-wt_list=$(git worktree list --porcelain)
+#
+# A newline in that path was the same truncation one byte further out: the plain
+# porcelain ends every attribute with one, so the record split and every
+# `substr($0,10)` below stopped at the newline. `wt_listing` reads `-z` and
+# swaps the separators, so a record ends where git says it ends. #551
+#
+# `|| die`, where this was a bare assignment: left bare the read died on `set -e`
+# under git's own diagnostic, with no line carrying the `release-ticket:` prefix
+# a caller greps stderr for — the very reason every lookup OVER this listing is
+# already guarded that way.
+wt_listing || die "could not read the worktree list for #$issue: $wt_err"
 
 # The main worktree is always listed first and has no registry entry of its own,
 # hence the -1.
@@ -305,6 +325,16 @@ wt_list=$(git worktree list --porcelain)
 # failure. awk needs no such case separated out: the program contains no `exit`,
 # so it returns 0 whether or not anything matched, and every non-zero status is
 # a real failure. This script already removed exactly this shape elsewhere.
+#
+# What this count does NOT cover, stated because it reads as though it might: a
+# path with a newline in it never moved this number. The orphaned continuation
+# line the plain porcelain produced did not begin `worktree `, so `listed - 1`
+# still equalled `registered` and the cross-check agreed with a read that had
+# truncated the path (measured on a real linked worktree at `…/wt/fix-33<LF>slug`,
+# git 2.50.1: `listed=3`, the true figure). It is a count of records against
+# registry entries and catches an entry git DROPPED; the path inside a record it
+# does keep is `nl_path`'s to refuse, below. Under `-z` the count is now right by
+# construction — one `worktree ` line per record, whatever the path holds. #551
 listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
   die "could not count the worktrees git listed for #$issue"
 linked=$((listed - 1))
@@ -491,50 +521,6 @@ block() {
   printf '    BLOCKED: %s\n' "$1" >&2
 }
 
-# Is this path ABSENT, or merely one we are not permitted to stat? -e is false
-# for both, and neither caller may infer the first from the second: on the dirty
-# check that releases a claim whose worktree is still on disk holding the
-# member's uncommitted work, on the stray guard it hands the operator a prune
-# that unregisters that same worktree. git cannot separate them either — it marks
-# both `prunable`, and `worktree remove` ACCEPTS a prunable-because-absent entry
-# (rc 0) where a live worktree whose .git was merely deleted it refuses — so
-# nothing downstream recomputes what this gets wrong. So walk up to the nearest
-# existing ancestor, `/` included, and require THAT to be searchable: only then
-# is "not there" a measurement rather than a guess. The walk is what keeps
-# `rm -rf .worktrees` answerable — the parent goes with the child, and testing
-# the immediate parent alone reads its absence as unknown, which is the
-# permanent refusal both callers exist to stop producing.
-#
-# `look=${look:-/}` INSIDE the loop, and that placement is the whole of #178:
-# `${p%/*}` on `/x` yields the empty string, not `/`, so a path whose every
-# ancestor below the root is gone used to fall out on "" and answer unknown
-# about an absence the searchable root proves. The same restore written AFTER
-# the loop reads identically and is wrong — nothing enters the loop on an empty
-# `$1`, so it would rewrite that to `/` too and turn `gone ""` into
-# established-absent. Inside, it only ever rewrites what the loop just
-# truncated. gone-walk.test.mjs holds that matrix, `gone ""` included, because
-# no caller can reach it: three test the path non-empty first, and
-# worktree-audit.sh reads its own off `git worktree list`, which never emits an
-# empty one — so a caller-level suite alone cannot tell the two placements apart.
-#
-# One predicate, because both callers ask one question. Answered twice they drift,
-# and the halves of this script that protect a member's work stop agreeing about
-# whether there is any work there to protect.
-#
-# `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
-# slash, so the emptiness form spins forever on one. git emits absolute paths
-# here, but a delete script may not hang on the input that proves otherwise.
-#
-# 0 ONLY for established absent; 1 covers present AND cannot-stat, so a caller
-# needing those apart pairs this with its own `[ ! -e ]`, as the dirty check does.
-# Condition context only: a bare `gone` returns 1 on the ordinary present answer
-# and `set -e` exits — rc 1, this script's own blocked-run code, and no receipt.
-gone() {
-  look=$1
-  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; look=${look:-/}; done
-  [ ! -e "$1" ] && [ -x "$look" ]
-}
-
 # Is the worktree registered at $1 locked? Both remedies this script can name
 # turn on the answer, so both callers below ask: `git worktree remove` refuses a
 # locked entry outright — before it looks at the directory at all, so present,
@@ -678,7 +664,16 @@ occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 # reported Indeterminate rather than squeezed into Unreleased, whose definition
 # is that BOTH are still present.
 release_outcome() {
-  if ! now=$(git worktree list --porcelain); then
+  # `wt_listing` writes the shared `$wt_list`, and this function must not disturb
+  # the pre-mutation capture the guards above read off it. Saved and put back in
+  # the same breath, so the function is safe wherever it is called rather than
+  # only inside the `$( )` subshell that happens to call it today.
+  ro_prior=$wt_list
+  ro_read=true
+  wt_listing || ro_read=false
+  now=$wt_list
+  wt_list=$ro_prior
+  if [ "$ro_read" = false ]; then
     # The listing is how the registration is read, so a listing git could not
     # produce leaves the registration unknown — not absent.
     echo Indeterminate
@@ -693,6 +688,31 @@ release_outcome() {
     echo Indeterminate
   fi
 }
+
+# A path holding a newline, refused rather than acted on. `wt_listing` delivers
+# it whole with the newline substituted, and the substituted byte is one no
+# `git worktree remove`, no `[ -d ]` and no `git -C` below can name — so every
+# check over it would answer about a different path, which is exactly the silent
+# truncation this ticket exists to end. #551
+#
+# `block`, not `die`: this is a refused precondition like every other one here,
+# and the caller gets the receipt that verdict carries. `nl_path ""` is false, so
+# a lookup that found nothing is unaffected.
+#
+# All three keys, because they are three different routes to a worktree of this
+# claim's and a newline anywhere in the chain is the same defect: `wt` off the
+# branch line, `stray` off the directory-name suffix, and `main_wt` — which the
+# orphan probe below builds its path from, so a truncated one sends that probe
+# at a directory nobody registered.
+if nl_path "$wt"; then
+  block "worktree $wt holds a newline in its path — nothing here can stat it, so whether it holds work is unknown"
+fi
+if nl_path "$stray"; then
+  block "worktree $stray holds a newline in its path — nothing here can stat it, so whether it holds work is unknown"
+fi
+if nl_path "$main_wt"; then
+  block "the main checkout $main_wt holds a newline in its path — no path this script builds from it can be stat'd"
+fi
 
 if [ "$main_branch" = "refs/heads/$branch" ]; then
   block "branch $branch is checked out in the main checkout — release it from elsewhere"
@@ -957,10 +977,20 @@ fi
 # branch deleted, label dropped, exit 0, `"blockers":[]` — with the member's
 # uncommitted work still on disk and now orphaned.
 #
-# The -e test stays: `gone` reports a path that EXISTS as not-established-absent,
-# which is the same answer it gives for one it cannot stat, and only the second
-# is unknown.
-if [ -n "$wt" ] && [ ! -e "$wt" ] && ! gone "$wt"; then
+# `occupied`, where this read `[ ! -e "$wt" ]`: `gone` reports a path that EXISTS
+# as not-established-absent, which is the same answer it gives for one it cannot
+# stat, and only the second is unknown — so the existence test has to be the one
+# that agrees with `gone` about what "exists" means. It did not. Every `test`
+# primary except `-L` STATS, so a DANGLING symlink is `-e` false, and once `gone`
+# stopped calling that established-absent (#725) this guard read it as "cannot
+# tell" and died at exit 2 with no receipt — for a path whose state is known
+# exactly, and which the stand-in blocker below already answers. Measured on
+# release-ticket.test.mjs's own dangling-link fixture, which is what caught it.
+#
+# `! occupied && ! gone` is the tri-valued pairing `gone`'s contract prescribes,
+# and the same one `release_outcome` composes: present or link-present is not
+# unknown, established-absent is not unknown, and what is left over is.
+if [ -n "$wt" ] && ! occupied "$wt" && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
 fi
 
