@@ -346,6 +346,15 @@ const UNKNOWN_LINE =
  */
 const ORPHAN_LINE =
   "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at";
+/**
+ * #482's line, and the third of the three: the two above are reached with an
+ * EMPTY list, this one with entries printed and a nonzero rc. Literal for the
+ * same reason they are — `/unknown/` passes on any wording, so a reword naming
+ * the wrong call as the one that failed would go unseen. git's own diagnostic
+ * is appended after it, so what is pinned here is the prefix, not the line.
+ */
+const RC_FAILED_LINE =
+  "    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
 
 // `$wt` is caller-supplied and reaches the operator through a step header.
@@ -695,8 +704,10 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
   assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
 });
 
-// #482: the other half of that ceiling, and the half that is not a ceiling any
-// more. Corrupt the loose object behind a NON-TIP entry and the reflog stays
+// #482: one shape of that ceiling, and the one that is not a ceiling any more.
+// Only this half of it — a MISSING non-tip object is skipped in silence at rc 0
+// and stays under #306, which is why this fixture corrupts rather than removes.
+// Corrupt the loose object behind a NON-TIP entry and the reflog stays
 // intact, so `stash list` resolves the ref, prints the entries it could read,
 // names the fault and exits 1 — a nonempty list at a nonzero rc, which is the
 // one shape none of the `show-ref` states above produce. The cross-check sees
@@ -728,7 +739,7 @@ test("a corrupt loose object behind a non-tip stash entry reports unknown, not t
   assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.stash, null, "a list call that failed is not a count — the payload must say unknown, never the short number");
-  assert.match(stashLine(r), /unknown/, "the operator-facing line must say unknown too, not just the payload");
+  assert.equal(stashLine(r).slice(0, RC_FAILED_LINE.length), RC_FAILED_LINE, "the operator-facing line must name THIS cause, not just say unknown — the other two say the list came back empty, which this state is not");
   assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault outright; the audit must pass it through rather than guess");
 });
 

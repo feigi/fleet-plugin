@@ -332,8 +332,8 @@ fi
 # characterization test pins it without closing it — closing it was ruled out
 # separately as not worth the complexity.
 #
-# A corrupt loose object behind a NON-TIP entry is the other shape of that
-# ceiling, and it is not one, because git is loud about it. The reflog there is
+# A corrupt loose object behind a NON-TIP entry is one shape of that ceiling,
+# and it is not one, because git is loud about it. The reflog there is
 # intact, so `stash list` resolves the ref, prints the entries it could read,
 # says `fatal: loose object ... is corrupt` and exits 1 — a nonempty list at a
 # nonzero rc, a shape none of the rows above has, so `show-ref` agrees with the
@@ -342,16 +342,25 @@ fi
 # this statement's status `wc`'s, always 0, and git's own rc unrecoverable.
 # Nothing else moves — the count is still the lines the list printed, its stderr
 # is still dropped here, and a list that succeeds is still read as a count. #482.
+#
+# Only the CORRUPT half of that shape is loud. A non-tip object that is MISSING
+# rather than corrupt leaves the reflog intact too, but `stash list` then skips
+# the entry it cannot read in silence: rc 0, no stderr, one line short
+# (measured: three entries, `rm` the loose object behind `refs/stash@{2}` ->
+# rc 0, two lines, empty stderr, git 2.50.1). Nothing here can tell that from a
+# genuinely shorter stack, so it still reports the exact-looking count and stays
+# under the #306 ceiling above.
 sl_rc=0
 sl=$(git -C "$wt" stash list 2>/dev/null) || sl_rc=$?
-# Both halves of the count are load-bearing, and neither is decoration.
-# `$()` strips the trailing newline, so `wc -l` on the bare capture counts one
-# short (measured: two entries, `printf '%s'`, `wc -l` -> 1) — hence the
-# `printf '%s\n'`. That same printf turns an EMPTY stack into a lone newline,
-# which `wc -l` counts as one entry — hence the `[ -z ]`, which answers the
-# empty stack without counting anything at all.
-stash=0
-[ -z "$sl" ] || stash=$(printf '%s\n' "$sl" | wc -l | tr -d ' ')
+# `awk 'END{print NR}'`, not `wc -l`, and the difference is the empty stack.
+# `$()` has stripped the trailing newline, so `wc -l` on the bare capture counts
+# one short (measured: two entries, `printf '%s'`, `wc -l` -> 1), and padding it
+# back with `printf '%s\n'` turns an EMPTY stack into a lone newline `wc -l`
+# counts as one entry — two errors needing a `[ -z ]` guard between them. awk
+# counts the final incomplete record, so one statement answers both ends
+# (measured under `/bin/sh` with `set -eu`: "" -> 0, one/two/three entries with
+# no trailing newline -> 1/2/3, and no padding to strip).
+stash=$(printf '%s' "$sl" | awk 'END{print NR}')
 sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # Resolved lazily, inside the one state that asks the question: a healthy repo
