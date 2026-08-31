@@ -67,6 +67,41 @@ function pick(a, ...rest) {
   assert.equal(lift(realShape, "pick", "a, ...rest")(1, 2, 3), 2);
 });
 
+// The pattern's two `^` anchors, one per end, are what make "top level" mean
+// anything. Neither was pinned: dropping the leading `^`, and dropping the
+// `^...$` around the closing brace, each left the whole suite green. Both
+// mutants below die here instead — named, in this file — rather than as an
+// opaque module-scope `assert.ok` crash in whichever caller imports next,
+// which is the failure mode lift.mjs's header says it exists to avoid.
+test("a declaration nested inside another function is not top level, and is refused", () => {
+  const code = `
+function outer() {
+  function inner(n) {
+    return n * 2;
+  }
+  return inner;
+}
+`;
+  assert.throws(
+    () => lift(code, "inner", "n"),
+    /review-pr\.js no longer declares inner\(n\) at top level — update this test/,
+  );
+});
+
+test("the body ends at a column-0 `}`, not at the first `}` nested inside it", () => {
+  const code = `
+function classify(n) {
+  if (n > 0) {
+    return "positive";
+  }
+  return "other";
+}
+`;
+  const classify = lift(code, "classify", "n");
+  assert.equal(classify(1), "positive");
+  assert.equal(classify(-1), "other", "the lift must not stop at the if-block's closing brace");
+});
+
 // AC-4 (#533): "the helper must not quietly return a stale or wrong
 // function." Extracting this replaces each converted file's own private
 // `.match`/`new Function` copy with the one shared pair in lift.mjs — so that

@@ -40,7 +40,7 @@ import assert from "node:assert/strict";
 // instead of this module silently picking one.
 export function lift(code, name, signature) {
   const re = new RegExp(
-    `^function ${RegExp.escape(name)}\\(${RegExp.escape(signature)}\\) \\{[\\s\\S]*?^\\}$`,
+    `^function ${RegExp.escape(name)}\\(${RegExp.escape(signature)}\\) \\{[\\s\\S]*?\\}`,
     "m",
   );
   const m = code.match(re);
