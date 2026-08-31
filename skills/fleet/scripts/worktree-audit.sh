@@ -39,6 +39,15 @@ export LC_ALL=C
 NAME=worktree-audit
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
+# No positional argument (#525). A caller-supplied path was silently discarded
+# — no `$#` check, no usage — so a missing worktree returned a full audit of
+# every OTHER worktree at exit 0, first row the main checkout. Refuse loudly
+# instead of adding a filter: this script's whole contract is "every worktree,
+# every time", and refusing makes every existing caller correct rather than
+# teaching the script a second, path-scoped one. Above the opening `[`, same as
+# the json_lib guard below, so a refusal never emits a truncated array.
+[ $# -eq 0 ] || die "takes no arguments; audits every worktree"
+
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
 # the measurements behind it. This script defines no exit 1 at all, so a bare 1
 # out of it is a code its caller has no reading for. Placed here, above the

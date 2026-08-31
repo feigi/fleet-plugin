@@ -48,7 +48,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const REAPING = readFileSync(
@@ -116,6 +116,32 @@ test("run-team/SKILL.md: the release-claims section carries the same limitation"
     section,
     /whenever\s+the\s+worktree\s+directory\s+is\s+there\s+to\s+read.{0,200}established\s+absent.{0,120}no\s+backstop.{0,200}sole\s+arbiter/s,
     "SKILL.md is back to promising all four preconditions are recomputed at the delete — the dirty check does not run when the directory is established absent, and `worktree remove` does not stand in for it",
+  );
+});
+
+test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argument contract", () => {
+  // #525. The by-hand fallback for a claim `release-ticket.sh` refused sends
+  // the reader to `worktree-audit.sh`, which takes NO argument and audits
+  // every worktree at once — unlike the path-taking siblings all around it in
+  // this runbook. Passing it this claim's worktree path is exit 2; before
+  // #525's guard it was worse, a full audit of every OTHER worktree at exit 0
+  // with the main checkout as the first row, read as if it were this claim's.
+  //
+  // Slice starts at the wrap point the section-scoped test above ENDS on, so
+  // the two spans abut rather than overlap and neither can satisfy the other.
+  const fallback = between(
+    RUN_TEAM,
+    "**That refusal is the",
+    "Run it over every pool ticket",
+    "run-team/SKILL.md",
+  );
+  // ONE contiguous phrase: the no-argument half and the row-lookup half are
+  // the same instruction. Pinned separately, dropping the lookup leaves a
+  // reader taking the first row — the main checkout — as this claim's.
+  assert.match(
+    fallback,
+    phrase("run `worktree-audit.sh` (it audits every worktree; find this claim's row in the output)"),
+    "the by-hand fallback no longer says `worktree-audit.sh` audits every worktree and needs a row lookup — a reader passing it this claim's path gets exit 2, and one reading the first row reads the main checkout",
   );
 });
 

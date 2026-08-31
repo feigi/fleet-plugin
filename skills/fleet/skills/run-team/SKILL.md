@@ -1339,8 +1339,10 @@ correctly halted. Note what that costs to detect: two reads of the same worktree
 a minute apart showed *different* mutants, so a member's report and any single
 `git status` are each valid only at their instant. Its duties, in this order:
 
-1. **Audit the worktree** — `worktree-audit.sh`, or `git status --porcelain` in
-   it. Dirty or diverged halts the finisher *here*, before the label: it reports
+1. **Audit the worktree** — run `worktree-audit.sh` (it takes no argument; it
+   audits every worktree in one pass, so find this worktree's row in its
+   output) or run `git status --porcelain` inside the worktree itself. Dirty
+   or diverged halts the finisher *here*, before the label: it reports
    what it found and labels nothing. A finisher that verifies the dirt is
    harmless and labels anyway has substituted the rule's purpose for the rule,
    and you find out at merge time. **Give it the two-cause block below,
@@ -1762,7 +1764,8 @@ measurement is sole arbiter there. All clear → drops the label,
 removes the worktree without `--force`, deletes the branch with `-d`. Any one of
 them failing → it touches nothing and names the blocker. **That refusal is the
 finding, never an obstacle**: a claim carrying commits or a pushed branch is not
-auto-released, ever — audit it with `worktree-audit.sh` and decide by hand.
+auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find
+this claim's row in the output) and decide by hand.
 
 Run it over every pool ticket with no PR when the run ends or the maintainer
 drains, and on the spot for a claim abandoned mid-run (a bail before
