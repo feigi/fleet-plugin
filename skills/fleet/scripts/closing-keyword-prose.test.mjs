@@ -40,7 +40,7 @@ const TRACKER = readFileSync(join(REPO, "docs", "agents", "issue-tracker.md"), "
 // across lines at a width nobody should have to preserve. Every assertion below
 // runs against the flattened text and is therefore reflow-safe.
 const section = (text = TRACKER) =>
-  between(text, "## Composing a PR body", "\n## When a skill says", "docs/agents/issue-tracker.md")
+  between(text, '## When a skill says "compose a PR body"', "\n## When a skill says", "docs/agents/issue-tracker.md")
     .split(/\s+/)
     .join(" ");
 
@@ -60,6 +60,28 @@ test("the adjacency rule names its fix in the same breath", () => {
   assert.match(
     section(),
     phrase("immediately before an issue reference creates a closing link, and the fix is to insert a word: write `closed issue #219`, or name the issue without the `#`"),
+  );
+});
+
+test("the keyword list stays whole and stays bound to the mechanism", () => {
+  // The list is operationally load-bearing and reads like a tidy-up target: an
+  // agent narrating with a keyword that has silently dropped off it gets no
+  // signal that adjacency will auto-link. Pinned as one span with the clause it
+  // qualifies, so a list orphaned from its rule reddens too.
+  assert.match(
+    section(),
+    phrase("A closing keyword — `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved` — immediately before an issue reference"),
+  );
+});
+
+test("the preventive rule names what to do with every OTHER mention", () => {
+  // The cheapest of the two remedies, and the only one that prevents rather
+  // than detects. "Write one deliberate `Closes #N`" alone is not the rule —
+  // it is silent on the narrative mentions that caused both instances, so the
+  // deliberate keyword and the treatment of the rest are asserted as one span.
+  assert.match(
+    section(),
+    phrase("Write one deliberate `Closes #N` and give every other issue mention a word in front of it"),
   );
 });
 

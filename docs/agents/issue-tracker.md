@@ -25,7 +25,7 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
-## Composing a PR body
+## When a skill says "compose a PR body"
 
 A closing keyword — `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
 `resolve`, `resolves`, `resolved` — immediately before an issue reference
@@ -39,13 +39,17 @@ comes back empty for each.
 
 One keyword before a list links exactly the first reference, never the rest —
 recorded on #382, whose body named #219 and #220 and linked only #219, and no
-longer visible there because that body was corrected. An explicit
-`Closes #A, #B` is the form that links both, so a body naming several issues
-after a single keyword misfires on all but one and the damage looks arbitrary.
+longer visible there because that body was corrected. Repeating the keyword is
+what links each one: #973's body reads `Closes #971, closes #864, closes #472`
+and its `closingIssuesReferences` comes back with all three. So a body naming
+several issues after a single keyword misfires on all but one and the damage
+looks arbitrary.
 
-Write one deliberate `Closes #N` and put everything else in the commit body.
-That is what `next-ticket` already tells fleet implementers (`skills/fleet/skills/next-ticket/SKILL.md`),
-and their PRs are the model.
+Write one deliberate `Closes #N` and give every other issue mention a word in
+front of it. That is how `next-ticket` has fleet implementers open PRs
+(`skills/fleet/skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
+go into one `--body`, so the single keyword there is the deliberate one, and
+their PRs are the model.
 
 After opening a PR, re-query its closing references and compare them against
 what you meant to close, surfacing a mismatch rather than accepting it
