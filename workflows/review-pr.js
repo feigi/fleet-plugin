@@ -258,6 +258,16 @@ function readRules(diffPath, stats, snap) {
   // exact commit `usableDiff` just rejected the diff for describing. Dropping
   // the diff for the wrong tree and then serving that tree's file list stamped
   // "and no others" is the same error with the evidence removed.
+  //
+  // #532 narrowed this to a pure-function property: `snapshotMissing` now
+  // REFUSES a snapshot whose head is not the PR head, and it runs before
+  // anything reaches here, so `skew` cannot be true in this workflow's own
+  // path — a rejection with `diffPath` and `diffLines` both present is exactly
+  // the head mismatch that already threw. It stays because `readRules` is a
+  // pure prompt builder that is pinned as one, not because the branch still
+  // fires: deleting it would remove behaviour the tests measure to buy nothing.
+  // Re-derive that before relying on either reading — it is true only while the
+  // refusal above stays unconditional.
   const skew = !!(rejected && snap.diffLines && snap.prHead);
   // Three headers, one list. `exactly ... and no others` is a CLOSURE claim, and
   // it is only true when the list is both complete and about this tree.
