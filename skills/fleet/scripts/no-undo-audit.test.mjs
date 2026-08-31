@@ -695,6 +695,43 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
   assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
 });
 
+// #482: the other half of that ceiling, and the half that is not a ceiling any
+// more. Corrupt the loose object behind a NON-TIP entry and the reflog stays
+// intact, so `stash list` resolves the ref, prints the entries it could read,
+// names the fault and exits 1 — a nonempty list at a nonzero rc, which is the
+// one shape none of the `show-ref` states above produce. The cross-check sees
+// no disagreement, so the rc is the whole signal, and the old pipeline gave
+// `wc`'s status instead of git's. The count printed was short by exactly the
+// entries git refused to read.
+test("a corrupt loose object behind a non-tip stash entry reports unknown, not the count git could not finish, #482", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  stashSomething(c.w, "h3.txt");
+  const sha = git(c.w, "rev-parse", "refs/stash@{2}"); // the OLDEST entry, not the tip
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644); // loose objects are mode 444
+  writeFileSync(obj, "junk\n");
+
+  // The signature that makes this state its own: git fails, and it fails
+  // AFTER printing entries. Measured here rather than asserted in prose,
+  // because both halves are what the fix reads and neither is obvious.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 1, `a corrupt non-tip object must make the list call fail; got ${list.status} ${list.stderr}`);
+  assert.equal(list.stdout.split("\n").filter(Boolean).length, 2, "fixture must leave a nonempty, undercounted list — an empty one lands on the show-ref branch instead");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 0, `refs/stash must still resolve — this is why the cross-check cannot see it; got ${showRef.status} ${showRef.stderr}`);
+  const reflog = readFileSync(join(c.w, ".git", "logs", "refs", "stash"), "utf8").split("\n").filter(Boolean);
+  assert.equal(reflog.length, 3, "the reflog is intact — the true count is 3, which is what makes the printed 2 a lie rather than a limit");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null, "a list call that failed is not a count — the payload must say unknown, never the short number");
+  assert.match(stashLine(r), /unknown/, "the operator-facing line must say unknown too, not just the payload");
+  assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault outright; the audit must pass it through rather than guess");
+});
+
 // A stash object that is CORRUPT rather than missing reaches the same branch —
 // list empty at rc 1, show-ref rc 0 — but git answers in SEVEN lines there, and
 // a bad `objects/info/alternates` both adds three more and puts a backslash in
