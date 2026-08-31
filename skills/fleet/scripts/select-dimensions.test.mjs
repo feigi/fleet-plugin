@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeStats } from "./diff-stats.mjs";
+import { lift } from "./lift.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing it
 // executes the workflow. Every value under test is lifted out of the SOURCE TEXT
@@ -21,8 +22,15 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
 // Every declaration below ends at a column-0 terminator and is the only
 // top-level declaration of its name, so these matches are unambiguous.
+//
+// Only `resolveDimensions` routes through the shared lift() in lift.mjs — it
+// is a plain top-level `function name(signature) { ... }` with no free
+// variables, the shape lift() generalizes. The other three stay local,
+// each for a reason lift()'s single-function signature cannot express:
 function liftFromSource(name) {
   if (name === "DEFAULT_DIMENSIONS") {
+    // An array literal, not a function — there is no signature for lift() to
+    // anchor on.
     const m = SOURCE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m);
     assert.ok(m, "review-pr.js no longer declares DEFAULT_DIMENSIONS as a top-level array — update this test");
     return new Function(`${m[0]}\nreturn DEFAULT_DIMENSIONS;`)();
@@ -33,6 +41,8 @@ function liftFromSource(name) {
     // over, declared immediately above it by construction. Lifting the function
     // alone leaves them out of the `new Function` eval scope — a ReferenceError,
     // not a wrong answer, so it fails loud rather than pinning a stale result.
+    // lift()'s regex anchors on one `function name(signature)` declaration and
+    // has no way to widen its start to a preceding const.
     const m = SOURCE.match(/^const SIZE_TIER_PROFILES = new Set[\s\S]*?^function selectDimensions\(all, stats\) \{[\s\S]*?^\}$/m);
     assert.ok(m, "review-pr.js no longer declares SIZE_TIER_PROFILES/selectDimensions(all, stats) as expected — update this test");
     return new Function(`${m[0]}\nreturn selectDimensions;`)();
@@ -42,21 +52,18 @@ function liftFromSource(name) {
     // as `new Function` parameters rather than re-declared — this pins the real
     // wiring, not a copy of it. `verifiers` gets a SENTINEL: the claim under test
     // is that the budget is a function of severity, not that the default is 2.
+    // lift() has no parameter channel — it always calls `new Function(body)()`
+    // with zero arguments.
     const m = SOURCE.match(/^const verifiersBySeverity = A\.verifiersBySeverity \|\| \{[\s\S]*?^const verifiersFor = .*;$/m);
     assert.ok(m, "review-pr.js no longer declares verifiersBySeverity then verifiersFor at top level — update this test");
     return new Function("A", "verifiers", `${m[0]}\nreturn verifiersFor;`)({}, 7);
-  }
-  if (name === "resolveDimensions") {
-    const m = SOURCE.match(/^function resolveDimensions\(override, all\) \{[\s\S]*?^\}$/m);
-    assert.ok(m, "review-pr.js no longer declares resolveDimensions(override, all) at top level — update this test");
-    return new Function(`${m[0]}\nreturn resolveDimensions;`)();
   }
   throw new Error(`liftFromSource: unknown name ${name}`);
 }
 
 const DEFAULT_DIMENSIONS = liftFromSource("DEFAULT_DIMENSIONS");
 const selectDimensions = liftFromSource("selectDimensions");
-const resolveDimensions = liftFromSource("resolveDimensions");
+const resolveDimensions = lift(SOURCE, "resolveDimensions", "override, all");
 
 // Drive the matrix from REAL file lists through the real classifier, not from
 // hand-written profile strings. A `diff-stats` classifier change that silently

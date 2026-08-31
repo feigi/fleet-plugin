@@ -35,6 +35,17 @@ const CODE = stripComments(SOURCE);
 // ReferenceError here on the branch that reads it, which is a property worth
 // having anyway. All three go into ONE scope because each calls the one before
 // it — `unrunEntries` wraps `unrunReason`, `unrunCrashed` wraps `unrunEntries`.
+//
+// Does NOT route through lift.mjs's single-function lift(), even for
+// `unrunReason` alone: every one of these three is exercised directly by a
+// test below, and `unrunEntries`/`unrunCrashed` call their callee BY NAME in
+// the lifted source text, so each needs every function it calls present in
+// its own `new Function` eval scope — measured, isolating `unrunEntries`
+// through `lift(CODE, "unrunEntries", "review, dimension")` alone throws
+// "unrunReason is not defined" the first time the returned function runs.
+// Same class of incompatibility as `selectDimensions`/`verifiersFor` below in
+// select-dimensions.test.mjs, just interdependence instead of a closed-over
+// const or an injected parameter.
 const SEAM = ["unrunReason(review)", "unrunEntries(review, dimension)", "unrunCrashed(reviewed, dimensions)"];
 function liftSeam() {
   const bodies = SEAM.map((sig) => {
@@ -210,6 +221,10 @@ test("a run that reported tests but not pass/fail is NOT unrun", () => {
 // SOURCE, not CODE: `new Function` is a real parser and drops every comment form
 // unconditionally, which is the whole point of reading the object rather than
 // the text (see the header). Stripping first would only re-narrow it.
+//
+// Not routed through lift.mjs's lift(): FINDINGS_SCHEMA is a `const` object
+// literal, not a `function name(signature)` declaration — same reason
+// DEFAULT_DIMENSIONS stays local in select-dimensions.test.mjs.
 function findingsSchema() {
   const src = between(SOURCE, "const FINDINGS_SCHEMA = {", "const VERDICT_SCHEMA", "review-pr.js");
   return new Function(`${src}\nreturn FINDINGS_SCHEMA;`)();

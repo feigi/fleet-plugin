@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
+import { lift } from "./lift.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
@@ -25,17 +26,7 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 // the stripper is shared rather than copied into each test file.
 const CODE = stripComments(SOURCE);
 
-// Each declaration is a top-level `function` whose body contains no line
-// starting at column 0 with `}`, so the non-greedy match ends on its own
-// closing brace.
-function lift(name, signature) {
-  const re = new RegExp(`^function ${name}\\(${signature}\\) \\{[\\s\\S]*?^\\}$`, "m");
-  const m = CODE.match(re);
-  assert.ok(m, `review-pr.js no longer declares ${name}(${signature}) at top level — update this test`);
-  return new Function(`${m[0]}\nreturn ${name};`)();
-}
-
-const usableDiff = lift("usableDiff", "snap");
+const usableDiff = lift(CODE, "usableDiff", "snap");
 
 // A diff that is empty, or that describes a commit other than the snapshot's,
 // is worse than no diff: the specialist reads it as authoritative.
@@ -105,7 +96,7 @@ test("usableDiff accepts when prHead is absent or matching", () => {
   );
 });
 
-const readRules = lift("readRules", "diffPath, stats, snap");
+const readRules = lift(CODE, "readRules", "diffPath, stats, snap");
 
 const PATHS = {
   paths: [
