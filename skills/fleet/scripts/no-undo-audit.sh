@@ -332,14 +332,35 @@ fi
 # characterization test pins it without closing it — closing it was ruled out
 # separately as not worth the complexity.
 #
-# It is not the only shape of that ceiling. #482 measured a corrupt loose
-# object behind a non-tip stash entry: the reflog there is intact, but `stash
-# list` prints the entries it got and exits 1 (`fatal: loose object ... is
-# corrupt`) rather than failing to resolve the ref. This cross-check does not
-# capture that exit code either, so a loud failure goes silently too-low here
-# just as a quiet one does above. Filed separately and not yet triaged — named
-# here only so this comment stops under-describing the gap.
-stash=$(git -C "$wt" stash list 2>/dev/null | wc -l | tr -d ' ')
+# A corrupt loose object behind a NON-TIP entry is one shape of that ceiling,
+# and it is not one, because git is loud about it. The reflog there is
+# intact, so `stash list` resolves the ref, prints the entries it could read,
+# says `fatal: loose object ... is corrupt` and exits 1 — a nonempty list at a
+# nonzero rc, a shape none of the rows above has, so `show-ref` agrees with the
+# ref and the cross-check has nothing to disagree with. The rc is the only
+# signal, which is why the list is captured rather than piped: `| wc -l` made
+# this statement's status `wc`'s, always 0, and git's own rc unrecoverable.
+# Nothing else moves — the count is still the lines the list printed, its stderr
+# is still dropped here, and a list that succeeds is still read as a count. #482.
+#
+# Only the CORRUPT half of that shape is loud. A non-tip object that is MISSING
+# rather than corrupt leaves the reflog intact too, but `stash list` then skips
+# the entry it cannot read in silence: rc 0, no stderr, one line short
+# (measured: three entries, `rm` the loose object behind `refs/stash@{2}` ->
+# rc 0, two lines, empty stderr, git 2.50.1). Nothing here can tell that from a
+# genuinely shorter stack, so it still reports the exact-looking count and stays
+# under the #306 ceiling above.
+sl_rc=0
+sl=$(git -C "$wt" stash list 2>/dev/null) || sl_rc=$?
+# `awk 'END{print NR}'`, not `wc -l`, and the difference is the empty stack.
+# `$()` has stripped the trailing newline, so `wc -l` on the bare capture counts
+# one short (measured: two entries, `printf '%s'`, `wc -l` -> 1), and padding it
+# back with `printf '%s\n'` turns an EMPTY stack into a lone newline `wc -l`
+# counts as one entry — two errors needing a `[ -z ]` guard between them. awk
+# counts the final incomplete record, so one statement answers both ends
+# (measured under `/bin/sh` with `set -eu`: "" -> 0, one/two/three entries with
+# no trailing newline -> 1/2/3, and no padding to strip).
+stash=$(printf '%s' "$sl" | awk 'END{print NR}')
 sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # Resolved lazily, inside the one state that asks the question: a healthy repo
@@ -353,9 +374,22 @@ if [ "$stash" = 0 ] && [ "$sr_rc" = 1 ]; then
   stash_reflog=$(git -C "$wt" rev-parse --path-format=absolute --git-path logs/refs/stash) \
     || die "git rev-parse failed in $wt — cannot tell an emptied stash from a deleted refs/stash"
 fi
+# Two ways to the same answer, and each names its own state. The empty-list
+# states are asked first and keep the sentence they already print, because a
+# corrupt TIP object satisfies both tests (empty list, rc 1, `show-ref` rc 0)
+# and `refs/stash` is what is wrong with it — the sentence below is about the
+# ref, and it is the more specific of the two there. What is left for the rc is
+# the state no cross-check can reach: git printed entries and then said it could
+# not finish, so the ref resolves, nothing disagrees, and the number would be
+# short by exactly the entries git refused to read (#482).
+msg=
 if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
-  stash=null
   msg="    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)"
+elif [ "$sl_rc" -ne 0 ]; then
+  msg="    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count"
+fi
+if [ -n "$msg" ]; then
+  stash=null
   # One of those causes is one git will name outright — the missing object,
   # where it says `fatal: bad object refs/stash` and the line above degrades
   # that into a guess across all four. So ask a second time, on this branch
@@ -372,12 +406,14 @@ if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   # right-but-vague one is #481; this change captures `stash list` and nothing
   # else.
   #
-  # The counting pipeline above is deliberately left alone. Capturing stderr
-  # THERE means splitting stdout from stderr around a `wc`, a temp file on
-  # every run, and a rule for git writing to stderr while succeeding — paid on
-  # every healthy audit to serve the one path that has already decided
-  # something is wrong. Here the second call costs nothing: it runs only on a
-  # run that is already reporting a fault. #304.
+  # The counting statement above takes git's exit code and nothing else, and
+  # that is the whole of what it takes. Capturing its stderr THERE means
+  # splitting stdout from stderr around one substitution, a temp file on every
+  # run, and a rule for git writing to stderr while succeeding — paid on every
+  # healthy audit to serve the one path that has already decided something is
+  # wrong. Here the second call costs nothing: it runs only on a run that is
+  # already reporting a fault, which now includes the run whose rc brought it
+  # here. #304, #482.
   #
   # `2>&1 >/dev/null` in that order captures stderr and drops stdout — the list
   # itself is not wanted, it was already counted. `|| true` is load-bearing

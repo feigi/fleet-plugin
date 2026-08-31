@@ -60,10 +60,26 @@ function noUndoAudit() {
 // pinned as written — `--git-common-dir`, not `.git/` — because a linked
 // worktree's `.git` is a file and `.git/refs/stash` reaches nothing there.
 test("the `unknown` path sends the operator to both stash files, via the common dir", () => {
-  assert.match(noUndoAudit(), /On `unknown` do not stop at that list: three of its four causes leave it empty at rc 0/);
+  // The instruction is pinned by its rule, not by a tally of the causes: the
+  // sentence used to count them, and #482 added one, which is how a count
+  // written into prose goes stale.
+  assert.match(noUndoAudit(), /On `unknown` do not stop at that list: the causes git stays silent about leave it empty at rc 0/);
   assert.match(noUndoAudit(), /c=\$\(git rev-parse --git-common-dir\)/);
   assert.match(noUndoAudit(), /ls -l "\$c"\/refs\/stash "\$c"\/logs\/refs\/stash`/);
   assert.match(noUndoAudit(), /cat "\$c"\/logs\/refs\/stash`/);
+});
+
+// #482: the cause whose whole shape is that the list did NOT come back empty —
+// `git stash list` printed entries, then exited nonzero, and the audit answers
+// `unknown` instead of the number it could have counted. The runbook has to
+// carry both halves: that the state exists at all, since an operator who reads
+// `unknown` as "the list was empty" goes looking for the wrong thing, and that
+// git's own words are already on the audit's line, since the earlier
+// instruction sends them to re-read a list whose stderr they have.
+test("the `unknown` path names the cause where the list printed entries and then failed", () => {
+  assert.match(noUndoAudit(), /`git stash list` printed entries and then exited nonzero, so what it printed is short/);
+  assert.match(noUndoAudit(), /a corrupt loose object behind an entry that is not the tip does this, and the audit reports `unknown` there/);
+  assert.match(noUndoAudit(), /the audit's own line carries that text for you/);
 });
 
 // `----------` alone is under-inclusive: an unreadable logs/refs DIRECTORY
