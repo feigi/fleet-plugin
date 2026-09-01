@@ -179,6 +179,16 @@ export function mapCi(ciJson, pr) {
     }
     return "unknown";
   }
+  // JSON.parse("null") succeeds and yields d === null. Nullishness, not
+  // object-ness, is the discriminator: `[]` and `{}` are typeof "object" just
+  // as null is, but null alone has no properties to read, so the status gate
+  // throws a TypeError on it where every other parsed payload boxes and reads
+  // its status as undefined. Hence a guard with its own return, rather than a
+  // payload that reaches the status gate and answers "unknown" there. Silent,
+  // not warned: the status gate already answers every parseable payload it
+  // cannot read a status from without a line, and a bare "null" is no more
+  // corrupt than those.
+  if (d === null) return "unknown";
   if (d.status !== "completed") return "unknown"; // still running, or no run yet (status null)
   if (d.verdict === "green") return "green";
   if (d.verdict === "not-green") return "red";
