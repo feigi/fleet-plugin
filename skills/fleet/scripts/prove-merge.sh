@@ -102,6 +102,23 @@ for obj in "$pre" "$post" "$merge"; do
   # Stops at what the guard observed: cat-file -e also fails on an object that
   # is present but is not a commit, and on an object store it cannot read.
   git cat-file -e "${obj}^{commit}" || die "cannot resolve $obj to a commit in this repository"
+  # -e above peels through a tag to reach the commit underneath, so an
+  # annotated tag clears that line even though $obj itself is not a commit —
+  # only the object at the far end of the peel is (#585). $pre and $post are
+  # then resolved UNPEELED by plain `git rev-parse` below, so a tag there hands
+  # back the tag object's own sha rather than the commit's, and the identity
+  # test later in this script compares that against a commit sha and can never
+  # match — every other leg still reads healthy, so the disproof carries no
+  # hint that the mismatch was in argument handling, not history. Checked here,
+  # on all three positions alike, so a tag is refused up front instead of
+  # reaching a verdict it was never fit to receive.
+  # Its own words, not a copy of the message above: -e already proved $obj
+  # resolves, so the only failure left here is git declining to answer at all,
+  # and the two guards would otherwise print the same line. Not decoration —
+  # under `set -eu` a bare failing assignment aborts with git's own 128, which
+  # is outside this script's 0/1/2 vocabulary (measured: rc=128, no diagnostic).
+  obj_type=$(git cat-file -t "$obj") || die "cannot read the type of $obj"
+  [ "$obj_type" = commit ] || die "$obj is a $obj_type, not a commit — refusing to treat it as one"
 done
 
 # Everything below reads structure off $merge, so an object the caller made up
