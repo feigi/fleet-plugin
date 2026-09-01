@@ -97,6 +97,23 @@ test("mapCi: a legitimately unknown state — status null, in_progress, no-ci �
   assert.deepEqual(errs, []);
 });
 
+// #1170: JSON.parse("null") succeeds and yields d === null, so the d.status
+// read two lines below the parse threw a TypeError out of mapCi — and mapCi
+// runs inside gather()'s per-PR loop, uncaught until serve's whole-tick catch,
+// so one PR's bare "null" aborted that tick's board.json rewrite for every PR.
+// Every other non-object JSON payload (true, a number, a string, an array, {})
+// already reads d.status as undefined and lands on "unknown" without a throw;
+// null was the lone outlier. Pinned alongside a sibling scalar so a fix that
+// over-guards (e.g. rejecting every non-plain-object, not just null) still
+// shows a still-correct "unknown" here rather than passing by accident.
+test("mapCi: a JSON payload that parses to null → unknown, not a thrown TypeError", () => {
+  assert.equal(mapCi("null", 1170), "unknown");
+});
+test("mapCi: a non-null non-object JSON scalar still classifies unknown, not thrown", () => {
+  assert.equal(mapCi("true", 1170), "unknown");
+  assert.equal(mapCi("[]", 1170), "unknown");
+});
+
 // `serve` rebuilds every ~15s and calls mapCi once per PR per tick, so a broken
 // payload is broken on every tick and the gate is the whole difference between
 // one line and a flood. Keyed per PR rather than globally, because a global

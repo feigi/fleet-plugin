@@ -179,6 +179,13 @@ export function mapCi(ciJson, pr) {
     }
     return "unknown";
   }
+  // JSON.parse("null") succeeds and yields d === null — the one JSON scalar
+  // that throws on the d.status read below instead of returning undefined
+  // like every other non-object payload (true/number/string/array/{} all
+  // read d.status as undefined and fall through to the same "unknown" one
+  // line down). Silent, not warned: a bare "null" is no more corrupt than
+  // those siblings this function already treats as legitimately unknown.
+  if (d === null) return "unknown";
   if (d.status !== "completed") return "unknown"; // still running, or no run yet (status null)
   if (d.verdict === "green") return "green";
   if (d.verdict === "not-green") return "red";
