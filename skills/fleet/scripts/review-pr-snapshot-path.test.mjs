@@ -43,12 +43,44 @@ test("a fully verified snapshot is not missing", () => {
 
 // Pre-existing behaviour (#140 must not regress it): no snapshot object at
 // all, or one missing path/head, was already refused before this ticket.
-test("a dead snapshot agent (falsy, or missing path/head) is refused, naming no tree", () => {
-  for (const dead of [null, undefined, false, {}, { path: "/tmp/snap" }, { head: "abc123" }]) {
+// #539 splits the single "no tree" message this used to share across all six
+// inputs into three, so the three groups below are asserted separately —
+// otherwise a branch that can't actually tell path-missing from head-missing
+// would still pass a loop that only checks "some string came back".
+//
+// A falsy `snap` is the agent contract failing — it died, or the harness
+// exhausted structured-output retries and `agent()` returned null (see the
+// comment above `function snapshotMissing` for that citation) — not a claim
+// about the tree on disk, which may be perfectly good.
+test("a falsy snapshot (agent died, or its structured output was rejected) names the agent contract, not a missing tree", () => {
+  for (const dead of [null, undefined, false]) {
     const reason = snapshotMissing(dead);
     assert.equal(typeof reason, "string", `${JSON.stringify(dead)} must yield a reason`);
-    assert.match(reason, /no tree/, "the reason no longer names a snapshot agent that returned no tree");
+    assert.match(reason, /died/, "the reason no longer names a dead agent as a cause");
+    assert.match(reason, /structured output/, "the reason no longer names rejected structured output as a cause");
   }
+});
+
+// `{}` and `{ head: "abc123" }` are both missing `path`; the original
+// `!snap || !snap.path || !snap.head` chain checks `path` before `head`, so
+// both land on the same branch under the split too — the split preserves that
+// order rather than re-deciding it.
+test("a report missing path is refused, naming path and not head", () => {
+  for (const dead of [{}, { head: "abc123" }]) {
+    const reason = snapshotMissing(dead);
+    assert.equal(typeof reason, "string", `${JSON.stringify(dead)} must yield a reason`);
+    assert.match(reason, /`path`/, "the reason no longer names path as the missing field");
+    assert.doesNotMatch(reason, /`head`/, "a missing-path report must not also claim head is what's missing");
+  }
+});
+
+// `{ path: "/tmp/snap" }` is the one input of the six with `path` present —
+// the only one that can reach the `head`-missing branch at all.
+test("a report missing head (path present) is refused, naming head and not path", () => {
+  const reason = snapshotMissing({ path: "/tmp/snap" });
+  assert.equal(typeof reason, "string", "a present path with no head must yield a reason");
+  assert.match(reason, /`head`/, "the reason no longer names head as the missing field");
+  assert.doesNotMatch(reason, /`path`/, "a missing-head report must not also claim path is what's missing");
 });
 
 // #140's actual case: path and head are both present, well-formed strings —

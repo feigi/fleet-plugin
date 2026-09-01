@@ -749,8 +749,18 @@ their command failed. Do not modify ${worktree}.`,
 // The prefix tolerance is load-bearing for the same reason: `head` is relayed
 // by an agent asked for "the HEAD sha" and may be abbreviated, and under a raw
 // `!==` an abbreviated MATCH would refuse the review outright.
+// Split into three branches (#539): the single message below used to cover a
+// dead agent (it died, or the harness exhausted structured-output retries —
+// see the `agent()` comment near this file's top — no fault of the tree), a
+// report missing `path`, and a report missing `head` alike, naming a
+// "returned no tree" cause common to none of the three specifically. Order
+// preserved from the original `!snap || !snap.path || !snap.head`: a report
+// missing both fields still reads as missing `path`, same short-circuit as
+// before the split.
 function snapshotMissing(snap) {
-  if (!snap || !snap.path || !snap.head) return "the snapshot agent returned no tree — nothing to review";
+  if (!snap) return "the snapshot agent returned nothing (it died, or its structured output was rejected) — no tree to review";
+  if (!snap.path) return "the snapshot agent's report is missing `path` — no tree to review";
+  if (!snap.head) return "the snapshot agent's report is missing `head` — no tree to review";
   if (!snap.pathVerified)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
