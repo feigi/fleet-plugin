@@ -995,6 +995,33 @@ function verdictFor(dispatched, votes) {
   return { verdict, votes: live, refutersDispatched: dispatched };
 }
 
+// The two populations of `unverified`, told apart by the field above rather
+// than by severity: refuters dispatched with nothing left standing is a crash,
+// none dispatched is the `suggestion` band's policy skip. And the response that
+// follows from telling them apart, returned beside the population it is about:
+// a crash-heavy `unverified` is not a reason to defer, because the run is
+// resumable, so the findings nobody looked at can still be looked at. Saying so
+// only in the apply rule puts it a file away from the payload that carries the
+// crash. Null when nothing crashed, so the field is an instruction to act
+// rather than boilerplate a reader learns to skip.
+//
+// PURE and top-level for the reason `verdictFor` above is, and for one more:
+// the file's top-level `await` leaves it unimportable, so a test can only reach
+// this by lifting the declaration out of the source text — and lifting it lets
+// a test DRIVE the classification instead of pinning the predicate as text. A
+// text pin does not cover it. Measured on this predicate while it was still
+// inline at the report block: deleting the filter left this file's own tests
+// green.
+function resumeFor(unverified) {
+  const crashed = unverified.filter((f) => f.refutersDispatched > 0);
+  return {
+    crashed,
+    resume: crashed.length
+      ? "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die — nothing looked at them. Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
+      : null,
+  };
+}
+
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
 // that dimension finishes, rather than waiting for the slowest reviewer. There
@@ -1144,10 +1171,7 @@ const survived = all.filter((f) => f.verdict === "survived");
 const refuted = all.filter((f) => f.verdict === "refuted");
 const unverified = all.filter((f) => f.verdict === "unverified");
 
-// The two populations of `unverified`, told apart by the field rather than by
-// severity: refuters dispatched with nothing left standing is a crash, none
-// dispatched is the `suggestion` band's policy skip.
-const crashed = unverified.filter((f) => f.refutersDispatched > 0);
+const { crashed, resume } = resumeFor(unverified);
 
 log(
   `${survived.length} survived, ${refuted.length} refuted, ${unverified.length} unverified ` +
@@ -1182,14 +1206,7 @@ return {
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),
-  // The recovery, named where the reader who has to act meets it. A crash-heavy
-  // `unverified` is not a reason to defer: the run is resumable, so the findings
-  // nobody looked at can still be looked at. Saying so only in the apply rule
-  // puts it a file away from the payload that carries the crash.
-  //
-  // Null when nothing crashed, so the field is an instruction to act rather than
-  // boilerplate a reader learns to skip.
-  resume: crashed.length
-    ? "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die — nothing looked at them. Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
-    : null,
+  // The recovery, named where the reader who has to act meets it — built by
+  // `resumeFor` above, alongside the crash population it is the response to.
+  resume,
 };

@@ -34,6 +34,7 @@ const CODE = stripComments(SOURCE);
 // is a property worth having: the verdict decision depends on the dispatched
 // count and the votes and on nothing else in the run.
 const verdictFor = lift(CODE, "verdictFor", "dispatched, votes");
+const resumeFor = lift(CODE, "resumeFor", "unverified");
 
 // --- the discriminant -----------------------------------------------------
 
@@ -97,18 +98,25 @@ test("the majority rule survives the extraction — a live vote list still bands
 // calls it. Both producers of the band are pinned as text, because a call site
 // is the half no lifted function can see — and one of the two calling it while
 // the other keeps its own inline copy is exactly the state #591 describes.
+//
+// Each is pinned as the WHOLE returned expression, spread included, and not as
+// a span that any mention of `verdictFor` inside it satisfies. A span is the
+// weaker pin and it does not hold: `stripComments` documents its own ceiling —
+// an inline `/* */` and a trailing `//` keep their text — so a revert that
+// rebuilds the object inline and leaves the call named in a surviving comment
+// puts the pinned token back where the span reads it. Measured on both spans
+// while they were still written that way: each revert passed with its comment
+// and failed without it, which is the pin discriminating on comment text.
 test("both producers of the unverified band route through verdictFor", () => {
-  const skip = CODE.match(/if \(n === 0\) return Promise\.resolve\(\{[^}]*\}\);/);
-  assert.ok(skip, "review-pr.js no longer returns early on a 0-refuter band — update this test");
   assert.match(
-    skip[0],
-    /verdictFor\(0, \[\]\)/,
+    CODE,
+    /if \(n === 0\) return Promise\.resolve\(\{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(0, \[\]\) \}\);/,
     "the policy-skip branch builds its own verdict again instead of routing through verdictFor (#591)",
   );
 
   assert.match(
     CODE,
-    /\.then\(\(votes\) => \{[\s\S]*?verdictFor\(n, votes\)/,
+    /\.then\(\(votes\) => \{\s*return \{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, votes\) \};\s*\}\);/,
     "the post-refuter branch builds its own verdict again instead of routing through verdictFor (#591)",
   );
   // The dispatched count is what the discriminant IS, so a call passing a
@@ -133,6 +141,38 @@ test("the returned object carries resume alongside the three bands", () => {
     CODE,
     /resumeFromRunId/,
     "the resume string no longer names the parameter that performs the resume — a reader is told to resume and not how",
+  );
+});
+
+// The field being present is not the field being right. This drives the real
+// classification over both populations of the band — the half `resume` exists
+// for and the half it must stay quiet on — because a source-text pin on the
+// predicate that separates them passes against its own deletion: measured while
+// the filter was still inline at the report block, deleting it left this file's
+// tests green.
+test("the crash population is the dispatched-refuter half of unverified, and only it arms resume", () => {
+  const skipped = { severity: "suggestion", verdict: "unverified", votes: [], refutersDispatched: 0 };
+  const crashed = { severity: "critical", verdict: "unverified", votes: [], refutersDispatched: 2 };
+
+  const quiet = resumeFor([skipped]);
+  assert.deepEqual(quiet.crashed, [], "a policy skip counts as a crashed refuter — the two populations read alike again (#591)");
+  assert.equal(quiet.resume, null, "a run where nothing died is told to relaunch — the instruction is boilerplate, not a signal");
+
+  const armed = resumeFor([skipped, crashed]);
+  assert.deepEqual(armed.crashed, [crashed], "the crash population no longer separates a dead refuter from a policy skip (#591)");
+  assert.match(
+    armed.resume,
+    /resumeFromRunId/,
+    "refuters died and the payload names no way to recover them — the findings nobody looked at get deferred instead",
+  );
+
+  // The classification above is reachable from a test whether or not the report
+  // block still calls it, so the call is pinned too — dropping the call is the
+  // mutation this file stayed green against.
+  assert.match(
+    CODE,
+    /const \{ crashed, resume \} = resumeFor\(unverified\);/,
+    "the report no longer derives its crash population and resume from resumeFor (#591)",
   );
 });
 
