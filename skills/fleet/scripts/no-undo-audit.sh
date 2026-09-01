@@ -482,12 +482,18 @@ fi
 #    read as "no conflicting files" and reported safe, which is exactly the
 #    branch-that-never-resolved case this step exists to catch.
 mt_out=$(mktemp) || die "cannot create a temporary file"
+# Armed before the SECOND `mktemp` rather than after it, because a `die` between
+# the two would otherwise run with no trap installed and leave the first
+# temporary on disk. `ps_out` is emptied first so the trap body is legal under
+# `set -u` while it names a variable the run has not reached yet; `rm -f ""` is
+# a no-op, so the trap is correct in both windows.
+ps_out=
+trap 'rm -f "$mt_out" "$ps_out"' EXIT
 # The at-risk step's pathspec list, written by the same reader that answers the
 # conflicts question below. NUL-separated, so it cannot travel in a variable;
 # `mktemp` rather than a name derived from `$mt_out`, so a shared TMPDIR offers
 # no predictable name to plant a symlink on.
 ps_out=$(mktemp) || die "cannot create a temporary file"
-trap 'rm -f "$mt_out" "$ps_out"' EXIT
 echo "\$ git merge-tree --write-tree --name-only -z $base origin/$branch" >&2
 mt_rc=0
 git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$mt_out" || mt_rc=$?

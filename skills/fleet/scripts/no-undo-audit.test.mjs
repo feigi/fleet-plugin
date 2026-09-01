@@ -323,22 +323,29 @@ exec ${s.real("git")} "$@"
  * Fails every `mktemp` after the first, leaving merge-tree's own temporary
  * intact so the run reaches the point where a second one is asked for. A full
  * TMPDIR or a TMPDIR that has gone missing does this for real.
+ *
+ * The path the first call handed back is recorded, not merely the fact that a
+ * call happened, because the abort this injects is also the abort that has to
+ * clean up after itself: the caller reads `firstTemp` to check the file is gone
+ * once the run has exited. Recording it is what lets the assertion name a real
+ * path rather than trusting the trap.
  */
 function withLaterMktempFailing(t) {
   const s = shimDir(t, "no-undo-audit-mktemp-");
-  const marker = join(s.bin, "first-seen");
-  s.write("mktemp", `if [ -e "${marker}" ]; then
+  const firstTemp = join(s.bin, "first-temp-path");
+  s.write("mktemp", `if [ -e "${firstTemp}" ]; then
   echo "mktemp: failed to create file" >&2
   exit 1
 fi
-: >"${marker}"
-exec ${s.real("mktemp")} "$@"
+f=$(${s.real("mktemp")} "$@") || exit $?
+printf '%s\n' "$f" >"${firstTemp}"
+printf '%s\n' "$f"
 `);
-  return s.path();
+  return { path: s.path(), firstTemp };
 }
 
 /**
- * Add/add conflicts on `n` paths long enough that merge-tree's PROSE tail — the
+ * Add/add conflicts on enough paths, each named long enough, that merge-tree's PROSE tail — the
  * `Auto-merging`/`CONFLICT` section that follows the empty record, and the part
  * of the output the audit deliberately never wants — is larger than a pipe
  * buffer.
@@ -355,9 +362,9 @@ exec ${s.real("mktemp")} "$@"
  * One main commit, not `manyConflictsTwoCommits`' two — the dedupe across xargs
  * batches is that fixture's claim and not this one's.
  */
-function longTailConflictRepo(t, n = 200, nameLen = 220) {
+function longTailConflictRepo(t) {
   const c = repo(t);
-  const paths = Array.from({ length: n }, (_, i) => `${String(i).padStart(3, "0")}-${"x".repeat(nameLen)}.txt`);
+  const paths = Array.from({ length: 200 }, (_, i) => `${String(i).padStart(3, "0")}-${"x".repeat(220)}.txt`);
   git(c.w, "checkout", "-q", "main");
   for (const p of paths) writeFileSync(join(c.w, p), "MAIN SIDE\n");
   git(c.w, "add", "--", ...paths);
@@ -1166,15 +1173,29 @@ test("breaking the sed that used to build the at-risk pathspecs changes nothing,
 // exit code has to say so: bare `set -eu` would abort with mktemp's own 1,
 // which out of THIS script is the dirty-worktree refusal — fabricated on a
 // worktree already measured clean, with no payload and nothing on stderr.
+//
+// The last assertion is about the abort PATH, not the verdict, and it is the
+// one that needs saying: the fault lands between the two `mktemp` calls, so a
+// cleanup trap armed after both would not yet exist when this run dies, and the
+// temporary the first call created would outlive it. Exit code and message are
+// both correct in that world, which is why they cannot be the whole pin —
+// asking whether the file is gone is the only question that separates a trap
+// armed early enough from one armed too late.
 test("a temporary file the at-risk step cannot create is unanswerable (2), never the refusal that means dirty", (t) => {
   const c = bareConflictRepo(t, "plain.txt");
 
-  const r = audit(c, { ...ENV, PATH: withLaterMktempFailing(t) });
+  const m = withLaterMktempFailing(t);
+  const r = audit(c, { ...ENV, PATH: m.path });
   assert.equal(r.status, 2,
     `the worktree is clean and was measured clean — exit 1 here would report it dirty on the strength of a full TMPDIR; got ${r.status} ${r.stderr}`);
   assert.equal(r.stdout.trim(), "", `exit 2 emits no payload; got ${r.stdout}`);
   assert.match(r.stderr, /cannot create a temporary file/,
     "and it names the cause rather than exiting silently");
+
+  const first = readFileSync(m.firstTemp, "utf8").trim();
+  assert.ok(first, "the shim must have recorded the temporary the first call handed back, or the check below proves nothing");
+  assert.equal(existsSync(first), false,
+    `the temporary created before the failing call has to be cleaned up by the abort that follows it, or a run that dies here leaks one; ${first} survived`);
 });
 
 // #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
@@ -1229,17 +1250,38 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 });
 
 // #582: `tr` is locale-sensitive, and under a UTF-8 locale BSD tr exits 1 on a
-// byte that is not valid UTF-8. In the script's `tr | tr | awk` it is the FIRST
-// stage that fails — measured, PIPESTATUS `1 0 0`, the second `tr` and `awk`
-// both exiting 0 on the short input it hands them — so the real status sits in
-// a non-final slot where `set -e` never sees it (the pipeline's status is
-// awk's) and the line carries no `|| die` of its own. `conflicts` came back
+// byte that is not valid UTF-8. What that cost was measured on the `tr | tr |
+// awk` that used to split merge-tree's output, where the FIRST stage was the
+// one that failed — PIPESTATUS `1 0 0`, the second `tr` and `awk` both exiting
+// 0 on the short input it handed them — so the real status sat in a non-final
+// slot where `set -e` could not see it (the pipeline's status was awk's) and
+// where the line carried no `|| die` of its own either. `conflicts` came back
 // holding the single truncated entry `b`, `plain.txt` was dropped from the list
-// entirely, `atRisk` was `[]`, and the audit exited 0. A false safe on the one
+// entirely, `atRisk` was `[]`, and the audit exited 0: a false safe from the one
 // tool whose whole job is to say whether a rebase would eat a commit, which is
 // the outcome the comment above `conflicts=` says must be exit 2.
 // `export LC_ALL=C` is the fix, and it is the convention inflight.sh already
-// follows at five sites.
+// follows, both globally and per site.
+//
+// Past tense throughout, because that mechanism is no longer here to reproduce:
+// #583 replaced the split with a single byte-oriented reader whose status
+// nothing discards, so the pin is not what stands between that byte and a false
+// safe on this path any more. The assertions below are unchanged by that —
+// they assert the correct ANSWER, which is what both the split and the reader
+// owe.
+//
+// WHAT KILLS THE MUTANT TODAY IS NOT THE MECHANISM ABOVE, and the difference
+// matters to anyone tidying the script. Measured on this tree, with the pin
+// deleted: the reader parses both conflicting paths correctly whatever the
+// locale, and the run then dies further down, when the `conflict: ` render that
+// prints them to stderr crashes on the byte — `sed: RE error: illegal byte
+// sequence`, and the script exits 1 rather than reporting a short list at 0.
+// So this test's kill now rests on a diagnostic render that decides nothing,
+// carries no `|| die`, and reads like safe cleanup. Neutralise or remove that
+// render and the mutant stops dying, with nothing going red to say so. #1160
+// tracks that render's own defect — it aborts a clean audit with the status
+// that means dirty — and carries the same warning in the other direction:
+// whoever fixes it must give this test a new kill mechanism first.
 //
 // The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
 // are load-bearing. Explicit rather than inherited, because a suite that takes
