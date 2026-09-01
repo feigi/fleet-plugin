@@ -1602,8 +1602,10 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
 // ── A stray flag in check's/filed's subject tail (#584) ─────────────────────
 //
 // `--file`/`--require-file` are spliced out of argv by NAME before `cmd`/
-// `rest` are ever split, so a correctly-spelled flag never reaches here — only
-// a MISSPELLED one survives into the tail. #362 closed the swallow at the
+// `rest` are ever split, so a misspelled flag is the ordinary way one reaches
+// here — though not the only way: the splice is `indexOf`-based and takes one
+// occurrence, so a REPEATED correctly-spelled flag survives into the tail too
+// and is refused by the same rule. #362 closed the swallow at the
 // `--file`/`--require-file` positions; this is the tail beyond them, where a
 // stray token used to fold straight into the duplicate-filing subject.
 //
@@ -1666,25 +1668,85 @@ test("CLI: a stray flag alone, with no subject, is accepted as the degenerate su
 // `filed` takes the same free-text tail, past its issue-number argument
 // (`subjectParts`, not `rest` — the issue number sits ahead of it), and is
 // refused by the same rule.
+// Seeded with nothing on purpose: `filed` has no missing-file path of its own
+// — save() writes the sections itself — so a pre-created empty ledger here
+// would only hide the assertion below, that a refusal leaves no ledger at all.
 test("CLI: a stray flag in filed's subject is refused, naming it (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
-  writeFileSync(file, ledgerText([]));
   const r = cli(["--file", file, "filed", "999", "--typo-flag", "some new subject"]);
   assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
   assert.match(r.stderr, /unknown flag --typo-flag/);
   assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+  assert.equal(existsSync(file), false, "a refusal must not write a ledger either");
 });
 
 // filed's own subject-legitimately-starting-with-'--' pin, mirroring check's.
 test("CLI: filed accepts a subject legitimately starting with '--', given as one argument (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
-  writeFileSync(file, ledgerText([]));
   const subject = "--flag-like subject text";
   const r = cli(["--file", file, "filed", "888", subject]);
   assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
   assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the ledger unchanged");
+});
+
+// Every pin above puts the stray flag FIRST in the tail, so all of them stay
+// green against a guard that only ever inspects `tail[0]` — a narrowing a
+// future reader could make believing the tests still cover it. These drive
+// the flag into a later position instead, and across all four subcommands
+// that read a free-text tail rather than only the two that read it into a
+// duplicate-filing answer.
+test("CLI: a stray flag is refused from a later position in the tail too, on every tail-reading subcommand (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const argv of [
+    ["check", "widget", "guard", "--typo-flag"],
+    ["filed", "999", "some new subject", "--typo-flag"],
+    ["row", "42", "some state text", "--typo-flag"],
+    ["ruled", "77", "merge it", "--typo-flag"],
+  ]) {
+    const r = cli(["--file", file, ...argv]);
+    assert.equal(r.status, 2, `${argv[0]}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /unknown flag --typo-flag/, `${argv[0]}: must name the stray`);
+    assert.equal(r.stdout, "", `${argv[0]}: a refusal must not also emit a payload`);
+  }
+  assert.equal(existsSync(file), false, "no refusal may write a ledger");
+});
+
+// The tail guard cannot reach the slot ahead of it: a stray flag one token
+// earlier becomes the id, and the tail behind it holds no `--` element to
+// find. Each subcommand loses something different to that — `filed` its
+// duplicate-filing answer, `row` its rewrite-in-place key, `ruled` its
+// decision record — so each is driven here on its own.
+test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const [cmd, expected] of [
+    ["filed", /unknown flag --requre-file — expected an issue number/],
+    ["row", /unknown flag --requre-file — expected a ticket number/],
+    ["ruled", /unknown flag --requre-file — expected a PR number/],
+  ]) {
+    const r = cli(["--file", file, cmd, "--requre-file", "999", "widget guard missing"]);
+    assert.equal(r.status, 2, `${cmd}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, expected, `${cmd}: must name the stray and the slot it displaced`);
+    assert.equal(r.stdout, "", `${cmd}: a refusal must not also emit a payload`);
+  }
+  assert.equal(existsSync(file), false, "no refusal may write a ledger");
+});
+
+// The id guard's own false-positive class: an id argument is still accepted
+// with or without its `#`, and the accept-pins above still hold, so the bare
+// prefix test on that slot cannot be what refuses a legitimate call.
+test("CLI: an ordinary id is unaffected by the id-slot guard, with or without '#' (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  const r = cli(["--file", file, "filed", "#999", "widget guard missing"]);
+  assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).issue, "#999");
+  const r2 = cli(["--file", file, "row", "42", "some state text"]);
+  assert.equal(r2.status, 0, `got exit ${r2.status}\n${r2.stderr}`);
+  assert.equal(JSON.parse(r2.stdout).ticket, "#42");
 });
 
 // ── The payload subcommands on a pipe (#246) ─────────────────────────────────

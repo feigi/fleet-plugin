@@ -174,6 +174,18 @@ function refuseStrayInTail(tail) {
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
+// The id slot AHEAD of that tail is a second hazard needing a different rule.
+// A stray flag one token earlier lands in `issue`/`ticket`/`pr`, and the tail
+// left behind carries no `--` element at all, so the rule above passes it.
+// Widening that rule to cover it is what cannot be done: `refuseStrayInTail`
+// over the whole of `rest` refuses `filed <issue> "--flag-like subject"` too,
+// which is a two-element tail with a `--` element and is pinned here as
+// must-keep-working. An id is never legitimately `--`-prefixed, so this slot
+// takes the bare prefix test the tail cannot have.
+function refuseStrayInId(value, what) {
+  if (value.startsWith("--")) die(`unknown flag ${value} — expected ${what}`);
+}
+
 // Set by load(), the only function that reads the file, so `ledger.ok` can
 // report what the parse saw rather than what a later stat() guesses (#231).
 let ledgerParsed = false;
@@ -256,6 +268,11 @@ if (cmd === "read") {
 } else if (cmd === "row") {
   const [ticket, ...textParts] = rest;
   if (!ticket || textParts.length === 0) die("usage: ledger.mjs row <ticket> <text>");
+  // A stray flag here becomes the row KEY, which is what the rewrite-in-place
+  // lookup below matches on — so the real ticket's next `row` call finds no
+  // match and appends a second row instead of rewriting the first.
+  refuseStrayInId(ticket, "a ticket number");
+  refuseStrayInTail(textParts);
   const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
   const line = `${key} ${textParts.join(" ")}`;
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
@@ -273,6 +290,12 @@ if (cmd === "read") {
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
+  // This slot is where #584's own signature survives the tail guard: a stray
+  // flag here shifts the issue number into the subject, and the row it writes
+  // no longer answers the subject a later `check` asks about — that check
+  // reports not-filed at exit 0 where the correctly-spelled filing makes it
+  // report already-filed at exit 1.
+  refuseStrayInId(issue, "an issue number");
   refuseStrayInTail(subjectParts);
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
@@ -281,6 +304,12 @@ if (cmd === "read") {
 } else if (cmd === "ruled") {
   const [pr, ...decisionParts] = rest;
   if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
+  // Nothing reads this section back — save() is its only consumer — so the
+  // harm here is the narrowest of the three: a permanently wrong decision
+  // record in an append-only file, with no verdict riding on it. Guarded
+  // anyway because the shape is identical and the record is the point.
+  refuseStrayInId(pr, "a PR number");
+  refuseStrayInTail(decisionParts);
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
   save(data);
