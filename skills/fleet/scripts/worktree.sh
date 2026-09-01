@@ -23,22 +23,30 @@
 
 # The byte `wt_listing` substitutes for a newline found INSIDE a worktree path.
 #
-# \001 because no field any caller parses out of the listing can hold one: the
-# attribute keywords are the fixed words `HEAD`, `branch`, `detached`, `bare`,
-# `locked` and `prunable`, an object id is hex, and a ref name rejects control
-# bytes outright. So the byte appearing in a PATH parsed out of `$wt_list` means
-# exactly one thing — that path had a newline in it, and no caller can hand it
-# back to the filesystem as read. `nl_path` is the one test for it.
+# \001 because the listing's own STRUCTURE cannot produce one, which is the
+# property the swap actually needs: nothing git emits to hold the format
+# together carries a control byte — the attribute keywords are fixed words, an
+# object id is hex, and a ref name rejects them outright (`git check-ref-format`
+# exits 1, `git branch` refuses). So a \001 reaching `$wt_list` is never part of
+# the format, and can never be read as a delimiter or an attribute.
 #
-# Deliberately not the wider claim that no byte anywhere in the listing can be a
-# \001. `locked <reason>` carries free-form text the operator wrote, and git
-# neither rejects nor sanitizes a control byte in it — measured, git 2.50.1:
-# `git worktree lock --reason` accepts a \001 and the listing hands it straight
-# back. It is inert here, and for reasons worth stating rather than assuming: a
-# lock reason is never a path, no caller passes one to `nl_path`, and after the
-# `tr` it sits on its own line where neither `/^worktree /` nor `/^branch /` can
-# match it. (`prunable`'s reason is git's own fixed prose, so it has no such
-# hole.) The narrow guarantee is the one the callers rely on.
+# That is the whole guarantee. Two things it deliberately does NOT claim, both
+# load-bearing:
+#
+# It is not a claim that no byte anywhere in the listing can be a \001.
+# `locked <reason>` carries free-form text the operator wrote, and git neither
+# rejects nor sanitizes a control byte in it — measured, git 2.50.1: `git
+# worktree lock --reason` accepts a \001 and the listing hands it straight back.
+# Inert here, for reasons worth stating rather than assuming: a lock reason is
+# never a path, no caller passes one to `nl_path`, and after the `tr` it sits on
+# its own line that no `/^worktree /` or `/^branch /` matches. (`prunable`'s
+# reason is git's own fixed prose, so it has no such hole.)
+#
+# And it is not a claim that a \001 in a PATH proves a newline was there. A path
+# may hold one natively; `nl_path` says so, and says why refusing on both is the
+# answer rather than guessing which it was. What the byte does establish is the
+# only thing any caller needs: this is a path the reader cannot hand back to the
+# filesystem byte for byte.
 wt_nl=$(printf '\001')
 
 # Does $1 carry the byte `wt_listing` substituted for a newline?
