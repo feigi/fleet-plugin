@@ -208,15 +208,16 @@ git -C "$wt" rev-parse --verify "$base" >/dev/null || die "$base does not resolv
 # Left unchecked, merge-tree below fails silently and "no conflicting files" is
 # printed for a question that was never actually answered.
 #
-# The message names only what the guard observed. It used to name causes as
-# well, and could not tell them apart: a branch never pushed, a stale
-# remote-tracking ref and a caller who already prefixed the name "origin/" all
-# land here alike, and that is not the whole set. git's own stderr, no longer
-# suppressed, is what says which one — so there is nothing left for a guess to
-# add. --verify stays: without it a name that matches a FILE resolves, prints
+# The message names what the guard observed and then what to DO, and stops. It
+# used to name CAUSES instead — a branch never pushed, a stale remote-tracking
+# ref, a caller who already prefixed the name "origin/" — which it cannot tell
+# apart, and neither can git: unsuppressed, rev-parse answers the constant
+# "fatal: Needed a single revision" for every one of them. A fetch is the right
+# next move whichever fired, so an action survives where the cause list could
+# not. --verify stays: without it a name that matches a FILE resolves, prints
 # the path and exits 0, and the guard passes something that is not a ref.
 git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
-  || die "origin/$branch does not resolve"
+  || die "origin/$branch does not resolve — run 'git fetch origin' and retry"
 
 # 1. Uncommitted work. This may exist nowhere else on disk. `|| true` here would
 #    turn a failed `status` into empty output and print "clean" over a dirty
