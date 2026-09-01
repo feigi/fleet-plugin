@@ -43,12 +43,54 @@ test("a fully verified snapshot is not missing", () => {
 
 // Pre-existing behaviour (#140 must not regress it): no snapshot object at
 // all, or one missing path/head, was already refused before this ticket.
-test("a dead snapshot agent (falsy, or missing path/head) is refused, naming no tree", () => {
-  for (const dead of [null, undefined, false, {}, { path: "/tmp/snap" }, { head: "abc123" }]) {
+// #539 splits the single "no tree" message this used to share across all six
+// inputs into three, so the three groups below are asserted separately —
+// otherwise a branch that can't actually tell path-missing from head-missing
+// would still pass a loop that only checks "some string came back".
+//
+// A falsy `snap` is the agent contract failing — it died, or the harness
+// exhausted structured-output retries and `agent()` returned null — not a
+// claim about the tree on disk, which may be perfectly good. The citation is
+// the `required:` comment inside `FINDINGS_SCHEMA` in review-pr.js, which
+// records that a schema REJECTION is retried and every observed one recovered:
+// exhaustion is the only one of the two that returns null, so naming rejection
+// as the cause would point an operator at a signature successful runs carry.
+test("a falsy snapshot (agent died, or it exhausted its structured-output retries) names the agent contract, not a missing tree", () => {
+  for (const dead of [null, undefined, false]) {
     const reason = snapshotMissing(dead);
     assert.equal(typeof reason, "string", `${JSON.stringify(dead)} must yield a reason`);
-    assert.match(reason, /no tree/, "the reason no longer names a snapshot agent that returned no tree");
+    assert.match(reason, /died/, "the reason no longer names a dead agent as a cause");
+    assert.match(reason, /exhausted/, "the reason no longer names exhausted retries — the only structured-output state that yields a falsy snap");
+    assert.doesNotMatch(reason, /rejected/, "the reason names a rejection, which is retried and recovers rather than returning null");
   }
+});
+
+// `{}` and `{ head: "abc123" }` are both missing `path`; the original
+// `!snap || !snap.path || !snap.head` chain checks `path` before `head`, so
+// both land on the same branch under the split too — the split preserves that
+// order rather than re-deciding it.
+test("a report missing path is refused, naming path and not head", () => {
+  for (const report of [{}, { head: "abc123" }]) {
+    const reason = snapshotMissing(report);
+    assert.equal(typeof reason, "string", `${JSON.stringify(report)} must yield a reason`);
+    assert.match(reason, /`path`/, "the reason no longer names path as the missing field");
+    assert.doesNotMatch(reason, /`head`/, "a missing-path report must not mention `head` at all — the pin is what catches this branch returning the head branch's message");
+  }
+});
+
+// `{ path: "/tmp/snap" }` is the one input of the six with `path` present —
+// the only one that can reach the `head`-missing branch at all. It is also the
+// one branch of the three that must NOT borrow the "no tree to review" ending:
+// `path` is present and may name a perfectly good directory, so the absent sha
+// is the whole of what is wrong. #539 exists because one message misattributed
+// a handshake failure as a missing tree; this branch is where that would come
+// straight back.
+test("a report missing head (path present) is refused, naming head and not path", () => {
+  const reason = snapshotMissing({ path: "/tmp/snap" });
+  assert.equal(typeof reason, "string", "a present path with no head must yield a reason");
+  assert.match(reason, /`head`/, "the reason no longer names head as the missing field");
+  assert.doesNotMatch(reason, /no tree/, "the head branch claims there is no tree, on the one branch whose path is present and whose tree may be fine");
+  assert.doesNotMatch(reason, /`path`/, "a missing-head report must not mention `path` at all — the pin is what catches this branch returning the path branch's message");
 });
 
 // #140's actual case: path and head are both present, well-formed strings —
