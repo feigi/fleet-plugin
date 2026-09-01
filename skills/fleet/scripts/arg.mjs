@@ -76,15 +76,50 @@ export function makeDie(name) {
 // could-not-check verdict rather than working around it here, because
 // refusing loudly still beats silently taking the next flag as this one's
 // value.
+// #567: the two predicates below ARE those rules, stated once and exported, so
+// that a caller which cannot route through arg()/has() consumes the rule
+// instead of hand-copying the expression. Two callers cannot: ledger.mjs and
+// member-outcomes.mjs each hand-roll their own argv reader. Before this they
+// carried their own copies, and nothing failed when a copy drifted — the same
+// class of defect as a requirement documented where nothing executes it.
+// shared-refusal.test.mjs is what executes it now.
+//
+// What travels is the RULE, never the refusal text: each caller keeps its own
+// die() wording, which is the constraint that made copying look necessary in
+// the first place. ledger.mjs says "--file needs a path" where arg() below
+// says "--<name> needs a value", because a reader who typed --file is owed the
+// flag they typed and not the grammar behind it.
+//
+// Plain exports, not factories, because neither takes a script NAME — one is a
+// predicate over a value, the other over an argv. That is also why #467's
+// proposed makeCli(NAME) collapse of makeDie/makeArg/makeHas cannot absorb
+// them whichever way it lands: those three exist to BIND a name, and these
+// have no name to bind.
+export function isFlagLike(value) {
+  return value === undefined || value.trim() === "" || value.startsWith("--");
+}
+
+// Prefix-matched on `--name=`, so a longer flag name sharing the prefix
+// (`--filename=x` asked about `file`) is NOT caught here — that one is a name
+// no script reads, which is sweep()'s to refuse in its own wording.
+//
+// argv is a parameter because the two kinds of caller hold different arrays:
+// arg()/has() read the live process.argv, where argv[0] and argv[1] are the
+// node and script paths and are scanned harmlessly; ledger.mjs holds its own
+// process.argv.slice(2) and passes it.
+export function hasEqualsForm(name, argv = process.argv) {
+  return argv.some((a) => a.startsWith(`--${name}=`));
+}
+
 export function makeArg(die) {
   return function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     if (i === -1) {
-      if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+      if (hasEqualsForm(name)) die(`--${name} needs a space-separated value, not --${name}=`);
       return null;
     }
     const value = process.argv[i + 1];
-    if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+    if (isFlagLike(value)) die(`--${name} needs a value`);
     return value;
   };
 }
@@ -95,7 +130,7 @@ export function makeArg(die) {
 // space-separated value" would lie.
 export function makeHas(die) {
   return function has(name) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
+    if (hasEqualsForm(name)) die(`--${name} is a boolean flag, not --${name}=`);
     return process.argv.includes(`--${name}`);
   };
 }
