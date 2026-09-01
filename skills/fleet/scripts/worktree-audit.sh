@@ -99,10 +99,19 @@ printf '['
 # A newline in that path used to end the record before `substr($0,10)` could
 # read past it, AND end the `read -r` line below — two truncations, and the loop
 # saw a shorter path than even the awk had. `wt_listing` swaps both separators
-# before either stage runs, so the whole path arrives as one field and one line;
-# `nl_path` below is what refuses to stat it. #551
-printf '%s\n' "$wt_list" | awk '/^worktree /{w=substr($0,10)} /^branch /{print w"\t"$2} /^detached$/{print w"\tDETACHED"}' |
-while IFS="$(printf '\t')" read -r wt br; do
+# before either stage runs, so the path arrives on one line; `nl_path` below is
+# what refuses to stat it. #551
+#
+# The path goes LAST, and the branch first, because the tab this awk delimits
+# with is itself a byte a path may hold — and `read -r wt br` split such a path
+# at it, reporting a truncated `MISSING on disk` for a worktree that is present
+# and clean, with the tail of its path swallowed into the branch field. That is
+# #551's own defect shape surviving in #551's own rewrite. With the path last,
+# `read` assigns the whole remainder of the line to the final name whatever it
+# holds, so no byte in a path can split it. The branch cannot take that slot: a
+# ref name rejects a tab outright, which is what makes it safe to read first.
+printf '%s\n' "$wt_list" | awk '/^worktree /{w=substr($0,10)} /^branch /{print $2"\t"w} /^detached$/{print "DETACHED\t"w}' |
+while IFS="$(printf '\t')" read -r br wt; do
   short=${br#refs/heads/}
   # FIRST, because every arm below stats `$wt` and none of them can: the byte
   # `wt_listing` substituted stands in for a newline, so this path does not name
