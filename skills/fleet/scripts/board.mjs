@@ -107,7 +107,9 @@ function tryParse(json, fallback, what) {
   catch (e) { console.error(`${NAME}: ${what} parse failed: ${e.message}`); return fallback; }
 }
 
-// ci-state.mjs exits 0 for green, 1 for not-green, 2 for a hard failure — and on
+// ci-state.mjs exits 0 for green, 1 for not-green or no-ci, 2 for a hard
+// failure — no-ci is its own verdict and shares exit 1 because this call omits
+// --declare-no-ci, the only thing that would move it to exit 0 — and on
 // exit 1 it has ALREADY printed its verdict JSON to stdout before exiting, so a
 // thrown exit 1 carries a real verdict. Feed that to mapCi: discarding e.stdout,
 // as a plain tryRun would, makes red/still-running CI unreachable — every
