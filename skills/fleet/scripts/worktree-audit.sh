@@ -81,7 +81,7 @@ gone() {
 
 base=${BASE_REF:-origin/main}
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
-git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
 
 echo "\$ git worktree list --porcelain" >&2
 

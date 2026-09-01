@@ -203,7 +203,7 @@ case "$base" in
 esac
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
-git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
 
 # Locate the worktree by the branch it has checked out, the way reap.sh does —
 # not by claim-ticket.sh's ".worktrees/$issue-$slug", which is relative to the

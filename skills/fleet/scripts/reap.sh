@@ -111,7 +111,7 @@ if [ "$fetch_rc" -ne 0 ]; then
   fi
   die "fetch failed — refusing to reap on stale refs"
 fi
-git rev-parse --verify --quiet "$base" >/dev/null || die "$base does not resolve"
+git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
 [ "$apply" = true ] || echo "$NAME: DRY RUN — nothing will be deleted. Pass --apply to act." >&2
 
 reaped=""
