@@ -70,6 +70,22 @@ elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="ya
 elif [ -z "$pkg" ]; then install="true"
 elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
+# The `2>&1` on the ndeps capture is load-bearing — without it the failure
+# path's die has no reason to print — but it merges node's stderr into $ndeps
+# on the SUCCESS path too. The hazard is not an enumerable set of env vars
+# (#752 arrived through NODE_DEBUG and NODE_OPTIONS=--inspect): it is anything
+# that writes to node's stderr and still exits 0, a --require preload or a
+# version-manager shim on PATH included.
+# A clean count is always bare digits, so anything else is certainly not one —
+# refuse it before comparing. That buys no false refusals, not a trustworthy
+# capture: digit-only chatter ending without a newline runs together with the
+# count and still reads as one, and a shape check cannot see the merge that
+# produced it.
+# The derive-testcmd.sh capture merges its stderr the same way with no such
+# guard. What protects it is its callee folding its own node's stderr into the
+# reason it returns rather than emitting it — not the capture's shape.
+elif case "$ndeps" in ''|*[!0-9]*) true ;; *) false ;; esac; then
+  die "could not read origin/main:package.json — unexpected output: $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
 else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
 fi
