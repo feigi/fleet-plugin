@@ -24,7 +24,15 @@
 //          is the only component that knows; it states them. Required, never
 //          defaulted, for the same reason: a default silently converts a
 //          forgotten flag into one of those two failures.
-//   gh     Review backlog and merge queue, from open PRs by label.
+//          Reviews in hand and merge holds arrive the same way and for the
+//          same reason: `ready-to-merge` says a PR is signed off, never that
+//          run-merge-bot's hold rule cleared it, and an open PR says a review
+//          is owed, never that one has returned. Both are the controller's,
+//          both are required, and neither defaults — a row that guesses them
+//          prints an ACTION nobody can take, which is the #3 failure wearing
+//          a number.
+//   gh     Merge queue and review backlog, from open PRs by label and by
+//          whether they close an issue.
 //   script Supply, from candidates.mjs.
 //
 // The pure half below is `reconcile()`; main() does the I/O. Split so the guard
@@ -70,23 +78,55 @@ function implementers(s) {
 
 function reviewers(s) {
   const deficit = s.reviewerCap - s.reviewerLive;
-  const row = (action) => ({
+  const detail = `reviews-ready=${s.reviewsReady} review-backlog=${s.reviewBacklog}`;
+  const row = (action, extra = "") => ({
     role: "reviewers", actual: s.reviewerLive, target: s.reviewerCap,
-    action, detail: `review-backlog=${s.reviewBacklog}`,
+    action, detail: extra ? `${detail} — ${extra}` : detail,
   });
   if (deficit <= 0) return row("AT CAP");
+
+  // The backlog is NOT this row's input. A reviewer slot holds a fix-applier
+  // and a fix-applier applies findings, so a slot is dispatchable only once a
+  // review has RETURNED — and on the default path the controller runs the
+  // reviews itself, one at a time, so a deep backlog says only that reviews
+  // are owed, never that anything can be handed out. It stays in the detail as
+  // an observation; the ACTION comes off what the caller has in hand.
+  if (s.reviewsReady >= 1) return row(`DISPATCH ${Math.min(deficit, s.reviewsReady)}`);
+
+  // Nothing in hand. Idle only when nothing is owed either — a backlog with no
+  // returned review is a pipeline waiting on the controller's own turn, which
+  // is not a member this script can ask for.
   if (s.reviewBacklog === 0) return row("IDLE OK");
-  return row(`DISPATCH ${Math.min(deficit, s.reviewBacklog)}`);
+  return row("HOLD", "no review has returned — a fix-applier has nothing to apply yet");
 }
 
 function mergeBot(s) {
   // Cap is 1 by invariant, not by configuration.
-  const row = (action) => ({
+  //
+  // `ignored=` names the held numbers the queue does not contain. Accepting
+  // them is deliberate (see prState), but an unnamed rejection makes a typo,
+  // or the ISSUE number passed where the PR number belongs, produce output
+  // byte-identical to `--merge-holds none` — the exact DISPATCH the flag was
+  // added to suppress. Held numbers are the caller's own input, so naming
+  // them back costs what `held=` costs and is what makes the mistake visible
+  // on the tick that made it rather than after the cascade has stalled.
+  const detail = `merge-queue=${s.mergeQueue} held=${s.mergeHeld}`
+    + (s.mergeIgnored.length ? ` ignored=${s.mergeIgnored.join(",")}` : "");
+  const row = (action, extra = "") => ({
     role: "merge-bot", actual: s.mergeBotLive, target: 1,
-    action, detail: `merge-queue=${s.mergeQueue}`,
+    action, detail: extra ? `${detail} — ${extra}` : detail,
   });
   if (s.mergeBotLive >= 1) return row("AT CAP");
   if (s.mergeQueue === 0) return row("IDLE OK");
+
+  // `ready-to-merge` is the author's sign-off and nothing more. run-merge-bot's
+  // hold rule runs pr-overlap.mjs against every lower open PR and reports
+  // `held-behind-#<lower>` without moving a label, so the label read above
+  // cannot see it, and a bot dispatched against a queue whose candidates are
+  // all held spends a whole member re-deriving a verdict already reported.
+  // That is also exactly when a cascade is stalled and the line most likely to
+  // be acted on without re-deriving.
+  if (s.mergeQueue - s.mergeHeld <= 0) return row("HOLD", "every queued candidate is held behind a lower PR");
   return row("DISPATCH merge-bot");
 }
 
@@ -123,11 +163,63 @@ const OPTIONS = {
   reviewers: { type: "string" },
   "merge-bots": { type: "string" },
   pool: { type: "string" },
+  // Same contract as the live counts, for the same reason — see WHY below.
+  "reviews-ready": { type: "string" },
+  "merge-holds": { type: "string" },
   // Defaults here, not threaded through int(): declared this way they still
   // go through the guard below, where a hand-passed default went round it.
   "implementer-cap": { type: "string", default: "2" },
   "reviewer-cap": { type: "string", default: "5" },
 };
+
+// Why each caller-stated input has no default, quoted back at whoever forgot
+// it. Every entry says the same thing about a different state: the controller
+// holds it, the repo does not record it, and a guess fails in both directions.
+const LIVE_WHY =
+  "Live member counts and the pool are the CONTROLLER's state: " +
+  "the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. " +
+  "There is no safe default — 0 would dispatch a full cap off a forgotten flag, the cap would hold forever, " +
+  "and both are silent.";
+
+const WHY = {
+  // The four live counts share one reason, but each is keyed by its own flag
+  // name rather than reached through a fallback: a fallback is what lets a
+  // flag added later borrow someone else's rationale, silently and correctly-
+  // looking, and it is unpairedFlags() below that turns the omission loud.
+  implementers: LIVE_WHY,
+  reviewers: LIVE_WHY,
+  "merge-bots": LIVE_WHY,
+  pool: LIVE_WHY,
+  "reviews-ready":
+    "A reviewer slot holds a fix-applier, and a fix-applier applies findings — so this is the number of " +
+    "reviews whose findings you HAVE with no fix-applier on them yet, not the number of PRs awaiting one. " +
+    "On the default path you run each review yourself, one at a time, so a review still in flight is 0 here; " +
+    "on the hand-dispatched fallback path it is the PRs a reviewer member can be given. Only you know it, " +
+    "and either default is a failure: 0 holds the row forever, anything else dispatches members with " +
+    "nothing to apply.",
+  "merge-holds":
+    "`ready-to-merge` is the author's sign-off, never a statement that the PR is dispatchable: " +
+    "run-merge-bot's hold rule reads pr-overlap.mjs against every lower open PR and reports " +
+    "`held-behind-#<lower>` without touching a label, so the queue read here is blind to it. " +
+    "Pass the held PR numbers (`--merge-holds 601,604`, `#` optional) or the explicit `none`. " +
+    "Defaulting to `none` prints DISPATCH merge-bot on every tick of a stalled cascade.",
+};
+
+// An option with no `default` is caller-stated, so it must carry its own
+// reason. Nothing but spelling ties an OPTIONS key to a WHY key, and a
+// string-key miss is the quietest kind: without this, a flag added to OPTIONS
+// alone would print a rationale belonging to another flag, and a renamed WHY
+// key would print `undefined` after "is required." — both at the usual exit 2,
+// both looking like a working refusal. Exported so the pairing is a test's
+// subject and not only an import-time side effect.
+export function unpairedFlags(options, why) {
+  return Object.keys(options).filter((f) => options[f].default === undefined && !(f in why));
+}
+
+const unpaired = unpairedFlags(OPTIONS, WHY);
+if (unpaired.length) {
+  throw new Error(`${NAME}: required flags with no WHY entry: ${unpaired.map((f) => `--${f}`).join(", ")}`);
+}
 
 function counts() {
   let values;
@@ -142,14 +234,9 @@ function counts() {
 
   const int = (name) => {
     const raw = values[name];
-    if (raw === undefined) {
-      die(
-        `--${name} is required. Live member counts and the pool are the CONTROLLER's state: ` +
-        `the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. ` +
-        `There is no safe default — 0 would dispatch a full cap off a forgotten flag, the cap would hold forever, ` +
-        `and both are silent.`,
-      );
-    }
+    // No fallback: the guard above proves the entry exists, so a miss here
+    // cannot be reached rather than being papered over with another flag's text.
+    if (raw === undefined) die(`--${name} is required. ${WHY[name]}`);
     // Regex, not Number(): `Number("")` is 0 and `Number.isInteger(0)` is true,
     // so `--pool ""` — the shape an unset shell variable produces — would read
     // as a genuine, empty pool.
@@ -163,20 +250,38 @@ function counts() {
     if (n < 1 || n > 5) die(`--${name} must be between 1 and 5 (run-team's member cap), got ${n}`);
     return n;
   };
+  // PR numbers the last merge-bot pass reported held, or the explicit `none`.
+  // The empty string is not that word on purpose: `--merge-holds ""` is the
+  // shape an unset shell variable produces, and reading it as "nothing is held"
+  // is precisely the silent default this flag exists to refuse.
+  const holds = () => {
+    const raw = values["merge-holds"];
+    if (raw === undefined) die(`--merge-holds is required. ${WHY["merge-holds"]}`);
+    const t = String(raw).trim();
+    if (t === "none") return [];
+    if (!/^#?\d+(\s*,\s*#?\d+)*$/.test(t)) {
+      die(`--merge-holds must be 'none' or PR numbers like '601,604', got '${raw}'`);
+    }
+    // The guard above has already ruled out every shape that is not a comma
+    // list of optionally-`#`-prefixed numbers, so the digits are the parse.
+    return t.match(/\d+/g).map(Number);
+  };
   return {
     implLive: int("implementers"), reviewerLive: int("reviewers"), mergeBotLive: int("merge-bots"),
-    pool: int("pool"), implCap: cap("implementer-cap"), reviewerCap: cap("reviewer-cap"),
+    pool: int("pool"), reviewsReady: int("reviews-ready"), mergeHolds: holds(),
+    implCap: cap("implementer-cap"), reviewerCap: cap("reviewer-cap"),
   };
 }
 
-// Review backlog and merge queue, by label, from one read. A failed read is not
-// an empty pipeline: backlog 0 + merge-queue 0 is a plausible tick, so printing
-// it off a failed query is the silent stall this script exists to end.
-function prState() {
+// Merge queue and review backlog from one read, with the caller's held set
+// applied to the first. A failed read is not an empty pipeline: backlog 0 +
+// merge-queue 0 is a plausible tick, so printing it off a failed query is the
+// silent stall this script exists to end.
+function prState(holds) {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels"], { encoding: "utf8" });
+      "--json", "number,labels,closingIssuesReferences"], { encoding: "utf8" });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -189,24 +294,68 @@ function prState() {
   } catch (e) {
     die(`could not parse gh pr list output as JSON: ${e.message}`);
   }
-  if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number" || !Array.isArray(p.labels))) {
-    die("gh pr list did not return {number,labels} rows");
+  if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
+    || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences))) {
+    die("gh pr list did not return {number,labels,closingIssuesReferences} rows");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
-  const mergeQueue = prs.filter((p) => p.labels.some((l) => l && l.name === "ready-to-merge")).length;
-  // Everything else open is queued for review or under review.
+  // Named once, so the backlog below re-states the sign-off test rather than
+  // re-deriving "not queued" by identity membership over the array it just
+  // built. Same answer, and one place to read what "queued" means.
+  const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
+  const queued = prs.filter(isQueued);
+  // A held number the queue does not contain is ignored, not refused: the
+  // ordinary way a hold ends is the lower PR merging and the candidate merging
+  // behind it, which leaves the caller quoting a number that has left the
+  // queue, and a tick that refuses on the happy path is worse than one that
+  // subtracts nothing.
+  const mergeHeld = queued.filter((p) => holds.includes(p.number)).length;
+  // Ignored, but never unnamed — the merge-bot row prints these back. Which is
+  // the whole difference between "nothing is held" and "you spelled it wrong".
+  const mergeIgnored = holds.filter((n) => !queued.some((p) => p.number === n));
+
+  // Review backlog: open, not signed off, and REVIEW WORK. The third clause is
+  // what the label read cannot express — a controller-authored chore PR is
+  // left unlabelled for the maintainer and no member of the fleet will ever be
+  // dispatched against it, so counting it floors the backlog at a number
+  // nothing in the run can drain, and the implementer gate holds for the rest
+  // of the run against a queue of nothing.
   //
-  // ponytail: label-only backlog. A PR already reviewed, ruled and merely
-  // waiting on CI counts here too, so the gate can hold the refill EARLIER
-  // than run-team's own definition ("queued with no reviewer slot") — never
-  // later. Narrowing it needs per-PR review state, which lives in the
-  // controller's head and not in the repo. Upgrade path if the over-count is
-  // measured to throttle implementers in practice: a `--review-backlog <n>`
-  // override, on the same "the controller states what only it knows" contract
-  // as the live counts above.
-  return { mergeQueue, reviewBacklog: prs.length - mergeQueue };
+  // GitHub's own linked-issue set decides that, not a keyword regex over the
+  // body: docs/agents/issue-tracker.md records a body carrying `fixes #77`
+  // inside a code span that GitHub did not link, so the regex over-reports.
+  // The lazy recompute cuts the other way — a PR queried seconds after its
+  // create can read as closing nothing — which drops it from the backlog for
+  // one tick and can under-hold the implementer refill by one. Bounded, and
+  // the next tick sees it; the permanent floor it replaces was not.
+  //
+  // That transient under-count is not the only one, and the other is
+  // permanent: a PR that goes through the fleet's own review cycle while
+  // closing no issue is invisible here for its whole life. Those exist — `gh
+  // pr list --state merged --json closingIssuesReferences,labels` returns
+  // merged PRs carrying `ready-to-merge`, the fleet's own sign-off, with an
+  // empty closing set, and each was review work while it was still
+  // unlabelled. So this clause swaps a permanent OVER-count for a permanent
+  // UNDER-count, deliberately and not by oversight: the over-count starves
+  // implementers for the rest of a run, which is the harm #590 measured,
+  // while the under-count only lets an extra PR into a review-bound pipeline.
+  // If that ever bites, widen it with a second clause — a fleet label — and
+  // never by dropping the closing-issue one.
+  //
+  // ponytail: still the wider read on the other axis. A PR already reviewed,
+  // ruled and merely waiting on CI counts here too, so the gate can hold the
+  // refill EARLIER than run-team's own definition ("queued with no reviewer
+  // slot") — never later. Narrowing that needs per-PR review state, which
+  // lives in the controller's head and not in the repo. Upgrade path if the
+  // over-count is measured to throttle implementers in practice: a
+  // `--review-backlog <n>` override, on the same "the controller states what
+  // only it knows" contract as the flags above.
+  const reviewBacklog = prs.filter(
+    (p) => !isQueued(p) && p.closingIssuesReferences.length > 0,
+  ).length;
+  return { mergeQueue: queued.length, mergeHeld, mergeIgnored, reviewBacklog };
 }
 
 // Supply, from candidates.mjs — the same shortlist phase 0 uses, so the tick
@@ -257,11 +406,11 @@ function supply() {
 }
 
 function main() {
-  const c = counts();
+  const { mergeHolds, ...c } = counts();
   // Both reads happen before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.
-  const { mergeQueue, reviewBacklog } = prState();
-  for (const line of formatLines(reconcile({ ...c, mergeQueue, reviewBacklog, supply: supply() }))) {
+  const { mergeQueue, mergeHeld, mergeIgnored, reviewBacklog } = prState(mergeHolds);
+  for (const line of formatLines(reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supply() }))) {
     console.log(line);
   }
 }

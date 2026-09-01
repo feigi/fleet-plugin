@@ -993,6 +993,7 @@ invocation of the executable reconcile, and you act on what it prints:
 ```
 ~/.claude/skills/fleet/scripts/fleet-tick.mjs \
   --implementers <live> --reviewers <live> --merge-bots <live> --pool <n> \
+  --reviews-ready <n> --merge-holds <pr,pr|none> \
   [--implementer-cap 2] [--reviewer-cap 5]
 ```
 
@@ -1002,8 +1003,28 @@ live counts and the pool are yours to state and it **refuses rather than
 defaulting them**: nothing in the repo records liveness — a ledger row is a
 dispatch, and that token outlives the member's death, its bail and the merge —
 so a default would turn a forgotten flag into either a dispatch past the cap or
-a permanent hold, silently. Review backlog, merge queue and supply it reads
+a permanent hold, silently. Merge queue, review backlog and supply it reads
 itself.
+
+**`--reviews-ready` and `--merge-holds` are yours on the same terms**, because a
+label says a PR is signed off or awaiting a review — never that anything can be
+handed out. Both refuse an absent value the way the counts above do.
+
+- **`--reviews-ready <n>`** — reviews whose findings you HAVE, with no
+  fix-applier on them yet. A reviewer slot holds a fix-applier and a fix-applier
+  applies findings, so a review still running counts 0 here, and on the default
+  path you run them one at a time. The backlog is **not** this number: it counts
+  PRs whose review has not started, which is nothing a member can be dispatched
+  against, and the row will no longer dispatch off it (#590). On the
+  hand-dispatched fallback path below, where the reviewer member does the review
+  itself, this is the PRs one can be given.
+- **`--merge-holds <pr,pr|none>`** — the PRs your last merge-bot pass reported
+  `held-behind-#<lower>`. That verdict moves no label and leaves nothing in the
+  repo, so the queue read here is blind to it, and a bot dispatched against a
+  queue whose every candidate is held spends a member re-deriving a verdict you
+  already have — which is exactly the state a stalled cascade sits in. `none` is
+  a statement, not a blank: an empty value is refused, since that is the shape an
+  unset shell variable arrives as.
 
 Why these two edges: a merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side
@@ -1851,11 +1872,17 @@ ledger rows in the same step. See references/reaping.md.
 - **supply** — open `ready-for-agent` surviving in-flight scan and the decided?
   check. A queue of undecided tickets is zero supply.
 - **review backlog** — PRs verified and queued with no reviewer slot.
-  `fleet-tick.mjs` counts every open PR without `ready-to-merge`, which is that
-  plus the ones already under review or waiting on CI. The wider read, because
-  narrowing it needs per-PR review state that lives in your head and not in the
-  repo — so it can hold the refill earlier than the definition above, never
-  later.
+  `fleet-tick.mjs` counts every open PR without `ready-to-merge` **that closes an
+  issue**, which is that plus the ones already under review or waiting on CI. The
+  wider read on that axis, because narrowing it needs per-PR review state that
+  lives in your head and not in the repo — so it holds the refill earlier than the definition above, never
+  later. The closing-issue test is what keeps it from
+  widening on the other axis: a chore PR you author yourself closes nothing and is
+  left unlabelled for the maintainer, so no member of the fleet will ever review
+  it, and counting it floors the backlog at a depth nothing in the run can drain
+  — the implementer gate then holds for the rest of the run against a queue of
+  nothing (#590). GitHub's own linked-issue set decides that, not a keyword regex
+  over the body; see `docs/agents/issue-tracker.md`.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
 runs 20-40, because each fans out up to six specialists. On the default path

@@ -150,7 +150,7 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
 // instead of forwarding it, so fd 2 is never the fd under pressure; board LOGS
 // a failed gh and returns null (tryRun, board.mjs:76-79) rather than refusing, so
 // it has no exit 2 to invert in the first place. fleet-tick is here because it
-// does forward and does refuse (fleet-tick.mjs:177-184) — measured at 65,613 B
+// does forward and does refuse (fleet-tick.mjs's `prState`) — measured at 65,613 B
 // forwarded and exit 2 — it only needs a wordier argv to reach gh, which is a
 // reason to spell the argv out, not a reason to leave the path ungated.
 // A consumer added later belongs here deliberately.
@@ -158,7 +158,8 @@ const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },
   { script: "diff-stats", argv: ["--pr", "42"] },
   { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
-  { script: "fleet-tick", argv: ["--implementers", "1", "--reviewers", "1", "--merge-bots", "1", "--pool", "1"] },
+  { script: "fleet-tick", argv: ["--implementers", "1", "--reviewers", "1", "--merge-bots", "1", "--pool", "1",
+    "--reviews-ready", "0", "--merge-holds", "none"] },
 ];
 
 // A `gh` that writes exactly `bytes` to stderr and then fails, so the script
