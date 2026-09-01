@@ -485,6 +485,11 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # definition is "registration and directory both still present" may not be
 # asserted about a worktree that was never there.
 wt_outcome=Unreleased
+# Why the measurement could not be taken, empty whenever it could. Only
+# `Indeterminate` ever carries one, and `halt` appends it to that state's report:
+# "could not be measured" names the failure without naming its cause, which is
+# the one line an operator mid-release has nothing else to go on. #551
+wt_why=
 done_branch=false
 halt() {
   if [ -n "$wt" ]; then
@@ -494,6 +499,7 @@ halt() {
       Released) landed="registration and directory both gone";;
       *) landed="what the removal landed could not be measured";;
     esac
+    [ -z "$wt_why" ] || landed="$landed: $wt_why"
     wt_report="worktree $wt is $wt_outcome — $landed"
   fi
   # The receipt carries the outcome in the blocker string, the one field a
@@ -674,29 +680,40 @@ occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 # not asserted: a registration that survived a directory that did not is
 # reported Indeterminate rather than squeezed into Unreleased, whose definition
 # is that BOTH are still present.
+# Writes `$wt_outcome`, and `$wt_why` whenever the answer is Indeterminate for a
+# reason git named. It does NOT echo the state: a `$( )` around the call would
+# put the whole body in a subshell, and the cause — which `wt_listing` leaves in
+# `$wt_err` — would die with it. That is not hypothetical, it is what this
+# function did: the one case where the headline degrades to "what landed could
+# not be measured" was the one case whose cause never reached the operator, on
+# stderr or in the receipt. Assigning globals is what carries it out. #551
 release_outcome() {
   # `wt_listing` writes the shared `$wt_list`, and this function must not disturb
   # the pre-mutation capture the guards above read off it. Saved and put back in
-  # the same breath, so the function is safe wherever it is called rather than
-  # only inside the `$( )` subshell that happens to call it today.
+  # the same breath — and now load-bearing rather than defensive, because without
+  # the subshell there is nothing else keeping the two reads apart.
   ro_prior=$wt_list
   ro_read=true
   wt_listing || ro_read=false
+  ro_err=$wt_err
   now=$wt_list
   wt_list=$ro_prior
+  wt_why=
   if [ "$ro_read" = false ]; then
     # The listing is how the registration is read, so a listing git could not
-    # produce leaves the registration unknown — not absent.
-    echo Indeterminate
+    # produce leaves the registration unknown — not absent. `$ro_err` is git's
+    # own prose for why it could not, flattened to one line for the receipt.
+    wt_outcome=Indeterminate
+    wt_why=$(printf '%s' "$ro_err" | tr '\n' ' ')
   elif printf '%s\n' "$now" |
        P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}'; then
-    if occupied "$1"; then echo Unreleased; else echo Indeterminate; fi
+    if occupied "$1"; then wt_outcome=Unreleased; else wt_outcome=Indeterminate; fi
   elif occupied "$1"; then
-    echo Deregistered
+    wt_outcome=Deregistered
   elif gone "$1"; then
-    echo Released
+    wt_outcome=Released
   else
-    echo Indeterminate
+    wt_outcome=Indeterminate
   fi
 }
 
@@ -1001,7 +1018,15 @@ fi
 # `! occupied && ! gone` is the tri-valued pairing `gone`'s contract prescribes,
 # and the same one `release_outcome` composes: present or link-present is not
 # unknown, established-absent is not unknown, and what is left over is.
-if [ -n "$wt" ] && ! occupied "$wt" && ! gone "$wt"; then
+#
+# `! nl_path` for the same reason the dangling link needed `occupied`, and it is
+# the same trap a second time: `gone` now refuses a substituted path too (#551),
+# so without this exemption the pairing reads it as "cannot tell" and dies — for
+# a path the newline blocker above has already answered in the operator's own
+# terms, downgrading a receipt-carrying `NOT released` verdict to an exit-2 die
+# that says nothing the receipt did not. Measured on a worktree registered at a
+# path holding a newline.
+if [ -n "$wt" ] && ! nl_path "$wt" && ! occupied "$wt" && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
 fi
 
@@ -1164,7 +1189,7 @@ else
     # failure. Re-measuring here would also make the happy path answerable by a
     # probe that can return Indeterminate, refusing releases that plainly worked.
     if ! err=$(git worktree remove "$wt" 2>&1); then
-      wt_outcome=$(release_outcome "$wt")
+      release_outcome "$wt"
       halt "git worktree remove refused $wt: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
     wt_outcome=Released

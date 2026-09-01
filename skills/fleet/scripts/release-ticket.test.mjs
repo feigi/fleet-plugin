@@ -2192,6 +2192,24 @@ esac`,
   assert.doesNotMatch(stderr, /PARTIALLY/, "and nothing established that anything did");
   assert.match(stderr, /is Indeterminate — what the removal landed could not be measured/);
   assert.match(json.blockers[0], /is Indeterminate/);
+
+  // And WHY it could not be measured, which is the half that used to be lost.
+  // `release_outcome` reads the listing through `wt_listing`, which captures
+  // git's stderr into `$wt_err`; echoing the state out of a `$( )` put the whole
+  // body in a subshell and that capture died with it. So the one halt whose
+  // headline degrades to "could not be measured" was the one halt reaching the
+  // operator with nothing to act on. Pinned on BOTH channels deliberately: the
+  // receipt is the only one a caller that never sees stderr can read. #551
+  assert.match(
+    stderr,
+    /listing refused by the git shim/,
+    "the halt must name why the re-measurement failed, not only that it did",
+  );
+  assert.match(
+    json.blockers[0],
+    /listing refused by the git shim/,
+    "and the receipt must carry that cause too — stderr is not machine-readable",
+  );
 });
 
 test("a successful release survives a failing `git worktree prune`", (t) => {

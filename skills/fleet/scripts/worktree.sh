@@ -23,12 +23,22 @@
 
 # The byte `wt_listing` substitutes for a newline found INSIDE a worktree path.
 #
-# \001 because nothing else in the listing can hold one: git's attribute
-# keywords are `HEAD`, `branch`, `detached`, `bare`, `locked` and `prunable`, an
-# object id is hex, and a ref name rejects control bytes outright. So the byte
-# appearing in a field parsed out of `$wt_list` means exactly one thing — this
-# path had a newline in it, and no caller can hand it back to the filesystem as
-# read. `nl_path` is the one test for it.
+# \001 because no field any caller parses out of the listing can hold one: the
+# attribute keywords are the fixed words `HEAD`, `branch`, `detached`, `bare`,
+# `locked` and `prunable`, an object id is hex, and a ref name rejects control
+# bytes outright. So the byte appearing in a PATH parsed out of `$wt_list` means
+# exactly one thing — that path had a newline in it, and no caller can hand it
+# back to the filesystem as read. `nl_path` is the one test for it.
+#
+# Deliberately not the wider claim that no byte anywhere in the listing can be a
+# \001. `locked <reason>` carries free-form text the operator wrote, and git
+# neither rejects nor sanitizes a control byte in it — measured, git 2.50.1:
+# `git worktree lock --reason` accepts a \001 and the listing hands it straight
+# back. It is inert here, and for reasons worth stating rather than assuming: a
+# lock reason is never a path, no caller passes one to `nl_path`, and after the
+# `tr` it sits on its own line where neither `/^worktree /` nor `/^branch /` can
+# match it. (`prunable`'s reason is git's own fixed prose, so it has no such
+# hole.) The narrow guarantee is the one the callers rely on.
 wt_nl=$(printf '\001')
 
 # Does $1 carry the byte `wt_listing` substituted for a newline?
@@ -187,6 +197,17 @@ wt_listing() {
 # dirty check does. Condition context only: a bare `gone` returns 1 on the
 # ordinary present answer and `set -e` exits.
 gone() {
+  # A path carrying the byte `wt_listing` substituted does not name the file git
+  # named, so every `test` below asks about a DIFFERENT path — one that is
+  # reliably not there, which is why the walk answered established-absent for it
+  # and each caller then acted on that. Measured: release-ticket.sh emitted its
+  # newline refusal and then a second blocker on the same path asserting the
+  # directory "is gone" and naming `git worktree prune` as the remedy, for a
+  # worktree on disk holding an uncommitted file and for which prune is a no-op
+  # — the permanent-refusal shape the surrounding guards exist to prevent.
+  # Refused in the predicate rather than at each call site for the reason the
+  # rest of this comment gives: answered separately, the callers drift. #551
+  nl_path "$1" && return 1
   look=$1
   while [ ! -e "$look" ] && [ ! -L "$look" ] && [ "$look" != "${look%/*}" ]; do
     look=${look%/*}
