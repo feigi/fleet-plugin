@@ -192,8 +192,9 @@ export function makeHas(die) {
 // `candidates.mjs ready-for-agent` — which this cannot, board.mjs's
 // subcommands being exactly that shape. Strictly stronger there; leave it.
 //
-// ledger.mjs is left out for the opposite reason: its `check`/`filed` take a
-// FREE-TEXT tail, where a `--` token is legitimately DATA — `check
+// ledger.mjs is left out for the opposite reason: its `check`, `filed`, `row`
+// and `ruled` all take a FREE-TEXT tail, where a `--` token is legitimately
+// DATA — `check
 // "--require-file silently absent when value missing"` works today and is the
 // shape of issue titles in this repo — so this sweep would refuse working
 // invocations, which #365's own AC calls worse than the bug. #584 NARROWED
