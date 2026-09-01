@@ -1315,12 +1315,14 @@ test("a FORCE_COLOR'd caller still resolves a dependency-free manifest", () => {
 
 // #752: the `2>&1` on the ndeps capture merges node's stderr into $ndeps on
 // the success path too (needed so the failure path keeps its reason — see
-// the comment at the capture site), so stray chatter (real triggers:
-// NODE_DEBUG, NODE_OPTIONS=--inspect) reads as part of the "dependency
-// count". A `node` stub stands in for that chatter instead of relying on
-// NODE_DEBUG's actual output, which is unpinned across node versions — this
-// asserts the shape guard, not node's debug format.
-test("install: node stderr merged via 2>&1 refuses by shape, not misread as a dependency count", () => {
+// the comment at the capture site), so anything that writes to node's stderr
+// and still exits 0 reads as part of the "dependency count". A `node` stub
+// stands in for that chatter instead of relying on NODE_DEBUG's actual
+// output, which is unpinned across node versions — this asserts the shape
+// guard, not node's debug format. What this fixture pins is the non-numeric
+// case; digit-only chatter merges into a plausible count that the shape
+// guard cannot catch.
+test("install: non-numeric node stderr merged via 2>&1 refuses by shape, not misread as a dependency count", () => {
   const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
   const bin = mkdtempSync(join(tmpdir(), "claim-node-"));
   writeFileSync(join(bin, "node"), '#!/bin/sh\necho "MODULE 12345: chatter" >&2\necho 0\n', { mode: 0o755 });
@@ -1329,10 +1331,32 @@ test("install: node stderr merged via 2>&1 refuses by shape, not misread as a de
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
-  assert.equal(r.status, 2, `a contaminated capture refuses\n${r.stdout}${r.stderr}`);
+  assert.equal(r.status, 2, `non-numeric chatter refuses\n${r.stdout}${r.stderr}`);
   assert.match(r.stderr, /unexpected output/, "names the shape refusal");
   assert.doesNotMatch(r.stderr, /dependencies but has no lockfile/,
-    "chatter must not be misread as a dependency count");
+    "non-numeric chatter must not be misread as a dependency count");
+});
+
+// The other half of the same guard: a `node` that exits 0 having written
+// nothing to either stream — a broken or no-op shim earlier on PATH — leaves
+// $ndeps empty, which is not a count either. Empty matches neither `*[!0-9]*`
+// nor a digit, so without the `''` arm it falls past the guard to
+// `[ "$ndeps" = 0 ]`, fails that, and refuses with `declares  dependencies`.
+// Both refusals exit 2, so the status does not discriminate — the stated
+// cause does, which is what a reader of the refusal acts on.
+test("install: a node that prints nothing refuses by shape, not as a dependency count", () => {
+  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-node-"));
+  writeFileSync(join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 2, `an empty capture refuses\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /unexpected output/, "names the shape refusal");
+  assert.doesNotMatch(r.stderr, /dependencies but has no lockfile/,
+    "an empty capture must not be misread as a dependency count");
 });
 
 test("runner: scripts.test wins", () => {
