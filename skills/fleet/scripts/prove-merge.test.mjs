@@ -517,6 +517,60 @@ test("an object that is present but is not a commit is not reported as absent", 
   );
 });
 
+test("ATTACK: an annotated tag is refused at the guard, not silently mishandled into a false disproof (#585)", (t) => {
+  // cat-file -e peels a tag to the commit underneath, so the existence guard
+  // above accepted a tag on its own — and then bare `git rev-parse` handed
+  // back the TAG's own sha, not the commit's, which the identity test later in
+  // this script could never match. Every other leg still read healthy, so a
+  // perfectly good merge came back proved=false with no hint the mismatch was
+  // in argument handling rather than history. The guard now also checks
+  // $obj's own (unpeeled) type and refuses anything that is not itself a
+  // commit, so the tag never reaches that comparison at all.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "tag", "-a", "v1", "-m", "annotated", head);
+
+  const { code, json, stderr } = prove(w, "v1", "v1", merge);
+  assert.equal(code, 2, "could not answer — never the 1 that means disproved, and not 0");
+  assert.equal(json, null, "a refused input must not emit a proof at all");
+  assert.match(stderr, /v1 is a tag, not a commit/, "the message names the object and its type");
+
+  // Same refusal in the third position: the merge-commit argument is never
+  // handed to bare rev-parse downstream, but the guard's contract is that it
+  // proves things about commits, uniformly, on all three positions.
+  git(w, "tag", "-a", "vm", "-m", "annotated", merge);
+  const merged = prove(w, head, head, "vm");
+  assert.equal(merged.code, 2);
+  assert.equal(merged.json, null);
+  assert.match(merged.stderr, /vm is a tag, not a commit/);
+});
+
+test("a lightweight tag is accepted exactly like a sha — it resolves directly to a commit", (t) => {
+  // The control for the refusal above: a lightweight tag is a ref pointing
+  // straight at a commit, with no tag object in between, so it must clear the
+  // new type check exactly as a sha or branch name does, and the proof must
+  // come back byte-identical to the sha-driven control.
+  const w = repo(t);
+  commit(w, "main moves on before the branch is cut");
+  git(w, "push", "-q", "origin", "main");
+  const mainTip = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "tag", "lw", head);
+
+  const { code, json } = prove(w, "lw", "lw", merge);
+  assert.equal(code, 0);
+  assert.equal(json.proved, true);
+  assert.equal(json.proofPath, "no-rebase");
+  assert.equal(json.secondParent, head);
+  assert.equal(json.firstParent, mainTip);
+});
+
 test("a base ref that does not resolve carries git's own cause", (t) => {
   // Real git throughout, no shim: the fetch succeeds against a live origin, so
   // the guard under test is the only one that can fire. BASE_REF is the
