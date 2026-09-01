@@ -1179,7 +1179,7 @@ test("a multi-word label is quoted into the search term — unquoted, every word
 test("a single-word label still resolves to itself — quoting must not disturb the only label every caller passes", () => {
   // AC-3's other half, and the half a quoting fix can newly break: this term
   // is what next-ticket/SKILL.md:15, run-team/SKILL.md:61 and
-  // fleet-tick.mjs:216 all send, so a change that widened or narrowed it would
+  // fleet-tick.mjs's `supply` all send, so a change that widened or narrowed it would
   // empty the fleet's queue at exit 1 — #175's own defect, relocated. Measured
   // against the live repo 2026-08-17: `label:ready-for-agent` and
   // `label:"ready-for-agent"` return the same count, so the quoting is a no-op

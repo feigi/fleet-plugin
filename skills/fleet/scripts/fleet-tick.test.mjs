@@ -12,7 +12,7 @@ import { reconcile, formatLines } from "./fleet-tick.mjs";
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
   implLive: 0, reviewerLive: 0, mergeBotLive: 0,
-  pool: 0, supply: 0, reviewBacklog: 0, mergeQueue: 0,
+  pool: 0, supply: 0, reviewsReady: 0, reviewBacklog: 0, mergeQueue: 0, mergeHeld: 0,
   implCap: 2, reviewerCap: 5,
   ...over,
 });
@@ -103,17 +103,48 @@ test("implementers: detail always carries the three numbers the branch turned on
   assert.match(r.detail, /review-backlog=1/);
 });
 
-test("reviewers: no PRs queued for review is idle, not a deficit", () => {
-  const r = row(state({ reviewerLive: 0, reviewBacklog: 0 }), "reviewers");
+test("reviewers: nothing owed and nothing in hand is idle, not a deficit", () => {
+  const r = row(state({ reviewerLive: 0, reviewsReady: 0, reviewBacklog: 0 }), "reviewers");
   assert.equal(r.actual, 0);
   assert.equal(r.target, 5);
   assert.equal(r.action, "IDLE OK");
 });
 
-test("reviewers: dispatch is the smaller of the free slots and the backlog", () => {
-  assert.equal(row(state({ reviewerLive: 0, reviewBacklog: 2 }), "reviewers").action, "DISPATCH 2");
-  assert.equal(row(state({ reviewerLive: 4, reviewBacklog: 9 }), "reviewers").action, "DISPATCH 1");
-  assert.equal(row(state({ reviewerLive: 5, reviewBacklog: 9 }), "reviewers").action, "AT CAP");
+test("reviewers: a backlog with no returned review dispatches nothing (#590)", () => {
+  // The defect this row was rewritten for. A reviewer slot holds a fix-applier
+  // and a fix-applier applies findings, so a PR whose review has not returned
+  // — including one the controller's own workflow is running right now — is
+  // not something any member can be dispatched against. Every backlog depth,
+  // because the old row's answer scaled with it.
+  for (const reviewBacklog of [1, 2, 9]) {
+    const r = row(state({ reviewerLive: 0, reviewsReady: 0, reviewBacklog }), "reviewers");
+    assert.equal(r.action, "HOLD", `backlog ${reviewBacklog}`);
+    assert.doesNotMatch(r.action, /DISPATCH/, `backlog ${reviewBacklog} must name no dispatch`);
+  }
+});
+
+test("reviewers: dispatch is the smaller of the free slots and the reviews in hand", () => {
+  // The accept side: a returned review IS dispatchable, and the row must still
+  // say so — a fix that only ever holds is a row nobody can use.
+  assert.equal(row(state({ reviewerLive: 0, reviewsReady: 2, reviewBacklog: 9 }), "reviewers").action, "DISPATCH 2");
+  assert.equal(row(state({ reviewerLive: 4, reviewsReady: 9, reviewBacklog: 9 }), "reviewers").action, "DISPATCH 1");
+  assert.equal(row(state({ reviewerLive: 5, reviewsReady: 9, reviewBacklog: 9 }), "reviewers").action, "AT CAP");
+});
+
+test("reviewers: dispatch never takes live past the cap", () => {
+  for (const reviewerCap of [1, 3, 5]) {
+    for (const reviewerLive of [0, 1, 5, 6]) {
+      const r = row(state({ reviewerLive, reviewerCap, reviewsReady: 99 }), "reviewers");
+      const n = Number((r.action.match(/^DISPATCH (\d+)$/) || [])[1] ?? 0);
+      assert.ok(n === 0 || reviewerLive + n <= reviewerCap, `cap ${reviewerCap} live ${reviewerLive} → ${r.action}`);
+    }
+  }
+});
+
+test("reviewers: the detail carries both numbers, so a HOLD can be told from a drained queue", () => {
+  const r = row(state({ reviewsReady: 0, reviewBacklog: 4 }), "reviewers");
+  assert.match(r.detail, /reviews-ready=0/);
+  assert.match(r.detail, /review-backlog=4/);
 });
 
 test("merge-bot: a queued ready-to-merge PR with no bot live dispatches one", () => {
@@ -130,6 +161,23 @@ test("merge-bot: never a second bot, however deep the merge queue", () => {
 
 test("merge-bot: an empty merge queue is idle", () => {
   assert.equal(row(state({ mergeBotLive: 0, mergeQueue: 0 }), "merge-bot").action, "IDLE OK");
+});
+
+test("merge-bot: a queue whose every candidate is held dispatches nothing (#590)", () => {
+  // `ready-to-merge` is a sign-off, not a statement that the hold rule cleared.
+  // A second bot against a fully held queue re-derives a verdict already
+  // reported and exits, and this is the state a stalled cascade sits in.
+  const r = row(state({ mergeBotLive: 0, mergeQueue: 2, mergeHeld: 2 }), "merge-bot");
+  assert.equal(r.action, "HOLD");
+  assert.doesNotMatch(r.action, /DISPATCH/);
+  assert.match(r.detail, /held=2/);
+});
+
+test("merge-bot: a partly held queue still dispatches — a hold is not a stop", () => {
+  // The accept side. run-merge-bot holds one candidate and MOVES ON, so a
+  // queue with anything unheld left in it is still work.
+  assert.equal(row(state({ mergeBotLive: 0, mergeQueue: 3, mergeHeld: 2 }), "merge-bot").action, "DISPATCH merge-bot");
+  assert.equal(row(state({ mergeBotLive: 0, mergeQueue: 1, mergeHeld: 0 }), "merge-bot").action, "DISPATCH merge-bot");
 });
 
 test("merge-queue depth never gates the implementer refill", () => {
@@ -186,7 +234,12 @@ case "$1 $2" in
 esac
 `;
 
-const pr = (number, labels = []) => ({ number, labels: labels.map((name) => ({ name })) });
+// `closes` defaults to the PR's own number so an ordinary fixture PR is review
+// work; pass `[]` for the controller-authored chore PR that closes nothing.
+const pr = (number, labels = [], closes = [number]) => ({
+  number, labels: labels.map((name) => ({ name })),
+  closingIssuesReferences: closes.map((n) => ({ number: n })),
+});
 const issue = (number) => ({
   number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "",
 });
@@ -228,13 +281,19 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } 
   return r;
 }
 
-const LIVE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1"];
+const LIVE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1",
+  "--reviews-ready", "0", "--merge-holds", "none"];
+// The same six required flags with the merge queue reported as unheld and one
+// review in hand — the shape every ACTION-side assertion below needs.
+const LIVE_ACTIONABLE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1",
+  "--reviews-ready", "1", "--merge-holds", "none"];
 
 test("CLI: a missing live count refuses rather than defaulting", () => {
   // The whole contract in one assertion. A default here is the bug: 0 would
   // dispatch a full cap off a forgotten flag, cap would hold forever, and
   // neither says anything on the way past.
-  for (const drop of ["--implementers", "--reviewers", "--merge-bots", "--pool"]) {
+  for (const drop of ["--implementers", "--reviewers", "--merge-bots", "--pool",
+    "--reviews-ready", "--merge-holds"]) {
     const args = LIVE.filter((a, i) => a !== drop && LIVE[i - 1] !== drop);
     const r = runCli(args, { prs: [] });
     assert.equal(r.status, 2, `dropping ${drop} should refuse`);
@@ -249,7 +308,8 @@ test("CLI: a live count that is not a non-negative integer refuses", () => {
     // leading dash as ambiguous BEFORE the guard runs, so status 2 alone is
     // satisfied by the parser and the negative case pins nothing. The stderr
     // match is what holds every case to this script's own reason for refusing.
-    const r = runCli([`--implementers=${bad}`, "--reviewers", "0", "--merge-bots", "0", "--pool", "1"]);
+    const r = runCli([`--implementers=${bad}`, "--reviewers", "0", "--merge-bots", "0", "--pool", "1",
+      "--reviews-ready", "0", "--merge-holds", "none"]);
     assert.equal(r.status, 2, `'${bad}' should refuse`);
     assert.match(r.stderr, /--implementers must be a non-negative integer/,
       `'${bad}' must refuse for the guard's reason, not the parser's`);
@@ -257,7 +317,8 @@ test("CLI: a live count that is not a non-negative integer refuses", () => {
 });
 
 test("CLI: a flag given no value at all refuses", () => {
-  const r = runCli(["--reviewers", "0", "--merge-bots", "0", "--pool", "1", "--implementers"]);
+  const r = runCli(["--reviewers", "0", "--merge-bots", "0", "--pool", "1",
+    "--reviews-ready", "0", "--merge-holds", "none", "--implementers"]);
   assert.equal(r.status, 2);
 });
 
@@ -284,8 +345,8 @@ test("CLI: a failed gh read refuses — it is not an empty backlog", () => {
 });
 
 test("CLI: a failed supply read refuses — unknown supply is not zero supply", () => {
-  const r = runCli(["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0"],
-    { env: { ISSUE_FAIL: "1" } });
+  const r = runCli(["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none"], { env: { ISSUE_FAIL: "1" } });
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /supply/);
@@ -374,6 +435,78 @@ test("CLI: a drained implementer queue with pool and a merge queue prints all th
   assert.match(lines[2], /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/);
 });
 
+test("CLI: the new inputs must still be ABLE to produce an ACTION (#590)", () => {
+  // The false-refusal side of the same change. A suppressor that suppresses
+  // whatever it is fed is not a fix — it is the row deleted, with a flag.
+  const r = runCli(LIVE_ACTIONABLE, { prs: [pr(1, ["ready-to-merge"]), pr(2)], issues: [issue(9)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^reviewers\s+0\/5 → DISPATCH 1\b/m);
+  assert.match(r.stdout, /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/m);
+});
+
+test("CLI: a held candidate suppresses the merge-bot ACTION, an unheld one does not (#590)", () => {
+  const prs = [pr(601, ["ready-to-merge"]), pr(599)];
+  const held = runCli([...LIVE.slice(0, -1), "601"], { prs, issues: [issue(9)] });
+  assert.equal(held.status, 0, held.stderr);
+  assert.match(held.stdout, /^merge-bot\s+0\/1 → HOLD\b/m);
+  assert.match(held.stdout, /held=1/);
+
+  // Two queued, one held: the bot holds a candidate and moves on, so the other
+  // is still work.
+  const partly = runCli([...LIVE.slice(0, -1), "601"],
+    { prs: [pr(601, ["ready-to-merge"]), pr(602, ["ready-to-merge"])], issues: [issue(9)] });
+  assert.match(partly.stdout, /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/m);
+
+  // A held number the queue does not contain — the shape left behind when the
+  // hold clears and the candidate merges — subtracts nothing rather than
+  // refusing the whole tick.
+  const stale = runCli([...LIVE.slice(0, -1), "1234"], { prs, issues: [issue(9)] });
+  assert.equal(stale.status, 0, stale.stderr);
+  assert.match(stale.stdout, /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/m);
+});
+
+test("CLI: --merge-holds refuses a value that is neither 'none' nor PR numbers", () => {
+  // `""` first: that is the shape an unset shell variable produces, and reading
+  // it as "nothing is held" is the default this flag exists to refuse.
+  for (const bad of ["", "yes", "601;604", "-1", "#"]) {
+    const r = runCli([...LIVE.slice(0, -1), bad], { prs: [], issues: [] });
+    assert.equal(r.status, 2, `'${bad}' should refuse`);
+    assert.equal(r.stdout.trim(), "", `'${bad}' must print no reconcile line`);
+  }
+  // …and the two accepted spellings still are, or the guard bought its
+  // refusals by breaking the flag.
+  for (const good of ["none", "601", "601,604", "#601, #604"]) {
+    const r = runCli([...LIVE.slice(0, -1), good], { prs: [], issues: [] });
+    assert.equal(r.status, 0, `'${good}' should be accepted: ${r.stderr}`);
+  }
+});
+
+test("CLI: a PR that closes no issue is not review backlog (#590)", () => {
+  // The controller's own chore PR: unlabelled by design, never reviewed by any
+  // member, so counting it floors the backlog at a number nothing can drain
+  // and the implementer gate holds for the rest of the run.
+  const chore = pr(2, [], []);
+  const r = runCli(LIVE, { prs: [chore, pr(3)], issues: [issue(9)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /review-backlog=1/);
+  assert.match(r.stdout, /^implementers\s+0\/2 → DISPATCH 1\b/m);
+
+  // Two chore PRs and nothing else: the gate's own threshold, and the row that
+  // used to print HOLD for the rest of the run.
+  const both = runCli(LIVE, { prs: [chore, pr(3, [], [])], issues: [issue(9)] });
+  assert.match(both.stdout, /review-backlog=0/);
+  assert.match(both.stdout, /^implementers\s+0\/2 → DISPATCH 1\b/m);
+});
+
+test("CLI: a gh row missing closingIssuesReferences refuses rather than counting as no-issue", () => {
+  // Absent, the field reads as an empty list and every open PR silently leaves
+  // the backlog — backlog 0 on a full pipeline, which is the #3 stall again.
+  const r = runCli(LIVE, { prs: [{ number: 1, labels: [] }], issues: [issue(9)] });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /closingIssuesReferences/);
+});
+
 test("CLI: review backlog and merge queue are derived from open PRs by label", () => {
   const prs = [pr(1, ["ready-to-merge"]), pr(2, ["ready-to-merge"]), pr(3), pr(4)];
   const r = runCli(LIVE, { prs, issues: [issue(9)] });
@@ -385,7 +518,8 @@ test("CLI: review backlog and merge queue are derived from open PRs by label", (
 });
 
 test("CLI: supply comes from candidates.mjs and drives the pool-0 branches", () => {
-  const empty = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0"];
+  const empty = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none"];
   const one = runCli(empty, { prs: [], issues: [issue(9)] });
   assert.equal(one.status, 0);
   assert.match(one.stdout, /supply=1/);
