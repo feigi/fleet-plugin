@@ -5,9 +5,12 @@
 // a fix to the contract lands here once and reaches every caller that routes
 // through the helper it fixes.
 //
-// For die() that is every script that has one: `grep -ln 'function die(' \
-// skills/fleet/scripts/*.mjs` outside the tests reports none, so no script
-// carries a private die() any more. For the guards it is not, and the gap
+// For die() that is every script that has one: `grep -ln '^function die(' \
+// skills/fleet/scripts/*.mjs` reports none, so no script carries a private
+// module-scope die() any more. The `^` is the whole command: unanchored, it
+// matches this very comment and makeDie()'s own indented `return function
+// die(msg)`, so it reported arg.mjs — a settling command that answers with
+// the file asserting it settles nothing. For the guards it is not, and the gap
 // is where this file's own defect used to live: a script that hand-rolls its
 // argv reader cannot call arg()/has() at all, because those refuse under a
 // GENERATED message ("--<name> needs a value") and such a reader exists
@@ -90,13 +93,9 @@ export function makeDie(name) {
 // could-not-check verdict rather than working around it here, because
 // refusing loudly still beats silently taking the next flag as this one's
 // value.
-// #567: the two predicates below ARE those rules, stated once and exported, so
-// that a caller which cannot route through arg()/has() consumes the rule
-// instead of hand-copying the expression. Two callers cannot: ledger.mjs and
-// member-outcomes.mjs each hand-roll their own argv reader. Before this they
-// carried their own copies, and nothing failed when a copy drifted — the same
-// class of defect as a requirement documented where nothing executes it.
-// shared-refusal.test.mjs is what executes it now.
+// #567: the two predicates below ARE those rules, exported so a caller that
+// cannot route through arg()/has() consumes them instead of copying the
+// expression — the header above says which callers and why.
 //
 // What travels is the RULE, never the refusal text: each caller keeps its own
 // die() wording, which is the constraint that made copying look necessary in
