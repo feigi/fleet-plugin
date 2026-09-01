@@ -751,16 +751,21 @@ their command failed. Do not modify ${worktree}.`,
 // `!==` an abbreviated MATCH would refuse the review outright.
 // Split into three branches (#539): the single message below used to cover a
 // dead agent (it died, or the harness exhausted structured-output retries —
-// see the `agent()` comment near this file's top — no fault of the tree), a
-// report missing `path`, and a report missing `head` alike, naming a
-// "returned no tree" cause common to none of the three specifically. Order
-// preserved from the original `!snap || !snap.path || !snap.head`: a report
-// missing both fields still reads as missing `path`, same short-circuit as
-// before the split.
+// see the `required:` comment inside `FINDINGS_SCHEMA` above for the measured
+// record, and note that a REJECTION is retried and recovers, so exhaustion is
+// the only one of the two that returns null — no fault of the tree), a report
+// with no `path`, and a report with no `head` alike, naming a "returned no
+// tree" cause common to none of the three specifically. Order preserved from
+// the original `!snap || !snap.path || !snap.head`: a report giving neither
+// field still reads as giving no `path`, same short-circuit as before the
+// split. Each branch says only what it knows: `path` absent means nothing on
+// disk is reachable, but `head` absent leaves the tree itself untouched — the
+// sha to check it against is what is gone, so that branch must not claim
+// there is no tree.
 function snapshotMissing(snap) {
-  if (!snap) return "the snapshot agent returned nothing (it died, or its structured output was rejected) — no tree to review";
-  if (!snap.path) return "the snapshot agent's report is missing `path` — no tree to review";
-  if (!snap.head) return "the snapshot agent's report is missing `head` — no tree to review";
+  if (!snap) return "the snapshot agent returned nothing (it died, or it exhausted its structured-output retries) — no tree to review";
+  if (!snap.path) return "the snapshot agent's report gives no `path` — no tree to review";
+  if (!snap.head) return "the snapshot agent's report gives no `head` — refusing to review a tree whose commit is unknown";
   if (!snap.pathVerified)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))

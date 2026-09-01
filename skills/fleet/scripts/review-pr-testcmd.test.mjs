@@ -83,11 +83,16 @@ test("review-pr.js actually calls resolveTestCmd once the snapshot is validated"
   );
   // Textually after the snapshot's own validity guard, not before — snap must
   // be known good (or the throw above already fired) before this reads it.
-  // Anchored on the guard's DEFINITION rather than one of its return
-  // messages (#539 split the single "no tree" message into three), so a
-  // future reword of any one message can't silently point this at the wrong
-  // line the way the pre-#539 anchor would have.
-  const guardAt = CODE.indexOf("function snapshotMissing(snap)");
+  // Anchored on the guard's INVOCATION — not its declaration, and not one of
+  // its return messages. The declaration sits above every top-level statement
+  // in this file, so ordering against it is near-tautological: measured, it
+  // stays green with the resolveTestCmd call moved ahead of the guard, which
+  // is the one regression this assertion's message names. A message anchor is
+  // reword-fragile instead — #539 split the single "no tree" message into
+  // three, and the retired literal leaves guardAt at -1, which reds this
+  // assertion loudly rather than silently, but reds it all the same. The call
+  // site is the only anchor that is both reword-proof and order-sensitive.
+  const guardAt = CODE.indexOf("const missingReason = snapshotMissing(snap);");
   const callAt = CODE.indexOf("const testCmd = resolveTestCmd(");
   assert.ok(guardAt !== -1 && callAt !== -1 && callAt > guardAt, "resolveTestCmd is called before snap is validated");
 });
