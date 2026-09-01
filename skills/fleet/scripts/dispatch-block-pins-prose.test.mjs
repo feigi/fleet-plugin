@@ -104,7 +104,8 @@ const block = (from, to, what) => flatten(between(region(), from, to, what));
 const worktreeBlock = () => block("You are ALREADY in worktree", "Read the issue with", "phase 2's worktree block");
 const issueReadBlock = () => block("Read the issue with", "**Re-derive the ticket", "phase 2's issue-read block");
 const rederiveBlock = () => block("**Re-derive the ticket", "Commit incrementally", "phase 2's re-derive block");
-const commitBlock = () => block("Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
+const commitBlock = () => block("Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
+const scratchBlock = () => block("**Every scratch file", "Your ticket names the cases", "phase 2's scratch-discipline block");
 const enumerateBlock = () => block("Your ticket names the cases", "Run `sizing-a-ticket`", "phase 2's enumerate-the-class block");
 
 test("the worktree block forbids a second worktree and carries the check that settles it", () => {
@@ -209,6 +210,49 @@ test("the commit-incrementally block carries the instruction with the loss that 
   );
 });
 
+test("the scratch-discipline block names the shared injected root, the per-member path, and the false-measurement harm", () => {
+  const b = scratchBlock();
+  // The root bound to it being shared and injected, not merely "use a subdir".
+  // #581: an implementer is TOLD to use that root by its own system prompt
+  // before SKILL.md ever reaches it, so the rule has to name the root and say
+  // it is shared, or it reads as tidiness advice competing with an instruction
+  // the member already received.
+  assert.match(
+    b,
+    phrase("The scratchpad root your own system prompt names is injected unprompted into every dispatched member and is shared with every sibling"),
+    "the block no longer names the injected scratch root as shared with every sibling member",
+  );
+  // The per-member path bound to the SAME derivation phase 1 already uses, not
+  // a second scheme invented for this rule.
+  assert.match(
+    b,
+    phrase("Derive your own path the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second scheme"),
+    "the per-member scratch path is no longer derived the same way claim-ticket.sh derives per-ticket ports",
+  );
+  // Absence handled: nothing else creates this directory, so a member that
+  // never `mkdir -p`s it has no path to write into.
+  assert.match(
+    b,
+    phrase("`mkdir -p` it yourself the first time — nothing creates it for you"),
+    "the block no longer tells the member to create its own scratch dir when absent",
+  );
+  // The harm bound to the mechanism, and stated as a false measurement, not
+  // clutter — bare "keep things tidy" is the framing #581 says gets skipped
+  // under time pressure, which is exactly when concurrency is highest.
+  assert.match(
+    b,
+    /The harm is a false measurement, not untidiness.{0,400}?indistinguishable from a real result/,
+    "the harm is no longer stated as a false measurement, or the mechanism that produces it is gone",
+  );
+  // Explicitly NOT the worktree isolation rule — folding the two together is
+  // the thing #581's brief rules out.
+  assert.match(
+    b,
+    phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
+    "the scratch-discipline block no longer distinguishes itself from worktree isolation",
+  );
+});
+
 test("the enumerate-the-class block carries all three of its halves, each with its own instruction", () => {
   const b = enumerateBlock();
   // Half one: enumerating bound to declaring. Enumerating privately and fixing
@@ -270,7 +314,7 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // the first draft quoted one, and then any reword of that line reddened this
   // test on the fixture guard rather than on the pin — an accept control that
   // reddens on the edits it exists to accept is worse than none.
-  const raw = between(region(), "Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
+  const raw = between(region(), "Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
   // Trimmed back to the BLOCK, not merely to the last non-space character.
   // `between`'s `to` anchor is the next block's opening words, so `raw` runs
   // past this block's last line through the blank line and onto the next
@@ -300,7 +344,7 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
   // interpreted in the latter. The commit block carries no `$` today, which is
   // exactly the kind of thing that stops being true without anyone noticing.
-  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
+  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "**Every scratch file", "rewrapped commit block"));
   assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
   assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });

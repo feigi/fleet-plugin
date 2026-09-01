@@ -784,6 +784,25 @@ number, worktree abs path, branch, and each of these verbatim:
 > you stop for any reason, uncommitted work is invisible to the controller and
 > effectively unrecoverable.
 
+> **Every scratch file, fixture or mutation copy you create goes under
+> `<scratch>/impl-<N>/`, never into the scratch root by itself.** The scratchpad
+> root your own system prompt names is injected unprompted into every dispatched
+> member and is shared with every sibling running this session — `SKILL.md` does
+> not choose that root and cannot keep it from being handed to you, so writing to
+> it directly, not a subdir under it, is the defect. Derive your own path the
+> same way `claim-ticket.sh` already derives per-ticket ports from the issue
+> number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second
+> scheme, and `mkdir -p` it yourself the first time — nothing creates it for you.
+> The harm is a false measurement, not untidiness: a mutation harness writes a
+> broken copy of a file, measures against it, then restores from `.orig`, and
+> two members in one directory are one filename collision away from restoring a
+> sibling's `.orig` over their own file, or measuring a "clean baseline" that is
+> actually a sibling's mutant — silently, indistinguishable from a real result.
+> This is not the worktree isolation rule: `claim-ticket.sh` already gives you
+> your own worktree, and the scratch root sits deliberately outside every
+> worktree so a harness never dirties one — nothing partitions the scratch root
+> itself but this rule.
+
 > Your ticket names the cases it was written from. **Before implementing, enumerate
 > every member of that class — including any the ticket names only in passing — and
 > say which you cover and which you deliberately leave** — a guard on one path
