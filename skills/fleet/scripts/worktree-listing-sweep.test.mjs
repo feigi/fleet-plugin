@@ -45,27 +45,87 @@ function shellScripts() {
 }
 
 /**
- * Lines of `src` that INVOKE `git worktree list`, as opposed to naming it.
+ * `src` as LOGICAL lines: a trailing backslash folds the next physical line in,
+ * and the pair keeps the number of the line the statement STARTED on.
+ *
+ * A gate that scans physical lines pins one way of typing the defect rather than
+ * the defect. Measured: `git worktree \` + `  list --porcelain` is valid POSIX
+ * sh, reads the listing exactly as rawly as the one-line spelling, and walked
+ * through this whole file green — the three words simply never appeared on one
+ * line for the scan to see.
+ */
+function logicalLines(src) {
+  const out = [];
+  const phys = src.split("\n");
+  let buf = "";
+  let start = 0;
+  for (let i = 0; i < phys.length; i++) {
+    if (buf === "") start = i + 1;
+    const line = buf === "" ? phys[i] : phys[i].replace(/^\s+/, "");
+    const joined = buf === "" ? line : `${buf} ${line}`;
+    if (/\\$/.test(line)) {
+      buf = joined.slice(0, -1);
+      continue;
+    }
+    out.push([start, joined]);
+    buf = "";
+  }
+  if (buf !== "") out.push([start, buf]);
+  return out;
+}
+
+/**
+ * Is the character at `idx` inside a quoted string?
+ *
+ * A scan rather than "is there a quote before the phrase", which is what this
+ * asked and is a different question with the same answer only by luck. Measured:
+ * `raw=$(cd "$HOME" && git worktree list --porcelain)` is a raw read, and the
+ * quotes around `$HOME` — closed long before `git` — excluded it. Every real
+ * invocation here expands or redirects through a quote somewhere, so any test
+ * that keys on a quote's mere presence ahead of the phrase excludes the very
+ * population being scanned for. Parity is what separates the two: an OPEN quote
+ * at the phrase means the phrase is text, a closed one means it is code.
+ */
+function quoted(line, idx) {
+  let q = null;
+  for (let i = 0; i < idx; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === q) q = null;
+    } else if (c === '"' || c === "'") {
+      q = c;
+    }
+  }
+  return q !== null;
+}
+
+/** `git` with any options between it and the subcommand — `git -C "$d" worktree list`. */
+const INVOCATION = /\bgit\b.*?\bworktree\s+list\b/;
+
+/**
+ * Logical lines of `src` that INVOKE `git worktree list`, as opposed to naming
+ * it.
  *
  * Two exclusions, both load-bearing, and both for lines that NAME the command
  * without running it. A comment describes git's output shape, and these scripts
- * do that constantly — including in the comments this fix wrote — so a scan
- * that counts them reports every file. The other is a quote opening before the
- * phrase: that is a banner `echo "\$ git worktree list …"` printing the command
+ * do that constantly — including in the comments this fix wrote — so a scan that
+ * counts them reports every file. The other is the phrase sitting inside an open
+ * quote: that is a banner `echo "\$ git worktree list …"` printing the command
  * for an operator, or a diagnostic string naming what failed. Both are inert
  * text, and worktree.sh and worktree-audit.sh each carry one.
  *
- * A quote BEFORE the phrase, never merely a quote on the line: every real
- * invocation here redirects or expands through one, so "contains a quote" would
- * exclude the whole population being scanned for.
+ * The match itself allows options between `git` and its subcommand. `git -C
+ * "$dir" worktree list` is a raw read by any measure and the literal three-word
+ * phrase does not occur in it — and `git -C` is the dominant git spelling in
+ * these scripts, so it is the form the next person reaches for.
  */
 function invocations(src) {
-  return src
-    .split("\n")
-    .map((line, i) => [i + 1, line])
-    .filter(([, line]) => /git worktree list/.test(line))
+  return logicalLines(src)
     .filter(([, line]) => !/^\s*#/.test(line))
-    .filter(([, line]) => !/"[^"]*git worktree list/.test(line));
+    .map(([n, line]) => [n, line, INVOCATION.exec(line)])
+    .filter(([, , m]) => m !== null)
+    .filter(([, line, m]) => !quoted(line, m.index))
+    .map(([n, line]) => [n, line]);
 }
 
 const ALLOWED = ["skills/fleet/scripts/worktree.sh", "skills/fleet/scripts/inflight.sh"];
@@ -105,15 +165,24 @@ test("the two allowed readers really do read it, and both read it -z", () => {
 // of any length, in all three spellings — which would have made inflight.sh
 // refuse every ticket. It reads like the obvious way to consume `-z` output, so
 // the next person to touch either reader will reach for it.
+//
+// Any `RS=` at all, not only one spelled with a literal `\0`. The separator has
+// no other use in this tree — no script sets `RS` for any reason today — so the
+// blunt scan costs nothing and the narrow one measurably missed the defect:
+// `sep=$(printf '\0'); awk -v RS="$sep"` reintroduces the identical one-record
+// read (measured on BWK awk 20200816: NR=1, against 3 for the same file through
+// `tr`), and the literal-`\0` pattern never saw it. A legitimate `RS=` arriving
+// later fails here loudly and is answered by naming it, which is the direction
+// worth erring in for a scan whose whole job is catching what nobody expected.
 test("no script consumes the -z listing with awk's record separator", () => {
   for (const f of shellScripts()) {
     const src = readFileSync(join(ROOT, f), "utf8");
-    for (const [i, line] of src.split("\n").entries()) {
+    for (const [n, line] of logicalLines(src)) {
       if (/^\s*#/.test(line)) continue;
       assert.doesNotMatch(
         line,
-        /RS\s*=\s*["']?\\0/,
-        `${f}:${i + 1}: BWK awk reports one record for the whole listing — swap the separators with tr instead`,
+        /\bRS\s*=/,
+        `${f}:${n}: BWK awk reports one record for the whole listing — swap the separators with tr instead`,
       );
     }
   }

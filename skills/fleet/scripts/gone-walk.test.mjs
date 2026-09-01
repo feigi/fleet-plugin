@@ -58,12 +58,18 @@ function extract(name = HOME) {
 // dangling symlink read as established-absent in two of three copies while the
 // third compensated at a call site. So the pin is no longer "the copies agree";
 // it is "there are no copies".
+// `\s*\{` and no end anchor, where this required the opening line to be
+// byte-for-byte `gone() {`. One syntactic form is not the class: measured, the
+// pre-PR body reintroduced under `gone() { # local override` walked straight
+// through and left all four tests here green. A redefinition arrives WITH a
+// comment excusing it far more plausibly than without one, so the one spelling
+// the anchor missed is the likely one.
 test("gone() is defined once in the tree, in worktree.sh", () => {
   extract(HOME);
   for (const name of CALLERS) {
     assert.doesNotMatch(
       read(name),
-      /^gone\(\) \{$/m,
+      /^gone\(\)\s*\{/m,
       `${name} must source ${HOME}, never redefine gone() — a second definition is what #725 found`,
     );
   }
