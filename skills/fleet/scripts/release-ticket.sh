@@ -329,9 +329,18 @@ wt_listing || die "could not read the worktree list for #$issue: $wt_err"
 # What this count does NOT cover, stated because it reads as though it might: a
 # path with a newline in it never moved this number. The orphaned continuation
 # line the plain porcelain produced did not begin `worktree `, so `listed - 1`
-# still equalled `registered` and the cross-check agreed with a read that had
-# truncated the path (measured on a real linked worktree at `…/wt/fix-33<LF>slug`,
-# git 2.50.1: `listed=3`, the true figure). It is a count of records against
+# still equalled `registered` and the cross-check AGREED with a read that had
+# truncated the path. Re-measured on a real linked worktree added at
+# `…/wt/fix-33<LF>slug`, git 2.50.1 (Apple Git-155):
+#
+#   git worktree add -b fix/33-slug "../wt/$(printf 'fix-33\nslug')"
+#   git worktree list --porcelain | awk '/^worktree /{n++} END{print n+0}'
+#   ls .git/worktrees | wc -l
+#
+# `listed - 1` equals `registered` while the same listing's `substr($0,10)` hands
+# back `…/wt/fix-33`, a path `[ -d ]` says is not there. The blindness is the
+# point, not the arithmetic: the orphan line adds no `worktree ` line, so no
+# count over this listing can see the truncation. It is a count of records against
 # registry entries and catches an entry git DROPPED; the path inside a record it
 # does keep is `nl_path`'s to refuse, below. Under `-z` the count is now right by
 # construction — one `worktree ` line per record, whatever the path holds. #551
@@ -655,9 +664,11 @@ occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 #
 # The tri-valued directory probe is `occupied` composed with `gone`, exactly the
 # pairing `gone`'s own contract prescribes for a caller that needs present and
-# cannot-stat apart. No second predicate and no third value inside `gone`: the
-# three copies of it are pinned byte-identical, and this file already carries
-# two answers on unreadable worktrees (#83) from a concept that got duplicated.
+# cannot-stat apart. No second predicate and no third value inside `gone`: it is
+# now a single definition in worktree.sh that every caller in the fleet shares,
+# so a third value added for this one caller lands in all of them — and this file
+# already carries two answers on unreadable worktrees (#83) from a concept that
+# got duplicated. #725
 #
 # Only the four named states, so the two cells CONTEXT.md has no name for are
 # not asserted: a registration that survived a directory that did not is
