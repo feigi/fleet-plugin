@@ -16,8 +16,18 @@ import { makeDie, isFlagLike, hasEqualsForm } from "./arg.mjs";
 const NAME = "ledger";
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
-// see arg.mjs for the #176/#328/#363 rationale). arg()/has() are NOT shared
-// here: this file splices flags out of argv with its own wording (#362).
+// see arg.mjs for the #176/#328/#363 rationale). arg()/has() themselves are
+// NOT shared here: this file splices its flags out of argv and refuses in its
+// own wording (#362), where arg() refuses under a message generated from the
+// flag name.
+//
+// Their RULES are shared, which is a different thing (#567). isFlagLike() and
+// hasEqualsForm() are arg.mjs's refusal rules as exported predicates; the
+// three guards below call them and supply their own die() text. This file
+// used to restate the expressions instead, and nothing failed when a
+// restatement drifted from the original — shared-refusal.test.mjs is what
+// fails now, and it reds even on a re-inlined copy that changes no behaviour
+// at all, which is the only kind a behavioural test cannot see.
 const die = makeDie(NAME);
 
 // The cause of a failed child process, for `check`'s repository probe and its
@@ -75,9 +85,14 @@ const argv = process.argv.slice(2);
 // exits 2. It failed loudly only where the token happened to land in the
 // SUBCOMMAND slot — argv[0] once the splices below have run, which a leading
 // `--file=x` does — and `unknown subcommand` is not the same refusal. That one
-// sample is why the `=` form read as already covered. So scan the whole argv.
-// Same two refusals arg.mjs gives the scripts that route through its arg() and
-// has(), in this reader's own wording (#362).
+// sample is why the `=` form read as already covered. So scan the whole argv
+// — which is why the sliced `argv` is passed rather than left to default to
+// process.argv, and why the scan is not anchored to a position.
+//
+// The same refusals arg.mjs gives the scripts that route through its arg() and
+// has(), in this reader's own wording (#362) — and since #567 that parity is
+// the shared hasEqualsForm() predicate itself rather than a claim about two
+// expressions that were free to drift apart.
 if (hasEqualsForm("file", argv)) die("--file needs a space-separated value, not --file=");
 if (hasEqualsForm("require-file", argv)) die("--require-file is a boolean flag, not --require-file=");
 const fileIdx = argv.indexOf("--file");

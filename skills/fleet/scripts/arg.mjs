@@ -1,26 +1,40 @@
 // Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has(),
-// sweep(), stray().
+// sweep(), stray(), and the two refusal rules isFlagLike()/hasEqualsForm().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
 // through the helper it fixes.
 //
-// For die() that is all seven scripts. For the guards it is not: ledger.mjs
-// splices --file/--require-file out of argv itself, in its own wording
-// (#362), and imports makeDie alone — so arg()'s refusals below never reach
-// it. `--file --require-file` used to take the next flag as the path, leaving
-// the duplicate-filing guard to fail open at exit 0 (measured); #362 fixed
-// that IN ledger.mjs, with its own copy of the `--`-prefix rule, because the
-// splice has no equivalent here. That parser is still ledger.mjs's own — it
-// is named here so this header is not read as covering a caller it does not,
-// and so the next change to the rule below is known to need a second edit
-// there. (fleet-tick.mjs also imports makeDie alone, so arg()'s refusals do
-// not reach it either — but not for want of flags: it parses six of its own
-// with node:util's parseArgs, and its unknown-flag, required-flag and range
-// refusals are a second edit site on the same terms, as is the empty-or-blank
-// value its integer guard refuses — the only one of the four spellings below
-// that it hand-writes, because parseArgs takes an empty value and
-// `Number("")` is 0.)
+// For die() that is every script that has one: `grep -ln 'function die(' \
+// skills/fleet/scripts/*.mjs` outside the tests reports none, so no script
+// carries a private die() any more. For the guards it is not, and the gap
+// is where this file's own defect used to live: a script that hand-rolls its
+// argv reader cannot call arg()/has() at all, because those refuse under a
+// GENERATED message ("--<name> needs a value") and such a reader exists
+// precisely to refuse under its own ("--file needs a path"). ledger.mjs
+// splices --file/--require-file out of argv itself (#362) and
+// member-outcomes.mjs reads its own --file, so both were out of arg()'s
+// reach — and both answered that by copying the expression, which is a
+// requirement recorded where nothing executes it.
+//
+// #567 closed that: the rules are stated once, as isFlagLike() and
+// hasEqualsForm() below, and BOTH readers import and call them while keeping
+// their own wording. No script now restates one of these rules as a value
+// guard instead of calling it. That is executed, not documented —
+// shared-refusal.test.mjs reds when a copy is re-inlined, including one
+// re-inlined behaviour-identically, which no behavioural test can see. Read
+// the current division with `grep -n 'from "./arg.mjs"'
+// skills/fleet/scripts/*.mjs | grep -v test` rather than trusting a list
+// here to have aged well.
+//
+// fleet-tick.mjs is the one script still outside the rules, and deliberately:
+// it parses its flags with node:util's parseArgs, so its unknown-flag,
+// required-flag and range refusals are a separate edit site on their own
+// terms — as is the empty-or-blank value its integer guard refuses, which is
+// the one spelling of the rule below that it hand-writes, because parseArgs
+// takes an empty value and `Number("")` is 0. That guard answers a question
+// about an integer GRAMMAR, not "is this a value at all", so isFlagLike()
+// would not express it.
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
