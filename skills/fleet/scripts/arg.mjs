@@ -1,26 +1,43 @@
 // Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has(),
-// sweep(), stray().
+// sweep(), stray(), and the two refusal rules isFlagLike()/hasEqualsForm().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
 // through the helper it fixes.
 //
-// For die() that is all seven scripts. For the guards it is not: ledger.mjs
-// splices --file/--require-file out of argv itself, in its own wording
-// (#362), and imports makeDie alone — so arg()'s refusals below never reach
-// it. `--file --require-file` used to take the next flag as the path, leaving
-// the duplicate-filing guard to fail open at exit 0 (measured); #362 fixed
-// that IN ledger.mjs, with its own copy of the `--`-prefix rule, because the
-// splice has no equivalent here. That parser is still ledger.mjs's own — it
-// is named here so this header is not read as covering a caller it does not,
-// and so the next change to the rule below is known to need a second edit
-// there. (fleet-tick.mjs also imports makeDie alone, so arg()'s refusals do
-// not reach it either — but not for want of flags: it parses six of its own
-// with node:util's parseArgs, and its unknown-flag, required-flag and range
-// refusals are a second edit site on the same terms, as is the empty-or-blank
-// value its integer guard refuses — the only one of the four spellings below
-// that it hand-writes, because parseArgs takes an empty value and
-// `Number("")` is 0.)
+// For die() that is every script that has one: `grep -ln '^function die(' \
+// skills/fleet/scripts/*.mjs` reports none, so no script carries a private
+// module-scope die() any more. The `^` is the whole command: unanchored, it
+// matches this very comment and makeDie()'s own indented `return function
+// die(msg)`, so it reported arg.mjs — a settling command that answers with
+// the file asserting it settles nothing. For the guards it is not, and the gap
+// is where this file's own defect used to live: a script that hand-rolls its
+// argv reader cannot call arg()/has() at all, because those refuse under a
+// GENERATED message ("--<name> needs a value") and such a reader exists
+// precisely to refuse under its own ("--file needs a path"). ledger.mjs
+// splices --file/--require-file out of argv itself (#362) and
+// member-outcomes.mjs reads its own --file, so both were out of arg()'s
+// reach — and both answered that by copying the expression, which is a
+// requirement recorded where nothing executes it.
+//
+// #567 closed that: the rules are stated once, as isFlagLike() and
+// hasEqualsForm() below, and BOTH readers import and call them while keeping
+// their own wording. No script now restates one of these rules as a value
+// guard instead of calling it. That is executed, not documented —
+// shared-refusal.test.mjs reds when a copy is re-inlined, including one
+// re-inlined behaviour-identically, which no behavioural test can see. Read
+// the current division with `grep -n 'from "./arg.mjs"'
+// skills/fleet/scripts/*.mjs | grep -v test` rather than trusting a list
+// here to have aged well.
+//
+// fleet-tick.mjs is the one script still outside the rules, and deliberately:
+// it parses its flags with node:util's parseArgs, so its unknown-flag,
+// required-flag and range refusals are a separate edit site on their own
+// terms — as is the empty-or-blank value its integer guard refuses, which is
+// the one spelling of the rule below that it hand-writes, because parseArgs
+// takes an empty value and `Number("")` is 0. That guard answers a question
+// about an integer GRAMMAR, not "is this a value at all", so isFlagLike()
+// would not express it.
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
@@ -76,15 +93,46 @@ export function makeDie(name) {
 // could-not-check verdict rather than working around it here, because
 // refusing loudly still beats silently taking the next flag as this one's
 // value.
+// #567: the two predicates below ARE those rules, exported so a caller that
+// cannot route through arg()/has() consumes them instead of copying the
+// expression — the header above says which callers and why.
+//
+// What travels is the RULE, never the refusal text: each caller keeps its own
+// die() wording, which is the constraint that made copying look necessary in
+// the first place. ledger.mjs says "--file needs a path" where arg() below
+// says "--<name> needs a value", because a reader who typed --file is owed the
+// flag they typed and not the grammar behind it.
+//
+// Plain exports, not factories, because neither takes a script NAME — one is a
+// predicate over a value, the other over an argv. That is also why #467's
+// proposed makeCli(NAME) collapse of makeDie/makeArg/makeHas cannot absorb
+// them whichever way it lands: those three exist to BIND a name, and these
+// have no name to bind.
+export function isFlagLike(value) {
+  return value === undefined || value.trim() === "" || value.startsWith("--");
+}
+
+// Prefix-matched on `--name=`, so a longer flag name sharing the prefix
+// (`--filename=x` asked about `file`) is NOT caught here — that one is a name
+// no script reads, which is sweep()'s to refuse in its own wording.
+//
+// argv is a parameter because the two kinds of caller hold different arrays:
+// arg()/has() read the live process.argv, where argv[0] and argv[1] are the
+// node and script paths and are scanned harmlessly; ledger.mjs holds its own
+// process.argv.slice(2) and passes it.
+export function hasEqualsForm(name, argv = process.argv) {
+  return argv.some((a) => a.startsWith(`--${name}=`));
+}
+
 export function makeArg(die) {
   return function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     if (i === -1) {
-      if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} needs a space-separated value, not --${name}=`);
+      if (hasEqualsForm(name)) die(`--${name} needs a space-separated value, not --${name}=`);
       return null;
     }
     const value = process.argv[i + 1];
-    if (value === undefined || value.trim() === "" || value.startsWith("--")) die(`--${name} needs a value`);
+    if (isFlagLike(value)) die(`--${name} needs a value`);
     return value;
   };
 }
@@ -95,7 +143,7 @@ export function makeArg(die) {
 // space-separated value" would lie.
 export function makeHas(die) {
   return function has(name) {
-    if (process.argv.some((a) => a.startsWith(`--${name}=`))) die(`--${name} is a boolean flag, not --${name}=`);
+    if (hasEqualsForm(name)) die(`--${name} is a boolean flag, not --${name}=`);
     return process.argv.includes(`--${name}`);
   };
 }

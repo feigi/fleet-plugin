@@ -248,7 +248,7 @@ export function parseTsv(text) {
 
 import { writeFileSync, existsSync, renameSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { makeDie } from "./arg.mjs";
+import { makeDie, isFlagLike } from "./arg.mjs";
 
 const NAME = "member-outcomes";
 
@@ -276,7 +276,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   // instruction all use) always exits 2.
   const dirs = argv.filter((a, i) => !a.startsWith("--") && (fileIdx < 0 || i !== fileIdx + 1));
   if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
-  if (!file || file.startsWith("--")) die("--file needs a path");
+  // arg.mjs's rule, consumed rather than copied (#567). This line used to
+  // hand-write `!file || file.startsWith("--")`, which was that rule with the
+  // blank spelling missing — so `--file "   "` was accepted here and wrote the
+  // metrics TSV to a whitespace-named path, while every script routing through
+  // arg() refused it. That gap is what a copy costs and is why the predicate
+  // is imported. The refusal WORDING stays this script's own: `--file` is the
+  // flag the operator typed.
+  if (isFlagLike(file)) die("--file needs a path");
 
   // findSubagentsDir() (board.mjs) returns .../<session>/subagents; a human
   // types the session dir instead. Accept both rather than making the caller
