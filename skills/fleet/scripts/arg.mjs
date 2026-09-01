@@ -196,14 +196,29 @@ export function makeHas(die) {
 // FREE-TEXT tail, where a `--` token is legitimately DATA — `check
 // "--require-file silently absent when value missing"` works today and is the
 // shape of issue titles in this repo — so this sweep would refuse working
-// invocations, which #365's own AC calls worse than the bug. #584 closed the
-// stray-flag gap that left open WITHOUT routing through this sweep:
+// invocations, which #365's own AC calls worse than the bug. #584 NARROWED
+// that gap without routing through this sweep, rather than closing it:
 // ledger.mjs's own refuseStrayInTail() refuses a `--`-prefixed token only
 // when it shares the tail with something else — the shape an unquoted stray
-// flag makes, never the shape a legitimate one-argument subject makes — so a
-// subject that legitimately opens with `--` still reaches the tracker query
-// unchanged. Not a bare `startsWith("--")` guard: that was measured refusing
-// exactly the legitimate case above (#584's Agent Brief).
+// flag makes, never the shape a one-argument subject makes — so a subject
+// that legitimately opens with `--`, given as that one argument, is accepted
+// and emitted in the payload's `subject` field unchanged. Unchanged there,
+// not everywhere: `check` normalises and reorders the subject before it
+// becomes a tracker query, so `the --basee flag is unread` is queried as
+// `unread basee flag`.
+//
+// It is the LENGTH gate that spares the legitimate case, not the prefix test
+// — that test is `startsWith("--")`, the same one this sweep uses. A prefix
+// test with no length gate was measured refusing the legitimate subject.
+//
+// #584 does not make this file's cost disappear; it buys a smaller version of
+// the same cost. An unquoted subject carrying a `--` word is a working
+// invocation ledger.mjs now refuses too: `check the --basee flag is unread`
+// answered at exit 0 before #584 and exits 2 after it. Two residuals stay
+// open and owned — a lone stray with no subject beside it is still taken as
+// the subject, which ledger.mjs's own comment prices, and #1161 tracks that
+// the tree documents those subcommands unquoted while the guard wants one
+// quoted argument.
 export function makeSweep(die) {
   return function sweep(known) {
     for (const a of process.argv.slice(2)) {

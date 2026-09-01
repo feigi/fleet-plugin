@@ -1599,7 +1599,7 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
   assert.equal(existsSync(dir), false, `cliFixture registered no cleanup on its test: ${dir} survived it`);
 });
 
-// ── A stray flag in check's/filed's subject tail (#584) ─────────────────────
+// ── A stray flag in a free-text subject tail, or the id slot ahead of it (#584) ──
 //
 // `--file`/`--require-file` are spliced out of argv by NAME before `cmd`/
 // `rest` are ever split, so a misspelled flag is the ordinary way one reaches
@@ -1623,10 +1623,12 @@ test("CLI: a stray flag in check's tail is refused, naming it (#584)", (t) => {
   assert.equal(r.stdout, "", "a refusal must not also emit a payload");
 });
 
-// The pin the refuted remedy failed. #584's Agent Brief measured
-// `rest.find(a => a.startsWith("--"))` refusing exactly this invocation — a
-// subject that legitimately begins with `--`, given as the documented ONE
-// argument. It must still be accepted, and reach the tracker query unchanged.
+// The pin a prefix test with no length gate fails: `rest.find(a =>
+// a.startsWith("--"))` refuses exactly this invocation — a subject that
+// legitimately begins with `--`, given as ONE argument. It must stay
+// accepted, and the payload's `subject` field must carry it unchanged. That
+// field, specifically: `check` normalises and reorders the subject before it
+// becomes `tracker.query`, so unchanged there is not a claim about the query.
 test("CLI: a subject legitimately starting with '--' is accepted unchanged, given as one argument (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1634,11 +1636,11 @@ test("CLI: a subject legitimately starting with '--' is accepted unchanged, give
   const subject = "--require-file silently absent when value missing";
   const r = cli(["--file", file, "check", subject]);
   assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
-  assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the tracker query unchanged");
+  assert.equal(JSON.parse(r.stdout).subject, subject, "the payload's subject field must carry it unchanged");
 });
 
-// The guard's own false-positive class, distinct from the pin above: an
-// unquoted multi-word subject that carries NO `--` token at all must stay
+// The guard's own false-positive class, distinct from the legitimate
+// `--`-leading subject: an unquoted multi-word subject carrying NO `--` at all must stay
 // accepted exactly as before — tail LENGTH alone must never be what triggers
 // the refusal, only a `--`-prefixed element sharing the tail with it.
 test("CLI: an unquoted multi-word subject with no stray flag is still accepted (#584)", (t) => {
@@ -1650,12 +1652,16 @@ test("CLI: an unquoted multi-word subject with no stray flag is still accepted (
   assert.match(r.stderr, /ALREADY FILED/);
 });
 
-// Known residual, deliberately left open (#584's Agent Brief): a stray flag
-// with no subject at all is a ONE-element tail, so the guard above never
-// fires on it — it is accepted as the subject itself. Degenerate and
-// harmless: it searches for that literal string and finds nothing. Pinned so
-// a future change does not start refusing it under the belief that widening
-// the guard closes a real gap.
+// Known residual, deliberately left open: a stray flag with no subject at all
+// is a ONE-element tail, so refuseStrayInTail() never fires on it — it is
+// accepted as the subject itself. Left open because closing it costs the
+// legitimate one-argument `--`-leading subject, which is the case #584 exists
+// to keep working, and the residual is harmless: the run searches for the
+// stray's own normalised text (`--requre-file` queries `requre file`), which
+// matches no real row. The exit 0 this asserts also rests on cliFixture's
+// stubbed, unreachable gh — it is not a claim that a live tracker would find
+// nothing, where a scoring row would exit 3. Pinned so a future change does not
+// start refusing it under the belief that widening the guard closes a gap.
 test("CLI: a stray flag alone, with no subject, is accepted as the degenerate subject (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1681,7 +1687,8 @@ test("CLI: a stray flag in filed's subject is refused, naming it (#584)", (t) =>
   assert.equal(existsSync(file), false, "a refusal must not write a ledger either");
 });
 
-// filed's own subject-legitimately-starting-with-'--' pin, mirroring check's.
+// filed's own subject-legitimately-starting-with-'--' pin, the counterpart
+// of check's.
 test("CLI: filed accepts a subject legitimately starting with '--', given as one argument (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1691,7 +1698,7 @@ test("CLI: filed accepts a subject legitimately starting with '--', given as one
   assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the ledger unchanged");
 });
 
-// Every pin above puts the stray flag FIRST in the tail, so all of them stay
+// The stray-flag refusal pins each put the flag FIRST in the tail, so they stay
 // green against a guard that only ever inspects `tail[0]` — a narrowing a
 // future reader could make believing the tests still cover it. These drive
 // the flag into a later position instead, and across all four subcommands
@@ -1736,7 +1743,7 @@ test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (
 });
 
 // The id guard's own false-positive class: an id argument is still accepted
-// with or without its `#`, and the accept-pins above still hold, so the bare
+// with or without its `#`, and the legitimate-subject pins still hold, so the bare
 // prefix test on that slot cannot be what refuses a legitimate call.
 test("CLI: an ordinary id is unaffected by the id-slot guard, with or without '#' (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
