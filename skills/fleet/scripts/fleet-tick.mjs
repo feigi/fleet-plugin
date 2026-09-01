@@ -102,7 +102,16 @@ function reviewers(s) {
 
 function mergeBot(s) {
   // Cap is 1 by invariant, not by configuration.
-  const detail = `merge-queue=${s.mergeQueue} held=${s.mergeHeld}`;
+  //
+  // `ignored=` names the held numbers the queue does not contain. Accepting
+  // them is deliberate (see prState), but an unnamed rejection makes a typo,
+  // or the ISSUE number passed where the PR number belongs, produce output
+  // byte-identical to `--merge-holds none` — the exact DISPATCH the flag was
+  // added to suppress. Held numbers are the caller's own input, so naming
+  // them back costs what `held=` costs and is what makes the mistake visible
+  // on the tick that made it rather than after the cascade has stalled.
+  const detail = `merge-queue=${s.mergeQueue} held=${s.mergeHeld}`
+    + (s.mergeIgnored.length ? ` ignored=${s.mergeIgnored.join(",")}` : "");
   const row = (action, extra = "") => ({
     role: "merge-bot", actual: s.mergeBotLive, target: 1,
     action, detail: extra ? `${detail} — ${extra}` : detail,
@@ -166,12 +175,21 @@ const OPTIONS = {
 // Why each caller-stated input has no default, quoted back at whoever forgot
 // it. Every entry says the same thing about a different state: the controller
 // holds it, the repo does not record it, and a guess fails in both directions.
+const LIVE_WHY =
+  "Live member counts and the pool are the CONTROLLER's state: " +
+  "the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. " +
+  "There is no safe default — 0 would dispatch a full cap off a forgotten flag, the cap would hold forever, " +
+  "and both are silent.";
+
 const WHY = {
-  live:
-    "Live member counts and the pool are the CONTROLLER's state: " +
-    "the ledger records a dispatch, never a liveness, so nothing in the repo can be read for them. " +
-    "There is no safe default — 0 would dispatch a full cap off a forgotten flag, the cap would hold forever, " +
-    "and both are silent.",
+  // The four live counts share one reason, but each is keyed by its own flag
+  // name rather than reached through a fallback: a fallback is what lets a
+  // flag added later borrow someone else's rationale, silently and correctly-
+  // looking, and it is unpairedFlags() below that turns the omission loud.
+  implementers: LIVE_WHY,
+  reviewers: LIVE_WHY,
+  "merge-bots": LIVE_WHY,
+  pool: LIVE_WHY,
   "reviews-ready":
     "A reviewer slot holds a fix-applier, and a fix-applier applies findings — so this is the number of " +
     "reviews whose findings you HAVE with no fix-applier on them yet, not the number of PRs awaiting one. " +
@@ -187,6 +205,22 @@ const WHY = {
     "Defaulting to `none` prints DISPATCH merge-bot on every tick of a stalled cascade.",
 };
 
+// An option with no `default` is caller-stated, so it must carry its own
+// reason. Nothing but spelling ties an OPTIONS key to a WHY key, and a
+// string-key miss is the quietest kind: without this, a flag added to OPTIONS
+// alone would print a rationale belonging to another flag, and a renamed WHY
+// key would print `undefined` after "is required." — both at the usual exit 2,
+// both looking like a working refusal. Exported so the pairing is a test's
+// subject and not only an import-time side effect.
+export function unpairedFlags(options, why) {
+  return Object.keys(options).filter((f) => options[f].default === undefined && !(f in why));
+}
+
+const unpaired = unpairedFlags(OPTIONS, WHY);
+if (unpaired.length) {
+  throw new Error(`${NAME}: required flags with no WHY entry: ${unpaired.map((f) => `--${f}`).join(", ")}`);
+}
+
 function counts() {
   let values;
   try {
@@ -200,7 +234,9 @@ function counts() {
 
   const int = (name) => {
     const raw = values[name];
-    if (raw === undefined) die(`--${name} is required. ${WHY[name] ?? WHY.live}`);
+    // No fallback: the guard above proves the entry exists, so a miss here
+    // cannot be reached rather than being papered over with another flag's text.
+    if (raw === undefined) die(`--${name} is required. ${WHY[name]}`);
     // Regex, not Number(): `Number("")` is 0 and `Number.isInteger(0)` is true,
     // so `--pool ""` — the shape an unset shell variable produces — would read
     // as a genuine, empty pool.
@@ -226,7 +262,9 @@ function counts() {
     if (!/^#?\d+(\s*,\s*#?\d+)*$/.test(t)) {
       die(`--merge-holds must be 'none' or PR numbers like '601,604', got '${raw}'`);
     }
-    return t.split(",").map((n) => Number(n.trim().replace("#", "")));
+    // The guard above has already ruled out every shape that is not a comma
+    // list of optionally-`#`-prefixed numbers, so the digits are the parse.
+    return t.match(/\d+/g).map(Number);
   };
   return {
     implLive: int("implementers"), reviewerLive: int("reviewers"), mergeBotLive: int("merge-bots"),
@@ -263,13 +301,20 @@ function prState(holds) {
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
-  const queued = prs.filter((p) => p.labels.some((l) => l && l.name === "ready-to-merge"));
+  // Named once, so the backlog below re-states the sign-off test rather than
+  // re-deriving "not queued" by identity membership over the array it just
+  // built. Same answer, and one place to read what "queued" means.
+  const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
+  const queued = prs.filter(isQueued);
   // A held number the queue does not contain is ignored, not refused: the
   // ordinary way a hold ends is the lower PR merging and the candidate merging
   // behind it, which leaves the caller quoting a number that has left the
   // queue, and a tick that refuses on the happy path is worse than one that
   // subtracts nothing.
   const mergeHeld = queued.filter((p) => holds.includes(p.number)).length;
+  // Ignored, but never unnamed — the merge-bot row prints these back. Which is
+  // the whole difference between "nothing is held" and "you spelled it wrong".
+  const mergeIgnored = holds.filter((n) => !queued.some((p) => p.number === n));
 
   // Review backlog: open, not signed off, and REVIEW WORK. The third clause is
   // what the label read cannot express — a controller-authored chore PR is
@@ -286,6 +331,19 @@ function prState(holds) {
   // one tick and can under-hold the implementer refill by one. Bounded, and
   // the next tick sees it; the permanent floor it replaces was not.
   //
+  // That transient under-count is not the only one, and the other is
+  // permanent: a PR that goes through the fleet's own review cycle while
+  // closing no issue is invisible here for its whole life. Those exist — `gh
+  // pr list --state merged --json closingIssuesReferences,labels` returns
+  // merged PRs carrying `ready-to-merge`, the fleet's own sign-off, with an
+  // empty closing set, and each was review work while it was still
+  // unlabelled. So this clause swaps a permanent OVER-count for a permanent
+  // UNDER-count, deliberately and not by oversight: the over-count starves
+  // implementers for the rest of a run, which is the harm #590 measured,
+  // while the under-count only lets an extra PR into a review-bound pipeline.
+  // If that ever bites, widen it with a second clause — a fleet label — and
+  // never by dropping the closing-issue one.
+  //
   // ponytail: still the wider read on the other axis. A PR already reviewed,
   // ruled and merely waiting on CI counts here too, so the gate can hold the
   // refill EARLIER than run-team's own definition ("queued with no reviewer
@@ -295,9 +353,9 @@ function prState(holds) {
   // `--review-backlog <n>` override, on the same "the controller states what
   // only it knows" contract as the flags above.
   const reviewBacklog = prs.filter(
-    (p) => !queued.includes(p) && p.closingIssuesReferences.length > 0,
+    (p) => !isQueued(p) && p.closingIssuesReferences.length > 0,
   ).length;
-  return { mergeQueue: queued.length, mergeHeld, reviewBacklog };
+  return { mergeQueue: queued.length, mergeHeld, mergeIgnored, reviewBacklog };
 }
 
 // Supply, from candidates.mjs — the same shortlist phase 0 uses, so the tick
@@ -351,8 +409,8 @@ function main() {
   const { mergeHolds, ...c } = counts();
   // Both reads happen before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.
-  const { mergeQueue, mergeHeld, reviewBacklog } = prState(mergeHolds);
-  for (const line of formatLines(reconcile({ ...c, mergeQueue, mergeHeld, reviewBacklog, supply: supply() }))) {
+  const { mergeQueue, mergeHeld, mergeIgnored, reviewBacklog } = prState(mergeHolds);
+  for (const line of formatLines(reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supply() }))) {
     console.log(line);
   }
 }

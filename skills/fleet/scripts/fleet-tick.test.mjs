@@ -6,13 +6,13 @@
 // "simplification" that drops a row has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines } from "./fleet-tick.mjs";
+import { reconcile, formatLines, unpairedFlags } from "./fleet-tick.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
   implLive: 0, reviewerLive: 0, mergeBotLive: 0,
-  pool: 0, supply: 0, reviewsReady: 0, reviewBacklog: 0, mergeQueue: 0, mergeHeld: 0,
+  pool: 0, supply: 0, reviewsReady: 0, reviewBacklog: 0, mergeQueue: 0, mergeHeld: 0, mergeIgnored: [],
   implCap: 2, reviewerCap: 5,
   ...over,
 });
@@ -180,6 +180,17 @@ test("merge-bot: a partly held queue still dispatches — a hold is not a stop",
   assert.equal(row(state({ mergeBotLive: 0, mergeQueue: 1, mergeHeld: 0 }), "merge-bot").action, "DISPATCH merge-bot");
 });
 
+test("merge-bot: a hold the queue does not contain is named in the detail, not swallowed", () => {
+  // The accept is deliberate, the silence was not: without `ignored=` a
+  // mistyped number and an honest `none` print the same line, so the flag
+  // added to suppress DISPATCH prints DISPATCH and says nothing about why.
+  const r = row(state({ mergeBotLive: 0, mergeQueue: 1, mergeHeld: 0, mergeIgnored: [610, 590] }), "merge-bot");
+  assert.equal(r.action, "DISPATCH merge-bot");
+  assert.match(r.detail, /ignored=610,590/);
+  // …and an empty set adds no field, so the happy path reads as it always did.
+  assert.doesNotMatch(row(state({ mergeBotLive: 0, mergeQueue: 1 }), "merge-bot").detail, /ignored/);
+});
+
 test("merge-queue depth never gates the implementer refill", () => {
   // run-team is explicit that the refill gate is the REVIEW backlog and never
   // the merge queue; a deep ready-to-merge queue costs no extra rebases per PR.
@@ -287,6 +298,17 @@ const LIVE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "-
 // review in hand — the shape every ACTION-side assertion below needs.
 const LIVE_ACTIONABLE = ["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1",
   "--reviews-ready", "1", "--merge-holds", "none"];
+
+test("a required flag with no rationale of its own is a load-time error, not a borrowed one", () => {
+  // Nothing but spelling ties an OPTIONS key to a WHY key, and the miss used
+  // to be silent in both directions: a new required flag printed the live-count
+  // rationale, and a renamed WHY key printed "is required. undefined". Both at
+  // exit 2, both reading like a working refusal.
+  assert.deepEqual(unpairedFlags({ "review-backlog": { type: "string" } }, {}), ["review-backlog"]);
+  // A flag carrying a default states no reason because it needs none.
+  assert.deepEqual(unpairedFlags({ cap: { type: "string", default: "2" } }, {}), []);
+  assert.deepEqual(unpairedFlags({ pool: { type: "string" } }, { pool: "why" }), []);
+});
 
 test("CLI: a missing live count refuses rather than defaulting", () => {
   // The whole contract in one assertion. A default here is the bug: 0 would
@@ -463,6 +485,25 @@ test("CLI: a held candidate suppresses the merge-bot ACTION, an unheld one does 
   const stale = runCli([...LIVE.slice(0, -1), "1234"], { prs, issues: [issue(9)] });
   assert.equal(stale.status, 0, stale.stderr);
   assert.match(stale.stdout, /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/m);
+});
+
+test("CLI: a mistyped hold is not byte-identical to declaring none (#590)", () => {
+  // The reproduction the review ran: with one queued PR, `--merge-holds 610`,
+  // `--merge-holds 590` (the ISSUE number, the confusion this very workflow
+  // invites) and `--merge-holds none` all printed the same DISPATCH line, so
+  // nothing on either stream told the caller their number was thrown away.
+  const prs = [pr(601, ["ready-to-merge"])];
+  const none = runCli([...LIVE.slice(0, -1), "none"], { prs, issues: [issue(9)] });
+  assert.equal(none.status, 0, none.stderr);
+  for (const typo of ["610", "590"]) {
+    const r = runCli([...LIVE.slice(0, -1), typo], { prs, issues: [issue(9)] });
+    assert.equal(r.status, 0, r.stderr);
+    // Still accepted — a tick that refuses on the ordinary merged-away case is
+    // worse than one that subtracts nothing.
+    assert.match(r.stdout, /^merge-bot\s+0\/1 → DISPATCH merge-bot\b/m);
+    assert.match(r.stdout, new RegExp(`ignored=${typo}`));
+    assert.notEqual(r.stdout, none.stdout, `--merge-holds ${typo} must not read as 'none'`);
+  }
 });
 
 test("CLI: --merge-holds refuses a value that is neither 'none' nor PR numbers", () => {
