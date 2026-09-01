@@ -40,9 +40,72 @@ test("mapCi: no run yet (status null) → unknown, not red", () => {
 test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped", () => {
   assert.equal(mapCi(JSON.stringify({ status: "completed", verdict: "no-ci" })), "unknown");
 });
-test("mapCi: null or unparseable input → unknown", () => {
-  assert.equal(mapCi(null), "unknown");
-  assert.equal(mapCi("not json"), "unknown");
+// A non-empty payload that will not parse is a THIRD state, and the return
+// value cannot carry it: "unknown" is pinned above and stays pinned — a false
+// red is worse than no verdict — so the distinction leaves through stderr or
+// not at all. runCiState() hands this payload straight here by design: at any
+// exit but 2, non-empty stdout is a real verdict, so a truncated pipe write or
+// a warning line printed ahead of the JSON reaches mapCi looking exactly like a
+// PR whose first run has not started, and that PR's red-ci flag — the top of
+// the attention strip — stays down with nothing said.
+test("mapCi: an unparseable payload → unknown, and says so on stderr, naming the PR", () => {
+  let v;
+  const errs = withStderr(() => { v = mapCi("not json", 6051); });
+  assert.equal(v, "unknown");
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /6051/, "the line has to name the PR whose flag is suppressed");
+});
+
+// An ABSENT payload is not a garbage one, and the difference is why the warn
+// sits after this guard rather than before it: every path that reaches mapCi
+// with null went through runCiState()'s own stderr line first, so warning here
+// would report the same failed read twice.
+test("mapCi: an absent payload (null) → unknown, silently — runCiState already reported it", () => {
+  let v;
+  const errs = withStderr(() => { v = mapCi(null, 6052); });
+  assert.equal(v, "unknown");
+  assert.deepEqual(errs, []);
+});
+
+// The other half of that split, and the whole reason the guard above tests null
+// rather than falsiness. An EMPTY payload is a failed read that nobody reported:
+// runCiState() returns stdout unconditionally at exit 0, emptiness untested, so
+// a lost stdout write on a green verdict comes back as "" and reaches here
+// having said nothing. A `!ciJson` guard cannot tell that from the null above
+// and answers "unknown" in silence — the same disappearance #605 exists to end,
+// one arm over from the arm it fixed. This test is the only thing separating the
+// two guards: the pair above and below it both pass under either guard.
+test("mapCi: an empty payload → unknown, and says so — a lost write is not an absent one", () => {
+  let v;
+  const errs = withStderr(() => { v = mapCi("", 6056); });
+  assert.equal(v, "unknown");
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /6056/, "the line has to name the PR whose flag is suppressed");
+});
+
+// The false-positive half, and the reason it is a test rather than an argument.
+// "no run yet", "still running" and "no-ci" are the states this mapping is
+// DESIGNED to answer unknown for — they are readings, not read failures. A warn
+// that cannot tell them from a garbage payload prints a line for every PR
+// awaiting its first run, on every ~15s tick, and the useful line drowns in it.
+test("mapCi: a legitimately unknown state — status null, in_progress, no-ci — stays silent", () => {
+  const errs = withStderr(() => {
+    mapCi(JSON.stringify({ status: null, verdict: "not-green" }), 6053);
+    mapCi(JSON.stringify({ status: "in_progress", verdict: "not-green" }), 6053);
+    mapCi(JSON.stringify({ status: "completed", verdict: "no-ci" }), 6053);
+  });
+  assert.deepEqual(errs, []);
+});
+
+// `serve` rebuilds every ~15s and calls mapCi once per PR per tick, so a broken
+// payload is broken on every tick and the gate is the whole difference between
+// one line and a flood. Keyed per PR rather than globally, because a global
+// gate would let the first broken PR mask every later one for the rest of the
+// run — silence that looks identical to the bug being fixed here.
+test("an unparseable payload warns ONCE per PR across ticks, and a second PR is not masked", () => {
+  assert.equal(withStderr(() => mapCi("not json", 6054)).length, 1, "tick 1 reports");
+  assert.deepEqual(withStderr(() => mapCi("not json", 6054)), [], "tick 2 stays quiet");
+  assert.equal(withStderr(() => mapCi("{ trunc", 6055)).length, 1, "another PR still gets its line");
 });
 
 // #262 put a payload on stdout at exit 2 for a quota refusal, and runCiState()
@@ -76,7 +139,10 @@ function gatherCi({ ciStateBody, prevCi }) {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  return JSON.parse(r.stdout.trim().split("\n").pop())[42];
+  // stderr comes back too: gather() reports through it, and the PR number in a
+  // mapCi warn is an argument the call site has to pass — see the unparseable
+  // payload test below, which is the only one that can observe that wiring.
+  return { ci: JSON.parse(r.stdout.trim().split("\n").pop())[42], stderr: r.stderr };
 }
 
 // The regression itself. This payload is what ci-state.mjs emits on a quota
@@ -87,7 +153,7 @@ writeSync(1, JSON.stringify({ pr: 42, verdict: "rate-limited", reasons: ["quota"
 process.exit(2);`;
 
 test("gather: a rate-limited ci-state — exit 2 WITH a payload — carries the previous board's CI value", () => {
-  assert.equal(gatherCi({ ciStateBody: RATE_LIMITED_EXIT_2, prevCi: "red" }), "red");
+  assert.equal(gatherCi({ ciStateBody: RATE_LIMITED_EXIT_2, prevCi: "red" }).ci, "red");
 });
 
 // The other direction, and the reason this pair is not one test: a runCiState()
@@ -101,7 +167,29 @@ writeSync(1, JSON.stringify({ pr: 42, status: "completed", verdict: "not-green",
 process.exit(1);`;
 
 test("gather: exit 1 is a verdict, not a failed read — it still overrides the previous value", () => {
-  assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }), "red");
+  assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }).ci, "red");
+});
+
+// The end-to-end shape of #605, and the one test that can see the call site.
+// mapCi's warn keys on a PR number mapCi has no other use for, so the argument
+// exists only if gather() passes it: leave the call as `mapCi(out)` and every
+// in-process test above stays green while the real board prints a line naming
+// PR "undefined". Only driving gather() itself pins the wiring.
+//
+// A warning line ahead of a truncated body — stdout that is non-empty, is a
+// real exit-1 verdict by runCiState()'s rule, and still will not parse.
+const UNPARSEABLE_EXIT_1 = `import { writeSync } from "node:fs";
+writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");
+process.exit(1);`;
+
+// prev is "red" to state plainly what the fix does NOT change: the payload is
+// non-null, so gather()'s carry-forward arm is not reached and the PR still
+// reverts to "unknown" for this tick. #605's remedy is additive — the return
+// value is pinned, only the silence is the defect.
+test("gather: an unparseable verdict payload → unknown, with a stderr line naming the PR", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+  assert.equal(r.ci, "unknown");
+  assert.match(r.stderr, /PR 42/);
 });
 
 test("createBoardServer serves board.json and the page", async () => {

@@ -107,7 +107,9 @@ function tryParse(json, fallback, what) {
   catch (e) { console.error(`${NAME}: ${what} parse failed: ${e.message}`); return fallback; }
 }
 
-// ci-state.mjs exits 0 for green, 1 for not-green, 2 for a hard failure — and on
+// ci-state.mjs exits 0 for green, 1 for not-green or no-ci, 2 for a hard
+// failure — no-ci is its own verdict and shares exit 1 because this call omits
+// --declare-no-ci, the only thing that would move it to exit 0 — and on
 // exit 1 it has ALREADY printed its verdict JSON to stdout before exiting, so a
 // thrown exit 1 carries a real verdict. Feed that to mapCi: discarding e.stdout,
 // as a plain tryRun would, makes red/still-running CI unreachable — every
@@ -133,12 +135,50 @@ function runCiState(scriptDir, pr) {
   }
 }
 
+// Keyed on the PR, not on the payload: `serve` rebuilds every ~15s and calls
+// mapCi once per PR per tick, so a payload that is broken is broken on every
+// tick, and a payload-keyed gate would flood anyway the moment the garbage
+// varies between ticks. A single global flag is the other wrong answer — it
+// would let the first broken PR mask every later one for the rest of the run,
+// which is the silence this gate exists to end. Same warn-once shape as the
+// sidecar and transcript gates below; if #603 lands its warnOnce(key, msg)
+// helper, this is a caller for it.
+const warnedCiParse = new Set();
+
 // ci-state's verdict already excludes behind-count staleness. Map it, and treat
 // anything not cleanly green-or-completed-red as unknown — never a false red.
-export function mapCi(ciJson) {
-  if (!ciJson) return "unknown";
+//
+// `pr` is carried for the warn below and nothing else: an unparseable payload
+// has no field to identify itself by, and "some PR's CI payload was garbage" is
+// not actionable. The caller has the number in hand.
+export function mapCi(ciJson, pr) {
+  // A NULL payload, which is a failed read runCiState() has already reported on
+  // stderr. Warning again here would report one failure twice. Null strictly,
+  // not falsiness: an EMPTY payload is not that case. runCiState() returns
+  // stdout unconditionally at exit 0, emptiness untested, so a lost stdout write
+  // on a green verdict arrives here as "" with nothing yet said about it — and a
+  // `!ciJson` guard would swallow it as though it had been reported. It falls
+  // through to the parse below instead, which is where it earns its line.
+  if (ciJson == null) return "unknown";
   let d;
-  try { d = JSON.parse(ciJson); } catch { return "unknown"; }
+  // A payload that will not parse is a THIRD state, and the return value cannot
+  // carry it: "unknown" is what the regression gate pins, since a false red is
+  // worse than no verdict. So the distinction leaves through stderr or not at
+  // all. runCiState() routes such a payload straight here by design — at any
+  // exit but 2, non-empty stdout is a real verdict, and at exit 0 stdout comes
+  // back whatever it holds — so a truncated write, a warning line printed ahead
+  // of the JSON, or a lost write reads exactly like a PR whose first run has not
+  // started, and that PR's red-ci flag, the top of the attention strip, stays
+  // down. gather()'s carry-forward does not catch it either: that arm needs a
+  // null return, and neither of these payloads is null.
+  try { d = JSON.parse(ciJson); }
+  catch (e) {
+    if (!warnedCiParse.has(pr)) {
+      warnedCiParse.add(pr);
+      console.error(`${NAME}: PR ${pr} ci-state payload is not JSON (${e.message}); reading its CI as unknown, so its red-ci flag stays down`);
+    }
+    return "unknown";
+  }
   if (d.status !== "completed") return "unknown"; // still running, or no run yet (status null)
   if (d.verdict === "green") return "green";
   if (d.verdict === "not-green") return "red";
@@ -453,7 +493,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   const ci = {};
   for (const p of prs) {
     const out = runCiState(scriptDir, p.number);
-    ci[p.number] = out === null ? (prevCi.get(p.number) ?? "unknown") : mapCi(out);
+    ci[p.number] = out === null ? (prevCi.get(p.number) ?? "unknown") : mapCi(out, p.number);
   }
 
   // Repo identity + web URL for PR links — the url carries the host, so links
