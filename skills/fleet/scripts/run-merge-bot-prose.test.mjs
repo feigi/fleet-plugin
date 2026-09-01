@@ -343,6 +343,37 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
   assert.match(step1(), /\n\s+"\$\(gh pr view <pr> --json headRefOid -q \.headRefOid\)" "\$out"/);
 });
 
+// The settle-window paragraph is bracketed in the doc by two rules that ARE
+// pinned — the test above anchors the headline naming which source is
+// authoritative, the test below the ancestry precondition — and neither reaches
+// the paragraph between them. That gap is the shape #1147 was scored for in this
+// branch's own tier row: every explanatory sentence around a mandate pinned, the
+// mandate itself left bare, so inverting it to "either is fine" costs nothing.
+// Measured against the doc as it stood before this test existed: inverting the
+// imperative to "report the desync on the first `headRefOid` read … without any
+// re-poll or cap", deleting the whole paragraph, and reverting the prose hunk
+// outright each left the whole suite green. So this anchors the two imperative
+// clauses and nothing else.
+//
+// The clauses are split because they fail independently: dropping "on the same
+// bounded cap" turns a bounded re-poll into an unbounded one while the "only if"
+// clause still reads correctly, and dropping "only if … runs out" restores the
+// single-read verdict while the re-poll instruction still stands.
+//
+// THE CEILING: the surrounding measurement sentence is deliberately unpinned —
+// it reports one run's observed attempt numbers and wall clocks, and re-measuring
+// must not turn a test red.
+test("step 1 re-polls before calling a desync, and that mandate is pinned", () => {
+  assert.match(
+    step1(),
+    /re-poll `headRefOid` on the same bounded cap you already use for `ls-remote`/,
+  );
+  assert.match(
+    step1(),
+    /report the desync only if `pr_head` is still on `pre` when that cap runs out/,
+  );
+});
+
 // #903's expensive half. Close-and-reopen is the usual remedy for a desynced PR
 // and is normally reversible — but a rebase orphans the recorded head by
 // construction, and that is the very event that produced the desync. Measured:
