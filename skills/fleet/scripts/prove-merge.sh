@@ -112,7 +112,12 @@ for obj in "$pre" "$post" "$merge"; do
   # hint that the mismatch was in argument handling, not history. Checked here,
   # on all three positions alike, so a tag is refused up front instead of
   # reaching a verdict it was never fit to receive.
-  obj_type=$(git cat-file -t "$obj") || die "cannot resolve $obj to a commit in this repository"
+  # Its own words, not a copy of the message above: -e already proved $obj
+  # resolves, so the only failure left here is git declining to answer at all,
+  # and the two guards would otherwise print the same line. Not decoration —
+  # under `set -eu` a bare failing assignment aborts with git's own 128, which
+  # is outside this script's 0/1/2 vocabulary (measured: rc=128, no diagnostic).
+  obj_type=$(git cat-file -t "$obj") || die "cannot read the type of $obj"
   [ "$obj_type" = commit ] || die "$obj is a $obj_type, not a commit — refusing to treat it as one"
 done
 

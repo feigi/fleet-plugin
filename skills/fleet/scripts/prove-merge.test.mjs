@@ -530,6 +530,9 @@ test("ATTACK: an annotated tag is refused at the guard, not silently mishandled 
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
   const merge = mergeNoFf(w, head, "merge feat");
+  // Load-bearing, not scenery: without the merge on origin, the PRE-fix script
+  // dies at `not reachable from origin/main` — exit 2, no proof — and every
+  // `code === 2` below passes on the bug it exists to catch.
   git(w, "push", "-q", "origin", "main");
   git(w, "tag", "-a", "v1", "-m", "annotated", head);
 
@@ -537,6 +540,15 @@ test("ATTACK: an annotated tag is refused at the guard, not silently mishandled 
   assert.equal(code, 2, "could not answer — never the 1 that means disproved, and not 0");
   assert.equal(json, null, "a refused input must not emit a proof at all");
   assert.match(stderr, /v1 is a tag, not a commit/, "the message names the object and its type");
+
+  // The tag in the SECOND position alone: the call above dies on the loop's
+  // first element, so it never reaches $post — and $post_full is the one value
+  // `[ "$second" = "$post_full" ]` compares, the mismatch #585 is made of. A
+  // real commit in position 1 is what carries the loop that far.
+  const postOnly = prove(w, head, "v1", merge);
+  assert.equal(postOnly.code, 2);
+  assert.equal(postOnly.json, null);
+  assert.match(postOnly.stderr, /v1 is a tag, not a commit/);
 
   // Same refusal in the third position: the merge-commit argument is never
   // handed to bare rev-parse downstream, but the guard's contract is that it
@@ -668,7 +680,7 @@ test("no probe in prove-merge.sh has its status discarded by `[ ]`", () => {
 //
 // Byte-identical is exactly why the test below it cannot discriminate: measured,
 // stripping all three `jstr` calls and interpolating the raw values leaves the
-// whole suite green (22/22). So the unwrap vector is pinned at the SOURCE
+// whole suite green. So the unwrap vector is pinned at the SOURCE
 // instead — the one place a regression here is visible without a fixture that
 // does not exist.
 test("wrapping the string fields left the payload byte-identical", (t) => {
