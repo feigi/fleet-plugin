@@ -212,6 +212,21 @@ test("the commit-incrementally block carries the instruction with the loss that 
 
 test("the scratch-discipline block names the shared injected root, the per-member path, and the false-measurement harm", () => {
   const b = scratchBlock();
+  // The imperative itself, bound to the exclusion it carries. Every other
+  // assertion here pins an explanatory sentence; measured on this PR's own
+  // review, inverting this one clause — "goes under `<scratch>/impl-<N>/`,
+  // never into the scratch root by itself" rewritten to "may go under ... or
+  // straight into the scratch root — either is fine" — left all seven tests in
+  // this file green, and all 298 in `*prose*.test.mjs` too. Rule 2 of this
+  // file's header is exactly that: a rule is pinned together with the command
+  // that carries it out, and an instruction together with the alternative it
+  // excludes. The path and the prohibition are ONE span deliberately, so an
+  // edit that keeps `<scratch>/impl-<N>/` and drops the "never" cannot pass.
+  assert.match(
+    b,
+    phrase("copy you create goes under `<scratch>/impl-<N>/`, never into the scratch root by itself"),
+    "the per-member path is no longer bound to the prohibition on writing into the scratch root itself",
+  );
   // The root bound to it being shared and injected, not merely "use a subdir".
   // #581: an implementer is TOLD to use that root by its own system prompt
   // before SKILL.md ever reaches it, so the rule has to name the root and say
@@ -239,10 +254,24 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // The harm bound to the mechanism, and stated as a false measurement, not
   // clutter — bare "keep things tidy" is the framing #581 says gets skipped
   // under time pressure, which is exactly when concurrency is highest.
+  //
+  // Two `phrase()` pins over the mechanism's two halves, NOT one regex spanning
+  // both with a `.{0,N}?` cap between them. Measured on this PR's own review:
+  // the cap was `{0,400}` and today's wording already spends 303 of it, so one
+  // added clause in that sentence reds the pin — with a message claiming the
+  // mechanism was removed, when it was extended. A false red that misdirects is
+  // how a pin gets deleted by the next person to touch the prose (see the
+  // `flatten` comment above for the same failure). Widening the cap only moves
+  // the cliff; a contiguous span has no character budget to approach.
   assert.match(
     b,
-    /The harm is a false measurement, not untidiness.{0,400}?indistinguishable from a real result/,
-    "the harm is no longer stated as a false measurement, or the mechanism that produces it is gone",
+    phrase("The harm is a false measurement, not untidiness: a mutation harness writes a broken copy of a file, measures against it, then restores from `.orig`"),
+    "the harm is no longer stated as a false measurement bound to the mutation harness that produces it",
+  );
+  assert.match(
+    b,
+    phrase("one filename collision away from restoring a sibling's `.orig` over their own file, or measuring a \"clean baseline\" that is actually a sibling's mutant — silently, indistinguishable from a real result"),
+    "the filename collision is no longer bound to the false result it produces, or to that result being indistinguishable from a real one",
   );
   // Explicitly NOT the worktree isolation rule — folding the two together is
   // the thing #581's brief rules out.
@@ -304,11 +333,16 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // reddened on it would be deleted by the next person who reflowed this file.
   //
   // What this test uniquely holds open, measured rather than assumed: deleting
-  // `flatten`'s gutter strip reds all six tests in this file, not just this one
-  // — every block pin above already spans a `>`. So the five of them hold the
+  // `flatten`'s gutter strip reds EVERY test in this file, not just this one —
+  // every block pin above already spans a `>`. So all of them hold the
   // normalization open at TODAY'S wrap points, and this is the only test that
   // exercises it at wrap points the file does not currently contain. A
-  // `flatten` that handled today's breaks by accident would survive all five.
+  // `flatten` that handled today's breaks by accident would survive every one.
+  //
+  // Stated as a property, not a count, deliberately. This comment said "six"
+  // and "the five of them" until the PR one block below it added a seventh and
+  // did not update them — a count is false the moment the next test lands, and
+  // this one rotted inside the single PR that measured it.
   //
   // The fixture is DERIVED from the live block, never a quoted line. Measured:
   // the first draft quoted one, and then any reword of that line reddened this
