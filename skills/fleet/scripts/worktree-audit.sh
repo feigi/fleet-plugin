@@ -58,6 +58,16 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
+
+# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# contract and the measurements behind it, and json.sh's holds the `[ -r ]`
+# reasoning both guards share. Above the opening `[` for the reason the json_lib
+# guard is: a missing library must refuse before the array is started.
+wt_lib="$(dirname "$0")/worktree.sh"
+[ -r "$wt_lib" ] || die "cannot read $wt_lib — refusing to audit without the worktree readers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=worktree.sh
+. "$wt_lib" || die "$wt_lib failed to load"
 # One unknown state, one place: null counts, readable:false, one reason. Four
 # branches below reach it and differ in nothing but that reason, so a fifth
 # added later cannot half-set the quadruple and emit a record whose counts
@@ -65,25 +75,18 @@ json_lib="$(dirname "$0")/json.sh"
 # it is the one state with non-null counts, and looking different is the point.
 unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
-# Is $1 established ABSENT, or merely a path this script cannot stat? A bare
-# `[ -d ]` failure is both — an unreadable parent (dropped mount, chmod'd
-# ancestor) fails it identically to a directory that was actually removed —
-# and the two must not share one report. Walk up to the nearest ancestor that
-# exists and require THAT to be searchable: only then is "not there" a
-# measurement, not a guess. Same shape and same reason as release-ticket.sh's
-# own `gone()` (not shared code — the callers differ in nothing else); named
-# there, not by line number, per #129.
-gone() {
-  look=$1
-  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; look=${look:-/}; done
-  [ ! -e "$1" ] && [ -x "$look" ]
-}
-
 base=${BASE_REF:-origin/main}
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
 
-echo "\$ git worktree list --porcelain" >&2
+echo "\$ git worktree list --porcelain -z" >&2
+
+# Read above the opening `[`, and its failure is a `die` for the reason the
+# library guards are: this script had NO status check on the listing at all, so
+# a git that could not run emitted `[]` — an empty audit, indistinguishable from
+# a repo with no worktrees, which is the answer the fleet controller reads to
+# decide whether a replacement member would redo work or destroy it.
+wt_listing || die "$wt_err"
 
 first=1
 printf '['
@@ -92,10 +95,34 @@ printf '['
 # directory with a space in it — ordinary on macOS — was otherwise truncated
 # at the first one, and every consumer below given a wrong, nonexistent path.
 # The branch line's $2 stays: a ref name cannot contain a space.
-git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch /{print w"\t"$2} /^detached$/{print w"\tDETACHED"}' |
-while IFS="$(printf '\t')" read -r wt br; do
+#
+# A newline in that path used to end the record before `substr($0,10)` could
+# read past it, AND end the `read -r` line below — two truncations, and the loop
+# saw a shorter path than even the awk had. `wt_listing` swaps both separators
+# before either stage runs, so the path arrives on one line; `nl_path` below is
+# what refuses to stat it. #551
+#
+# The path goes LAST, and the branch first, because the tab this awk delimits
+# with is itself a byte a path may hold — and `read -r wt br` split such a path
+# at it, reporting a truncated `MISSING on disk` for a worktree that is present
+# and clean, with the tail of its path swallowed into the branch field. That is
+# #551's own defect shape surviving in #551's own rewrite. With the path last,
+# `read` assigns the whole remainder of the line to the final name whatever it
+# holds, so no byte in a path can split it. The branch cannot take that slot: a
+# ref name rejects a tab outright, which is what makes it safe to read first.
+printf '%s\n' "$wt_list" | awk '/^worktree /{w=substr($0,10)} /^branch /{print $2"\t"w} /^detached$/{print "DETACHED\t"w}' |
+while IFS="$(printf '\t')" read -r br wt; do
   short=${br#refs/heads/}
-  if [ -d "$wt" ]; then
+  # FIRST, because every arm below stats `$wt` and none of them can: the byte
+  # `wt_listing` substituted stands in for a newline, so this path does not name
+  # the file git named. Reported rather than skipped — jstr renders the
+  # substituted byte as a space, so the entry still names which worktree could
+  # not be audited, whole, with the byte neutralised. The same ceiling
+  # inflight.sh's probe 3 records, and here it costs a diagnosis rather than a
+  # verdict. #551
+  if nl_path "$wt"; then
+    unknown "path holds a newline — git's own listing cannot be read back to a name this script can stat"
+  elif [ -d "$wt" ]; then
     # Establish the .git linkage exists before trusting anything git says
     # through it. Delete a worktree's .git file outright — directory and every
     # uncommitted file still on disk — and `git -C` does not fail: it walks UP
@@ -175,7 +202,17 @@ while IFS="$(printf '\t')" read -r wt br; do
     readable=false
     ahead=0; dirty=0; files=""
     printf '    MISSING on disk: %s\n' "$wt" >&2
-  elif [ -e "$wt" ]; then
+  elif [ -e "$wt" ] || [ -L "$wt" ]; then
+    # `-L` beside `-e`, never folded into it: every other `test` primary STATS,
+    # so a DANGLING symlink is `-e` false and `-L` true, and without this it fell
+    # past both this arm and `gone` into "an ancestor could not be read" — prose
+    # that is false of a path whose every ancestor was read fine. `gone` now
+    # refuses it too (#725), so this arm is where it lands, and the diagnosis
+    # below is true of it: a link IS there, and it is not a directory. The
+    # wording stays hedged deliberately — a dangling worktree link is rc-0
+    # residue OR release-ticket.sh's rc-255 halt path with the claim still live,
+    # and only the hedge is true of both (#728).
+    #
     # `-d` false does not mean "not there". A registered worktree path replaced
     # by a regular file, a symlink to one, or a FIFO is all three still LISTED
     # by git (with its `branch` line, so this loop still sees it) and reads

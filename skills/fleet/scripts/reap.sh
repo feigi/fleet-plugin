@@ -60,18 +60,16 @@ net_lib="$(dirname "$0")/net.sh"
 # shellcheck source=net.sh
 . "$net_lib" || die "$net_lib failed to load"
 
-# Is $1 established ABSENT, or merely a path this script cannot stat? A bare
-# `[ -e ]` failure is both — an unreadable parent fails it identically to a
-# directory that was actually removed — and only the second is nothing to
-# protect. Walk up to the nearest ancestor that exists and require THAT to be
-# searchable: only then is "not there" a measurement, not a guess. Same shape
-# and same reason as release-ticket.sh's own `gone()` (not shared code — the
-# callers differ in nothing else); named there, not by line number, per #129.
-gone() {
-  look=$1
-  while [ ! -e "$look" ] && [ "$look" != "${look%/*}" ]; do look=${look%/*}; look=${look:-/}; done
-  [ ! -e "$1" ] && [ -x "$look" ]
-}
+# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# contract and the measurements behind it, and json.sh's holds the `[ -r ]`
+# reasoning all three guards share. Sourced below json.sh so a lone copy of this
+# script still blames json.sh, the name its missing-library test pins, and above
+# the fetch so a missing library refuses before anything is deleted.
+wt_lib="$(dirname "$0")/worktree.sh"
+[ -r "$wt_lib" ] || die "cannot read $wt_lib — refusing to reap without the worktree readers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=worktree.sh
+. "$wt_lib" || die "$wt_lib failed to load"
 
 # Count first, then value. The count guard used to be the only one, and the
 # `--apply` test demoted anything else to "not --apply", so a single argument
@@ -249,8 +247,31 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
   # half that IS a message change is already made: a branch that does have a
   # worktree still reaches `git branch -D` and still refuses, and that refusal
   # now carries git's own `used by worktree at …` instead of a bare label. #622
-  wt=$(git worktree list --porcelain |
+  #
+  # `|| :` keeps that swallow exactly where it was after the read moved into
+  # `wt_listing`: a listing that could not be produced leaves `$wt_list` empty,
+  # the awk matches nothing, `$wt` is empty, and the branch is reaped as before.
+  # Without it the helper's status would reach `set -e` and end the sweep, which
+  # is the control-flow change the paragraph above declines to make.
+  wt_listing || :
+  wt=$(printf '%s\n' "$wt_list" |
        awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}')
+
+  # A newline in that path used to end the porcelain record before
+  # `substr($0,10)` could read past it, so `$wt` was a prefix of the real path —
+  # a directory not on disk, which `[ -e ]` below then reported absent and the
+  # removal was authorised against. The match itself was never affected: it is
+  # made on the `branch` line, so only the path this sweep REPORTS and acts on
+  # was wrong. `wt_listing` now delivers the whole path with the newline
+  # substituted, and a substituted path is one no `git -C` or `worktree remove`
+  # here can name — so it is refused rather than acted on. #551
+  #
+  # `nl_path ""` is false, so a branch with no worktree falls through to the
+  # `[ -n "$wt" ]` below exactly as before.
+  if nl_path "$wt"; then
+    keep "$b" "worktree $wt holds a newline in its path — nothing here can stat it, so whether it holds work is unknown"
+    continue
+  fi
 
   if [ -n "$wt" ]; then
     # Three states, never the two `|| echo dirty` used to collapse it to:
@@ -386,9 +407,9 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
       # sweep, and a directory whose contents nobody has inspected is not this
       # script's to delete.
       if ! err=$(git worktree remove "$wt" 2>&1); then
-        if ! reg=$(git worktree list --porcelain 2>&1); then
+        if ! wt_listing; then
           state="cannot tell whether the registration survived"
-        elif printf '%s\n' "$reg" | grep -qxF "worktree $wt"; then
+        elif printf '%s\n' "$wt_list" | grep -qxF "worktree $wt"; then
           state="registration intact"
         else
           state="registration cleared"
@@ -456,8 +477,8 @@ done
 # has already merged. Same call reap.sh and release-ticket.sh already make for
 # their two copies of `gone()`, for the opposite reason: there the callers
 # differ in nothing else.
-if ! wt_list=$(git worktree list --porcelain 2>&1); then
-  keep "" "cannot enumerate worktrees — a branchless one would go unreported: $(printf '%s' "$wt_list" | tr '\n' ' ')"
+if ! wt_listing; then
+  keep "" "cannot enumerate worktrees — a branchless one would go unreported: $(printf '%s' "$wt_err" | tr '\n' ' ')"
 # `h" "p`, an object id and a path: the id is fixed-width hex with no space in
 # it, so the shell splits the pair on the first space and the path keeps the
 # rest — the whole rest, since `substr($0,10)` is what reads it, never awk's
@@ -490,6 +511,18 @@ else
     [ -n "$entry" ] || continue
     head=${entry%% *}
     wt=${entry#* }
+
+    # Before any probe stats `$wt`, and before the main-checkout test below,
+    # which would answer `-d "$wt/.git"` about a path that is not the one git
+    # listed. A newline in the path used to split the porcelain record AND the
+    # `read -r` line above, so this sweep saw a prefix and, being the sweep that
+    # deletes branchless worktrees, could authorise a removal against it.
+    # `wt_listing` keeps the record and the line whole; the substituted byte is
+    # what no command here can name, so the entry is kept and reported. #551
+    if nl_path "$wt"; then
+      keep "" "worktree $wt holds a newline in its path — nothing here can stat it, so whether its work has landed is unknown"
+      continue
+    fi
 
     # The main checkout, answered before the ownership bound below so it keeps
     # the reason that is true of it rather than the one true of every stranger.
@@ -638,9 +671,9 @@ else
       # names what the REGISTRY answered and claims nothing about what is left
       # on disk.
       if ! err=$(git worktree remove "$wt" 2>&1); then
-        if ! reg=$(git worktree list --porcelain 2>&1); then
+        if ! wt_listing; then
           state="cannot tell whether the registration survived"
-        elif printf '%s\n' "$reg" | grep -qxF "worktree $wt"; then
+        elif printf '%s\n' "$wt_list" | grep -qxF "worktree $wt"; then
           state="registration intact"
         else
           state="registration cleared"

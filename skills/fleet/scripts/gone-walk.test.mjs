@@ -1,35 +1,49 @@
-// Regression gate for `gone()`, the established-absent predicate three fleet
-// scripts each carry a byte-identical copy of. Zero deps:
+// Regression gate for `gone()`, the established-absent predicate the fleet's
+// worktree scripts share. Zero deps:
 // `node --test skills/fleet/scripts/gone-walk.test.mjs`.
 //
-// The four CALLERS are covered in their own suites (release-ticket.test.mjs
-// twice, reap.test.mjs, worktree-audit.test.mjs), and each of them can only
-// reach the predicate through `git worktree list`, which never yields an empty
-// path and never yields a relative one. This suite exists for the inputs that
-// route leaves unreachable — `gone ""` above all, the case the rejected form of
-// the #178 fix (`[ -n "$look" ] || look=/` placed AFTER the loop) flips from 1
-// to 0 while every caller-level test stays green.
+// #725 moved it out of the three byte-identical copies into worktree.sh, so
+// this file now pins ONE definition and the sourcing that reaches it.
 //
-// It reads the function out of the scripts rather than restating it, so the
+// The CALLERS are covered in their own suites (release-ticket.test.mjs,
+// reap.test.mjs, worktree-audit.test.mjs), and each of them can only reach the
+// predicate through `git worktree list`, which never yields an empty path and
+// never yields a relative one. This suite exists for the inputs that route
+// leaves unreachable — `gone ""` above all, the case the rejected form of the
+// #178 fix (`[ -n "$look" ] || look=/` placed AFTER the loop) flips from 1 to 0
+// while every caller-level test stays green.
+//
+// The caller inventory is DERIVED here rather than stated. The stated one was
+// wrong — it credited release-ticket.sh with two call sites when that file has
+// several, and #725's remedy question ("fix in the predicate, or at every call
+// site?") turned on exactly that figure. A number written into a comment is
+// false the moment the next commit lands; an assertion over the tree is not.
+//
+// It reads the function out of the script rather than restating it, so the
 // matrix below cannot drift away from the code it claims to pin.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Spelled out rather than discovered by globbing for `^gone() {`: a discovered
-// set silently SHRINKS when a script drops its copy, which is precisely the
-// regression being pinned. A fourth copy has to be added here deliberately —
-// same trade-off, same reason as arg.test.mjs's own CONSUMERS list.
-const SCRIPTS = ["reap.sh", "release-ticket.sh", "worktree-audit.sh"];
+// The scripts that ASK the question. Spelled out rather than discovered, for
+// the reason arg.test.mjs spells out its own CONSUMERS list: a discovered set
+// silently shrinks when a script drops its call, which is one of the
+// regressions being pinned. A fourth caller has to be added here deliberately.
+const CALLERS = ["reap.sh", "release-ticket.sh", "worktree-audit.sh"];
 
-/** The `gone()` definition, verbatim, as it appears in a script's source. */
-function extract(name) {
-  const src = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
+// The one file the definition is allowed to live in.
+const HOME = "worktree.sh";
+
+const read = (name) => readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
+
+/** The `gone()` definition, verbatim, as it appears in worktree.sh. */
+function extract(name = HOME) {
+  const src = read(name);
   // Global, and pinned to exactly ONE match: /bin/sh runs whichever definition
   // was read last, while this lift takes the first, so a second `gone()` further
   // down would leave both tests below green against a predicate the scripts
@@ -39,14 +53,65 @@ function extract(name) {
   return all[0];
 }
 
-// One copy per script and no shared file to change: the three drift unless
-// something compares them. #466 landed the second and third copies, and #178
-// exists because a fix to one is a fix to none.
-test("all three copies of gone() are still byte-identical", () => {
-  const [first, ...rest] = SCRIPTS.map(extract);
-  for (const [i, body] of rest.entries()) {
-    assert.equal(body, first, `${SCRIPTS[i + 1]} has drifted from ${SCRIPTS[0]}`);
+// #466 landed the second and third copies and #178 exists because a fix to one
+// was a fix to none — then #725 found the third failure of the same shape, a
+// dangling symlink read as established-absent in two of three copies while the
+// third compensated at a call site. So the pin is no longer "the copies agree";
+// it is "there are no copies".
+// `\s*\{` and no end anchor, where this required the opening line to be
+// byte-for-byte `gone() {`. One syntactic form is not the class: measured, the
+// pre-PR body reintroduced under `gone() { # local override` walked straight
+// through and left all four tests here green. A redefinition arrives WITH a
+// comment excusing it far more plausibly than without one, so the one spelling
+// the anchor missed is the likely one.
+test("gone() is defined once in the tree, in worktree.sh", () => {
+  extract(HOME);
+  for (const name of CALLERS) {
+    assert.doesNotMatch(
+      read(name),
+      /^gone\(\)\s*\{/m,
+      `${name} must source ${HOME}, never redefine gone() — a second definition is what #725 found`,
+    );
   }
+});
+
+// The sourcing is what makes the single definition reachable, and a caller that
+// lost it fails on `gone: not found` at run time — late, and in a delete script.
+test("every caller of gone() sources worktree.sh", () => {
+  for (const name of CALLERS) {
+    const src = read(name);
+    assert.match(src, /\. "\$wt_lib" \|\| die/, `${name} must source ${HOME}`);
+    assert.ok(
+      src.includes('gone "'),
+      `${name} is listed as a caller but never calls gone — drop it from CALLERS or restore the call`,
+    );
+  }
+});
+
+// The inventory #725's remedy question turned on, derived rather than stated.
+// The comment this file used to carry named a figure for release-ticket.sh that
+// its own source contradicted, so "fix at every call site" was sized against a
+// number nothing checked.
+test("the caller inventory matches the tree", () => {
+  const counts = Object.fromEntries(
+    CALLERS.map((name) => [name, (read(name).match(/(?:^|[^\w-])gone "/g) ?? []).length]),
+  );
+  for (const [name, n] of Object.entries(counts)) {
+    assert.ok(n > 0, `${name} must call gone() at least once`);
+  }
+  // release-ticket.sh is the file the old stated inventory undercounted, and the
+  // reason it did is that its call sites are spread across four guards rather
+  // than gathered. Pinned against the OTHER two so the assertion says something
+  // about shape rather than restating a number: it is the file that asks the
+  // question most often, and a change that levels that out is worth a look.
+  assert.ok(
+    counts["release-ticket.sh"] > counts["reap.sh"],
+    "release-ticket.sh asks gone() more often than reap.sh — the asymmetry the old inventory flattened",
+  );
+  assert.ok(
+    counts["release-ticket.sh"] > counts["worktree-audit.sh"],
+    "release-ticket.sh asks gone() more often than worktree-audit.sh",
+  );
 });
 
 /**
@@ -83,6 +148,14 @@ test("gone() answers the full input matrix, 0 only for established absence", (t)
   mkdirSync(join(root, "exists"));
   mkdirSync(join(root, "noperm", "inner"), { recursive: true });
   chmodSync(join(root, "noperm"), 0o000);
+  // #725's fixtures. `dangling` is the defect itself; `live` is the control that
+  // stops the fix becoming a blanket refusal of every symlink; `danganc/link` is
+  // the sibling the loop-condition placement answers for free — a dangling link
+  // standing in for an ANCESTOR rather than for the path itself.
+  symlinkSync(join(root, "nowhere"), join(root, "dangling"));
+  symlinkSync(join(root, "exists"), join(root, "live"));
+  mkdirSync(join(root, "danganc"));
+  symlinkSync(join(root, "nowhere"), join(root, "danganc", "link"));
 
   // `/nonexistent-top-level-178` is never created and needs no fixture: what
   // makes it the shape #178 is about is that its FIRST component is missing,
@@ -101,6 +174,19 @@ test("gone() answers the full input matrix, 0 only for established absence", (t)
     [join(root, "noperm", "inner"), "1", "unsearchable prefix stays unknown, never absent"],
     ["relative-no-slash", "1", "no slash: the walk cannot climb, so it cannot establish anything"],
     ["relative/with/slash", "1", "relative prefix is not searchable from here either"],
+    // #725. `-e` STATS, so it is false through a dangling link while `-L` is
+    // true: the path is occupied as far as `git worktree add` is concerned, and
+    // calling it established-absent is what let reap.sh predict a removal and
+    // worktree-audit.sh report `MISSING on disk` over a live claim. A dangling
+    // worktree link arrives BOTH as rc-0 residue and as release-ticket.sh's
+    // rc-255 halt path with the branch and the label still alive, so "not
+    // established-absent" is the only answer true of both (#728).
+    [join(root, "dangling"), "1", "a dangling symlink is occupied, never an absence (#725)"],
+    [join(root, "danganc", "link", "child"), "1", "a dangling symlink ANCESTOR is not an absence either (#725)"],
+    // The accept side. Without it the matrix pins that the fix refuses, not that
+    // it discriminates: a `gone` hard-wired to 1 passes every reject row above.
+    [join(root, "live"), "1", "a symlink to a real directory is present, as it always was"],
+    [join(root, "nowhere"), "0", "the dangling links point HERE, and it is still an ordinary absence"],
   ]
     // Root reads every directory, so the unsearchable prefix the `noperm` row
     // needs cannot be fixtured under uid 0. Drop that ONE row there, never the
@@ -110,7 +196,7 @@ test("gone() answers the full input matrix, 0 only for established absence", (t)
     // against the very placement it was written to reject.
     .filter(([p]) => process.getuid?.() !== 0 || !p.startsWith(join(root, "noperm")));
 
-  const answers = probe(extract("release-ticket.sh"), cases.map(([p]) => p));
+  const answers = probe(extract(), cases.map(([p]) => p));
   for (const [i, [p, want, why]] of cases.entries()) {
     assert.equal(answers[i], want, `gone "${p}" must be ${want}: ${why}`);
   }

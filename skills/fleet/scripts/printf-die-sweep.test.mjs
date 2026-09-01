@@ -263,15 +263,21 @@ test("worktree-audit: a worktree gone from disk is named verbatim as MISSING", (
   );
 });
 
-// `keep()`'s reason is the single line eleven call sites converge on, and seven
-// of them interpolate a worktree path. Neither number is worth trusting from
-// prose — this comment shipped "four", which is the count of the sites that do
-// NOT interpolate one: the cherry-probe-failed, unmerged-commits,
-// worktree-remove-refused and branch-delete-failed reasons. Those four were
-// cited by line number here and the numbers had already drifted off every one
-// of them; naming them is what #129 asks for. Re-derive both counts instead:
-//   grep -c 'keep "\$b"' reap.sh                    # 11
-//   grep 'keep "\$b"' reap.sh | grep -c '\$wt'      # 7
+// `keep()`'s reason is the one line reap.sh's refusals converge on, and a
+// worktree path is interpolated into it from more than one of them — which is
+// the property this test rests on: the escaping belongs in `keep()`, where every
+// such reason passes through `jfield` once, and not at any call site, where it
+// would have to be repeated and would be forgotten at the next one added.
+//
+// No count in this prose, deliberately, and that is this comment's own history
+// rather than a rule imported from elsewhere. It shipped two counts and a list
+// of sites cited by line number; the line numbers had drifted off what they
+// pointed at before anyone noticed, and the counts then went stale again the
+// next time a call site was added — silently, because nothing goes red when a
+// number in a comment stops being true. Name the property, and re-derive the
+// numbers from the tree at the moment you need them (#129):
+//   grep -c 'keep "\$b"' reap.sh
+//   grep 'keep "\$b"' reap.sh | grep -c '\$wt'
 // reap only considers a branch whose
 // upstream reads `[gone]`, so the fixture has to push the branch and then
 // delete it on origin — reap's own `fetch --prune` is what marks it gone.

@@ -2192,6 +2192,24 @@ esac`,
   assert.doesNotMatch(stderr, /PARTIALLY/, "and nothing established that anything did");
   assert.match(stderr, /is Indeterminate — what the removal landed could not be measured/);
   assert.match(json.blockers[0], /is Indeterminate/);
+
+  // And WHY it could not be measured, which is the half that used to be lost.
+  // `release_outcome` reads the listing through `wt_listing`, which captures
+  // git's stderr into `$wt_err`; echoing the state out of a `$( )` put the whole
+  // body in a subshell and that capture died with it. So the one halt whose
+  // headline degrades to "could not be measured" was the one halt reaching the
+  // operator with nothing to act on. Pinned on BOTH channels deliberately: the
+  // receipt is the only one a caller that never sees stderr can read. #551
+  assert.match(
+    stderr,
+    /listing refused by the git shim/,
+    "the halt must name why the re-measurement failed, not only that it did",
+  );
+  assert.match(
+    json.blockers[0],
+    /listing refused by the git shim/,
+    "and the receipt must carry that cause too — stderr is not machine-readable",
+  );
 });
 
 test("a successful release survives a failing `git worktree prune`", (t) => {
@@ -3406,4 +3424,28 @@ test("with awk healthy both predicates still answer, true and false alike (#454)
     `an unreadable HEAD is still a blocked verdict, not a refusal: ${unreadable.stderr}`);
   assert.equal(unreadable.json.released, false);
   assert.match(unreadable.json.blockers.join("\n"), /could not read its HEAD/);
+});
+
+test("a claim whose worktree path holds a newline blocks, never releases (#551)", (t) => {
+  // The lookup found the claim by its `branch` line and the plain porcelain cut
+  // the path at the newline, so every guard below — the dirty check, the lock
+  // probe, the stand-in test — ran against a path that is not on disk and each
+  // one cleared. The run then released the claim over a live worktree.
+  //
+  // The branch cannot carry the newline (git rejects a control byte in a ref),
+  // so the worktree is added by hand rather than through `claim`.
+  const r = repo(t);
+  const branch = "fix/9-slug";
+  const wt = join(r.w, ".worktrees", "9-slug\ntail");
+  git(r.w, "worktree", "add", "-q", wt, "-b", branch, "origin/main");
+  const c = { branch, wt, args: ["9", "slug", "fix"] };
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "a path nothing can stat is not a claim anything may release");
+  assert.match(dry.json.blockers.join(" "), /holds a newline in its path/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
