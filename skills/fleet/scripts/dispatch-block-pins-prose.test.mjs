@@ -104,7 +104,8 @@ const block = (from, to, what) => flatten(between(region(), from, to, what));
 const worktreeBlock = () => block("You are ALREADY in worktree", "Read the issue with", "phase 2's worktree block");
 const issueReadBlock = () => block("Read the issue with", "**Re-derive the ticket", "phase 2's issue-read block");
 const rederiveBlock = () => block("**Re-derive the ticket", "Commit incrementally", "phase 2's re-derive block");
-const commitBlock = () => block("Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
+const commitBlock = () => block("Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
+const scratchBlock = () => block("**Every scratch file", "Your ticket names the cases", "phase 2's scratch-discipline block");
 const enumerateBlock = () => block("Your ticket names the cases", "Run `sizing-a-ticket`", "phase 2's enumerate-the-class block");
 
 test("the worktree block forbids a second worktree and carries the check that settles it", () => {
@@ -209,6 +210,78 @@ test("the commit-incrementally block carries the instruction with the loss that 
   );
 });
 
+test("the scratch-discipline block names the shared injected root, the per-member path, and the false-measurement harm", () => {
+  const b = scratchBlock();
+  // The imperative itself, bound to the exclusion it carries. Every other
+  // assertion here pins an explanatory sentence; measured on this PR's own
+  // review, inverting this one clause — "goes under `<scratch>/impl-<N>/`,
+  // never into the scratch root by itself" rewritten to "may go under ... or
+  // straight into the scratch root — either is fine" — left all seven tests in
+  // this file green, and all 298 in `*prose*.test.mjs` too. Rule 2 of this
+  // file's header is exactly that: a rule is pinned together with the command
+  // that carries it out, and an instruction together with the alternative it
+  // excludes. The path and the prohibition are ONE span deliberately, so an
+  // edit that keeps `<scratch>/impl-<N>/` and drops the "never" cannot pass.
+  assert.match(
+    b,
+    phrase("copy you create goes under `<scratch>/impl-<N>/`, never into the scratch root by itself"),
+    "the per-member path is no longer bound to the prohibition on writing into the scratch root itself",
+  );
+  // The root bound to it being shared and injected, not merely "use a subdir".
+  // #581: an implementer is TOLD to use that root by its own system prompt
+  // before SKILL.md ever reaches it, so the rule has to name the root and say
+  // it is shared, or it reads as tidiness advice competing with an instruction
+  // the member already received.
+  assert.match(
+    b,
+    phrase("The scratchpad root your own system prompt names is injected unprompted into every dispatched member and is shared with every sibling"),
+    "the block no longer names the injected scratch root as shared with every sibling member",
+  );
+  // The per-member path bound to the SAME derivation phase 1 already uses, not
+  // a second scheme invented for this rule.
+  assert.match(
+    b,
+    phrase("Derive your own path the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second scheme"),
+    "the per-member scratch path is no longer derived the same way claim-ticket.sh derives per-ticket ports",
+  );
+  // Absence handled: nothing else creates this directory, so a member that
+  // never `mkdir -p`s it has no path to write into.
+  assert.match(
+    b,
+    phrase("`mkdir -p` it yourself the first time — nothing creates it for you"),
+    "the block no longer tells the member to create its own scratch dir when absent",
+  );
+  // The harm bound to the mechanism, and stated as a false measurement, not
+  // clutter — bare "keep things tidy" is the framing #581 says gets skipped
+  // under time pressure, which is exactly when concurrency is highest.
+  //
+  // Two `phrase()` pins over the mechanism's two halves, NOT one regex spanning
+  // both with a `.{0,N}?` cap between them. Measured on this PR's own review:
+  // the cap was `{0,400}` and today's wording already spends 303 of it, so one
+  // added clause in that sentence reds the pin — with a message claiming the
+  // mechanism was removed, when it was extended. A false red that misdirects is
+  // how a pin gets deleted by the next person to touch the prose (see the
+  // `flatten` comment above for the same failure). Widening the cap only moves
+  // the cliff; a contiguous span has no character budget to approach.
+  assert.match(
+    b,
+    phrase("The harm is a false measurement, not untidiness: a mutation harness writes a broken copy of a file, measures against it, then restores from `.orig`"),
+    "the harm is no longer stated as a false measurement bound to the mutation harness that produces it",
+  );
+  assert.match(
+    b,
+    phrase("one filename collision away from restoring a sibling's `.orig` over their own file, or measuring a \"clean baseline\" that is actually a sibling's mutant — silently, indistinguishable from a real result"),
+    "the filename collision is no longer bound to the false result it produces, or to that result being indistinguishable from a real one",
+  );
+  // Explicitly NOT the worktree isolation rule — folding the two together is
+  // the thing #581's brief rules out.
+  assert.match(
+    b,
+    phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
+    "the scratch-discipline block no longer distinguishes itself from worktree isolation",
+  );
+});
+
 test("the enumerate-the-class block carries all three of its halves, each with its own instruction", () => {
   const b = enumerateBlock();
   // Half one: enumerating bound to declaring. Enumerating privately and fixing
@@ -260,17 +333,22 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // reddened on it would be deleted by the next person who reflowed this file.
   //
   // What this test uniquely holds open, measured rather than assumed: deleting
-  // `flatten`'s gutter strip reds all six tests in this file, not just this one
-  // — every block pin above already spans a `>`. So the five of them hold the
+  // `flatten`'s gutter strip reds EVERY test in this file, not just this one —
+  // every block pin above already spans a `>`. So all of them hold the
   // normalization open at TODAY'S wrap points, and this is the only test that
   // exercises it at wrap points the file does not currently contain. A
-  // `flatten` that handled today's breaks by accident would survive all five.
+  // `flatten` that handled today's breaks by accident would survive every one.
+  //
+  // Stated as a property, not a count, deliberately. This comment said "six"
+  // and "the five of them" until the PR one block below it added a seventh and
+  // did not update them — a count is false the moment the next test lands, and
+  // this one rotted inside the single PR that measured it.
   //
   // The fixture is DERIVED from the live block, never a quoted line. Measured:
   // the first draft quoted one, and then any reword of that line reddened this
   // test on the fixture guard rather than on the pin — an accept control that
   // reddens on the edits it exists to accept is worse than none.
-  const raw = between(region(), "Commit incrementally", "Your ticket names the cases", "phase 2's commit-incrementally block");
+  const raw = between(region(), "Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
   // Trimmed back to the BLOCK, not merely to the last non-space character.
   // `between`'s `to` anchor is the next block's opening words, so `raw` runs
   // past this block's last line through the blank line and onto the next
@@ -300,7 +378,7 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
   // interpreted in the latter. The commit block carries no `$` today, which is
   // exactly the kind of thing that stops being true without anyone noticing.
-  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "Your ticket names the cases", "rewrapped commit block"));
+  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "**Every scratch file", "rewrapped commit block"));
   assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
   assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });
