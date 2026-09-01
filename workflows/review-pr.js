@@ -957,6 +957,44 @@ function unrunCrashed(reviewed, dimensions) {
   return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
 }
 
+// The band a finding lands in, and — the whole of #591 — how many refuters were
+// DISPATCHED to put it there. Two callers below produce `unverified` and they
+// produced byte-identical objects: the `suggestion` band, budgeted 0 refuters by
+// policy, and a finding whose refuters were all dispatched and all died. One is
+// "nothing looked, on purpose", the other "nothing looked, by accident", and a
+// consumer reading severity or the empty vote list cannot tell them apart. The
+// count separates them with no new band and no re-keying of the three that
+// exist: an added field breaks no reader of `survived` / `refuted` /
+// `unverified`, and a fourth band breaks all of them.
+//
+// The discriminant is ADDITIVE for a second reason. `unverified` at `critical`
+// already means every refuter died, and a severity floor over this band (#239's
+// shelved option 1) would read that as low-severity and drop it. A floor can
+// only be written against a field; it cannot be written against a band whose two
+// populations are equal.
+//
+// PURE, and kept that way for the reason `unrunReason` above is: the file's
+// top-level `await` leaves it unimportable, so the test lifts this declaration
+// out of the source text to run it, and a free variable would throw a
+// ReferenceError there on whichever branch read it. The verdict depends on the
+// dispatched count and the votes and on nothing else in the run.
+//
+// `votes` is filtered here rather than by the caller so a dead refuter cannot
+// vote OR sit in the denominator: `refuted * 2 >= live.length` over a list
+// holding nulls would refute a finding on a crash.
+function verdictFor(dispatched, votes) {
+  const live = votes.filter(Boolean);
+  const refuted = live.filter((v) => v.refuted).length;
+  // Every refuter crashed (spend limit, timeout, terminal error): the finding
+  // was NOT verified, so it is `unverified`, not `survived`. It is still
+  // returned — surfaced, never dropped — but a consumer keying on "survived"
+  // must not read a verification that never ran as one passed.
+  let verdict;
+  if (live.length === 0) verdict = "unverified";
+  else verdict = refuted * 2 >= live.length ? "refuted" : "survived";
+  return { verdict, votes: live, refutersDispatched: dispatched };
+}
+
 // --- Review → Verify ------------------------------------------------------
 // pipeline(), not parallel(): a dimension's findings start verifying the moment
 // that dimension finishes, rather than waiting for the slowest reviewer. There
@@ -1040,7 +1078,7 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
         // fix-applier runs itself for each in-scope one it means to apply.
         // `unverified` is therefore "nothing looked yet", never "not worth
         // looking at".
-        if (n === 0) return Promise.resolve({ ...f, dimension: d.key, verdict: "unverified", votes: [] });
+        if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
         return parallel(
           Array.from({ length: n }, (_, i) => () =>
             agent(
@@ -1088,16 +1126,10 @@ before any \`git commit\` it must equal your scratch path.`,
             ),
           ),
         ).then((votes) => {
-          const live = votes.filter(Boolean);
-          const refuted = live.filter((v) => v.refuted).length;
-          // Every refuter crashed (spend limit, timeout, terminal error): the
-          // finding was NOT verified, so it is `unverified`, not `survived`. It is
-          // still returned — surfaced, never dropped — but a consumer keying on
-          // "survived" must not read a verification that never ran as one passed.
-          let verdict;
-          if (live.length === 0) verdict = "unverified";
-          else verdict = refuted * 2 >= live.length ? "refuted" : "survived";
-          return { ...f, dimension: d.key, verdict, votes: live };
+          // `n`, not `live.length`: the dispatch is what a crash is invisible
+          // without. A finding that reaches here with every vote lost is in the
+          // same band as the 0-refuter branch above and must not read like it.
+          return { ...f, dimension: d.key, ...verdictFor(n, votes) };
         });
       }),
     );
@@ -1112,7 +1144,15 @@ const survived = all.filter((f) => f.verdict === "survived");
 const refuted = all.filter((f) => f.verdict === "refuted");
 const unverified = all.filter((f) => f.verdict === "unverified");
 
-log(`${survived.length} survived, ${refuted.length} refuted, ${unverified.length} unverified, of ${all.length}`);
+// The two populations of `unverified`, told apart by the field rather than by
+// severity: refuters dispatched with nothing left standing is a crash, none
+// dispatched is the `suggestion` band's policy skip.
+const crashed = unverified.filter((f) => f.refutersDispatched > 0);
+
+log(
+  `${survived.length} survived, ${refuted.length} refuted, ${unverified.length} unverified ` +
+    `(${crashed.length} of those by crashed refuters), of ${all.length}`,
+);
 
 const rank = { critical: 0, important: 1, suggestion: 2 };
 const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
@@ -1142,4 +1182,14 @@ return {
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),
+  // The recovery, named where the reader who has to act meets it. A crash-heavy
+  // `unverified` is not a reason to defer: the run is resumable, so the findings
+  // nobody looked at can still be looked at. Saying so only in the apply rule
+  // puts it a file away from the payload that carries the crash.
+  //
+  // Null when nothing crashed, so the field is an instruction to act rather than
+  // boilerplate a reader learns to skip.
+  resume: crashed.length
+    ? "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die — nothing looked at them. Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
+    : null,
 };
