@@ -1136,6 +1136,32 @@ test("a conflicting run whose unread tail outgrows a pipe buffer still answers, 
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
 });
 
+// The at-risk half of #583. Its `|| die` reads the status of the LAST command
+// in the pipeline that built the pathspec list, so the `printf | sed | tr` that
+// once sat ahead of `xargs` could fail and leave `at_risk` short or empty at
+// exit 0 — a branch reported as eating nothing while it really was about to.
+// The fix is that the list no longer passes through them at all, and this is
+// the assertion that says so: break `sed` on the invocation that used to build
+// the pathspecs and the answer must be unchanged, because there is no longer
+// such an invocation. Restore the pipeline and the decoy commit comes back with
+// the real one, since an empty pathspec list leaves `git log` filtering by
+// nothing.
+//
+// `conflictRepo`, not `bareConflictRepo`: the decoys are what make an
+// unfiltered `git log` distinguishable from a correctly filtered one. Without
+// them the range holds a single commit and the broken run returns the right
+// answer for the wrong reason.
+test("breaking the sed that used to build the at-risk pathspecs changes nothing, because nothing ahead of xargs can fail unseen", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "plain.txt", selector: "literal" }) });
+  assert.equal(r.status, 0, `nothing failed, so nothing is unanswerable; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}`);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "the decoys are back, which means the pathspec list went through something that could fail without the guard hearing it");
+});
+
 // A temporary the audit cannot create is a question it cannot answer, and the
 // exit code has to say so: bare `set -eu` would abort with mktemp's own 1,
 // which out of THIS script is the dirty-worktree refusal — fabricated on a
