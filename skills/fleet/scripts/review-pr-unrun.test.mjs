@@ -406,22 +406,28 @@ test("run-team's Reviewers section documents dimensionsUnrun, not only dimension
 // refuted 2-0 and stays refuted (#535) — the doc claiming only what the
 // classifier can see is the remedy, and nothing pinned the word it turns on.
 //
-// Anchored on the construct rather than sliced to the paragraph, and matched
-// through `phrase` so a reflow of the hard wrap cannot fire it: the two ends are
-// CONTIGUOUS, so the unbounded-end hazard `between` exists for does not arise.
-// The exclusion is what catches a revert — a positive pin alone passes on a
-// sentence rewritten to assert coverage some other way only if the anchor goes
-// with it, and here it does not.
+// The positive pin carries the claim: sliced to the paragraph so a failure
+// prints it rather than the whole 2000-line doc, matched through `phrase` so a
+// reflow of the hard wrap cannot fire it, and run out to the sentence's `;` so
+// the clause has to END there. That terminator is what catches the likelier
+// regression — an editor softening rather than reverting, `ran a suite AND IS
+// THEREFORE COVERED` — which a pin on the anchor alone reads as still present.
+// The exclusion then has nothing left to guess at, so it stays whole-doc and
+// case-insensitive: the retracted claim is caught wherever in the file it comes
+// back, and in the lowercase paraphrase a `phrase` pin on `NOT` walks past.
+// Measured both ways — each form reds, and a reflow, a `; every` → `; each`
+// reword, and a correctly negated coverage sentence in the paragraph stay green.
 test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const doc = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
+  const para = between(doc, "**`dimensionsRun` is the dispatch", "The rule this replaces", "run-team/SKILL.md");
   assert.match(
-    doc,
-    phrase("and NOT in `dimensionsUnrun` ran a suite"),
-    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun ran a suite",
+    para,
+    phrase("and NOT in `dimensionsUnrun` ran a suite;"),
+    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun ran a suite, full stop",
   );
   assert.doesNotMatch(
     doc,
-    phrase("and NOT in `dimensionsUnrun` is covered"),
+    /in\s+`dimensionsUnrun`\s+is\s+covered/i,
     "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — the classifier never checked the command that ran",
   );
 });
