@@ -152,19 +152,25 @@ const warnedCiParse = new Set();
 // has no field to identify itself by, and "some PR's CI payload was garbage" is
 // not actionable. The caller has the number in hand.
 export function mapCi(ciJson, pr) {
-  // An ABSENT payload, which is a failed read runCiState() has already reported
-  // on stderr. Warning again here would report one failure twice.
-  if (!ciJson) return "unknown";
+  // A NULL payload, which is a failed read runCiState() has already reported on
+  // stderr. Warning again here would report one failure twice. Null strictly,
+  // not falsiness: an EMPTY payload is not that case. runCiState() returns
+  // stdout unconditionally at exit 0, emptiness untested, so a lost stdout write
+  // on a green verdict arrives here as "" with nothing yet said about it — and a
+  // `!ciJson` guard would swallow it as though it had been reported. It falls
+  // through to the parse below instead, which is where it earns its line.
+  if (ciJson == null) return "unknown";
   let d;
-  // Non-empty and unparseable is a THIRD state, and the return value cannot
-  // carry it: "unknown" is what every caller and the regression gate pin, since
-  // a false red is worse than no verdict. So the distinction leaves through
-  // stderr or not at all. runCiState() routes this payload straight here by
-  // design — at any exit but 2, non-empty stdout is a real verdict — so a
-  // truncated write or a warning line printed ahead of the JSON reads exactly
-  // like a PR whose first run has not started, and that PR's red-ci flag, the
-  // top of the attention strip, stays down. gather()'s carry-forward does not
-  // catch it either: that arm needs a null return, and this payload is not null.
+  // A payload that will not parse is a THIRD state, and the return value cannot
+  // carry it: "unknown" is what the regression gate pins, since a false red is
+  // worse than no verdict. So the distinction leaves through stderr or not at
+  // all. runCiState() routes such a payload straight here by design — at any
+  // exit but 2, non-empty stdout is a real verdict, and at exit 0 stdout comes
+  // back whatever it holds — so a truncated write, a warning line printed ahead
+  // of the JSON, or a lost write reads exactly like a PR whose first run has not
+  // started, and that PR's red-ci flag, the top of the attention strip, stays
+  // down. gather()'s carry-forward does not catch it either: that arm needs a
+  // null return, and neither of these payloads is null.
   try { d = JSON.parse(ciJson); }
   catch (e) {
     if (!warnedCiParse.has(pr)) {

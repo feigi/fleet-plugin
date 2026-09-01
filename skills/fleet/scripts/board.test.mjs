@@ -67,6 +67,22 @@ test("mapCi: an absent payload (null) → unknown, silently — runCiState alrea
   assert.deepEqual(errs, []);
 });
 
+// The other half of that split, and the whole reason the guard above tests null
+// rather than falsiness. An EMPTY payload is a failed read that nobody reported:
+// runCiState() returns stdout unconditionally at exit 0, emptiness untested, so
+// a lost stdout write on a green verdict comes back as "" and reaches here
+// having said nothing. A `!ciJson` guard cannot tell that from the null above
+// and answers "unknown" in silence — the same disappearance #605 exists to end,
+// one arm over from the arm it fixed. This test is the only thing separating the
+// two guards: the pair above and below it both pass under either guard.
+test("mapCi: an empty payload → unknown, and says so — a lost write is not an absent one", () => {
+  let v;
+  const errs = withStderr(() => { v = mapCi("", 6056); });
+  assert.equal(v, "unknown");
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.match(errs[0], /6056/, "the line has to name the PR whose flag is suppressed");
+});
+
 // The false-positive half, and the reason it is a test rather than an argument.
 // "no run yet", "still running" and "no-ci" are the states this mapping is
 // DESIGNED to answer unknown for — they are readings, not read failures. A warn
