@@ -11,21 +11,24 @@ set -eu
 
 # Byte semantics for every tool below, and not a stylistic pin. `tr` is
 # locale-sensitive: under a UTF-8 locale BSD tr exits 1 on a byte that is not
-# valid UTF-8, and in the `tr | tr | awk` that splits merge-tree's output it is
-# the FIRST stage that fails — measured, PIPESTATUS `1 0 0`: the first `tr`
-# exits 1 and truncates, and the second `tr` and `awk` both exit 0 on the short
-# input it handed them. So the real status sits in a non-final slot, where
-# `set -e` cannot see it — the pipeline's status is awk's — and where no
-# `|| die` is watching either. A conflicting path carrying such a byte truncated
-# `conflicts` at that byte, dropped every path after it, and reported
-# `atRisk: []` at exit 0: a FALSE SAFE from the one tool whose whole job is to
-# say whether a rebase would eat a commit, and precisely the outcome the comment
-# above `conflicts=` says must be exit 2 instead. `tr` is not the only carrier
-# here: `sed` exits 1 on the same byte and emits nothing at all, and
-# `paste -sd, -` truncates its whole output at the byte while still exiting 0.
-# `awk` alone is immune, byte-identical in both locales. Reachable only from a
-# fetched tree — a Linux- or latin-1-authored commit — since APFS refuses to
-# hold the name locally. #582.
+# valid UTF-8. `tr` is not the only carrier: `sed` exits 1 on the same byte and
+# emits nothing at all, and `paste -sd, -` truncates its whole output at the
+# byte while still exiting 0. `awk` alone is immune, byte-identical in both
+# locales. Reachable only from a fetched tree — a Linux- or latin-1-authored
+# commit — since APFS refuses to hold the name locally. #582.
+#
+# What that cost was measured on the pipeline that used to split merge-tree's
+# output: PIPESTATUS `1 0 0` — its first stage exiting 1 and truncating, the
+# two behind it exiting 0 on the short input it handed them. The real status
+# sat in a non-final slot, where `set -e` cannot see it and where no `|| die`
+# was watching either, so a conflicting path carrying such a byte dropped every
+# path after it and reported `atRisk: []` at exit 0: a FALSE SAFE from the one
+# tool whose whole job is to say whether a rebase would eat a commit. That
+# split is now a single byte-oriented reader whose status nothing discards
+# (#583), so this pin is no longer the only thing standing between that byte
+# and a false safe there. It still is for the `sed` and `tr` below that render
+# a path or git's own diagnostic to stderr — grep this file for them; json.sh's
+# escapers do not rely on it, pinning the locale on each call instead.
 #
 # Global rather than per-site, unlike inflight.sh's five: this script sorts
 # nothing, folds no case, and uses a `[a-z]` range nowhere. It does hold ONE
@@ -479,7 +482,18 @@ fi
 #    read as "no conflicting files" and reported safe, which is exactly the
 #    branch-that-never-resolved case this step exists to catch.
 mt_out=$(mktemp) || die "cannot create a temporary file"
-trap 'rm -f "$mt_out"' EXIT
+# Armed before the SECOND `mktemp` rather than after it, because a `die` between
+# the two would otherwise run with no trap installed and leave the first
+# temporary on disk. `ps_out` is emptied first so the trap body is legal under
+# `set -u` while it names a variable the run has not reached yet; `rm -f ""` is
+# a no-op, so the trap is correct in both windows.
+ps_out=
+trap 'rm -f "$mt_out" "$ps_out"' EXIT
+# The at-risk step's pathspec list, written by the same reader that answers the
+# conflicts question below. NUL-separated, so it cannot travel in a variable;
+# `mktemp` rather than a name derived from `$mt_out`, so a shared TMPDIR offers
+# no predictable name to plant a symlink on.
+ps_out=$(mktemp) || die "cannot create a temporary file"
 echo "\$ git merge-tree --write-tree --name-only -z $base origin/$branch" >&2
 mt_rc=0
 git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$mt_out" || mt_rc=$?
@@ -492,22 +506,57 @@ git -C "$wt" merge-tree --write-tree --name-only -z "$base" "origin/$branch" >"$
 # `tail -n +2` grabbed the prose section too and word-split it into the
 # `git log -- $conflicts` pathspec below.
 #
-# The section split needs newline as the separator, because macOS awk 20200816
-# reads RS="\0" as RS="" and silently switches to paragraph mode, and POSIX sh
-# has no `read -d ''`. So a filename holding a literal newline has to be got out
-# of the way FIRST — parking it on \001 — or it manufactures the empty record
-# that ends the section, and `conflicts` comes back short or empty while the
-# audit exits 0. That is a false safe, and worse than what this replaced: git
-# C-quoted such a path, which at least emitted JSON the caller choked on.
-# Unanswerable is exit 2. ponytail: refusing, not answering — a shell variable
-# cannot hold NUL, so answering means keeping the whole list in a file and
-# reading it with something NUL-capable. That is available (inflight.sh already
-# shells out to python3, claim-ticket.sh to node) and is not the constraint; it
-# is a restructure bought for a filename holding a literal NEWLINE — that shape,
-# and only that one, is what nobody has produced. Upgrade there if one turns up.
-# #582 produced a different shape, an invalid-UTF-8 byte, and it needed no
-# restructure: `export LC_ALL=C` at the top of this file answers it outright.
-conflicts=$(tr '\n' '\001' <"$mt_out" | tr '\0' '\n' | awk 'NR==1{next} /^$/{exit} {print}')
+# Read by one NUL-capable reader rather than a `tr | tr | awk` pipeline, and
+# the reason is the exit status, not the parse. A POSIX pipeline's status is its
+# LAST command's, so a fault in any earlier stage is invisible to `set -e` and
+# to a trailing `|| die` alike: the stage yields short output, the pipeline
+# exits 0, and this script reports a SMALLER conflicts list with full
+# confidence — the false safe the prologue describes, and precisely the outcome
+# the standard below says must be exit 2 instead. `export LC_ALL=C` answers the
+# one byte that was measured getting in; it cannot make a status readable, and
+# any other fault in a prefix stage reproduces the under-report. #583.
+#
+# `set -o pipefail` is NOT the alternative, and not merely because POSIX sh
+# lacks it (dash rejects `set -o pipefail` outright). Measured: a healthy
+# conflicted run already ends with the prefix stages killed by SIGPIPE —
+# `pipestatus 141 141 0 0` on a run whose answer is entirely CORRECT — because
+# the reader stops at the empty record BY DESIGN and leaves merge-tree's prose
+# tail unread, and once that tail outgrows a pipe buffer whatever is upstream is
+# still writing when the reader goes away. `pipefail` would turn every such run
+# into a refusal, which is a worse failure than the one it fixes. The control
+# for that is a test rather than this paragraph: no-undo-audit.test.mjs builds a
+# run whose unread tail outgrows a pipe buffer and requires a full answer.
+#
+# One reader answers both questions, so there is nothing left to discard a
+# status. stdout carries the paths for the payload, a literal NEWLINE in a
+# filename parked on \001 — a shell variable cannot hold NUL, and macOS awk
+# 20200816 reads RS="\0" as RS="" and silently switches to paragraph mode, so
+# an unparked newline manufactured the empty record that ends the section and
+# `conflicts` came back short or empty while the audit exited 0. `$ps_out` gets
+# the same paths NUL-separated and `:(literal)`-prefixed, which is what the
+# at-risk step feeds to xargs. The reader works in bytes end to end (`rb`,
+# `stdout.buffer`), so no path is decoded and none can be rejected for its
+# bytes; the locale cannot reach it.
+conflicts=$(python3 -c '
+import sys
+recs = open(sys.argv[1], "rb").read().split(b"\0")
+paths = []
+for r in recs[1:]:
+    if not r:
+        break
+    paths.append(r)
+with open(sys.argv[2], "wb") as f:
+    f.write(b"".join(b":(literal)" + p + b"\0" for p in paths))
+sys.stdout.buffer.write(b"\n".join(p.replace(b"\n", b"\x01") for p in paths))
+' "$mt_out" "$ps_out") \
+  || die "could not read git merge-tree's output (python3) — cannot determine conflicts"
+# Unanswerable is exit 2, and worse than what this replaced: git C-quoted such a
+# path, which at least emitted JSON the caller choked on. ponytail: refusing,
+# not answering. `$ps_out` already carries the newline-holding path unparked, so
+# the at-risk half could answer for it; `conflicts[]` cannot, because it reaches
+# the payload through a shell variable and NUL is the one byte that cannot
+# travel there. Answering both halves means keeping the payload side in a file
+# too. Bought for a shape nobody has produced — upgrade there if one turns up.
 nl=$(printf '\001')
 case "$conflicts" in
   *"$nl"*) die "a conflicting path contains a newline — cannot build a pathspec for it" ;;
@@ -548,8 +597,14 @@ if [ -n "$conflicts" ]; then
   # -A` and `git add .` track such a file happily, because the name never
   # appears as a pathspec there. Naming it as one is what fails — so
   # `git add -- :colon.txt` erroring is not evidence this guard is dead weight.
-  at_risk=$(printf '%s\n' "$conflicts" | sed 's/^/:(literal)/' | tr '\n' '\0' \
-    | xargs -0 git -C "$wt" log --oneline "$fork".."$base" --) \
+  #
+  # The pathspec list arrives NUL-separated in `$ps_out`, written by the reader
+  # that produced `$conflicts`, so this is a single command and not a pipeline:
+  # nothing sits ahead of it with a status to discard. It used to be
+  # `printf | sed | tr | xargs`, where the `|| die` could only ever answer for
+  # the last of the four and a fault in any of the other three under-reported
+  # `at_risk` at exit 0. #583.
+  at_risk=$(xargs -0 git -C "$wt" log --oneline "$fork".."$base" -- <"$ps_out") \
     || die "listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat"
   # Above ARG_MAX (1048576 on macOS) xargs splits the pathspec list across
   # more than one `git log` invocation, and each invocation reports every
@@ -563,8 +618,8 @@ if [ -n "$conflicts" ]; then
   # reading. Left that way deliberately: re-sorting costs a second `git log`
   # to buy a ranking this audit does not offer, since it names the commits a
   # resolution would eat rather than ordering them.
-  # Kept as its own statement rather than appended to the xargs/git-log pipe
-  # that produced $at_risk: appended, `awk` would become that pipeline's LAST
+  # Kept as its own statement rather than piped onto the xargs/git-log command
+  # that produced $at_risk: piped, `awk` would become that pipeline's LAST
   # command, and with no `pipefail` in POSIX sh (dash rejects `set -o pipefail`
   # outright) its `|| die` would read awk's exit status, not git log's —
   # silently swallowing a real git-log failure behind a trivially-successful

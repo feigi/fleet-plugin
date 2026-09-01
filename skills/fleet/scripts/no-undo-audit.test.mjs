@@ -264,6 +264,130 @@ function withSplitXargs(t, size = 300) {
 }
 
 /**
+ * A wrapper factory for the two shims below: resolves the real binary once, up
+ * front and outside the shadowed PATH so the lookup cannot recurse into the
+ * wrapper, then writes an executable of the given body. Same technique as
+ * `withSplitXargs`, kept separate because these two need a whole script rather
+ * than a prefix ahead of a trailing `exec`.
+ */
+function shimDir(t, prefix) {
+  const bin = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  return {
+    bin,
+    real: (name) => execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim(),
+    write: (name, body) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
+      chmodSync(join(bin, name), 0o755);
+    },
+    path: () => `${bin}:${process.env.PATH}`,
+  };
+}
+
+/**
+ * Makes the file holding merge-tree's `-z` output unreadable at the moment the
+ * audit reads it, and not one step earlier: the `git` wrapper chmods it only
+ * after the real `merge-tree` has written and exited, so the emptiness guard
+ * that sits between the write and the read still sees a non-empty file and
+ * passes. That ordering is the whole point — the fault has to land on the stage
+ * that READS, which is the stage a pipeline's exit status does not report.
+ *
+ * `chmod 000` rather than `rm` for the same reason: a removed file fails the
+ * emptiness guard instead, and the test would then be green on a refusal raised
+ * by a different guard about a different fault, proving nothing about this one.
+ *
+ * The `mktemp` wrapper exists only to learn the name of a temporary that is
+ * otherwise private to the script. It records the FIRST one, which is the file
+ * merge-tree writes; a later temporary is left alone.
+ */
+function withUnreadableMergeTreeOutput(t) {
+  const s = shimDir(t, "no-undo-audit-mtout-");
+  const recorded = join(s.bin, "first-temp-path");
+  s.write("mktemp", `f=$(${s.real("mktemp")} "$@") || exit $?
+[ -e "${recorded}" ] || printf '%s\\n' "$f" >"${recorded}"
+printf '%s\\n' "$f"
+`);
+  s.write("git", `case " $* " in
+  *" merge-tree "*)
+    ${s.real("git")} "$@"
+    rc=$?
+    chmod 000 "$(cat "${recorded}")"
+    exit $rc ;;
+esac
+exec ${s.real("git")} "$@"
+`);
+  return s.path();
+}
+
+/**
+ * Fails every `mktemp` after the first, leaving merge-tree's own temporary
+ * intact so the run reaches the point where a second one is asked for. A full
+ * TMPDIR or a TMPDIR that has gone missing does this for real.
+ *
+ * The path the first call handed back is recorded, not merely the fact that a
+ * call happened, because the abort this injects is also the abort that has to
+ * clean up after itself: the caller reads `firstTemp` to check the file is gone
+ * once the run has exited. Recording it is what lets the assertion name a real
+ * path rather than trusting the trap.
+ */
+function withLaterMktempFailing(t) {
+  const s = shimDir(t, "no-undo-audit-mktemp-");
+  const firstTemp = join(s.bin, "first-temp-path");
+  s.write("mktemp", `if [ -e "${firstTemp}" ]; then
+  echo "mktemp: failed to create file" >&2
+  exit 1
+fi
+f=$(${s.real("mktemp")} "$@") || exit $?
+printf '%s\n' "$f" >"${firstTemp}"
+printf '%s\n' "$f"
+`);
+  return { path: s.path(), firstTemp };
+}
+
+/**
+ * Add/add conflicts on enough paths, each named long enough, that merge-tree's PROSE tail — the
+ * `Auto-merging`/`CONFLICT` section that follows the empty record, and the part
+ * of the output the audit deliberately never wants — is larger than a pipe
+ * buffer.
+ *
+ * That size is the whole fixture. The reader stops at the empty record by
+ * design, so on any conflicted run it leaves the tail unread; once the tail no
+ * longer fits in the buffer, whatever is upstream of the reader is still trying
+ * to write when the reader goes away. A `tr | tr | awk` reads back
+ * `141 141 0 0` there — two stages killed by SIGPIPE on a run whose answer is
+ * completely CORRECT. Anything that adopts a prefix stage's status as the
+ * pipeline's own, `set -o pipefail` most obviously, converts exactly this run
+ * into a refusal. So the fixture is a control: it must keep answering.
+ *
+ * One main commit, not `manyConflictsTwoCommits`' two — the dedupe across xargs
+ * batches is that fixture's claim and not this one's.
+ */
+function longTailConflictRepo(t) {
+  const c = repo(t);
+  const paths = Array.from({ length: 200 }, (_, i) => `${String(i).padStart(3, "0")}-${"x".repeat(220)}.txt`);
+  git(c.w, "checkout", "-q", "main");
+  for (const p of paths) writeFileSync(join(c.w, p), "MAIN SIDE\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  for (const p of paths) writeFileSync(join(c.w, p), "branch side\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "branch edits every file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  return { ...c, paths };
+}
+
+/** Bytes of merge-tree's output after the empty record — the part left unread. */
+function unreadTailBytes({ w, branch }) {
+  const mt = spawnSync("git", ["-C", w, "merge-tree", "--write-tree", "--name-only", "-z", "origin/main", `origin/${branch}`],
+    { env: ENV, maxBuffer: 1 << 27 });
+  const end = mt.stdout.indexOf(Buffer.from([0, 0]));
+  assert.notEqual(end, -1, "merge-tree must emit the empty record that ends the filename section");
+  return mt.stdout.length - (end + 2);
+}
+
+/**
  * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
  * fleet's own layout, and the only one where breaking the linkage is dangerous:
  * an enclosing repo is standing by to answer in the worktree's place, and being
@@ -976,6 +1100,104 @@ test("an xargs-side failure listing the at-risk commits is unanswerable, and doe
   );
 });
 
+// #583: a POSIX pipeline's status is its LAST command's, so a fault in any
+// earlier stage is invisible to `set -e` and to a trailing `|| die` alike. The
+// stage that reads merge-tree's output is the one that can fail — measured on
+// the locale fault #582 filed, `PIPESTATUS: 1 0 0`, the first stage exiting 1
+// and truncating while the two behind it exit 0 on the short input handed to
+// them. What came out was a SMALLER conflicts list at exit 0: a false safe from
+// the one tool whose job is to say whether a rebase would eat a commit.
+//
+// The fault is injected on the file rather than on any one command, so the
+// pin survives a change of reader: whatever reads merge-tree's output, it must
+// refuse when it cannot.
+test("merge-tree's output going unreadable at the moment it is read is unanswerable (2), never an empty conflicts list at exit 0", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withUnreadableMergeTreeOutput(t) });
+  assert.equal(r.status, 2,
+    `a conflicts list that could not be read is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "",
+    `exit 2 emits no payload — an empty conflicts[] here would be a false safe on a branch that really conflicts; got ${r.stdout}`);
+  assert.match(r.stderr, /could not read git merge-tree's output \(python3\)/,
+    "the guard names the command whose status it actually reads, the way #522 taught the at-risk guard to");
+});
+
+// The other half of #583, and the one that rules `set -o pipefail` out even
+// where a shell offers it: on a large CORRECT run the reader stops at the empty
+// record by design and leaves merge-tree's prose tail unread, so a `tr | tr |
+// awk` reads back `141 141 0 0` — two stages killed by SIGPIPE with nothing
+// wrong. Adopting a prefix stage's status would refuse this run. It must
+// answer, and answer in full.
+test("a conflicting run whose unread tail outgrows a pipe buffer still answers, and answers in full", (t) => {
+  const c = longTailConflictRepo(t);
+  const tail = unreadTailBytes(c);
+  assert.ok(tail > 65536,
+    `the fixture must leave more unread than a pipe buffer holds, or nothing is being controlled for — left ${tail} bytes`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a large correct run is an answer, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}`);
+  assert.deepEqual([...r.json.conflicts].sort(), [...c.paths].sort(),
+    "every conflicting path, not the prefix that fitted before the reader stopped");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// The at-risk half of #583. Its `|| die` reads the status of the LAST command
+// in the pipeline that built the pathspec list, so the `printf | sed | tr` that
+// once sat ahead of `xargs` could fail and leave `at_risk` short or empty at
+// exit 0 — a branch reported as eating nothing while it really was about to.
+// The fix is that the list no longer passes through them at all, and this is
+// the assertion that says so: break `sed` on the invocation that used to build
+// the pathspecs and the answer must be unchanged, because there is no longer
+// such an invocation. Restore the pipeline and the decoy commit comes back with
+// the real one, since an empty pathspec list leaves `git log` filtering by
+// nothing.
+//
+// `conflictRepo`, not `bareConflictRepo`: the decoys are what make an
+// unfiltered `git log` distinguishable from a correctly filtered one. Without
+// them the range holds a single commit and the broken run returns the right
+// answer for the wrong reason.
+test("breaking the sed that used to build the at-risk pathspecs changes nothing, because nothing ahead of xargs can fail unseen", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "plain.txt", selector: "literal" }) });
+  assert.equal(r.status, 0, `nothing failed, so nothing is unanswerable; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}`);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "the decoys are back, which means the pathspec list went through something that could fail without the guard hearing it");
+});
+
+// A temporary the audit cannot create is a question it cannot answer, and the
+// exit code has to say so: bare `set -eu` would abort with mktemp's own 1,
+// which out of THIS script is the dirty-worktree refusal — fabricated on a
+// worktree already measured clean, with no payload and nothing on stderr.
+//
+// The last assertion is about the abort PATH, not the verdict, and it is the
+// one that needs saying: the fault lands between the two `mktemp` calls, so a
+// cleanup trap armed after both would not yet exist when this run dies, and the
+// temporary the first call created would outlive it. Exit code and message are
+// both correct in that world, which is why they cannot be the whole pin —
+// asking whether the file is gone is the only question that separates a trap
+// armed early enough from one armed too late.
+test("a temporary file the at-risk step cannot create is unanswerable (2), never the refusal that means dirty", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const m = withLaterMktempFailing(t);
+  const r = audit(c, { ...ENV, PATH: m.path });
+  assert.equal(r.status, 2,
+    `the worktree is clean and was measured clean — exit 1 here would report it dirty on the strength of a full TMPDIR; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload; got ${r.stdout}`);
+  assert.match(r.stderr, /cannot create a temporary file/,
+    "and it names the cause rather than exiting silently");
+
+  const first = readFileSync(m.firstTemp, "utf8").trim();
+  assert.ok(first, "the shim must have recorded the temporary the first call handed back, or the check below proves nothing");
+  assert.equal(existsSync(first), false,
+    `the temporary created before the failing call has to be cleaned up by the abort that follows it, or a run that dies here leaks one; ${first} survived`);
+});
+
 // #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
 // with a space, so `conflicts[]` named a file that exists nowhere on disk —
 // this is the case the ticket itself measured. RFC 8259 gives short forms to
@@ -1028,17 +1250,38 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 });
 
 // #582: `tr` is locale-sensitive, and under a UTF-8 locale BSD tr exits 1 on a
-// byte that is not valid UTF-8. In the script's `tr | tr | awk` it is the FIRST
-// stage that fails — measured, PIPESTATUS `1 0 0`, the second `tr` and `awk`
-// both exiting 0 on the short input it hands them — so the real status sits in
-// a non-final slot where `set -e` never sees it (the pipeline's status is
-// awk's) and the line carries no `|| die` of its own. `conflicts` came back
+// byte that is not valid UTF-8. What that cost was measured on the `tr | tr |
+// awk` that used to split merge-tree's output, where the FIRST stage was the
+// one that failed — PIPESTATUS `1 0 0`, the second `tr` and `awk` both exiting
+// 0 on the short input it handed them — so the real status sat in a non-final
+// slot where `set -e` could not see it (the pipeline's status was awk's) and
+// where the line carried no `|| die` of its own either. `conflicts` came back
 // holding the single truncated entry `b`, `plain.txt` was dropped from the list
-// entirely, `atRisk` was `[]`, and the audit exited 0. A false safe on the one
+// entirely, `atRisk` was `[]`, and the audit exited 0: a false safe from the one
 // tool whose whole job is to say whether a rebase would eat a commit, which is
 // the outcome the comment above `conflicts=` says must be exit 2.
 // `export LC_ALL=C` is the fix, and it is the convention inflight.sh already
-// follows at five sites.
+// follows, both globally and per site.
+//
+// Past tense throughout, because that mechanism is no longer here to reproduce:
+// #583 replaced the split with a single byte-oriented reader whose status
+// nothing discards, so the pin is not what stands between that byte and a false
+// safe on this path any more. The assertions below are unchanged by that —
+// they assert the correct ANSWER, which is what both the split and the reader
+// owe.
+//
+// WHAT KILLS THE MUTANT TODAY IS NOT THE MECHANISM ABOVE, and the difference
+// matters to anyone tidying the script. Measured on this tree, with the pin
+// deleted: the reader parses both conflicting paths correctly whatever the
+// locale, and the run then dies further down, when the `conflict: ` render that
+// prints them to stderr crashes on the byte — `sed: RE error: illegal byte
+// sequence`, and the script exits 1 rather than reporting a short list at 0.
+// So this test's kill now rests on a diagnostic render that decides nothing,
+// carries no `|| die`, and reads like safe cleanup. Neutralise or remove that
+// render and the mutant stops dying, with nothing going red to say so. #1160
+// tracks that render's own defect — it aborts a clean audit with the status
+// that means dirty — and carries the same warning in the other direction:
+// whoever fixes it must give this test a new kill mechanism first.
 //
 // The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
 // are load-bearing. Explicit rather than inherited, because a suite that takes
