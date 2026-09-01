@@ -97,21 +97,36 @@ test("mapCi: a legitimately unknown state — status null, in_progress, no-ci �
   assert.deepEqual(errs, []);
 });
 
-// #1170: JSON.parse("null") succeeds and yields d === null, so the d.status
-// read that followed the parse threw a TypeError out of mapCi — and mapCi
-// runs inside gather()'s per-PR loop, uncaught until serve's whole-tick catch,
-// so one PR's bare "null" aborted that tick's board.json rewrite for every PR.
-// Every other non-object JSON payload (true, a number, a string, an array, {})
-// already reads d.status as undefined and lands on "unknown" without a throw;
-// null was the lone outlier. Pinned alongside a sibling scalar so a fix that
-// over-guards (e.g. rejecting every non-plain-object, not just null) still
-// shows a still-correct "unknown" here rather than passing by accident.
+// #1170: JSON.parse("null") succeeds and yields d === null, and null alone
+// among parsed payloads has no properties to read — every other one boxes and
+// reads its status as undefined — so the status gate threw a TypeError back
+// out of mapCi. mapCi runs inside gather()'s per-PR loop, so a bare "null" for
+// one PR would take out that tick's whole board.json rewrite: under `serve`
+// the throw is uncaught until the whole-tick catch, which logs and leaves the
+// previous board.json standing, while the one-shot build path exits through
+// main().catch and dies loudly. Written as a conditional because this repo's
+// ci-state.mjs puts nothing on stdout but JSON.stringify of an object literal,
+// so it cannot emit a bare "null" — the guard is defence in depth against a
+// producer that can. Silence is the pin the comment claims and the assertion
+// nobody wrote: every parseable payload with no status to read answers without
+// a line, and the guard has to join that class rather than start warning.
 test("mapCi: a JSON payload that parses to null → unknown, not a thrown TypeError", () => {
-  assert.equal(mapCi("null", 1170), "unknown");
+  let v;
+  const errs = withStderr(() => { v = mapCi("null", 1170); });
+  assert.equal(v, "unknown");
+  assert.deepEqual(errs, [], "silent, like every other payload with no status to read");
 });
-test("mapCi: a non-null non-object JSON scalar still classifies unknown, not thrown", () => {
-  assert.equal(mapCi("true", 1170), "unknown");
-  assert.equal(mapCi("[]", 1170), "unknown");
+// The other half: a payload that already answered "unknown" still does, so the
+// guard narrowed nothing. It does not discriminate an over-guard — one
+// rejecting every non-plain-object answers exactly as this guard does for every
+// JSON value, since reaching a verdict at all takes a plain object such a guard
+// passes through, so no fixture separates the two.
+test("mapCi: parsed payloads with no status still classify unknown, not thrown", () => {
+  let v, w;
+  const errs = withStderr(() => { v = mapCi("true", 1170); w = mapCi("[]", 1170); });
+  assert.equal(v, "unknown");
+  assert.equal(w, "unknown");
+  assert.deepEqual(errs, [], "silent, like every other payload with no status to read");
 });
 
 // `serve` rebuilds every ~15s and calls mapCi once per PR per tick, so a broken
