@@ -724,8 +724,11 @@ their command failed. Do not modify ${worktree}.`,
 // is a SECOND COPY on purpose: the sandbox above forbids `import`, so a shared
 // helper could not be lifted out of this file by the tests that pin it, and
 // `lift()` evaluates one declaration standalone. The copies are pinned to each
-// other in review-pr-snapshot-path.test.mjs rather than to any literal text, so
-// a change made to one side and not the other reds.
+// other in review-pr-snapshot-path.test.mjs rather than to the comparison's own
+// text: that pin anchors on the `if (snap.prHead && ` guard head and captures
+// whatever comparison follows, so a change made to one side and not the other
+// reds, while a semantics-preserving rewrite of both stays green. Rewrite this
+// comparison — but rewrite BOTH.
 //
 // What it adds is the CONSEQUENCE, which is the half that was missing. The
 // comparison already existed, in `usableDiff`, where a mismatching `prHead`
@@ -755,10 +758,40 @@ function snapshotMissing(snap) {
   return null;
 }
 
+// Neither sha is normalized on the way here. `prHead` is 40 lowercase hex from
+// `gh pr view --json headRefOid`; `head` is whatever an agent asked for "the
+// HEAD sha" relayed, and `git rev-parse` prints a trailing newline. Under the
+// refusal below an unnormalized `head` no longer costs a diff — it cancels the
+// whole review, and the refusal message then names two shas that look
+// identical, which reads as a wrong-commit worktree rather than the relay
+// artifact it is. Measured: `head` of `"9e8ee3d\n"` against a 40-char `prHead`
+// starting `9e8ee3d` refuses, and so does a leading space; a trailing newline
+// survives only when `prHead` happens to be a prefix of `head`, so the
+// tolerance the comment below claims is partly accidental.
+//
+// Normalized ONCE here rather than inside either copy of the compare: the two
+// copies stay byte-identical for the pin in review-pr-snapshot-path.test.mjs,
+// and `usableDiff`'s three call sites below read this same object. Case-folding
+// rides along in the same pass — git emits lowercase hex, so it is belt to the
+// trim's suspenders, not a case this workflow has produced. `snap` falsy is
+// left to `snapshotMissing`'s own first guard, which names it.
+if (snap) {
+  if (typeof snap.head === "string") snap.head = snap.head.trim().toLowerCase();
+  if (typeof snap.prHead === "string") snap.prHead = snap.prHead.trim().toLowerCase();
+}
+
 const missingReason = snapshotMissing(snap);
 if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
-log(`snapshot ${snap.head} at ${snap.path}`);
+// `prHead` is named here even when it is absent. The head compare in
+// `snapshotMissing` is guarded on `snap.prHead &&`, so a failed `gh pr view`
+// skips the #532 refusal — deliberately, see the comment above it — and the run
+// log is then byte-identical to one where the two heads were compared and
+// matched. Measured: both cases printed `snapshot <head> at <path>` and nothing
+// else. The skip is the whole difference between a backstopped review and an
+// unbackstopped one, so it is said rather than left to be inferred from a field
+// this line never printed.
+log(`snapshot ${snap.head} at ${snap.path} — PR head ${snap.prHead ?? "(absent): head check SKIPPED"}`);
 
 // Resolved here, right after snap is known good: everything downstream (the
 // specialist prompt) just interpolates `testCmd`. Throws when neither an

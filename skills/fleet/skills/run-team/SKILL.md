@@ -462,8 +462,10 @@ So, when you re-create a worktree for an already-open PR:
   will not tell them apart.
 
 `review-pr.js` refuses a snapshot whose head is not the PR head, so the workflow
-review path is backstopped. A worktree you hand to an agent directly is not.
-Verify here anyway.
+review path is backstopped — except when `gh pr view` returned no head at all,
+which skips the compare rather than refusing on it. Its run log names that case:
+`PR head (absent): head check SKIPPED`. A worktree you hand to an agent directly
+is not. Verify here anyway.
 
 ## Phase 2 — dispatch implementers
 

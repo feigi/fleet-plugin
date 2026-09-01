@@ -126,19 +126,93 @@ test("a matching head proceeds, abbreviated on either side", () => {
 // diff, and `snapshotMissing`, which refuses the review — and the Workflow
 // sandbox forbids `import`, so neither can call a shared helper and still be
 // lifted (see lift.mjs). Two copies of one expression is this repo's recurring
-// disconnect defect, so the copies are pinned to each other rather than to a
-// literal: a change to one side that is not made to the other reds here,
-// whatever the expression becomes. Pinning the expression's TEXT instead would
-// red on a rename and stay green on the disconnect, which is backwards.
+// disconnect defect, so the copies are pinned to each other rather than to the
+// comparison's own text: the pattern anchors on the `if (snap.prHead && ` guard
+// head and CAPTURES whatever comparison follows it, then compares the two
+// captures. A change to one side that is not made to the other reds here,
+// whatever the expression becomes; a semantics-preserving rewrite applied to
+// BOTH sides stays green. Both directions are measured, in this file's own
+// mutants, because the earlier form of this test asserted a fixed literal and
+// did neither — it red on an identical rewrite of both copies, with a message
+// saying neither copy compared the heads at all, which is backwards.
+//
+// The anchor is the residual literal, and it is the loud direction: rename
+// `prHead` and the count drops rather than the comparison silently ceasing to
+// be pinned.
 test("the head compare in usableDiff and snapshotMissing are the same expression", () => {
-  const compares = CODE.match(/!snap\.prHead\.startsWith\(snap\.head\) && !snap\.head\.startsWith\(snap\.prHead\)/g);
-  assert.ok(compares, "neither function still compares the snapshot head against the PR head");
+  const compares = [...CODE.matchAll(/^\s*if \(snap\.prHead && (.+?)\)(?: return null;)?$/gm)].map((m) => m[1]);
+  assert.ok(
+    compares.length > 1,
+    `${compares.length} head compare(s) found — the diff drop and the refusal are no longer both armed`,
+  );
   assert.equal(
     new Set(compares).size,
     1,
-    "the two head compares have diverged — one of them now decides on a different test than the other",
+    `the two head compares have diverged — one of them now decides on a different test than the other:\n  ${compares.join("\n  ")}`,
   );
-  assert.ok(compares.length > 1, "only one head compare is left — the diff drop and the refusal are no longer both armed");
+});
+
+// The refusal above raised the price of an unnormalized `head` from one diff to
+// the whole review: `prHead` is 40 lowercase hex from `gh`, `head` is whatever
+// an agent relayed for `git rev-parse HEAD`, and that command prints a trailing
+// newline. Measured before the fix: `"9e8ee3d\n"` against a 40-char `prHead`
+// beginning `9e8ee3d` refused, naming two shas that look identical.
+//
+// The normalization is a top-level statement rather than a function, so it is
+// lifted as TEXT and RUN. A presence pin would stay green on a normalization
+// that had stopped normalizing, which is the failure this test exists to catch.
+test("a relayed head is normalized before the refusal ever sees it", () => {
+  // Anchored on the ASSIGNMENT, not on `.trim()`: anchoring on the operation
+  // means a normalization that stops normalizing reads as one that was deleted,
+  // and the assertions below never run to say what actually broke.
+  const block = CODE.match(/if \(snap\) \{[^}]*snap\.head = [^}]*\}/);
+  assert.ok(
+    block,
+    "no `if (snap) { … snap.head = … }` normalization ahead of snapshotMissing — it was deleted, or reshaped past what this pins",
+  );
+  assert.ok(
+    CODE.indexOf(block[0]) < CODE.indexOf("const missingReason = snapshotMissing(snap);"),
+    "the normalization runs AFTER the refusal — it can no longer keep a relay artifact from cancelling the review",
+  );
+  const normalize = new Function("snap", block[0]);
+  const full = "deadbee" + "0".repeat(33);
+  const after = (head, prHead) => {
+    const snap = { path: "/tmp/snap", pathVerified: true, head, prHead };
+    normalize(snap);
+    return snapshotMissing(snap);
+  };
+  assert.equal(after("deadbee\n", full), null, "a rev-parse newline is a relay artifact, not a different commit");
+  assert.equal(after(" deadbee ", full), null, "and neither is surrounding whitespace");
+  assert.equal(after("DEADBEE", full), null, "and neither is case");
+  // The tolerance must not swallow the case it sits beside, here either.
+  assert.equal(typeof after("cff7330", full), "string", "a genuinely different sha still refuses after normalizing");
+  const absent = { path: "/tmp/snap", pathVerified: true, head: "deadbee" };
+  normalize(absent);
+  assert.equal(snapshotMissing(absent), null, "normalizing must not invent a prHead the snapshot agent never sent");
+  // A dead snapshot agent returns falsy, and `snapshotMissing`'s first guard is
+  // what names that. Normalizing must not beat it to the dereference.
+  assert.doesNotThrow(() => normalize(null), "a falsy snap must reach snapshotMissing's own guard, not a TypeError here");
+});
+
+// `snapshotMissing`'s head compare is guarded on `snap.prHead &&`, so a failed
+// `gh pr view` skips the refusal — deliberately, per the test above — and the
+// run log used to be BYTE-IDENTICAL to a run where the two heads were compared
+// and matched. That is the #532 case with the evidence removed: a wrong-commit
+// review and a verified one read the same afterwards. Measured by running the
+// log statement itself, not by matching its source, so a line that stops
+// distinguishing the two reds here.
+test("the snapshot log line says when the head check was skipped", () => {
+  const line = CODE.split("\n").find((l) => l.startsWith("log(`snapshot "));
+  assert.ok(line, "the snapshot run-log line is gone — the whole diff decision below it is unobservable without it");
+  const say = (snap) => {
+    let out;
+    new Function("snap", "log", line)(snap, (m) => (out = m));
+    return out;
+  };
+  const skipped = say({ path: "/tmp/snap", head: "deadbee" });
+  const checked = say({ path: "/tmp/snap", head: "deadbee", prHead: "deadbee" + "0".repeat(33) });
+  assert.notEqual(skipped, checked, "a skipped head check and a passed one log the same line — the two runs cannot be told apart");
+  assert.match(skipped, /SKIPPED/, "the skip must be NAMED, not left to be inferred from a field the line does not print");
 });
 
 // Bound at both ends via prose-pin.mjs's between() — an unbounded end lets the
