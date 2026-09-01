@@ -1082,7 +1082,7 @@ refutations were reversed and re-examined in one run; all three findings survive
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies, and one that never executed the suite, both contribute zero
 findings while the key stays in `dimensionsRun` — so read the two together. A key
-in `dimensionsRun` and NOT in `dimensionsUnrun` is covered; every
+in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
 `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
 Re-run those, or name them unrun in the report — an absence of findings is not
 coverage. Same rule the fallback below states for a killed specialist, for the

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
-import { between } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
 // IDENTICAL shapes: `findings: []` either way, with the key listed in
@@ -394,5 +394,34 @@ test("run-team's Reviewers section documents dimensionsUnrun, not only dimension
     doc,
     /a dimension listed\s+in `dimensionsRun` with nothing in `survived`\/`refuted`\/`unverified` is \*\*unrun,\s+not clean\*\*/,
     "run-team/SKILL.md still states the pre-#137 workaround, which marks a clean dimension unrun",
+  );
+});
+
+// What the absence of an unrun classification ESTABLISHES is that a suite ran —
+// never that the dimension is covered. `unrunReason` above reads `test_run`'s
+// counts and quotes `command` into its message; it never compares that command
+// against the one the dispatch handed out, so a specialist that substituted a
+// narrower runner reports a non-zero count, is not classified unrun, and reads
+// as covered having validated a fraction of the suite. Comparing the two was
+// refuted 2-0 and stays refuted (#535) — the doc claiming only what the
+// classifier can see is the remedy, and nothing pinned the word it turns on.
+//
+// Anchored on the construct rather than sliced to the paragraph, and matched
+// through `phrase` so a reflow of the hard wrap cannot fire it: the two ends are
+// CONTIGUOUS, so the unbounded-end hazard `between` exists for does not arise.
+// The exclusion is what catches a revert — a positive pin alone passes on a
+// sentence rewritten to assert coverage some other way only if the anchor goes
+// with it, and here it does not.
+test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
+  const doc = readFileSync(join(REPO, "skills", "fleet", "skills", "run-team", "SKILL.md"), "utf8");
+  assert.match(
+    doc,
+    phrase("and NOT in `dimensionsUnrun` ran a suite"),
+    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun ran a suite",
+  );
+  assert.doesNotMatch(
+    doc,
+    phrase("and NOT in `dimensionsUnrun` is covered"),
+    "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — the classifier never checked the command that ran",
   );
 });
