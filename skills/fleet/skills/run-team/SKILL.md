@@ -1744,9 +1744,9 @@ Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `SendMessage` you what it merged and what it held, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step.
 
-**Put both gate traps in the bot's brief, not in a follow-up message.** A bot
+**Put every gate trap in the bot's brief, not in a follow-up message.** A bot
 already looping cannot be corrected — the loop consumes the turns a correction
-would land in. Both are measured, and they fail in opposite directions:
+would land in. Each is measured, and they fail in different directions:
 
 - **`ci-state --quiet` is unsatisfiable-FALSE.** It drops `jobs` and `missing`,
   so a gate reading per-job state from it can never be satisfied. One bot polled
@@ -1763,6 +1763,18 @@ would land in. Both are measured, and they fail in opposite directions:
   suppressed, reads as a check that silently did not run. Same root cause as the
   `PIPESTATUS` trap above, opposite failure direction — so name the variable
   anything else (`ci_status`).
+- **A `jq` exit outside 0 and 1 is not a verdict.** `jq -e` exits 0 when its
+  last output was truthy and 1 when it was false or null — the two outcomes that
+  invite reading the code as a boolean. Every other exit means the gate never
+  compared a field at all: measured on jq 1.7.1, **3** the program did not
+  compile (a full-width `｜` typed where `|` was meant, which is how the gate
+  merging #1172 hit it), **2** a usage error, **4** the program yielded no
+  output, **5** the input did not parse or the program raised. Both boolean
+  readings are wrong, in opposite directions: `[ $rc -eq 0 ]` blocks a mergeable
+  PR on a typo, `[ $rc -ne 1 ]` merges on a gate that never parsed. Same rule as
+  `inflight.sh`, `verify-sha.sh` and `staleness.mjs` exit 2 — a probe that could
+  not look is not an answer: re-run the gate once, and if the same exit repeats
+  report it and stop rather than re-running again.
 
 So **gate on the payload's own fields** — `verdict`, `behind`, `missing`, the
 per-job conclusions, and `prHead == runHeadSha` — read with `jq` from an
