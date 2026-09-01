@@ -1313,6 +1313,28 @@ test("a FORCE_COLOR'd caller still resolves a dependency-free manifest", () => {
   assert.match(r.stdout + r.stderr, /install: true/);
 });
 
+// #752: the `2>&1` on the ndeps capture merges node's stderr into $ndeps on
+// the success path too (needed so the failure path keeps its reason — see
+// the comment at the capture site), so stray chatter (real triggers:
+// NODE_DEBUG, NODE_OPTIONS=--inspect) reads as part of the "dependency
+// count". A `node` stub stands in for that chatter instead of relying on
+// NODE_DEBUG's actual output, which is unpinned across node versions — this
+// asserts the shape guard, not node's debug format.
+test("install: node stderr merged via 2>&1 refuses by shape, not misread as a dependency count", () => {
+  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-node-"));
+  writeFileSync(join(bin, "node"), '#!/bin/sh\necho "MODULE 12345: chatter" >&2\necho 0\n', { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 2, `a contaminated capture refuses\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /unexpected output/, "names the shape refusal");
+  assert.doesNotMatch(r.stderr, /dependencies but has no lockfile/,
+    "chatter must not be misread as a dependency count");
+});
+
 test("runner: scripts.test wins", () => {
   assert.equal(claim(repo({ "package.json": pkg({ scripts: { test: "vitest" } }) })).testcmd, "npm test --");
 });

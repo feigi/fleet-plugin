@@ -70,6 +70,13 @@ elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="ya
 elif [ -z "$pkg" ]; then install="true"
 elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
+# The `2>&1` above is load-bearing (see the sibling capture below) but merges
+# node's stderr into $ndeps on the SUCCESS path too, so stray chatter (#752:
+# NODE_DEBUG, NODE_OPTIONS=--inspect) would otherwise be misread as a
+# dependency count. A clean count is always bare digits — refuse by shape
+# before comparing, rather than trust a contaminated capture.
+elif case "$ndeps" in ''|*[!0-9]*) true ;; *) false ;; esac; then
+  die "could not read origin/main:package.json — unexpected output: $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
 else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
 fi
