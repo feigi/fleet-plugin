@@ -83,7 +83,10 @@
 //
 // KNOWN LIMIT: this file needs an ambient `.git` (see `REPO` below) and throws
 // at module load without one, so it cannot run from a `git archive`
-// extraction. Tracked separately; CI checks out a real clone.
+// extraction — measured, 2 of 93 test files in this directory. It fails loudly
+// there rather than passing vacuously, and CI checks out a real clone, but it
+// is how review specialists measure the suite (#1056). Tracked with its
+// sibling, which has the same defect and predates this file, in #1149.
 //
 // Zero deps: `node --test skills/fleet/scripts/muted-git-guard-sweep.test.mjs`.
 
@@ -202,6 +205,14 @@ const resolvesARef = (g) => {
   return rest.some((w, i) => !w.startsWith("-") && rest[i - 1] !== "--git-path");
 };
 
+// The two verdicts, written once. The fixtures below and the sweep over what
+// ships must ask the SAME question, or the fixtures stop defending anything.
+const isMutedGuard = (g) => failureIsFatal(g) && isMuted(g);
+const isUnverifiedGuard = (g) => failureIsFatal(g)
+  && />\/dev\/null/.test(g.line)
+  && resolvesARef(g)
+  && !/--verify\b/.test(g.cmd);
+
 test("the sweep sees the scripts it is supposed to police", () => {
   // A guard on the guard: a bad glob, a moved directory or a `git ls-files`
   // that answers nothing turns every assertion below into a vacuous pass over
@@ -216,7 +227,7 @@ test("the sweep sees the scripts it is supposed to police", () => {
 });
 
 test("no fatal rev-parse guard suppresses git's own diagnosis", () => {
-  const muted = ALL.filter((g) => failureIsFatal(g) && isMuted(g));
+  const muted = ALL.filter(isMutedGuard);
   assert.deepEqual(
     muted.map((g) => `${g.path}: ${g.line}`),
     [],
@@ -241,10 +252,7 @@ test("every rev-parse resolution guard keeps --verify", () => {
   // file `origin/weird` present `git rev-parse "origin/weird"` exits 0 and
   // prints the path, so that capture can carry a non-sha onward. Real, and a
   // different mechanism: filed as #1146 rather than widened into here.
-  const unverified = ALL.filter((g) => failureIsFatal(g)
-    && />\/dev\/null/.test(g.line)
-    && resolvesARef(g)
-    && !/--verify\b/.test(g.cmd));
+  const unverified = ALL.filter(isUnverifiedGuard);
   assert.deepEqual(
     unverified.map((g) => `${g.path}: ${g.line}`),
     [],
@@ -268,7 +276,8 @@ const SHAPES = [
 
   { why: "an already-correct guard", muted: false, src: 'git rev-parse --verify "$base" >/dev/null || die "no"' },
   { why: "a `--quiet` in a trailing comment must not raise a false failure", muted: false, src: 'git rev-parse --verify "$base" >/dev/null || die "no"  # never add --quiet here' },
-  { why: "a `--quiet` in the die message is prose, not an argument", muted: false, src: 'git rev-parse --verify "$b" >/dev/null || die "unresolved; do not silence this with --quiet"' },
+  { why: "a `--quiet` in the die message is prose, not an argument", muted: false, src: 'git rev-parse --verify "$b" >/dev/null || die "unresolved; never silence this with --quiet again"' },
+  { why: "a `|| die` inside a comment must not make a probe look fatal", muted: false, src: 'git rev-parse --verify --quiet "refs/heads/$b" >/dev/null && has_branch=true  # not a || die site: failure is the answer' },
   { why: "a whole-line comment is not code", muted: false, src: '# git rev-parse --quiet --verify "$base" >/dev/null || die "no"' },
   { why: "success-is-fatal: a branch-existence probe wants --quiet", muted: false, src: 'git rev-parse --verify --quiet "refs/heads/$b" >/dev/null && die "branch exists"' },
   { why: "a `#` inside the message must not truncate the guard", muted: false, src: 'git rev-parse --verify "$b" >/dev/null || die "$b does not resolve (see #578)"' },
@@ -276,7 +285,8 @@ const SHAPES = [
 
 const REFS = [
   { why: "a differently-named ref variable still escapes nothing", unverified: true, src: 'git rev-parse "$candidate" >/dev/null || die "no"' },
-  { why: "a `--verify` in a trailing comment must not silence a real one", unverified: true, src: 'git rev-parse "$ref" >/dev/null || die "no"  # --verify deliberately omitted' },
+  { why: "a `--verify` in a trailing comment must not silence a real one", unverified: true, src: 'git rev-parse "$ref" >/dev/null || die "no"  # --verify deliberately omitted here' },
+  { why: "a `--verify` in the die message is prose, not an argument", unverified: true, src: 'git rev-parse "$ref" >/dev/null || die "unresolved; pass --verify to fix this"' },
   { why: "`if ! … ; then die` on a bare name", unverified: true, src: 'if ! git rev-parse "$ref" >/dev/null; then\n  die "no"\nfi' },
 
   { why: "`--verify` present", unverified: false, src: 'git rev-parse --verify "$ref" >/dev/null || die "no"' },
@@ -288,7 +298,7 @@ const REFS = [
 
 test("the sweep keys on the defect, not on one spelling of it", () => {
   for (const f of SHAPES) {
-    const hit = scan("fixture.sh", f.src).filter((g) => failureIsFatal(g) && isMuted(g));
+    const hit = scan("fixture.sh", f.src).filter(isMutedGuard);
     assert.equal(hit.length, f.muted ? 1 : 0,
       `${f.why}: expected ${f.muted ? "a hit" : "no hit"}, got ${JSON.stringify(hit.map((g) => g.line))} from ${JSON.stringify(f.src)}`);
   }
@@ -296,8 +306,7 @@ test("the sweep keys on the defect, not on one spelling of it", () => {
 
 test("the --verify half keys on shape, not on a list of variable names", () => {
   for (const f of REFS) {
-    const hit = scan("fixture.sh", f.src).filter((g) => failureIsFatal(g)
-      && />\/dev\/null/.test(g.line) && resolvesARef(g) && !/--verify\b/.test(g.cmd));
+    const hit = scan("fixture.sh", f.src).filter(isUnverifiedGuard);
     assert.equal(hit.length, f.unverified ? 1 : 0,
       `${f.why}: expected ${f.unverified ? "a hit" : "no hit"}, got ${JSON.stringify(hit.map((g) => g.line))} from ${JSON.stringify(f.src)}`);
   }
