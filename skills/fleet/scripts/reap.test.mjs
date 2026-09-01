@@ -1974,3 +1974,45 @@ test("the design spec's script-surface row carries the in-progress decline this 
   // The payload shape a reader parses against, stated where the reasons are.
   assert.ok(row.includes("worktreesRemoved[]"), `the row must state the key this sweep writes.\nrow: ${row}`);
 });
+
+test("a [gone] branch whose worktree path holds a newline is kept, never reaped (#551)", (t) => {
+  // The branch sweep matched on the `branch` line, so the MATCH was never
+  // affected — only the path it reported and acted on, which the plain
+  // porcelain cut at the newline. Measured before the fix on this shape: the
+  // dry run printed `would remove worktree …/33-slug`, a path not on disk, and
+  // `reaped:["…"]` with it.
+  const w = repo(t);
+  mergedGoneBranchWithWorktree(w, "feature/newline", "merged work", join(w, ".worktrees", "33-slug\ntail"));
+  // ACCEPT, in the SAME run and the same listing: an ordinary [gone] branch
+  // must still be reaped. Without it a `nl_path` hard-wired true passes every
+  // assertion below while stranding the whole sweep.
+  const ok = mergedGoneBranchWithWorktree(w, "feature/ordinary", "merged work");
+
+  const { json } = runReap(w, []);
+  assert.deepEqual(json.reaped, ["feature/ordinary"], "the ordinary branch is untouched by the refusal");
+  assert.deepEqual(json.worktreesRemoved, [ok], "and its worktree is still the one predicted for removal");
+  const kept = json.kept.find((k) => k.branch === "feature/newline");
+  assert.ok(kept, `the newline branch must be reported, never silently walked past: ${JSON.stringify(json.kept)}`);
+  assert.match(kept.reason, /holds a newline in its path/);
+  assert.ok(branchExists(w, "feature/newline"), "and nothing about it may be deleted");
+});
+
+test("a [gone] branch whose worktree is a dangling symlink is kept, never reaped (#725)", (t) => {
+  // `gone()` followed the link, called the path established-absent, and this
+  // sweep's own comment says an absent directory "holds no work" and falls
+  // through to the removal. Measured before the fix: `would remove worktree`
+  // and `reaped:["feature/dangling"]`. A dangling worktree link is also what
+  // release-ticket.sh's rc-255 halt path leaves behind, with the branch and the
+  // in-progress label still live — so this is a live claim, not residue (#728).
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/dangling", "merged work");
+  rmSync(wt, { recursive: true, force: true });
+  symlinkSync(join(w, "nowhere"), wt);
+
+  const { json } = runReap(w, []);
+  assert.deepEqual(json.reaped, [], "nothing may be reaped over a path that is occupied");
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.match(json.kept.find((k) => k.branch === "feature/dangling").reason, /cannot tell whether worktree/);
+  assert.ok(branchExists(w, "feature/dangling"));
+  assert.equal(lstatSync(wt).isSymbolicLink(), true, "and the link itself is untouched");
+});

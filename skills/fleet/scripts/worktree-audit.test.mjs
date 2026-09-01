@@ -420,6 +420,77 @@ test("an ordinary worktree is byte-identical — the escaping accepts what it sh
 // worktree got a full audit of every worktree back at exit 0, first row the
 // main checkout. Refuse instead, same contract as the missing-json.sh case
 // below: exit 2, nothing on stdout.
+test("a worktree path holding a newline is refused, never truncated (#551)", (t) => {
+  // The plain porcelain ends every attribute with a newline, so a path holding
+  // one split into two records: `substr($0,10)` stopped at the newline, and the
+  // `while IFS=<TAB> read -r` loop below it stopped there a second time. This
+  // script then reported `ahead=0 dirty=0 readable:true` about a path not on
+  // disk — a clean, confident answer, which is what the fleet controller reads
+  // to decide whether a replacement member would redo work or destroy it.
+  //
+  // The branch name cannot carry the newline (git rejects a control byte in a
+  // ref), so the worktree is added by hand rather than through addWorktree.
+  const w = repo(t);
+  const ordinary = addWorktree(w, "plain-77");
+  const wt = join(w, ".worktrees", "fix-33\nslug");
+  git(w, "worktree", "add", "-q", wt, "-b", "fix/33-slug", "origin/main");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0, "one unreadable entry must not take the whole audit down");
+  assert.match(stderr, /path holds a newline/, "the refusal names the problem");
+
+  // jstr renders the substituted byte as a space — the treatment every C0 byte
+  // without a JSON short form gets — so the reported path is WHOLE with the
+  // newline neutralised, never cut at it.
+  const reported = json.map((e) => e.worktree);
+  assert.ok(
+    reported.some((x) => x.startsWith(`${w}/.worktrees/fix-33`) && x.endsWith("slug")),
+    `the whole path must survive to the payload: ${JSON.stringify(reported)}`,
+  );
+  assert.ok(
+    !reported.includes(join(w, ".worktrees", "fix-33")),
+    "the truncated path is what this ticket exists to stop being reported",
+  );
+  const cut = json.find((e) => e.worktree.endsWith("slug"));
+  assert.deepEqual(
+    { readable: cut.readable, ahead: cut.ahead, dirty: cut.dirty },
+    { readable: false, ahead: null, dirty: null },
+    "nothing on disk was checked through that path, so nothing may be claimed about it",
+  );
+
+  // ACCEPT. A sibling ordinary worktree in the SAME listing must be audited
+  // exactly as before — otherwise this pins that the guard refuses, not that it
+  // discriminates, and a `nl_path` hard-wired true would pass every line above.
+  assert.deepEqual(
+    (({ worktree, ahead, dirty, readable }) => ({ worktree, ahead, dirty, readable }))(entryFor(json, ordinary)),
+    { worktree: ordinary, ahead: 0, dirty: 0, readable: true },
+  );
+});
+
+test("a dangling symlink at a worktree path is occupied, not MISSING on disk (#725)", (t) => {
+  // `gone()` used `-e`, which STATS, so a dangling link was `-e` false and read
+  // as established-absent — and this script reported `MISSING on disk` with
+  // zero counts for a path `git worktree add` treats as occupied. Measured
+  // before the fix, exactly that. The wording stays hedged: such a link is
+  // rc-0 residue OR release-ticket.sh's rc-255 halt path with the branch and
+  // the in-progress label still alive, and only the hedge is true of both (#728).
+  const w = repo(t);
+  const wt = addWorktree(w, "33-slug");
+  rmSync(wt, { recursive: true, force: true });
+  symlinkSync(join(w, "nowhere"), wt);
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  assert.doesNotMatch(stderr, /MISSING on disk/, "a link IS there — absence is the one thing this is not");
+  assert.match(stderr, /exists but is not a directory/);
+  const e = entryFor(json, wt);
+  assert.deepEqual(
+    { readable: e.readable, ahead: e.ahead, dirty: e.dirty },
+    { readable: false, ahead: null, dirty: null },
+    "null counts, never the 0/0 that reads as a clean worktree holding no work",
+  );
+});
+
 test("a positional argument is refused, not silently discarded (#525)", (t) => {
   // No `addWorktree` here on purpose: `repo(t)` alone already yields one
   // auditable worktree (the main checkout), so an un-guarded script still
