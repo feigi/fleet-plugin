@@ -19,9 +19,10 @@
 //      file.trim() === "")` reds this test and nothing else.
 //   2. The DIFFERENTIAL. The wiring pin is a text-lift, and a text pin proves
 //      a spelling, never a behaviour: it stays green if the predicate itself
-//      is gutted. This one runs arg()'s reader and ledger.mjs's reader over
-//      the same values and requires the same verdict, so a copy that reappears
-//      DRIFTED reds here even if it is spelled to satisfy test 1.
+//      is gutted, and it is blind to a regression ABOVE the pinned line that
+//      corrupts the value before it arrives. This one runs all three readers
+//      over the same values and requires the same verdict, so a copy that
+//      reappears DRIFTED reds here even if it is spelled to satisfy test 1.
 //   3. The must-ACCEPT pin. Every case in 1 and 2 is input the rule must
 //      REFUSE, and a rule that refused everything would satisfy both. The
 //      predicates are fed input they must accept, including the neighbours the
@@ -29,11 +30,19 @@
 //      `--` anywhere but the front, and a longer flag name that merely shares
 //      a prefix with the one being asked about.
 //
-// KNOWN CEILING on test 1, the same one strip-comments.mjs's own header
+// KNOWN CEILING on test 1, the presence-pin ceiling member-prompt-prose.test.mjs
 // records: it asserts each refusal LINE routes through a predicate. It cannot
 // prove some other line further down does not re-refuse on a hand-written
 // rule of its own. Test 2 is the backstop for exactly that, on the values it
-// samples.
+// samples. (Not strip-comments.mjs's ceiling, which is about trailing `code;
+// // note` surviving the strip — measured, closing that one closes a
+// different escape and leaves this one open.)
+//
+// SECOND CEILING, disclosed rather than fixed: these are text pins, so they
+// answer a spelling. The `^` anchors mean re-indenting a pinned line reds
+// them though nothing executable changed. Import ORDER and import LAYOUT are
+// deliberately not pinned — each imported name is matched on its own, and
+// `[^}]*` spans newlines — so a reflow or a reorder is free.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
@@ -61,16 +70,22 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
   assert.match(arg, /if \(hasEqualsForm\(name\)\) die\(`--\$\{name\} is a boolean flag/, "has()'s `=` guard restates the rule instead of calling hasEqualsForm");
 
   const ledger = src("ledger.mjs");
-  // One line, because arg.test.mjs's #367 wiring pin matches the import with
-  // `[^}]*` and cannot span a newline — a reflow that splits this import
-  // silently unpins die()'s migration in a different file.
-  assert.match(ledger, /^import \{[^}]*\bisFlagLike\b[^}]*\bhasEqualsForm\b[^}]*\} from "\.\/arg\.mjs";/m, "ledger.mjs no longer imports both predicates from arg.mjs on one line");
+  // Each name on its own, because what must hold is that it comes from
+  // arg.mjs — not the order, and not the layout. `[^}]*` DOES span newlines
+  // (measured), here and in arg.test.mjs's #367 wiring pin, so a reflow of
+  // either import unpins nothing.
+  for (const fn of ["isFlagLike", "hasEqualsForm"]) {
+    assert.match(ledger, new RegExp(String.raw`^import \{[^}]*\b${fn}\b[^}]*\} from "\./arg\.mjs";`, "m"), `ledger.mjs no longer imports ${fn} from arg.mjs`);
+  }
   // Each assertion pins the predicate call AND the wording beside it: the
   // wording is deliberately ledger.mjs's own, not generated from a flag name,
   // and a fix that unified the messages would be the other half of #567's AC
   // going the wrong way.
-  assert.match(ledger, /^if \(hasEqualsForm\("file", argv\)\) die\("--file needs a space-separated value, not --file="\);$/m, "ledger.mjs's --file= guard drifted from arg.mjs's rule or lost its own wording");
-  assert.match(ledger, /^if \(hasEqualsForm\("require-file", argv\)\) die\("--require-file is a boolean flag, not --require-file="\);$/m, "ledger.mjs's --require-file= guard drifted from arg.mjs's rule or lost its own wording");
+  // No `$`: stripComments blanks whole-line comments only, so a trailing
+  // `// note` survives the strip and would red an end-anchored pin over a
+  // line whose code did not change.
+  assert.match(ledger, /^if \(hasEqualsForm\("file", argv\)\) die\("--file needs a space-separated value, not --file="\);/m, "ledger.mjs's --file= guard drifted from arg.mjs's rule or lost its own wording");
+  assert.match(ledger, /^if \(hasEqualsForm\("require-file", argv\)\) die\("--require-file is a boolean flag, not --require-file="\);/m, "ledger.mjs's --require-file= guard drifted from arg.mjs's rule or lost its own wording");
   assert.match(ledger, /if \(fileIdx !== -1 && file && isFlagLike\(file\)\) die\("--file needs a path"\);/, "ledger.mjs's --file value guard drifted from arg.mjs's rule or lost its own wording");
 
   const memberOutcomes = src("member-outcomes.mjs");
@@ -81,12 +96,12 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
   // — member-outcomes.mjs's copy was `!file || file.startsWith("--")`, the rule
   // with that clause missing, and `--file "   "` was accepted for it. Nothing
   // outside arg.mjs's own predicate should spell it again.
-  for (const name of ["ledger.mjs", "member-outcomes.mjs"]) {
-    assert.doesNotMatch(src(name), /trim\(\) === ""/, `${name} hand-writes the blank-value rule again instead of calling isFlagLike`);
+  for (const [name, text] of [["ledger.mjs", ledger], ["member-outcomes.mjs", memberOutcomes]]) {
+    assert.doesNotMatch(text, /trim\(\) === ""/, `${name} hand-writes the blank-value rule again instead of calling isFlagLike`);
   }
 });
 
-// The two readers, run for real over the same values. `arg()` is exercised
+// The three readers, run for real over the same values. `arg()` is exercised
 // through a throwaway script rather than in-process because it reads the live
 // process.argv and exits the process on refusal — both of which a test runner
 // cannot host.
@@ -114,8 +129,14 @@ function probeFixture(t) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
 
+  // member-outcomes.mjs takes a session dir positional and refuses before it
+  // reaches the --file rule if that dir has no readable `subagents`, so the
+  // probe would otherwise measure the wrong guard.
+  mkdirSync(join(dir, "session", "subagents"), { recursive: true });
+
   const run = (script, args) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env, cwd: dir });
   const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
+  const MEMBER_OUTCOMES = fileURLToPath(new URL("./member-outcomes.mjs", import.meta.url));
   return {
     // "Refused BY THIS RULE", never merely "exited non-zero": an accepted odd
     // path sends ledger.mjs on to a missing file and a tracker it cannot
@@ -128,17 +149,39 @@ function probeFixture(t) {
       const r = run(LEDGER, ["--file", value, "check", "some subject"]);
       return r.status === 2 && /--file needs a path|--file needs a space-separated value/.test(r.stderr);
     },
+    // The third copy site. Pinned by SOURCE TEXT alone until #1128, which is
+    // a spelling and not a behaviour: the mutation that reds nothing is one
+    // ABOVE the `if (isFlagLike(file))` line, corrupting `file` before it
+    // arrives — measured, `const file = (raw ?? "").trim() || <default>` left
+    // every member-outcomes test green while `--file "   "` wrote the
+    // production metrics path at exit 0. Only a spawn sees that.
+    viaMemberOutcomes: (value) => {
+      const r = run(MEMBER_OUTCOMES, [join(dir, "session"), "--file", value]);
+      return r.status === 2 && /--file needs a path/.test(r.stderr);
+    },
     viaArgRaw: (args) => run(join(dir, "probe.mjs"), args),
     viaLedgerRaw: (args) => run(LEDGER, args),
   };
 }
 
-test("arg()'s reader and ledger.mjs's reader reach the same verdict — the copies cannot drift", (t) => {
+test("all three readers reach the same verdict on the shared rule — the copies cannot drift", (t) => {
   const p = probeFixture(t);
 
-  // REFUSE on both sides. `--require-file` is #362's own case: the flag that
-  // used to become the path.
-  for (const value of ["--require-file", "--other", "   ", "\t"]) {
+  // REFUSE on all three. The blank spellings are the ones a hand-written copy
+  // has historically dropped — member-outcomes.mjs's copy was `!file ||
+  // file.startsWith("--")`, and `--file "   "` wrote the production metrics
+  // TSV to a whitespace-named path at exit 0.
+  for (const value of ["   ", "\t"]) {
+    assert.equal(p.viaArg(value), true, `arg() must refuse ${JSON.stringify(value)}`);
+    assert.equal(p.viaLedger(value), true, `ledger.mjs must refuse ${JSON.stringify(value)} — its copy has drifted narrower than arg.mjs's rule`);
+    assert.equal(p.viaMemberOutcomes(value), true, `member-outcomes.mjs must refuse ${JSON.stringify(value)} — its copy has drifted narrower than arg.mjs's rule`);
+  }
+
+  // `--`-prefixed values reach the shared rule in only two of the three:
+  // member-outcomes.mjs refuses them one guard earlier, in its own
+  // unknown-option sweep, under wording that names the sweep and not --file.
+  // `--require-file` is #362's own case: the flag that used to become the path.
+  for (const value of ["--require-file", "--other"]) {
     assert.equal(p.viaArg(value), true, `arg() must refuse ${JSON.stringify(value)}`);
     assert.equal(p.viaLedger(value), true, `ledger.mjs must refuse ${JSON.stringify(value)} — its copy has drifted narrower than arg.mjs's rule`);
   }
