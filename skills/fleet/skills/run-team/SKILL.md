@@ -1089,10 +1089,18 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, dimensionsRun, dimensionsUnrun, survived, refuted, unverified}`.
+It returns `{pr, head, snapshot, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Hand those over
-with the rest; never rule on them yourself. `refuted` comes back deliberately as
+with the rest; never rule on them yourself. **`refutersDispatched`, carried on
+every finding, is what tells those two apart** — zero is the policy skip, above
+zero with no surviving vote is the crash — so read the population off that field
+rather than off severity, which records only how much a finding would matter if
+true. `resume` is non-null exactly when that crash population is non-empty, and
+it names the relaunch that replays this run's unchanged prefix from cache and
+re-runs only the calls that died. **Resume beats handing a crash-heavy review
+on**: a deferred crash is a finding nobody ever looked at, and you are the seat
+that can still make something look. `refuted` comes back deliberately as
 well — a refutation is itself a claim, and one has been reversed on new evidence —
 so record it in the ledger's `ruled` line and hand it over only when you reverse
 it. **A 1-1 split is not a verdict** — read the votes, not the band. Three tied
@@ -1219,11 +1227,17 @@ nothing leaves it no gate at all.
 > dispatches the finisher.
 >
 > **Apply `survived` findings. A finding in `unverified` whose refuters ran and
-> crashed always defers** — at `critical` that means every one of them died.
-> Severity records how much a finding would matter if true, never whether
-> anything looked. **A `suggestion` is also in `unverified`, for a different
-> reason — the workflow budgets it 0 refuters by policy — and the rule below,
-> not this one, covers it.**
+> crashed always defers** — and which of the two it is, you read off
+> `refutersDispatched`, never off severity and never off an empty vote list:
+> above zero with nothing surviving means every refuter dispatched against it
+> died, and at `critical` that is every one of them. Severity records how much a
+> finding would matter if true, never whether anything looked. Say *in the
+> deferral* that its refuters crashed rather than that it went unchecked — the
+> run is resumable and I hold the tool that resumes it, so a deferral that names
+> the crash can still be re-verified. **A `suggestion` is also in `unverified`,
+> for a different reason — `refutersDispatched` of zero, the 0-refuter budget
+> the workflow gives that band by policy — and the rule below, not this one,
+> covers it.**
 >
 > **A `suggestion` is budgeted 0 refuters, so it is unchecked until you check
 > it.** For each one, first decide scope: is it inside the scope of the PR's own
