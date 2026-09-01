@@ -1599,6 +1599,94 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
   assert.equal(existsSync(dir), false, `cliFixture registered no cleanup on its test: ${dir} survived it`);
 });
 
+// ── A stray flag in check's/filed's subject tail (#584) ─────────────────────
+//
+// `--file`/`--require-file` are spliced out of argv by NAME before `cmd`/
+// `rest` are ever split, so a correctly-spelled flag never reaches here — only
+// a MISSPELLED one survives into the tail. #362 closed the swallow at the
+// `--file`/`--require-file` positions; this is the tail beyond them, where a
+// stray token used to fold straight into the duplicate-filing subject.
+//
+// The measured defect: `check --requre-file "widget guard missing"` searched
+// for subject "--requre-file widget guard missing" — a DIFFERENT subject than
+// the seeded one — and answered exit 0 where the correctly-spelled invocation
+// answers ALREADY FILED at exit 1.
+test("CLI: a stray flag in check's tail is refused, naming it (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const r = cli(["--file", file, "check", "--requre-file", "widget guard missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /unknown flag --requre-file/);
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// The pin the refuted remedy failed. #584's Agent Brief measured
+// `rest.find(a => a.startsWith("--"))` refusing exactly this invocation — a
+// subject that legitimately begins with `--`, given as the documented ONE
+// argument. It must still be accepted, and reach the tracker query unchanged.
+test("CLI: a subject legitimately starting with '--' is accepted unchanged, given as one argument (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+  const subject = "--require-file silently absent when value missing";
+  const r = cli(["--file", file, "check", subject]);
+  assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the tracker query unchanged");
+});
+
+// The guard's own false-positive class, distinct from the pin above: an
+// unquoted multi-word subject that carries NO `--` token at all must stay
+// accepted exactly as before — tail LENGTH alone must never be what triggers
+// the refusal, only a `--`-prefixed element sharing the tail with it.
+test("CLI: an unquoted multi-word subject with no stray flag is still accepted (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#1 widget guard missing"]));
+  const r = cli(["--file", file, "check", "widget", "guard", "missing"]);
+  assert.equal(r.status, 1, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /ALREADY FILED/);
+});
+
+// Known residual, deliberately left open (#584's Agent Brief): a stray flag
+// with no subject at all is a ONE-element tail, so the guard above never
+// fires on it — it is accepted as the subject itself. Degenerate and
+// harmless: it searches for that literal string and finds nothing. Pinned so
+// a future change does not start refusing it under the belief that widening
+// the guard closes a real gap.
+test("CLI: a stray flag alone, with no subject, is accepted as the degenerate subject (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+  const r = cli(["--file", file, "check", "--requre-file"]);
+  assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).subject, "--requre-file");
+});
+
+// `filed` takes the same free-text tail, past its issue-number argument
+// (`subjectParts`, not `rest` — the issue number sits ahead of it), and is
+// refused by the same rule.
+test("CLI: a stray flag in filed's subject is refused, naming it (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+  const r = cli(["--file", file, "filed", "999", "--typo-flag", "some new subject"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /unknown flag --typo-flag/);
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// filed's own subject-legitimately-starting-with-'--' pin, mirroring check's.
+test("CLI: filed accepts a subject legitimately starting with '--', given as one argument (#584)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+  const subject = "--flag-like subject text";
+  const r = cli(["--file", file, "filed", "888", subject]);
+  assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the ledger unchanged");
+});
+
 // ── The payload subcommands on a pipe (#246) ─────────────────────────────────
 //
 // `console.log(payload)` followed by `process.exit()` truncates on a pipe.

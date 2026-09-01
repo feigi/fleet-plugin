@@ -196,10 +196,14 @@ export function makeHas(die) {
 // FREE-TEXT tail, where a `--` token is legitimately DATA — `check
 // "--require-file silently absent when value missing"` works today and is the
 // shape of issue titles in this repo — so this sweep would refuse working
-// invocations, which #365's own AC calls worse than the bug. The cost is that
-// a stray flag in that tail is still absorbed into the duplicate-filing
-// subject at exit 0. Measured, unowned since #362 closed without covering it,
-// and tracked in #584; do not close it with a bare `startsWith("--")` guard.
+// invocations, which #365's own AC calls worse than the bug. #584 closed the
+// stray-flag gap that left open WITHOUT routing through this sweep:
+// ledger.mjs's own refuseStrayInTail() refuses a `--`-prefixed token only
+// when it shares the tail with something else — the shape an unquoted stray
+// flag makes, never the shape a legitimate one-argument subject makes — so a
+// subject that legitimately opens with `--` still reaches the tracker query
+// unchanged. Not a bare `startsWith("--")` guard: that was measured refusing
+// exactly the legitimate case above (#584's Agent Brief).
 export function makeSweep(die) {
   return function sweep(known) {
     for (const a of process.argv.slice(2)) {

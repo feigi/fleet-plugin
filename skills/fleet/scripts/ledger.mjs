@@ -157,6 +157,23 @@ function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
+// #584: `check`/`filed` read a free-text tail where a `--`-prefixed token can
+// legitimately BE the subject (arg.mjs's makeSweep() comment names why
+// sweep() stays out of this file). The documented calling convention hands
+// the subject as ONE argument though — `check "<subject>"`, `filed <issue>
+// "<subject>"` — so an unquoted stray flag reveals itself only by splitting
+// that one argument into more than one: `check --requre-file "widget guard
+// missing"` is a two-element tail, `check "--require-file silently absent
+// when value missing"` is one. A one-element tail is accepted unchanged,
+// whatever it starts with; a multi-element tail carrying a `--`-prefixed
+// element is refused by name. Structural, not a distance threshold, so
+// #365's no-fuzzy-did-you-mean exclusion is not engaged.
+function refuseStrayInTail(tail) {
+  if (tail.length <= 1) return;
+  const stray = tail.find((a) => a.startsWith("--"));
+  if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
+}
+
 // Set by load(), the only function that reads the file, so `ledger.ok` can
 // report what the parse saw rather than what a later stat() guesses (#231).
 let ledgerParsed = false;
@@ -256,6 +273,7 @@ if (cmd === "read") {
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
+  refuseStrayInTail(subjectParts);
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
   save(data);
@@ -303,6 +321,7 @@ function runCheck() {
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
     );
   }
+  refuseStrayInTail(rest);
   const subject = rest.join(" ");
   if (!subject) die("usage: ledger.mjs check <subject>");
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
