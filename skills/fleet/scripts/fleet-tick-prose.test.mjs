@@ -39,7 +39,8 @@ test("the reconcile block names the script and the flags a caller must pass", ()
   assert.match(s, /fleet-tick\.mjs/);
   // Every required flag, individually. A block naming the script without them
   // is unrunnable prose: the script refuses each missing one at exit 2.
-  for (const flag of ["--implementers", "--reviewers", "--merge-bots", "--pool"]) {
+  for (const flag of ["--implementers", "--reviewers", "--merge-bots", "--pool",
+    "--reviews-ready", "--merge-holds"]) {
     assert.ok(s.includes(flag), `reconcile block does not name ${flag}`);
   }
 });
@@ -49,6 +50,19 @@ test("the reconcile block says the live counts are the controller's to state", (
   // invents one from the ledger — the guess whose over-count is the #3 stall.
   assert.match(reconcileBlock(), /refuses rather than\s+defaulting them/);
   assert.match(reconcileBlock(), /a ledger row is a\s+dispatch/);
+});
+
+test("the reconcile block says what the two row-suppressing inputs mean", () => {
+  // Naming the flags is not enough for these two: a caller who reads
+  // `--reviews-ready` as the backlog, or `--merge-holds` as optional, gets back
+  // exactly the non-actionable ACTIONs #590 was filed for. The obligation is
+  // that the block distinguishes them from the label reads the script makes
+  // for itself.
+  const s = reconcileBlock();
+  assert.match(s, /fix-applier\s+applies findings/);
+  assert.match(s, /The backlog is \*\*not\*\* this number/);
+  assert.match(s, /held-behind-#<lower>/);
+  assert.match(s, /moves no label/);
 });
 
 test("the reconcile block admits it is edge-triggered only", () => {
@@ -101,4 +115,10 @@ test("the review-backlog definition states what the script actually counts", () 
   const def = section("- **review backlog**", "\n\n**Reviews are the bottleneck", "review-backlog definition");
   assert.match(def, /open PR without `ready-to-merge`/);
   assert.match(def, /earlier than the definition above, never\s+later/);
+  // Both halves of the closing-issue clause. The predicate alone is a rule a
+  // reader can only obey; the reason is what stops the next narrowing pass
+  // from dropping it as a stray filter, since a PR nothing will ever review
+  // floors the gate's input permanently rather than transiently.
+  assert.match(def, /that closes an\s+issue/);
+  assert.match(def, /nothing in the run can drain/);
 });
