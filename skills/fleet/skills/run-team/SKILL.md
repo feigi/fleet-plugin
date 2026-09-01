@@ -1744,9 +1744,9 @@ Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `SendMessage` you what it merged and what it held, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step.
 
-**Put both gate traps in the bot's brief, not in a follow-up message.** A bot
+**Put every gate trap in the bot's brief, not in a follow-up message.** A bot
 already looping cannot be corrected — the loop consumes the turns a correction
-would land in. Both are measured, and they fail in opposite directions:
+would land in. Each is measured, and they fail in different directions:
 
 - **`ci-state --quiet` is unsatisfiable-FALSE.** It drops `jobs` and `missing`,
   so a gate reading per-job state from it can never be satisfied. One bot polled
@@ -1763,6 +1763,28 @@ would land in. Both are measured, and they fail in opposite directions:
   suppressed, reads as a check that silently did not run. Same root cause as the
   `PIPESTATUS` trap above, opposite failure direction — so name the variable
   anything else (`ci_status`).
+- **A `jq` exit outside 0 and 1 is not a verdict.** `jq -e` exits 0 when its
+  last output was truthy and 1 when it was false or null — the outcomes that
+  invite reading the code as a boolean. Every other exit means the gate never
+  compared a field at all: measured on jq-1.7.1-apple, **3** the program did not
+  compile (a full-width `｜` typed where `|` was meant, which is how the gate
+  merging #1172 hit it), **2** a usage error, **4** the program yielded no output
+  (an empty payload has no field to compare), **5** the input did not parse or
+  the program raised. That table is for the boolean comparison this spec
+  prescribes. A *filtering* gate — `jq -e 'select(.verdict=="pass")'` — is
+  outside it: such a gate answers by emitting or withholding its input, so on a
+  payload that says `fail` it exits **4** where the boolean form exits 1, and
+  that 4 is a genuine refusal by a gate that did look. Read an exit against the
+  shape of the gate that produced it. Each boolean reading of a non-0/1 exit is
+  wrong, in a different direction: `[ $rc -eq 0 ]` blocks a mergeable PR on a
+  typo, `[ $rc -ne 1 ]` merges on a gate that never parsed. Same rule as
+  `inflight.sh`, `verify-sha.sh` and `staleness.mjs` exit 2 — could-not-look is
+  a third answer carried beside pass and fail, never folded into either. Scope
+  the response to what the exit can change: 5, and 4 while the payload may still
+  be filling, can clear on a re-read, so re-run the gate once and report if the
+  same exit repeats; 3 and 2 are properties of the program and the invocation,
+  so a second run returns them by construction — report and stop without
+  re-running.
 
 So **gate on the payload's own fields** — `verdict`, `behind`, `missing`, the
 per-job conclusions, and `prHead == runHeadSha` — read with `jq` from an
