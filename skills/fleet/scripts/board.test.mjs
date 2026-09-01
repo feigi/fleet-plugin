@@ -98,7 +98,7 @@ test("mapCi: a legitimately unknown state — status null, in_progress, no-ci �
 });
 
 // #1170: JSON.parse("null") succeeds and yields d === null, so the d.status
-// read two lines below the parse threw a TypeError out of mapCi — and mapCi
+// read that followed the parse threw a TypeError out of mapCi — and mapCi
 // runs inside gather()'s per-PR loop, uncaught until serve's whole-tick catch,
 // so one PR's bare "null" aborted that tick's board.json rewrite for every PR.
 // Every other non-object JSON payload (true, a number, a string, an array, {})
