@@ -430,6 +430,43 @@ first or tell the member the runner is absent and to run docker-free suites
 directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
 config has no `globalSetup`, so there is no stack to collide on).
 
+**A reused worktree may also be on the wrong COMMIT.** `git worktree add <path>
+<branch>` checks out the existing LOCAL branch and never consults the remote, so
+a branch a previous run left behind wins over the rebased `origin/` ref that is
+actually the PR. Measured in a scratch repo (git 2.50.1): with the branch rebased
+on the remote and a stale local ref standing, `git worktree add <path> <branch>`
+checked out the stale commit and printed `HEAD is now at <stale-sha> <subject>` —
+the same subject the PR head carries, because a rebase preserves it. Neither
+commit was an ancestor of the other, so *behind* is the wrong model; it is a
+fork. Every other signal reads normal too: `git worktree list` shows the worktree
+present on the expected branch, and the tree is clean. `claim-ticket.sh` never
+touches this path — it claims only fresh tickets, and builds those from
+`origin/main`.
+
+**The two reuse failures are not symmetric.** A missing runner fails LOUDLY: the
+member stalls on a script that is not there. A stale base fails SILENTLY and
+produces confident wrong output — a review cut its immutable snapshot at the
+stale commit and a fix-applier was dispatched into it, halted only before a push
+that would have been a non-fast-forward.
+
+So, when you re-create a worktree for an already-open PR:
+
+- **Create it detached from the remote ref**, never from the bare branch name:
+  `git worktree add --detach <path> origin/<branch>`. Same scratch repo, same
+  moment: this landed on the remote's commit. It removes the mechanism rather
+  than catching it, and leaves no local ref for the next run to inherit.
+- **Then verify, and refuse on mismatch.** Compare
+  `git -C <path> rev-parse HEAD` against
+  `gh pr view <N> --json headRefOid -q .headRefOid`. Unequal → dispatch nothing
+  into that worktree, and report it naming BOTH commits, since their subjects
+  will not tell them apart.
+
+`review-pr.js` refuses a snapshot whose head is not the PR head, so the workflow
+review path is backstopped — except when `gh pr view` returned no head at all,
+which skips the compare rather than refusing on it. Its run log names that case:
+`PR head (absent): head check SKIPPED`. A worktree you hand to an agent directly
+is not. Verify here anyway.
+
 ## Phase 2 — dispatch implementers
 
 **Dispatch every implementer as `subagent_type: "fleet-implementer"`, and still

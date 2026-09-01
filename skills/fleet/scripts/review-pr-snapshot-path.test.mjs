@@ -71,6 +71,150 @@ test("a snapshot that omitted pathVerified is refused, not assumed true", () => 
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
 });
 
+// #532: the head compare already existed — in `usableDiff`, where a
+// mismatching `prHead` cost the review its DIFF and nothing else. The review
+// then ran to completion against a tree that was not the PR, on the fallback
+// read rules, and reported findings about code the PR does not contain. That is
+// the measured case: a carried-over worktree re-created with
+// `git worktree add <path> <branch>`, which checks out a leftover LOCAL branch
+// and never consults the remote, so the tree sat at a pre-rebase commit whose
+// subject line was byte-identical to the PR head's. Neither commit was an
+// ancestor of the other. The refusal is what the comparison was missing.
+test("a tree whose head is not the PR's head is refused, naming both commits", () => {
+  const reason = snapshotMissing({ path: "/tmp/snap", head: "cff7330", pathVerified: true, prHead: "9e8ee3d" });
+  assert.equal(typeof reason, "string", "a present, mismatching prHead must yield a reason");
+  assert.match(reason, /cff7330/, "the reason must name the commit the tree is actually at");
+  assert.match(reason, /9e8ee3d/, "the reason must name the PR head it was measured against");
+});
+
+// The ACCEPT half, and the one this guard is most likely to get wrong. An
+// ABSENT `prHead` is not a mismatch: `gh pr view` can fail while everything
+// else succeeded, and turning missing input into a refusal would let a network
+// blip cancel a runnable review — the inversion `usableDiff`'s own comment
+// records for the diff, now with a whole review behind it instead of a diff.
+// Absent and mismatching are different cases and stay different.
+test("a snapshot with no prHead at all still proceeds", () => {
+  assert.equal(
+    snapshotMissing({ path: "/tmp/snap", head: "abc123", pathVerified: true }),
+    null,
+    "a missing prHead must not refuse an otherwise good snapshot",
+  );
+});
+
+// The normal path, plus the abbreviation tolerance that keeps it normal.
+// `prHead` is 40 chars from `gh`; `head` is whatever the snapshot agent relayed
+// for "the HEAD sha", and an agent may abbreviate it. Under a raw `!==` those
+// two matching shas compare unequal — which used to cost a diff and would now
+// cost the entire review, so the prefix tolerance is load-bearing in both
+// directions here in a way it was not before.
+test("a matching head proceeds, abbreviated on either side", () => {
+  const full = "a".repeat(40);
+  const ok = (snap) => snapshotMissing({ path: "/tmp/snap", pathVerified: true, ...snap });
+  assert.equal(ok({ head: "abc123", prHead: "abc123" }), null, "an exact match must not be refused");
+  assert.equal(ok({ head: full.slice(0, 7), prHead: full }), null, "an abbreviated head is the same commit");
+  assert.equal(ok({ head: full, prHead: full.slice(0, 7) }), null, "and the same the other way round");
+  // The tolerance must not swallow the case it sits beside: a genuinely
+  // different sha still refuses, at short compare length too.
+  assert.equal(
+    typeof ok({ head: "abc1234", prHead: "abd" + "9".repeat(37) }),
+    "string",
+    "a different sha stays disqualifying however short the compare",
+  );
+});
+
+// The head compare now lives in two places — `usableDiff`, which drops the
+// diff, and `snapshotMissing`, which refuses the review — and the Workflow
+// sandbox forbids `import`, so neither can call a shared helper and still be
+// lifted (see lift.mjs). Two copies of one expression is this repo's recurring
+// disconnect defect, so the copies are pinned to each other rather than to the
+// comparison's own text: the pattern anchors on the `if (snap.prHead && ` guard
+// head and CAPTURES whatever comparison follows it, then compares the two
+// captures. A change to one side that is not made to the other reds here,
+// whatever the expression becomes; a semantics-preserving rewrite applied to
+// BOTH sides stays green. Both directions are measured, in this file's own
+// mutants, because the earlier form of this test asserted a fixed literal and
+// did neither — it red on an identical rewrite of both copies, with a message
+// saying neither copy compared the heads at all, which is backwards.
+//
+// The anchor is the residual literal, and it is the loud direction: rename
+// `prHead` and the count drops rather than the comparison silently ceasing to
+// be pinned.
+test("the head compare in usableDiff and snapshotMissing are the same expression", () => {
+  const compares = [...CODE.matchAll(/^\s*if \(snap\.prHead && (.+?)\)(?: return null;)?$/gm)].map((m) => m[1]);
+  assert.ok(
+    compares.length > 1,
+    `${compares.length} head compare(s) found — the diff drop and the refusal are no longer both armed`,
+  );
+  assert.equal(
+    new Set(compares).size,
+    1,
+    `the two head compares have diverged — one of them now decides on a different test than the other:\n  ${compares.join("\n  ")}`,
+  );
+});
+
+// The refusal above raised the price of an unnormalized `head` from one diff to
+// the whole review: `prHead` is 40 lowercase hex from `gh`, `head` is whatever
+// an agent relayed for `git rev-parse HEAD`, and that command prints a trailing
+// newline. Measured before the fix: `"9e8ee3d\n"` against a 40-char `prHead`
+// beginning `9e8ee3d` refused, naming two shas that look identical.
+//
+// The normalization is a top-level statement rather than a function, so it is
+// lifted as TEXT and RUN. A presence pin would stay green on a normalization
+// that had stopped normalizing, which is the failure this test exists to catch.
+test("a relayed head is normalized before the refusal ever sees it", () => {
+  // Anchored on the ASSIGNMENT, not on `.trim()`: anchoring on the operation
+  // means a normalization that stops normalizing reads as one that was deleted,
+  // and the assertions below never run to say what actually broke.
+  const block = CODE.match(/if \(snap\) \{[^}]*snap\.head = [^}]*\}/);
+  assert.ok(
+    block,
+    "no `if (snap) { … snap.head = … }` normalization ahead of snapshotMissing — it was deleted, or reshaped past what this pins",
+  );
+  assert.ok(
+    CODE.indexOf(block[0]) < CODE.indexOf("const missingReason = snapshotMissing(snap);"),
+    "the normalization runs AFTER the refusal — it can no longer keep a relay artifact from cancelling the review",
+  );
+  const normalize = new Function("snap", block[0]);
+  const full = "deadbee" + "0".repeat(33);
+  const after = (head, prHead) => {
+    const snap = { path: "/tmp/snap", pathVerified: true, head, prHead };
+    normalize(snap);
+    return snapshotMissing(snap);
+  };
+  assert.equal(after("deadbee\n", full), null, "a rev-parse newline is a relay artifact, not a different commit");
+  assert.equal(after(" deadbee ", full), null, "and neither is surrounding whitespace");
+  assert.equal(after("DEADBEE", full), null, "and neither is case");
+  // The tolerance must not swallow the case it sits beside, here either.
+  assert.equal(typeof after("cff7330", full), "string", "a genuinely different sha still refuses after normalizing");
+  const absent = { path: "/tmp/snap", pathVerified: true, head: "deadbee" };
+  normalize(absent);
+  assert.equal(snapshotMissing(absent), null, "normalizing must not invent a prHead the snapshot agent never sent");
+  // A dead snapshot agent returns falsy, and `snapshotMissing`'s first guard is
+  // what names that. Normalizing must not beat it to the dereference.
+  assert.doesNotThrow(() => normalize(null), "a falsy snap must reach snapshotMissing's own guard, not a TypeError here");
+});
+
+// `snapshotMissing`'s head compare is guarded on `snap.prHead &&`, so a failed
+// `gh pr view` skips the refusal — deliberately, per the test above — and the
+// run log used to be BYTE-IDENTICAL to a run where the two heads were compared
+// and matched. That is the #532 case with the evidence removed: a wrong-commit
+// review and a verified one read the same afterwards. Measured by running the
+// log statement itself, not by matching its source, so a line that stops
+// distinguishing the two reds here.
+test("the snapshot log line says when the head check was skipped", () => {
+  const line = CODE.split("\n").find((l) => l.startsWith("log(`snapshot "));
+  assert.ok(line, "the snapshot run-log line is gone — the whole diff decision below it is unobservable without it");
+  const say = (snap) => {
+    let out;
+    new Function("snap", "log", line)(snap, (m) => (out = m));
+    return out;
+  };
+  const skipped = say({ path: "/tmp/snap", head: "deadbee" });
+  const checked = say({ path: "/tmp/snap", head: "deadbee", prHead: "deadbee" + "0".repeat(33) });
+  assert.notEqual(skipped, checked, "a skipped head check and a passed one log the same line — the two runs cannot be told apart");
+  assert.match(skipped, /SKIPPED/, "the skip must be NAMED, not left to be inferred from a field the line does not print");
+});
+
 // Bound at both ends via prose-pin.mjs's between() — an unbounded end lets the
 // specialist and refuter prompts further down satisfy the assertions instead,
 // the defect `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the
