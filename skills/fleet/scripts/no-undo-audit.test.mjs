@@ -477,6 +477,15 @@ const ORPHAN_LINE =
  * the wrong call as the one that failed would go unseen. git's own diagnostic
  * is appended after it, so what is pinned here is the prefix, not the line.
  */
+/**
+ * #570's line, and the fourth: the three above are all reached with the reflog
+ * path in hand, this one is reached without it. It says only that the reflog
+ * could not be reached and nothing about what it holds — ORPHAN_LINE's claim
+ * that the reflog "still names entries no ref points at" is a claim about
+ * contents this state has not read and cannot make.
+ */
+const UNREACHED_LINE =
+  "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read";
 const RC_FAILED_LINE =
   "    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
@@ -746,6 +755,81 @@ test("the orphaned-reflog probe resolves from a cwd that is not $wt", (t) => {
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null, "the reflog is under $wt — resolved against the caller's cwd instead, it reads as absent and reports the `0` #376 removes");
   assert.equal(stashLine(r), ORPHAN_LINE);
+});
+
+// #570: the reflog path is resolved lazily, and resolving it needs search
+// permission on every ancestor directory. An unsearchable `logs/refs` makes
+// that call fail, and the `|| die` behind it turned a fault in a field the
+// script declares "reported, not gated" into a refusal of the WHOLE audit —
+// exit 2 with a zero-byte payload, withholding the `clean`, `conflicts` and
+// `atRisk` answers the audit exists to give before an irreversible rebase.
+// The suite already pins that rule twice above, with `unknown must not gate
+// the audit`, for the unreadable-reflog FILE and unreadable-ref FILE faults;
+// the unsearchable DIRECTORY is the same class.
+//
+// Both rows reach the probe: it is entered on an empty list plus a genuinely
+// absent ref, which is what a never-stashed repo looks like and what an
+// orphaned reflog looks like. So the common state — a repo that never stashed
+// at all — is one of them, and needed no stash history to refuse.
+//
+// The die's stated rationale was that a failure here means the repo went away
+// mid-run. These fixtures falsify it: the repository is entirely present, and
+// the worktree status and three earlier revision resolutions have already
+// succeeded on it. A repo that really goes away still refuses from the steps
+// that need it — the status and merge-tree probes both die on their own.
+for (const [why, prepare] of [
+  ["a repository that never stashed", () => {}],
+  ["a stash ref deleted while its reflog survived", (w) => { stashSomething(w); rmSync(join(w, ".git", "refs", "stash")); }],
+]) {
+  test(`an unsearchable reflog directory reports unknown rather than refusing the whole audit — ${why}, #570`, (t) => {
+    if (process.getuid?.() === 0) return t.skip("root searches a 000 directory regardless");
+    const c = repo(t);
+    prepare(c.w);
+    const dir = join(c.w, ".git", "logs", "refs");
+    mkdirSync(dir, { recursive: true });
+    assert.equal(git(c.w, "stash", "list"), "", "both fixtures must leave the list empty — that is what reaches the probe");
+    chmodSync(dir, 0o000);
+    const probe = spawnSync("git", ["-C", c.w, "rev-parse", "--path-format=absolute", "--git-path", "logs/refs/stash"], { env: ENV, encoding: "utf8" });
+    assert.notEqual(probe.status, 0, "fixture must actually defeat the path resolution — that failure is the whole subject");
+
+    const r = audit(c);
+    // Restored here, not in a `t.after`: `repo` registers its own teardown
+    // first and node runs them in that order, so an rmSync that cannot recurse
+    // into a 000 directory fires before any later hook could reopen it.
+    chmodSync(dir, 0o755);
+    assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+    assert.equal(r.jsonError, null, `payload must parse — this used to be zero bytes; got ${r.jsonError?.message}\n${r.stdout}`);
+    assert.equal(r.json.stash, null, "the probe could not look, so a number is not a claim it can make");
+    assert.equal(stashLine(r), UNREACHED_LINE);
+    // The other half of the ruling: this state must not borrow the sentence
+    // that asserts what the reflog CONTAINS.
+    assert.notEqual(stashLine(r), ORPHAN_LINE);
+    // Degrading must not fall through to the confident `0` either: with the
+    // path unresolved, the `-s` test that guards the orphan branch is false
+    // against an empty string and the trailing branch prints the count.
+    assert.doesNotMatch(r.stderr, /stash entries \(repo-global, not gated\): 0$/m);
+    // The audit's real subject still answers, which is the point of degrading.
+    assert.equal(r.json.clean, true);
+    assert.deepEqual(r.json.conflicts, []);
+  });
+}
+
+// The control that keeps the guard above honest in the other direction, and
+// the one state it must NOT reach: a healthy stack short-circuits on the count
+// before the reflog path is ever resolved, so an unsearchable directory lands
+// on the existing unknown line, unchanged.
+test("a healthy stash under an unsearchable reflog directory keeps the sentence it already printed, #570", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches a 000 directory regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  const dir = join(c.w, ".git", "logs", "refs");
+  chmodSync(dir, 0o000);
+
+  const r = audit(c);
+  chmodSync(dir, 0o755); // see the sibling above — `repo`'s teardown runs before any `t.after` here
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null);
+  assert.equal(stashLine(r), UNKNOWN_LINE, "this state never reaches #570's probe — its line must not move");
 });
 
 // The other half of #376, and the more expensive one to get wrong. This script

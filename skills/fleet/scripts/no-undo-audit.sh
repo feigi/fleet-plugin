@@ -328,9 +328,11 @@ fi
 # already absolute from a linked worktree but relative to `-C` from a main one,
 # and this script runs from the CALLER's cwd, not `$wt`'s, so the relative form
 # would look for the reflog under the caller and print the confident `0` this
-# exists to remove. A CEILING it shares with the states above: an unreadable
-# `logs/refs` DIRECTORY defeats the `-s` stat exactly as absence does, so the
-# entries stay named in the reflog and the audit still reports `0` (measured).
+# exists to remove. An unsearchable `logs/refs` DIRECTORY is no longer a
+# ceiling here and never printed the `0` this once recorded: the path
+# resolution needs search permission on every ancestor, so it fails before the
+# `-s` stat, and it now answers unknown on its own line rather than refusing
+# the whole audit (#570 — see the resolution below).
 # `core.logAllRefUpdates=false` is NOT a second one: it suppresses the HEAD
 # reflog, but `git stash push` force-creates `logs/refs/stash` regardless, so
 # such a repo probes normally and reports `unknown` (measured, git 2.50.1).
@@ -375,14 +377,29 @@ sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # Resolved lazily, inside the one state that asks the question: a healthy repo
 # with entries short-circuits on `$stash` and never pays for this call.
-# `|| die` rather than a fallback: `$wt` has already answered three `rev-parse`
-# calls above, so a failure here is the repo going away mid-run, and exit 2 —
-# the question is unanswerable — is what that is. Degrading to an empty path
-# instead would land on `[ -s "" ]`, false, and print the confident `0`.
+#
+# It used to `|| die`, reasoning that `$wt` had already answered three
+# `rev-parse` calls above so a failure here was the repo going away mid-run.
+# Measurement falsified that: `--path-format=absolute` has to realify the path,
+# which needs search permission on every ancestor, so an unsearchable
+# `logs/refs` fails it with the repository entirely present — after the
+# worktree status and those three resolutions have all succeeded on it. No
+# stash history and no deleted ref are needed either, because this branch is
+# what a repo that never stashed looks like. Refusing there withheld `clean`,
+# `conflicts` and `atRisk` — the answers this script exists to give before an
+# irreversible rebase — over a field its own line declares reported, not gated.
+# A repo that really did go away still refuses, from the steps that need it:
+# the status above and the merge-tree probe below each die on their own.
+# `$stash_reflog_rc` rather than a bare empty `$stash_reflog`, because an empty
+# path lands on `[ -s "" ]`, false, and prints the confident `0`; the state
+# gets its own emission below instead of falling through to one. git's own
+# `fatal:` naming the path and the errno is left on stderr, unwrapped, as the
+# operator's whole lead on which directory to look at. #570.
 stash_reflog=
+stash_reflog_rc=0
 if [ "$stash" = 0 ] && [ "$sr_rc" = 1 ]; then
   stash_reflog=$(git -C "$wt" rev-parse --path-format=absolute --git-path logs/refs/stash) \
-    || die "git rev-parse failed in $wt — cannot tell an emptied stash from a deleted refs/stash"
+    || stash_reflog_rc=$?
 fi
 # Two ways to the same answer, and each names its own state. The empty-list
 # states are asked first and keep the sentence they already print, because a
@@ -448,6 +465,16 @@ if [ -n "$msg" ]; then
   diag=$(git -C "$wt" stash list 2>&1 >/dev/null) || true
   if [ -n "$diag" ]; then msg="$msg — $(printf '%s' "$diag" | tr '\n' ' ')"; fi
   printf '%s\n' "$msg" >&2
+elif [ "$stash_reflog_rc" -ne 0 ]; then
+  stash=null
+  # Its own sentence, and asked BEFORE the `-s` test the resolved path feeds:
+  # `$stash_reflog` is empty here, `[ -s "" ]` is false, and the trailing
+  # branch prints the confident `0` this exists to remove. It says only that
+  # the reflog could not be reached. The line below asserts what the reflog
+  # CONTAINS — "still names entries no ref points at" — and that is a claim
+  # about a file this state has not read; one sentence spanning both states
+  # is the conflation the header rule forbids.
+  echo "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read" >&2
 elif [ -s "$stash_reflog" ]; then
   stash=null
   # Its own sentence, not the one above: there `refs/stash` is present and
