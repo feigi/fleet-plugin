@@ -88,11 +88,12 @@ export function makeDie(name) {
 // Rejecting a `--`-prefixed value does forfeit a real capability — a value
 // that legitimately starts with `--` — and staleness.mjs (#238) is a caller
 // that can want one: its `--gone`/`--present` value is a string quoted out of
-// a ticket, and #240's is `--label ready-for-agent`. It documents the
-// restriction in run-team/SKILL.md and lets the refusal land as its
-// could-not-check verdict rather than working around it here, because
-// refusing loudly still beats silently taking the next flag as this one's
-// value.
+// a ticket, and #240's is `--label ready-for-agent`. Refusing loudly here
+// still beats silently taking the next flag as this one's value, so this
+// guard itself does not bend for it. staleness.mjs (#818) instead opts a
+// caller in per flag with its own end-of-options separator, `--gone --
+// '<value>'`, read before arg() ever sees the value — bare, with no `--`
+// immediately before it, this refusal still stands unchanged.
 // #567: the two predicates below ARE those rules, exported so a caller that
 // cannot route through arg()/has() consumes them instead of copying the
 // expression — the header above says which callers and why.
