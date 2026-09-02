@@ -299,3 +299,84 @@ test("both --gone and --present refuses at exit 2 with no payload", (t) => {
   assert.equal(r.json, null);
   assert.match(r.stderr, /opposite questions/);
 });
+
+// #818: the end-of-options separator. Without it, a `--`-prefixed needle can
+// never reach this script's question — arg() refuses it as a missing value,
+// and #240's ticket quotes exactly that shape, `--label ready-for-agent`.
+// `--gone -- '<value>'` reads the token after `--` literally, however it
+// starts.
+test("a --gone needle starting with -- is checked when given after the end-of-options separator", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst flag = '--require-file';\n", "the defect");
+  push(w);
+
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--", "--require-file"]);
+  assert.equal(r.code, 0, `expected live (exit 0), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "live");
+  assert.equal(r.json.needle, "--require-file", "the payload must carry the literal needle, not the separator");
+  assert.equal(r.json.found, true);
+});
+
+// THE CONTROL. This is what proves #61/#169's original refusal survived
+// #818: the identical needle, given bare with no separator, must still be
+// refused — a flag swallowing the next flag as its own value was a real
+// measured defect, and #818 only adds an opt-in past it, never weakens it.
+test("the same --gone needle with NO separator is still refused at exit 2, today's message", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst flag = '--require-file';\n", "the defect");
+  push(w);
+
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--require-file"]);
+  assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json, null, "a refusal must print no verdict at all");
+  assert.match(r.stderr, /^\nstaleness: --gone needs a value$/m);
+});
+
+// --present takes the same path through the separator opt-in as --gone;
+// covered separately because a fix wiring only one of the two flags would
+// pass every --gone case above.
+test("a --present needle starting with -- is checked when given after the separator", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--present", "--", "--not-here"]);
+  assert.equal(r.code, 0, `expected live (exit 0), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "live");
+  assert.equal(r.json.needle, "--not-here");
+  assert.equal(r.json.found, false);
+});
+
+// A needle that does NOT start with -- must answer identically whether or
+// not the separator wraps it — the separator is an opt-in for one shape of
+// value, not a different code path for an ordinary one.
+test("an ordinary needle answers the same with or without the separator", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst wrong = 2;\n", "the defect");
+  push(w);
+
+  const bare = probe(w, ["--path", "src.mjs", "--gone", "const wrong = 2;"]);
+  const separated = probe(w, ["--path", "src.mjs", "--gone", "--", "const wrong = 2;"]);
+  assert.equal(bare.code, separated.code);
+  assert.deepEqual(bare.json, separated.json);
+});
+
+// The separator only counts immediately after the flag it modifies. A value
+// given first with `--` trailing after it is the malformed order, not the
+// opt-in spelling, and must refuse exactly like the no-separator case —
+// otherwise the separator would forgive the exact invocation #61/#169
+// exists to catch.
+test("a -- appearing AFTER the value, not before it, does not opt in — still refused", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--require-file", "--"]);
+  assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json, null);
+  assert.match(r.stderr, /--gone needs a value/);
+});
+
+// The separator with nothing after it is the same "no value" shape as
+// today's bare-flag refusal, reached from the opt-in path instead.
+test("-- as the very last token, with no value after it, refuses needs-a-value", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--"]);
+  assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json, null);
+  assert.match(r.stderr, /--gone needs a value/);
+});

@@ -44,19 +44,41 @@
 import { execFileSync } from "node:child_process";
 import { writeSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "staleness";
 
 const die = makeDie(NAME);
 const arg = makeArg(die);
-const has = makeHas(die);
 const sweep = makeSweep(die);
 const stray = makeStray(die);
 
+// #818: a needle QUOTED OUT OF A TICKET can legitimately start with `--`
+// (#240's is `--label ready-for-agent`), and arg()'s value guard refuses
+// that spelling outright (#61/#169 — see arg.mjs's isFlagLike for why the
+// refusal itself stays). An end-of-options separator opts `--gone`/
+// `--present` into the literal reading: `--gone -- '--value'` is the POSIX
+// convention, explicit at the call site, no second input channel.
+//
+// Given bare, with no `--` immediately after the flag, this defers to arg()
+// unchanged — a `--`-prefixed value still dies "needs a value" exactly as
+// before #818; that refusal is what keeps a flag from swallowing the next
+// flag as its own value, and it is not weakened here. The three tokens
+// (flag, separator, value) are spliced out of process.argv once read, so
+// sweep()/stray() below never see the swallowed `--` or a needle shaped like
+// a flag — either would otherwise die on it as unrecognized.
+function needleArg(name) {
+  const i = process.argv.indexOf(`--${name}`);
+  if (i === -1 || process.argv[i + 1] !== "--") return arg(name);
+  const value = process.argv[i + 2];
+  if (value === undefined || value.trim() === "") die(`--${name} needs a value`);
+  process.argv.splice(i, 3);
+  return value;
+}
+
 const path = arg("path");
-const gone = arg("gone");
-const present = arg("present");
+const gone = needleArg("gone");
+const present = needleArg("present");
 // `--gone`/`--present` are the two shapes a ticket's asked-for change takes,
 // and the caller has to say which — the direction is not inferable from the
 // string. `--gone` is a defect the fix must REMOVE (the wording a ticket
@@ -64,7 +86,11 @@ const present = arg("present");
 // pin ticket asks for). Refusing both-or-neither rather than defaulting: a
 // default here would pick a direction on the caller's behalf and then report
 // the opposite verdict with full confidence.
-if (has("gone") && has("present")) die("--gone and --present are opposite questions; give one");
+//
+// Checked against the resolved values, not a raw `--gone`/`--present` token
+// scan: needleArg() above can splice a separator-form flag's own token out of
+// process.argv once consumed, so a presence scan would read it as absent.
+if (gone !== null && present !== null) die("--gone and --present are opposite questions; give one");
 if (!gone && !present) die("give --gone <string> (the fix removes it) or --present <string> (the fix adds it)");
 if (!path) die("--path <path> is required");
 
@@ -73,10 +99,10 @@ if (!path) die("--path <path> is required");
 // has run a git call.
 //
 // One consequence the caller has to be told about, so run-team/SKILL.md says
-// it too: a needle that itself starts with `--` never reaches this script's
-// question. `arg()` refuses it as a missing value, at exit 2, which is the
-// verdict that keeps the ticket in the queue — a ticket quoting a flag name
-// is a could-not-check, not a broken invocation.
+// it too: a needle that starts with `--`, given BARE, never reaches this
+// script's question — `arg()` refuses it as a missing value, at exit 2, which
+// is the verdict that keeps the ticket in the queue. `--gone -- '<value>'`
+// (needleArg() above) is the opt-in past that, one flag at a time.
 sweep(["path", "gone", "present"]);
 
 // #463: the sweep above only ever refuses a `--`-prefixed token, so a bare
