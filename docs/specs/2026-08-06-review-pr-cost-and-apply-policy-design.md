@@ -320,8 +320,9 @@ currently carries only the PR number, worktree path and findings
 (`run-team/SKILL.md:337-338`); `testCmd` is added to that payload.
 
 A bad run reuses the convention already in the specialist prompt
-(`review-pr.js`) rather than inventing one: **`tests 0` is a FAILED run, not
-a pass.** Report the test result alongside the SHA.
+(`review-pr.js`, the "is a FAILED run, not a pass" rule) rather than inventing
+one: **`tests 0` is a FAILED run, not a pass.** Report the test result
+alongside the SHA.
 
 **Do not bypass.** `no-verify` and `pre-commit` appear nowhere in
 `skills/fleet/` — verified at `8a84402`. A generic plugin instructs agents to
