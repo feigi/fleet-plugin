@@ -363,9 +363,21 @@ test("an ordinary needle answers the same with or without the separator", (t) =>
 // opt-in spelling, and must refuse exactly like the no-separator case —
 // otherwise the separator would forgive the exact invocation #61/#169
 // exists to catch.
+//
+// The token AFTER the trailing `--` is what makes this discriminate, and it
+// has to be a word the fixture carries. With nothing after the separator,
+// a reader that took the LAST `--` in argv instead of the one immediately
+// after the flag falls off the end of argv and dies on the same
+// "needs a value" wording as the correct code — byte-identical stderr, exit
+// and payload, so the case passes under the bug it names (measured). With
+// `decoy` there and in the tree, that reader answers `live` at exit 0
+// instead, on a needle nobody asked about.
 test("a -- appearing AFTER the value, not before it, does not opt in — still refused", (t) => {
   const w = repo(t);
-  const r = probe(w, ["--path", "src.mjs", "--gone", "--require-file", "--"]);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst decoy = 3;\n", "the decoy");
+  push(w);
+
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--require-file", "--", "decoy"]);
   assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
   assert.equal(r.json, null);
   assert.match(r.stderr, /--gone needs a value/);
@@ -379,4 +391,67 @@ test("-- as the very last token, with no value after it, refuses needs-a-value",
   assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
   assert.equal(r.json, null);
   assert.match(r.stderr, /--gone needs a value/);
+});
+
+// THE CLASS #818 EXISTS FOR, at its sharpest: the quoted needle spells one of
+// this script's OWN flag names. A reader that resolves `--gone` over the whole
+// argv before `--present` matches the token `--gone` sitting there as
+// --present's already-quoted DATA, and refuses naming a flag the caller never
+// typed — measured on that shape: `staleness: --gone needs a value`, exit 2.
+// The needle here is absent from the tree, so the answer this must reach is
+// `live` at exit 0; anything that reads it as a control token cannot get
+// there.
+test("a --present needle whose literal text is the sibling flag's own name is checked, not read as that flag", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--present", "--", "--gone"]);
+  assert.equal(r.code, 0, `expected live (exit 0), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "live");
+  assert.equal(r.json.needle, "--gone", "the payload must carry the caller's needle, not the flag it spells");
+  assert.equal(r.json.found, false);
+});
+
+// Same class against `--path`, which is read AFTER the separator pass for
+// exactly this reason: the quoted needle spells the flag whose value the
+// script needs to find the file. Both assertions are load-bearing — the
+// needle has to survive as data, and `--path` has to still resolve to
+// src.mjs rather than to the quoted copy of its own name (measured on the
+// resolve-path-first shape: `staleness: --path needs a value`, exit 2).
+test("a --gone needle spelling --path leaves the real --path resolving to its own value", (t) => {
+  const w = repo(t);
+  commitFile(w, "src.mjs", "const keep = 1;\nconst flag = '--path';\n", "the defect");
+  push(w);
+
+  const r = probe(w, ["--gone", "--", "--path", "--path", "src.mjs"]);
+  assert.equal(r.code, 0, `expected live (exit 0), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "live");
+  assert.equal(r.json.needle, "--path");
+  assert.equal(r.json.path, "src.mjs", "the second --path is the flag; the first is the needle");
+  assert.equal(r.json.found, true);
+});
+
+// The both-flags refusal, reached through the separator form. The bare-form
+// case above it is pinned by a raw argv scan too, so it alone cannot tell
+// this guard's resolved-value reading from a `process.argv.includes("--gone")
+// && process.argv.includes("--present")` one: the separator pass splices both
+// flag tokens out of argv before the guard runs, so that scan finds neither
+// and lets the run through — measured, exit 0 with a full-confidence `live`
+// under `--gone` while `--present` is silently dropped.
+test("both --gone and --present through the separator form refuses at exit 2", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--", "--defect", "--present", "--", "--wanted"]);
+  assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json, null, "a refusal must print no verdict at all");
+  assert.match(r.stderr, /opposite questions/);
+});
+
+// A repeated `--gone -- <value>` must not silently answer about the LAST one.
+// The separator pass consumes a name once and steps over any repeat, which
+// leaves that repeat's `--` a token no flag owns — and sweep() refuses it,
+// the same exit-2 wording this shape earned before the pass existed.
+test("a second --gone -- <value> refuses, rather than overwriting the first", (t) => {
+  const w = repo(t);
+  const r = probe(w, ["--path", "src.mjs", "--gone", "--", "a", "--gone", "--", "b"]);
+  assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json, null);
+  assert.match(r.stderr, /unknown flag --/);
 });

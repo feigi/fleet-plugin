@@ -60,25 +60,50 @@ const stray = makeStray(die);
 // `--present` into the literal reading: `--gone -- '--value'` is the POSIX
 // convention, explicit at the call site, no second input channel.
 //
-// Given bare, with no `--` immediately after the flag, this defers to arg()
+// Given bare, with no `--` immediately after the flag, a flag defers to arg()
 // unchanged — a `--`-prefixed value still dies "needs a value" exactly as
 // before #818; that refusal is what keeps a flag from swallowing the next
 // flag as its own value, and it is not weakened here. The three tokens
 // (flag, separator, value) are spliced out of process.argv once read, so
 // sweep()/stray() below never see the swallowed `--` or a needle shaped like
 // a flag — either would otherwise die on it as unrecognized.
-function needleArg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i === -1 || process.argv[i + 1] !== "--") return arg(name);
-  const value = process.argv[i + 2];
-  if (value === undefined || value.trim() === "") die(`--${name} needs a value`);
-  process.argv.splice(i, 3);
-  return value;
+//
+// ONE left-to-right pass over argv, both names in it together and every
+// separator triple consumed before arg() reads anything. Position decides
+// which flag owns a token, never the order the reads are written in —
+// because the values #818 exists to carry are FLAG-SHAPED, so a
+// separator-quoted needle can spell this script's own flag names, and a
+// scan for one name over the whole argv matches the sibling's already-quoted
+// data. Measured against a `needleArg("gone")`-then-`needleArg("present")`
+// version, with `--path` read ahead of both: `--present -- --gone` died
+// `--gone needs a value` and `--present -- --gone extra` died `--gone and
+// --present are opposite questions`, each naming a flag the caller never
+// typed; `--gone -- --path --path src.mjs` died `--path needs a value`.
+// Every one of those is a needle that IS a flag spelling — the class this
+// feature exists for — and all three answer now.
+function separatedNeedles() {
+  const found = {};
+  for (let i = 2; i < process.argv.length; ) {
+    const name = /^--(gone|present)$/.exec(process.argv[i])?.[1];
+    // A repeated `--gone -- x` is left where it sits rather than silently
+    // overwriting the first: its stranded `--` is then a token no name
+    // owns, and sweep() below refuses it as `unknown flag --` (measured).
+    if (!name || found[name] !== undefined || process.argv[i + 1] !== "--") {
+      i++;
+      continue;
+    }
+    const value = process.argv[i + 2];
+    if (value === undefined || value.trim() === "") die(`--${name} needs a value`);
+    found[name] = value;
+    process.argv.splice(i, 3);
+  }
+  return found;
 }
 
+const separated = separatedNeedles();
 const path = arg("path");
-const gone = needleArg("gone");
-const present = needleArg("present");
+const gone = separated.gone ?? arg("gone");
+const present = separated.present ?? arg("present");
 // `--gone`/`--present` are the two shapes a ticket's asked-for change takes,
 // and the caller has to say which — the direction is not inferable from the
 // string. `--gone` is a defect the fix must REMOVE (the wording a ticket
@@ -88,9 +113,11 @@ const present = needleArg("present");
 // the opposite verdict with full confidence.
 //
 // Checked against the resolved values, not a raw `--gone`/`--present` token
-// scan: needleArg() above can splice a separator-form flag's own token out of
-// process.argv once consumed, so a presence scan would read it as absent.
-if (gone !== null && present !== null) die("--gone and --present are opposite questions; give one");
+// scan: separatedNeedles() above splices a separator-form flag's own token
+// out of process.argv once consumed, so a presence scan would read it as
+// absent — measured, with `--gone -- a --present -- b` answering under
+// `--gone` alone at exit 0 while the caller asked two opposite questions.
+if (gone && present) die("--gone and --present are opposite questions; give one");
 if (!gone && !present) die("give --gone <string> (the fix removes it) or --present <string> (the fix adds it)");
 if (!path) die("--path <path> is required");
 
@@ -102,7 +129,7 @@ if (!path) die("--path <path> is required");
 // it too: a needle that starts with `--`, given BARE, never reaches this
 // script's question — `arg()` refuses it as a missing value, at exit 2, which
 // is the verdict that keeps the ticket in the queue. `--gone -- '<value>'`
-// (needleArg() above) is the opt-in past that, one flag at a time.
+// (separatedNeedles() above) is the opt-in past that, one flag at a time.
 sweep(["path", "gone", "present"]);
 
 // #463: the sweep above only ever refuses a `--`-prefixed token, so a bare
