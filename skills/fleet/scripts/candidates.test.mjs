@@ -1316,12 +1316,22 @@ const SPEC_COCKPIT_DESIGN = fileURLToPath(
 // a hand-copied spelling that nothing made move with the script.
 //
 // Guarded at every step, and called from a test body rather than run at module
-// scope, because an unguarded index here fails at IMPORT. Reformatting
-// `OPTIONS` — one-lining it, wrapping it in `Object.freeze`, anything that
-// drops the literal `\n};` this regex needs — has zero behavioural effect and
-// took this file from 62 tests to a single failure, with no *test-authored*
-// diagnostic: node does name the file and the line, but nothing names
-// `OPTIONS` as the thing to look at, and the 61 unrelated tests never run.
+// scope, because an unguarded index here fails at IMPORT, and an import-time
+// failure takes down every test in this file — the ones deriving the flag and
+// the ones that have nothing to do with it alike — leaving one node-authored
+// `TypeError` that names a file and a line but never names `OPTIONS` as the
+// thing to look at. Measured on this tree by appending an unguarded
+// module-scope `.match(...)[0]` to this file and one-lining `OPTIONS`:
+// `node --test skills/fleet/scripts/candidates.test.mjs` then reports one
+// synthetic test, zero passes, and that TypeError.
+//
+// Reformatting `OPTIONS` — one-lining it, wrapping it in `Object.freeze`,
+// anything that drops the literal `\n};` this regex needs — has zero
+// behavioural effect, so what the guard buys is that such a reformat costs
+// only the tests that derive the flag: measured by one-lining `OPTIONS` on
+// this tree, those tests red with this guard's own `OPTIONS block no longer
+// matches — update this test` message and every other test in this file still
+// runs and passes.
 //
 // The `*label` match is global and required to be UNIQUE rather than indexed
 // at the first hit, because indexing fails SILENTLY: an `"exclude-label"`
@@ -1368,14 +1378,25 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   );
 });
 
-// --- #851: the third live carrier, and the last one nothing asserted on. The
-// two pins above cover a rule and a dated spec; `next-ticket/SKILL.md` states
-// the invocation a solo caller RUNS, so its spelling is copied into a shell
-// rather than paraphrased — and `--label` is what `gh issue list` accepts, so
-// it is the plausible thing to write and the thing this script refuses at exit
-// 2. Derived from `OPTIONS`, through the same guarded `declaredLabelFlag()` the
-// spec pin uses, so a rename of the flag reddens here instead of minting the
-// next hand-copied spelling.
+// --- #851: another live carrier of the flag spelling, and not the last
+// carrier nothing asserts on. `git grep -l -- --require-label docs skills`
+// lists the carriers; several are unpinned, filed as #1196 — measured by
+// rewriting `docs/specs/2026-07-23-fleet-plugin-design.md`'s value-bearing
+// `[--require-label L]` synopsis row to `[--label L]`, which leaves this whole
+// suite green. `next-ticket/SKILL.md` earns a pin here because it is what a
+// solo caller reads to run the scan, and `--label` is what `gh issue list`
+// accepts, so it is the plausible thing to write and the thing this script
+// refuses at exit 2. Derived from `OPTIONS`, through the same guarded
+// `declaredLabelFlag()` the run-team design-spec pin uses, so a rename of the
+// flag reddens here instead of minting the next hand-copied spelling.
+//
+// What gets pinned is the TOKEN inside the candidate step, not the invocation
+// that carries it. Measured, both legs: deleting that step's only fenced block
+// and naming the flag in prose instead leaves the whole suite green, while
+// deleting the same fence with NO mention of the flag reds with this pin's own
+// message. So this holds "the flag named here is the one `OPTIONS` declares",
+// never "there is a runnable command here" — a separate invariant #851 does
+// not ask for and nothing else in this suite claims.
 const NEXT_TICKET = readFileSync(join(import.meta.dirname, "..", "skills", "next-ticket", "SKILL.md"), "utf8");
 
 // Takes the text rather than reading the file, so the discrimination test below
