@@ -720,6 +720,24 @@ their command failed. Do not modify ${worktree}.`,
 // 2026-08-23; if the harness changes, re-measure with a throwaway workflow
 // rather than re-reading this.
 //
+// WHEN YOU WRITE THAT THROWAWAY: registry presence is not evidence about the
+// thing you are testing. A workflow whose body carries any statement before
+// `export const meta` was observed absent from the workflow registry, with no
+// error and no warning — indistinguishable from a file that was never written,
+// a wrong path, or a harness that refused the construct you were probing. That
+// is how #538 came within one control of the right verdict for the wrong
+// reason: its first probe carried a static `import` and did not appear, which
+// reads as "the import was rejected"; a twin with the import REMOVED was also
+// absent, and only that twin exposed the shape rule the absence was really
+// about. So give any absence a twin with the construct under test removed, and
+// make the workflow RUN and return a computed marker instead of reading its
+// presence as a result. Cited as observed, not as a specification: the
+// registry is the harness's, and nothing in this repo can settle what its
+// loader guarantees. The shape rule is guarded for the files in `workflows/`
+// by skills/fleet/scripts/workflow-meta-first.test.mjs, which discovers them
+// rather than listing them; a throwaway in a scratch project is guarded by
+// nothing, which is where it bit. (#853)
+//
 // The head compare below (#532) is the same expression `usableDiff` runs, and it
 // is a SECOND COPY on purpose: the sandbox above forbids `import`, so a shared
 // helper could not be lifted out of this file by the tests that pin it, and
