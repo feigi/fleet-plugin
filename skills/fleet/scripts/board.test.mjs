@@ -3,7 +3,7 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -459,7 +459,7 @@ test("a meta.json holding valid JSON of the wrong SHAPE is a SIDECAR fault", () 
 
 test("a broken sidecar warns ONCE across ticks, not once per tick", () => {
   // `serve` rebuilds every ~15s and a broken sidecar is broken on every one, so
-  // the warnedMeta gate is the whole difference between one line and a flood.
+  // the `meta` gate is the whole difference between one line and a flood.
   // A single call cannot see that gate at all — pinning it takes two.
   const dir = fixture(TURN);
   writeFileSync(join(dir, "agent-x.meta.json"), '{"spawnDepth":0,"descrip');
@@ -529,7 +529,7 @@ test("a torn LAST line stays silent — the tear every tick legitimately produce
 });
 
 test("a damaged mid-file line warns ONCE across ticks, not once per tick", () => {
-  // Same flood argument as the sidecar's warnedMeta gate: a transcript that is
+  // Same flood argument as the sidecar's `meta` gate: a transcript that is
   // damaged is damaged on every tick, so a single call cannot see the gate.
   const dir = rawFixture(MIDFILE_TEAR);
   const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
@@ -553,10 +553,10 @@ test("two damaged transcripts in one dir each get their own warning", () => {
 });
 
 test("a tail tear that later moves mid-file is reported on the tick it moves", () => {
-  // Where warnedLines.add sits is load-bearing and no test above can see it:
-  // all three hold the file's SHAPE constant across ticks, so moving the add
-  // out of the position check — making a legitimate tail tear consume the
-  // file's one warning — leaves the whole suite green while permanently
+  // Where the `lines` gate is CALLED is load-bearing and no test above can see
+  // it: all three hold the file's SHAPE constant across ticks, so moving the
+  // warnOnce call out of the position check — making a legitimate tail tear
+  // consume the file's one warning — leaves the suite green while permanently
   // silencing the real fault. Tick 1 is that legitimate live tail tear (no
   // trailing newline); tick 2 is the SAME tear after the transcript grew, which
   // is the sequence `serve` produces every ~15s.
@@ -568,6 +568,40 @@ test("a tail tear that later moves mid-file is reported on the tick it moves", (
   assert.equal(errs.length, 1, "expected one stderr line on tick 2, got " + JSON.stringify(errs));
   assert.match(errs[0], /agent-x\.jsonl/);
   assert.equal(s.totals.cacheWrite, 1500);
+});
+
+// The `lines` and `skips` gates are keyed on the SAME transcript path, and every
+// test above feeds each gate a path no other gate has seen — so the whole suite
+// stays green under a single warn-once Set with no channel in its key, while a
+// torn line permanently silences that file's later skip. Measured: with the
+// channel dropped from the key, this is the only test in the file that fails.
+//
+// Both ticks are faults the operator must see, and they are DIFFERENT faults —
+// tick 1 costs one turn out of a booked agent, tick 2 costs the whole agent —
+// so neither line may be spent on the other. The directory-where-a-file-is-
+// expected trick is the same one the panel-blackout test uses; it produces
+// EISDIR out of readAgent's read regardless of who is running the suite, which
+// a chmod would not.
+test("a torn line and an unreadable read on the SAME transcript each get their own line", () => {
+  const dir = rawFixture(MIDFILE_TEAR);
+  const file = join(dir, "agent-x.jsonl");
+  assert.equal(withStderr(() => gatherSpend({ dir })).length, 1, "tick 1: the mid-file tear");
+  rmSync(file);
+  mkdirSync(file);
+  const errs = withStderr(() => gatherSpend({ dir }));
+  assert.equal(errs.length, 1, "tick 2: the unreadable transcript, got " + JSON.stringify(errs));
+  assert.match(errs[0], /skipping agent-x\.jsonl/, "the skip gate's line, not the torn-line gate's");
+});
+
+// The keyless caller. Every other gate keys on a PR or a path, so nothing else
+// in the suite drives warnOnce's empty key, and the folded-in spend-dir gate
+// would be collapsed untested. The failure it reports is the session directory
+// itself, which is why there is nothing to key on: a second tick cannot be a
+// different instance of it.
+test("the keyless spend-dir gate warns once per process, not once per tick", () => {
+  const dir = { error: "no session directory under ~/.claude/projects for this cwd" };
+  assert.equal(withStderr(() => gatherSpend({ dir })).length, 1, "tick 1 reports");
+  assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 2 stays quiet");
 });
 
 test("an unreadable dir reports an error rather than posing as an empty run", () => {

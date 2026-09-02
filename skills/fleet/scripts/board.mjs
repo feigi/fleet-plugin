@@ -135,15 +135,29 @@ function runCiState(scriptDir, pr) {
   }
 }
 
-// Keyed on the PR, not on the payload: `serve` rebuilds every ~15s and calls
-// mapCi once per PR per tick, so a payload that is broken is broken on every
-// tick, and a payload-keyed gate would flood anyway the moment the garbage
-// varies between ticks. A single global flag is the other wrong answer — it
-// would let the first broken PR mask every later one for the rest of the run,
-// which is the silence this gate exists to end. Same warn-once shape as the
-// sidecar and transcript gates below; if #603 lands its warnOnce(key, msg)
-// helper, this is a caller for it.
-const warnedCiParse = new Set();
+// Every warn-once gate in this file routes through here. The stored key is the
+// CHANNEL joined to the caller's key, never the caller's key alone: the gates
+// below are keyed on paths, and two of them are keyed on the SAME transcript
+// path, so a bare-key Set would let one channel's warning consume the other's
+// line for that file — a behaviour change, not a refactor. NUL joins them
+// because no channel name or path can hold one, so no two distinct (channel,
+// key) pairs can collide. A caller that passes an empty key gets one line per
+// process — whether it has nothing to key on, or had a key and chose to spend
+// only that one line.
+const warnedOnce = new Set();
+function warnOnce(channel, key, msg) {
+  const k = `${channel}\0${key}`;
+  if (warnedOnce.has(k)) return;
+  warnedOnce.add(k);
+  console.error(`${NAME}: ${msg}`);
+}
+
+// The `ci-parse` gate is keyed on the PR, not on the payload: `serve` rebuilds
+// every ~15s and calls mapCi once per PR per tick, so a payload that is broken
+// is broken on every tick, and a payload-keyed gate would flood anyway the
+// moment the garbage varies between ticks. A single global flag is the other
+// wrong answer — it would let the first broken PR mask every later one for the
+// rest of the run, which is the silence this gate exists to end.
 
 // ci-state's verdict already excludes behind-count staleness. Map it, and treat
 // anything not cleanly green-or-completed-red as unknown — never a false red.
@@ -173,10 +187,7 @@ export function mapCi(ciJson, pr) {
   // null return, and neither of these payloads is null.
   try { d = JSON.parse(ciJson); }
   catch (e) {
-    if (!warnedCiParse.has(pr)) {
-      warnedCiParse.add(pr);
-      console.error(`${NAME}: PR ${pr} ci-state payload is not JSON (${e.message}); reading its CI as unknown, so its red-ci flag stays down`);
-    }
+    warnOnce("ci-parse", pr, `PR ${pr} ci-state payload is not JSON (${e.message}); reading its CI as unknown, so its red-ci flag stays down`);
     return "unknown";
   }
   // JSON.parse("null") succeeds and yields d === null. Nullishness, not
@@ -264,12 +275,14 @@ function newestTranscriptMs(dir) {
 // the FINAL element of the split and no other, so only that one is skipped in
 // silence. A line anywhere earlier can never be completed by a later append, so
 // it is still malformed on every tick after — a real fault, and one that costs
-// spend rather than nothing, so it warns once per transcript path. Warn-once is
-// safe here for a reason warnedSkips cannot lend: warnedSkips' message carries a
-// COUNT, which is why it needs `skipped` reaching the browser every tick to keep
-// that number live. This message carries none — it says this file's spend may be
-// incomplete — and a second tear in the same file makes that no more true, so
-// there is no number here that can go stale.
+// spend rather than nothing, so it warns once per transcript path under the
+// `lines` channel. Warn-once is safe here for a reason the `skips` gate cannot
+// lend: that gate's message carries a COUNT, which is why it needs `skipped`
+// reaching the browser every tick to keep that number live. This message carries
+// none — it says this file's spend may be incomplete — and a second tear in the
+// same file makes that no more true, so there is no number here that can go
+// stale. Two gates, safe for two DIFFERENT reasons; sharing warnOnce collapses
+// how they are written, not why each one is allowed to stay quiet.
 // Ceiling: a transcript whose writer has already exited has no legitimate torn
 // last line either, but readAgent cannot tell a live writer from a finished one,
 // so that line keeps passing in silence. Strictly better than warning on none.
@@ -299,12 +312,10 @@ function newestTranscriptMs(dir) {
 // Keep the {} fallback rather than rethrowing. The TRANSCRIPT is still readable,
 // so a throw would land in gatherSpend's per-file catch and drop this agent's
 // real tokens from the totals — a wrong total in place of a wrong role, and one
-// the panel would then also count as `skipped`. Warn-once per PATH, for the
-// reason warnedSkips gives below: `serve` rebuilds every ~15s, and a broken
-// sidecar is broken on every tick.
-const warnedMeta = new Set();
-// Keyed on the transcript's FULL PATH, for the reason warnedSkips gives below.
-const warnedLines = new Set();
+// the panel would then also count as `skipped`. The `meta` gate warns once per
+// PATH, for the reason the `skips` gate gives below: `serve` rebuilds every
+// ~15s, and a broken sidecar is broken on every tick. The `lines` gate is keyed
+// on the transcript's FULL PATH for that same reason.
 function readAgent(file, metaFile) {
   let meta = {};
   try {
@@ -322,10 +333,7 @@ function readAgent(file, metaFile) {
     }
   }
   catch (e) {
-    if (!warnedMeta.has(metaFile)) {
-      warnedMeta.add(metaFile);
-      console.error(`${NAME}: ${metaFile} unusable, classifying agent as "other": ${e.message}`);
-    }
+    warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other": ${e.message}`);
   }
 
   let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
@@ -338,10 +346,11 @@ function readAgent(file, metaFile) {
     let j;
     try { j = JSON.parse(line); }
     catch (e) {
-      if (i !== lines.length - 1 && !warnedLines.has(file)) {
-        warnedLines.add(file);
-        console.error(`${NAME}: ${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${e.message}`);
-      }
+      // The position check stays OUTSIDE the gate: a legitimate torn tail must
+      // not reach warnOnce at all, or it consumes this file's one `lines` line
+      // and permanently silences the real fault when the tear later moves.
+      if (i !== lines.length - 1)
+        warnOnce("lines", file, `${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${e.message}`);
       continue;
     }
     // `message.content` is an array of blocks on tool-bearing turns but a plain
@@ -377,17 +386,22 @@ function readAgent(file, metaFile) {
   return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
 }
 
-// Warn at most once per process. Errors reach the browser too (see below), but
-// the board gathers every ~15s and a line repeating at that rate just trains the
-// eye to ignore it.
-let warnedNoSpendDir = false;
-// Same rule, per transcript: a file that is broken is broken every tick, and at
-// the default 15s interval three of them are 720 lines an hour. Keyed on the
-// FULL PATH, not the bare filename — gatherSpend re-resolves its dir on every
-// tick, so a bare-filename key would silence a genuinely different broken file
-// living under a second session directory. The count still reaches the browser
-// every tick via `skipped`, which is the channel that matters here.
-const warnedSkips = new Set();
+// The `no-spend-dir` gate warns at most once per process. `dir.error` is not
+// constant — findSubagentsDir words an unresolvable project dir differently
+// from a lookup that threw — so the empty key warnOnce documents is a CHOICE
+// here, not an absence of anything to key on. What it costs is only the repeat
+// stderr LINE: a fault that differs still reaches the browser on the tick it
+// happens, through the `{ error }` gatherSpend returns for it, which board.html
+// renders as the panel's text. The board gathers every ~15s and a line
+// repeating at that rate just trains the eye to ignore it.
+//
+// The `skips` gate is the same rule, per transcript: a file that is broken is
+// broken every tick, and at the default 15s interval three of them are 720 lines
+// an hour. Keyed on the FULL PATH, not the bare filename — gatherSpend
+// re-resolves its dir on every tick, so a bare-filename key would silence a
+// genuinely different broken file living under a second session directory. The
+// count still reaches the browser every tick via `skipped`, which is the route
+// that matters here.
 
 // Scope is the SESSION directory, which is the closest thing to a run boundary
 // that actually exists on disk — one Claude Code session, one folder.
@@ -408,10 +422,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
     if (dir && dir.error) {
-      if (!warnedNoSpendDir) {
-        warnedNoSpendDir = true;
-        console.error(`${NAME}: ${dir.error}`);
-      }
+      warnOnce("no-spend-dir", "", dir.error);
       return { error: dir.error };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
@@ -447,10 +458,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         toolTables.push(tools);
       } catch (e) {
         skipped++;
-        if (!warnedSkips.has(file)) {
-          warnedSkips.add(file);
-          console.error(`${NAME}: skipping ${f}: ${e.message}`);
-        }
+        warnOnce("skips", file, `skipping ${f}: ${e.message}`);
       }
     }
     if (!agents.length) return skipped ? { error: `all ${skipped} transcripts unreadable` } : null;
