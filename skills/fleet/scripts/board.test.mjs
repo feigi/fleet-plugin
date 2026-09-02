@@ -459,7 +459,7 @@ test("a meta.json holding valid JSON of the wrong SHAPE is a SIDECAR fault", () 
 
 test("a broken sidecar warns ONCE across ticks, not once per tick", () => {
   // `serve` rebuilds every ~15s and a broken sidecar is broken on every one, so
-  // the warnedMeta gate is the whole difference between one line and a flood.
+  // the `meta` gate is the whole difference between one line and a flood.
   // A single call cannot see that gate at all — pinning it takes two.
   const dir = fixture(TURN);
   writeFileSync(join(dir, "agent-x.meta.json"), '{"spawnDepth":0,"descrip');
@@ -529,7 +529,7 @@ test("a torn LAST line stays silent — the tear every tick legitimately produce
 });
 
 test("a damaged mid-file line warns ONCE across ticks, not once per tick", () => {
-  // Same flood argument as the sidecar's warnedMeta gate: a transcript that is
+  // Same flood argument as the sidecar's `meta` gate: a transcript that is
   // damaged is damaged on every tick, so a single call cannot see the gate.
   const dir = rawFixture(MIDFILE_TEAR);
   const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
@@ -553,10 +553,10 @@ test("two damaged transcripts in one dir each get their own warning", () => {
 });
 
 test("a tail tear that later moves mid-file is reported on the tick it moves", () => {
-  // Where warnedLines.add sits is load-bearing and no test above can see it:
-  // all three hold the file's SHAPE constant across ticks, so moving the add
-  // out of the position check — making a legitimate tail tear consume the
-  // file's one warning — leaves the whole suite green while permanently
+  // Where the `lines` gate is CALLED is load-bearing and no test above can see
+  // it: all three hold the file's SHAPE constant across ticks, so moving the
+  // warnOnce call out of the position check — making a legitimate tail tear
+  // consume the file's one warning — leaves the suite green while permanently
   // silencing the real fault. Tick 1 is that legitimate live tail tear (no
   // trailing newline); tick 2 is the SAME tear after the transcript grew, which
   // is the sequence `serve` produces every ~15s.
