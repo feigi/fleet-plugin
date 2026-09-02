@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
 const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
@@ -1271,11 +1272,7 @@ test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
   // `candidates.mjs` invocation in the same bullet already spells
   // `--require-label` correctly, so a positive match anywhere in phase 0 stays
   // green with the rule naming anything at all.
-  const at = RUN_TEAM.indexOf("1. **Candidate scan**");
-  assert.notEqual(at, -1, "run-team phase 0 step 1 moved — update this test");
-  const end = RUN_TEAM.indexOf("\n2. ", at);
-  assert.notEqual(end, -1, "run-team phase 0 step 2 moved — update this test");
-  const step1 = RUN_TEAM.slice(at, end);
+  const step1 = between(RUN_TEAM, "1. **Candidate scan**", "\n2. ", "run-team/SKILL.md");
   // Leading backtick, so this can only be satisfied by the RULE: in the command
   // above it, `--require-label` is preceded by a line break, not a backtick.
   // The gap is loose enough that rewording around `mandatory` stays green and
@@ -1351,12 +1348,12 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   // the supersession note at the head cites `--label` deliberately, as the
   // spelling this script refuses, so a file-wide negative would fail on the
   // correction's own prose.
-  const spec = readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8");
-  const at = spec.indexOf("1. Candidate scan");
-  assert.notEqual(at, -1, "the spec's phase 0 candidate scan moved — update this test");
-  const end = spec.indexOf("\n2. ", at);
-  assert.notEqual(end, -1, "the spec's phase 0 step after the candidate scan moved — update this test");
-  const step = spec.slice(at, end);
+  const step = between(
+    readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8"),
+    "1. Candidate scan",
+    "\n2. ",
+    "the run-team design spec",
+  );
 
   assert.ok(
     step.includes(`\`--${DECLARED_LABEL_FLAG} ready-for-agent\``),
