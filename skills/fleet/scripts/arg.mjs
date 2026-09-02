@@ -37,6 +37,16 @@
 // way to end up holding one; running a second parser alongside arg() is
 // another, and each way has a script that qualifies only under it.
 //
+// Which scripts those are is readable off the `from "./arg.mjs"` grep this
+// header already recommends, provided you read the imported SYMBOL list and
+// not the filenames: a row binding makeSweep has delegated the unknown-flag
+// refusal, so `grep -n '^import .* from "./arg.mjs"'
+// skills/fleet/scripts/*.mjs | grep -v test | grep -v makeSweep` leaves the
+// rows that hold their own. Anchoring on `^import` is load-bearing for the
+// same reason it is on the die() grep: unanchored, this very comment matches
+// itself. Read that output for the roster — the scripts this header names
+// exemplify a way of qualifying, and were never the whole of it.
+//
 // fleet-tick.mjs is the one script still outside the rules, and deliberately:
 // it parses its flags with node:util's parseArgs, so its unknown-flag,
 // required-flag and range refusals are a separate edit site on their own
