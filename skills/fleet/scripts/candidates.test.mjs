@@ -1368,6 +1368,73 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   );
 });
 
+// --- #851: the third live carrier, and the last one nothing asserted on. The
+// two pins above cover a rule and a dated spec; `next-ticket/SKILL.md` states
+// the invocation a solo caller RUNS, so its spelling is copied into a shell
+// rather than paraphrased — and `--label` is what `gh issue list` accepts, so
+// it is the plausible thing to write and the thing this script refuses at exit
+// 2. Derived from `OPTIONS`, through the same guarded `declaredLabelFlag()` the
+// spec pin uses, so a rename of the flag reddens here instead of minting the
+// next hand-copied spelling.
+const NEXT_TICKET = readFileSync(join(import.meta.dirname, "..", "skills", "next-ticket", "SKILL.md"), "utf8");
+
+// Takes the text rather than reading the file, so the discrimination test below
+// can put the same pin in front of the input it must red on AND the input it
+// must not. A pin only shown to red is not shown to discriminate.
+function assertScanRunsDeclaredFlag(text, where) {
+  const flag = declaredLabelFlag();
+  // The candidate step alone, for the reason both pins above give, and here
+  // with a live second reason: step 7 of this same skill says "Never fold
+  // `--label` into the create", where `--label` is `gh pr edit`'s own flag and
+  // correct (#375). A file-wide negative would fail on that sentence.
+  const step = between(text, "## 1. Candidates", "## 2. Dependencies", where);
+  assert.ok(
+    step.includes(`--${flag} ready-for-agent`),
+    `${where}'s candidate scan no longer runs the label flag candidates.mjs' OPTIONS declares`,
+  );
+  // `--require-label` does not contain `--label`, so this tells them apart with
+  // no quoting — same reasoning as the two pins above.
+  assert.doesNotMatch(
+    step,
+    /--label\b/,
+    `${where}'s candidate scan names \`--label\`, which candidates.mjs refuses at exit 2`,
+  );
+}
+
+test("next-ticket's candidate scan runs the flag this script declares", () => {
+  assertScanRunsDeclaredFlag(NEXT_TICKET, "next-ticket/SKILL.md");
+});
+
+test("the next-ticket pin reds on the refused spelling and stays green on text it must accept", () => {
+  // REDS on the swap it exists to catch — written through the declared flag
+  // rather than the literal, so a rename of the flag moves the mutant with it
+  // instead of leaving a mutant that tests nothing.
+  assert.throws(
+    () => assertScanRunsDeclaredFlag(NEXT_TICKET.replaceAll(`--${declaredLabelFlag()}`, "--label"), "the mutant"),
+    /the mutant's candidate scan/,
+    "the pin does not red when the candidate scan is given the spelling this script refuses",
+  );
+
+  // GREEN, control 1: the live file, which carries a legitimate `--label`
+  // outside this slice. This is what separates a bounded pin from a whole-file
+  // one — the latter clears "it and only it reds" and still reds on prose it
+  // has no business reading.
+  assert.match(
+    NEXT_TICKET,
+    /Never fold `--label` into the create/,
+    "next-ticket/SKILL.md no longer carries a legitimate `--label` outside its candidate step — this control now proves nothing",
+  );
+
+  // GREEN, control 2: a reflow. Rejoining hard wraps outside fenced blocks has
+  // zero behavioural effect on a skill, and a prose pin that reds on one costs
+  // its readers more than it holds.
+  const reflowed = NEXT_TICKET.split(/(```[\s\S]*?```)/)
+    .map((part, i) => (i % 2 ? part : part.replace(/(\S)\n(?=\S)/g, "$1 ")))
+    .join("");
+  assert.notEqual(reflowed, NEXT_TICKET, "the reflow changed nothing — this control now proves nothing");
+  assertScanRunsDeclaredFlag(reflowed, "a reflowed next-ticket/SKILL.md");
+});
+
 test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {
   // The other half of the same class, and the one a fix for it can break:
   // `--label` is correct for `gh issue list`, so a sweep for the wrong spelling
