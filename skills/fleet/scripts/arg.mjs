@@ -30,6 +30,13 @@
 // skills/fleet/scripts/*.mjs | grep -v test` rather than trusting a list
 // here to have aged well.
 //
+// The scripts that hold a flag refusal of their OWN are the second edit sites
+// for this contract: change a rule here and each of them needs the same change
+// made again at its own site. Holding that refusal is what makes a script one
+// — not whether arg()'s refusals reach it. Being out of arg()'s reach is one
+// way to end up holding one; running a second parser alongside arg() is
+// another, and each way has a script that qualifies only under it.
+//
 // fleet-tick.mjs is the one script still outside the rules, and deliberately:
 // it parses its flags with node:util's parseArgs, so its unknown-flag,
 // required-flag and range refusals are a separate edit site on their own
@@ -38,6 +45,15 @@
 // takes an empty value and `Number("")` is 0. That guard answers a question
 // about an integer GRAMMAR, not "is this a value at all", so isFlagLike()
 // would not express it.
+//
+// candidates.mjs qualifies the other way, which the reach test cannot express:
+// it binds makeArg/makeHas, so arg()'s refusals DO reach it — `node
+// skills/fleet/scripts/candidates.mjs --limit` refuses under the generated
+// wording from here — and it parses with node:util's parseArgs as well, whose
+// unknown-flag refusal is its own edit site: `node
+// skills/fleet/scripts/candidates.mjs --bogus`. Why that refusal is not
+// sweep()'s is argued at makeSweep(), which owns the trade-off; this names the
+// edit site rather than restating it.
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
 // because every script's die() speaks under its own NAME — that stays
