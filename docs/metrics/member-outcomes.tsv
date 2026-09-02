@@ -1578,6 +1578,7 @@
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	general-purpose	claude-opus-5	high			58921	4959	490	19	agent-abb7abcc683ee6d72
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	memory	memory-proxy	claude-haiku-4-5-20251001				6486	2992	178	3	agent-ac20872256085bb56
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	general-purpose	claude-opus-5	high			57988	4982	492	30	agent-ac87641163713cd37
+2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	other	closeout	claude-sonnet-5	xhigh			109565	6469	437	40	agent-acloseout-f533fb767cf5a46b
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	other	comments-rerun-1185	claude-opus-5	high			149656	3262	532	24	agent-acomments-rerun-1185-17d7a22b4b4f980c
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	general-purpose	claude-opus-5	high			33193	5050	166	7	agent-af85179e71a338b1f
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	general-purpose	claude-opus-5	high			34366	2647	116	8	agent-afc850ed21dfa8556
@@ -1587,7 +1588,7 @@
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	finisher	finisher-pr-1187	claude-opus-5	high		1187	52348	3235	659	20	agent-afinisher-pr-1187-c820dcdaadb7f49c
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	finisher	finisher-pr-1198	claude-opus-5	high		1198	54019	2541	373	20	agent-afinisher-pr-1198-43c87f44666793bf
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	finisher	finisher-pr-1200	claude-opus-5	high		1200	48295	2418	299	13	agent-afinisher-pr-1200-3556136743abef4c
-2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	finisher	finisher-pr-1201	claude-opus-5	high		1201	23091	696	30	3	agent-afinisher-pr-1201-a6f764c1030ac9d5
+2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	finisher	finisher-pr-1201	claude-opus-5	high		1201	58678	4561	389	17	agent-afinisher-pr-1201-a6f764c1030ac9d5
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1183	claude-opus-5	high		1183	268840	18713	2653	30	agent-afix-pr-1183-47a3ca53590750b0
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1184	claude-opus-5	high		1184	643677	18909	10893	74	agent-afix-pr-1184-72d14879e752bcf1
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1185	claude-opus-5	high		1185	307994	23841	3441	54	agent-afix-pr-1185-e66cd13ae343e0d2
@@ -1595,6 +1596,7 @@
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1198	claude-opus-5	high		1198	229271	13968	3591	52	agent-afix-pr-1198-0c0d122869231b9f
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1200	claude-opus-5	high		1200	292979	12183	1887	36	agent-afix-pr-1200-286759f8f637fe0f
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	reviewer	fix-pr-1201	claude-opus-5	high		1201	516576	39924	3992	39	agent-afix-pr-1201-51c2986c8fc8d16d
+2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	other	housekeeper	claude-opus-5	high			65953	1639	211	13	agent-ahousekeeper-564767acb0cadf0c
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	implementer	impl-603	claude-opus-5	high	603		105982	10809	1034	33	agent-aimpl-603-e75e824134f6d896
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	implementer	impl-654	claude-sonnet-5	xhigh	654		153094	2513	482	37	agent-aimpl-654-07e6e2c42c15002a
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	implementer	impl-818	claude-sonnet-5	xhigh	818		327305	2599	1975	65	agent-aimpl-818-490f5b235655a759
@@ -1608,6 +1610,7 @@
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	merge-bot	merge-bot-4	claude-opus-5	high			49627	1724	425	19	agent-amerge-bot-4-5b2f6409f0e75b20
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	merge-bot	merge-bot-5	claude-opus-5	high			59240	4176	479	20	agent-amerge-bot-5-b30c9c799f208a5e
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	merge-bot	merge-bot-6	claude-opus-5	high			52425	2677	453	17	agent-amerge-bot-6-5a3bcd02f07d8d4d
+2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	merge-bot	merge-bot-7	claude-opus-5	high			48062	1955	435	13	agent-amerge-bot-7-d4a45066a95b7a56
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	other	tests-rerun-1187	claude-opus-5	high			154689	7988	1081	28	agent-atests-rerun-1187-d8fbae8a88412cf4
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			45672	1134	93	7	workflows/wf_0754e4fb-457/agent-a2253b1dea8a0f2b9
 2c1b9510-77c9-41b2-ac8a-02ee78bb1c12	2026-09-02	specialist	workflow-subagent	claude-haiku-4-5-20251001				31122	306	42	8	workflows/wf_0754e4fb-457/agent-a6356f99f1f69ea4b
@@ -4558,6 +4561,86 @@
 9cc8651c-f16b-4f67-9c75-bf182e00dec8	2026-08-15	specialist	pr-review-toolkit:pr-test-analyzer	claude-sonnet-5	xhigh			76324	24861	499	47	workflows/wf_c217b468-8b0/agent-ac97eacda07dfcbc6
 9cc8651c-f16b-4f67-9c75-bf182e00dec8	2026-08-15	specialist	pr-review-toolkit:silent-failure-hunter	claude-opus-5	xhigh			69790	16175	528	23	workflows/wf_c217b468-8b0/agent-ad5f4584d53d848a6
 9cc8651c-f16b-4f67-9c75-bf182e00dec8	2026-08-15	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	xhigh			77136	17301	657	22	workflows/wf_c217b468-8b0/agent-adb9abf0a9447d681
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			32232	552	312	14	agent-a085b2ca263f029b2
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			37273	2795	257	16	agent-a41676dccc3a4a03b
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			103150	4227	1578	37	agent-a44141236da743db0
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			50550	3367	802	19	agent-a70b9b5097e82c159
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			76391	1538	997	19	agent-a79bdcc3dd0786ed8
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			97982	758	1646	31	agent-a7d856acff5424995
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			74857	5607	390	24	agent-a8a64cb132faeb895
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	memory	memory-housekeeper	claude-opus-5	high			23687	4	15	2	agent-ab4360193a07a52e1
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			213397	4190	1625	34	agent-abfe3f663f1b3d624
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	claude-code-guide	claude-haiku-4-5-20251001				33529	6	55	3	agent-ac96aa072099e695e
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			145460	6943	1833	25	agent-ac9f1f02b819b1817
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			56586	1169	551	17	agent-ae4406f25cbd98490
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			32836	4586	542	12	agent-ae7c98bd9d86ed8c3
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	general-purpose	claude-opus-5	high			29814	59	97	9	agent-af8172fb047ef96d0
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	finisher	finisher-pr-1208	claude-opus-5	high		1208	73724	5066	509	25	agent-afinisher-pr-1208-e03b3cba15e03508
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	finisher	finisher-pr-1209	claude-opus-5	high		1209	69786	4334	438	20	agent-afinisher-pr-1209-ddfd4c0e1597b9b5
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	finisher	finisher-pr-1214	claude-opus-5	high		1214	52421	3090	372	17	agent-afinisher-pr-1214-7127d7de4af500b6
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	finisher	finisher-pr-1216	claude-opus-5	high		1216	50377	2686	513	19	agent-afinisher-pr-1216-5766664f30974559
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	reviewer	fix-pr-1208	claude-opus-5	high		1208	236664	5375	2923	35	agent-afix-pr-1208-548ff473ab3d4dba
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	reviewer	fix-pr-1209	claude-opus-5	high		1209	402321	21691	1966	50	agent-afix-pr-1209-5fbb3b640091960c
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	reviewer	fix-pr-1214	claude-opus-5	high		1214	121444	8672	1047	40	agent-afix-pr-1214-db4f8416634f7785
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	implementer	impl-570	claude-opus-5	high	570		221187	5006	1173	37	agent-aimpl-570-ce9267b4478cd8a7
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	implementer	impl-625	claude-sonnet-5	xhigh	625		258657	20137	1988	58	agent-aimpl-625-21d000d08317d0d1
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	implementer	impl-676	claude-opus-5	high	676		71537	6941	697	24	agent-aimpl-676-4107d22e0e7981fd
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	implementer	impl-709	claude-opus-5	high	709		78856	8190	872	28	agent-aimpl-709-2c823e13bde9c0bb
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	merge-bot	merge-bot-1-2	claude-opus-5	high			59382	4403	562	21	agent-amerge-bot-1-2-5f0f12e488edd970
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	merge-bot	merge-bot-2-2	claude-opus-5	high			53753	4695	779	24	agent-amerge-bot-2-2-8e41fb31d844936e
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-simplifier	claude-opus-5	high			139870	1588	1512	38	workflows/wf_518c0fcd-659/agent-a057a3c8fb4271297
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			28791	1322	107	14	workflows/wf_518c0fcd-659/agent-a065d5863bb606082
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			23937	571	67	8	workflows/wf_518c0fcd-659/agent-a1400a3ad986413c0
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			19527	19	37	4	workflows/wf_518c0fcd-659/agent-a15af26c647b602c8
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:type-design-analyzer	claude-sonnet-5	xhigh			192503	1318	1599	44	workflows/wf_518c0fcd-659/agent-a166b7f13ff5a2b3a
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			26293	1704	164	6	workflows/wf_518c0fcd-659/agent-a16b392ce3abe4b58
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			22916	14	53	5	workflows/wf_518c0fcd-659/agent-a2a14d56b6fc3616a
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			31117	2393	112	11	workflows/wf_518c0fcd-659/agent-a363865b7ec843bee
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			27840	53	220	8	workflows/wf_518c0fcd-659/agent-a3a6f4939d7cb1fa1
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			26971	500	69	8	workflows/wf_518c0fcd-659/agent-a4904b67e81880acb
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			23790	355	64	8	workflows/wf_518c0fcd-659/agent-a4ee70077b5a86124
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			219475	3696	1572	38	workflows/wf_518c0fcd-659/agent-a502824a0a439add5
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:comment-analyzer	claude-sonnet-5	xhigh			195622	5600	1252	64	workflows/wf_518c0fcd-659/agent-a6d8109d0d698fc1a
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			27918	291	65	6	workflows/wf_518c0fcd-659/agent-a71c1295ece1a7473
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:pr-test-analyzer	claude-sonnet-5	xhigh			213241	3006	1655	142	workflows/wf_518c0fcd-659/agent-a7c7cb822e2e88b65
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			31063	655	328	15	workflows/wf_518c0fcd-659/agent-a7f1c912367932138
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			25037	52	63	8	workflows/wf_518c0fcd-659/agent-a9976a6be8eeaf561
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			38782	36	45	6	workflows/wf_518c0fcd-659/agent-ab443d307f7890bc1
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			23115	30	69	7	workflows/wf_518c0fcd-659/agent-ab881f4e9c314e7f0
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			26073	28	158	7	workflows/wf_518c0fcd-659/agent-ac31eea984dfe72b5
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			33548	923	110	13	workflows/wf_518c0fcd-659/agent-acb5a792067fe4aaa
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:silent-failure-hunter	claude-opus-5	high			199146	1106	1502	22	workflows/wf_518c0fcd-659/agent-accd45ec05539c77f
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-haiku-4-5-20251001				31381	1302	40	7	workflows/wf_518c0fcd-659/agent-ad142f37c62633cdc
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			25102	369	57	6	workflows/wf_518c0fcd-659/agent-add4d1dba842149bd
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			29369	1369	94	9	workflows/wf_518c0fcd-659/agent-ae4603b86eee15fc7
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			61076	3692	147	14	workflows/wf_68c26787-e88/agent-a03d80436ed5ec416
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:type-design-analyzer	claude-sonnet-5	xhigh			107048	2417	746	35	workflows/wf_68c26787-e88/agent-a234ad6843a8c67da
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			25308	87	77	10	workflows/wf_68c26787-e88/agent-a38572114a6c81298
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:silent-failure-hunter	claude-opus-5	high			99694	1463	704	35	workflows/wf_68c26787-e88/agent-a3a89c84216b59ae6
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			30388	414	138	8	workflows/wf_68c26787-e88/agent-a402dda5b82242c35
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			27256	1733	85	10	workflows/wf_68c26787-e88/agent-a5a2781d4d5d39b10
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			30122	2600	118	14	workflows/wf_68c26787-e88/agent-a62000fdfebaddad7
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:comment-analyzer	claude-sonnet-5	xhigh			155253	7472	989	56	workflows/wf_68c26787-e88/agent-a6638985958e7c297
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			27521	444	56	7	workflows/wf_68c26787-e88/agent-a6b10dfaa0e7ca665
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-haiku-4-5-20251001				32666	2239	47	7	workflows/wf_68c26787-e88/agent-a7447b415e04ba220
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-simplifier	claude-opus-5	high			107713	1119	962	21	workflows/wf_68c26787-e88/agent-a792c9cb8b106bb32
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			24912	2053	127	12	workflows/wf_68c26787-e88/agent-a8438a230f167397b
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			29681	788	139	7	workflows/wf_68c26787-e88/agent-a962edc9fdd5ab50f
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			31340	57	102	9	workflows/wf_68c26787-e88/agent-a99307682e6852e8a
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			30065	533	121	9	workflows/wf_68c26787-e88/agent-a9b675774d0e7b23d
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:pr-test-analyzer	claude-sonnet-5	xhigh			161252	2821	1096	83	workflows/wf_68c26787-e88/agent-ab6dc278c81295c33
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			227023	6277	1216	54	workflows/wf_68c26787-e88/agent-ad6e42ab0093bf956
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-haiku-4-5-20251001				31831	23	50	10	workflows/wf_a7074819-dbd/agent-a55f02847b4cf484c
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:silent-failure-hunter	claude-opus-5	high			55984	316	466	12	workflows/wf_a7074819-dbd/agent-aa49bbe86a3d1ff14
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			75221	775	374	18	workflows/wf_a7074819-dbd/agent-ad05c12ff139caaa1
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			29421	18	100	7	workflows/wf_ad06cb54-799/agent-a24d0d7210ce3f0df
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			68773	6989	440	29	workflows/wf_ad06cb54-799/agent-a35b7038ca07ea5ad
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			47685	1105	114	11	workflows/wf_ad06cb54-799/agent-a40a00a025d276de4
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-haiku-4-5-20251001				33064	9	57	5	workflows/wf_ad06cb54-799/agent-a45a41f6ccae66970
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			26433	1502	133	14	workflows/wf_ad06cb54-799/agent-a942a49cc18dc10f3
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:comment-analyzer	claude-sonnet-5	xhigh			99167	3643	600	41	workflows/wf_ad06cb54-799/agent-ab77d14c2540bbb1d
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	pr-review-toolkit:pr-test-analyzer	claude-sonnet-5	xhigh			99654	8763	570	36	workflows/wf_ad06cb54-799/agent-ac9111c0707aaac34
+9d506598-a99d-43f0-9990-19b35d88e96a	2026-09-02	specialist	workflow-subagent	claude-opus-5	low			25124	1448	79	6	workflows/wf_ad06cb54-799/agent-acf2799e50ebdf8e7
 9f2bdc9b-6cf5-429a-b6f6-ca2a6bafd93c	2026-07-31	memory	memory-housekeeper	claude-opus-5	xhigh			50989	6547	125	4	agent-a50de74247ad66177
 9f2bdc9b-6cf5-429a-b6f6-ca2a6bafd93c	2026-07-31	memory	memory-proxy	claude-haiku-4-5-20251001				27697	6233	108	7	agent-a5ed0b9c0a2df0bdf
 9f2bdc9b-6cf5-429a-b6f6-ca2a6bafd93c	2026-07-31	specialist	workflow-subagent	claude-opus-5	low			33217	1689	46	5	workflows/wf_7a589dd6-aa7/agent-a002e595aead9979f
