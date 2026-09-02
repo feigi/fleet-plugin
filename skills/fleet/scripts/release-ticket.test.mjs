@@ -926,6 +926,8 @@ test("a symlink over HEAD that RESOLVES never reaches the unresolved-HEAD arm â€
   // ends in the same words, so a tail-only match could not tell them apart.
   assert.match(stderr, /cannot read the git linkage of/);
   assert.doesNotMatch(stderr, /could not read its HEAD/, "HEAD resolved fine â€” this refusal is about the linkage");
+  assert.doesNotMatch(stderr, /cannot read the status of/,
+    "the linkage guard itself must be what refused this, not a downstream guard reached because it went advisory");
   assert.equal(code, 2);
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "and nothing is touched");
 });
