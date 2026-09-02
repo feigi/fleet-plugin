@@ -124,7 +124,9 @@ was lost is that you pinged it by name with a concrete next action.
 `finisher-pr-1184` reached for the same pattern minutes later — a proactive
 warning is the only reason it did not repeat the stall. Its
 `pgrep -f 'finish-finisher-pr-1184'` could never have matched any process, so
-the poll it was waiting on was structurally incapable of firing.
+the poll it was waiting on was structurally incapable of firing. Say it in
+every dispatch prompt — this file is yours, not theirs, so a member learns
+it only if you write it into the prompt.
 
 ## Phase 0 — shortlist
 
