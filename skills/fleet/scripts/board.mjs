@@ -385,11 +385,14 @@ function readAgent(file, metaFile) {
   return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
 }
 
-// The `no-spend-dir` gate warns at most once per process. It has nothing to key
-// on — the failure is the session directory itself — so it passes the empty key
-// warnOnce documents. Errors reach the browser too (see below), but the board
-// gathers every ~15s and a line repeating at that rate just trains the eye to
-// ignore it.
+// The `no-spend-dir` gate warns at most once per process. `dir.error` is not
+// constant — findSubagentsDir words an unresolvable project dir differently
+// from a lookup that threw — so the empty key warnOnce documents is a CHOICE
+// here, not an absence of anything to key on. What it costs is only the repeat
+// stderr LINE: a fault that differs still reaches the browser on the tick it
+// happens, through the `{ error }` gatherSpend returns for it, which board.html
+// renders as the panel's text. The board gathers every ~15s and a line
+// repeating at that rate just trains the eye to ignore it.
 //
 // The `skips` gate is the same rule, per transcript: a file that is broken is
 // broken every tick, and at the default 15s interval three of them are 720 lines
