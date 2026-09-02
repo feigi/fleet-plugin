@@ -73,3 +73,9 @@ file-header ceiling block is the place to consolidate *into*, not a copy to cut.
 - #313 — "delete the duplicated testCmd tombstone comment in the arg-defaulting block"
 - #314 — "replace resolveTestCmd's snap && guards with optional chaining"
 - #220 — "review-pr.js comment blocks and the #211 spec restate each other and the tests"
+- #1157 — "collapse `verdictFor`'s `dispatched` parameter, derivable at every call site"
+  (closed a record, not a rejection: the collapse also fails on merits — `verdictFor`
+  returns the *filtered* votes, so `dispatched` is the only carrier of what the filter
+  destroys. Measured `verdictFor(3, [yes, null])` → `refutersDispatched 3` beside a
+  one-element `votes`. Equal at today's two call sites, different in meaning: the
+  duplication hides a difference, not an owner — the #987 shape, not #1040's.)
