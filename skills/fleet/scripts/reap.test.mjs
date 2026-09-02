@@ -588,7 +588,7 @@ test("a status probe that dies (rc 128) is kept with git's own message, not just
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$#" = 4 ]`,
+    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
     ["fatal: not a git repository: /some/admin/path"],
     128,
   );
@@ -619,7 +619,7 @@ test("a clean worktree with a warning on the plain status probe's stderr is stil
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$#" = 4 ]`,
+    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
     ["warning: unrelated advice from git, not about this worktree's contents"],
     0,
   );
@@ -665,6 +665,156 @@ test("an `--ignored` probe that warns at rc 0 is kept, listing incomplete, never
   assert.match(json.kept[0].reason, /Permission denied/, "git's own warning must reach the reason");
   assert.match(stderr, /KEEP feature\/merged/);
   assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true);
+});
+
+test("a plain status probe that warns its walk was cut short keeps the branch, never reads the empty answer as clean (#625)", (t) => {
+  // The other half of the same asymmetry. `git status --porcelain` opens
+  // UNTRACKED directories, so an unreadable one makes it warn at rc 0 and
+  // answer EMPTY — measured, git 2.50.1 (Apple Git-155). The rc check above
+  // never fires, `[ -n "$gp_out" ]` reads the empty answer as clean, and
+  // `--apply` deletes a worktree holding work git had provably not finished
+  // listing. This is the fleet-worktree path: `.worktrees/` is exempt from the
+  // `--ignored` probe, so the plain scan is the ONLY probe that can catch it.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    ["warning: could not open directory 'wip/': Permission denied"],
+    0,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^worktree .* status warned, listing may be incomplete: /);
+  assert.match(json.kept[0].reason, /could not open directory 'wip\/': Permission denied$/, "git's own warning must reach the reason, and end it");
+  assert.match(stderr, /KEEP feature\/merged/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true, "a worktree git could not finish reading must survive");
+});
+
+test("ambient git noise on the `--ignored` probe's stderr does not strand a clean worktree (#625)", (t) => {
+  // The gate's other failure direction, and the one a plain `[ -n "$gp_err" ]`
+  // walks straight into: a global gitconfig with a key outside any section
+  // makes EVERY git command print this at rc 0 — the same fault this file's
+  // rev-parse probe is redirected for — while leaving the listing COMPLETE.
+  // Gated on stderr merely existing, every worktree outside `.worktrees/` is
+  // kept for as long as the operator's config stays broken, with a reason
+  // blaming the worktree for a fault in ~/.gitconfig.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "noisy"));
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    ["error: key does not contain a section: stray"],
+    0,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.kept, [], "noise that left the listing whole must not keep this branch");
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.doesNotMatch(stderr, /listing may be incomplete/, "a complete listing must never be reported as incomplete");
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.equal(existsSync(wt), false);
+});
+
+test("an `--ignored` probe that DIES is kept with git's own message, not just a label (#625)", (t) => {
+  // Sibling of the plain probe's rc-128 test above, for the branch this file
+  // had no coverage of at all: the rc check on the `--ignored` probe. The keep
+  // is unconditional either way, so what is at stake is only the diagnostic
+  // text — which is the entire thing #625 exists to preserve.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside-dead"));
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    ["fatal: unable to read index file .git/index"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable probe is not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.equal(
+    json.kept[0].reason,
+    `worktree ${wt} unreadable (git status --ignored failed): fatal: unable to read index file .git/index`,
+    "git's message must reach the reason whole — and the reason must not trail a separator or a space",
+  );
+  assert.match(stderr, /KEEP feature\/merged/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true);
+});
+
+test("the branchless sweep's status probe reports git's own message when it dies, too (#625)", (t) => {
+  // The third call site. The branch sweep's two probes got #625 coverage; this
+  // copy — the one the detached/branchless sweep runs, and the only probe a
+  // worktree that wandered off its branch is ever measured by — got none, so a
+  // regression here reverted silently under a green suite.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    ["fatal: not a git repository: /some/admin/path"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable probe is not a script failure");
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "the branchless sweep has no branch to name");
+  assert.equal(
+    json.kept[0].reason,
+    `worktree ${wt} could not be read: fatal: not a git repository: /some/admin/path`,
+    "git's message must reach the reason whole — and the reason must not trail a separator or a space",
+  );
+  assert.match(stderr, /KEEP \(no branch\)/);
+  assert.equal(existsSync(wt), true, "a worktree that could not be read must survive");
+});
+
+test("the branchless sweep keeps a worktree whose status walk was cut short, too (#625)", (t) => {
+  // The third call site's copy of the gate, on the same rc-0 shape the branch
+  // sweep's copy is pinned against above. Without it a detached worktree whose
+  // walk git could not finish reads as clean here as well, and this sweep
+  // removes the directory outright — there is no branch left to keep as a
+  // second chance.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    ["warning: could not open directory 'wip/': Permission denied"],
+    0,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [], "a walk git could not finish is not grounds to remove");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null);
+  assert.equal(
+    json.kept[0].reason,
+    `worktree ${wt} status warned, listing may be incomplete: warning: could not open directory 'wip/': Permission denied`,
+  );
+  assert.match(stderr, /KEEP \(no branch\)/);
   assert.equal(existsSync(wt), true);
 });
 
