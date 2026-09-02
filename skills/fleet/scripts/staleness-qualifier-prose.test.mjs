@@ -52,11 +52,21 @@
 // `indexOf` anchor would break on a rewrap the clause itself survives, turning
 // a reflow into a red. Measured: each of the qualifier's six inter-word gaps
 // broken on its own, and all six broken at once, still match, and both
-// containing paragraphs rewrapped at 60-400 cols stay green. The one break that
-// defeats it falls INSIDE `behind-count` (Python `textwrap` at width 40
-// hyphen-breaks it into `behind-` / `count`), which no Markdown wrapper does —
-// and loosening the token to admit it would let `behind- count` read as the
-// qualifier.
+// containing paragraphs rewrapped across 60-400 cols stay green with Python
+// `textwrap`'s `break_on_hyphens` off — which is how a Markdown wrapper wraps.
+//
+// THE REFLOW CEILING is that hyphen-breaking, not any one width. With
+// `break_on_hyphens` at its default, `textwrap` splits `behind-count` into
+// `behind-` / `count`; measured, the split lands inside SKILL.md's copy of the
+// qualifier at width 40 and again at 72 and reds, while 60, 80 and 100 stay
+// green. It is not monotonic in width, so a ceiling re-derived at one width —
+// or against an invented sentence rather than the real paragraph — lands
+// somewhere else, which is how this note has already been read as false once.
+// WHICH occurrence splits is what decides a red: at 80 the split falls on
+// review-and-fix.md's "solely from a non-zero behind-count", which sits before
+// that document's anchor and outside its slice, and the suite stays green —
+// the slice bound above doing its job, not luck. Loosening the token to admit
+// the split would let `behind- count` read as the qualifier.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
