@@ -165,6 +165,93 @@ keep() {
   printf '    KEEP %s — %s\n' "${1:-(no branch)}" "$2" >&2
 }
 
+# Runs `git "$@"`, and unlike a bare `$(git … 2>/dev/null)` this keeps git's
+# stderr instead of discarding it — into $gp_err, never mixed into $gp_out,
+# with git's own exit status returned by this function. #625: this file's
+# worktree status probes used to throw stderr away, so a `fatal:` at rc 128 named
+# no cause and a `warning:` at rc 0 (measured, PR #726 review — a
+# permission-denied ignored directory) reached nobody. The wrong fix is
+# `2>&1`: the very next line after one of these probes tests whether the
+# captured text is non-empty to decide dirty, so folding a warning in would
+# make a clean worktree with ANY git warning on it read as dirty forever.
+#
+# No temp file (this file creates none): git's stderr goes to fd3, which the
+# group below dupes from fd1 before git runs, so it lands live in the SAME
+# pipe `gp_raw=$( … )` reads — no separate pipe or file needed for it. Command
+# substitution runs in its own subshell (POSIX), so a plain variable set
+# inside — git's stdout, git's own $? — cannot escape it; only the TEXT
+# written there survives. `gp_sep` (a byte no porcelain line or ordinary
+# warning contains) marks where one piece ends and the next begins, so
+# `gp_raw` can be split apart with plain parameter expansion once it is back
+# in the real, top-level shell.
+#
+# `if gp_o=$(...); then gp_rc=0; else gp_rc=$?; fi`, never a bare
+# `gp_o=$(...); gp_rc=$?`: under `set -e` a bare failing assignment aborts the
+# subshell before `gp_rc=$?` or the printf below ever run, and `gp_raw` comes
+# back empty — silently, at the one moment this function exists to not be
+# silent (measured on this exact shape, PR #1068 review).
+gp_sep=$(printf '\002')
+git_probe() {
+  gp_raw=$(
+    {
+      if gp_o=$(git "$@" 2>&3); then gp_rc=0; else gp_rc=$?; fi
+      printf '%s' "$gp_sep$gp_o$gp_sep$gp_rc"
+    } 3>&1
+  )
+  gp_err=${gp_raw%%"$gp_sep"*}
+  gp_raw=${gp_raw#*"$gp_sep"}
+  gp_out=${gp_raw%%"$gp_sep"*}
+  gp_rc=${gp_raw#*"$gp_sep"}
+  return "$gp_rc"
+}
+
+# True when git's stderr says the directory walk was CUT SHORT — entries are
+# missing from $gp_out — as opposed to git merely having said something.
+# "Anything on stderr" is the wrong test in both directions, measured here on
+# git 2.50.1 (Apple Git-155):
+#
+#   too broad — a global gitconfig with a key outside any section makes EVERY
+#   git command print `error: key does not contain a section: …` at rc 0 (the
+#   same fault the rev-parse probe near the end of this file is redirected
+#   for), and an unreadable core.attributesFile prints `warning: unable to
+#   access '…': Permission denied`. Both leave the listing COMPLETE, so a
+#   non-empty-stderr gate strands every worktree it guards for as long as the
+#   operator's config stays broken, blaming the worktree for the fault.
+#
+#   too narrow — gating only the `--ignored` probe misses the plain scan: an
+#   unreadable UNTRACKED directory makes `git status --porcelain` warn at rc 0
+#   and answer EMPTY, which the dirty check below then reads as clean.
+#
+# `warning: could not open directory '<path>': <err>` is the message git emits
+# for exactly that, and only that: measured at rc 0 with entries missing on an
+# unreadable untracked directory, an unreadable ignored directory, and an
+# unreadable directory holding a tracked file. So both probe kinds gate on it,
+# and neither gates on anything else.
+gp_cut_short() {
+  case "$gp_err" in
+    *"could not open directory"*) return 0 ;;
+  esac
+  return 1
+}
+
+# `: <what git said>`, or nothing at all when git said nothing. Two reasons not
+# to interpolate $gp_err directly. It keeps its trailing newline — it is read
+# straight out of the pipe, unlike $gp_out, which command substitution strips —
+# so a bare `tr '\n' ' '` leaves a trailing space inside the JSON reason. And a
+# git that dies without writing to stderr (measured: a signal-killed git exits
+# 137 with stderr empty) would otherwise leave a dangling `": "` naming no
+# cause, on the one path this whole change exists to make name one.
+gp_why() {
+  gp_w=$(printf '%s' "$gp_err" | tr '\n' ' ')
+  while :; do
+    case "$gp_w" in
+      *' ') gp_w=${gp_w% } ;;
+      *) break ;;
+    esac
+  done
+  if [ -n "$gp_w" ]; then printf ': %s' "$gp_w"; fi
+}
+
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
 #
@@ -325,11 +412,24 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
         keep "$b" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-        keep "$b" "worktree $wt could not be read"
+      if ! git_probe -C "$wt" status --porcelain; then
+        keep "$b" "worktree $wt could not be read$(gp_why)"
         continue
       fi
-      if [ -n "$status_out" ]; then
+      # Before the dirty check, never after it: a walk git could not finish
+      # answers EMPTY, so `[ -n "$gp_out" ]` below reads it as clean and the
+      # run goes on to delete a worktree it never finished reading. An earlier
+      # version of this comment argued a plain scan cannot reach that warning
+      # because it skips ignored paths without opening them; the scan does open
+      # UNTRACKED directories, and measurably warns at rc 0 on an unreadable
+      # one. $gp_out still stays clean of whatever reached stderr — that is
+      # what git_probe is for — so a warning is never read as dirty content
+      # either.
+      if gp_cut_short; then
+        keep "$b" "worktree $wt status warned, listing may be incomplete$(gp_why)"
+        continue
+      fi
+      if [ -n "$gp_out" ]; then
         keep "$b" "dirty worktree $wt"
         continue
       fi
@@ -348,11 +448,22 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
       case "$wt" in
         */.worktrees/*) : ;;
         *)
-          if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
-            keep "$b" "worktree $wt unreadable (git status --ignored failed)"
+          if ! git_probe -C "$wt" status --porcelain --ignored; then
+            keep "$b" "worktree $wt unreadable (git status --ignored failed)$(gp_why)"
             continue
           fi
-          ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
+          # `--ignored` asks git to OPEN every ignored path to list what is
+          # inside it (measured, PR #726 review: a `chmod 000` ignored
+          # directory made this exact probe warn and exit 0). A precious
+          # ignored file under a path git could not open would never reach
+          # $ignored, and `git worktree remove` deletes ignored files
+          # silently — so a cut-short walk fails closed rather than report what
+          # git managed to see as the whole answer.
+          if gp_cut_short; then
+            keep "$b" "worktree $wt status --ignored warned, listing may be incomplete$(gp_why)"
+            continue
+          fi
+          ignored=$(printf '%s\n' "$gp_out" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
           if [ -n "$ignored" ]; then
             keep "$b" "ignored files present in $wt: $ignored"
             continue
@@ -370,8 +481,15 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
     # as release-ticket.sh measures for its own delete), so no separate branch
     # is needed for the absent case.
     if [ "$apply" = true ]; then
-      # No --force, ever. It refuses on modified and untracked files; the
-      # ignored-file gap it does NOT cover is handled by the check above.
+      # No --force, ever. It refuses on modified and untracked files — but
+      # that refusal reads the same `status` machinery the probe above does, so
+      # it is a DEFAULT-config guarantee, not an absolute. Measured here, git
+      # 2.50.1 (Apple Git-155), with a control: with `status.showUntrackedFiles
+      # = no` set, removing a worktree holding an untracked file exits 0 and
+      # takes the file with it; the identical fixture without that config exits
+      # 128 refusing. Pinning the probes against that config is #730's, not
+      # this guard's. The ignored-file gap it never covers under any config is
+      # handled by the check above.
       #
       # A non-zero exit does NOT mean the removal had no effect. Measured here,
       # git 2.50.1 (Apple Git-155): a locked worktree exits 128 with the
@@ -611,11 +729,18 @@ else
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-        keep "" "worktree $wt could not be read"
+      if ! git_probe -C "$wt" status --porcelain; then
+        keep "" "worktree $wt could not be read$(gp_why)"
         continue
       fi
-      if [ -n "$status_out" ]; then
+      # Same gate, same order, and the same reason as the branch sweep's copy
+      # of this probe: a cut-short walk answers empty, so it has to be caught
+      # before the dirty check below rather than after it.
+      if gp_cut_short; then
+        keep "" "worktree $wt status warned, listing may be incomplete$(gp_why)"
+        continue
+      fi
+      if [ -n "$gp_out" ]; then
         keep "" "dirty worktree $wt"
         continue
       fi
