@@ -121,8 +121,8 @@ requires `dimension` (`review-pr.js:31`) and every returned finding carries it
 The review runs **once**, against a snapshot cut at the pre-fix HEAD
 (`git archive HEAD`, `review-pr.js:207`). The fix-applier then edits, commits,
 pushes and exits. The finisher is "a fresh small agent, not the fix-applier
-resumed" (`run-team/SKILL.md:382`) whose duties are worktree audit, confirm
-deferrals filed, add `ready-to-merge`. Nothing re-reviews.
+resumed" (`run-team/SKILL.md`, same quoted words) whose duties are worktree
+audit, confirm deferrals filed, add `ready-to-merge`. Nothing re-reviews.
 
 So no reviewer ever reads the fix commit. Two consequences:
 
@@ -320,8 +320,8 @@ currently carries only the PR number, worktree path and findings
 (`run-team/SKILL.md:337-338`); `testCmd` is added to that payload.
 
 A bad run reuses the convention already in the specialist prompt
-(`review-pr.js:284-286`) rather than inventing one: **`tests 0` is a FAILED run,
-not a pass.** Report the test result alongside the SHA.
+(`review-pr.js`) rather than inventing one: **`tests 0` is a FAILED run, not
+a pass.** Report the test result alongside the SHA.
 
 **Do not bypass.** `no-verify` and `pre-commit` appear nowhere in
 `skills/fleet/` — verified at `8a84402`. A generic plugin instructs agents to
