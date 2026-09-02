@@ -1425,14 +1425,26 @@ test("the next-ticket pin reds on the refused spelling and stays green on text i
     "next-ticket/SKILL.md no longer carries a legitimate `--label` outside its candidate step — this control now proves nothing",
   );
 
-  // GREEN, control 2: a reflow. Rejoining hard wraps outside fenced blocks has
-  // zero behavioural effect on a skill, and a prose pin that reds on one costs
-  // its readers more than it holds.
-  const reflowed = NEXT_TICKET.split(/(```[\s\S]*?```)/)
-    .map((part, i) => (i % 2 ? part : part.replace(/(\S)\n(?=\S)/g, "$1 ")))
-    .join("");
-  assert.notEqual(reflowed, NEXT_TICKET, "the reflow changed nothing — this control now proves nothing");
-  assertScanRunsDeclaredFlag(reflowed, "a reflowed next-ticket/SKILL.md");
+  // GREEN, control 2: a reflow. Rewrapping prose outside fenced blocks has zero
+  // behavioural effect on a skill, and a prose pin that reds on one costs its
+  // readers more than it holds.
+  //
+  // TWO reflows, in opposite directions, because one is not enough to stay
+  // honest: an unwrap applied to an already-unwrapped file changes nothing, and
+  // a control that asserts its own input changed would then red on the very
+  // maintainer edit it exists to bless — measured, by running this against an
+  // unwrapped copy of the skill. Requiring only that ONE of the two differs
+  // keeps the control non-vacuous whatever the file's current wrapping.
+  const outsideFences = (md, f) =>
+    md.split(/(```[\s\S]*?```)/).map((part, i) => (i % 2 ? part : f(part))).join("");
+  const unwrapped = outsideFences(NEXT_TICKET, (p) => p.replace(/(\S)\n(?=\S)/g, "$1 "));
+  const rewrapped = outsideFences(unwrapped, (p) => p.replace(/, (?=\S)/g, ",\n"));
+  assert.ok(
+    unwrapped !== NEXT_TICKET || rewrapped !== NEXT_TICKET,
+    "neither reflow changed next-ticket/SKILL.md — this control now proves nothing",
+  );
+  assertScanRunsDeclaredFlag(unwrapped, "an unwrapped next-ticket/SKILL.md");
+  assertScanRunsDeclaredFlag(rewrapped, "a rewrapped next-ticket/SKILL.md");
 });
 
 test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {
