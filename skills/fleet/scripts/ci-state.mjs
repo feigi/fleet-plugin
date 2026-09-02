@@ -404,9 +404,22 @@ if (noCi) {
 }
 
 // --- Expected jobs, derived from the workflow file ------------------------
-// Never hardcoded. The fleet's prose names four jobs; the workflow defines five.
-// A list built from the documents would silently accept a run missing
-// `integration-docker`.
+// Never hardcoded: expectedJobs() parses the `jobs:` block of the workflow file
+// this run resolved (discoverWorkflowFile, or --workflow-file), so the expected
+// set tracks that file and follows it across repos. A reader asking whether an
+// empty `missing` is real should read that workflow for the current set. It is
+// deliberately not restated here: a set written into this comment is wrong the
+// moment a job is added, which is what happened to the figures this comment used
+// to carry. The path is not named here either, for the same reason it is not
+// hardcoded in the code — a fixed `.github/workflows/ci.yml` is the #111 defect
+// discoverWorkflowFile exists to fix.
+//
+// Not built from the fleet's own prose instead, because the prose does not name
+// every job a workflow defines: `integration-docker` — a job in the agent-brain
+// repo's CI workflow, which is on an internal GHE host and so cannot be settled
+// from this repo — appears in no fleet document (`git grep -l integration-docker
+// -- 'skills/fleet/**/*.md'` matches nothing), so a list built from the documents
+// would have silently accepted a run missing it.
 function expectedJobs(file) {
   let text;
   try {
