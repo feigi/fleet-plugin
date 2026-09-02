@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
 const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
@@ -1271,11 +1272,7 @@ test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
   // `candidates.mjs` invocation in the same bullet already spells
   // `--require-label` correctly, so a positive match anywhere in phase 0 stays
   // green with the rule naming anything at all.
-  const at = RUN_TEAM.indexOf("1. **Candidate scan**");
-  assert.notEqual(at, -1, "run-team phase 0 step 1 moved — update this test");
-  const end = RUN_TEAM.indexOf("\n2. ", at);
-  assert.notEqual(end, -1, "run-team phase 0 step 2 moved — update this test");
-  const step1 = RUN_TEAM.slice(at, end);
+  const step1 = between(RUN_TEAM, "1. **Candidate scan**", "\n2. ", "run-team/SKILL.md");
   // Leading backtick, so this can only be satisfied by the RULE: in the command
   // above it, `--require-label` is preceded by a line break, not a backtick.
   // The gap is loose enough that rewording around `mandatory` stays green and
@@ -1319,12 +1316,22 @@ const SPEC_COCKPIT_DESIGN = fileURLToPath(
 // a hand-copied spelling that nothing made move with the script.
 //
 // Guarded at every step, and called from a test body rather than run at module
-// scope, because an unguarded index here fails at IMPORT. Reformatting
-// `OPTIONS` — one-lining it, wrapping it in `Object.freeze`, anything that
-// drops the literal `\n};` this regex needs — has zero behavioural effect and
-// took this file from 62 tests to a single failure, with no *test-authored*
-// diagnostic: node does name the file and the line, but nothing names
-// `OPTIONS` as the thing to look at, and the 61 unrelated tests never run.
+// scope, because an unguarded index here fails at IMPORT, and an import-time
+// failure takes down every test in this file — the ones deriving the flag and
+// the ones that have nothing to do with it alike — leaving one node-authored
+// `TypeError` that names a file and a line but never names `OPTIONS` as the
+// thing to look at. Measured on this tree by appending an unguarded
+// module-scope `.match(...)[0]` to this file and one-lining `OPTIONS`:
+// `node --test skills/fleet/scripts/candidates.test.mjs` then reports one
+// synthetic test, zero passes, and that TypeError.
+//
+// Reformatting `OPTIONS` — one-lining it, wrapping it in `Object.freeze`,
+// anything that drops the literal `\n};` this regex needs — has zero
+// behavioural effect, so what the guard buys is that such a reformat costs
+// only the tests that derive the flag: measured by one-lining `OPTIONS` on
+// this tree, those tests red with this guard's own `OPTIONS block no longer
+// matches — update this test` message and every other test in this file still
+// runs and passes.
 //
 // The `*label` match is global and required to be UNIQUE rather than indexed
 // at the first hit, because indexing fails SILENTLY: an `"exclude-label"`
@@ -1351,12 +1358,12 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   // the supersession note at the head cites `--label` deliberately, as the
   // spelling this script refuses, so a file-wide negative would fail on the
   // correction's own prose.
-  const spec = readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8");
-  const at = spec.indexOf("1. Candidate scan");
-  assert.notEqual(at, -1, "the spec's phase 0 candidate scan moved — update this test");
-  const end = spec.indexOf("\n2. ", at);
-  assert.notEqual(end, -1, "the spec's phase 0 step after the candidate scan moved — update this test");
-  const step = spec.slice(at, end);
+  const step = between(
+    readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8"),
+    "1. Candidate scan",
+    "\n2. ",
+    "the run-team design spec",
+  );
 
   assert.ok(
     step.includes(`\`--${DECLARED_LABEL_FLAG} ready-for-agent\``),
@@ -1369,6 +1376,96 @@ test("the run-team design spec's candidate-scan step names the flag this script 
     /--label\b/,
     "the spec's candidate-scan step names `--label`, which this script refuses at exit 2",
   );
+});
+
+// --- #851: another live carrier of the flag spelling, and not the last
+// carrier nothing asserts on. `git grep -l -- --require-label docs skills`
+// lists the carriers; several are unpinned, filed as #1196 — measured by
+// rewriting `docs/specs/2026-07-23-fleet-plugin-design.md`'s value-bearing
+// `[--require-label L]` synopsis row to `[--label L]`, which leaves this whole
+// suite green. `next-ticket/SKILL.md` earns a pin here because it is what a
+// solo caller reads to run the scan, and `--label` is what `gh issue list`
+// accepts, so it is the plausible thing to write and the thing this script
+// refuses at exit 2. Derived from `OPTIONS`, through the same guarded
+// `declaredLabelFlag()` the run-team design-spec pin uses, so a rename of the
+// flag reddens here instead of minting the next hand-copied spelling.
+//
+// What gets pinned is the TOKEN inside the candidate step, not the invocation
+// that carries it. Measured, both legs: deleting that step's only fenced block
+// and naming the flag in prose instead leaves the whole suite green, while
+// deleting the same fence with NO mention of the flag reds with this pin's own
+// message. So this holds "the flag named here is the one `OPTIONS` declares",
+// never "there is a runnable command here" — a separate invariant #851 does
+// not ask for and nothing else in this suite claims.
+const NEXT_TICKET = readFileSync(join(import.meta.dirname, "..", "skills", "next-ticket", "SKILL.md"), "utf8");
+
+// Takes the text rather than reading the file, so the discrimination test below
+// can put the same pin in front of the input it must red on AND the input it
+// must not. A pin only shown to red is not shown to discriminate.
+function assertScanRunsDeclaredFlag(text, where) {
+  const flag = declaredLabelFlag();
+  // The candidate step alone, for the reason both pins above give, and here
+  // with a live second reason: step 7 of this same skill says "Never fold
+  // `--label` into the create", where `--label` is `gh pr edit`'s own flag and
+  // correct (#375). A file-wide negative would fail on that sentence.
+  const step = between(text, "## 1. Candidates", "## 2. Dependencies", where);
+  assert.ok(
+    step.includes(`--${flag} ready-for-agent`),
+    `${where}'s candidate scan no longer runs the label flag candidates.mjs' OPTIONS declares`,
+  );
+  // `--require-label` does not contain `--label`, so this tells them apart with
+  // no quoting — same reasoning as the two pins above.
+  assert.doesNotMatch(
+    step,
+    /--label\b/,
+    `${where}'s candidate scan names \`--label\`, which candidates.mjs refuses at exit 2`,
+  );
+}
+
+test("next-ticket's candidate scan runs the flag this script declares", () => {
+  assertScanRunsDeclaredFlag(NEXT_TICKET, "next-ticket/SKILL.md");
+});
+
+test("the next-ticket pin reds on the refused spelling and stays green on text it must accept", () => {
+  // REDS on the swap it exists to catch — written through the declared flag
+  // rather than the literal, so a rename of the flag moves the mutant with it
+  // instead of leaving a mutant that tests nothing.
+  assert.throws(
+    () => assertScanRunsDeclaredFlag(NEXT_TICKET.replaceAll(`--${declaredLabelFlag()}`, "--label"), "the mutant"),
+    /the mutant's candidate scan/,
+    "the pin does not red when the candidate scan is given the spelling this script refuses",
+  );
+
+  // GREEN, control 1: the live file, which carries a legitimate `--label`
+  // outside this slice. This is what separates a bounded pin from a whole-file
+  // one — the latter clears "it and only it reds" and still reds on prose it
+  // has no business reading.
+  assert.match(
+    NEXT_TICKET,
+    /Never fold `--label` into the create/,
+    "next-ticket/SKILL.md no longer carries a legitimate `--label` outside its candidate step — this control now proves nothing",
+  );
+
+  // GREEN, control 2: a reflow. Rewrapping prose outside fenced blocks has zero
+  // behavioural effect on a skill, and a prose pin that reds on one costs its
+  // readers more than it holds.
+  //
+  // TWO reflows, in opposite directions, because one is not enough to stay
+  // honest: an unwrap applied to an already-unwrapped file changes nothing, and
+  // a control that asserts its own input changed would then red on the very
+  // maintainer edit it exists to bless — measured, by running this against an
+  // unwrapped copy of the skill. Requiring only that ONE of the two differs
+  // keeps the control non-vacuous whatever the file's current wrapping.
+  const outsideFences = (md, f) =>
+    md.split(/(```[\s\S]*?```)/).map((part, i) => (i % 2 ? part : f(part))).join("");
+  const unwrapped = outsideFences(NEXT_TICKET, (p) => p.replace(/(\S)\n(?=\S)/g, "$1 "));
+  const rewrapped = outsideFences(unwrapped, (p) => p.replace(/, (?=\S)/g, ",\n"));
+  assert.ok(
+    unwrapped !== NEXT_TICKET || rewrapped !== NEXT_TICKET,
+    "neither reflow changed next-ticket/SKILL.md — this control now proves nothing",
+  );
+  assertScanRunsDeclaredFlag(unwrapped, "an unwrapped next-ticket/SKILL.md");
+  assertScanRunsDeclaredFlag(rewrapped, "a rewrapped next-ticket/SKILL.md");
 });
 
 test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {
