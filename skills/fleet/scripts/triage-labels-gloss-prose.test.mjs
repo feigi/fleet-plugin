@@ -7,23 +7,35 @@
 // ticket is by construction not.
 //
 // The fix was to strip the criterion rather than restate it, so what needs
-// guarding is a RE-ADDITION, and its vector is named and still live: the label
-// description on the tracker still carries the old wording, and anyone
-// re-syncing this column from it puts the contradiction straight back.
+// guarding is a RE-ADDITION, and its vector is named and still live: the
+// `ready-for-agent` description on the tracker still carries the old wording,
+// and anyone re-syncing this column from it puts the contradiction back.
 //
-// CEILING: this pins two phrases out of two one-row slices. It catches the
-// re-sync vector and a narrowing of `ready-for-human` back to implementation.
-// It cannot prove the column carries no OTHER restated criterion — no assertion
-// can, which is why the column's job is stated in the file's own `:3` rather
-// than defended here.
+// #836 raises the `ready-for-agent` cell alone. The `ready-for-human` pin below
+// is an ADDITION, made under the ticket's own acceptance criterion that "the
+// other four rows are checked for the same drift while the file is open". That
+// check found the same narrowing in `ready-for-human` and nothing to correct in
+// the other three. Its vector is not the re-sync above — the tracker's own
+// `ready-for-human` description does not narrow to implementation — so what is
+// pinned there is the narrowing itself.
 //
-// Measured as of this commit, on the working tree with `cp` restore after each:
-// five mutations — the old description re-synced verbatim, the criterion
+// CEILING: each test pins one row slice, on three things — the role-to-label-
+// string mapping, that the gloss still turns on whether an AFK agent can take
+// the work, and the absence of the restated criterion. The middle one is what
+// stops the negative passing on an emptied cell; the label-string companion
+// alone does not, because it pins columns the gloss is not in. None of this
+// proves the column carries no OTHER restated criterion — no assertion can. The
+// bound is the file's own stated job at `:3`, which "maps those roles to the
+// actual label strings": a mapping, not a criteria source.
+//
+// Measured as of this commit, on a copy of the tree with `cp` restore after
+// each: seven mutations — the old description re-synced verbatim, the criterion
 // re-added with two words wedged into the adjacency, `ready-for-human` narrowed
-// back to implementation, that same narrowing with the noun gone, and the
-// label-string mapping broken — each reddened its own pin and no other.
-// Controls: a benign reword of a pinned cell, an unpinned row's cell rewritten,
-// and the table re-padded to a wider column all stayed green.
+// back to implementation, that same narrowing with the noun gone, the
+// label-string mapping broken, and each gloss cell emptied out entirely — each
+// reddened its own pin and no other. Controls: a benign reword of either pinned
+// cell, an unpinned row's cell rewritten, and the table re-padded to a wider
+// column all stayed green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -39,12 +51,18 @@ const row = (label) => between(TABLE, `| \`${label}\``, "\n|", `the ${label} row
 
 test("the ready-for-agent row maps the role and states no filing criterion", () => {
   const r = row("ready-for-agent");
-  // Positive companion: without it the negative below passes trivially on a row
-  // that has degenerated to nothing.
   assert.match(
     r,
     phrase("| `ready-for-agent` | `ready-for-agent` |"),
     "the ready-for-agent row no longer maps the role to its label string — that mapping is what scripts read",
+  );
+  // The gloss itself, which the mapping companion above does not cover: it pins
+  // columns 1 and 2, so emptying column 3 leaves it green and the negative
+  // below then passes on nothing at all.
+  assert.match(
+    r,
+    /AFK agent/,
+    "the ready-for-agent gloss no longer says who the label routes work to, so the negative below is passing on an empty cell",
   );
   // The stem, not the phrase. A negative pinned to the adjacency is trivially
   // evaded — measured: `/[Ff]ully\s+\w*\s*specified/` stayed green against
@@ -63,6 +81,11 @@ test("the ready-for-human row does not narrow the role to implementation", () =>
     r,
     phrase("| `ready-for-human` | `ready-for-human` |"),
     "the ready-for-human row no longer maps the role to its label string — that mapping is what scripts read",
+  );
+  assert.match(
+    r,
+    /AFK agent/,
+    "the ready-for-human gloss no longer says who the label routes work to, so the negative below is passing on an empty cell",
   );
   // Stem again: "Requires a human to implement" carries the same narrowing
   // with the noun gone.
