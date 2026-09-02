@@ -165,6 +165,46 @@ keep() {
   printf '    KEEP %s — %s\n' "${1:-(no branch)}" "$2" >&2
 }
 
+# Runs `git "$@"`, and unlike a bare `$(git … 2>/dev/null)` this keeps git's
+# stderr instead of discarding it — into $gp_err, never mixed into $gp_out,
+# with git's own exit status returned by this function. #625: the two worktree
+# status probes below used to throw stderr away, so a `fatal:` at rc 128 named
+# no cause and a `warning:` at rc 0 (measured, PR #726 review — a
+# permission-denied ignored directory) reached nobody. The wrong fix is
+# `2>&1`: the very next line after one of these probes tests whether the
+# captured text is non-empty to decide dirty, so folding a warning in would
+# make a clean worktree with ANY git warning on it read as dirty forever.
+#
+# No temp file (this file creates none): git's stderr goes to fd3, which the
+# group below dupes from fd1 before git runs, so it lands live in the SAME
+# pipe `gp_raw=$( … )` reads — no separate pipe or file needed for it. Command
+# substitution runs in its own subshell (POSIX), so a plain variable set
+# inside — git's stdout, git's own $? — cannot escape it; only the TEXT
+# written there survives. `gp_sep` (a byte no porcelain line or ordinary
+# warning contains) marks where one piece ends and the next begins, so
+# `gp_raw` can be split apart with plain parameter expansion once it is back
+# in the real, top-level shell.
+#
+# `if gp_o=$(...); then gp_rc=0; else gp_rc=$?; fi`, never a bare
+# `gp_o=$(...); gp_rc=$?`: under `set -e` a bare failing assignment aborts the
+# subshell before `gp_rc=$?` or the printf below ever run, and `gp_raw` comes
+# back empty — silently, at the one moment this function exists to not be
+# silent (measured on this exact shape, PR #1068 review).
+gp_sep=$(printf '\002')
+git_probe() {
+  gp_raw=$(
+    {
+      if gp_o=$(git "$@" 2>&3); then gp_rc=0; else gp_rc=$?; fi
+      printf '%s' "$gp_sep$gp_o$gp_sep$gp_rc"
+    } 3>&1
+  )
+  gp_err=${gp_raw%%"$gp_sep"*}
+  gp_raw=${gp_raw#*"$gp_sep"}
+  gp_out=${gp_raw%%"$gp_sep"*}
+  gp_rc=${gp_raw#*"$gp_sep"}
+  return "$gp_rc"
+}
+
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
 #
@@ -325,11 +365,17 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
         keep "$b" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-        keep "$b" "worktree $wt could not be read"
+      if ! git_probe -C "$wt" status --porcelain; then
+        keep "$b" "worktree $wt could not be read: $(printf '%s' "$gp_err" | tr '\n' ' ')"
         continue
       fi
-      if [ -n "$status_out" ]; then
+      # No "warned at rc 0 → keep" gate here, unlike the `--ignored` probe
+      # below: a plain scan skips an ignored path outright, without opening
+      # it, so it cannot hit the permission-denied-on-an-ignored-directory
+      # warning that probe measures. $gp_out itself stayed clean of whatever
+      # DID reach stderr — that is the whole fix — so a warning here changes
+      # nothing about whether this worktree is dirty.
+      if [ -n "$gp_out" ]; then
         keep "$b" "dirty worktree $wt"
         continue
       fi
@@ -348,11 +394,23 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
       case "$wt" in
         */.worktrees/*) : ;;
         *)
-          if ! ignored_raw=$(git -C "$wt" status --porcelain --ignored 2>/dev/null); then
-            keep "$b" "worktree $wt unreadable (git status --ignored failed)"
+          if ! git_probe -C "$wt" status --porcelain --ignored; then
+            keep "$b" "worktree $wt unreadable (git status --ignored failed): $(printf '%s' "$gp_err" | tr '\n' ' ')"
             continue
           fi
-          ignored=$(printf '%s\n' "$ignored_raw" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
+          if [ -n "$gp_err" ]; then
+            # Unlike the dirty-check above, `--ignored` asks git to OPEN every
+            # ignored path to list what is inside it, so a warning here means
+            # the enumeration below is INCOMPLETE, not merely noisy (measured,
+            # PR #726 review: a `chmod 000` ignored directory made this exact
+            # probe warn and exit 0). A precious ignored file under the
+            # unreadable path would never reach $ignored, and `git worktree
+            # remove` deletes ignored files silently — so this fails closed
+            # rather than report what git managed to see as the whole answer.
+            keep "$b" "worktree $wt status --ignored warned, listing may be incomplete: $(printf '%s' "$gp_err" | tr '\n' ' ')"
+            continue
+          fi
+          ignored=$(printf '%s\n' "$gp_out" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
           if [ -n "$ignored" ]; then
             keep "$b" "ignored files present in $wt: $ignored"
             continue
@@ -611,11 +669,15 @@ else
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      if ! status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-        keep "" "worktree $wt could not be read"
+      if ! git_probe -C "$wt" status --porcelain; then
+        keep "" "worktree $wt could not be read: $(printf '%s' "$gp_err" | tr '\n' ' ')"
         continue
       fi
-      if [ -n "$status_out" ]; then
+      # Same reasoning as the branch sweep's copy of this probe: a plain scan
+      # never opens an ignored path, so it cannot hit the rc-0 warning the
+      # `--ignored` probe measures, and $gp_out already stayed clean of
+      # whatever DID reach stderr.
+      if [ -n "$gp_out" ]; then
         keep "" "dirty worktree $wt"
         continue
       fi

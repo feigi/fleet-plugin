@@ -578,6 +578,96 @@ test("a dirty worktree on an otherwise-mergeable [gone] branch is kept, not reap
   assert.equal(existsSync(wt), true, "a dirty worktree must survive untouched");
 });
 
+test("a status probe that dies (rc 128) is kept with git's own message, not just a label (#625)", (t) => {
+  // Before #625, this probe's stderr went to /dev/null and the reason named
+  // only the step ("could not be read"), never the fault. Git's own message —
+  // here the admin path it names — is the whole remedy signal, and it used to
+  // reach nobody but the terminal that ran this by hand.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$#" = 4 ]`,
+    ["fatal: not a git repository: /some/admin/path"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable probe is not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^worktree .* could not be read: /);
+  assert.match(json.kept[0].reason, /fatal: not a git repository: \/some\/admin\/path/, "git's own message must reach the reason");
+  assert.match(stderr, /KEEP feature\/merged/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true);
+});
+
+test("a clean worktree with a warning on the plain status probe's stderr is still reaped, never misread as dirty (#625)", (t) => {
+  // The control that proves the fix keeps the two streams apart rather than
+  // folding them with `2>&1`. Folded, this warning would land IN the value
+  // the dirty-check tests with `[ -n ]`, and a clean worktree would read as
+  // dirty and never be reaped again — silently, and looking like correct,
+  // conservative behavior. Left at the old `2>/dev/null`, this test would
+  // still pass; it exists to catch a REGRESSION to the merged-stream mistake,
+  // not to distinguish the fix from the original bug.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$#" = 4 ]`,
+    ["warning: unrelated advice from git, not about this worktree's contents"],
+    0,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.kept, [], "a warning unrelated to dirtiness must not keep this branch");
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.doesNotMatch(stderr, /dirty worktree/, "the warning must never be read as dirty content");
+  assert.equal(branchExists(w, "feature/merged"), false);
+  assert.equal(existsSync(wt), false);
+});
+
+test("an `--ignored` probe that warns at rc 0 is kept, listing incomplete, never read as an empty answer (#625)", (t) => {
+  // Measured, PR #726 review: a `chmod 000` ignored directory made exactly
+  // this probe print a permission warning and exit 0 — not a failure this
+  // script's rc check ever saw, and not a keep either, so the run proceeded to
+  // reap a worktree it had provably not finished reading. `--ignored` OPENS
+  // every ignored path to list what's inside, unlike the plain scan above,
+  // which is what makes this probe (and only this one) able to reach that
+  // warning at all.
+  const w = repo(t);
+  // Outside .worktrees/: that home exempts the ignored-file probe entirely, so
+  // this fixture has to sit elsewhere for the probe to run at all.
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the --ignored probe can decide");
+
+  const bin = failOnlyShim(
+    t,
+    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    ["warning: could not open directory 'secret/': Permission denied"],
+    0,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^worktree .* status --ignored warned, listing may be incomplete: /);
+  assert.match(json.kept[0].reason, /Permission denied/, "git's own warning must reach the reason");
+  assert.match(stderr, /KEEP feature\/merged/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true);
+});
+
 test("a [gone] branch whose worktree directory was deleted by hand is reaped, never kept as dirty (#83)", (t) => {
   // The bug: `|| echo dirty` folds ANY failed status — including one that
   // failed because the directory is not there at all — into "dirty", pinning
