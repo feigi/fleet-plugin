@@ -68,6 +68,17 @@ if   git cat-file -e origin/main:package-lock.json 2>/dev/null; then install="np
 elif git cat-file -e origin/main:pnpm-lock.yaml    2>/dev/null; then install="pnpm i --frozen-lockfile"
 elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="yarn --immutable"
 elif [ -z "$pkg" ]; then install="true"
+# Ahead of the capture below, and only on the arm that reaches it — every
+# lockfile arm and the no-manifest arm settle the install without an
+# interpreter, so an unavailable one is not their problem. The capture merges
+# stderr (see the block under it), so without this the shell's own `node:
+# command not found` arrives INSIDE $ndeps and the refusal reports it as
+# `could not read origin/main:package.json — <that line>`: the manifest's name
+# for a fault the manifest had no part in, indistinguishable by message from a
+# manifest that genuinely does not parse. `command -v` asks the same question
+# the invocation would, so this refuses exactly where that one would have. #1141
+elif ! command -v node >/dev/null 2>&1; then
+  die "node is not on PATH — refusing to claim without the interpreter this derivation needs"
 elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
 # The `2>&1` on the ndeps capture is load-bearing — without it the failure
