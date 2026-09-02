@@ -43,12 +43,38 @@ const REVIEW_PR = readFileSync(join(WORKFLOWS, "review-pr.js"), "utf8");
 // block spanning lines is handled the way every other pin in this directory
 // handles one.
 //
-// Known ceiling, inherited from the stripper: a line that OPENS with `/*` is
-// blanked whole, so `/* c */ export const meta = {` written on one physical
-// line reds. Nothing writes that, and the failure is loud with an obvious fix
-// — put the export on its own line — rather than silent, which is the trade
-// this whole file exists to make.
-const firstStatement = (source) => stripComments(source).split("\n").find((line) => line.trim() !== "") ?? "";
+// The `*/` split is LOAD-BEARING, not tidying. The shared stripper is
+// line-based and blanks a line WHOLE when it opens with `/*` or when it closes
+// a block — code on that line included. So `/* h */ const scratch = 'x';`, and
+// a block closed by `*/ const scratch = 'x';`, both vanish; the export below
+// them then reads as first; and the guard goes SILENTLY green on exactly the
+// file it exists to catch. `/** @type {{a:number}} */ const cfg = { a: 1 };` is
+// an ordinary JSDoc one-liner that lands there. Breaking every `*/` onto its
+// own line first puts that tail where the stripper cannot blank it; all three
+// shapes are pinned in the refusal table below. Fixing the stripper instead is
+// refused for the reason strip-comments.mjs states: a span regex opens a
+// comment at a glob inside a string literal and swallows the real code after
+// it.
+//
+// Two ceilings remain, and BOTH ARE LOUD — a red with an obvious fix, never a
+// silent pass. That is the trade this whole file exists to make, and after the
+// split it runs in that direction only.
+//   - `/* c */ export const meta = {` written on one physical line reds: the
+//     split leaves the export indented and `META_FIRST` anchors at `^`.
+//     Refusing an indented export costs nothing here, because both of this
+//     repo's syntax checks strip the export with `/^export /m` before
+//     compiling and that pattern does not match an indented line either:
+//       $ grep -rl 'replace(/\^export /m' .github/workflows/ci.yml skills/fleet/scripts/
+//         .github/workflows/ci.yml
+//         skills/fleet/scripts/review-pr-reads.test.mjs
+//   - a `*/` inside a string literal or inside a `//` comment ABOVE the export
+//     splits that line as well, and its tail then reads as a statement.
+//     Settled that every file under `workflows/` reaches `export const meta`
+//     before its first `*/`:
+//       $ for f in workflows/*.js; do printf '%s: ' "$f"; awk '/^export const meta/{print "export first"; exit} /\*\//{print "*-slash first"; exit}' "$f"; done
+//         workflows/review-pr.js: export first
+const firstStatement = (source) =>
+  stripComments(source.replace(/\*\//g, "*/\n")).split("\n").find((line) => line.trim() !== "") ?? "";
 
 const META_FIRST = /^export\s+const\s+meta\b/;
 
@@ -66,10 +92,19 @@ test("every workflow file's first non-comment statement is `export const meta`",
     "no .js files found in workflows/ — this guard is asserting over nothing and would pass vacuously",
   );
   for (const f of files) {
+    // Two causes, two messages. An empty or comment-only file has NO statement
+    // rather than the wrong one first, and reporting it as "a statement before
+    // `export const meta`" sends the reader looking for a statement that isn't
+    // there. #853's entire provenance is a misattributed cause — a probe's
+    // registry absence read as an import rejection — so a guard written against
+    // that trap must not misattribute its own failure.
+    const first = firstStatement(readFileSync(join(WORKFLOWS, f), "utf8"));
     assert.match(
-      firstStatement(readFileSync(join(WORKFLOWS, f), "utf8")),
+      first,
       META_FIRST,
-      `workflows/${f} has a statement before \`export const meta\` — the harness drops it from the registry silently, and nothing else in this repo would notice`,
+      first === ""
+        ? `workflows/${f} carries no statement at all — an empty or comment-only file never reaches \`export const meta\`, and the harness drops it from the registry silently`
+        : `workflows/${f} has a statement before \`export const meta\` — the harness drops it from the registry silently, and nothing else in this repo would notice`,
     );
   }
 });
@@ -102,11 +137,12 @@ test("the meta-first guard refuses the shapes that silently drop a workflow", ()
     ["a const before the export", "const scratch = 'x';\nexport const meta = {"],
     ["a static import before the export", "import { readFileSync } from 'node:fs';\nexport const meta = {"],
     ["a call before the export", "log('starting');\nexport const meta = {"],
-    // Legal JS, still refused, and the refusal is CORRECT: settled here that a
-    // `"use strict"` directive prologue compiles fine as a function body, so
-    // nothing local rejects it — but it is a statement before the export, so
-    // the harness's shape rule drops the file anyway. Legality is not the
-    // question this guard asks.
+    // Legal JS, still refused, and the refusal is CORRECT. Settled with
+    // `new AsyncFunction('"use strict";\nconst meta = {};')`, which compiles: a
+    // directive prologue is legal at the start of a function body, so nothing
+    // local rejects it — but it is a statement before the export, so the
+    // harness's shape rule drops the file anyway. Legality is not the question
+    // this guard asks.
     ['a "use strict" directive', '"use strict";\nexport const meta = {'],
     // A shebang is likewise refused, and likewise correctly. Settled with
     // `new AsyncFunction("#!/usr/bin/env node\\nconst meta = {};")`, which
@@ -125,6 +161,18 @@ test("the meta-first guard refuses the shapes that silently drop a workflow", ()
     ["the export only inside a comment", "// export const meta = {\nconst x = 1;"],
     ["an empty file", ""],
     ["a file of only comments", "// nothing here\n"],
+    // The false-GREEN shapes, and the reason `firstStatement` splits at `*/`.
+    // Each carries a real statement on the same physical line as a block
+    // comment's close, and each was measured passing this guard before the
+    // split — a silent green on the file this whole test exists to red.
+    ["code on the line that closes a block comment", "/*\n * header\n */ const scratch = 'x';\nexport const meta = {"],
+    ["code after a one-line block comment", "/* header */ const scratch = 'x';\nexport const meta = {"],
+    ["a JSDoc one-liner declaration", "/** @type {{a:number}} */ const cfg = { a: 1 };\nexport const meta = {"],
+    // And the same physical line with no comment involved at all. This row is
+    // the only one that discriminates `META_FIRST`'s `^`: drop the anchor and
+    // every other row here still refuses, because none of them puts
+    // `export const meta` anywhere on the line the matcher is handed.
+    ["a statement before the export on one line", "const scratch = 1; export const meta = {"],
   ])
     assert.doesNotMatch(firstStatement(source), META_FIRST, `a dropped-from-the-registry shape is accepted: ${form}`);
 });
@@ -155,24 +203,28 @@ test("the throwaway-probe instruction carries the silent-omission trap", () => {
     .split("\n")
     .map((line) => line.replace(/^\s*\/\/\s?/, ""))
     .join(" ");
-  assert.match(
-    record,
-    phrase("registry presence is not evidence"),
-    "the record does not say what registry presence is not — a reader takes an absence as a result",
-  );
-  assert.match(
-    record,
-    phrase("any statement before `export const meta`"),
-    "the shape rule itself is not stated, so the reader cannot avoid tripping it",
-  );
-  assert.match(
-    record,
-    phrase("twin with the construct under test removed"),
-    "the control that caught this is not named, so the next probe has no way to detect the same trap",
-  );
-  assert.match(
-    record,
-    phrase("RUN and return a computed marker"),
-    "no positive signal is offered in place of presence — the reader is told what not to trust and given no alternative",
-  );
+  // Three spans, not four phrases. The last runs CONTIGUOUSLY from the control
+  // through the positive signal to the sentence's closing period, because four
+  // independent presence checks pin only that the words appear — never that
+  // nothing BETWEEN them reverses the guidance. Measured: an exception clause
+  // spliced onto the instruction ("… as a result -- UNLESS the absence already
+  // reads as rejection, in which case trust the first probe and skip the twin
+  // entirely") tells the reader to do the exact thing this paragraph exists to
+  // stop, and left all four separate assertions green. The span is the fix this
+  // repo already uses for that defect class (#488, #144).
+  for (const [pin, why] of [
+    [
+      "registry presence is not evidence",
+      "the record does not say what registry presence is not — a reader takes an absence as a result",
+    ],
+    [
+      "any statement before `export const meta`",
+      "the shape rule itself is not stated, so the reader cannot avoid tripping it",
+    ],
+    [
+      "twin with the construct under test removed, and make the workflow RUN and return a computed marker instead of reading its presence as a result.",
+      "the control and the positive signal are no longer one unbroken instruction — either the control is unnamed, or no positive signal replaces presence, or something spliced into the join lets the reader trust an absence after all",
+    ],
+  ])
+    assert.match(record, phrase(pin), why);
 });
