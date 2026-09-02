@@ -477,17 +477,20 @@ const ORPHAN_LINE =
  * the wrong call as the one that failed would go unseen. git's own diagnostic
  * is appended after it, so what is pinned here is the prefix, not the line.
  */
+const RC_FAILED_LINE =
+  "    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count";
 /**
- * #570's line, and the fourth: the three above are all reached with the reflog
- * path in hand, this one is reached without it. It says only that the reflog
- * could not be reached and nothing about what it holds — ORPHAN_LINE's claim
- * that the reflog "still names entries no ref points at" is a claim about
- * contents this state has not read and cannot make.
+ * #570's line, and the fourth. Of the three above only ORPHAN_LINE is reached
+ * with the reflog path in hand: the resolution is guarded on an empty list AND
+ * an absent ref, so UNKNOWN_LINE (ref present) and RC_FAILED_LINE (entries
+ * printed) never ask for the path at all — measured. This one is reached
+ * because asking for it FAILED. So it says only that the reflog could not be
+ * reached and nothing about what it holds — ORPHAN_LINE's claim that the
+ * reflog "still names entries no ref points at" is a claim about contents this
+ * state has not read and cannot make.
  */
 const UNREACHED_LINE =
   "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read";
-const RC_FAILED_LINE =
-  "    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
 
 // `$wt` is caller-supplied and reaches the operator through a step header.
@@ -808,6 +811,15 @@ for (const [why, prepare] of [
     // path unresolved, the `-s` test that guards the orphan branch is false
     // against an empty string and the trailing branch prints the count.
     assert.doesNotMatch(r.stderr, /stash entries \(repo-global, not gated\): 0$/m);
+    // git's own `fatal:` naming the path and the errno is the operator's whole
+    // lead on WHICH directory to reopen — the audit's own sentence names none.
+    // Unpinned, a `2>/dev/null` on that `rev-parse` deletes it silently: the
+    // mutation leaves every other assertion here green (measured).
+    assert.match(
+      r.stderr,
+      /fatal: .*logs\/refs\/stash.*Permission denied/,
+      "git's unwrapped diagnostic is the only thing naming the directory",
+    );
     // The audit's real subject still answers, which is the point of degrading.
     assert.equal(r.json.clean, true);
     assert.deepEqual(r.json.conflicts, []);
@@ -815,9 +827,12 @@ for (const [why, prepare] of [
 }
 
 // The control that keeps the guard above honest in the other direction, and
-// the one state it must NOT reach: a healthy stack short-circuits on the count
-// before the reflog path is ever resolved, so an unsearchable directory lands
-// on the existing unknown line, unchanged.
+// the one state it must NOT reach. Not by the count: an unsearchable
+// `logs/refs` empties `git stash list` too — it prints nothing at rc 0
+// (measured) — so `$stash` is 0 here exactly as in the rows above. What keeps
+// this state off #570's probe is `show-ref refs/stash` still answering rc 0,
+// which fails the probe's `sr_rc = 1` guard, so an unsearchable directory
+// lands on the existing empty-list unknown line, unchanged.
 test("a healthy stash under an unsearchable reflog directory keeps the sentence it already printed, #570", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches a 000 directory regardless");
   const c = repo(t);
