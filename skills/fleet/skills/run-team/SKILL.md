@@ -114,6 +114,20 @@ cover refs, deliberately: `claim-ticket.sh` creates a branch per ticket and
 `reap.sh` deletes them in the ref store every worktree shares, so ordinary work
 moves refs several times a wave and a per-gate refusal on that is noise.
 
+**A member runs its test suite in the foreground and blocks on it.**
+Backgrounding a suite and polling for it makes the member's own progress
+depend on a wake-up nothing in the fleet guarantees, and an idle member is
+indistinguishable from a working one — you learn only by pinging. Measured
+twice in one run: `fix-pr-1184` backgrounded its suite plus a Monitor and sat
+idle for roughly two hours; neither ever woke it, and the only reason no work
+was lost is that you pinged it by name with a concrete next action.
+`finisher-pr-1184` reached for the same pattern minutes later — a proactive
+warning is the only reason it did not repeat the stall. Its
+`pgrep -f 'finish-finisher-pr-1184'` could never have matched any process, so
+the poll it was waiting on was structurally incapable of firing. Say it in
+every dispatch prompt — this file is yours, not theirs, so a member learns
+it only if you write it into the prompt.
+
 ## Phase 0 — shortlist
 
 At start, and whenever the pool empties.

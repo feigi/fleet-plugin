@@ -40,6 +40,8 @@ Genuinely unclear → **hold**. Waiting costs a label; merging out of order cost
 
 **A fired signal is not a verdict — disprove it.** Soft signals fire on deliberately-partitioned PRs. Observed: two PRs sharing two issue refs and all of `reset_hint=` / `resetHint` / `terminalFailure`, provably unrelated — one handed the other a specific emit site in its own body, their exact-string pins were punctuation-distinct so neither could match the other's site, and **both were test-only**. That generalizes: **a test-only PR cannot invalidate what another PR asserts**, and neither can a docs-only one.
 
+**`git merge-tree --write-tree <branch-a> <branch-b>` disproves a fired signal without inference.** It performs the merge in-memory and writes a tree, exiting non-zero with the conflicting paths on stdout only when the merge genuinely conflicts. That is a real answer, not an inference from a behind-count — being behind is not evidence of conflict. `rc=0` with a written tree means the two branches merge clean; run it on `files` before holding. It answers only whether the two trees conflict textually, not whether one PR's content invalidates the other's — the same-issue, stacked-branch, and shared-symbol conditions still decide that.
+
 Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one is sloppy. Do the work, report which evidence settled it.
 
 ## The labelled head
