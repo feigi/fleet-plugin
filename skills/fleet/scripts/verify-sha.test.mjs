@@ -303,13 +303,17 @@ test("a rev-parse that would fall back to a colliding path is still fatal, and n
   assert.equal(json, null);
   assert.match(stderr, /origin\/main does not resolve after fetch/, "this guard is what catches it");
   assert.match(stderr, /fatal: Needed a single revision/, "git's own --verify diagnosis must survive to stderr");
-  // The discriminating assertion: without --verify this fixture is NOT caught
-  // here at all — measured, it falls through to the unrelated merge-base
-  // guard three lines down (see the mutant test below), which names a
-  // different, wrong cause. If this guard ever regresses to a bare
-  // `rev-parse`, that wrong cause is what would show up here instead.
-  assert.doesNotMatch(stderr, /cannot tell reachable from unanswerable/,
-    "a mutant without --verify is caught downstream, at the merge-base guard, not here");
+  // The discriminating pair: without --verify this guard does not catch this
+  // fixture at all. Measured 2026-09-03 against a single-point mutant (this
+  // capture with `--verify` removed, nothing else): the capture exits 0 with
+  // the colliding PATH as the tip, and the run dies at the `git cat-file -e`
+  // guard with `cannot resolve 0000… to a commit in this repository` — a
+  // refusal about the sha, not about the ref. It never reaches
+  // `git merge-base --is-ancestor`: an all-zero sha cannot clear `cat-file`.
+  // Reaching merge-base takes a real commit for a sha, which is the mutant
+  // test's fixture, not this one.
+  assert.doesNotMatch(stderr, /cannot resolve .* to a commit/,
+    "without --verify the colliding path is carried onward and the cat-file guard is what refuses — this guard must be the one that fires");
 });
 
 // The positive control criterion #1146 names explicitly: a real ref and a
@@ -330,24 +334,29 @@ test("a colliding path does not shadow a real remote-tracking ref", (t) => {
   assert.equal(json.tip, head, "the real ref's sha, never the colliding path's name");
 });
 
-// The regression control: what the fixture above actually catches WITHOUT
-// --verify. Measured, not the shape a reader might assume from the ticket's
-// general description of this bug class (a malformed-but-parseable payload at
-// exit 0): `git merge-base --is-ancestor` a few lines below re-resolves the
-// identical "origin/$branch" string, and merge-base has no path fallback, so
-// it independently refuses (rc 128) whenever the ref genuinely does not
-// exist. That guard's own `|| die` already fires — this script was fail-closed
-// before this fix too. What the mutant actually costs is the DIAGNOSIS: it
-// dies with "cannot tell reachable from unanswerable" — a guard that exists to
-// catch a broken `merge-base`, not an unresolvable ref — never with this
-// guard's own "does not resolve after fetch". An operator reading the refusal
-// is told the wrong thing failed.
+// The regression control: what a fixture whose sha is a REAL commit catches
+// WITHOUT --verify. Not the fixture of the colliding-path test above, whose
+// all-zero sha is refused earlier, by `git cat-file -e`; the sha is what
+// routes a run to one guard or the other. And not the shape a reader might
+// assume from the ticket's general description of this bug class (a
+// malformed-but-parseable payload at exit 0). Measured 2026-09-03: the
+// `git merge-base --is-ancestor` guard re-resolves the identical
+// "origin/$branch" string, and merge-base has no path fallback, so it
+// independently refuses (rc 128) whenever the ref genuinely does not exist.
+// That guard's own `|| die` already fires — this script was fail-closed
+// before this fix too, by whichever guard the sha routed it to. What the
+// mutant actually costs is the DIAGNOSIS: it dies with "cannot tell reachable
+// from unanswerable" — a guard that exists to catch a broken `merge-base`,
+// not an unresolvable ref — never with the tip guard's own "does not resolve
+// after fetch". An operator reading the refusal is told the wrong thing
+// failed.
 test("mutant: without --verify, the same fixture is still caught, but by the wrong guard", (t) => {
   const w = repo(t);
-  // Reachable, so the mutant's bogus tip survives past the cat-file guard and
-  // actually reaches merge-base — the deepest point this bug can reach.
-  const head = commit(w, "reachable, so the mutant runs all the way to merge-base");
-  git(w, "push", "-q", "origin", "main");
+  // A real commit, so the mutant's bogus tip gets past `git cat-file -e` and
+  // reaches merge-base — the deepest point this bug can reach. Local existence
+  // is the whole requirement: what makes merge-base refuse is the deleted
+  // tracking ref, so this commit is deliberately NOT pushed.
+  const head = commit(w, "a real commit, so the mutant runs all the way to merge-base");
   git(w, "config", "--unset", "remote.origin.fetch");
   git(w, "update-ref", "-d", "refs/remotes/origin/main");
   mkdirSync(join(w, "origin"), { recursive: true });
