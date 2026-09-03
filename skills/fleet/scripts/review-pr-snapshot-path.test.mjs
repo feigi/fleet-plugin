@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, phrase } from "./prose-pin.mjs";
@@ -29,7 +31,24 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 // against a field dead under a comment — same stripper, same policy here.
 const CODE = stripComments(SOURCE);
 
-const snapshotMissing = lift(CODE, "snapshotMissing", "snap");
+// #1129 gave the guard a second parameter: the `${scratch}/pr${pr}/run-` prefix
+// the SCRIPT owns, which is what the reported `runRoot` is checked against. The
+// per-run segment itself is minted by the snapshot agent's shell — the Workflow
+// sandbox throws on `Date.now`/`Math.random` (pinned below), so the script
+// cannot mint one — and the check is what keeps that round trip from resting on
+// the agent having obeyed prose.
+const snapshotMissingRaw = lift(CODE, "snapshotMissing", "snap, runRootPrefix");
+
+const PREFIX = "/scr/pr7/run-";
+const ROOT = `${PREFIX}ab12cd34`;
+const SNAP = `${ROOT}/snapshot-abc123`;
+
+// Every fixture in the tests that PREDATE the run-root check must satisfy that
+// check, or the check silently becomes the thing deciding them and the branch
+// each was written for stops being exercised. So the wrapper supplies a valid
+// `runRoot` and the prefix, and each fixture's `path` sits under it: the field
+// the test is about stays the only thing wrong with the report.
+const snapshotMissing = (snap) => snapshotMissingRaw(snap && { runRoot: ROOT, ...snap }, PREFIX);
 
 // The accept case: this is the ONLY shape the review/verify stages may
 // proceed on. A guard's false-positive class (wrongly refusing a healthy
@@ -37,7 +56,7 @@ const snapshotMissing = lift(CODE, "snapshotMissing", "snap");
 // exercises the ACCEPT path — every other test in this file feeds it input
 // it must reject.
 test("a fully verified snapshot is not missing", () => {
-  const reason = snapshotMissing({ path: "/tmp/snap", head: "abc123", pathVerified: true });
+  const reason = snapshotMissing({ path: SNAP, head: "abc123", pathVerified: true });
   assert.equal(reason, null, "a snapshot with path, head and pathVerified:true must not be refused");
 });
 
@@ -78,7 +97,7 @@ test("a report missing path is refused, naming path and not head", () => {
   }
 });
 
-// `{ path: "/tmp/snap" }` is the one input of the six with `path` present —
+// `{ path: SNAP }` is the one input of the six with `path` present —
 // the only one that can reach the `head`-missing branch at all. It is also the
 // one branch of the three that must NOT borrow the "no tree to review" ending:
 // `path` is present and may name a perfectly good directory, so the absent sha
@@ -86,7 +105,7 @@ test("a report missing path is refused, naming path and not head", () => {
 // a handshake failure as a missing tree; this branch is where that would come
 // straight back.
 test("a report missing head (path present) is refused, naming head and not path", () => {
-  const reason = snapshotMissing({ path: "/tmp/snap" });
+  const reason = snapshotMissing({ path: SNAP });
   assert.equal(typeof reason, "string", "a present path with no head must yield a reason");
   assert.match(reason, /`head`/, "the reason no longer names head as the missing field");
   assert.doesNotMatch(reason, /no tree/, "the head branch claims there is no tree, on the one branch whose path is present and whose tree may be fine");
@@ -98,9 +117,9 @@ test("a report missing head (path present) is refused, naming head and not path"
 // mechanical existence check came back false. The interpolation defect this
 // closes is only reachable through THIS branch, not the no-tree one above.
 test("a present path that failed its existence check is refused, naming the path", () => {
-  const reason = snapshotMissing({ path: "/tmp/empty-snap", head: "abc123", pathVerified: false });
+  const reason = snapshotMissing({ path: `${ROOT}/snapshot-empty`, head: "abc123", pathVerified: false });
   assert.equal(typeof reason, "string", "pathVerified:false must yield a reason");
-  assert.match(reason, /\/tmp\/empty-snap/, "the reason must name the unverified path");
+  assert.match(reason, /snapshot-empty/, "the reason must name the unverified path");
   assert.match(reason, /not verified to exist/, "the reason no longer says the path was not verified");
 });
 
@@ -109,7 +128,7 @@ test("a present path that failed its existence check is refused, naming the path
 // supposed to prevent this at the tool-call layer, but the pure function must
 // not read silence as success if that layer is ever bypassed.
 test("a snapshot that omitted pathVerified is refused, not assumed true", () => {
-  const reason = snapshotMissing({ path: "/tmp/snap", head: "abc123" });
+  const reason = snapshotMissing({ path: SNAP, head: "abc123" });
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
 });
 
@@ -123,7 +142,7 @@ test("a snapshot that omitted pathVerified is refused, not assumed true", () => 
 // subject line was byte-identical to the PR head's. Neither commit was an
 // ancestor of the other. The refusal is what the comparison was missing.
 test("a tree whose head is not the PR's head is refused, naming both commits", () => {
-  const reason = snapshotMissing({ path: "/tmp/snap", head: "cff7330", pathVerified: true, prHead: "9e8ee3d" });
+  const reason = snapshotMissing({ path: SNAP, head: "cff7330", pathVerified: true, prHead: "9e8ee3d" });
   assert.equal(typeof reason, "string", "a present, mismatching prHead must yield a reason");
   assert.match(reason, /cff7330/, "the reason must name the commit the tree is actually at");
   assert.match(reason, /9e8ee3d/, "the reason must name the PR head it was measured against");
@@ -137,10 +156,59 @@ test("a tree whose head is not the PR's head is refused, naming both commits", (
 // Absent and mismatching are different cases and stay different.
 test("a snapshot with no prHead at all still proceeds", () => {
   assert.equal(
-    snapshotMissing({ path: "/tmp/snap", head: "abc123", pathVerified: true }),
+    snapshotMissing({ path: SNAP, head: "abc123", pathVerified: true }),
     null,
     "a missing prHead must not refuse an otherwise good snapshot",
   );
+});
+
+// #1129's whole value rests on one invariant: every consumer reads a tree
+// rooted under THIS run's own root. Before these three branches that invariant
+// was carried entirely by prompt prose asking the snapshot agent to copy
+// SNAPSHOT_DEST verbatim and not reconstruct it — and a refuter reverted that
+// paragraph and ran all 18 test files that read review-pr.js, 276 tests, with
+// nothing turning red. Prose an agent is asked to obey is not an invariant.
+// These are, because the run root prefix is the caller's own string: a
+// reconstructed, stale, or mistranscribed path now costs the run instead of
+// sending six specialists into a tree that belongs to some other review.
+test("a report whose run root is not this run's is refused, naming both roots", () => {
+  const reason = snapshotMissingRaw(
+    { runRoot: "/scr/pr7/run-OTHER", path: "/scr/pr7/run-OTHER/snapshot-abc123", head: "abc123", pathVerified: true },
+    "/scr/pr9/run-",
+  );
+  assert.equal(typeof reason, "string", "a run root outside the caller's prefix must yield a reason");
+  assert.match(reason, /run-OTHER/, "the reason must name the root that was reported");
+  assert.match(reason, /\/scr\/pr9\/run-/, "the reason must name the prefix it was measured against");
+});
+
+// The mistranscription this is really for: a path that is plausible, present,
+// and under a REAL run root — just not this run's. `pathVerified` cannot catch
+// it, because the tree it names genuinely exists.
+test("a snapshot path outside the reported run root is refused, naming both", () => {
+  const reason = snapshotMissing({ path: `${PREFIX}99999999/snapshot-abc123`, head: "abc123", pathVerified: true });
+  assert.equal(typeof reason, "string", "a path under a different run's root must yield a reason");
+  assert.match(reason, /run-99999999/, "the reason must name the path that was reported");
+  assert.match(reason, /ab12cd34/, "the reason must name this run's own root");
+});
+
+// A prefix test alone does not settle "under": a `..` segment carries the
+// prefix and resolves outside it. Asserted here rather than left to the prefix
+// check, which passes on every one of these.
+test("a snapshot path that climbs out of the run root with `..` is refused", () => {
+  for (const path of [`${ROOT}/snapshot-abc/../../../etc`, `${ROOT}/snapshot-abc/..`]) {
+    const reason = snapshotMissing({ path, head: "abc123", pathVerified: true });
+    assert.equal(typeof reason, "string", `${path} carries the run root prefix and resolves outside it — it must yield a reason`);
+  }
+});
+
+// The field cannot be silently omitted at the tool-call layer — the schema's
+// `required` covers that — but the pure function must not read silence as
+// "this run's tree" if that layer is ever bypassed, which is the same rule
+// `pathVerified` above follows.
+test("a report that omitted runRoot is refused, not assumed to be this run's", () => {
+  const reason = snapshotMissingRaw({ path: SNAP, head: "abc123", pathVerified: true }, PREFIX);
+  assert.equal(typeof reason, "string", "an absent runRoot must yield a reason");
+  assert.match(reason, /`runRoot`/, "the reason no longer names runRoot as the missing field");
 });
 
 // The normal path, plus the abbreviation tolerance that keeps it normal.
@@ -151,7 +219,7 @@ test("a snapshot with no prHead at all still proceeds", () => {
 // directions here in a way it was not before.
 test("a matching head proceeds, abbreviated on either side", () => {
   const full = "a".repeat(40);
-  const ok = (snap) => snapshotMissing({ path: "/tmp/snap", pathVerified: true, ...snap });
+  const ok = (snap) => snapshotMissing({ path: SNAP, pathVerified: true, ...snap });
   assert.equal(ok({ head: "abc123", prHead: "abc123" }), null, "an exact match must not be refused");
   assert.equal(ok({ head: full.slice(0, 7), prHead: full }), null, "an abbreviated head is the same commit");
   assert.equal(ok({ head: full, prHead: full.slice(0, 7) }), null, "and the same the other way round");
@@ -213,13 +281,13 @@ test("a relayed head is normalized before the refusal ever sees it", () => {
     "no `if (snap) { … snap.head = … }` normalization ahead of snapshotMissing — it was deleted, or reshaped past what this pins",
   );
   assert.ok(
-    CODE.indexOf(block[0]) < CODE.indexOf("const missingReason = snapshotMissing(snap);"),
+    CODE.indexOf(block[0]) < CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);"),
     "the normalization runs AFTER the refusal — it can no longer keep a relay artifact from cancelling the review",
   );
   const normalize = new Function("snap", block[0]);
   const full = "deadbee" + "0".repeat(33);
   const after = (head, prHead) => {
-    const snap = { path: "/tmp/snap", pathVerified: true, head, prHead };
+    const snap = { path: SNAP, pathVerified: true, head, prHead };
     normalize(snap);
     return snapshotMissing(snap);
   };
@@ -228,7 +296,7 @@ test("a relayed head is normalized before the refusal ever sees it", () => {
   assert.equal(after("DEADBEE", full), null, "and neither is case");
   // The tolerance must not swallow the case it sits beside, here either.
   assert.equal(typeof after("cff7330", full), "string", "a genuinely different sha still refuses after normalizing");
-  const absent = { path: "/tmp/snap", pathVerified: true, head: "deadbee" };
+  const absent = { path: SNAP, pathVerified: true, head: "deadbee" };
   normalize(absent);
   assert.equal(snapshotMissing(absent), null, "normalizing must not invent a prHead the snapshot agent never sent");
   // A dead snapshot agent returns falsy, and `snapshotMissing`'s first guard is
@@ -251,8 +319,8 @@ test("the snapshot log line says when the head check was skipped", () => {
     new Function("snap", "log", line)(snap, (m) => (out = m));
     return out;
   };
-  const skipped = say({ path: "/tmp/snap", head: "deadbee" });
-  const checked = say({ path: "/tmp/snap", head: "deadbee", prHead: "deadbee" + "0".repeat(33) });
+  const skipped = say({ path: SNAP, head: "deadbee" });
+  const checked = say({ path: SNAP, head: "deadbee", prHead: "deadbee" + "0".repeat(33) });
   assert.notEqual(skipped, checked, "a skipped head check and a passed one log the same line — the two runs cannot be told apart");
   assert.match(skipped, /SKIPPED/, "the skip must be NAMED, not left to be inferred from a field the line does not print");
 });
@@ -297,6 +365,41 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
   );
 });
 
+// The instruction that makes the round trip work at all, and the one thing in
+// #1129 that nothing held down: `snapshotMissing` REFUSES a reconstructed path,
+// but only this paragraph makes the agent report a correct one in the first
+// place. Delete it and every review still refuses — loudly, and having spent a
+// snapshot agent to get there. Measured on the pre-check version of this
+// paragraph: a refuter reverted it to the pre-#1129 wording and ran all 18 test
+// files that read review-pr.js, and nothing turned red.
+//
+// So this pins the instruction, and the check pins the outcome. Neither
+// substitutes for the other: prose an agent is asked to obey is not an
+// invariant, and a refusal is not a working review.
+test("the snapshot prompt tells the agent to copy both printed values verbatim, never to reconstruct them", () => {
+  const snapshot = snapshotBlock();
+  const B = "\\\\?`";
+  for (const [re, gone] of [
+    [
+      new RegExp(`Report\\s+${B}runRoot${B}\\s+=\\s+the\\s+SNAPSHOT_RUN_ROOT\\s+value`),
+      "the agent is no longer told to report `runRoot` off the printed SNAPSHOT_RUN_ROOT — the caller's containment check now refuses every run instead of catching a wrong one",
+    ],
+    [
+      new RegExp(`${B}path${B}\\s+=\\s+the\\s+SNAPSHOT_DEST\\s+value`),
+      "the agent is no longer told to report `path` off the printed SNAPSHOT_DEST",
+    ],
+    [
+      // phrase(), not a literal: the sentence wraps in the source, so a plain
+      // space between "the" and "block" matches nothing and the pin reds on
+      // prose that is present and correct.
+      phrase("do not reconstruct it, and do not report a path the block did not print"),
+      "the prohibition on reconstructing the destination is gone — both values end in components the shell substituted, so an agent invited to guess produces a path that reads plausible and belongs to no run",
+    ],
+  ]) {
+    assert.match(snapshot, re, gone);
+  }
+});
+
 // The ORDER is the guard, not the probe, and two different reorderings each
 // defeat it. Measured, both:
 //   probe AFTER the symlink -> `ls -A` counts the symlink, so a `git archive`
@@ -314,127 +417,225 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
 // presence pin — every one of these lines is in the right place or the
 // guard is decorative.
 //
-// #1129 moved the destination off `${scratch}/snapshot` and onto a per-run
-// `$SNAP`, so the needles below address `$SNAP` — which is also what keeps the
-// sequence honest now that the destination is a shell variable: an assignment
-// that moved BELOW the wipe would wipe an unset (empty) `$SNAP`, and one command
-// still spelling the old bare path would be a second destination this pin's
-// order says nothing about. Both are caught here, by the assignment's place in
-// the sequence and by `$SNAP` being what every later needle names.
-test("the snapshot block derives a per-run destination, then wipes, extracts, probes, and symlinks — in that order", () => {
+// #1129 moved the destination off `${scratch}/snapshot` and onto a per-run root
+// the SHELL mints, so the needles below address `$RUN` and `$SNAP`. The order is
+// the guard: an assignment that moved below its readers would leave them
+// addressing an unset (empty) variable, and one command still spelling the old
+// bare path would be a second destination this pin says nothing about.
+//
+// The needles are REGEXES, and every one that spans a shell word tolerates an
+// optional quote around it. A literal-substring needle pinned one arbitrary
+// quote placement: adding quotes to the `SNAP=` assignment — a no-op on the
+// right-hand side of a bash assignment, and what a shellcheck pass suggests —
+// red this test with a message claiming a #1129 collision regression that had
+// not happened. A pin that reds on correct changes gets weakened by the next
+// reader, so these match the shape that decides behaviour and nothing else.
+test("the snapshot block mints a per-run destination, then extracts, probes, and symlinks — in that order", () => {
   const snapshot = snapshotBlock();
   let prev = -1;
   for (const [needle, gone] of [
     [
-      '[ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET',
-      "the empty-scratch guard is gone — the wipe below it is rooted at `/` on an empty interpolation",
+      /\[ -n "\$\{scratch\}" \] \|\| \{ echo SNAPSHOT_SCRATCH_UNSET/,
+      "the empty-scratch guard is gone — an empty interpolation now creates this run's artefacts at `/` instead of refusing by name",
     ],
     [
-      "SNAP=${runScratch}/snapshot-$(git -C ${worktree} rev-parse --short HEAD)",
-      "the destination is no longer derived per run from the run root and the archived commit — two reviews sharing one scratch can collide again (#1129)",
+      /mkdir -p "?\$\{runRootParent\}"?/,
+      "the run root's parent is no longer created — `mktemp -d` has nowhere to mint into and every run dies at the same line",
     ],
-    ['echo SNAPSHOT_DEST="$SNAP"', "the destination is never printed — the agent cannot report a path it can no longer read off this prompt"],
-    ['rm -rf "$SNAP"', "the wipe is gone, or no longer bounded to this run's own destination — `tar -x` MERGES, so a reused destination certifies a stale tree"],
-    ['mkdir -p "$SNAP"', "the mkdir is gone — `tar -x` has nowhere to extract to"],
-    ["git -C ${worktree} archive HEAD", "the archive is gone — there is no snapshot to review"],
-    ['[ -n "$(ls -A "$SNAP")" ]', "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
-    ["ln -s ${worktree}/node_modules", "the node_modules symlink is gone — a derived `npm test --` cannot run"],
+    [
+      /RUN=\$\(mktemp -d "?\$\{runRootPrefix\}X{3,}"?\)/,
+      "the run root is no longer minted by `mktemp -d` under the prefix the caller owns — two reviews sharing one scratch can collide again (#1129)",
+    ],
+    [
+      /echo SNAPSHOT_RUN_ROOT="?\$RUN"?/,
+      "the run root is never printed — the agent cannot report a `runRoot` it can no longer read off this prompt, and the caller's containment check has nothing to check",
+    ],
+    [
+      /SHA=\$\(git -C \$\{worktree\} rev-parse --short HEAD\)/,
+      "the archived commit is no longer captured into its own variable — a rev-parse failure goes back to shortening the destination silently",
+    ],
+    [
+      /SNAP="?\$RUN\/snapshot-\$SHA"?/,
+      "the destination is no longer this run's root plus the archived commit — it addresses something the run does not own",
+    ],
+    [
+      /echo SNAPSHOT_DEST="?\$SNAP"?/,
+      "the destination is never printed — the agent cannot report a path it can no longer read off this prompt",
+    ],
+    [/mkdir -p "?\$SNAP"?/, "the mkdir is gone — `tar -x` has nowhere to extract to"],
+    [/git -C \$\{worktree\} archive HEAD/, "the archive is gone — there is no snapshot to review"],
+    [/\[ -n "\$\(ls -A "\$SNAP"\)" \]/, "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
+    [/ln -s \$\{worktree\}\/node_modules/, "the node_modules symlink is gone — a derived `npm test --` cannot run"],
   ]) {
-    const at = snapshot.indexOf(needle);
+    const at = snapshot.search(needle);
     assert.notEqual(at, -1, gone);
     assert.ok(
       at > prev,
-      `\`${needle}\` is out of sequence — the block must derive the destination, then wipe, then extract, then probe, then symlink`,
+      `${needle} is out of sequence — the block must mint the run root, derive the destination, then extract, then probe, then symlink`,
     );
     prev = at;
   }
 });
 
+// Both failure clauses, pinned where they are decided. Neither 'mktemp' nor
+// 'rev-parse' failing stops the block on its own: each contributes a path
+// component, so an unread failure does not abort, it SHORTENS "$SNAP" to a path
+// another run could also produce — the collision this ticket closes, arriving by
+// a different route. The `|| { echo …; exit 1; }` is what makes each a named
+// refusal instead of an empty string.
+test("the run root and the sha each refuse by name rather than shortening the destination", () => {
+  const snapshot = snapshotBlock();
+  for (const [needle, gone] of [
+    [/mktemp -d [^\n]*\|\| \{ echo SNAPSHOT_RUNROOT_FAILED; exit 1; \}/, "a failed `mktemp -d` no longer refuses by name — `$RUN` goes empty and every path below collapses to its suffix"],
+    [/rev-parse --short HEAD\) \|\| \{ echo SNAPSHOT_REVPARSE_FAILED; exit 1; \}/, "a failed `rev-parse` no longer refuses by name — the sha goes empty and the destination stops naming the commit it holds"],
+  ]) {
+    assert.match(snapshot, needle, gone);
+  }
+});
+
 // #1129. The destination used to be `scratch` plus a fixed literal, so two runs
-// handed one scratch root resolved to ONE absolute path — and the block above
-// wipes its destination before extracting, so the second review deleted the tree
-// the first review's fix-applier was still citing. Nothing failed: the path
-// still existed, still held a plausible checkout of this repo, and answered a
-// read with another PR's code. Observed live, worked around by hand-feeding each
+// handed one scratch root resolved to ONE absolute path — and the block wiped
+// its destination before extracting, so the second review deleted the tree the
+// first review's fix-applier was still citing. Nothing failed: the path still
+// existed, still held a plausible checkout of this repo, and answered a read
+// with another PR's code. Observed live, worked around by hand-feeding each
 // review a different scratch root.
 //
-// The derivation is a top-level statement rather than a function, so it is
-// lifted as TEXT and RUN — the idiom the `snap.head` normalization above already
-// uses, for the same reason: a presence pin over `runId` would stay green on a
-// derivation that had stopped varying. The `.match()` is guarded and lives
-// INSIDE the test, never at module scope, so a reformat that defeats the anchor
-// reds one named test instead of taking the whole file down before it registers.
-function deriveRunScratch() {
-  const block = CODE.match(/^const runId = .+\nconst runScratch = .+$/m);
+// The per-run segment is minted by the SHELL, so the AC-1 property — two runs
+// never share a root — is a property of `mktemp -d`, not of any expression in
+// review-pr.js. It is asserted by RUNNING the two lines that mint it, for the
+// reason the executed derivation it replaces gives: a presence pin over
+// `mktemp` would stay green on a block that had stopped varying. Only the lines
+// up to SNAPSHOT_RUN_ROOT are lifted — `mkdir`, `mktemp` and the echo, and the
+// block prints the root ahead of the sha precisely so those three stand alone.
+// So this needs no git at all, which matters because the suite is RUN from a
+// `git archive` snapshot during a review and that extraction is not a
+// repository: a test shelling out to `git rev-parse` there fails on the
+// environment rather than on the code. What the rest of the block does is
+// pinned by the sequence test.
+function mintScript(scratch) {
+  const snapshot = snapshotBlock();
+  const from = snapshot.search(/^ *mkdir -p "?\$\{runRootParent\}"?/m);
+  const runRootLine = snapshot.search(/^ *echo SNAPSHOT_RUN_ROOT=/m);
+  assert.ok(from !== -1, "the snapshot block no longer creates the run root's parent — this test lifts lines that are gone");
+  assert.ok(runRootLine > from, "the snapshot block no longer prints SNAPSHOT_RUN_ROOT below the mint — this test lifts lines that are gone");
+  const lines = snapshot.slice(from, snapshot.indexOf("\n", runRootLine));
+  // Rendered, not string-replaced: the lines carry `${runRootParent}` and
+  // `${runRootPrefix}` exactly as review-pr.js interpolates them, and the two
+  // are derived here by the same expressions the script uses — lifted below —
+  // so a change to either derivation reaches this test instead of being
+  // re-spelled in it.
+  const derive = deriveRunRoot();
+  const { runRootParent, runRootPrefix } = derive(scratch, 1129);
+  return new Function("runRootParent", "runRootPrefix", "return `" + lines + "`")(runRootParent, runRootPrefix);
+}
+
+// The prefix is the half the SCRIPT still owns — it is what `snapshotMissing`
+// checks the reported root against — so it is lifted as TEXT and RUN, the idiom
+// the `snap.head` normalization above already uses. The `.match()` is guarded
+// and lives INSIDE the helper, never at module scope, so a reformat that
+// defeats the anchor reds named tests instead of taking the whole file down
+// before any of them registers.
+function deriveRunRoot() {
+  const block = CODE.match(/^const runRootParent = .+\nconst runRootPrefix = .+$/m);
   assert.ok(
     block,
-    "review-pr.js no longer derives `runId` and `runScratch` as adjacent top-level statements — the per-run root was deleted, or reshaped past what this lifts",
+    "review-pr.js no longer derives `runRootParent` and `runRootPrefix` as adjacent top-level statements — the run root the caller owns was deleted, or reshaped past what this lifts",
   );
   assert.ok(
     CODE.indexOf(block[0]) < CODE.indexOf("const snap = await agent("),
-    "the per-run root is derived BELOW the snapshot dispatch that interpolates it",
+    "the run root prefix is derived BELOW the snapshot dispatch that interpolates it",
   );
-  return new Function("scratch", "pr", `${block[0]}\nreturn runScratch;`);
+  return new Function("scratch", "pr", `${block[0]}\nreturn { runRootParent, runRootPrefix };`);
 }
 
-// AC-1, both halves, executed rather than read: two runs differing only in PR,
-// and two runs differing in nothing at all.
-test("two review runs sharing one scratch root never derive the same artefact root", () => {
-  const derive = deriveRunScratch();
-  assert.notEqual(
-    derive("/scr", 1126),
-    derive("/scr", 1128),
-    "two PRs reviewed under one scratch root resolve to the same artefact root — the second review overwrites the first's",
-  );
-  // The half a per-PR path does NOT fix, and the one measured under #140: one
-  // PR reviewed twice is one path twice, so a re-review still lands on the tree
-  // a live consumer of the first review is citing.
-  const again = Array.from({ length: 8 }, () => derive("/scr", 1129));
-  assert.equal(
-    new Set(again).size,
-    again.length,
-    `re-reviewing ONE PR resolves to a repeated artefact root — ${again[0]} came back more than once, so a second review of the same PR still overwrites the first's tree`,
-  );
-  // AC-2's PR half, asserted on the same axis rather than left to the two
-  // inequalities above: a run token alone satisfies both of them while leaving
-  // the path anonymous, and a path that does not say which PR it holds is one a
-  // consumer cannot tell a stale reference from a current one by reading.
-  assert.match(
-    derive("/scr", 1129),
-    /\/pr1129(\/|$)/,
-    "the artefact root no longer names the PR — the paths are distinct but anonymous, so nothing about a path says which tree it holds",
-  );
+// AC-1, executed rather than read: two runs differing in nothing at all, both
+// minting into one scratch root. This is the half a per-PR path does NOT fix and
+// the one measured under #140 — one PR reviewed twice used to be one path twice,
+// so a re-review landed on the tree a live consumer of the first review was
+// citing.
+test("two review runs sharing one scratch root never mint the same artefact root", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "review-pr-mint-"));
+  try {
+    const run = () => {
+      const out = execFileSync("sh", ["-c", mintScript(scratch)], { encoding: "utf8" });
+      const m = out.match(/^SNAPSHOT_RUN_ROOT=(.+)$/m);
+      assert.ok(m, `the mint printed no SNAPSHOT_RUN_ROOT line: ${JSON.stringify(out)}`);
+      return m[1];
+    };
+    const roots = Array.from({ length: 8 }, run);
+    assert.equal(
+      new Set(roots).size,
+      roots.length,
+      `re-reviewing ONE PR minted a repeated artefact root — ${roots[0]} came back more than once, so a second review of the same PR still overwrites the first's tree`,
+    );
+    for (const root of roots) {
+      assert.ok(statSync(root).isDirectory(), `${root} was reported but never created — a name alone cannot stop two runs meeting, only a directory that exists can`);
+      // AC-2's PR half: a path that does not say which PR it holds is one a
+      // consumer cannot tell a stale reference from a current one by reading.
+      assert.match(root, /\/pr1129\/run-/, "the artefact root no longer names the PR — the roots are distinct but anonymous");
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
-// NOT PINNED HERE, deliberately: that no run's root sits INSIDE another's, the
-// property the wipe needs beyond mere distinctness (`rm -rf <a>` still takes
-// `<a>/deeper`). It was written, and it killed no mutant the distinctness test
-// above does not already kill — a derivation ending in a variable final segment
-// cannot produce containment, since two distinct values of that segment are
-// siblings whatever they are, so the assertion holds structurally rather than
-// because the code is right. What the wipe actually targets is pinned where it
-// is decided instead: the sequence test's `SNAP=${runScratch}/…` needle binds
-// the wipe's variable to this root and nothing else.
-//
 // The ACCEPT case, and the class this change could wrongly BREAK. Everything
 // downstream — the diff redirect, the specialists' own directories, the
 // controller that provisioned the root and expects to find the run's artefacts
 // beneath it — assumes what a run writes lands under the scratch argument it was
-// given. A derivation that "fixed" collisions by moving artefacts somewhere
-// unique but OUTSIDE that root would satisfy every assertion above it and break
-// every one of those consumers, so the containment is asserted in its own right.
+// given. A mint that "fixed" collisions by putting artefacts somewhere unique
+// but OUTSIDE that root would satisfy the assertion above and break every one of
+// those consumers, so the containment is asserted in its own right.
 test("a run's artefact root stays under the scratch root the caller provisioned", () => {
-  const derive = deriveRunScratch();
+  const derive = deriveRunRoot();
   for (const scratch of ["/scr", "/run/scratch", "/tmp/claude-501/session/scratchpad"]) {
-    const root = derive(scratch, 1129);
+    const { runRootPrefix } = derive(scratch, 1129);
     assert.ok(
-      root.startsWith(`${scratch}/`),
-      `a run under ${scratch} writes to ${root}, outside the root the caller provisioned — a caller that cleans up or inspects its own scratch root now finds nothing there`,
+      runRootPrefix.startsWith(`${scratch}/`),
+      `a run under ${scratch} writes to ${runRootPrefix}, outside the root the caller provisioned — a caller that cleans up or inspects its own scratch root now finds nothing there`,
     );
     // A prefix alone does not settle "under": `/scr/../elsewhere` carries it and
     // resolves outside. Same escape review-pr-refuter-scratch.test.mjs asserts
     // separately of the refuter paths built on this root.
-    assert.doesNotMatch(root, /\/\.\.(\/|$)/, `${root} climbs out of the provisioned root with a \`..\` segment`);
+    assert.doesNotMatch(runRootPrefix, /\/\.\.(\/|$)/, `${runRootPrefix} climbs out of the provisioned root with a \`..\` segment`);
+  }
+});
+
+// THE FATAL ONE. `Date.now()`, `Math.random()` and argless `new Date()` are not
+// merely discouraged in a Workflow script — the harness replaces them with
+// functions that THROW, so a script that calls one at top level dies before a
+// single agent() dispatches. Measured out of the Claude Code 2.1.259 binary,
+// which installs this prelude into the workflow VM context:
+//   Math.random = function random() { throw new Error(RANDOM_ERR) };
+//   RealDate.now = function now() { throw new Error(NOW_ERR) };
+// with the messages "Math.random() is unavailable in workflow scripts (breaks
+// resume)" and "Date.now() / new Date() are unavailable in workflow scripts
+// (breaks resume)". The ban exists to protect the resume this script's own
+// `resumeFor` message promises its caller: a relaunch replays the longest
+// unchanged PREFIX of agent() calls, and a prompt carrying a fresh token every
+// run has no unchanged prefix left to replay.
+//
+// #1129's first attempt minted the per-run token with exactly those two calls.
+// Nothing in the suite caught it, because every other pin reads the script as
+// TEXT and text is all it ever was — so this pin is over the whole `workflows/`
+// directory rather than this one file, and over CODE so a mention inside a
+// comment (there are several, deliberately) cannot satisfy or break it.
+test("no workflow script draws on the clock or the RNG — the sandbox throws on both", () => {
+  const dir = join(REPO, "workflows");
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+    const code = stripComments(readFileSync(join(dir, file), "utf8"));
+    for (const [re, what] of [
+      [/\bDate\.now\s*\(/, "Date.now()"],
+      [/\bMath\.random\s*\(/, "Math.random()"],
+      [/\bnew Date\s*\(\s*\)/, "argless new Date()"],
+    ]) {
+      assert.doesNotMatch(
+        code,
+        re,
+        `workflows/${file} calls ${what}, which the Workflow sandbox replaces with a function that THROWS — the script dies at that line before any agent() dispatches. Per-run variation has to come from a process the script dispatches (see the snapshot block's \`mktemp -d\`); a timestamp has to arrive through \`args\`.`,
+      );
+    }
   }
 });
 
@@ -449,7 +650,7 @@ test("a run's artefact root stays under the scratch root the caller provisioned"
 // The derivation itself is the one legitimate occurrence — it is where the
 // caller's root is consumed — so it is excluded by identity, not by counting.
 test("no artefact path is spelled off the bare scratch argument — every one hangs off the per-run root", () => {
-  const offending = CODE.split("\n").filter((l) => l.includes("${scratch}/") && !l.includes("const runScratch ="));
+  const offending = CODE.split("\n").filter((l) => l.includes("${scratch}/") && !l.includes("const runRootParent ="));
   assert.deepEqual(
     offending,
     [],
@@ -462,8 +663,8 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
   // their own terms, which makes a failure say nothing about which property
   // broke.
   assert.ok(
-    CODE.split("\n").some((l) => l.includes("const runScratch =") && l.includes("${scratch}/")),
-    "the per-run root no longer derives from the caller's scratch argument at all — the empty list above is vacuous",
+    CODE.split("\n").some((l) => l.includes("const runRootParent =") && l.includes("${scratch}/")),
+    "the run root no longer derives from the caller's scratch argument at all — the empty list above is vacuous",
   );
 });
 
@@ -477,7 +678,7 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
 test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
   assert.match(
     CODE,
-    /^const missingReason = snapshotMissing\(snap\);$/m,
+    /^const missingReason = snapshotMissing\(snap, runRootPrefix\);$/m,
     "the snapshotMissing call site changed — the #140 guard may be disconnected",
   );
   assert.match(
@@ -490,8 +691,8 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
   // after the schema that produces `pathVerified`, and before the first thing
   // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
   // for a tree that was never confirmed to exist.
-  const schemaAt = CODE.indexOf('required: ["path", "head", "pathVerified"]');
-  const callAt = CODE.indexOf("const missingReason = snapshotMissing(snap);");
+  const schemaAt = CODE.indexOf('required: ["runRoot", "path", "head", "pathVerified"]');
+  const callAt = CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);");
   const testCmdAt = CODE.indexOf("const testCmd = resolveTestCmd(");
   assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");
   assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
@@ -539,7 +740,7 @@ const rationale = () =>
   between(
     SOURCE,
     "`pathVerified` closes a narrower gap",
-    "function snapshotMissing(snap)",
+    "function snapshotMissing(snap",
     "review-pr.js's snapshotMissing rationale",
   ).replace(/^[ \t]*\/\/ ?/gm, "");
 

@@ -215,7 +215,13 @@ function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead)) return null;
-  return snap.diffPath;
+  // Rebuilt from the checked `runRoot`, not read off `diffPath`. The redirect
+  // that wrote it is `> "$RUN"/pr.diff` in the snapshot block, so the path is
+  // the caller's to derive; what the agent's field decides is whether the
+  // capture happened at all. Trusting the reported string instead would put a
+  // second transcribed path into every specialist prompt while `runRoot` — the
+  // one this script actually verified — sat unused (#1129).
+  return `${snap.runRoot}/pr.diff`;
 }
 
 // The read rules every agent in this workflow obeys — specialist and refuter
@@ -247,7 +253,7 @@ function usableDiff(snap) {
 // and both fallback branches lie without that. See `rejected`/`skew` below.
 function readRules(diffPath, stats, snap) {
   // A REJECTED diff file still EXISTS. The capture is a shell redirect —
-  // `gh pr diff ${pr} > ${runScratch}/pr.diff` — so the path is there in every run,
+  // `gh pr diff ${pr} > "$RUN"/pr.diff` — so the path is there in every run,
   // inside the scratch dir this same prompt points the specialist at for its own
   // work. On head skew it is also non-empty and authoritative-looking. "No diff
   // file was captured" sent a specialist hunting for a file it can find and must
@@ -366,27 +372,45 @@ const worktree = A.worktree;
 // CONCURRENT workflow writes to the same one, which is the sibling-clobbering
 // this snapshot design exists to prevent.
 const scratch = A.scratch || `/tmp/review-pr-${pr}`;
-// Every artefact this run writes hangs off THIS, never off `scratch` directly.
-// `scratch` is a caller argument and the fleet passes one session-wide root for
-// every PR it reviews, so a destination derived from it and a fixed literal is
-// the SAME absolute path in every run of the session. The snapshot block wipes
-// its destination before extracting, so the second review deleted and replaced
-// the first review's tree — and a fix-applier outlives the review that produced
-// its findings, still citing absolute paths into it. The path stayed valid, held
-// a plausible checkout of the same repo, and answered a read with another PR's
-// code; measured live in one fleet run, worked around by hand-feeding each
-// review a different scratch root (#1129).
+// Every artefact this run writes hangs off a PER-RUN root, never off `scratch`
+// directly. `scratch` is a caller argument and the fleet passes one session-wide
+// root for every PR it reviews, so a destination derived from it and a fixed
+// literal is the SAME absolute path in every run of the session. The snapshot
+// block used to wipe its destination before extracting, so the second review
+// deleted and replaced the first review's tree — and a fix-applier outlives the
+// review that produced its findings, still citing absolute paths into it. The
+// path stayed valid, held a plausible checkout of the same repo, and answered a
+// read with another PR's code; measured live in one fleet run, worked around by
+// hand-feeding each review a different scratch root (#1129).
+//
+// The per-run segment is minted by the SHELL, in the snapshot block below, and
+// reported back on `runRoot`. This script cannot mint it. The Workflow sandbox
+// replaces `Date.now`, `Math.random` and argless `new Date()` with functions
+// that THROW, so a token drawn from a clock or an RNG does not degrade the run,
+// it kills this script at the line that draws it, before a single agent()
+// dispatches. Measured against the runtime rather than read off the docs — the
+// rule #538 left for exactly this — by reading the prelude the harness installs
+// into the workflow VM context out of the Claude Code 2.1.259 binary:
+// `Math.random = function random() { throw new Error(RANDOM_ERR) }` and
+// `RealDate.now = function now() { throw new Error(NOW_ERR) }`, whose messages
+// name the reason: "unavailable in workflow scripts (breaks resume)". The ban
+// is the harness protecting resume, which is a guarantee THIS script makes to
+// its caller — `resumeFor` below promises that a relaunch replays the unchanged
+// prefix of agent() calls from cache — and a prompt carrying a fresh token
+// every run has no unchanged prefix to replay.
+//
+// Nor is there a harness run id to seed from: enumerating the sandbox's globals
+// turns up `log`, `phase`, `console`, `budget`, `setTimeout`, `clearTimeout`,
+// `agent`, `parallel`, `pipeline`, `workflow`, `args` and the ECMAScript
+// builtins, and nothing that names the run. So the only legal source of per-run
+// variation is a process this script dispatches — the snapshot agent's shell.
+// Re-measure against the binary rather than re-reading this if that changes.
 //
 // `pr` alone does not close it: re-reviewing one PR resolves to one path twice.
-// `runId` is what makes two runs distinct whatever else matches — a millisecond
-// clock for ordering plus randomness, because two workflow dispatches can land
-// in one millisecond. Not a uniqueness PROOF: two dispatches in the same
-// millisecond that also draw the same six base-36 characters collide. `Math` is
-// a language global; `crypto.randomUUID` is a host one this sandbox has never
-// been measured for, and #538 is the record of guessing wrong about it. The
-// COMMIT is not here either: this script compiles as a function body with no
-// `import` and no `require` (#538), so it cannot run `git`, and the snapshot
-// block appends the sha itself from the shell that already has it.
+// `mktemp -d` is what makes two runs distinct whatever else matches, and it is
+// a stronger guarantee than any token minted here: it CREATES the directory it
+// names, so it cannot hand two runs one path even in the same millisecond, and
+// it fails rather than returning a name that already exists.
 //
 // What this costs: every run now leaves its own tree instead of overwriting one,
 // and nothing here removes it — the growth is real and it is #1083's, which
@@ -396,11 +420,12 @@ const scratch = A.scratch || `/tmp/review-pr-${pr}`;
 // half — a re-review reading the previous run's mutants — is closed here as a
 // side effect, because the refuter directories below hang off this root too.
 //
-// The wipe's blast radius shrinks rather than grows: the guard on an empty
-// `scratch` still runs first, and the worst target reachable past it is now
-// `//pr<N>/run-<id>/snapshot-<sha>` where it was `/snapshot`.
-const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-const runScratch = `${scratch}/pr${pr}/run-${runId}`;
+// What the script keeps is the one segment it can own, and it REFUSES a
+// reported root that does not start with it — so "this tree belongs to this
+// run" is a checked fact rather than an instruction the snapshot agent was
+// asked to follow. See `snapshotMissing`.
+const runRootParent = `${scratch}/pr${pr}`;
+const runRootPrefix = `${runRootParent}/run-`;
 const explicitDimensions = A.dimensions; // caller override; else derived from the diff below
 const verifiers = A.verifiers || 2;
 const snapshotModel = A.snapshotModel || "haiku";
@@ -601,53 +626,71 @@ const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
     [ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET; exit 1; }
-    SNAP=${runScratch}/snapshot-$(git -C ${worktree} rev-parse --short HEAD)
+    mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
+    RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
+    echo SNAPSHOT_RUN_ROOT="$RUN"
+    SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
+    SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"
-    rm -rf "$SNAP"
     mkdir -p "$SNAP"
     git -C ${worktree} archive HEAD | tar -x -C "$SNAP"
     [ -n "$(ls -A "$SNAP")" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
-    if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
+    if [ -n "$SNAP" ] && [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
 
-The destination is this RUN's and no other run's. It carries the PR, a per-run
-token minted by the caller, and the sha the archive is cut at — so two reviews
-handed one scratch root cannot resolve to one path, whether they run at once or
-one after the other, and whether they review two PRs or one PR twice. That is
-what makes the wipe safe to keep: it can only ever reach the directory this same
-block just named, never a tree some other review is still being cited from
-(#1129). It also makes a stale absolute reference fail LOUDLY rather than
-resolve to a stranger's tree — nothing but this run ever writes at "$SNAP", so a
-consumer holding the path gets this run's commit or ENOENT, never another PR's
-code at a path that still reads plausible.
+The destination is this RUN's and no other run's. 'mktemp -d' CREATES the run
+root it names, so two reviews handed one scratch root cannot resolve to one
+path — whether they run at once or one after the other, whether they review two
+PRs or one PR twice, and whatever the clock says (#1129). It also makes a stale
+absolute reference fail LOUDLY rather than resolve to a stranger's tree:
+nothing but this run ever writes under "$RUN", so a consumer holding the path
+gets this run's commit or ENOENT, never another PR's code at a path that still
+reads plausible.
 
-'\$SNAP' is assigned ONCE and every line below addresses it. Recomputing the
-substitution per line would let a 'rev-parse' that succeeds for the wipe and
-fails for the probe point two of these commands at two different directories.
+The symlink tests "$SNAP" for the same reason the first line tests 'scratch'.
+It is the one command below whose target is not created by an earlier line, so
+it is the one that would still act on an empty "$SNAP" — writing at
+'/node_modules' — where every other line fails first. With the wipe gone that is
+the last way anything here reaches outside this run's own root.
 
-The guard before the wipe is not decoration: this block is EXECUTED by an
+There is NO wipe here, and that is not an omission. A freshly minted "$RUN" has
+never held anything, so "$SNAP" cannot exist before 'mkdir -p' creates it and
+'tar -x' has nothing to merge into. The 'rm -rf' this block used to carry was
+the one command in it that could reach outside the run, and a destination
+'mktemp' guarantees is fresh retires it rather than re-bounding it.
+
+Run these lines as ONE shell invocation. "$RUN", "$SHA" and "$SNAP" are shell
+variables, not text this prompt can re-spell, so a fresh shell per line loses
+all three and every path below collapses to its suffix. That fails loudly — the
+run root prints empty, there is no 'runRoot' to report, and the caller refuses
+the review — but it still costs the run. Each of the three is assigned ONCE and
+every line below addresses it: recomputing 'mktemp' or 'rev-parse' per line
+would point two of these commands at two different directories, and a second
+'mktemp' would strand the tree the first one made.
+
+The guard on the first line is not decoration: this block is EXECUTED by an
 agent's shell, not evaluated by this script, so 'scratch' being non-empty at
 interpolation time is a fact about today's caller, not about the text that runs.
-Empty, the assignment reads '/pr<N>/run-<id>/snapshot-<sha>' and the wipe runs
-against it. Testing the emitted "${scratch}" catches that in the shell that runs
-it. Note a suffix check would NOT: the trailing components are appended
-literally here, so they are always present. Ceiling: the worst reachable target
-is '/pr<N>/run-<id>/snapshot-<sha>' (empty and '/' both land there), narrower
-than the bare '/snapshot' this bounded before the per-run path — and a
-'rev-parse' that fails leaves the sha empty, which shortens the target to
-'.../snapshot-' rather than widening it. This bounds the blast radius rather
-than validating the path in general.
+Empty, the 'mkdir -p' reads '/pr<N>' and the 'mktemp -d' template reads
+'/pr<N>/run-XXXXXXXX'. What the guard buys is a NAMED refusal —
+SNAPSHOT_SCRATCH_UNSET — rather than blast-radius containment, which is no
+longer this block's problem: with the wipe gone, the worst an unguarded empty
+'scratch' can do is CREATE directories at '/', and for any user who is not root
+both commands fail there anyway. Testing the emitted "${scratch}" is what
+catches it in the shell that runs it; a suffix check would not, since the
+trailing components are appended literally here and so are always present.
 
-The wipe is not optional. 'mkdir -p' never empties and 'tar -x' MERGES into
-whatever is already there, so a reused destination hands every specialist the
-previous run's files. Measured across two PRs sharing one scratch: the snapshot
-held files that exist on neither branch nor on main. A merged tree is non-empty
-for REAL, so SNAPSHOT_NONEMPTY passes it and \`pathVerified\` then certifies a
-tree that is partly some other commit — the exact state it exists to reject. The
-per-run destination above is what stops two runs meeting; the wipe is what still
-has to hold when one run's own destination is somehow not fresh, and the two are
-not substitutes for each other.
-Every other scratch user is namespaced ('<scratch>/pr<N>/<finding>/'); the
-snapshot alone sat at a bare path, which is why it was the one that merged.
+The run root is printed the moment 'mktemp' returns it, ahead of the sha, so a
+'rev-parse' that fails still leaves the caller able to see which root this run
+minted rather than only that something went wrong.
+
+Both '|| { echo …; exit 1; }' clauses matter for the same reason: 'mktemp' and
+'rev-parse' each contribute a path component, and a failure that goes unread
+does not stop the block, it shortens "$SNAP" to a path some OTHER run could
+also produce. That is the collision this ticket exists to close, arriving by a
+different route, so each is a named refusal rather than an empty string.
+
+Every other scratch user is namespaced under this same run root; the snapshot
+alone sat at a bare path, which is why it was the one that merged.
 
 The symlink is not optional. 'git archive' carries TRACKED files only, so the
 snapshot has no node_modules — and the command derived below is 'npm test --'
@@ -673,12 +716,15 @@ diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
 Then capture the PR's diff for the specialists, plus the two facts the caller
 needs to judge whether it is usable:
 
-    gh pr diff ${pr} > ${runScratch}/pr.diff
+    gh pr diff ${pr} > "$RUN"/pr.diff
     gh pr view ${pr} --json headRefOid -q .headRefOid
-    wc -l < ${runScratch}/pr.diff
+    wc -l < "$RUN"/pr.diff
 
-Report \`diffPath\` = ${runScratch}/pr.diff ONLY if 'gh pr diff' exited 0 — note it
-writes an empty file on failure, so a file existing is not success. Report
+Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
+if 'gh pr diff' exited 0 — note it writes an empty file on failure, so a file
+existing is not success. The caller rebuilds that path from \`runRoot\` rather
+than reading yours, so what this field decides is whether the capture succeeded
+at all: omitting it on failure is what matters, not its exact spelling. Report
 \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Do not judge
 whether the diff is usable, and do not withhold one field because another
 failed: report what you got and let the caller decide.
@@ -697,20 +743,33 @@ Then size the diff:
 
     ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
 
-Report \`path\` = the SNAPSHOT_DEST value the block above printed, copied
-verbatim. The destination ends in a sha the shell substituted, so it is not
-readable off this prompt — do not reconstruct it, and do not report a path the
-block did not print. Report the HEAD sha, and — in \`diffStats\` — the
+Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value the block above printed and
+\`path\` = the SNAPSHOT_DEST value it printed, both copied verbatim. Each ends
+in a component the shell substituted — a 'mktemp' name, and a sha — so neither
+is readable off this prompt: do not reconstruct it, and do not report a path the
+block did not print. The caller checks both against the run root it provisioned
+and refuses the review when they disagree, so a reconstructed path costs the run
+rather than sending six specialists into another run's tree. Report the HEAD
+sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
-omit diffStats entirely. Only path, head and pathVerified are ever required —
+omit diffStats entirely. Only runRoot, path, head and pathVerified are ever required —
 diffStats, diffPath, diffLines and prHead are each omitted independently when
 their command failed. Do not modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
       type: "object",
       additionalProperties: false,
-      required: ["path", "head", "pathVerified"],
+      required: ["runRoot", "path", "head", "pathVerified"],
       properties: {
+        // The run root 'mktemp -d' created, printed as SNAPSHOT_RUN_ROOT and
+        // copied back verbatim. REQUIRED, and checked by `snapshotMissing`
+        // against the `${scratch}/pr${pr}/run-` prefix this script owns: the
+        // per-run segment is the shell's to mint (the sandbox throws on
+        // `Date.now`/`Math.random`, see `runRootPrefix` above), so this field
+        // is the only way the value gets back, and a field the caller merely
+        // trusted would leave the whole per-run invariant resting on the agent
+        // having followed prose (#1129).
+        runRoot: { type: "string" },
         path: { type: "string" },
         head: { type: "string" },
         // The mechanical 'ls -A' check the shell block above runs,
@@ -841,10 +900,17 @@ their command failed. Do not modify ${worktree}.`,
 // disk is reachable, but `head` absent leaves the tree itself untouched — the
 // sha to check it against is what is gone, so that branch must not claim
 // there is no tree.
-function snapshotMissing(snap) {
+function snapshotMissing(snap, runRootPrefix) {
   if (!snap) return "the snapshot agent returned nothing (it died, or it exhausted its structured-output retries) — no tree to review";
   if (!snap.path) return "the snapshot agent's report gives no `path` — no tree to review";
   if (!snap.head) return "the snapshot agent's report gives no `head` — refusing to review a tree whose commit is unknown";
+  if (!snap.runRoot) return "the snapshot agent's report gives no `runRoot` — nothing says the tree belongs to THIS run";
+  if (!snap.runRoot.startsWith(runRootPrefix))
+    return `the snapshot agent reported a run root of ${snap.runRoot}, which is not under ${runRootPrefix} — refusing a tree this run did not provision`;
+  if (!snap.path.startsWith(`${snap.runRoot}/snapshot-`))
+    return `the snapshot at ${snap.path} is not under this run's own root ${snap.runRoot} — refusing a tree that may belong to another run`;
+  if (snap.path.includes("/../") || snap.path.endsWith("/.."))
+    return `the snapshot at ${snap.path} climbs out of ${snap.runRoot} with a \`..\` segment — the prefix says nothing about where it resolves`;
   if (!snap.pathVerified)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
@@ -874,7 +940,7 @@ if (snap) {
   if (typeof snap.prHead === "string") snap.prHead = snap.prHead.trim().toLowerCase();
 }
 
-const missingReason = snapshotMissing(snap);
+const missingReason = snapshotMissing(snap, runRootPrefix);
 if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
 // `prHead` is named here even when it is absent. The head compare in
@@ -1144,7 +1210,7 @@ everything skipped. And a count well below what the whole tree reports means you
 ran a PARTIAL copy: nothing downstream can catch that one for you, because only
 your own run knows what the full tree reports. Run from the snapshot's root, and
 report any of the three as unrun.
-Scratch files go in ${runScratch}/${d.key}/ and nowhere else.
+Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
 'suggestion', not 'critical'. State your search scope for every negative claim.`,
@@ -1216,7 +1282,7 @@ diff removed does not support a claim that the category is empty.
 ${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
-Scratch: ${runScratch}/verify-${d.key}/f${fi + 1}-l${i + 1}/
+Scratch: ${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}/
 Everything you write — mutants, fixtures, scratch repos — goes there and nowhere
 else. That directory is yours alone: every other refuter of this dimension, on
 this finding and on the others, is given a different one, so a generic filename

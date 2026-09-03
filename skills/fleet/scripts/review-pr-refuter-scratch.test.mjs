@@ -56,11 +56,14 @@ const TEMPLATE_END = "{ label: `verify:";
 // `usableDiff` are supplied as stubs: what they return is not under test here,
 // and a stub keeps this file from re-deriving the diff-gating rules that
 // review-pr-reads.test.mjs already owns.
-// `runScratch`, not `scratch`, since #1129: every artefact of one review now
-// hangs off a per-run root, so the name the template interpolates changed. The
-// binding is what makes the "stays under the run's provisioned scratch root"
-// test below mean what it says — that root is per RUN now, not per session.
-const SCOPE = ["pr", "f", "snap", "stats", "runScratch", "d", "i", "fi", "readRules", "usableDiff"];
+// `snap.runRoot`, not `scratch`, since #1129: every artefact of one review now
+// hangs off a per-run root, so the name the template interpolates changed. That
+// root is minted by the snapshot agent's shell and reported back on `snap`, so
+// it reaches this template through `snap` rather than as a free name of its own
+// — which is why `runScratch` is gone from this list. The binding is what makes
+// the "stays under the run's provisioned scratch root" test below mean what it
+// says: that root is per RUN now, not per session.
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -85,9 +88,8 @@ function render({ finding = 0, lens = 0, runScratch = "/scr" } = {}) {
   return RENDER(
     7,
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
-    { path: "/snap", head: "abc1234" },
+    { path: `${runScratch}/snapshot-abc1234`, head: "abc1234", runRoot: runScratch },
     null,
-    runScratch,
     { key: "correctness" },
     lens,
     finding,

@@ -92,7 +92,7 @@ test("review-pr.js actually calls resolveTestCmd once the snapshot is validated"
   // three, and the retired literal leaves guardAt at -1, which reds this
   // assertion loudly rather than silently, but reds it all the same. The call
   // site is the only anchor that is both reword-proof and order-sensitive.
-  const guardAt = CODE.indexOf("const missingReason = snapshotMissing(snap);");
+  const guardAt = CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);");
   const callAt = CODE.indexOf("const testCmd = resolveTestCmd(");
   assert.ok(guardAt !== -1 && callAt !== -1 && callAt > guardAt, "resolveTestCmd is called before snap is validated");
 });
@@ -134,7 +134,21 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     // variable now, and the symlink has to land in the tree this run actually
     // extracted — a link left at the old bare `${scratch}/snapshot` would
     // provision node_modules for a directory no specialist is pointed at.
-    /ln -s \$\{worktree\}\/node_modules "\$SNAP\/node_modules"/,
+    // Quote-tolerant on purpose. The needle's job is that the symlink lands in
+    // THIS run's destination — `$SNAP`, never the old bare `${scratch}/snapshot`
+    // — and `"$SNAP/node_modules"` and `"$SNAP"/node_modules` are the same word
+    // to any POSIX shell, `/node_modules` carrying no metacharacters. Pinning
+    // one of the two rejected a behaviour-identical rewrite as a #1129
+    // regression, which is how a pin teaches its next reader to weaken it.
+    //
+    // The `[ -n "$SNAP" ]` half is not decoration either: this is the only
+    // command in the block whose target no earlier line created, so it is the
+    // only one that would still act on an empty `$SNAP` — writing a symlink at
+    // `/node_modules`, outside the run root entirely.
+    // Order-agnostic between the two `[ ]` tests, for the same reason the
+    // quotes are optional: swapping them is behaviour-identical, so pinning
+    // one arrangement would red a correct change.
+    /if [^\n]*\[ -n "\$SNAP" \][^\n]*; then ln -s \$\{worktree\}\/node_modules "?\$SNAP"?\/node_modules"?/,
     "the snapshot no longer provisions node_modules — a derived `npm test --` cannot run in it",
   );
   // These names live inside a template literal, so each backtick is a
@@ -173,7 +187,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // path+head instead (#140): unlike testCmd, its absence must abort.
   assert.match(
     snapshot,
-    /required:\s*\["path",\s*"head",\s*"pathVerified"\]/,
+    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified"\]/,
     "required must stay path+head+pathVerified only",
   );
 });
