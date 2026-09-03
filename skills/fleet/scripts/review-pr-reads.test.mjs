@@ -28,6 +28,14 @@ const CODE = stripComments(SOURCE);
 
 const usableDiff = lift(CODE, "usableDiff", "snap");
 
+// #1129: `usableDiff` no longer returns the reported `diffPath`, it REBUILDS
+// the path from the run root the caller already checked — the redirect that
+// wrote the file is `> "$RUN"/pr.diff` inside the snapshot block, so the path is
+// the caller's to derive. What the reported field still decides is whether the
+// capture happened at all, which is why every fixture below varies `diffPath`
+// while the accepted RESULT is always derived from `runRoot`.
+const ROOT = "/s/pr7/run-ab12cd34";
+
 // A diff that is empty, or that describes a commit other than the snapshot's,
 // is worse than no diff: the specialist reads it as authoritative.
 test("usableDiff rejects a diff that would lie about the snapshot", () => {
@@ -64,13 +72,13 @@ test("usableDiff rejects a diff that would lie about the snapshot", () => {
 // `selectDimensions`, inverted.
 test("usableDiff accepts when prHead is absent or matching", () => {
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }),
-    "/s/pr.diff",
+    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }),
+    `${ROOT}/pr.diff`,
     "missing prHead must not suppress an otherwise good diff",
   );
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, prHead: "aaa" }),
-    "/s/pr.diff",
+    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, prHead: "aaa" }),
+    `${ROOT}/pr.diff`,
   );
   // `prHead` is 40 chars from `gh`; `head` is whatever the snapshot agent
   // relayed for "the HEAD sha", which an agent may abbreviate. Under a raw
@@ -78,13 +86,13 @@ test("usableDiff accepts when prHead is absent or matching", () => {
   // Both directions, because either side can be the short one.
   const full = "a".repeat(40);
   assert.equal(
-    usableDiff({ head: full.slice(0, 7), diffPath: "/s/pr.diff", diffLines: 40, prHead: full }),
-    "/s/pr.diff",
+    usableDiff({ runRoot: ROOT, head: full.slice(0, 7), diffPath: "/s/pr.diff", diffLines: 40, prHead: full }),
+    `${ROOT}/pr.diff`,
     "abbreviated head against the full prHead is the same commit, not a divergence",
   );
   assert.equal(
-    usableDiff({ head: full, diffPath: "/s/pr.diff", diffLines: 40, prHead: full.slice(0, 7) }),
-    "/s/pr.diff",
+    usableDiff({ runRoot: ROOT, head: full, diffPath: "/s/pr.diff", diffLines: 40, prHead: full.slice(0, 7) }),
+    `${ROOT}/pr.diff`,
     "and the same the other way round",
   );
   // The prefix tolerance must not swallow the case it exists beside: a genuinely
@@ -275,7 +283,12 @@ const slice = (from, to) => between(CODE, from, to, "review-pr.js");
 // disconnects in one token.
 test("the snapshot agent asks for the diff facts AND declares them in its schema", () => {
   const snapshot = slice("const snap = await agent(", "if (!snap");
-  assert.match(snapshot, /gh pr diff \$\{pr\} > \$\{scratch\}\/pr\.diff/, "no diff capture");
+  // Pinned on `"$RUN"` since #1129: the capture is a shell redirect into a
+  // directory the snapshot block's own `mkdir -p` created, and both artefacts
+  // hang off the same per-run root, which is what keeps `pr.diff` a SIBLING of
+  // the snapshot tree (the relationship the read-rules qualifier below depends
+  // on) while stopping two reviews in one session from overwriting each other's.
+  assert.match(snapshot, /gh pr diff \$\{pr\} > "?\$RUN"?\/pr\.diff/, "no diff capture");
   // `/headRefOid/` alone also matches the prose ("Report `prHead` = the
   // headRefOid") in the same prompt, so deleting this command left the suite
   // green — pin the command line itself, not a word it shares with prose.
@@ -284,7 +297,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     /gh pr view \$\{pr\} --json headRefOid -q \.headRefOid/,
     "no PR head to cross-check against the snapshot's",
   );
-  assert.match(snapshot, /wc -l < \$\{scratch\}\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
+  assert.match(snapshot, /wc -l < "?\$RUN"?\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
   // Scoped to the `properties` object, not the whole schema. Declaring a field
   // ANYWHERE else — beside `required`, in the options bag — leaves it undeclared
   // as far as `additionalProperties: false` is concerned, and a slice covering
@@ -315,7 +328,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // the snapshot exists, not a `gh` fact that can legitimately be absent.
   assert.match(
     snapshot,
-    /required:\s*\["path",\s*"head",\s*"pathVerified"\]/,
+    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified"\]/,
     "required must stay path+head+pathVerified only",
   );
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
@@ -334,7 +347,11 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       // inside a `/* */` block — which starts its line with `/*`, not `//`, so a
       // `//`-only anchor would have stayed green. Handled once by CODE now,
       // rather than by an anchor each future assertion has to remember.
-      `Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
+      // The run root, not `scratch`: #1129 moved every artefact of a run onto a
+      // per-run root, and a pin left on the bare root would go green again on
+      // exactly the regression it exists to stop — the diff capture sliding
+      // back to a path two reviews in one session share.
+      `Report\\s+${B}diffPath${B}\\s+=\\s+the\\s+SNAPSHOT_RUN_ROOT\\s+value\\s+with\\s+'/pr\\.diff'\\s+appended,\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
       "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],

@@ -56,7 +56,14 @@ const TEMPLATE_END = "{ label: `verify:";
 // `usableDiff` are supplied as stubs: what they return is not under test here,
 // and a stub keeps this file from re-deriving the diff-gating rules that
 // review-pr-reads.test.mjs already owns.
-const SCOPE = ["pr", "f", "snap", "stats", "scratch", "d", "i", "fi", "readRules", "usableDiff"];
+// `snap.runRoot`, not `scratch`, since #1129: every artefact of one review now
+// hangs off a per-run root, so the name the template interpolates changed. That
+// root is minted by the snapshot agent's shell and reported back on `snap`, so
+// it reaches this template through `snap` rather than as a free name of its own
+// — which is why `runScratch` is gone from this list. The binding is what makes
+// the "stays under the run's provisioned scratch root" test below mean what it
+// says: that root is per RUN now, not per session.
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -77,13 +84,12 @@ const RENDER = new Function(...SCOPE, "return `" + refuterTemplate() + "`");
 // One refuter's prompt. `finding` and `lens` are the two fan-out indices; every
 // other argument is fixed, so any difference between two renders is caused by
 // the axis the caller varied and by nothing else.
-function render({ finding = 0, lens = 0, scratch = "/scr" } = {}) {
+function render({ finding = 0, lens = 0, runScratch = "/scr" } = {}) {
   return RENDER(
     7,
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
-    { path: "/snap", head: "abc1234" },
+    { path: `${runScratch}/snapshot-abc1234`, head: "abc1234", runRoot: runScratch },
     null,
-    scratch,
     { key: "correctness" },
     lens,
     finding,
@@ -172,7 +178,7 @@ test("the scratch path is what differs, not merely the lens line", () => {
 test("every refuter's scratch path stays under the run's provisioned scratch root", () => {
   for (const finding of [0, 1, 4]) {
     for (const lens of [0, 1]) {
-      const line = scratchLine(render({ finding, lens, scratch: "/run/scratch" }));
+      const line = scratchLine(render({ finding, lens, runScratch: "/run/scratch" }));
       assert.match(
         line,
         /^Scratch: \/run\/scratch\//,
