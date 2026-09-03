@@ -395,24 +395,27 @@ test("two review runs sharing one scratch root never derive the same artefact ro
     again.length,
     `re-reviewing ONE PR resolves to a repeated artefact root — ${again[0]} came back more than once, so a second review of the same PR still overwrites the first's tree`,
   );
+  // AC-2's PR half, asserted on the same axis rather than left to the two
+  // inequalities above: a run token alone satisfies both of them while leaving
+  // the path anonymous, and a path that does not say which PR it holds is one a
+  // consumer cannot tell a stale reference from a current one by reading.
+  assert.match(
+    derive("/scr", 1129),
+    /\/pr1129(\/|$)/,
+    "the artefact root no longer names the PR — the paths are distinct but anonymous, so nothing about a path says which tree it holds",
+  );
 });
 
-// What the wipe needs in order to be safe to keep. Distinctness alone does not
-// give it: `<root>/pr1129/run-a` and `<root>/pr1129/run-a/deeper` are distinct
-// and `rm -rf` on the first still takes the second. The property is that no
-// run's root CONTAINS another's.
-test("no run's artefact root sits inside another's, so a wipe cannot reach a live run's tree", () => {
-  const derive = deriveRunScratch();
-  const roots = [derive("/scr", 1126), derive("/scr", 1128), derive("/scr", 1129), derive("/scr", 1129)];
-  for (const a of roots)
-    for (const b of roots)
-      if (a !== b)
-        assert.ok(
-          !b.startsWith(`${a}/`),
-          `the wipe of ${a} would also remove ${b} — one run's destination sits inside another's, which is what makes a second review able to delete the tree a live consumer is citing`,
-        );
-});
-
+// NOT PINNED HERE, deliberately: that no run's root sits INSIDE another's, the
+// property the wipe needs beyond mere distinctness (`rm -rf <a>` still takes
+// `<a>/deeper`). It was written, and it killed no mutant the distinctness test
+// above does not already kill — a derivation ending in a variable final segment
+// cannot produce containment, since two distinct values of that segment are
+// siblings whatever they are, so the assertion holds structurally rather than
+// because the code is right. What the wipe actually targets is pinned where it
+// is decided instead: the sequence test's `SNAP=${runScratch}/…` needle binds
+// the wipe's variable to this root and nothing else.
+//
 // The ACCEPT case, and the class this change could wrongly BREAK. Everything
 // downstream — the diff redirect, the specialists' own directories, the
 // controller that provisioned the root and expects to find the run's artefacts
@@ -432,7 +435,6 @@ test("a run's artefact root stays under the scratch root the caller provisioned"
     // resolves outside. Same escape review-pr-refuter-scratch.test.mjs asserts
     // separately of the refuter paths built on this root.
     assert.doesNotMatch(root, /\/\.\.(\/|$)/, `${root} climbs out of the provisioned root with a \`..\` segment`);
-    assert.match(root, /\/pr1129\//, `${root} does not name the PR — a stale reference cannot be told apart from another PR's by reading it`);
   }
 });
 
@@ -453,9 +455,16 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
     [],
     `these lines still build a path from the caller's scratch argument directly, so two reviews in one session share it:\n  ${offending.join("\n  ")}`,
   );
-  // The other direction: the exclusion above must not be satisfied by the
-  // derivation having been deleted along with everything it fed.
-  assert.match(CODE, /^const runScratch = `\$\{scratch\}\/pr\$\{pr\}\/run-\$\{runId\}`;$/m, "the per-run root is no longer derived from the caller's scratch root, the PR and the run token");
+  // The other direction: an empty list must not be satisfied by the derivation
+  // having been deleted along with everything it fed. Bound to the derivation
+  // CONSUMING the caller's root, not to its shape — pinning the literal here
+  // would red this test on every reshaping the tests above already judge on
+  // their own terms, which makes a failure say nothing about which property
+  // broke.
+  assert.ok(
+    CODE.split("\n").some((l) => l.includes("const runScratch =") && l.includes("${scratch}/")),
+    "the per-run root no longer derives from the caller's scratch argument at all — the empty list above is vacuous",
+  );
 });
 
 // The function is worthless if nothing calls it, and every test above tests a

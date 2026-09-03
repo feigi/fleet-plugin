@@ -380,9 +380,21 @@ const scratch = A.scratch || `/tmp/review-pr-${pr}`;
 // `pr` alone does not close it: re-reviewing one PR resolves to one path twice.
 // `runId` is what makes two runs distinct whatever else matches — a millisecond
 // clock for ordering plus randomness, because two workflow dispatches can land
-// in one millisecond. The COMMIT is not here: this script compiles as a function
-// body with no `import` and no `require` (#538), so it cannot run `git`, and the
-// snapshot block appends the sha itself from the shell that already has it.
+// in one millisecond. Not a uniqueness PROOF: two dispatches in the same
+// millisecond that also draw the same six base-36 characters collide. `Math` is
+// a language global; `crypto.randomUUID` is a host one this sandbox has never
+// been measured for, and #538 is the record of guessing wrong about it. The
+// COMMIT is not here either: this script compiles as a function body with no
+// `import` and no `require` (#538), so it cannot run `git`, and the snapshot
+// block appends the sha itself from the shell that already has it.
+//
+// What this costs: every run now leaves its own tree instead of overwriting one,
+// and nothing here removes it — the growth is real and it is #1083's, which
+// covers cleanup for the same directories. Deliberately not absorbed: a wipe on
+// return is the very trade this ticket refused, since it forecloses the post-hoc
+// inspection a fix-applier reading a finding's path depends on. #1083's other
+// half — a re-review reading the previous run's mutants — is closed here as a
+// side effect, because the refuter directories below hang off this root too.
 //
 // The wipe's blast radius shrinks rather than grows: the guard on an empty
 // `scratch` still runs first, and the worst target reachable past it is now
