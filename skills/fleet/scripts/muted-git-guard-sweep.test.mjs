@@ -87,16 +87,14 @@
 // prose or its own fixtures — the failure mode where a check quotes the
 // pattern it greps for and reports on itself.
 //
-// KNOWN LIMIT: this file needs an ambient `.git` (see `REPO` below) and throws
-// at module load without one, so it cannot run from a `git archive`
-// extraction. Which files those are is the PROPERTY "resolves a repo root at
-// module scope", not a count — the count this sentence used to carry had
-// rotted on both of its numbers, and any replacement number rots the same way
-// the next time a test file lands. It fails loudly there rather than passing
-// vacuously, and CI checks
-// out a real clone, but it is how review specialists measure the suite
-// (#1056). Tracked with its sibling, which has the same defect and predates
-// this file, in #1149.
+// KNOWN LIMIT: the sweep half of this file needs an ambient `.git` (see `ROOT`
+// below). Where there is none — a `git archive` extraction, which is how review
+// specialists measure the suite (#1056) — those tests DECLINE, with a reason,
+// rather than running: the tree they would police is not reachable from here.
+// The fixture tests below run against literal strings and the behaviour tests
+// build their own repositories — both hold anywhere, so neither is gated. Until #1149 the same condition was an
+// uncaught throw at module load, which node could only report as one synthetic
+// failing test at line 1 of this file.
 //
 // Zero deps: `node --test skills/fleet/scripts/muted-git-guard-sweep.test.mjs`.
 
@@ -108,17 +106,22 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
 // Asks git what ships rather than walking the directory: an untracked scratch
 // script is not what ships, and a fleet script that moves out of this directory
 // must not fall out of the sweep with it. Same rule, and same reason, as
-// unattended-git-sweep.test.mjs. Needs an ambient working tree; a `git archive`
-// extraction has none and this file alone reds there.
-const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: DIR, encoding: "utf8" }).trim();
-const SHELL_SCRIPTS = execFileSync("git", ["ls-files", "*.sh"], { cwd: REPO, encoding: "utf8" })
-  .split("\n").filter(Boolean);
+// unattended-git-sweep.test.mjs. Needs an ambient working tree, and answers
+// `null` rather than throwing where there is none (#1149).
+const ROOT = repoRoot(DIR);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the sweep over what ships");
+// Empty ONLY because the root lookup could not answer, in which case every test
+// that reads it is skipped. A root that answers and lists nothing is a different
+// condition — the wrong repository, or a broken glob — and it must reach the
+// non-vacuity guard below and fail there.
+const SHELL_SCRIPTS = ROOT === null ? [] : trackedShellScripts(ROOT);
 
 /**
  * Drop a trailing `#` comment. Quote-aware: a `#` inside a `die` message is
@@ -190,7 +193,18 @@ function scan(path, text) {
     .map((line) => ({ path, line, cmd: revParseCmd(line) }));
 }
 
-const ALL = SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(REPO, p), "utf8")));
+/**
+ * Every rev-parse line in what ships, read on first use rather than at module
+ * scope.
+ *
+ * Module scope is what #1149 is about: a read that throws there is a throw node
+ * cannot attribute to any test, so it reports one synthetic failure at line 1
+ * and the file's other tests never run. Deferred into the tests, an unreadable
+ * tracked script fails the test that needed it, by name, and the fixture tests
+ * — which need no repository at all — still report.
+ */
+let cachedAll;
+const all = () => (cachedAll ??= SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(ROOT, p), "utf8"))));
 
 /**
  * Does a FAILURE of this rev-parse end the script? That — not `|| die`
@@ -223,21 +237,21 @@ const isUnverifiedGuard = (g) => failureIsFatal(g)
   && resolvesARef(g)
   && !/--verify\b/.test(g.cmd);
 
-test("the sweep sees the scripts it is supposed to police", () => {
+test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   // A guard on the guard: a bad glob, a moved directory or a `git ls-files`
   // that answers nothing turns every assertion below into a vacuous pass over
   // an empty list — green, and blind. Named scripts, because those are the ones
   // whose defect this file exists to hold shut.
   for (const s of ["no-undo-audit.sh", "worktree-audit.sh", "release-ticket.sh", "reap.sh", "prove-merge.sh"]) {
     assert.ok(
-      ALL.some((g) => g.path.endsWith(`/${s}`)),
+      all().some((g) => g.path.endsWith(`/${s}`)),
       `${s} contributed no rev-parse line to the sweep — the file list or the join above is broken, not the script`,
     );
   }
 });
 
-test("no fatal rev-parse guard suppresses git's own diagnosis", () => {
-  const muted = ALL.filter(isMutedGuard);
+test("no fatal rev-parse guard suppresses git's own diagnosis", { skip: SKIP_WITHOUT_REPO }, () => {
+  const muted = all().filter(isMutedGuard);
   assert.deepEqual(
     muted.map((g) => `${g.path}: ${g.line}`),
     [],
@@ -246,7 +260,7 @@ test("no fatal rev-parse guard suppresses git's own diagnosis", () => {
   );
 });
 
-test("every rev-parse resolution guard keeps --verify", () => {
+test("every rev-parse resolution guard keeps --verify", { skip: SKIP_WITHOUT_REPO }, () => {
   // The regression a reader "tidying up" after the fix would introduce, and the
   // one a comment alone does not survive.
   //
@@ -265,7 +279,7 @@ test("every rev-parse resolution guard keeps --verify", () => {
   // into here. The fixture for this exclusion stays in the BARE spelling for
   // the reason recorded on it — it is what pins the `>/dev/null` clause — so
   // it deliberately no longer matches what verify-sha.sh ships.
-  const unverified = ALL.filter(isUnverifiedGuard);
+  const unverified = all().filter(isUnverifiedGuard);
   assert.deepEqual(
     unverified.map((g) => `${g.path}: ${g.line}`),
     [],
