@@ -209,7 +209,12 @@ test("derive-testcmd.sh and claim-ticket.sh declare the same testfile_re", () =>
 // from `process.execPath` for the same reason the spawns in this repo's
 // suites use it: a name is exactly what a stripped PATH cannot answer.
 // Nothing here mutates the ambient PATH.
-const SHIMMED = ["sh", "git", "sed", "grep", "dirname", "cut", "rm", "mkdir", "env"];
+//
+// The list is closed: this script sources nothing, so `git` and `grep` are its
+// whole external set beside the shell. A name absent here is one no derivation
+// invokes — a wrapper that logged every exec under both derivations named no
+// others — so adding one back needs a call site, not a hunch.
+const SHIMMED = ["sh", "git", "grep"];
 function shimPath({ node }) {
   const bin = mkdtempSync(join(tmpdir(), "derive-path-"));
   for (const name of SHIMMED) {
@@ -228,19 +233,19 @@ test("an unresolvable interpreter refuses in this script's own voice, never the 
   const absent = onShimmedPath(dir, shimPath({ node: false }));
   assert.equal(absent.status, 1, `an unavailable interpreter is a refusal — this script's only failure code\n${absent.stderr}`);
   assert.equal(absent.stdout, "", "and emits no entrypoint it could not derive");
-  assert.match(absent.stderr, /node is not on PATH/, "names the interpreter as the unavailable thing");
+  assert.match(absent.stderr, /^derive-testcmd: node is unusable/, "this script's own voice, naming the interpreter as the unusable thing");
   assert.doesNotMatch(absent.stderr, /could not read HEAD:package\.json/,
     "an interpreter that never ran establishes nothing about the manifest, so it must not claim to");
 
   // The must-ACCEPT half on the discriminating input: an unparseable manifest
   // with the interpreter resolvable still earns the manifest refusal word for
-  // word, so the case above and `a manifest that does not parse refuses`
-  // cannot be satisfied by each other's cause.
+  // word, so this case and `a manifest that does not parse refuses instead of
+  // degrading to node --test` cannot be satisfied by each other's cause.
   const broken = repo({ "package.json": '{"scripts":{"test":"vitest run"},}', "t.test.mjs": PASSES });
   const present = onShimmedPath(broken, shimPath({ node: true }));
   assert.equal(present.status, 1, present.stderr);
   assert.match(present.stderr, /could not read HEAD:package\.json/, "the manifest refusal is unchanged");
-  assert.doesNotMatch(present.stderr, /node is not on PATH/, "and does not blame an interpreter that resolved");
+  assert.doesNotMatch(present.stderr, /node is unusable/, "and does not blame an interpreter that ran");
 });
 
 // The false-positive control for the shim dir: both refusals above rest on a

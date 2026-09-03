@@ -74,9 +74,16 @@ if [ -n "$pkg" ]; then
   # genuinely does not parse, which is the very distinction the three-outcome
   # split exists to keep. Two consumers read this refusal: claim-ticket.sh
   # wraps it into its own, and review-pr.js's snapshot agent reads it against
-  # the repo under review. `command -v` asks the same question the invocation
-  # would, so this refuses exactly where that one would have. #1141
-  command -v node >/dev/null 2>&1 || die "node is not on PATH — refusing to derive a test entrypoint without the interpreter"
+  # the repo under review. The probe is an INVOCATION rather than a name
+  # lookup, because those are not the same question: `command -v` answers only
+  # that a PATH entry named `node` exists and is executable, which a
+  # version-manager shim that resolves and then fails satisfies — and that
+  # shim's own stderr then arrives under the manifest's name, which is this
+  # defect itself rather than a narrower cousin of it. Running the interpreter
+  # asks what the capture below asks, so this refuses exactly where that one
+  # would have, and reports the interpreter's own words rather than a cause
+  # inferred from a name. #1141
+  nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to derive a test entrypoint without the interpreter — $nodeerr"
   st=0
   pkgerr=$(printf '%s' "$pkg" | node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(0,"utf8"))}catch(e){console.error(e.message);process.exit(2)}process.exit((p.scripts||{}).test?0:1)' 2>&1) || st=$?
   case $st in

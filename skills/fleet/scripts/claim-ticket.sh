@@ -75,10 +75,17 @@ elif [ -z "$pkg" ]; then install="true"
 # command not found` arrives INSIDE $ndeps and the refusal reports it as
 # `could not read origin/main:package.json — <that line>`: the manifest's name
 # for a fault the manifest had no part in, indistinguishable by message from a
-# manifest that genuinely does not parse. `command -v` asks the same question
-# the invocation would, so this refuses exactly where that one would have. #1141
-elif ! command -v node >/dev/null 2>&1; then
-  die "node is not on PATH — refusing to claim without the interpreter this derivation needs"
+# manifest that genuinely does not parse. The probe is an INVOCATION rather
+# than a name lookup, because those are not the same question: `command -v`
+# answers only that a PATH entry named `node` exists and is executable, which a
+# version-manager shim that resolves and then fails satisfies — and that shim's
+# own stderr then arrives under the manifest's name, which is this defect itself
+# rather than a narrower cousin of it. Running the interpreter asks what the
+# capture below asks, so this refuses exactly where that one would have, and
+# reports the interpreter's own words rather than a cause inferred from a name.
+# #1141
+elif ! nodeerr=$(node -e 0 </dev/null 2>&1); then
+  die "node is unusable, refusing to claim without the interpreter this derivation needs — $nodeerr"
 elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
   die "could not read origin/main:package.json — $ndeps"
 # The `2>&1` on the ndeps capture is load-bearing — without it the failure
