@@ -350,6 +350,114 @@ test("the snapshot block derives a per-run destination, then wipes, extracts, pr
   }
 });
 
+// #1129. The destination used to be `scratch` plus a fixed literal, so two runs
+// handed one scratch root resolved to ONE absolute path — and the block above
+// wipes its destination before extracting, so the second review deleted the tree
+// the first review's fix-applier was still citing. Nothing failed: the path
+// still existed, still held a plausible checkout of this repo, and answered a
+// read with another PR's code. Observed live, worked around by hand-feeding each
+// review a different scratch root.
+//
+// The derivation is a top-level statement rather than a function, so it is
+// lifted as TEXT and RUN — the idiom the `snap.head` normalization above already
+// uses, for the same reason: a presence pin over `runId` would stay green on a
+// derivation that had stopped varying. The `.match()` is guarded and lives
+// INSIDE the test, never at module scope, so a reformat that defeats the anchor
+// reds one named test instead of taking the whole file down before it registers.
+function deriveRunScratch() {
+  const block = CODE.match(/^const runId = .+\nconst runScratch = .+$/m);
+  assert.ok(
+    block,
+    "review-pr.js no longer derives `runId` and `runScratch` as adjacent top-level statements — the per-run root was deleted, or reshaped past what this lifts",
+  );
+  assert.ok(
+    CODE.indexOf(block[0]) < CODE.indexOf("const snap = await agent("),
+    "the per-run root is derived BELOW the snapshot dispatch that interpolates it",
+  );
+  return new Function("scratch", "pr", `${block[0]}\nreturn runScratch;`);
+}
+
+// AC-1, both halves, executed rather than read: two runs differing only in PR,
+// and two runs differing in nothing at all.
+test("two review runs sharing one scratch root never derive the same artefact root", () => {
+  const derive = deriveRunScratch();
+  assert.notEqual(
+    derive("/scr", 1126),
+    derive("/scr", 1128),
+    "two PRs reviewed under one scratch root resolve to the same artefact root — the second review overwrites the first's",
+  );
+  // The half a per-PR path does NOT fix, and the one measured under #140: one
+  // PR reviewed twice is one path twice, so a re-review still lands on the tree
+  // a live consumer of the first review is citing.
+  const again = Array.from({ length: 8 }, () => derive("/scr", 1129));
+  assert.equal(
+    new Set(again).size,
+    again.length,
+    `re-reviewing ONE PR resolves to a repeated artefact root — ${again[0]} came back more than once, so a second review of the same PR still overwrites the first's tree`,
+  );
+});
+
+// What the wipe needs in order to be safe to keep. Distinctness alone does not
+// give it: `<root>/pr1129/run-a` and `<root>/pr1129/run-a/deeper` are distinct
+// and `rm -rf` on the first still takes the second. The property is that no
+// run's root CONTAINS another's.
+test("no run's artefact root sits inside another's, so a wipe cannot reach a live run's tree", () => {
+  const derive = deriveRunScratch();
+  const roots = [derive("/scr", 1126), derive("/scr", 1128), derive("/scr", 1129), derive("/scr", 1129)];
+  for (const a of roots)
+    for (const b of roots)
+      if (a !== b)
+        assert.ok(
+          !b.startsWith(`${a}/`),
+          `the wipe of ${a} would also remove ${b} — one run's destination sits inside another's, which is what makes a second review able to delete the tree a live consumer is citing`,
+        );
+});
+
+// The ACCEPT case, and the class this change could wrongly BREAK. Everything
+// downstream — the diff redirect, the specialists' own directories, the
+// controller that provisioned the root and expects to find the run's artefacts
+// beneath it — assumes what a run writes lands under the scratch argument it was
+// given. A derivation that "fixed" collisions by moving artefacts somewhere
+// unique but OUTSIDE that root would satisfy every assertion above it and break
+// every one of those consumers, so the containment is asserted in its own right.
+test("a run's artefact root stays under the scratch root the caller provisioned", () => {
+  const derive = deriveRunScratch();
+  for (const scratch of ["/scr", "/run/scratch", "/tmp/claude-501/session/scratchpad"]) {
+    const root = derive(scratch, 1129);
+    assert.ok(
+      root.startsWith(`${scratch}/`),
+      `a run under ${scratch} writes to ${root}, outside the root the caller provisioned — a caller that cleans up or inspects its own scratch root now finds nothing there`,
+    );
+    // A prefix alone does not settle "under": `/scr/../elsewhere` carries it and
+    // resolves outside. Same escape review-pr-refuter-scratch.test.mjs asserts
+    // separately of the refuter paths built on this root.
+    assert.doesNotMatch(root, /\/\.\.(\/|$)/, `${root} climbs out of the provisioned root with a \`..\` segment`);
+    assert.match(root, /\/pr1129\//, `${root} does not name the PR — a stale reference cannot be told apart from another PR's by reading it`);
+  }
+});
+
+// AC-6, and the pin that reds on a revert of ANY of the four artefact sites
+// rather than only the snapshot's. `${scratch}` reaching a path directly is the
+// whole defect: the snapshot, the captured diff behind `diffPath`, each
+// specialist's directory and each refuter's were all spelled that way, and
+// fixing one leaves the others colliding. Stated as a property over the source
+// rather than as a list of four expected paths, so an artefact added later is
+// covered without this test being remembered.
+//
+// The derivation itself is the one legitimate occurrence — it is where the
+// caller's root is consumed — so it is excluded by identity, not by counting.
+test("no artefact path is spelled off the bare scratch argument — every one hangs off the per-run root", () => {
+  const offending = CODE.split("\n").filter((l) => l.includes("${scratch}/") && !l.includes("const runScratch ="));
+  assert.deepEqual(
+    offending,
+    [],
+    `these lines still build a path from the caller's scratch argument directly, so two reviews in one session share it:\n  ${offending.join("\n  ")}`,
+  );
+  // The other direction: the exclusion above must not be satisfied by the
+  // derivation having been deleted along with everything it fed.
+  assert.match(CODE, /^const runScratch = `\$\{scratch\}\/pr\$\{pr\}\/run-\$\{runId\}`;$/m, "the per-run root is no longer derived from the caller's scratch root, the PR and the run token");
+});
+
 // The function is worthless if nothing calls it, and every test above tests a
 // COPY lifted from the source text: it stays green while the feature
 // disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
