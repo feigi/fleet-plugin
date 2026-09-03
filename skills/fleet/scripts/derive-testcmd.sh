@@ -63,9 +63,27 @@ testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 # degrade silently to `node --test` — the wrong entrypoint, reported as a
 # success. An unparseable manifest is not evidence of an absent test script,
 # which is the same policy claim-ticket.sh already applies to the dependency
-# count it reads out of this same file. Anything other than 0 or 1 (node
-# missing, unreadable stdin) refuses too, rather than being read as an answer.
+# count it reads out of this same file. Anything other than 0 or 1 (unreadable
+# stdin) refuses too, rather than being read as an answer.
 if [ -n "$pkg" ]; then
+  # An unavailable interpreter is the one such status that is not about the
+  # manifest at all, so it does not reach the arm above. The capture merges
+  # stderr, so unguarded the shell's own `node: command not found` arrives
+  # inside $pkgerr and the refusal reports it as `could not read
+  # <ref>:package.json` — indistinguishable by message from a manifest that
+  # genuinely does not parse, which is the very distinction the three-outcome
+  # split exists to keep. Two consumers read this refusal: claim-ticket.sh
+  # wraps it into its own, and review-pr.js's snapshot agent reads it against
+  # the repo under review. The probe is an INVOCATION rather than a name
+  # lookup, because those are not the same question: `command -v` answers only
+  # that a PATH entry named `node` exists and is executable, which a
+  # version-manager shim that resolves and then fails satisfies — and that
+  # shim's own stderr then arrives under the manifest's name, which is this
+  # defect itself rather than a narrower cousin of it. Running the interpreter
+  # asks what the capture below asks, so this refuses exactly where that one
+  # would have, and reports the interpreter's own words rather than a cause
+  # inferred from a name. #1141
+  nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to derive a test entrypoint without the interpreter — $nodeerr"
   st=0
   pkgerr=$(printf '%s' "$pkg" | node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(0,"utf8"))}catch(e){console.error(e.message);process.exit(2)}process.exit((p.scripts||{}).test?0:1)' 2>&1) || st=$?
   case $st in

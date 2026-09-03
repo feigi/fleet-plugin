@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -192,4 +192,72 @@ test("derive-testcmd.sh and claim-ticket.sh declare the same testfile_re", () =>
     return m[1];
   };
   assert.equal(literal("derive-testcmd.sh"), literal("claim-ticket.sh"));
+});
+
+// #1141: this script resolves its interpreter by NAME, so a `PATH` that
+// cannot resolve it makes the shell emit `node: command not found` into the
+// `2>&1` capture, land on the `*)` arm, and refuse as `could not read
+// <ref>:package.json` — the manifest's name for a fault that is not the
+// manifest's. Two consumers read that refusal: claim-ticket.sh wraps it into
+// its own, and review-pr.js's snapshot agent reads it against a repo under
+// review. An absent interpreter is not evidence about the manifest.
+//
+// The repo's PATH-shadow convention: symlinks to the REAL binaries this
+// script reaches for, resolved from the ambient PATH up front, with `PATH`
+// REPLACED rather than prepended — prepending leaves the interpreter
+// reachable behind the shim and the fixture asks nothing. `node` is linked
+// from `process.execPath` for the same reason the spawns in this repo's
+// suites use it: a name is exactly what a stripped PATH cannot answer.
+// Nothing here mutates the ambient PATH.
+//
+// The list is closed: this script sources nothing, so `git` and `grep` are its
+// whole external set beside the shell. A name absent here is one no derivation
+// invokes — a wrapper that logged every exec under both derivations named no
+// others — so adding one back needs a call site, not a hunch.
+const SHIMMED = ["sh", "git", "grep"];
+function shimPath({ node }) {
+  const bin = mkdtempSync(join(tmpdir(), "derive-path-"));
+  for (const name of SHIMMED) {
+    const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
+    symlinkSync(real, join(bin, name));
+  }
+  if (node) symlinkSync(process.execPath, join(bin, "node"));
+  return bin;
+}
+const onShimmedPath = (dir, bin) =>
+  spawnSync("sh", [SCRIPT, dir, "HEAD"], { encoding: "utf8", env: { ...process.env, PATH: bin } });
+
+test("an unresolvable interpreter refuses in this script's own voice, never the manifest's", () => {
+  const dir = repo({ "package.json": pkg({ scripts: { test: "vitest run" } }), "t.test.mjs": PASSES });
+
+  const absent = onShimmedPath(dir, shimPath({ node: false }));
+  assert.equal(absent.status, 1, `an unavailable interpreter is a refusal — this script's only failure code\n${absent.stderr}`);
+  assert.equal(absent.stdout, "", "and emits no entrypoint it could not derive");
+  assert.match(absent.stderr, /^derive-testcmd: node is unusable/, "this script's own voice, naming the interpreter as the unusable thing");
+  assert.doesNotMatch(absent.stderr, /could not read HEAD:package\.json/,
+    "an interpreter that never ran establishes nothing about the manifest, so it must not claim to");
+
+  // The must-ACCEPT half on the discriminating input: an unparseable manifest
+  // with the interpreter resolvable still earns the manifest refusal word for
+  // word, so this case and `a manifest that does not parse refuses instead of
+  // degrading to node --test` cannot be satisfied by each other's cause.
+  const broken = repo({ "package.json": '{"scripts":{"test":"vitest run"},}', "t.test.mjs": PASSES });
+  const present = onShimmedPath(broken, shimPath({ node: true }));
+  assert.equal(present.status, 1, present.stderr);
+  assert.match(present.stderr, /could not read HEAD:package\.json/, "the manifest refusal is unchanged");
+  assert.doesNotMatch(present.stderr, /node is unusable/, "and does not blame an interpreter that ran");
+});
+
+// The false-positive control for the shim dir: both refusals above rest on a
+// stripped PATH, and a PATH too thin for this script to work at all would
+// produce them for a reason that is not the interpreter. Both derivations run
+// to completion under exactly that PATH.
+test("a resolvable interpreter on the shimmed PATH still derives both entrypoints", () => {
+  const bin = shimPath({ node: true });
+  const fromManifest = onShimmedPath(repo({ "package.json": pkg({ scripts: { test: "vitest" } }) }), bin);
+  assert.equal(fromManifest.status, 0, fromManifest.stderr);
+  assert.equal(fromManifest.stdout.trim(), "npm test --");
+  const fromFiles = onShimmedPath(repo({ "t.test.mjs": PASSES }), bin);
+  assert.equal(fromFiles.status, 0, fromFiles.stderr);
+  assert.equal(fromFiles.stdout.trim(), "node --test");
 });

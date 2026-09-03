@@ -1588,3 +1588,109 @@ test("a missing json.sh is exit 2, before anything is created", () => {
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
 });
+
+// #1141: the interpreter this script reads the manifest with is resolved by
+// NAME, so a `PATH` that cannot resolve it makes the shell emit `node:
+// command not found` — into the `2>&1` capture, where it was reported as
+// `could not read origin/main:package.json — <that line>`. An absent
+// interpreter is not evidence about the manifest, and while it was reported
+// as such the case headed `install: an unparseable manifest refuses, and
+// says so` was satisfied by it: measured on this tree before the guard, that case
+// PASSES with the interpreter unresolvable. It is the assertion this guard
+// exists to make discriminate.
+//
+// The fixture is the repo's PATH-shadow convention: a directory of symlinks
+// to the REAL binaries the script reaches for, resolved from the ambient PATH
+// up front, and `PATH` REPLACED by it rather than prepended — prepending
+// leaves the interpreter reachable behind the shim and the fixture asks
+// nothing. Resolving up front is the same reason `node` itself is linked from
+// `process.execPath` rather than by name: a shim dir assembled by asking the
+// child to look names up is the very PATH question the fixture controls.
+// Nothing here touches the ambient PATH, which siblings on this machine
+// inherit.
+//
+// The list is closed over what a dry run reaches, transitive calls included:
+// `sed` and `tr` are json.sh's `jstr`, which the receipt goes through, and
+// `cksum` is the runner's hash. A name absent here is one no path under test
+// invokes — a wrapper that logged every exec under each of these fixtures
+// named no others — so adding one back needs a call site, not a hunch.
+const SHIMMED = ["sh", "git", "sed", "tr", "dirname", "cksum", "grep"];
+function shimPath({ node }) {
+  const bin = mkdtempSync(join(tmpdir(), "claim-path-"));
+  for (const name of SHIMMED) {
+    const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
+    symlinkSync(real, join(bin, name));
+  }
+  if (node) symlinkSync(process.execPath, join(bin, "node"));
+  return bin;
+}
+const onShimmedPath = (dir, bin) =>
+  spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: bin } });
+
+test("install: an unresolvable interpreter refuses in this script's own voice, never the manifest's", () => {
+  const dir = repo({ "package.json": "{,,broken", [TESTS]: "" });
+
+  const absent = onShimmedPath(dir, shimPath({ node: false }));
+  assert.equal(absent.status, 2, `an unavailable interpreter is a refusal — this script's only failure code\n${absent.stderr}`);
+  assert.match(absent.stderr, /^claim-ticket: node is unusable/, "this script's own voice, naming the interpreter as the unusable thing");
+  assert.doesNotMatch(absent.stderr, /could not read origin\/main:package\.json/,
+    "an interpreter that never ran establishes nothing about the manifest, so it must not claim to");
+  // And the refusal is FATAL, which is a separate claim from its wording:
+  // derive-testcmd.sh carries the same guard and is delegated to moments
+  // later, so a downgraded die here still lands exit 2 carrying a refusal
+  // that names the interpreter. Only stopping AT the refusal tells them
+  // apart, so the refusal has to be the last thing on stderr.
+  assert.equal(absent.stderr.trimEnd().split("\n").length, 1,
+    `the guard aborts rather than warning — anything after it is the delegate refusing in this one's place\n${absent.stderr}`);
+
+  // The must-ACCEPT half, on the discriminating input: the SAME unparseable
+  // manifest with the interpreter resolvable still earns the manifest refusal
+  // word for word. A guard that refused this too would satisfy every
+  // assertion above and have destroyed the case it was added to sharpen.
+  const present = onShimmedPath(dir, shimPath({ node: true }));
+  assert.equal(present.status, 2, `an unparseable manifest still refuses\n${present.stderr}`);
+  assert.match(present.stderr, /could not read origin\/main:package\.json/, "the manifest refusal is unchanged");
+  assert.doesNotMatch(present.stderr, /node is unusable/, "and does not blame an interpreter that ran");
+});
+
+// The false-positive control for the shim dir itself: everything the two
+// refusals above rest on is a stripped PATH, and a PATH too thin for the
+// script to work at all would produce them for a reason that is not the
+// interpreter. This drives a claim to completion under exactly that PATH.
+test("install: a resolvable interpreter on the shimmed PATH still derives the install command and the entrypoint", () => {
+  const r = onShimmedPath(repo({ "package.json": pkg({}), [TESTS]: "" }), shimPath({ node: true }));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const out = r.stdout + r.stderr;
+  assert.match(out, /install: true/);
+  assert.match(out, /test entrypoint → node --test/);
+});
+
+// The silence half of the same guard, on the input that needs no interpreter
+// at all: no manifest. The install settles on the `[ -z "$pkg" ]` arm ahead of
+// the guard, and the entrypoint on derive-testcmd.sh's test-file fallback,
+// which its own `[ -n "$pkg" ]` gate keeps the interpreter out of — so a claim
+// that resolves nothing named `node` must still succeed. Nothing but that
+// placement holds this: hoisting either guard above its gate refuses every
+// manifest-less repo wherever an interpreter happens to be missing, and every
+// refusal assertion in this file stays green while it does.
+test("install: with no manifest at all the claim needs no interpreter, and neither guard fires", () => {
+  const r = onShimmedPath(repo({ [TESTS]: "" }), shimPath({ node: false }));
+  assert.equal(r.status, 0, `nothing here reads a manifest, so an unusable interpreter is not this claim's problem\n${r.stdout}${r.stderr}`);
+  const out = r.stdout + r.stderr;
+  assert.match(out, /install: true/, "the no-manifest arm settles the install without an interpreter");
+  assert.match(out, /test entrypoint → node --test/, "and the delegate's test-file fallback settles the entrypoint without one");
+  assert.doesNotMatch(out, /node is unusable/, "so neither this script's guard nor the delegate's may speak here");
+});
+
+// The delegated cause. A lockfile settles the install without this script
+// reading the manifest at all, so its own interpreter guard is never reached
+// and `derive-testcmd.sh` is where the interpreter first has to resolve. Its
+// refusal travels back through the `2>&1` capture, and what arrives must
+// still name the interpreter rather than the manifest.
+test("runner: an unresolvable interpreter in the delegated derivation carries that cause through", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" });
+  const r = onShimmedPath(dir, shimPath({ node: false }));
+  assert.equal(r.status, 2, `the wrapping refusal keeps this script's only failure code\n${r.stderr}`);
+  assert.match(r.stderr, /derive-testcmd: node is unusable/, "the delegate's own voice, naming the interpreter");
+  assert.doesNotMatch(r.stderr, /could not read origin\/main:package\.json/);
+});
