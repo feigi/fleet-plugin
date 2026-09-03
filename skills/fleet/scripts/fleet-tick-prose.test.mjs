@@ -123,7 +123,48 @@ test("the review-backlog definition states what the script actually counts", () 
   assert.match(def, /nothing in the run can drain/);
   // The exemption is scoped to the chore PR THIS run authors. Unscoped, a reader
   // applies it to an INHERITED chore PR too — which step 0 queues for review, so
-  // it has a reviewer and belongs in the count. That under-read is the opposite
-  // error from #590's over-read, and the narrow phrase is what separates them.
-  assert.match(def, /never one a PRIOR run left open/);
+  // a reader counts it BY HAND. The reviewBacklog number excludes it either way:
+  // a PR closing no issue fails the closing-issue test whichever run left it
+  // open, so nothing here is a claim about the script's output. That under-read
+  // is the opposite error from #590's over-read, and the narrow phrase separates
+  // them.
+  //
+  // Finding 2: \s+ between every pinned word, matching this file's own
+  // convention above. The pinned clause spans a line break in SKILL.md, so
+  // literal spaces red on a whitespace-only reflow — a false failure naming a
+  // regression that did not happen.
+  assert.match(def, /never\s+one\s+a\s+PRIOR\s+run\s+left\s+open/);
+  // The corrected half: the prose must keep saying the mechanical number
+  // excludes such a PR, or the by-hand reading silently becomes a claim about
+  // fleet-tick.mjs again.
+  assert.match(def, /number\s+still\s+excludes\s+it/);
+  assert.match(def, /BY\s+HAND/);
+});
+
+// The step-0 fold-in bullet only, ending where the numbered candidate scan
+// begins. Widened to the whole of phase 0 it would be satisfied by the
+// candidate-scan and in-flight bullets, which talk about queueing and review
+// without saying inherited PRs are in scope at all.
+const foldInBlock = () =>
+  section(
+    "**Fold in every PR a prior run left open, before shortlisting.**",
+    "1. **Candidate scan**",
+    "run-team step-0 fold-in block",
+  );
+
+test("the fold-in block says inherited PRs are queued before shortlisting, as ordinary review work", () => {
+  // #1237's own review found this bullet unpinned while its sibling addition in
+  // the same PR was pinned. Unpinned, a reword silently reverts phase 0 to
+  // scanning ISSUES only and inherited PRs go unreviewed again — the #1222
+  // pattern this bullet cites as its own motivation.
+  const s = foldInBlock();
+  assert.match(s, /before\s+shortlisting/);
+  // The three roles individually. "Queue it for review" without them reads as a
+  // note to self; naming them is what makes it the same pipeline as ticket work.
+  for (const role of ["review workflow", "fix-applier", "finisher"]) {
+    assert.ok(s.includes(role), `fold-in block does not name the ${role}`);
+  }
+  // The #590 tie-back is the reason the rule survives a narrowing pass: a PR
+  // that is both unreviewable and uncounted is what strands the gate.
+  assert.match(s, /unreviewable AND uncounted/);
 });

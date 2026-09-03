@@ -1932,8 +1932,14 @@ ledger rows in the same step. See references/reaping.md.
   nothing (#590). GitHub's own linked-issue set decides that, not a keyword regex
   over the body; see `docs/agents/issue-tracker.md`. **That exemption is for
   the chore PR THIS run authors, never one a PRIOR run left open** — step 0
-  folds those into this run's review queue, so they carry a real reviewer and
-  counting them is correct.
+  folds those into this run's review queue, so count one when you reason about
+  backlog BY HAND. **The `fleet-tick.mjs` number still excludes it**: nothing
+  in its filter distinguishes an inherited chore PR from this run's own, since
+  a PR closing no issue fails the closing-issue test either way — folding one
+  in cannot reach the count. So the by-hand judgement and the script's output
+  differ here, and the script's own comment at `reviewBacklog` says why:
+  narrowing it needs per-PR review state that lives in the controller's head
+  and not in the repo.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
 runs 20-40, because each fans out up to six specialists. On the default path
