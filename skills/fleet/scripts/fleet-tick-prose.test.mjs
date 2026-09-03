@@ -121,4 +121,9 @@ test("the review-backlog definition states what the script actually counts", () 
   // floors the gate's input permanently rather than transiently.
   assert.match(def, /that closes an\s+issue/);
   assert.match(def, /nothing in the run can drain/);
+  // The exemption is scoped to the chore PR THIS run authors. Unscoped, a reader
+  // applies it to an INHERITED chore PR too — which step 0 queues for review, so
+  // it has a reviewer and belongs in the count. That under-read is the opposite
+  // error from #590's over-read, and the narrow phrase is what separates them.
+  assert.match(def, /never one a PRIOR run left open/);
 });
