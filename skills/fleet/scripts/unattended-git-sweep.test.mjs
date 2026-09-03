@@ -38,26 +38,32 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 // This file needs an ambient git WORKING TREE, not just the sources: it asks git
-// what ships rather than walking the directory, so both calls below are fatal
-// where there is no `.git` above them. A checkout and a worktree both have one;
-// a `git archive` extraction does not, and this test alone reds there with
-// `fatal: not a git repository` while every other file in the suite passes. That
-// is the extraction missing a repo, not a defect in the tree under it — a review
-// or CI step that unpacks an archive should run this one against a checkout.
-const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"],
-  { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim();
+// what ships rather than walking the directory, so both calls below want a
+// `.git` at or above them. A checkout and a worktree both have one; a `git
+// archive` extraction does not, and this file's tests DECLINE there with a
+// reason instead of running — the tree they would police is not reachable from
+// an extraction. That is the extraction missing a repo, not a defect in the tree
+// under it, and a review or CI step that unpacks an archive should run this one
+// against a checkout. Until #1149 the same condition threw at module load and
+// node could only report it as one synthetic failing test at line 1.
+const ROOT = repoRoot(fileURLToPath(new URL(".", import.meta.url)));
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT);
 
 // Tracked `*.sh` only, and from git rather than a directory walk: an untracked
 // scratch script is not what ships, and a fleet script that moves out of this
 // directory must not fall out of the sweep with it.
-const SHELL_SCRIPTS = execFileSync("git", ["ls-files", "*.sh"], { cwd: REPO, encoding: "utf8" })
-  .split("\n").filter(Boolean);
+//
+// Empty ONLY because the root lookup could not answer, in which case both tests
+// are skipped. A root that answers and lists nothing is a different condition —
+// the wrong repository, or a broken glob — and it must reach the non-vacuity
+// test below and fail there.
+const SHELL_SCRIPTS = ROOT === null ? [] : trackedShellScripts(ROOT);
 
 // Whole-line `#` comments only, blanked rather than deleted so line numbers
 // survive for the diagnostic. A trailing `code  # note` keeps its comment, and
@@ -90,10 +96,10 @@ const insideString = (prefix) => {
   return (bare.split('"').length - 1) % 2 === 1 || (bare.split("'").length - 1) % 2 === 1;
 };
 
-test("no fleet shell script makes a raw git network call — they all route through net.sh (#347)", () => {
+test("no fleet shell script makes a raw git network call — they all route through net.sh (#347)", { skip: SKIP_WITHOUT_REPO }, () => {
   const offenders = [];
   for (const f of SHELL_SCRIPTS) {
-    const code = stripHashComments(readFileSync(join(REPO, f), "utf8"));
+    const code = stripHashComments(readFileSync(join(ROOT, f), "utf8"));
     for (const line of code.split("\n")) {
       for (const m of line.matchAll(RAW_NETWORK_GIT)) {
         if (insideString(line.slice(0, m.index))) continue;
@@ -110,9 +116,9 @@ test("no fleet shell script makes a raw git network call — they all route thro
 // what a tree with the calls DELETED would show — so on its own it cannot tell
 // "routed" from "gone". These are the five call sites the enumeration names;
 // each must still source the lib and still reach it.
-test("every script that made one of those calls still sources net.sh and reaches net_git (#347)", () => {
+test("every script that made one of those calls still sources net.sh and reaches net_git (#347)", { skip: SKIP_WITHOUT_REPO }, () => {
   for (const f of ["inflight.sh", "release-ticket.sh", "prove-merge.sh", "reap.sh", "verify-sha.sh"]) {
-    const code = stripHashComments(readFileSync(join(REPO, "skills/fleet/scripts", f), "utf8"));
+    const code = stripHashComments(readFileSync(join(ROOT, "skills/fleet/scripts", f), "utf8"));
     assert.match(code, /\.\s+"\$net_lib"/,
       `${f} no longer sources net.sh, so whatever network call it makes is unbounded again`);
     assert.match(code, /\bnet_git\s+"/,

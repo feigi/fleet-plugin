@@ -29,19 +29,33 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
-const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: DIR, encoding: "utf8" }).trim();
 
-/** Every tracked `*.sh` in the repo, so a new script cannot join unnoticed. */
+// Needs an ambient git working tree: this gate asks git what ships rather than
+// walking the directory. `repoRoot` answers `null` where there is none — a `git
+// archive` extraction, which is how review specialists measure the suite
+// (#1056) — and the tests below then DECLINE with a reason instead of running,
+// because the tree they would police is not reachable from here. Until #1149
+// this threw at module load and node could only report it as one synthetic
+// failing test at line 1.
+const ROOT = repoRoot(DIR);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT);
+
+/**
+ * Every tracked `*.sh` in the repo, so a new script cannot join unnoticed.
+ *
+ * Empty ONLY because the root lookup could not answer, in which case every test
+ * below is skipped. A root that answers and lists nothing is a different
+ * condition — the wrong repository, or a broken glob — and it must reach the
+ * allowed-readers test below and fail there.
+ */
 function shellScripts() {
-  return execFileSync("git", ["ls-files", "*.sh"], { cwd: ROOT, encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
+  return ROOT === null ? [] : trackedShellScripts(ROOT);
 }
 
 /**
@@ -130,7 +144,7 @@ function invocations(src) {
 
 const ALLOWED = ["skills/fleet/scripts/worktree.sh", "skills/fleet/scripts/inflight.sh"];
 
-test("only worktree.sh and inflight.sh read the worktree listing directly", () => {
+test("only worktree.sh and inflight.sh read the worktree listing directly", { skip: SKIP_WITHOUT_REPO }, () => {
   const offenders = shellScripts()
     .filter((f) => !ALLOWED.includes(f))
     .flatMap((f) => invocations(readFileSync(join(ROOT, f), "utf8")).map(([n, l]) => `${f}:${n}: ${l.trim()}`));
@@ -145,7 +159,7 @@ test("only worktree.sh and inflight.sh read the worktree listing directly", () =
 // over a tree where NOTHING reads the listing at all — a `wt_listing` deleted,
 // or an `ALLOWED` entry that has stopped being a reader — and the gate would be
 // pinning the absence of a feature rather than the shape of one.
-test("the two allowed readers really do read it, and both read it -z", () => {
+test("the two allowed readers really do read it, and both read it -z", { skip: SKIP_WITHOUT_REPO }, () => {
   for (const f of ALLOWED) {
     const src = readFileSync(join(ROOT, f), "utf8");
     const calls = invocations(src);
@@ -174,7 +188,7 @@ test("the two allowed readers really do read it, and both read it -z", () => {
 // `tr`), and the literal-`\0` pattern never saw it. A legitimate `RS=` arriving
 // later fails here loudly and is answered by naming it, which is the direction
 // worth erring in for a scan whose whole job is catching what nobody expected.
-test("no script consumes the -z listing with awk's record separator", () => {
+test("no script consumes the -z listing with awk's record separator", { skip: SKIP_WITHOUT_REPO }, () => {
   for (const f of shellScripts()) {
     const src = readFileSync(join(ROOT, f), "utf8");
     for (const [n, line] of logicalLines(src)) {

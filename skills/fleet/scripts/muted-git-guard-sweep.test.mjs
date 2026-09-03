@@ -87,16 +87,14 @@
 // prose or its own fixtures — the failure mode where a check quotes the
 // pattern it greps for and reports on itself.
 //
-// KNOWN LIMIT: this file needs an ambient `.git` (see `REPO` below) and throws
-// at module load without one, so it cannot run from a `git archive`
-// extraction. Which files those are is the PROPERTY "resolves a repo root at
-// module scope", not a count — the count this sentence used to carry had
-// rotted on both of its numbers, and any replacement number rots the same way
-// the next time a test file lands. It fails loudly there rather than passing
-// vacuously, and CI checks
-// out a real clone, but it is how review specialists measure the suite
-// (#1056). Tracked with its sibling, which has the same defect and predates
-// this file, in #1149.
+// KNOWN LIMIT: the sweep half of this file needs an ambient `.git` (see `ROOT`
+// below). Where there is none — a `git archive` extraction, which is how review
+// specialists measure the suite (#1056) — those tests DECLINE, with a reason,
+// rather than running: the tree they would police is not reachable from here.
+// The fixture and behaviour tests below build their own repositories and run
+// anywhere, so they are not gated. Until #1149 the same condition was an
+// uncaught throw at module load, which node could only report as one synthetic
+// failing test at line 1 of this file.
 //
 // Zero deps: `node --test skills/fleet/scripts/muted-git-guard-sweep.test.mjs`.
 
@@ -108,17 +106,22 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
 // Asks git what ships rather than walking the directory: an untracked scratch
 // script is not what ships, and a fleet script that moves out of this directory
 // must not fall out of the sweep with it. Same rule, and same reason, as
-// unattended-git-sweep.test.mjs. Needs an ambient working tree; a `git archive`
-// extraction has none and this file alone reds there.
-const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: DIR, encoding: "utf8" }).trim();
-const SHELL_SCRIPTS = execFileSync("git", ["ls-files", "*.sh"], { cwd: REPO, encoding: "utf8" })
-  .split("\n").filter(Boolean);
+// unattended-git-sweep.test.mjs. Needs an ambient working tree, and answers
+// `null` rather than throwing where there is none (#1149).
+const ROOT = repoRoot(DIR);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT);
+// Empty ONLY because the root lookup could not answer, in which case every test
+// that reads it is skipped. A root that answers and lists nothing is a different
+// condition — the wrong repository, or a broken glob — and it must reach the
+// non-vacuity guard below and fail there.
+const SHELL_SCRIPTS = ROOT === null ? [] : trackedShellScripts(ROOT);
 
 /**
  * Drop a trailing `#` comment. Quote-aware: a `#` inside a `die` message is
@@ -190,7 +193,7 @@ function scan(path, text) {
     .map((line) => ({ path, line, cmd: revParseCmd(line) }));
 }
 
-const ALL = SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(REPO, p), "utf8")));
+const ALL = SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(ROOT, p), "utf8")));
 
 /**
  * Does a FAILURE of this rev-parse end the script? That — not `|| die`
@@ -223,7 +226,7 @@ const isUnverifiedGuard = (g) => failureIsFatal(g)
   && resolvesARef(g)
   && !/--verify\b/.test(g.cmd);
 
-test("the sweep sees the scripts it is supposed to police", () => {
+test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   // A guard on the guard: a bad glob, a moved directory or a `git ls-files`
   // that answers nothing turns every assertion below into a vacuous pass over
   // an empty list — green, and blind. Named scripts, because those are the ones
@@ -236,7 +239,7 @@ test("the sweep sees the scripts it is supposed to police", () => {
   }
 });
 
-test("no fatal rev-parse guard suppresses git's own diagnosis", () => {
+test("no fatal rev-parse guard suppresses git's own diagnosis", { skip: SKIP_WITHOUT_REPO }, () => {
   const muted = ALL.filter(isMutedGuard);
   assert.deepEqual(
     muted.map((g) => `${g.path}: ${g.line}`),
@@ -246,7 +249,7 @@ test("no fatal rev-parse guard suppresses git's own diagnosis", () => {
   );
 });
 
-test("every rev-parse resolution guard keeps --verify", () => {
+test("every rev-parse resolution guard keeps --verify", { skip: SKIP_WITHOUT_REPO }, () => {
   // The regression a reader "tidying up" after the fix would introduce, and the
   // one a comment alone does not survive.
   //
