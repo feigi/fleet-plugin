@@ -63,10 +63,16 @@
 //     because `--quiet` suppresses progress, not diagnosis. Nothing is muted.
 //   - The `2>/dev/null` probes. An adjacent mechanism, tracked in #481, #482
 //     and #391, and not this one.
-//   - Captures (`tip=$(git rev-parse …)`), which suppress nothing. verify-sha.sh
-//     has one without `--verify`; it is a real defect of a DIFFERENT mechanism
-//     and is filed as #1146, not smuggled in here. The `>/dev/null` clause in
-//     the `--verify` test below is what keeps it out.
+//   - Captures (`tip=$(git rev-parse …)`), which suppress nothing — a capture
+//     is read, so git's diagnosis reaches the operator on failure whether or
+//     not `--verify` is present. verify-sha.sh had one without `--verify`,
+//     a real defect of a DIFFERENT mechanism (#1146 fixed it: the capture now
+//     carries `--verify`, so a working-directory path can no longer clear it
+//     at exit 0). Whether captures join THIS sweep is a separate decision,
+//     left open rather than folded in here — #1146 is one fixed site, not a
+//     general capture audit. The `>/dev/null` clause in the `--verify` test
+//     below is what keeps captures out structurally, regardless of that
+//     decision.
 //
 // Comment text inside the shell scripts is stripped before any of this, and
 // the strip is quote-aware. Not because some sentence happens to trip the
@@ -248,10 +254,11 @@ test("every rev-parse resolution guard keeps --verify", () => {
   // A CAPTURE (`tip=$(git rev-parse …)`) is deliberately out, which is what the
   // `>/dev/null` clause buys. It asks a different question — the value, not the
   // yes/no — and it suppresses nothing, so git's diagnosis already reaches the
-  // operator there. verify-sha.sh has one without `--verify`; measured, with a
+  // operator there. verify-sha.sh had one without `--verify`; measured, with a
   // file `origin/weird` present `git rev-parse "origin/weird"` exits 0 and
-  // prints the path, so that capture can carry a non-sha onward. Real, and a
-  // different mechanism: filed as #1146 rather than widened into here.
+  // prints the path, so that capture could carry a non-sha onward. Real, and a
+  // different mechanism: fixed at its own site by #1146 rather than widened
+  // into here — verify-sha.sh's capture now carries `--verify` too.
   const unverified = ALL.filter(isUnverifiedGuard);
   assert.deepEqual(
     unverified.map((g) => `${g.path}: ${g.line}`),
@@ -292,7 +299,7 @@ const REFS = [
   { why: "`--verify` present", unverified: false, src: 'git rev-parse --verify "$ref" >/dev/null || die "no"' },
   { why: "a repository probe names no ref", unverified: false, src: 'git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"' },
   { why: "`--git-path` takes a path, not a rev", unverified: false, src: 'git rev-parse --path-format=absolute --git-path logs/refs/stash >/dev/null || die "no"' },
-  { why: "a capture is a different mechanism (#1146)", unverified: false, src: 'tip=$(git rev-parse "origin/$branch") || die "no"' },
+  { why: "a capture is a different mechanism — #1146 fixed this exact site, but the sweep excludes captures on shape, not on that ticket's status", unverified: false, src: 'tip=$(git rev-parse --verify "origin/$branch") || die "no"' },
   { why: "a probe whose failure is the answer", unverified: false, src: 'git rev-parse "$ref" >/dev/null && die "taken"' },
 ];
 
