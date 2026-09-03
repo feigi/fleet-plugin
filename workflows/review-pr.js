@@ -247,7 +247,7 @@ function usableDiff(snap) {
 // and both fallback branches lie without that. See `rejected`/`skew` below.
 function readRules(diffPath, stats, snap) {
   // A REJECTED diff file still EXISTS. The capture is a shell redirect —
-  // `gh pr diff ${pr} > ${scratch}/pr.diff` — so the path is there in every run,
+  // `gh pr diff ${pr} > ${runScratch}/pr.diff` — so the path is there in every run,
   // inside the scratch dir this same prompt points the specialist at for its own
   // work. On head skew it is also non-empty and authoritative-looking. "No diff
   // file was captured" sent a specialist hunting for a file it can find and must
@@ -366,6 +366,29 @@ const worktree = A.worktree;
 // CONCURRENT workflow writes to the same one, which is the sibling-clobbering
 // this snapshot design exists to prevent.
 const scratch = A.scratch || `/tmp/review-pr-${pr}`;
+// Every artefact this run writes hangs off THIS, never off `scratch` directly.
+// `scratch` is a caller argument and the fleet passes one session-wide root for
+// every PR it reviews, so a destination derived from it and a fixed literal is
+// the SAME absolute path in every run of the session. The snapshot block wipes
+// its destination before extracting, so the second review deleted and replaced
+// the first review's tree — and a fix-applier outlives the review that produced
+// its findings, still citing absolute paths into it. The path stayed valid, held
+// a plausible checkout of the same repo, and answered a read with another PR's
+// code; measured live in one fleet run, worked around by hand-feeding each
+// review a different scratch root (#1129).
+//
+// `pr` alone does not close it: re-reviewing one PR resolves to one path twice.
+// `runId` is what makes two runs distinct whatever else matches — a millisecond
+// clock for ordering plus randomness, because two workflow dispatches can land
+// in one millisecond. The COMMIT is not here: this script compiles as a function
+// body with no `import` and no `require` (#538), so it cannot run `git`, and the
+// snapshot block appends the sha itself from the shell that already has it.
+//
+// The wipe's blast radius shrinks rather than grows: the guard on an empty
+// `scratch` still runs first, and the worst target reachable past it is now
+// `//pr<N>/run-<id>/snapshot-<sha>` where it was `/snapshot`.
+const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const runScratch = `${scratch}/pr${pr}/run-${runId}`;
 const explicitDimensions = A.dimensions; // caller override; else derived from the diff below
 const verifiers = A.verifiers || 2;
 const snapshotModel = A.snapshotModel || "haiku";
@@ -566,28 +589,51 @@ const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
     [ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET; exit 1; }
-    rm -rf ${scratch}/snapshot
-    mkdir -p ${scratch}/snapshot
-    git -C ${worktree} archive HEAD | tar -x -C ${scratch}/snapshot
-    [ -n "$(ls -A ${scratch}/snapshot)" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
-    if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules ${scratch}/snapshot/node_modules; fi
+    SNAP=${runScratch}/snapshot-$(git -C ${worktree} rev-parse --short HEAD)
+    echo SNAPSHOT_DEST="$SNAP"
+    rm -rf "$SNAP"
+    mkdir -p "$SNAP"
+    git -C ${worktree} archive HEAD | tar -x -C "$SNAP"
+    [ -n "$(ls -A "$SNAP")" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
+    if [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
+
+The destination is this RUN's and no other run's. It carries the PR, a per-run
+token minted by the caller, and the sha the archive is cut at — so two reviews
+handed one scratch root cannot resolve to one path, whether they run at once or
+one after the other, and whether they review two PRs or one PR twice. That is
+what makes the wipe safe to keep: it can only ever reach the directory this same
+block just named, never a tree some other review is still being cited from
+(#1129). It also makes a stale absolute reference fail LOUDLY rather than
+resolve to a stranger's tree — nothing but this run ever writes at "$SNAP", so a
+consumer holding the path gets this run's commit or ENOENT, never another PR's
+code at a path that still reads plausible.
+
+'\$SNAP' is assigned ONCE and every line below addresses it. Recomputing the
+substitution per line would let a 'rev-parse' that succeeds for the wipe and
+fails for the probe point two of these commands at two different directories.
 
 The guard before the wipe is not decoration: this block is EXECUTED by an
 agent's shell, not evaluated by this script, so 'scratch' being non-empty at
 interpolation time is a fact about today's caller, not about the text that runs.
-Empty, the line reads 'rm -rf /snapshot'. Testing the emitted "${scratch}"
-catches that in the shell that runs it. Note a suffix check would NOT: the
-'/snapshot' is appended literally here, so it is always present — including on
-'rm -rf /snapshot'. Ceiling: the worst reachable target is '/snapshot' (empty
-and '/' both land there), so this bounds the blast radius rather than validating
-the path in general.
+Empty, the assignment reads '/pr<N>/run-<id>/snapshot-<sha>' and the wipe runs
+against it. Testing the emitted "${scratch}" catches that in the shell that runs
+it. Note a suffix check would NOT: the trailing components are appended
+literally here, so they are always present. Ceiling: the worst reachable target
+is '/pr<N>/run-<id>/snapshot-<sha>' (empty and '/' both land there), narrower
+than the bare '/snapshot' this bounded before the per-run path — and a
+'rev-parse' that fails leaves the sha empty, which shortens the target to
+'.../snapshot-' rather than widening it. This bounds the blast radius rather
+than validating the path in general.
 
 The wipe is not optional. 'mkdir -p' never empties and 'tar -x' MERGES into
-whatever is already there, so a reused ${scratch} hands every specialist the
+whatever is already there, so a reused destination hands every specialist the
 previous run's files. Measured across two PRs sharing one scratch: the snapshot
 held files that exist on neither branch nor on main. A merged tree is non-empty
 for REAL, so SNAPSHOT_NONEMPTY passes it and \`pathVerified\` then certifies a
-tree that is partly some other commit — the exact state it exists to reject.
+tree that is partly some other commit — the exact state it exists to reject. The
+per-run destination above is what stops two runs meeting; the wipe is what still
+has to hold when one run's own destination is somehow not fresh, and the two are
+not substitutes for each other.
 Every other scratch user is namespaced ('<scratch>/pr<N>/<finding>/'); the
 snapshot alone sat at a bare path, which is why it was the one that merged.
 
@@ -615,11 +661,11 @@ diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
 Then capture the PR's diff for the specialists, plus the two facts the caller
 needs to judge whether it is usable:
 
-    gh pr diff ${pr} > ${scratch}/pr.diff
+    gh pr diff ${pr} > ${runScratch}/pr.diff
     gh pr view ${pr} --json headRefOid -q .headRefOid
-    wc -l < ${scratch}/pr.diff
+    wc -l < ${runScratch}/pr.diff
 
-Report \`diffPath\` = ${scratch}/pr.diff ONLY if 'gh pr diff' exited 0 — note it
+Report \`diffPath\` = ${runScratch}/pr.diff ONLY if 'gh pr diff' exited 0 — note it
 writes an empty file on failure, so a file existing is not success. Report
 \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Do not judge
 whether the diff is usable, and do not withhold one field because another
@@ -639,7 +685,10 @@ Then size the diff:
 
     ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
 
-Report the snapshot's absolute path, the HEAD sha, and — in \`diffStats\` — the
+Report \`path\` = the SNAPSHOT_DEST value the block above printed, copied
+verbatim. The destination ends in a sha the shell substituted, so it is not
+readable off this prompt — do not reconstruct it, and do not report a path the
+block did not print. Report the HEAD sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
 omit diffStats entirely. Only path, head and pathVerified are ever required —
@@ -1083,7 +1132,7 @@ everything skipped. And a count well below what the whole tree reports means you
 ran a PARTIAL copy: nothing downstream can catch that one for you, because only
 your own run knows what the full tree reports. Run from the snapshot's root, and
 report any of the three as unrun.
-Scratch files go in ${scratch}/${d.key}/ and nowhere else.
+Scratch files go in ${runScratch}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
 'suggestion', not 'critical'. State your search scope for every negative claim.`,
@@ -1155,7 +1204,7 @@ diff removed does not support a claim that the category is empty.
 ${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
-Scratch: ${scratch}/verify-${d.key}/f${fi + 1}-l${i + 1}/
+Scratch: ${runScratch}/verify-${d.key}/f${fi + 1}-l${i + 1}/
 Everything you write — mutants, fixtures, scratch repos — goes there and nowhere
 else. That directory is yours alone: every other refuter of this dimension, on
 this finding and on the others, is given a different one, so a generic filename

@@ -282,7 +282,7 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
   const snapshot = snapshotBlock();
   assert.match(
     snapshot,
-    /\[ -n "\$\(ls -A \$\{scratch\}\/snapshot\)" \] && echo SNAPSHOT_NONEMPTY \|\| echo SNAPSHOT_EMPTY/,
+    /\[ -n "\$\(ls -A "\$SNAP"\)" \] && echo SNAPSHOT_NONEMPTY \|\| echo SNAPSHOT_EMPTY/,
     "the emptiness probe is gone — nothing mechanical stands behind pathVerified",
   );
   // These names live inside a template literal, so each backtick is a
@@ -303,35 +303,48 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
 //     that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in every repo that
 //     has node_modules (which is every repo the symlink exists for).
 //   guard MISSING -> the wipe is executed text, not evaluated JS, so an empty
-//     `scratch` emits `rm -rf /snapshot` and runs it.
+//     `scratch` emits a wipe rooted at `/` and runs it.
 //   wipe MISSING (or after `tar -x`) -> `mkdir -p` never empties and `tar -x`
-//     MERGES, so a reused scratch keeps the previous run's files. Measured
+//     MERGES, so a reused destination keeps the previous run's files. Measured
 //     across two PRs sharing one scratch: reviewing prB, the snapshot held
 //     prA's file. A merged tree is non-empty for REAL, so the probe cannot
 //     catch this one at all — only the wipe can.
 // Both end the same way: the agent honestly reports `pathVerified: true`,
 // because that is what it was told to report. Hence a sequence pin, not a
-// presence pin — every one of these five lines is in the right place or the
+// presence pin — every one of these lines is in the right place or the
 // guard is decorative.
-test("the snapshot block wipes, extracts, probes, then symlinks — in that order", () => {
+//
+// #1129 moved the destination off `${scratch}/snapshot` and onto a per-run
+// `$SNAP`, so the needles below address `$SNAP` — which is also what keeps the
+// sequence honest now that the destination is a shell variable: an assignment
+// that moved BELOW the wipe would wipe an unset (empty) `$SNAP`, and one command
+// still spelling the old bare path would be a second destination this pin's
+// order says nothing about. Both are caught here, by the assignment's place in
+// the sequence and by `$SNAP` being what every later needle names.
+test("the snapshot block derives a per-run destination, then wipes, extracts, probes, and symlinks — in that order", () => {
   const snapshot = snapshotBlock();
   let prev = -1;
   for (const [needle, gone] of [
     [
       '[ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET',
-      "the empty-scratch guard is gone — the wipe below it reads `rm -rf /snapshot` on an empty interpolation",
+      "the empty-scratch guard is gone — the wipe below it is rooted at `/` on an empty interpolation",
     ],
-    ["rm -rf ${scratch}/snapshot", "the wipe is gone — `tar -x` MERGES, so a reused scratch certifies a stale tree"],
-    ["mkdir -p ${scratch}/snapshot", "the mkdir is gone — `tar -x` has nowhere to extract to"],
+    [
+      "SNAP=${runScratch}/snapshot-$(git -C ${worktree} rev-parse --short HEAD)",
+      "the destination is no longer derived per run from the run root and the archived commit — two reviews sharing one scratch can collide again (#1129)",
+    ],
+    ['echo SNAPSHOT_DEST="$SNAP"', "the destination is never printed — the agent cannot report a path it can no longer read off this prompt"],
+    ['rm -rf "$SNAP"', "the wipe is gone, or no longer bounded to this run's own destination — `tar -x` MERGES, so a reused destination certifies a stale tree"],
+    ['mkdir -p "$SNAP"', "the mkdir is gone — `tar -x` has nowhere to extract to"],
     ["git -C ${worktree} archive HEAD", "the archive is gone — there is no snapshot to review"],
-    ['[ -n "$(ls -A ${scratch}/snapshot)" ]', "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
+    ['[ -n "$(ls -A "$SNAP")" ]', "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
     ["ln -s ${worktree}/node_modules", "the node_modules symlink is gone — a derived `npm test --` cannot run"],
   ]) {
     const at = snapshot.indexOf(needle);
     assert.notEqual(at, -1, gone);
     assert.ok(
       at > prev,
-      `\`${needle}\` is out of sequence — the block must wipe, then extract, then probe, then symlink`,
+      `\`${needle}\` is out of sequence — the block must derive the destination, then wipe, then extract, then probe, then symlink`,
     );
     prev = at;
   }

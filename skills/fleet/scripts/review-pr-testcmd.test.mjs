@@ -130,7 +130,11 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // a synthetic repo during the #142 review: worktree exit 0, archive exit 127.
   assert.match(
     snapshot,
-    /ln -s \$\{worktree\}\/node_modules \$\{scratch\}\/snapshot\/node_modules/,
+    // `"$SNAP/node_modules"` since #1129: the destination is a per-run shell
+    // variable now, and the symlink has to land in the tree this run actually
+    // extracted — a link left at the old bare `${scratch}/snapshot` would
+    // provision node_modules for a directory no specialist is pointed at.
+    /ln -s \$\{worktree\}\/node_modules "\$SNAP\/node_modules"/,
     "the snapshot no longer provisions node_modules — a derived `npm test --` cannot run in it",
   );
   // These names live inside a template literal, so each backtick is a

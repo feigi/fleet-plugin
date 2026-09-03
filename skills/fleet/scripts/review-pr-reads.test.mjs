@@ -275,7 +275,12 @@ const slice = (from, to) => between(CODE, from, to, "review-pr.js");
 // disconnects in one token.
 test("the snapshot agent asks for the diff facts AND declares them in its schema", () => {
   const snapshot = slice("const snap = await agent(", "if (!snap");
-  assert.match(snapshot, /gh pr diff \$\{pr\} > \$\{scratch\}\/pr\.diff/, "no diff capture");
+  // Pinned on `runScratch` since #1129: the capture is a shell redirect into a
+  // directory the snapshot block's own `mkdir -p` created, and both artefacts
+  // hang off the same per-run root, which is what keeps `pr.diff` a SIBLING of
+  // the snapshot tree (the relationship the read-rules qualifier below depends
+  // on) while stopping two reviews in one session from overwriting each other's.
+  assert.match(snapshot, /gh pr diff \$\{pr\} > \$\{runScratch\}\/pr\.diff/, "no diff capture");
   // `/headRefOid/` alone also matches the prose ("Report `prHead` = the
   // headRefOid") in the same prompt, so deleting this command left the suite
   // green — pin the command line itself, not a word it shares with prose.
@@ -284,7 +289,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     /gh pr view \$\{pr\} --json headRefOid -q \.headRefOid/,
     "no PR head to cross-check against the snapshot's",
   );
-  assert.match(snapshot, /wc -l < \$\{scratch\}\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
+  assert.match(snapshot, /wc -l < \$\{runScratch\}\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
   // Scoped to the `properties` object, not the whole schema. Declaring a field
   // ANYWHERE else — beside `required`, in the options bag — leaves it undeclared
   // as far as `additionalProperties: false` is concerned, and a slice covering
@@ -334,7 +339,11 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       // inside a `/* */` block — which starts its line with `/*`, not `//`, so a
       // `//`-only anchor would have stayed green. Handled once by CODE now,
       // rather than by an anchor each future assertion has to remember.
-      `Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{scratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
+      // `runScratch`, not `scratch`: #1129 moved every artefact of a run onto a
+      // per-run root, and a pin left on the bare root would go green again on
+      // exactly the regression it exists to stop — the diff capture sliding
+      // back to a path two reviews in one session share.
+      `Report\\s+${B}diffPath${B}\\s+=\\s+\\$\\{runScratch\\}/pr\\.diff\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
       "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
