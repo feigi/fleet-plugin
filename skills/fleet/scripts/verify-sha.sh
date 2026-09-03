@@ -72,7 +72,12 @@ if [ "$fetch_rc" -ne 0 ]; then
   die "cannot fetch origin/$branch"
 fi
 
-tip=$(git rev-parse "origin/$branch") \
+# --verify (#1146): without it, an unresolvable "origin/$branch" falls back to
+# treating the argument as a PATH — if a file or dir of that name sits in the
+# cwd, rev-parse prints it and exits 0, and this guard's `|| die` never fires.
+# Measured: a real ref still wins over a same-named path either way, so
+# --verify costs the healthy case nothing; it only closes the fallback.
+tip=$(git rev-parse --verify "origin/$branch") \
   || die "origin/$branch does not resolve after fetch"
 echo "    origin/$branch tip = $tip" >&2
 

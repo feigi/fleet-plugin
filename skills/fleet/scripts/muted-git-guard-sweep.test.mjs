@@ -63,10 +63,16 @@
 //     because `--quiet` suppresses progress, not diagnosis. Nothing is muted.
 //   - The `2>/dev/null` probes. An adjacent mechanism, tracked in #481, #482
 //     and #391, and not this one.
-//   - Captures (`tip=$(git rev-parse …)`), which suppress nothing. verify-sha.sh
-//     has one without `--verify`; it is a real defect of a DIFFERENT mechanism
-//     and is filed as #1146, not smuggled in here. The `>/dev/null` clause in
-//     the `--verify` test below is what keeps it out.
+//   - Captures (`tip=$(git rev-parse …)`), which suppress nothing — a capture
+//     is read, so git's diagnosis reaches the operator on failure whether or
+//     not `--verify` is present. verify-sha.sh had one without `--verify`,
+//     a real defect of a DIFFERENT mechanism (#1146 fixed it: the capture now
+//     carries `--verify`, so a working-directory path can no longer clear it
+//     at exit 0). Whether captures join THIS sweep is a separate decision,
+//     left open rather than folded in here — #1146 is one fixed site, not a
+//     general capture audit. The `>/dev/null` clause in the `--verify` test
+//     below is what keeps captures out structurally, regardless of that
+//     decision.
 //
 // Comment text inside the shell scripts is stripped before any of this, and
 // the strip is quote-aware. Not because some sentence happens to trip the
@@ -83,10 +89,14 @@
 //
 // KNOWN LIMIT: this file needs an ambient `.git` (see `REPO` below) and throws
 // at module load without one, so it cannot run from a `git archive`
-// extraction — measured, 2 of 93 test files in this directory. It fails loudly
-// there rather than passing vacuously, and CI checks out a real clone, but it
-// is how review specialists measure the suite (#1056). Tracked with its
-// sibling, which has the same defect and predates this file, in #1149.
+// extraction. Which files those are is the PROPERTY "resolves a repo root at
+// module scope", not a count — the count this sentence used to carry had
+// rotted on both of its numbers, and any replacement number rots the same way
+// the next time a test file lands. It fails loudly there rather than passing
+// vacuously, and CI checks
+// out a real clone, but it is how review specialists measure the suite
+// (#1056). Tracked with its sibling, which has the same defect and predates
+// this file, in #1149.
 //
 // Zero deps: `node --test skills/fleet/scripts/muted-git-guard-sweep.test.mjs`.
 
@@ -248,10 +258,13 @@ test("every rev-parse resolution guard keeps --verify", () => {
   // A CAPTURE (`tip=$(git rev-parse …)`) is deliberately out, which is what the
   // `>/dev/null` clause buys. It asks a different question — the value, not the
   // yes/no — and it suppresses nothing, so git's diagnosis already reaches the
-  // operator there. verify-sha.sh has one without `--verify`; measured, with a
+  // operator there. verify-sha.sh had one without `--verify`; measured, with a
   // file `origin/weird` present `git rev-parse "origin/weird"` exits 0 and
-  // prints the path, so that capture can carry a non-sha onward. Real, and a
-  // different mechanism: filed as #1146 rather than widened into here.
+  // prints the path, so that capture could carry a non-sha onward. Real, and a
+  // different mechanism: fixed at its own site by #1146 rather than widened
+  // into here. The fixture for this exclusion stays in the BARE spelling for
+  // the reason recorded on it — it is what pins the `>/dev/null` clause — so
+  // it deliberately no longer matches what verify-sha.sh ships.
   const unverified = ALL.filter(isUnverifiedGuard);
   assert.deepEqual(
     unverified.map((g) => `${g.path}: ${g.line}`),
@@ -292,7 +305,13 @@ const REFS = [
   { why: "`--verify` present", unverified: false, src: 'git rev-parse --verify "$ref" >/dev/null || die "no"' },
   { why: "a repository probe names no ref", unverified: false, src: 'git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"' },
   { why: "`--git-path` takes a path, not a rev", unverified: false, src: 'git rev-parse --path-format=absolute --git-path logs/refs/stash >/dev/null || die "no"' },
-  { why: "a capture is a different mechanism (#1146)", unverified: false, src: 'tip=$(git rev-parse "origin/$branch") || die "no"' },
+  // The BARE spelling is load-bearing and must stay bare. This is the only row
+  // in either table excluded solely by the `>/dev/null` clause of
+  // `isUnverifiedGuard` — written with `--verify` it would be excluded by the
+  // `--verify` clause as well, and deleting the `>/dev/null` clause would leave
+  // this file green. Measured both ways, 2026-09-03: bare, that deletion reds
+  // this test; with `--verify`, it does not.
+  { why: "a capture is a different mechanism — excluded on shape, whatever #1146 did to the real site", unverified: false, src: 'tip=$(git rev-parse "origin/$branch") || die "no"' },
   { why: "a probe whose failure is the answer", unverified: false, src: 'git rev-parse "$ref" >/dev/null && die "taken"' },
 ];
 

@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -239,7 +239,10 @@ test("a fetch that succeeds but leaves origin/<branch> unresolvable is exit 2 at
   assert.equal(code, 2);
   assert.equal(json, null);
   assert.match(stderr, /origin\/main does not resolve after fetch/);
-  assert.match(stderr, /ambiguous argument 'origin\/main'/, "git's own diagnosis must survive to stderr");
+  // #1146 added --verify to this capture, which changes git's own wording for
+  // this exact failure: `fatal: Needed a single revision`, not the `ambiguous
+  // argument` a bare `git rev-parse` prints for the same unresolvable ref.
+  assert.match(stderr, /fatal: Needed a single revision/, "git's own diagnosis must survive to stderr");
   assert.doesNotMatch(stderr, /cannot fetch/, "the fetch passed — this is the guard after it");
 });
 
@@ -255,11 +258,13 @@ test("a rev-parse that cannot resolve origin/<branch> is fatal — the script st
   // What only fatality produces is the absence of progress. The `tip =` trace is
   // echoed on the line after this guard, so it appears if and only if execution
   // got past it, and it is pinned verbatim by "a healthy run stays quiet", so it
-  // cannot be reworded out from under this assertion unseen. git's own `ambiguous
-  // argument` is the other bracket: it proves rev-parse ran and failed HERE,
-  // rather than this test passing off an earlier guard that stopped the script
-  // before it. Neither bracket names a `die` string, so rewording any guard's
-  // message — this one included — leaves both standing.
+  // cannot be reworded out from under this assertion unseen. git's own `Needed a
+  // single revision` (#1146 added --verify, which is what produces this exact
+  // wording rather than a bare rev-parse's `ambiguous argument`) is the other
+  // bracket: it proves rev-parse ran and failed HERE, rather than this test
+  // passing off an earlier guard that stopped the script before it. Neither
+  // bracket names a `die` string, so rewording any guard's message — this one
+  // included — leaves both standing.
   const w = repo(t);
   // The fixture of the case above: with no refspec configured the fetch still
   // succeeds, into FETCH_HEAD, so deleting the tracking ref leaves this guard to
@@ -270,12 +275,112 @@ test("a rev-parse that cannot resolve origin/<branch> is fatal — the script st
   const { code, json, stderr } = verify(w, "main", "0".repeat(40));
   assert.equal(code, 2);
   assert.equal(json, null);
-  assert.match(stderr, /ambiguous argument 'origin\/main'/, "rev-parse ran and failed here, not some earlier guard");
+  assert.match(stderr, /fatal: Needed a single revision/, "rev-parse ran and failed here, not some earlier guard");
   assert.doesNotMatch(
     stderr,
     /origin\/main tip =/,
     "a ref that does not resolve must stop the script, not warn and carry an empty tip onward",
   );
+});
+
+// #1146: the tip capture (`tip=$(git rev-parse "origin/$branch")`) had no
+// `--verify`. Without it, an unresolvable "origin/<branch>" falls back to
+// treating the argument as a PATH: if a file or dir of that name sits in the
+// cwd, rev-parse prints it and exits 0, and this guard's own `|| die` never
+// fires. This differs from the case above only in that a colliding path
+// exists — same missing tracking ref, same fetch, same everything else.
+test("a rev-parse that would fall back to a colliding path is still fatal, and names the tip guard as the cause", (t) => {
+  const w = repo(t);
+  git(w, "config", "--unset", "remote.origin.fetch");
+  git(w, "update-ref", "-d", "refs/remotes/origin/main");
+  // The collision: a file at the exact path "origin/main" would print, at
+  // exit 0, wherever this guard let a bare `git rev-parse` fall back to it.
+  mkdirSync(join(w, "origin"), { recursive: true });
+  writeFileSync(join(w, "origin", "main"), "not a sha\n");
+
+  const { code, json, stderr } = verify(w, "main", "0".repeat(40));
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /origin\/main does not resolve after fetch/, "this guard is what catches it");
+  assert.match(stderr, /fatal: Needed a single revision/, "git's own --verify diagnosis must survive to stderr");
+  // The discriminating pair: without --verify this guard does not catch this
+  // fixture at all. Measured 2026-09-03 against a single-point mutant (this
+  // capture with `--verify` removed, nothing else): the capture exits 0 with
+  // the colliding PATH as the tip, and the run dies at the `git cat-file -e`
+  // guard with `cannot resolve 0000… to a commit in this repository` — a
+  // refusal about the sha, not about the ref. It never reaches
+  // `git merge-base --is-ancestor`: an all-zero sha cannot clear `cat-file`.
+  // Reaching merge-base takes a real commit for a sha, which is the mutant
+  // test's fixture, not this one.
+  assert.doesNotMatch(stderr, /cannot resolve .* to a commit/,
+    "without --verify the colliding path is carried onward and the cat-file guard is what refuses — this guard must be the one that fires");
+});
+
+// The positive control criterion #1146 names explicitly: a real ref and a
+// same-named path coexisting must still resolve the ref. Git's own
+// precedence — try revision resolution before ever falling back to a path —
+// makes this true for both the bare and the --verify forms; pinned here so a
+// reader does not need to trust that reasoning, only this measurement.
+test("a colliding path does not shadow a real remote-tracking ref", (t) => {
+  const w = repo(t);
+  const head = commit(w, "the ref, not the path, must win");
+  git(w, "push", "-q", "origin", "main");
+  mkdirSync(join(w, "origin"), { recursive: true });
+  writeFileSync(join(w, "origin", "main"), "not a sha\n");
+
+  const { code, json } = verify(w, "main", head);
+  assert.equal(code, 0);
+  assert.equal(json.reachable, true);
+  assert.equal(json.tip, head, "the real ref's sha, never the colliding path's name");
+});
+
+// The regression control: what a fixture whose sha is a REAL commit catches
+// WITHOUT --verify. Not the fixture of the colliding-path test above, whose
+// all-zero sha is refused earlier, by `git cat-file -e`; the sha is what
+// routes a run to one guard or the other. And not the shape a reader might
+// assume from the ticket's general description of this bug class (a
+// malformed-but-parseable payload at exit 0). Measured 2026-09-03: the
+// `git merge-base --is-ancestor` guard re-resolves the identical
+// "origin/$branch" string, and merge-base has no path fallback, so it
+// independently refuses (rc 128) whenever the ref genuinely does not exist.
+// That guard's own `|| die` already fires — this script was fail-closed
+// before this fix too, by whichever guard the sha routed it to. What the
+// mutant actually costs is the DIAGNOSIS: it dies with "cannot tell reachable
+// from unanswerable" — a guard that exists to catch a broken `merge-base`,
+// not an unresolvable ref — never with the tip guard's own "does not resolve
+// after fetch". An operator reading the refusal is told the wrong thing
+// failed.
+test("mutant: without --verify, the same fixture is still caught, but by the wrong guard", (t) => {
+  const w = repo(t);
+  // A real commit, so the mutant's bogus tip gets past `git cat-file -e` and
+  // reaches merge-base — the deepest point this bug can reach. Local existence
+  // is the whole requirement: what makes merge-base refuse is the deleted
+  // tracking ref, so this commit is deliberately NOT pushed.
+  const head = commit(w, "a real commit, so the mutant runs all the way to merge-base");
+  git(w, "config", "--unset", "remote.origin.fetch");
+  git(w, "update-ref", "-d", "refs/remotes/origin/main");
+  mkdirSync(join(w, "origin"), { recursive: true });
+  writeFileSync(join(w, "origin", "main"), "not a sha\n");
+
+  const scriptText = readFileSync(SCRIPT, "utf8");
+  const FIXED_LINE = 'tip=$(git rev-parse --verify "origin/$branch")';
+  assert.ok(scriptText.includes(FIXED_LINE), "the capture line moved — update this mutant to match");
+  const scratch = mkdtempSync(join(tmpdir(), "verify-sha-mutant-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const mutant = join(scratch, "verify-sha.sh");
+  writeFileSync(mutant, scriptText.replace(FIXED_LINE, 'tip=$(git rev-parse "origin/$branch")'), { mode: 0o755 });
+  // The mutant sources json.sh/net.sh next to itself ("$(dirname "$0")"), so
+  // both siblings have to travel with it or the run dies at the library guard
+  // instead of measuring anything about this mutant.
+  copyFileSync(fileURLToPath(new URL("./json.sh", import.meta.url)), join(scratch, "json.sh"));
+  copyFileSync(fileURLToPath(new URL("./net.sh", import.meta.url)), join(scratch, "net.sh"));
+
+  const r = spawnSync("sh", [mutant, "main", head], { cwd: w, env: ENV, encoding: "utf8" });
+  assert.equal(r.status, 2, "still fails closed — merge-base's own guard catches it either way");
+  assert.equal(r.stdout, "", "no payload either way — this bug never reaches the printf");
+  assert.match(r.stderr, /cannot tell reachable from unanswerable/, "caught by the WRONG guard");
+  assert.doesNotMatch(r.stderr, /origin\/main does not resolve after fetch/,
+    "and never names the real cause — restoring that name is what this fix buys");
 });
 
 test("an object that is present but is not a commit is not reported as absent", (t) => {
