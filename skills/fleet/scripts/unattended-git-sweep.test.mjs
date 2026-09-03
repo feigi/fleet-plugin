@@ -53,7 +53,7 @@ import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs"
 // against a checkout. Until #1149 the same condition threw at module load and
 // node could only report it as one synthetic failing test at line 1.
 const ROOT = repoRoot(fileURLToPath(new URL(".", import.meta.url)));
-const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "this sweep over what ships");
 
 // Tracked `*.sh` only, and from git rather than a directory walk: an untracked
 // scratch script is not what ships, and a fleet script that moves out of this
@@ -95,6 +95,21 @@ const insideString = (prefix) => {
   const bare = prefix.replace(/\\./g, "");
   return (bare.split('"').length - 1) % 2 === 1 || (bare.split("'").length - 1) % 2 === 1;
 };
+
+// A guard on the guard, and the half the skip above leans on: a bad glob, a
+// moved directory or a `git ls-files` that answers nothing turns every
+// assertion below into a vacuous pass over an empty list — green, and blind.
+// The skip is allowed to make that list empty for ONE reason (no working tree);
+// every other reason has to land here as a failure. Named scripts, because
+// those are the ones this file exists to police.
+test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
+  for (const s of ["inflight.sh", "release-ticket.sh", "prove-merge.sh", "reap.sh", "verify-sha.sh"]) {
+    assert.ok(
+      SHELL_SCRIPTS.some((f) => f.endsWith(`/${s}`)),
+      `${s} is not in the tracked-script list — the glob or the root above is broken, not the script`,
+    );
+  }
+});
 
 test("no fleet shell script makes a raw git network call — they all route through net.sh (#347)", { skip: SKIP_WITHOUT_REPO }, () => {
   const offenders = [];

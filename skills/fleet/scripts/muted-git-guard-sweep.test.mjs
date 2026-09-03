@@ -91,8 +91,8 @@
 // below). Where there is none — a `git archive` extraction, which is how review
 // specialists measure the suite (#1056) — those tests DECLINE, with a reason,
 // rather than running: the tree they would police is not reachable from here.
-// The fixture and behaviour tests below build their own repositories and run
-// anywhere, so they are not gated. Until #1149 the same condition was an
+// The fixture tests below run against literal strings and the behaviour tests
+// build their own repositories — both hold anywhere, so neither is gated. Until #1149 the same condition was an
 // uncaught throw at module load, which node could only report as one synthetic
 // failing test at line 1 of this file.
 //
@@ -116,7 +116,7 @@ const DIR = fileURLToPath(new URL(".", import.meta.url));
 // unattended-git-sweep.test.mjs. Needs an ambient working tree, and answers
 // `null` rather than throwing where there is none (#1149).
 const ROOT = repoRoot(DIR);
-const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the sweep over what ships");
 // Empty ONLY because the root lookup could not answer, in which case every test
 // that reads it is skipped. A root that answers and lists nothing is a different
 // condition — the wrong repository, or a broken glob — and it must reach the
@@ -193,7 +193,18 @@ function scan(path, text) {
     .map((line) => ({ path, line, cmd: revParseCmd(line) }));
 }
 
-const ALL = SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(ROOT, p), "utf8")));
+/**
+ * Every rev-parse line in what ships, read on first use rather than at module
+ * scope.
+ *
+ * Module scope is what #1149 is about: a read that throws there is a throw node
+ * cannot attribute to any test, so it reports one synthetic failure at line 1
+ * and the file's other tests never run. Deferred into the tests, an unreadable
+ * tracked script fails the test that needed it, by name, and the fixture tests
+ * — which need no repository at all — still report.
+ */
+let cachedAll;
+const all = () => (cachedAll ??= SHELL_SCRIPTS.flatMap((p) => scan(p, readFileSync(join(ROOT, p), "utf8"))));
 
 /**
  * Does a FAILURE of this rev-parse end the script? That — not `|| die`
@@ -233,14 +244,14 @@ test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT
   // whose defect this file exists to hold shut.
   for (const s of ["no-undo-audit.sh", "worktree-audit.sh", "release-ticket.sh", "reap.sh", "prove-merge.sh"]) {
     assert.ok(
-      ALL.some((g) => g.path.endsWith(`/${s}`)),
+      all().some((g) => g.path.endsWith(`/${s}`)),
       `${s} contributed no rev-parse line to the sweep — the file list or the join above is broken, not the script`,
     );
   }
 });
 
 test("no fatal rev-parse guard suppresses git's own diagnosis", { skip: SKIP_WITHOUT_REPO }, () => {
-  const muted = ALL.filter(isMutedGuard);
+  const muted = all().filter(isMutedGuard);
   assert.deepEqual(
     muted.map((g) => `${g.path}: ${g.line}`),
     [],
@@ -268,7 +279,7 @@ test("every rev-parse resolution guard keeps --verify", { skip: SKIP_WITHOUT_REP
   // into here. The fixture for this exclusion stays in the BARE spelling for
   // the reason recorded on it — it is what pins the `>/dev/null` clause — so
   // it deliberately no longer matches what verify-sha.sh ships.
-  const unverified = ALL.filter(isUnverifiedGuard);
+  const unverified = all().filter(isUnverifiedGuard);
   assert.deepEqual(
     unverified.map((g) => `${g.path}: ${g.line}`),
     [],
