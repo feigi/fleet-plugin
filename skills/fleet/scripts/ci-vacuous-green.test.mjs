@@ -145,7 +145,17 @@ test("every ls-files check in ci.yml goes through check-tracked.sh", () => {
 });
 
 test("the .js step refuses an empty match too", () => {
-  const ci = flat(readFileSync(CI_YML, "utf8"));
+  // Strip `#` comments before matching, same as the gojq pin below: a
+  // commented-out `echo "::error::..."` / `exit 1` still CONTAINS the literal
+  // this looks for, so against the raw file a disabled refusal and a live one
+  // read identically. Both comment forms, since killing only whole-line ones
+  // leaves the trailing form as the same hole.
+  const ci = flat(
+    readFileSync(CI_YML, "utf8")
+      .split("\n")
+      .map((l) => l.replace(/(^|\s)#.*$/, ""))
+      .join("\n"),
+  );
 
   // Not an xargs step — a `for` loop over `git ls-files '*.js'`, which iterates
   // zero times and exits 0 on an empty match. Same defect, different shape, so
