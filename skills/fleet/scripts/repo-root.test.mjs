@@ -22,6 +22,13 @@ import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs"
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
+// This file's own use of the shape it pins. The last test asserts the answer for
+// the tree this file ships in, which is a fact about the ENVIRONMENT, not about
+// the code — so it declines in an extraction exactly as the sweeps do, rather
+// than reporting the missing working tree as a failure. The three tests above it
+// build their own repositories and hold anywhere.
+const SKIP_WITHOUT_REPO = skipWithoutRepo(repoRoot(DIR));
+
 // `git init` under an inherited GIT_DIR exits 0 and creates nothing in the
 // target, so a fixture built with the ambient environment can be no repository
 // at all while every status check passes. Scrubbed here, and the fixtures below
@@ -113,7 +120,7 @@ test("an empty tracked-script list is NOT a skip — the sweep still runs and it
 });
 
 // And the guard must not fire in the tree it ships in.
-test("this checkout resolves, so the sweeps that import this are not skipped here", () => {
+test("this checkout resolves, so the sweeps that import this are not skipped here", { skip: SKIP_WITHOUT_REPO }, () => {
   const root = repoRoot(DIR);
   assert.notEqual(root, null, "no ambient working tree for a file that is itself tracked in one");
   assert.equal(skipWithoutRepo(root), false);
