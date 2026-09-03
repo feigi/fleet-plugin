@@ -144,13 +144,55 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   );
   // The revert is dated and attributed, or the next reader takes the missing
   // tier for an omission and helpfully restores it. Pinned BEFORE the scan
-  // below, whose exemption names this note verbatim: a reworded note has to be
-  // diagnosed as a reworded note, or the scan reports it as a restored binding
-  // and sends the reader hunting a rebinding nobody made.
+  // below, whose exemption is the SPAN this note occupies: a reworded note has
+  // to be diagnosed as a reworded note, or the scan reports it as a restored
+  // binding and sends the reader hunting a rebinding nobody made.
   assert.match(
     slice,
     /REVERTED on 2026-08-16/,
     "phase 2 no longer records WHEN and WHY the tier binding was removed",
+  );
+  // THE POSITIVE SHAPE PIN (#553). The pin above only checks the phrase is
+  // PRESENT somewhere in the slice, so a restoration clause written INSIDE
+  // the note — keeping "was REVERTED on 2026-08-16" intact — still satisfies
+  // it, then rides the scan's note exemption below to green: that exemption
+  // drops every hit starting inside the note's span, whatever else the hit
+  // says. Pin the note's own shape instead of slicing the note out before the
+  // scan (the rejected remedy — a larger change, not needed once the shape
+  // itself is pinned). Isolated to the bold span itself, not the whole slice,
+  // so a present-tense rebinding written anywhere else in THIS DISPATCH SLICE
+  // stays the rebindings scan's job below. Not "anywhere in phase 2": the
+  // `## Phase 2` heading is far wider than this paragraph, and the guard
+  // paragraph inside it has no rebindings scan of its own — this file holds
+  // exactly one.
+  //
+  // This doc's own convention grounds the shape: a dated note states one
+  // action on one date (comment above — "dated and attributed"), so a
+  // restoration smuggled inside it either introduces a further date (when the
+  // restoration happened) or names the state the binding is restored TO.
+  // Settled against a single edit to this note — appending "and is RESTORED
+  // on 2026-08-18, so routine members dispatch at `sonnet` again." — both
+  // checks below fire and name the note, not the scan; a reflow or a
+  // past-tense-only reword of the same note trips neither.
+  const revertNote = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/.exec(slice)?.[0];
+  assert.ok(
+    revertNote,
+    "the revert note's opening clause changed shape enough that this pin can no longer find it — read the slice and update the anchor",
+  );
+  assert.equal(
+    (revertNote.match(/\d{4}-\d{2}-\d{2}/g) ?? []).length,
+    1,
+    "the revert note now names more than one date — a restoration is hiding inside the note whose span the rebindings scan exempts",
+  );
+  // ponytail: catches the measured restoration and any dated repeat of it,
+  // plus the specific verb this doc's own restorations are written with; a
+  // same-day, dateless restoration phrased without "restored" is a narrower
+  // gap in the same family the guard test's hedge-word list already accepts
+  // (#476) — widen only on a second measured miss.
+  assert.doesNotMatch(
+    revertNote,
+    /\bRESTORED\b/i,
+    "the revert note now says the binding is RESTORED — a restoration is hiding inside the note whose span the rebindings scan exempts",
   );
   // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
   // stated independently in both places, so restoring either one alone is
@@ -161,14 +203,21 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // resolves to", and `model:'sonnet'` each re-bind the class in the file's own
   // vocabulary and each walked straight through the literal form. The one
   // legitimate statement of the binding in this slice is the past-tense revert
-  // note, exempted BY NAME rather than by narrowing the pattern back to a
-  // literal — a narrower pattern is what let the half-revert through. The ORDER
-  // is not assumed either, for the same reason the arrow is not: the mirrored
-  // sentence states the same binding and matched nothing at all.
-  const rebindings =
-    slice.match(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}|sonnet[^.]{0,120}`class=routine`[^.]{0,40}/g) ?? [];
+  // note, exempted by the SPAN it occupies rather than by narrowing the pattern
+  // back to a literal — a narrower pattern is what let the half-revert through.
+  // Exempting on the phrase "was REVERTED" instead was measured to swallow a
+  // live restoration written AFTER the note that quoted that phrase in its own
+  // sentence: the hit began past the note's end and was dropped anyway, because
+  // the filter read the hit's words rather than where it sat. A span cannot be
+  // quoted. The ORDER is not assumed either, for the same reason the arrow is
+  // not: the mirrored sentence states the same binding and matched nothing at
+  // all.
+  const noteAt = slice.indexOf(revertNote);
+  const rebindings = [
+    ...slice.matchAll(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}|sonnet[^.]{0,120}`class=routine`[^.]{0,40}/g),
+  ];
   assert.deepEqual(
-    rebindings.filter((hit) => !/was REVERTED/.test(hit)),
+    rebindings.filter((hit) => hit.index < noteAt || hit.index >= noteAt + revertNote.length).map((hit) => hit[0]),
     [],
     "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
   );
