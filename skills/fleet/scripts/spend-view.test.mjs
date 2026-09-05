@@ -141,8 +141,10 @@ const spendView = K_SRC && VIEW_SRC
   ? new Function(`${K_SRC[0]}\n${VIEW_SRC[0]}\nreturn spendView;`)()
   : () => { throw new Error("spendView could not be lifted from board.html — see the shape test above"); };
 
-// A run whose transcripts all read fine. Fields are the ones gatherSpend returns.
+// A run whose transcripts all read fine. Fields are the ones gatherSpend returns,
+// `ok: true` included — it is the tag the view routes on, not decoration (#959).
 const ok = (o = {}) => ({
+  ok: true,
   totals: { cacheWrite: 2_000_000, cacheRead: 500_000, output: 12_000, agents: 4 },
   roles: [{ role: "reviewer", agents: 2, cacheWrite: 1_500_000, pct: 75 }],
   tools: [{ tool: "Bash", calls: 9, cacheWrite: 400_000, pct: 40 }],
@@ -162,7 +164,7 @@ test("no spend yet hides the panel", () => {
 test("an error is shown, never hidden", () => {
   // The operator has to act on this one, and stderr is not a channel: the board
   // is launched backgrounded and the operator is watching the page.
-  assert.deepEqual(spendView({ error: "no transcript dir for cwd /x" }),
+  assert.deepEqual(spendView({ ok: false, error: "no transcript dir for cwd /x" }),
     { kind: "error", text: "spend unavailable: no transcript dir for cwd /x" });
 });
 
@@ -174,7 +176,7 @@ test("a success object with no cache-write but a non-zero skipped count reports 
   assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 3 })),
     { kind: "note", text: "3 transcripts skipped; no spend recorded yet" });
   // Same conflation one step earlier: totals absent entirely rather than zeroed.
-  assert.deepEqual(spendView({ skipped: 1 }),
+  assert.deepEqual(spendView({ ok: true, skipped: 1 }),
     { kind: "note", text: "1 transcripts skipped; no spend recorded yet" });
 });
 
@@ -217,16 +219,41 @@ test("the tool column is capped and both columns tolerate a missing list", () =>
   assert.deepEqual(bare.tools, []);
 });
 
-test("an error with an empty message is currently routed to success and hidden — enumerated, not fixed (#371)", () => {
-  // A contract/code divergence, measured here rather than a claim about live
-  // traffic: gatherSpend's outer catch returns `{ error: e.message }`, and
-  // e.message is "" for any error thrown without one, so the contract admits the
-  // shape. The discriminant is truthiness, so `{ error: "" }` misses the error
-  // branch, finds no totals, and hides — the same "a bug looks like an idle run"
-  // conflation the error branch exists to remove. Whether any producer actually
-  // throws a message-less error into that catch is not established here.
-  // NOT changed here: #371 rules the contract reshape out of
-  // scope and requires rendering to be unchanged. This pins today's routing so
-  // the follow-up flips one assertion instead of discovering the case again.
-  assert.deepEqual(spendView({ error: "" }), { kind: "hidden" });
+test("an error with no usable message still renders the error panel (#959)", () => {
+  // The case #371 pinned as broken and #959 fixed. gatherSpend's outer catch
+  // returns `{ ok: false, error: e.message }`, and `e.message` is "" for an
+  // error thrown without one and `undefined` for a thrown non-Error — two
+  // shapes that, under the old truthiness discriminant, missed the error branch,
+  // found no totals, and HID the panel: a fault rendered as an idle run.
+  //
+  // Both are one case now, because the tag decides and the message only words
+  // the text. That is the whole value of the reshape over a presence check,
+  // which would have fixed "" and left `undefined` hidden.
+  const shown = { kind: "error", text: "spend unavailable: no reason given" };
+  assert.deepEqual(spendView({ ok: false, error: "" }), shown);
+  assert.deepEqual(spendView({ ok: false, error: undefined }), shown);
+  assert.deepEqual(spendView({ ok: false }), shown);
+});
+
+test("the TAG decides the branch, never the presence or truthiness of another field (#959)", () => {
+  // What makes the reshape more than a fixed discriminant: nothing but `ok`
+  // says which case a payload is. A success payload that happens to carry an
+  // `error` key is still a success, so no future reader can reintroduce
+  // "the error field means it failed" and have the suite agree.
+  assert.equal(spendView(ok({ error: "left over from somewhere" })).kind, "panel");
+  // And the mirror: a failure whose message is missing is still a failure.
+  assert.equal(spendView({ ok: false, error: "" }).kind, "error");
+});
+
+test("an untagged payload is treated as an error, never as a success (#959)", () => {
+  // The wrongly-REFUSE direction, decided on purpose. `!sp.ok` means a stale
+  // `board.json` written by an older board.mjs renders "spend unavailable"
+  // rather than its panel — a visible wrong answer that self-heals on the next
+  // tick (~15s). The alternative bias, `sp.ok === false`, would route a legacy
+  // `{ error: "…" }` back to hidden, which is the invisible wrong answer this
+  // whole ticket exists to remove. Loud and temporary beats silent.
+  assert.equal(spendView({ totals: { cacheWrite: 2_000_000, cacheRead: 1, output: 1, agents: 1 }, reviewPct: 50 }).kind, "error");
+  // A legacy error payload keeps its message rather than losing it to the fallback.
+  assert.deepEqual(spendView({ error: "no transcript dir for cwd /x" }),
+    { kind: "error", text: "spend unavailable: no transcript dir for cwd /x" });
 });

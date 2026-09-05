@@ -104,7 +104,25 @@ function spendView(sp) {
   // A read failure is a bug the operator has to act on, and it used to look
   // exactly like an idle run. stderr is not a channel here: the board is
   // launched backgrounded and the operator is watching this page, not a log.
-  if (sp.error) return { kind: "error", text: "spend unavailable: " + sp.error };
+  //
+  // Switch on `ok`, gatherSpend's explicit tag, and never on `error`. Reading
+  // the error case off `error`'s truthiness was #959: `{ error: "" }` and
+  // `{ error: undefined }` — both of which the producer's outer catch can emit,
+  // from a message-less throw and a thrown non-Error — matched neither this
+  // branch nor a success shape, so they fell through, found no totals, and HID
+  // the panel. That is the fault-as-idle-run conflation this branch exists to
+  // remove, reappearing one field over.
+  //
+  // `!sp.ok`, not `sp.ok === false`, so an UNTAGGED payload is an error too.
+  // That direction is deliberate: an old `board.json` still on disk after an
+  // upgrade renders a loud "spend unavailable" and self-heals on the next tick
+  // (~15s), where the other bias would route a legacy `{ error: "…" }` to
+  // hidden — trading a visible, temporary wrong answer for an invisible one.
+  //
+  // An empty or absent message loses only the wording, never the panel: the tag
+  // has already decided. `|| "no reason given"` is `ledger.mjs`'s idiom for the
+  // same shape ("gh failed without saying why").
+  if (!sp.ok) return { kind: "error", text: "spend unavailable: " + (sp.error || "no reason given") };
   // Zeroes would read as "this run was free", a worse lie than absence — but a
   // skipped count is not a zero, and hiding it here re-created the exact
   // conflation this panel exists to remove: "3 of 4 transcripts unreadable"
