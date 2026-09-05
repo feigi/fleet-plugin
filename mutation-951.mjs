@@ -29,17 +29,20 @@ if (/writeSync\(2/.test(patched.match(/export function makeDie[\s\S]*?\n\}/)[0])
 }
 writeFileSync(argPath, patched);
 
-const r = spawnSync(process.execPath, ["--test", join(dir, "board-cli.test.mjs")], {
+// TAP, not the default spec reporter: spec prints "✖ name" and no machine-
+// readable per-test status, so a detector matching "not ok" against it finds
+// nothing and misreports a correct red as the wrong red.
+const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", join(dir, "board-cli.test.mjs")], {
   encoding: "utf8",
   env: process.env,
 });
 const out = (r.stdout ?? "") + (r.stderr ?? "");
 
 const GATE = "pushed past the pipe buffer";
-const gateFailed = /^not ok \d+ - .*pushed past the pipe buffer/m.test(out);
+const gateFailed = new RegExp(`^not ok \\d+ - .*${GATE}`, "m").test(out);
 
 console.log(`mutant test exit: ${r.status}`);
-console.log(out.split("\n").filter((l) => /^# (pass|fail|skipped)|^not ok|^ok \d+ - build: --spend-since's refusal/.test(l)).join("\n"));
+console.log(out.split("\n").filter((l) => /^# (pass|fail|skip)|^not ok /.test(l)).join("\n"));
 
 if (r.status === 0) {
   console.error(`\nFAIL: the suite passed against the pre-fix die(). The gate is vacuous.`);

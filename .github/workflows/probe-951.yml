@@ -20,3 +20,11 @@ jobs:
         run: node --test skills/fleet/scripts/board-cli.test.mjs
       - name: Same gate against the pre-fix die() — must be RED
         run: node mutation-951.mjs
+      - name: Flake rate of the shipped build — must be 0
+        env:
+          FLAKE_N: 30
+        run: node flake-951.mjs
+      - name: Fixed arm, 100 runs
+        env:
+          PROBE_N: 100
+        run: node probe-951.mjs
