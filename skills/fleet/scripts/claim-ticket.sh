@@ -90,7 +90,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 if [ -e "$wt" ] || [ -L "$wt" ]; then
   die "$wt already exists — ticket may already be claimed"
 elif ! gone "$PWD/$wt"; then
-  die "could not establish whether $wt exists — an ancestor is unreadable; refusing to claim a path nothing measured"
+  die "could not establish whether $wt exists — an ancestor is unreadable, not searchable, or not a directory; refusing to claim a path nothing measured"
 fi
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 

@@ -1583,26 +1583,22 @@ test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) 
     "the guard must refuse ahead of every mutation — a labelled issue with no worktree is the half-claim this ordering exists to prevent");
 });
 
-// The must-ACCEPT half, and it is not the same control as the free path above.
-// `gone()` walks UP to the nearest existing ancestor and asks whether that one
-// is searchable, so the two free shapes exercise different walks: `.worktrees`
-// ABSENT stops the walk at the repo root, `.worktrees` PRESENT stops it at
-// `.worktrees` itself. Measured, and the reason this test exists: handed the
-// RELATIVE `$wt` the script carries, the walk terminates at the bare
-// `.worktrees` component it cannot strip further, finds it missing, and answers
-// "not established absent" — turning every first claim in a repo into a
-// refusal. The absolute path is what keeps the accept case an accept.
-test("a free path still claims, with the worktrees directory present or absent", () => {
-  for (const [shape, make] of [
-    ["absent", () => {}],
-    ["present and searchable", (dir) => mkdirSync(join(dir, ".worktrees"), { recursive: true })],
-  ]) {
-    const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
-    make(dir);
-    const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
-    assert.equal(r.status, 0, `${shape}: ${r.stdout + r.stderr}`);
-    assert.match(r.stdout, /"worktree":"\.worktrees\/42-slug"/, shape);
-  }
+// The must-ACCEPT half for `.worktrees` PRESENT — the `.worktrees` ABSENT
+// shape is already covered by the `free` case in the dangling-symlink test
+// above, byte-identical input and assertions. `gone()` walks UP to the
+// nearest existing ancestor and asks whether that one is searchable, so this
+// shape exercises a DIFFERENT walk: it stops at `.worktrees` itself rather
+// than at the repo root. Measured, and the reason this test exists: handed
+// the RELATIVE `$wt` the script carries, the walk terminates at the bare
+// `.worktrees` component it cannot strip further, finds it missing, and
+// answers "not established absent" — turning every first claim in a repo
+// into a refusal. The absolute path is what keeps the accept case an accept.
+test("a free path still claims, with the worktrees directory present", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  mkdirSync(join(dir, ".worktrees"), { recursive: true });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /"worktree":"\.worktrees\/42-slug"/);
 });
 
 // --- #119: the payload's own string fields.
@@ -1670,6 +1666,27 @@ test("a missing json.sh is exit 2, before anything is created", () => {
 
   assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
   assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the lockfile probe");
+  assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
+    "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
+});
+
+// The twin of the json.sh test above, for worktree.sh's own `[ -r ]` guard
+// (#727's fourth caller of `gone()`) — json.sh present, worktree.sh absent.
+test("a missing worktree.sh is exit 2, before anything is created", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const lone = mkdtempSync(join(tmpdir(), "claim-nowt-"));
+  copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
+  copyFileSync(join(dirname(SCRIPT), "json.sh"), join(lone, "json.sh"));
+  const bin = mkdtempSync(join(tmpdir(), "claim-nowt-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  const r = spawnSync("sh", [join(lone, "claim-ticket.sh"), "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+
+  assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
+  assert.match(r.stderr, /worktree\.sh/, "and it names the file rather than blaming the lockfile probe");
   assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
