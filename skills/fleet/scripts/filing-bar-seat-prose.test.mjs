@@ -139,3 +139,87 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
     "the ADR no longer separates #211's apply policy from this decision's label policy",
   );
 });
+
+// #839. The guard above pre-chose a floor and a trigger but never said WHICH
+// POPULATION the trigger measures — open issues only, or open and closed
+// together. Both readings are available from the same text and they do not
+// agree: a refuted deferral filed as `needs-triage` and later closed is in the
+// denominator under one and absent under the other. An undefined input surface
+// hands back exactly the discretion a pre-chosen guard exists to remove — the
+// evaluator picks the population and the population picks the verdict.
+//
+// Ruled open AND closed on #839. The reason is pinned WITH the ruling, in one
+// contiguous span, because a bare ruling is re-derivable against itself: a later
+// reader who finds open-only more convenient can restore it from a text that
+// never says why it was rejected. Same reason the floor and trigger are pinned
+// as one span above.
+//
+// CEILING: presence and contiguity over one bounded section. This proves the
+// clause is stated and that its reason travels with it; it cannot prove a
+// sentence elsewhere in the ADR does not carve out an exception.
+const guardSection = (text) =>
+  flat(between(text, "## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section"));
+
+// The ruling and its reason as ONE phrase, wrap-tolerant. Reworded on purpose →
+// update this string. Do not delete the pin to clear the red.
+const POPULATION = phrase(
+  "**Population:** open **and** closed issues together, never open alone. The trigger measures filing behaviour, and a refuted deferral filed as `needs-triage` and later closed counts under one reading and vanishes under the other — so under open-only any triage pass that reads the backlog improves the ratio without one filing having changed. A guard on the filing bar must not be satisfiable by triaging the queue.",
+);
+// The population made operational. A prose ruling the evaluator's own command
+// contradicts is not a ruling, and `--state all` is the single token that
+// carries it.
+const STATE_ALL = phrase("--state all");
+// The as-of duty. Per this ADR's own rule, a count off an append-only tracker
+// rots on the next filing, so the date the count was taken is part of the count.
+const AS_OF = phrase("record the date taken with the verdict");
+
+const guardPins = {
+  population: (s) => !POPULATION.test(s),
+  stateAll: (s) => !STATE_ALL.test(s),
+  asOf: (s) => !AS_OF.test(s),
+};
+const guardFiring = (s) => Object.keys(guardPins).filter((n) => guardPins[n](s));
+
+test("the guard names the population its trigger measures, and why", () => {
+  const s = guardSection(read("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md"));
+  // Positive control against a vacuous slice: a stale anchor matching almost
+  // nothing would still satisfy a doesNotMatch and assert nothing.
+  assert.ok(s.length > 200, "the guard slice is shorter than its own heading and bullets — the extractor is broken, not the ADR wrong");
+  assert.deepEqual(guardFiring(s), [], "the guard's population clause, its `--state all` count, or its as-of duty is gone");
+});
+
+// The refuse direction: each fixture asserts it changed the document before it
+// is scored, because a fixture that applies nothing is green in exactly the way
+// a pin that does not bite is green.
+const guardMutants = [
+  ["the population is flipped to open-only", ["population"],
+    (t) => t.replace(phrase("open **and** closed issues together, never open alone"), "open issues only, never the closed ones")],
+  ["the ruling survives but its reason is stripped", ["population"],
+    (t) => t.replace(phrase("The trigger measures filing behaviour, and a refuted deferral filed as `needs-triage` and later closed counts under one reading and vanishes under the other — so under open-only any triage pass that reads the backlog improves the ratio without one filing having changed. A guard on the filing bar must not be satisfiable by triaging the queue."), "Count them all.")],
+  ["the count command is narrowed to open issues", ["stateAll"],
+    (t) => t.replace(phrase("--state all"), "--state open")],
+  ["the as-of duty is dropped", ["asOf"],
+    (t) => t.replace(phrase("and record the date taken with the verdict"), "and read it off the tracker")],
+];
+
+for (const [what, expected, mutate] of guardMutants) {
+  test(`the guard pins redden when ${what}`, () => {
+    const adr = read("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md");
+    const mutated = mutate(adr);
+    assert.notEqual(mutated, adr, `the "${what}" fixture no longer matches the guard section and applied nothing — update the fixture, do not delete it`);
+    assert.deepEqual(guardFiring(guardSection(mutated)), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
+  });
+}
+
+test("rewrapping the guard section and editing it elsewhere stays green", () => {
+  // The accept direction. A pin that reds on any edit to the section has
+  // discriminated nothing and gets deleted by whoever next reflows this file.
+  const adr = read("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md");
+  const section = between(adr, "## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section");
+  const benign = adr.replace(section, () =>
+    section
+      .replace(/\n(?! *[-*] )(?! *```)/g, " ")
+      .replace("When the guard fires, its verdict lands on `main`.", "When the guard fires, its verdict lands on `main` before the next run starts."));
+  assert.notEqual(benign, adr, "the benign-edit fixture no longer matches the guard section — update it");
+  assert.deepEqual(guardFiring(guardSection(benign)), [], "a reflow plus an unrelated edit reddened a guard pin — the pins are over-tight, not the ADR wrong");
+});
