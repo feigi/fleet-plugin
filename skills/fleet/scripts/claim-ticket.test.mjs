@@ -1158,15 +1158,18 @@ test("runner: the stamp changes when the script's content changes", () => {
   const scriptDir = mkdtempSync(join(tmpdir(), "claim-script-"));
   const editedScript = join(scriptDir, "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
-  // claim-ticket.sh resolves two siblings relative to itself
-  // (`$(dirname -- "$0")`): derive-testcmd.sh for the testcmd, and json.sh for
-  // the payload escaping (#119). Both have to travel with this edited copy or
-  // the script refuses before it emits anything — which is the guard working,
-  // not a regression.
+  // claim-ticket.sh resolves three siblings relative to itself
+  // (`$(dirname -- "$0")`): derive-testcmd.sh for the testcmd, json.sh for the
+  // payload escaping (#119), and worktree.sh for `gone()`, the established-absent
+  // predicate the worktree guard asks (#727). All three have to travel with this
+  // edited copy or the script refuses before it emits anything — which is the
+  // guard working, not a regression.
   const sibling = join(scriptDir, "derive-testcmd.sh");
   copyFileSync(join(import.meta.dirname, "derive-testcmd.sh"), sibling);
   chmodSync(sibling, 0o755);
-  copyFileSync(join(import.meta.dirname, "json.sh"), join(scriptDir, "json.sh"));
+  for (const lib of ["json.sh", "worktree.sh"]) {
+    copyFileSync(join(import.meta.dirname, lib), join(scriptDir, lib));
+  }
 
   const after = apply(SUITE, editedScript).text.match(STAMP_RE)[1];
   const before = apply(SUITE).text.match(STAMP_RE)[1];
@@ -1517,6 +1520,89 @@ test("a dangling symlink and a real directory are both refused, and a free path 
   const ok = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: free, encoding: "utf8" });
   assert.equal(ok.status, 0, "`-L` must not refuse a path that is simply not there");
   assert.match(ok.stdout, /"worktree":"\.worktrees\/42-slug"/);
+});
+
+// --- #727: the THIRD answer, which the `-e`/`-L` pair collapsed into the first.
+//
+// `-e` and `-L` both answer false when the stat could not RUN — an unreadable or
+// unsearchable ancestor fails them EACCES, and the shell discards the errno. So
+// a path that is occupied read as claimable, and nothing reached stderr saying
+// the question had gone unanswered. Measured on the pre-fix script with a real
+// directory at $wt and `.worktrees` chmod 000: exit 0 and the receipt below,
+// byte-identical to one for a genuinely free path.
+//
+// The DRY RUN is the sharp mode and is why this is pinned there: it is the
+// default, and the mode in which `git worktree add` never runs, so no downstream
+// refusal exists to catch the mistake. `--apply` is pinned too, but for a
+// different property — ORDERING. There the failure did surface, from inside `git
+// worktree add`, but only AFTER `gh issue edit --add-label in-progress` had
+// already fired, leaving a labelled issue with no worktree behind it.
+//
+// The fix routes through `gone()`, the established-absent predicate #725 moved
+// into worktree.sh, so this script stops asking a question two of its three
+// answers cannot distinguish.
+test("an unreadable ancestor refuses rather than predicting a claim", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  mkdirSync(join(dir, ".worktrees", "42-slug"), { recursive: true });
+  chmodSync(join(dir, ".worktrees"), 0o000);
+  t.after(() => chmodSync(join(dir, ".worktrees"), 0o755));
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 2, "a path whose state could not be established is not a claimable path");
+  assert.equal(r.stdout, "", "above all no receipt — the dry run is where nothing downstream refuses");
+  // Named as unestablished, not as occupied: the script did not measure the
+  // path, and saying it exists would assert something it cannot see either.
+  assert.match(r.stderr, /could not establish whether \.worktrees\/42-slug exists/,
+    "the refusal has to say the probe could not look, not guess an answer");
+});
+
+test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  mkdirSync(join(dir, ".worktrees", "42-slug"), { recursive: true });
+  chmodSync(join(dir, ".worktrees"), 0o000);
+  t.after(() => chmodSync(join(dir, ".worktrees"), 0o755));
+
+  // A `gh` that RECORDS rather than one that merely succeeds: the assertion is
+  // about whether the tracker was mutated at all, which a silent stub cannot
+  // answer. Before the fix this file existed — the label landed, and only then
+  // did `git worktree add` die on the leading directories it could not create.
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  const marker = join(bin, "gh-ran");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${marker}\nexit 0\n`, { mode: 0o755 });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(existsSync(marker), false,
+    "the guard must refuse ahead of every mutation — a labelled issue with no worktree is the half-claim this ordering exists to prevent");
+});
+
+// The must-ACCEPT half, and it is not the same control as the free path above.
+// `gone()` walks UP to the nearest existing ancestor and asks whether that one
+// is searchable, so the two free shapes exercise different walks: `.worktrees`
+// ABSENT stops the walk at the repo root, `.worktrees` PRESENT stops it at
+// `.worktrees` itself. Measured, and the reason this test exists: handed the
+// RELATIVE `$wt` the script carries, the walk terminates at the bare
+// `.worktrees` component it cannot strip further, finds it missing, and answers
+// "not established absent" — turning every first claim in a repo into a
+// refusal. The absolute path is what keeps the accept case an accept.
+test("a free path still claims, with the worktrees directory present or absent", () => {
+  for (const [shape, make] of [
+    ["absent", () => {}],
+    ["present and searchable", (dir) => mkdirSync(join(dir, ".worktrees"), { recursive: true })],
+  ]) {
+    const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+    make(dir);
+    const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+    assert.equal(r.status, 0, `${shape}: ${r.stdout + r.stderr}`);
+    assert.match(r.stdout, /"worktree":"\.worktrees\/42-slug"/, shape);
+  }
 });
 
 // --- #119: the payload's own string fields.
