@@ -159,6 +159,18 @@ At start, and whenever the pool empties.
    re-shortlists (a server is already running; a second one collides on the
    port).
 
+   **Fold in every PR a prior run left open, before shortlisting.** A chore PR
+   carrying that run's own metrics, or ticket work whose review was deferred —
+   both are reviewable work no member otherwise picks up, because phase 0 scans
+   ISSUES and nothing looks at inherited PRs. Queue each for review exactly as
+   ticket work: same review workflow, same fix-applier, same finisher. Measured
+   2026-09-03 — #1222 arrived this way and its review found a defect its own PR
+   body called unreviewed, and #1237's review then caught two metrics rows the
+   controller had missed in its own close-out, so a chore PR is not exempt from
+   being wrong. Reviewing them next run is also what stops one pinning
+   `fleet-tick`'s backlog forever (#590): unreviewable AND uncounted is the state
+   that strands it.
+
 1. **Candidate scan** — `~/.claude/skills/fleet/scripts/candidates.mjs
    --require-label ready-for-agent`. **`--require-label ready-for-agent` mandatory, no
    fallback** — do NOT pass `--allow-fallback`. Empty means no work;
@@ -1918,7 +1930,16 @@ ledger rows in the same step. See references/reaping.md.
   it, and counting it floors the backlog at a depth nothing in the run can drain
   — the implementer gate then holds for the rest of the run against a queue of
   nothing (#590). GitHub's own linked-issue set decides that, not a keyword regex
-  over the body; see `docs/agents/issue-tracker.md`.
+  over the body; see `docs/agents/issue-tracker.md`. **That exemption is for
+  the chore PR THIS run authors, never one a PRIOR run left open** — step 0
+  folds those into this run's review queue, so count one when you reason about
+  backlog BY HAND. **The `fleet-tick.mjs` number still excludes it**: nothing
+  in its filter distinguishes an inherited chore PR from this run's own, since
+  a PR closing no issue fails the closing-issue test either way — folding one
+  in cannot reach the count. So the by-hand judgement and the script's output
+  differ here, and the script's own comment at `reviewBacklog` says why:
+  narrowing it needs per-PR review state that lives in the controller's head
+  and not in the repo.
 
 **Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
 runs 20-40, because each fans out up to six specialists. On the default path
