@@ -89,21 +89,41 @@ function mutantBoard() {
   return join(dir, "board.mjs");
 }
 
-const rows = [];
+// A probabilistic failure needs repeated runs; one run is uninformative in
+// either direction (#299/#322's lesson). N=25 per arm.
+const N = Number(process.env.PROBE_N ?? 25);
 const fixed = join(SCRIPTS, "board.mjs");
 const mutant = mutantBoard();
 
-rows.push(["fixed  (writeSync die, PIPE) ", await runPiped(fixed)]);
-rows.push(["mutant (console.error, PIPE) ", await runPiped(mutant)]);
-rows.push(["mutant (console.error, FILE) ", await runFileFd(mutant)]);
+async function arm(label, board, runner) {
+  const sizes = [];
+  let lost = 0;
+  let badExit = 0;
+  let wouldPassGuard = 0;
+  for (let i = 0; i < N; i++) {
+    const r = await runner(board);
+    sizes.push(r.stderr.length);
+    if (!REFUSAL.test(r.stderr)) lost++;
+    if (r.status !== 2) badExit++;
+    if (r.stderr.length < FLOOD_BYTES) wouldPassGuard++;
+  }
+  sizes.sort((a, b) => a - b);
+  return { label, lost, badExit, wouldPassGuard, min: sizes[0], max: sizes[sizes.length - 1], uniq: new Set(sizes).size };
+}
+
+const rows = [
+  await arm("fixed  (writeSync die, PIPE) ", fixed, runPiped),
+  await arm("mutant (console.error, PIPE) ", mutant, runPiped),
+  await arm("mutant (console.error, FILE) ", mutant, runFileFd),
+];
 
 console.log(`\n=== #951 flooded-child probe ===`);
-console.log(`platform=${process.platform} arch=${process.arch} node=${process.version} FLOOD_BYTES=${FLOOD_BYTES}\n`);
-console.log(`build                          | exit | stderr bytes | refusal | < FLOOD_BYTES`);
-console.log(`-------------------------------|------|--------------|---------|--------------`);
-for (const [name, r] of rows) {
+console.log(`platform=${process.platform} arch=${process.arch} node=${process.version} FLOOD_BYTES=${FLOOD_BYTES} runs=${N}\n`);
+console.log(`build                          | refusal LOST | exit!=2 | stderr min | stderr max | distinct | guard(<FLOOD) passes`);
+console.log(`-------------------------------|--------------|---------|------------|------------|----------|---------------------`);
+for (const r of rows) {
   console.log(
-    `${name} | ${String(r.status).padStart(4)} | ${String(r.stderr.length).padStart(12)} | ${REFUSAL.test(r.stderr) ? "PRESENT" : "LOST   "} | ${r.stderr.length < FLOOD_BYTES}`,
+    `${r.label} | ${String(r.lost + "/" + N).padStart(12)} | ${String(r.badExit + "/" + N).padStart(7)} | ${String(r.min).padStart(10)} | ${String(r.max).padStart(10)} | ${String(r.uniq).padStart(8)} | ${r.wouldPassGuard}/${N}`,
   );
 }
 console.log("");
