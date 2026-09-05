@@ -106,6 +106,26 @@ test("the Shellcheck comment does not present its examples as the complete set",
   );
 });
 
+// #953. The same file, the same failure mode, one axis over: a rationale can rot
+// by MOVING rather than by going stale. The failglob paragraph drifted above the
+// gojq provisioning block and two steps it says nothing about, so a reader at the
+// step it explains had to scroll past an unrelated toolchain to find it. Nothing
+// caught that, for the reason ci.yml states about itself: no test reads its
+// comments. Anchored on what the paragraph SAYS and on the step's name, never on
+// a line number — the drift this pins is exactly a line number changing.
+test("the failglob rationale sits against the Tests step it documents", () => {
+  const lines = read("../../../.github/workflows/ci.yml").split("\n");
+  const anchor = lines.findIndex((l) => /^\s*#.*failglob/.test(l));
+  assert.ok(anchor >= 0, "ci.yml no longer explains in prose why the Tests step sets failglob");
+  let i = anchor;
+  while (/^\s*#/.test(lines[++i]));
+  assert.match(
+    lines[i],
+    /^\s*- name: Tests$/,
+    `the failglob rationale documents the Tests step but is followed by "${lines[i]}" — it has drifted away from the step it explains`,
+  );
+});
+
 test("the vendored-tree sentence makes a structural claim, not a size claim", () => {
   // The sentence exists to say there is nothing to walk INTO under that
   // directory. A file count neither supports that nor survives a commit.
