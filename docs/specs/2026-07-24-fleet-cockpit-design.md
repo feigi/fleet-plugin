@@ -155,9 +155,19 @@ source, and it can never move a ticket.
   "attention": [ /* the subset of tickets with a non-empty flags, most-severe first */ ],
 
   // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.
-  // null when this session has spawned no agents yet (panel hidden);
-  // { "error": "…" } when the transcripts could not be read (panel says so).
+  // Tri-state, discriminated by the explicit `ok` TAG and by nothing else:
+  //   null                            — no agents spawned yet (panel hidden)
+  //   { "ok": false, "error": "…" }   — transcripts unreadable (panel says so)
+  //   { "ok": true,  … }              — the object below
+  // The page checks `ok` BEFORE reading any success-only field, the way
+  // ledger.mjs's `tracker` does. It must never infer the case from another
+  // field's presence or truthiness: `error` is `""` for an error thrown without
+  // a message and `undefined` for a thrown non-Error, and a truthiness check on
+  // it hid the panel for both — a fault rendering as an idle run (#959). An
+  // absent message costs only the wording ("no reason given"), never the panel.
+  // A payload carrying no `ok` at all reads as an error, not as a success.
   "spend": {
+    "ok": true,
     "totals": { "agents": 86, "cacheWrite": 0, "cacheRead": 0, "output": 0, "maxCtx": 0 },
     "roles": [ { "role": "specialist", "agents": 42, "cacheWrite": 0, "pct": 47 } ],
     "tools": [ { "tool": "Bash", "calls": 1974, "resultChars": 0, "cacheWrite": 0, "pct": 69 } ],
