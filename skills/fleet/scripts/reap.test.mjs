@@ -210,6 +210,16 @@ function branchExists(w, name) {
   return spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], { cwd: w, env: ENV }).status === 0;
 }
 
+function specRow() {
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  return row;
+}
+
 test("an uncorrupted repo still reaps a genuinely merged [gone] branch", (t) => {
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
@@ -495,12 +505,7 @@ test("the design spec's script-surface row carries the argument refusal this scr
   const label = /^reap: (.+?) '/m.exec(stderr);
   assert.ok(label, `fixture must reach the argument refusal: ${stderr}`);
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  const row = specRow();
   assert.ok(
     row.includes(label[1]),
     `the spec row must state this refusal, and does not carry "${label[1]}".\nrow: ${row}`,
@@ -529,12 +534,7 @@ test("the design spec's script-surface row carries the keep reason this script a
   const label = json.kept[0].reason.split(":")[0].trim();
   assert.match(label, /^cherry probe failed/, "fixture must reach the failed-probe keep, not some other one");
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  const row = specRow();
   assert.ok(
     row.includes(label),
     `the spec row must quote the keep reason verbatim, and does not carry "${label}".\nrow: ${row}`,
@@ -1651,12 +1651,7 @@ test("the design spec's script-surface row carries both refusal states this scri
 
   assert.notEqual(states[0], states[1], "the two refusals must not report the same state");
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  const row = specRow();
   for (const state of states) {
     assert.ok(row.includes(state), `the spec row must quote the refusal state verbatim, and does not carry "${state}".\nrow: ${row}`);
   }
@@ -2172,12 +2167,7 @@ test("the design spec's script-surface row carries the two declines only this sw
   assert.ok(refused, `fixture must reach the refusal decline: ${reasons.join(" | ")}`);
   assert.ok(reasons.some((r) => r.includes(foreign)) && reasons.some((r) => r.includes(locked)), reasons.join(" | "));
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  const row = specRow();
   for (const label of [bound[1], refused[1]]) {
     assert.ok(row.includes(label), `the spec row must quote this decline verbatim, and does not carry "${label}".\nrow: ${row}`);
   }
@@ -2201,12 +2191,7 @@ test("the design spec's script-surface row carries the in-progress decline this 
   const label = /(has a git operation in progress) \(/.exec(json.kept[0]?.reason ?? "");
   assert.ok(label, `fixture must reach the in-progress decline: ${json.kept[0]?.reason}`);
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `reap.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a reap.sh row");
+  const row = specRow();
   assert.ok(
     row.includes(label[1]),
     `the spec row must quote this decline verbatim, and does not carry "${label[1]}".\nrow: ${row}`,
