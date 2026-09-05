@@ -76,6 +76,9 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # cannot strip further, finds it missing on a repo that has never had a
 # worktree, and answers "not established absent" — turning every first claim in
 # a repo into a refusal. `$PWD` is what the walk needs to reach the repo root.
+# Measured on /bin/sh, dash and bash: each sets PWD from getcwd() at startup, so
+# a stale inherited value is corrected and an unset one does not trip `set -u` —
+# the two ways this term could have asked about the wrong path.
 #
 # Kept as a PAIR rather than `gone` alone, the way gone()'s own header prescribes
 # for a caller that needs the two refusals apart. The messages are not
