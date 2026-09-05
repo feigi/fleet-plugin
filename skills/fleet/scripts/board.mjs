@@ -491,8 +491,24 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     catch (e) { console.error(`${NAME}: ignoring unreadable prev board ${prevFile}: ${e.message}`); }
   }
 
-  const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "read"]);
-  const ledger = tryParse(ledgerJson, { rows: [], filed: [], ruled: [] }, "ledger read");
+  // `--require-file` turns an absent ledger into a refusal at exit 2 rather
+  // than the empty payload a real empty ledger returns (#816). Without it the
+  // two are byte-identical on stdout, and tryParse's fallback is that same
+  // empty shape besides — so an unread ledger, one read empty, and a read whose
+  // answer would not parse were three states with one rendering, on the one
+  // subcommand this cockpit consumes.
+  //
+  // The three stay three here because each is a different observation, not a
+  // different value of one: null from tryRun is a read that did not happen (the
+  // refusal, or an unreachable node), null from tryParse is a read whose answer
+  // was unusable, and anything else is the ledger. `tryParse`'s fallback is
+  // null rather than the empty shape for exactly that reason — the empty shape
+  // is a real answer and must not double as the failure.
+  const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "--require-file", "read"]);
+  const parsedLedger = ledgerJson == null ? null : tryParse(ledgerJson, null, "ledger read");
+  const ledger = parsedLedger
+    ? { ...parsedLedger, state: "read" }
+    : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };
 
   const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
