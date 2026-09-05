@@ -140,7 +140,7 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
   );
 });
 
-// #839. The guard above pre-chose a floor and a trigger but never said WHICH
+// #839. ADR 0001's guard pre-chose a floor and a trigger but never said WHICH
 // POPULATION the trigger measures — open issues only, or open and closed
 // together. Both readings are available from the same text and they do not
 // agree: a refuted deferral filed as `needs-triage` and later closed is in the
@@ -151,8 +151,8 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
 // Ruled open AND closed on #839. The reason is pinned WITH the ruling, in one
 // contiguous span, because a bare ruling is re-derivable against itself: a later
 // reader who finds open-only more convenient can restore it from a text that
-// never says why it was rejected. Same reason the floor and trigger are pinned
-// as one span above.
+// never says why it was rejected. Same reason the pre-chosen-guard test pins
+// the floor and the trigger as one span rather than two.
 //
 // CEILING: presence and contiguity over one bounded section. This proves the
 // clause is stated and that its reason travels with it; it cannot prove a
