@@ -183,11 +183,34 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // writeSync die() delivers 65,599 B at every one of those sizes — the same
 // cap plus the refusal.
 //
-// Darwin-only, and skipped elsewhere rather than left to pass silently: the
-// loss above was measured on darwin and nowhere else, so a green run on
-// another platform would prove nothing about the fix and must not read as
-// coverage. The platform gate below is the only gate.
-const IS_DARWIN = process.platform === "darwin";
+// This ran darwin-only until #951, behind "the loss was measured on darwin and
+// nowhere else". That was true of the measurement, not of the loss — nobody had
+// driven this scenario on Linux, and the gate's own wording is what stopped
+// anyone re-checking. Driven on it now, 25 runs per arm, ubuntu-24.04 /
+// node 26.5.0 (this repo's CI runner and .nvmrc), same rig as below:
+//
+//   build                          refusal LOST  stderr bytes  distinct
+//   die() = writeSync   (PIPE)          0/25     146239-182783        2
+//   die() = console.error (PIPE)       25/25            146176        1
+//   die() = console.error (FILE)        0/25            600187        1
+//
+// The mutant drops the refusal on every Linux run, so the platform gate was
+// hiding real coverage rather than protecting a vacuous green. It is gone.
+//
+// The FILE row is the control the gate's removal rests on, and it is why the
+// stdio below must stay a pipe: on a file fd the same mutant keeps the refusal
+// 25/25 and delivers all 600,187 bytes, so a harness that captured to a file
+// would pass whether or not die() was ever fixed.
+//
+// Sampling note, recorded because it misleads at n=1: a single Linux run of the
+// mutant delivered all 600,187 bytes with the refusal intact. The loss is
+// deterministic under the repeated-run load above and absent in that one
+// isolated shot, so one run is not evidence here in either direction.
+//
+// Nothing about the EAGAIN exit-code inversion (#299/#322) is claimed here.
+// That is the other half of this file family — probabilistic, and genuinely
+// darwin-immune. This is the truncation half (#176/#246/#328/#363), which is
+// deterministic on both platforms. Do not merge the two.
 
 // The stub has one job: make board.mjs's re-emission of this output a single
 // write bigger than the pipe can hold. `head -c` rather than a hand-rolled
@@ -199,6 +222,18 @@ const IS_DARWIN = process.platform === "darwin";
 // goes red instead of quietly vacuous.
 const FLOOD_BYTES = 200_000;
 const FLOOD_GH_STUB = `#!/bin/sh\nyes F | head -c ${FLOOD_BYTES} >&2\nexit 0\n`;
+
+// One pipe buffer — the cap every measurement above lands on. The fixture has
+// to clear it or this test proves nothing: shrink FLOOD_BYTES under the cap and
+// the flood arrives whole, the refusal is never at risk, and all three
+// assertions below pass green under the very bug they exist to pin. Asserted
+// rather than trusted to the comment, because that is the failure a later
+// de-tuning would introduce silently.
+const PIPE_BUF = 65_536;
+assert.ok(
+  FLOOD_BYTES > PIPE_BUF * 2,
+  `flood fixture must outgrow the pipe buffer with headroom: ${FLOOD_BYTES} <= ${PIPE_BUF * 2}`,
+);
 
 // Async spawn + immediate drain: `close` rather than `exit`, so every byte
 // the stream ever receives is captured before assertions run, not just
@@ -224,7 +259,6 @@ function runBoardFlooded() {
 
 test(
   "build: --spend-since's refusal survives a gh child that has already pushed past the pipe buffer, unread",
-  { skip: IS_DARWIN ? false : "async pipe-write loss (#363) is darwin-only — a green run here is not coverage" },
   async () => {
     const r = await runBoardFlooded();
     // The flood must have OVERRUN the pipe, not arrived whole — and tied to

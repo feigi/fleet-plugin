@@ -16,5 +16,7 @@ jobs:
           node-version-file: .nvmrc
       - name: Flooded-child probe
         run: node probe-951.mjs
-      - name: Gate under test, unskipped
+      - name: Gate under test, unskipped — must be GREEN
         run: node --test skills/fleet/scripts/board-cli.test.mjs
+      - name: Same gate against the pre-fix die() — must be RED
+        run: node mutation-951.mjs
