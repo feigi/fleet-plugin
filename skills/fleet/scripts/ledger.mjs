@@ -252,6 +252,30 @@ function save(d) {
   console.error(`    wrote ${file}`);
 }
 
+// Read ahead of the dispatch, not inside one branch of it. This guard used to
+// live in runCheck(), so `check` refused a missing ledger under the flag and
+// the other four subcommands ignored it entirely: `read --require-file` on an
+// absent file printed the empty payload at exit 0, byte-identical to a real
+// empty ledger on both streams, and `row --require-file` CREATED the very file
+// whose absence the flag exists to refuse (#816). One flag read in one place is
+// also what docs/specs/2026-07-23-fleet-plugin-design.md:200 already documents
+// — "Exit 2 on any subcommand — ... `--require-file` with no ledger file" — so
+// the implementation is what had drifted, not the contract.
+//
+// Ahead of load() rather than after it: load() answers "absent" and "present
+// but unparseable" with the same empty lists, which is the ambiguity this flag
+// exists to break, so the answer must not be taken from it. `check`'s own
+// wording and exit code are unchanged — it reached this same die() first
+// either way, before its stray-tail and usage guards — and the WARNING left
+// behind in runCheck() is now unreachable under the flag by construction
+// rather than by an `if` that repeats the condition.
+//
+// Also ahead of "unknown subcommand" validation: `--require-file` against a
+// missing file with a bogus subcommand reports the require-file refusal, not
+// a usage error. Deliberate/accepted, not reordered — the doc line above
+// bundles both under one undifferentiated exit 2, with no ordering between them.
+if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
+
 const data = load();
 
 // The payload subcommands end by falling out of this chain, never by calling
@@ -351,7 +375,10 @@ function runCheck() {
   // cannot be an error — but a silent "safe to file" for every check when
   // the path is simply wrong (typo'd --file) is a fail-open that no caller
   // would notice. Warn loudly by default; --require-file makes absence a
-  // hard failure for callers that know the file must already exist.
+  // hard failure for callers that know the file must already exist — and that
+  // refusal is read ahead of the dispatch now, not here, because four other
+  // subcommands needed the same one (#816). Reaching this line at all means
+  // the flag was absent.
   //
   // `ledger.ok` is the parse's answer, not this stat()'s: load() sets it only
   // for a file it opened and found a `## Filed` header in, so a --file landing
@@ -364,7 +391,6 @@ function runCheck() {
   // header still parses, with the rows below it lost (#231).
   const ledger = { ok: ledgerParsed };
   if (!existsSync(file)) {
-    if (requireFile) die(`--require-file given but ledger file does not exist: ${file}`);
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
     );

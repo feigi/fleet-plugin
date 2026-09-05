@@ -634,10 +634,11 @@ default is carried rather than killed mid-flight and reported as an
 unreachable tool — which is how the blind cockpit came back at HTTP 200 even
 after the pipe cut was gone (#807). That cap is deliberately bounded, so a
 payload past it lands in the same blind cockpit — and so does a ledger that
-cannot be read at all, at any size. The read fails open to an empty ledger and
-`board.json` carries no field saying so, while `spend` in the same payload does
-carry its own error (#874). Zeroes on the cockpit are not yet proof the
-pipeline is idle.
+cannot be read at all, at any size. The read fails open to an empty ledger, and
+`board.json`'s `ledgerState` field now distinguishes a read that failed or
+didn't parse from one that succeeded (`unread`/`unparsed`/`read`, #816) —
+`spend` in the same payload carries its own error the same way (#874). Zeroes
+on the cockpit are not yet proof the pipeline is idle.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 refill is level-triggered, so there are no implementer waves. **Append one row to

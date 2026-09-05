@@ -207,10 +207,30 @@ function render(m) {
   // freshness
   document.getElementById("age").textContent = "updated " + mins(m.generatedAt) + "m ago";
   const banner = document.getElementById("stale-banner");
+  const ledgerMsg = ledgerBanner(m.ledgerState);
   if (Date.now() - m.generatedAt > interval * 1000 * 2) {
     banner.style.display = "block";
     banner.textContent = "⚠ data stale — server/controller stopped?";
+  } else if (ledgerMsg) {
+    banner.style.display = "block";
+    banner.textContent = ledgerMsg;
   } else banner.style.display = "none";
+}
+
+// Three ledger states, three renderings (#816). `read` refuses an absent ledger
+// under --require-file now, so gather() can tell "there was no ledger to read"
+// from "read it, nothing filed yet" from "read it, the answer would not parse".
+// All three used to arrive here as the same empty lists and drew the same empty
+// board, which reads as a quiet run rather than a broken one.
+//
+// A ledger read empty gets no banner at all: it is the ordinary state of a run
+// that has just started, and a warning there would fire on every first tick and
+// train the operator to ignore this strip. Stale outranks both messages at the
+// call site above — it says the whole board is old, not that one read failed.
+function ledgerBanner(state) {
+  if (state === "unread") return "⚠ ledger not read — no ledger file, or it could not be read (see --ledger / stderr)";
+  if (state === "unparsed") return "⚠ ledger read did not parse — this board is incomplete";
+  return null;
 }
 
 function card(t) {

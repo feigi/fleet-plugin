@@ -2040,3 +2040,99 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
   // verdict travelled with it.
   assert.equal(r.json.verdict, "soft-hit");
 });
+
+// ── `--require-file` past `check` (#816) ─────────────────────────────────────
+//
+// An absent ledger and a real empty one produced byte-identical stdout at exit
+// 0 with nothing on stderr — measured with `cmp` on both streams — and `read`
+// is the subcommand board.mjs consumes, so the cockpit rendered "no ledger
+// yet", "ledger read, nothing in it" and "the read did not parse" as one thing.
+//
+// The flag that separates them already existed. What was missing is where it
+// was read: the guard sat inside runCheck(), so `check` honoured it and the
+// other four subcommands did not. It is read ahead of the dispatch now, which
+// is what docs/specs/2026-07-23-fleet-plugin-design.md:200 already documented
+// ("Exit 2 on any subcommand — ... `--require-file` with no ledger file") and
+// what the implementation had never matched.
+//
+// So the sweep below is the whole class, not the one member #816's title names:
+// fixing only `read` leaves three siblings holding the same defect behind the
+// same flag. `check` is the fourth and was already correct; the tests above
+// pin it, and hoisting the guard leaves its message and its exit code alone.
+
+const READ_EMPTY = { rows: [], filed: [], ruled: [] };
+
+test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const missing = join(dir, "nope.md");
+
+  const r = cli(["--file", missing, "--require-file", "read"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /--require-file given but ledger file does not exist/);
+  assert.ok(r.stderr.includes(missing), `the reason must name the path that was looked for; got: ${r.stderr}`);
+  // Not "the payload is not the empty shape" but "there is no payload at all".
+  // board.mjs's tryParse takes whatever lands on stdout and never sees the exit
+  // code, so a refusal that still printed something parseable would be this
+  // defect in a new spelling rather than a fix for it.
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// The pin that separates the two states, and the one that keeps this fix from
+// being a new bug: before it, both of these succeeded identically, so a guard
+// that refused any ledger holding nothing would satisfy the refusal test above
+// and break the first read of every real run — a ledger with no rows yet is
+// the normal state of a run that has just started.
+test("read --require-file accepts a real EMPTY ledger, unchanged (#816)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+
+  const r = cli(["--file", file, "--require-file", "read"]);
+  assert.equal(r.status, 0, `an empty ledger is still a ledger; got exit ${r.status}\n${r.stderr}`);
+  assert.deepEqual(parsePayload(r, "read's"), READ_EMPTY);
+  assert.equal(r.stderr, "", "an accepted read says nothing on stderr");
+});
+
+// The other half of the ruling. The flag is an opt-in, so every caller that
+// does not pass it — board.mjs as it stood, and anything else spawning `read`
+// — must still see today's bytes. This is #816's own `cmp`-on-both-streams
+// measurement kept as an assertion rather than a paragraph.
+test("read WITHOUT the flag is unchanged on both streams, absent and empty alike (#816)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+
+  for (const [what, path] of [["absent", join(dir, "nope.md")], ["empty", file]]) {
+    const r = cli(["--file", path, "read"]);
+    assert.equal(r.status, 0, `${what}: a bare read must still exit 0; got ${r.status}\n${r.stderr}`);
+    assert.equal(r.stdout, `${JSON.stringify(READ_EMPTY)}\n`, `${what}: read's stdout moved`);
+    assert.equal(r.stderr, "", `${what}: read's stderr moved`);
+  }
+});
+
+// The siblings. These three WRITE, so a missing file is ordinarily legitimate
+// — save() creates it, and that is how the first row of a run gets written.
+// `--require-file` is precisely the opt-in for a caller that knows the ledger
+// must already exist, and the measured behaviour was that `row` under the flag
+// happily CREATED the file whose absence the flag exists to refuse. Both
+// directions are driven, because a guard that refused unconditionally would
+// break every run's first write.
+for (const [cmd, args] of [["row", ["7", "impl-7 · class=routine"]], ["filed", ["8", "a short filed subject"]], ["ruled", ["9", "MERGE · green"]]]) {
+  test(`${cmd} --require-file refuses an absent ledger and writes nothing, while a bare ${cmd} still creates it (#816)`, (t) => {
+    const { dir, cli } = cliFixture(t);
+    const missing = join(dir, "nope.md");
+
+    const refused = cli(["--file", missing, "--require-file", cmd, ...args]);
+    assert.equal(refused.status, 2, `got exit ${refused.status}\n${refused.stderr}`);
+    assert.ok(refused.stderr.includes(missing), `the reason must name the path; got: ${refused.stderr}`);
+    assert.equal(refused.stdout, "", "a refusal must not also emit a payload");
+    // The harm, not just the exit code: the flag's whole job is to stop a
+    // write against a ledger that is not there, and a refusal that had already
+    // written would leave the path existing for every later call.
+    assert.equal(existsSync(missing), false, "a refused write must not have created the ledger it refused");
+
+    const created = cli(["--file", missing, cmd, ...args]);
+    assert.equal(created.status, 0, `without the flag ${cmd} must still create the ledger; got ${created.status}\n${created.stderr}`);
+    assert.equal(existsSync(missing), true, "a bare write still creates the ledger it was given");
+  });
+}

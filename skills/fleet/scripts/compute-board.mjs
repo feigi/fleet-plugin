@@ -162,6 +162,13 @@ export function computeBoard(inputs) {
     queue: { pool, supply: pool, reviewBacklog },
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
+    // Not derivable from anything else in this model: a ledger that was never
+    // read, one read empty, and one whose payload would not parse all reduce to
+    // the same empty lists, which is the collapse #816 names. gather() is the
+    // only caller that can tell them apart, so it says so and this carries the
+    // answer to the page. Defaulted rather than required — every other caller
+    // of computeBoard builds its inputs by hand and means a ledger it read.
+    ledgerState: ledger.state ?? "read",
     // Telemetry, not pipeline state: null when this run has produced no
     // transcripts yet, `{ error }` when they cannot be read. Those are
     // deliberately not the same value — the UI hides the panel on null rather

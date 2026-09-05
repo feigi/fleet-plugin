@@ -189,3 +189,16 @@ test("computeBoard: a PR with no CI entry is unknown, not null (null means no PR
   // a genuinely PR-less ticket still reports null
   assert.equal(computeBoard(inp).tickets.find((x) => x.issue === 340).ci, null);
 });
+
+test("computeBoard: ledgerState reflects gather()'s read outcome", () => {
+  for (const state of ["unread", "unparsed", "read"]) {
+    const inp = baseInputs();
+    inp.ledger = { ...inp.ledger, state };
+    assert.equal(computeBoard(inp).ledgerState, state);
+  }
+});
+
+test("computeBoard: ledgerState defaults to read when gather() reports none", () => {
+  const inp = baseInputs(); // ledger has no `state` key
+  assert.equal(computeBoard(inp).ledgerState, "read");
+});

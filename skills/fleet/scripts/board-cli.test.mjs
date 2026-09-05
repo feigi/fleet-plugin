@@ -111,13 +111,19 @@ test("a valid epoch-ms --spend-since survives the guard and reaches the payload"
   const since = Date.now() - 3_600_000;
   const r = runBoard(["--spend-since", String(since)]);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(r.stdout).spend.since, since);
+  const body = JSON.parse(r.stdout);
+  assert.equal(body.spend.since, since);
+  // This case's default ledger file (nope.md) never exists — build() must
+  // still exit 0 and say so via ledgerState, not go silent about the refusal.
+  assert.equal(body.ledgerState, "unread");
 });
 
 test("no --spend-since at all is not an error — the panel is simply unscoped", () => {
   const r = runBoard([]);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(r.stdout).spend.since, null);
+  const body = JSON.parse(r.stdout);
+  assert.equal(body.spend.since, null);
+  assert.equal(body.ledgerState, "unread");
 });
 
 // #366: the SECOND --interval read site. gather()'s own argInterval() fallback
@@ -141,7 +147,11 @@ test("build: --interval 0, a negative value and an over-range value are all refu
 test("build: a valid --interval survives the guard and reaches the payload", () => {
   const r = runBoard(["--interval", "42"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(r.stdout).interval, 42);
+  const body = JSON.parse(r.stdout);
+  assert.equal(body.interval, 42);
+  // This case's default ledger file (nope.md) never exists — build() must
+  // still exit 0 and say so via ledgerState, not go silent about the refusal.
+  assert.equal(body.ledgerState, "unread");
 });
 
 // ── #363: the pipe-race that motivated this file's --spend-since rig ──────────
