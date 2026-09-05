@@ -186,26 +186,43 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // This ran darwin-only until #951, behind "the loss was measured on darwin and
 // nowhere else". That was true of the measurement, not of the loss — nobody had
 // driven this scenario on Linux, and the gate's own wording is what stopped
-// anyone re-checking. Driven on it now, 25 runs per arm, ubuntu-24.04 /
-// node 26.5.0 (this repo's CI runner and .nvmrc), same rig as below:
+// anyone re-checking. Driven on it now, 100 runs per arm, ubuntu-24.04 /
+// node 26.5.0 (this repo's CI runner and its .nvmrc), same rig as below:
 //
 //   build                          refusal LOST  stderr bytes  distinct
-//   die() = writeSync   (PIPE)          0/25     146239-182783        2
-//   die() = console.error (PIPE)       25/25            146176        1
-//   die() = console.error (FILE)        0/25            600187        1
+//   die() = writeSync   (PIPE)         0/100     146239-182783        2
+//   die() = console.error (PIPE)     100/100            146176        1
+//   die() = console.error (FILE)       0/100            600187        1
 //
-// The mutant drops the refusal on every Linux run, so the platform gate was
-// hiding real coverage rather than protecting a vacuous green. It is gone.
+// The mutant drops the refusal on every Linux run, at one byte count, so the
+// platform gate was hiding real coverage rather than protecting a vacuous
+// green. It is gone, and this file no longer reads process.platform at all.
 //
-// The FILE row is the control the gate's removal rests on, and it is why the
-// stdio below must stay a pipe: on a file fd the same mutant keeps the refusal
-// 25/25 and delivers all 600,187 bytes, so a harness that captured to a file
-// would pass whether or not die() was ever fixed.
+// It was the last one: no test in this suite is now gated on the platform, so
+// nothing here is unexercised on CI by construction the way #337 found. The
+// conditional skips that remain — candidates.test.mjs's gojq gate and the
+// SKIP_WITHOUT_REPO sweeps — are runtime-capability gates that CI provisions
+// for and does execute. A non-zero `skipped` on CI is therefore a real signal
+// again rather than the permanent floor it used to be, which is the residue
+// #337 left and #951 closes.
 //
-// Sampling note, recorded because it misleads at n=1: a single Linux run of the
-// mutant delivered all 600,187 bytes with the refusal intact. The loss is
-// deterministic under the repeated-run load above and absent in that one
-// isolated shot, so one run is not evidence here in either direction.
+// The FILE row is the control that removal rests on, and it is why the stdio
+// below must stay a pipe: on a file fd the same mutant keeps the refusal 100/100
+// and delivers all 600,187 bytes, so a harness capturing to a file would pass
+// whether or not die() was ever fixed.
+//
+// Two sampling notes, both recorded because each misleads on its own:
+//
+//   - A SINGLE Linux run of the mutant delivered all 600,187 bytes with the
+//     refusal intact. The loss is deterministic under the back-to-back load of
+//     a repeated run and absent in one isolated shot, so n=1 is not evidence
+//     here in either direction, including a single green run of this test.
+//   - One 25-run sample of the FIXED build lost the refusal 1/25, with a
+//     546,301-byte outlier. That is #889 — die()'s writeSync is unlooped, so a
+//     non-blocking pipe can short-write it — not this gate's subject. It did
+//     not recur over 100 further runs, and the whole test flaked 0/30 end to
+//     end. If this test ever does red on a correct build, that is the cause and
+//     #889 is the fix; do not re-gate this on the platform for it.
 //
 // Nothing about the EAGAIN exit-code inversion (#299/#322) is claimed here.
 // That is the other half of this file family — probabilistic, and genuinely
