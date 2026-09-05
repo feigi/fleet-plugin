@@ -415,15 +415,27 @@ function readAgent(file, metaFile) {
 // board does not.
 //
 // Three returns, deliberately distinct — collapsing them into one bare null is
-// what let the path-encoding bug live: `{ error }` is a bug the operator must
-// act on and the UI shows it; `null` is the normal "nothing yet" and the UI
-// hides the panel; a model object is data.
+// what let the path-encoding bug live: `{ ok: false, error }` is a bug the
+// operator must act on and the UI shows it; `null` is the normal "nothing yet"
+// and the UI hides the panel; `{ ok: true, ... }` is data.
+//
+// `ok` is an explicit TAG, and it is what the page switches on — never the
+// presence or the truthiness of any other field. Reading the error case off
+// `error`'s truthiness is what #959 was: `e.message` is "" for an error thrown
+// without one and `undefined` for a thrown non-Error, so two shapes the catch
+// below can emit matched neither the error branch nor a success shape, and the
+// panel HID — a fault rendered as an idle run, the one conflation this panel
+// exists to remove. A presence check would have fixed the "" case and still
+// mis-routed the `undefined` one, and either is a refactor away from a
+// truthiness check returning, because nothing in the data says which field is
+// the tag. This follows `ledger.mjs`'s `tracker`: a boolean checked before any
+// success-only field is read.
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
     if (dir && dir.error) {
       warnOnce("no-spend-dir", "", dir.error);
-      return { error: dir.error };
+      return { ok: false, error: dir.error };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
 
@@ -461,7 +473,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         warnOnce("skips", file, `skipping ${f}: ${e.message}`);
       }
     }
-    if (!agents.length) return skipped ? { error: `all ${skipped} transcripts unreadable` } : null;
+    if (!agents.length) return skipped ? { ok: false, error: `all ${skipped} transcripts unreadable` } : null;
     const spend = computeSpend({ agents, topN });
     const tools = mergeTools(toolTables);
     // What fraction of cache_creation the tool table actually explains. It is
@@ -473,12 +485,17 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // are not.
     const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
-    return { ...spend, tools, attributedPct, skipped, since: sinceMs };
+    // `ok` first, so a future field named `ok` on computeSpend's return cannot
+    // silently untag a success.
+    return { ok: true, ...spend, tools, attributedPct, skipped, since: sinceMs };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
+    // `e.message` is carried as-is, including the "" and `undefined` a
+    // message-less throw would give it: the tag above is what routes this to the
+    // error panel, so an unhelpful message costs wording, never the panel.
     console.error(`${NAME}: spend read failed: ${e.message}`);
-    return { error: e.message };
+    return { ok: false, error: e.message };
   }
 }
 

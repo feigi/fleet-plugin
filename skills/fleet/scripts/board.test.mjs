@@ -609,6 +609,27 @@ test("an unreadable dir reports an error rather than posing as an empty run", ()
   // yet" and "this is broken", so the broken case never surfaced.
   const s = gatherSpend({ dir: join(tmpdir(), "definitely-not-here-12345") });
   assert.ok(s.error, "expected an error object, got " + JSON.stringify(s));
+  // The TAG, not the message: the page routes on `ok` alone (#959), so a
+  // producer that stops emitting it hides the panel no matter what `error` says.
+  assert.equal(s.ok, false);
+});
+
+test("every gatherSpend return carries the tag the page routes on (#959)", () => {
+  // One test over all four returns, because the defect was a MISSING tag on one
+  // of them, and a per-return test is what leaves the next one untagged.
+  // The unresolvable-dir return.
+  assert.equal(gatherSpend({ dir: { error: "no session directory for this cwd" } }).ok, false);
+  // The all-unreadable return: a dir holding only a transcript that cannot be read.
+  const allBad = mkdtempSync(join(tmpdir(), "spend-"));
+  mkdirSync(join(allBad, "agent-trap.jsonl")); // a directory where a file is expected
+  let bad;
+  withStderr(() => { bad = gatherSpend({ dir: allBad }); }); // it warns; the warning is not what is under test
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /all 1 transcripts unreadable/);
+  // The success return.
+  assert.equal(gatherSpend({ dir: fixture(TURN) }).ok, true);
+  // And the one return that is deliberately NOT an object: nothing yet.
+  assert.equal(gatherSpend({ dir: mkdtempSync(join(tmpdir(), "spend-")) }), null);
 });
 
 test("encodeProjectDir covers every non-alphanumeric character", () => {
