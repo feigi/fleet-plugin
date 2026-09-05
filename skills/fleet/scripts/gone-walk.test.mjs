@@ -6,12 +6,22 @@
 // this file now pins ONE definition and the sourcing that reaches it.
 //
 // The CALLERS are covered in their own suites (release-ticket.test.mjs,
-// reap.test.mjs, worktree-audit.test.mjs), and each of them can only reach the
-// predicate through `git worktree list`, which never yields an empty path and
-// never yields a relative one. This suite exists for the inputs that route
-// leaves unreachable — `gone ""` above all, the case the rejected form of the
-// #178 fix (`[ -n "$look" ] || look=/` placed AFTER the loop) flips from 1 to 0
-// while every caller-level test stays green.
+// reap.test.mjs, worktree-audit.test.mjs, claim-ticket.test.mjs). Three of them
+// can only reach the predicate through `git worktree list`, which never yields
+// an empty path and never yields a relative one. This suite exists for the
+// inputs that route leaves unreachable — `gone ""` above all, the case the
+// rejected form of the #178 fix (`[ -n "$look" ] || look=/` placed AFTER the
+// loop) flips from 1 to 0 while every caller-level test stays green.
+//
+// #727 added the fourth, and it is the exception that makes the `relative/…`
+// rows below reachable rather than theoretical: claim-ticket.sh CONSTRUCTS the
+// path it asks about (`.worktrees/$issue-$slug`) instead of reading it back from
+// git, so it is the one caller that can hand this predicate a relative path.
+// Measured on that spelling, the walk stops at the unstrippable `.worktrees`
+// component and answers 1 for a repo that simply has no worktrees yet — every
+// first claim a refusal. It passes `$PWD/$wt` for that reason, and its own suite
+// pins the accept case; the rows here are what say why the absolute form is not
+// decoration.
 //
 // The caller inventory is DERIVED here rather than stated. The stated one was
 // wrong — it credited release-ticket.sh with two call sites when that file has
@@ -34,7 +44,7 @@ import { fileURLToPath } from "node:url";
 // the reason arg.test.mjs spells out its own CONSUMERS list: a discovered set
 // silently shrinks when a script drops its call, which is one of the
 // regressions being pinned. A fourth caller has to be added here deliberately.
-const CALLERS = ["reap.sh", "release-ticket.sh", "worktree-audit.sh"];
+const CALLERS = ["reap.sh", "release-ticket.sh", "worktree-audit.sh", "claim-ticket.sh"];
 
 // The one file the definition is allowed to live in.
 const HOME = "worktree.sh";

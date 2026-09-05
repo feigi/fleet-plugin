@@ -24,6 +24,15 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
+# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# contract; the `[ -r ]` ahead of the `.` is load-bearing there, not decoration.
+# Sourced for `gone()` alone — this script reads no listing.
+wt_lib="$(dirname "$0")/worktree.sh"
+[ -r "$wt_lib" ] || die "cannot read $wt_lib — refusing to claim without the worktree predicates"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=worktree.sh
+. "$wt_lib" || die "$wt_lib failed to load"
+
 [ $# -ge 3 ] || die "usage: claim-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
@@ -49,7 +58,40 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # survives the `git worktree remove` that deletes its target. Measured on git
 # 2.50.1: every path `-L` adds here (dangling link, symlink loop) is one `git
 # worktree add` refuses too, so it cannot refuse a claim that would have worked.
-{ [ -e "$wt" ] || [ -L "$wt" ]; } && die "$wt already exists — ticket may already be claimed"
+#
+# But the pair answers only TWO of the three states, and silently folds the
+# third into "absent": both `-e` and `-L` are false when the stat could not RUN.
+# An unreadable or unsearchable ancestor fails them EACCES and the shell
+# discards the errno, so an occupied path read as claimable with nothing on
+# stderr — in the DEFAULT dry run, where `git worktree add` never runs to refuse
+# it downstream, that is exit 0 and a receipt byte-identical to a free path's.
+# `gone()` is the predicate that keeps established-absent and could-not-measure
+# apart (worktree.sh; #725 made it one definition rather than three), so the
+# refusal below is the existing helper, not a new EACCES-aware stat. #727
+#
+# ABSOLUTE, and this is the term to leave alone. `gone()` walks up to the
+# nearest existing ancestor and asks whether IT is searchable; git hands every
+# other caller an absolute path, and `$wt` is the first relative one. Measured:
+# handed `.worktrees/42-slug`, the walk reaches the bare `.worktrees` component,
+# cannot strip further, finds it missing on a repo that has never had a
+# worktree, and answers "not established absent" — turning every first claim in
+# a repo into a refusal. `$PWD` is what the walk needs to reach the repo root.
+# Measured on /bin/sh, dash and bash: each sets PWD from getcwd() at startup, so
+# a stale inherited value is corrected and an unset one does not trip `set -u` —
+# the two ways this term could have asked about the wrong path.
+#
+# Kept as a PAIR rather than `gone` alone, the way gone()'s own header prescribes
+# for a caller that needs the two refusals apart. The messages are not
+# interchangeable: an occupied path is diagnosed, an unmeasured one is admitted
+# to. And the wording of the first stays hedged — a dangling link here has two
+# provenances with opposite claim states (rc-0 residue, and a release halted
+# mid-flight with the branch and the label still live), and only the hedge is
+# true of both. #728
+if [ -e "$wt" ] || [ -L "$wt" ]; then
+  die "$wt already exists — ticket may already be claimed"
+elif ! gone "$PWD/$wt"; then
+  die "could not establish whether $wt exists — an ancestor is unreadable, not searchable, or not a directory; refusing to claim a path nothing measured"
+fi
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
 # Everything below is derived from origin/main, the ref the worktree is built

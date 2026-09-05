@@ -204,6 +204,9 @@ wt_listing() {
 # needing those apart pairs this with its own `[ ! -e ]`, as release-ticket.sh's
 # dirty check does. Condition context only: a bare `gone` returns 1 on the
 # ordinary present answer and `set -e` exits.
+#
+# $1 must be absolute; a relative operand can answer 1 for a path that is
+# genuinely absent.
 gone() {
   # A path carrying the byte `wt_listing` substituted does not name the file git
   # named, so every `test` below asks about a DIFFERENT path — one that is
