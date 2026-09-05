@@ -505,7 +505,12 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   // null rather than the empty shape for exactly that reason — the empty shape
   // is a real answer and must not double as the failure.
   const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "--require-file", "read"]);
-  const parsedLedger = ledgerJson == null ? null : tryParse(ledgerJson, null, "ledger read");
+  // "read" means ledgerJson parsed as JSON, not that it conforms to the
+  // {rows,filed,ruled} shape — tryParse only checks syntax, so a
+  // syntactically-valid-but-wrong-shape payload from ledger.mjs would still
+  // be labelled "read" here. ledger.mjs is this repo's own, already-tested
+  // producer of this JSON, so that gap is accepted rather than guarded.
+  const parsedLedger = tryParse(ledgerJson, null, "ledger read");
   const ledger = parsedLedger
     ? { ...parsedLedger, state: "read" }
     : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };

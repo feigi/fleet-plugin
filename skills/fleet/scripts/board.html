@@ -228,7 +228,7 @@ function render(m) {
 // train the operator to ignore this strip. Stale outranks both messages at the
 // call site above — it says the whole board is old, not that one read failed.
 function ledgerBanner(state) {
-  if (state === "unread") return "⚠ ledger not read — no ledger file yet, or --ledger points at the wrong path";
+  if (state === "unread") return "⚠ ledger not read — no ledger file, or it could not be read (see --ledger / stderr)";
   if (state === "unparsed") return "⚠ ledger read did not parse — this board is incomplete";
   return null;
 }

@@ -55,7 +55,7 @@ function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
   assert.equal(r.status, 0, `the driver itself must not fail\n${r.stdout}${r.stderr}`);
-  return { ledger: JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr, cwd };
+  return { ledger: JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr };
 }
 
 // A stub ledger.mjs whose body is supplied per test, plus an argv sentinel so a

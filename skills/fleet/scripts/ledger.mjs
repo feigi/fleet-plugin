@@ -269,6 +269,11 @@ function save(d) {
 // either way, before its stray-tail and usage guards — and the WARNING left
 // behind in runCheck() is now unreachable under the flag by construction
 // rather than by an `if` that repeats the condition.
+//
+// Also ahead of "unknown subcommand" validation: `--require-file` against a
+// missing file with a bogus subcommand reports the require-file refusal, not
+// a usage error. Deliberate/accepted, not reordered — the doc line above
+// bundles both under one undifferentiated exit 2, with no ordering between them.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
 const data = load();

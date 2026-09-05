@@ -70,7 +70,7 @@ Three units with clean boundaries:
    (below). No I/O, no `gh`, no clock read inside — time is passed in. All the
    tricky stage-derivation and flag logic lives here so it is unit-testable in
    isolation.
-2. **`board.mjs build`** — gathers raw inputs (`ledger.mjs read`,
+2. **`board.mjs build`** — gathers raw inputs (`ledger.mjs read --require-file`,
    `gh issue list --label ready-for-agent`, `gh pr list`, `ci-state.mjs --pr N`
    per open PR), stamps the current time, calls `computeBoard`, prints
    `board.json` to stdout. `build --once > .fleet/board.json` produces a static
@@ -136,6 +136,7 @@ source, and it can never move a ticket.
 {
   "generatedAt": 1690000000000,      // epoch ms, for the page's staleness banner
   "interval": 15,
+  "ledgerState": "read",             // read|unread|unparsed — see #816
   "queue": { "pool": 3, "supply": 3, "reviewBacklog": 1 },  // footer line
   "tickets": [
     {
@@ -197,8 +198,15 @@ source, and it can never move a ticket.
 
 - A `gh` / `ci-state` call fails (rate limit, network) → keep the last-known
   value for that card, mark it `?`, **do not crash the loop**; log to stderr.
-- `.fleet/ledger.md` missing (board launched before the run) → empty board with
-  "no active run yet."
+- `.fleet/ledger.md` read (`--require-file`) distinguishes three outcomes, not
+  one: **unread** (missing, or the read otherwise failed — permission, a
+  crashing `node`), **unparsed** (read, but the answer would not parse), and
+  **read** (a real ledger, possibly empty — the normal state of a run that has
+  just started). `ledgerState` carries the answer to `board.json`; `board.html`
+  draws `unread`/`unparsed` as a warning banner and stays silent on a ledger
+  that read empty, so the operator isn't trained to ignore a banner shown on
+  every run's first tick (#816). Silently tolerating a missing ledger here
+  would defeat the point of distinguishing it everywhere else.
 - `ci-state` errors on a PR → CI dot = **unknown, never red**. Never false-alarm.
 - `board.json` written atomically (temp + rename) → the page never reads a
   half-written file.
