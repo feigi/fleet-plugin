@@ -202,9 +202,13 @@ test("a routed check's own exit status still reaches the job", () => {
 // So the wiring below can be deleted with the whole suite still green, and only
 // the `skipped` count moves. That is what this test refuses.
 //
-// It pins the wiring, not the paths' agreement: GOJQ_BIN naming a binary the
-// install did not produce is already loud, since findGojq() throws on a
-// GOJQ_BIN that is not gojq rather than falling back to a skip.
+// It pins the wiring — all three legs of it, the install command, the GOBIN
+// that decides where the install deposits the binary, and the GOJQ_BIN the
+// gates read — but not that a binary really lands at the path those two imply,
+// which is go's placement behaviour and runs nowhere in this suite: a GOJQ_BIN
+// naming a binary the install did not produce is already loud, since
+// findGojq() throws on a GOJQ_BIN that is not gojq rather than falling back to
+// a skip.
 test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   // Strip `#` comments before matching. A commented-out line still CONTAINS the
   // literal every assertion below looks for, so against the raw file they cannot
@@ -226,6 +230,15 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   // `@latest` installs a gojq that satisfies the gate while changing what the
   // gate measures, with no commit here to say so.
   assert.ok(!/gojq[^\s]*@latest/.test(ci), "the gojq install is floating again — pin the version");
+  // The leg between the other two: `go install` deposits its output where GOBIN
+  // says, so dropping this env leaves the binary in $(go env GOPATH)/bin and
+  // GOJQ_BIN pointing at nothing. That does red the job — but it reds it saying
+  // `GOJQ_BIN=… is not gojq`, naming the variable that is still correct. This
+  // assertion exists to name the one that went missing.
+  assert.ok(
+    phrase("GOBIN: ${{ runner.temp }}/gojq").test(ci),
+    "the Install gojq step lost its GOBIN, so `go install` no longer deposits gojq where GOJQ_BIN points — restore GOBIN, whatever the job's own failure says about GOJQ_BIN",
+  );
   assert.ok(
     phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
     "the Tests step no longer names the binary, so a failed provision skips quietly instead of failing the job",
