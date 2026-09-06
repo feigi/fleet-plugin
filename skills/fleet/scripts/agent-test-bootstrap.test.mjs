@@ -5,10 +5,12 @@
 // root that materializes the CURRENT runner from the one emitter and execs it,
 // rather than carrying a 24 KB copy that would freeze at the commit adding it.
 //
-// Four properties, each pinning a failure the change would otherwise buy:
+// Six properties, each pinning a failure the change would otherwise buy:
 // generate-only must not claim, it must emit the claim path's own bytes, the
-// claim path must not overwrite the tracked bootstrap, and the bootstrap must
-// read its isolation issue from the worktree it stands in.
+// claim path must not overwrite the tracked bootstrap, the runner must never
+// be written over a path git tracks, an untracked destination outside any
+// repo must still get its runner, and the bootstrap must read its isolation
+// issue from the worktree it stands in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

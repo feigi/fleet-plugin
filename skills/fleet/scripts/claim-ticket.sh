@@ -363,13 +363,55 @@ else
   # `git -C` outside one is an ordinary input rather than a fault, and nothing
   # untracked is lost by writing. The refusal fires on trackedness this
   # established, never on a question it could not put.
-  runner_dir=$(dirname -- "$runner")
-  runner_base=$(basename -- "$runner")
   if [ "$writeonly" = false ] && [ -e "$runner" ]; then
     printf '    %s already present — tracked runner, checked out with the worktree; left as is\n' "$runner" >&2
-  elif git -C "$runner_dir" ls-files --error-unmatch -- "$runner_base" >/dev/null 2>&1; then
-    die "$runner is tracked — writing the generated runner over it would leave a modified tracked path, which \`git worktree remove\` refuses and every release would then strand on; refusing"
   else
+    # Gated to --write-runner only. On the claim path $runner is always the
+    # worktree's own agent-test — freshly checked out by `git worktree add`
+    # whenever it is tracked at all, so the `-e` branch above already catches
+    # every real case; reaching this far on the claim path means an untracked
+    # path, and firing a `die` here would land AFTER the label, the worktree
+    # and the install already happened — a half-claim needing manual
+    # release-ticket.sh, for a check the claim path gets no protection from
+    # (`--write-runner`'s $dest has no such checkout to shortcut it, so it's
+    # the one path this guard actually protects). #1262
+    if [ "$writeonly" = true ]; then
+      runner_dir=$(dirname -- "$runner")
+      runner_base=$(basename -- "$runner")
+      # `:(literal)` pins the pathspec to $runner_base's own literal text.
+      # Bare, it is a pathspec, not a filename — a $dest whose basename holds
+      # `*`, `?` or `[` matched a DIFFERENT tracked file sharing that
+      # directory and answered about that file's trackedness instead of this
+      # one's (measured — 'agent-test-?' matched a real 'agent-test-x').
+      #
+      # The exit STATUS alone cannot tell a real git failure apart from the
+      # two states this guard fails open on — a corrupted or unreadable index
+      # exits 128, the same code "not a git repository" does — so both sides
+      # of this branch route through the message git itself printed, captured
+      # with stdout discarded and stderr kept (`2>&1 >/dev/null`, order
+      # matters): the ls-files call this replaced folded errors into rc alone
+      # and could not distinguish "genuinely untracked" from "git could not
+      # tell" — the latter silently read as the former, which is #1262's own
+      # clobber through a different door (a live git fault standing in for
+      # "outside any repo").
+      if trackedmsg=$(git -C "$runner_dir" ls-files --error-unmatch -- ":(literal)$runner_base" 2>&1 >/dev/null); then
+        die "$runner is tracked — writing the generated runner over it would leave a modified tracked path, which \`git worktree remove\` refuses and every release would then strand on; refusing"
+      fi
+      case "$trackedmsg" in
+        # $runner_dir is not inside any repository at all — $dest need not
+        # share a repo with the cwd, so this is an ordinary input, not a
+        # fault, and nothing untracked is lost by writing.
+        *'not a git repository'*) ;;
+        # A real repo, ':(literal)' pathspec, genuinely no match — this is
+        # what "untracked" actually looks like once the wildcard hazard above
+        # is closed.
+        *'did not match any file'*) ;;
+        # Anything else is git unable to answer at all — a corrupted or
+        # locked index, a permission fault — and folding that into "untracked"
+        # is the exact silent clobber #1262 exists to refuse.
+        *) die "could not determine whether $runner is tracked — refusing rather than risk overwriting a tracked path; git said: $trackedmsg" ;;
+      esac
+    fi
 
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
