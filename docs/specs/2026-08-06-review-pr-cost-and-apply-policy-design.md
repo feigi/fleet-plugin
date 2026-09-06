@@ -241,6 +241,20 @@ The `comments` guard is `stats.kinds?.docs !== 0`, not `> 0`, matching the
 missing without failing `JSON.parse`, and absence must widen rather than be the
 one input that narrows coverage.
 
+**Superseded by #218 — the `comments` carve-out is gone; the dimension is on the
+floor unconditionally.** The file-kind test above was measured wrong five times in
+production, every one a correction-class PR whose entire substance was prose
+inside a `.js`/`.mjs`/`.sh` comment (#682, #710, #843, #1091, #1223), plus #1172,
+where five of the seven lines added to the src file were comment and `docs` was
+still 0. `dimensionsUnrun` was empty on each, because the trim was by design — so
+the payload read as full coverage of a diff whose one fitting specialist never
+ran. `comments` now sits in `SIZE_TIER_DIMS` beside `correctness` and
+`silent-failure`, so it reads no `stats` field and the `!== 0` reasoning above no
+longer applies to it. The alternative — a `linesOfComment` signal out of
+`diff-stats.mjs` — would cover the same instances at more cost; the size tier
+already discriminates all of them. `tests` keeps its file-kind carve-out. Every
+`single-file`/`small` row in the matrix below therefore gains `comments`.
+
 `single-file` is `files === 1` at **any** size, so this trims a one-file rewrite,
 not only a short diff. Thresholds stay named once, in `diff-stats.mjs` where
 `files === 1` and `loc < 30` already live.
