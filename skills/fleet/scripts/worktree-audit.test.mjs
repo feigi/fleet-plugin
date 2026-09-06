@@ -23,6 +23,13 @@ const SCRIPT = fileURLToPath(new URL("./worktree-audit.sh", import.meta.url));
 // what these fixtures see.
 const ENV = {
   ...process.env,
+  // Every `sh $SCRIPT` invocation below inherits the script's own
+  // `export LC_ALL=C` (worktree-audit.sh) regardless of what ENV carries —
+  // but the two direct `awk` calls in the C-quote-escape test bypass the
+  // script and its export entirely, so the pin has to live here. Without it,
+  // gawk under an ambient UTF-8 locale (CI's default) double-encodes the
+  // `\303\251` octal escape instead of decoding it to a single byte.
+  LC_ALL: "C",
   BASE_REF: undefined,
   GIT_DIR: undefined,
   GIT_WORK_TREE: undefined,
@@ -516,14 +523,14 @@ function extractJescAwkProgram() {
 
 test("jesc fails loud on an unrecognized C-quote escape, never corrupting the output", () => {
   const program = extractJescAwkProgram();
-  const bad = spawnSync("awk", [program], { input: ' M "weird\\efile.txt"\n', encoding: "utf8" });
+  const bad = spawnSync("awk", [program], { input: ' M "weird\\efile.txt"\n', env: ENV, encoding: "utf8" });
   assert.notEqual(bad.status, 0, "an unrecognized escape must fail the awk program, not emit a corrupted string");
   assert.equal(bad.stdout, "", "no corrupted string on stdout once the program has refused");
   assert.match(bad.stderr, /unrecognized C-quote escape/);
 
   // ACCEPT: the same program must still pass ordinary input, so the refusal
   // above is discrimination, not a program that fails unconditionally.
-  const good = spawnSync("awk", [program], { input: ' M "caf\\303\\251.txt"\n', encoding: "utf8" });
+  const good = spawnSync("awk", [program], { input: ' M "caf\\303\\251.txt"\n', env: ENV, encoding: "utf8" });
   assert.equal(good.status, 0);
   assert.equal(good.stdout, '"caf\u00e9.txt"\n');
 });
