@@ -22,14 +22,21 @@ set -eu
 # Byte semantics for the `awk` and `paste` below — this script runs no `tr`,
 # no `sed` and no `grep`. Both are fed worktree paths and the file names
 # `git status --porcelain` prints, which reach us from a fetched tree even
-# where the local filesystem refuses to hold the name. `awk` is the immune one:
-# measured byte-identical under `en_US.UTF-8` and `C`. `paste -sd, -` is not —
-# fed `b\377ad.txt` then `plain.txt` it emits the single byte `b` under
-# `en_US.UTF-8` and the whole pair under `C`, exiting 0 both times. So the pin
-# is load-bearing here for exactly one call, and silently so: that truncation
-# carries no stderr and no status. #582 measured the cost of leaving this
-# ambient in no-undo-audit.sh: a truncated list reported as a clean, confident
-# answer.
+# where the local filesystem refuses to hold the name. `paste -sd, -` is the
+# obvious one — fed `b\377ad.txt` then `plain.txt` it emits the single byte `b`
+# under `en_US.UTF-8` and the whole pair under `C`, exiting 0 both times, a
+# truncation carrying no stderr and no status. #582 measured the cost of
+# leaving this ambient in no-undo-audit.sh: a truncated list reported as a
+# clean, confident answer.
+#
+# `awk` used to be the immune one — measured byte-identical under
+# `en_US.UTF-8` and `C` — and #617 ended that: `jesc` below turns git's octal
+# escapes back into bytes with `sprintf("%c", n)`, and that IS locale-sensitive.
+# Measured, `%c` with 195: gawk 5.4.1 emits the two-byte UTF-8 encoding of
+# U+00C3 under `en_US.UTF-8` and the single byte \303 under `C`; BWK awk
+# 20200816 emits the byte under both. gawk is what Linux CI runs, so without
+# the pin every non-ASCII dirty filename would come back double-encoded there
+# and correct on the developer's Mac.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
@@ -156,20 +163,75 @@ while IFS="$(printf '\t')" read -r br wt; do
     # dirty" — indistinguishable from a genuinely clean worktree.
     elif ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-      readable=true
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')
       # substr, not $2: a dirty file's own name may hold a space — "XY " is
       # always exactly three bytes in porcelain v1, so the path starts at the
       # fourth. Same truncation as the worktree path above, one caller down.
+      #
       # git C-quotes the path itself (wraps it in its own "…", backslash-
       # escaped) whenever it holds a space or other unusual byte — measured,
-      # git 2.50.1 — so wrapping it in a second pair of quotes here would
-      # double-quote it into invalid JSON. Only add quotes when git did not
-      # already add its own; a filename holding a literal `"` or `\` that git's
-      # C-quoting escapes one way and JSON escaping wants another is the
-      # existing, unaddressed gap this script has always had for the worktree
-      # path and branch name too (#119-shaped), not one this fix opens.
-      files=$(printf '%s\n' "$status_out" | awk 'NF{
+      # git 2.50.1 — and C-quoting is NOT JSON escaping. `\303\251` for the `é`
+      # in `café.txt` is an invalid JSON escape, so ONE such file made the whole
+      # array unparseable and cost the caller every other worktree's entry too.
+      # #617 settled the open half of that: TRANSLATE git's form into JSON's, so
+      # `dirtyFiles[]` round-trips to the real name on disk. The alternative
+      # #617 weighed — JSON-escape the C-quoted text itself — parses, but hands
+      # a fleet controller a string it cannot pass back to the filesystem, which
+      # is the same defect `nl_path` above refuses rather than reports.
+      #
+      # Not `--porcelain -z` (git's raw, unquoted form) even though it would
+      # delete the rename scan below: no shell variable holds a NUL and no awk
+      # program holds one either (worktree.sh states that measurement), so it
+      # buys a temp file and a `tr` swap, and a filename holding a real newline
+      # then becomes indistinguishable from two files — a regression, since
+      # C-quoting keeps every path on one line, which is also what keeps the
+      # `dirty` count above honest.
+      #
+      # Not `jstr`: the value arriving here is already an ESCAPED form, not the
+      # raw bytes jstr's rules are written for, and it arrives one per line
+      # inside awk where no shell function is reachable. The two agree on where
+      # it matters — `jesc` replaces the same C0 bytes json.sh's `tr` replaces
+      # (\001-\007 \013 \016-\037 → space), plus \000: `tr`'s range starts at
+      # \001 because a shell string cannot hold a real NUL byte to feed it, but
+      # `jesc` meets \000 as three literal digit characters (git's own octal
+      # spelling of the byte), never as an embedded NUL, so the exclusion that
+      # protects `tr` does not apply here. Emits the same five short forms, and
+      # leaves \177 alone (#146).
+      if jfiles=$(printf '%s\n' "$status_out" | awk '
+      # git C-quoting to JSON, byte for byte. An UNQUOTED path is returned
+      # untouched: git quotes for `"`, `\`, any control byte and any byte with
+      # the high bit set, so what it left bare is printable ASCII with nothing
+      # JSON needs escaped. `index("01234567", c)`, not a `[0-7]` bracket range
+      # — locale-pin-prose.test.mjs scans this file for collation ranges and a
+      # range here would read as one (#612). git spells an octal escape with
+      # exactly three digits, so the two lookahead reads below always land.
+      # jesc_err is a global, deliberately never reset: an unrecognized escape
+      # exits the awk program (below) before a second call could matter, so
+      # nothing here ever needs to un-set it.
+      function jesc(p,   out,i,c,n) {
+        if (substr(p,1,1) != "\"") return p
+        i=2
+        while (i < length(p)) {
+          c=substr(p,i,1); i++
+          if (c != "\\") { out=out c; continue }
+          c=substr(p,i,1); i++
+          if (index("01234567", c) > 0) {
+            n=(c*64) + (substr(p,i,1)*8) + substr(p,i+1,1); i+=2
+            out = out (n < 32 ? " " : sprintf("%c", n))
+          } else if (c=="a" || c=="v") out=out " "
+          else if (index("bfnrt\\\"", c) > 0) out=out "\\" c
+          # An escape letter git 2.50.1 never emits (the #617 enumeration
+          # above is exhaustive against it) — dead code under real git, same
+          # as the header states. Fail loud rather than pass the byte through
+          # unescaped: this file has one rule above every other one, never
+          # silently report a wrong answer as a clean one, and a
+          # silently-dropped backslash here is exactly that, one dirtyFiles[]
+          # entry at a time.
+          else { jesc_err=c; return out }
+        }
+        return out
+      }
+      NF{
         p=substr($0,4)
         # A rename/copy line is `<src> -> <dst>`; emit the DESTINATION only —
         # the source path no longer exists, so reporting it names a file that
@@ -195,9 +257,22 @@ while IFS="$(printf '\t')" read -r br wt; do
             if (i) p=substr(p,i+4)
           }
         }
-        if (substr(p,1,1) != "\"") p = "\"" p "\""
-        print p
-      }' | paste -sd, -)
+        e=jesc(p)
+        # Checked here, not after the pipeline: `awk ... | paste -sd, -` would
+        # otherwise report the PASTE exit status, and paste never fails on
+        # this input — the jesc_err below would kill awk with nothing
+        # downstream ever finding out (#617 suggestion 3).
+        if (jesc_err != "") {
+          print "jesc: unrecognized C-quote escape \\" jesc_err > "/dev/stderr"
+          exit 1
+        }
+        print "\"" e "\""
+      }'); then
+        readable=true
+        files=$(printf '%s\n' "$jfiles" | paste -sd, -)
+      else
+        unknown "jesc: unrecognized C-quote escape — refusing a corrupted dirtyFiles entry"
+      fi
     else
       unknown "git rev-list/status failed — treat as unknown, not empty"
     fi
@@ -236,8 +311,8 @@ while IFS="$(printf '\t')" read -r br wt; do
   # accepts a `"` (git rejects `\` in a ref), while a worktree path is a
   # filename and accepts both. This script's whole output is one array, so a
   # single unescaped byte costs the caller every entry, not just this one.
-  # `$files` is NOT wrapped: git C-quotes those paths itself, conditionally,
-  # which is a second and different problem — see the `files=` awk above.
+  # `$files` is NOT wrapped here: its elements arrive already quoted and already
+  # JSON-escaped, by `jesc` in the `files=` awk above (#617).
   # `die` rather than a null field, unlike reap.sh: nothing has been mutated
   # here, so refusing costs no record of work already done.
   wt_j=$(jstr "$wt") && short_j=$(jstr "$short") \

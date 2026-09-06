@@ -23,6 +23,13 @@ const SCRIPT = fileURLToPath(new URL("./worktree-audit.sh", import.meta.url));
 // what these fixtures see.
 const ENV = {
   ...process.env,
+  // Every `sh $SCRIPT` invocation below inherits the script's own
+  // `export LC_ALL=C` (worktree-audit.sh) regardless of what ENV carries —
+  // but the two direct `awk` calls in the C-quote-escape test bypass the
+  // script and its export entirely, so the pin has to live here. Without it,
+  // gawk under an ambient UTF-8 locale (CI's default) double-encodes the
+  // `\303\251` octal escape instead of decoding it to a single byte.
+  LC_ALL: "C",
   BASE_REF: undefined,
   GIT_DIR: undefined,
   GIT_WORK_TREE: undefined,
@@ -155,21 +162,29 @@ test("a staged rename reports its destination and leaves the payload parseable",
   // runAudit's JSON.parse of the full payload is the real gate here.
   // `a -> b.txt` pins the split itself: gating on the literal " -> " instead of
   // on the R status byte cuts that source name in half mid-path.
+  //
+  // The third rename, into a tab-holding destination, is the #617 interaction
+  // (survived-finding-adjacent suggestion 1): `jesc` runs on `p` unconditionally
+  // at the print below, rename or not, so a destination needing real escape
+  // translation (not just quote-stripping around a bare space) must round-trip
+  // through the rename-split path too.
   const w = repo(t);
   const wt = addWorktree(w, "fix/9-x");
   writeFileSync(join(wt, "old.txt"), "x\n");
   writeFileSync(join(wt, "a -> b.txt"), "x\n");
+  writeFileSync(join(wt, "third.txt"), "x\n");
   git(wt, "add", "-A");
   commit(wt, "files to rename");
   git(wt, "mv", "old.txt", "new name.txt");
   git(wt, "mv", "a -> b.txt", "c.txt");
+  git(wt, "mv", "third.txt", "ta\tb2.txt");
 
   const { code, json } = runAudit(w);
   assert.equal(code, 0);
   const e = entryFor(json, wt);
   assert.equal(e.readable, true);
-  assert.equal(e.dirty, 2);
-  assert.deepEqual(e.dirtyFiles, ["c.txt", "new name.txt"]);
+  assert.equal(e.dirty, 3);
+  assert.deepEqual([...e.dirtyFiles].sort(), ["c.txt", "new name.txt", "ta\tb2.txt"].sort());
   assert.equal(entryFor(json, w).readable, true);
 });
 
@@ -373,9 +388,9 @@ test("the design spec's script-surface row names every field the payload actuall
 // one JSON array, so a single unescaped byte costs the caller every entry, not
 // just the offending one.
 //
-// `dirtyFiles[]` is NOT covered here and that is deliberate: git C-quotes those
-// paths itself, conditionally, so JSON-escaping on top is a second and
-// different problem. The comment at the `files=` awk names it in place.
+// `dirtyFiles[]` was left out of #119 because git C-quotes those paths itself,
+// conditionally, and translating that form is a second and different problem.
+// #617 settled it — see the test below and the `jesc` comment in the script.
 test("a quote in a branch name still emits parseable JSON", (t) => {
   const w = repo(t);
   addWorktree(w, 'evil"branch');
@@ -413,6 +428,111 @@ test("an ordinary worktree is byte-identical — the escaping accepts what it sh
   assert.equal(code, 0);
   const e = entryFor(json, wt);
   assert.deepEqual(e, { worktree: wt, branch: "fix/119-json-sh-extract", ahead: 0, dirty: 0, dirtyFiles: [], readable: true });
+});
+
+// #617: `dirtyFiles[]` carries git's C-quoting, which is not JSON's. One
+// `caf\u00e9.txt` used to emit the literal `"caf\\303\\251.txt"` — `\\3` is not a JSON
+// escape — and took the WHOLE array down with it, every other worktree's entry
+// included, which is why the sibling assertion at the end is the real gate.
+//
+// The remedy chosen is translate-then-emit: the payload names the file that is
+// on disk, so a controller reading it can hand the string straight back to the
+// filesystem. Every branch of that translation is exercised here:
+//   - an octal escape with the high bit set (`caf\u00e9.txt`)
+//   - an octal escape for a C0 byte with NO named short form in either format
+//     (`\\016`, SO) — the branch a mutation could break silently while every
+//     other case here stayed green, since BEL/VT below reach `jesc` by the
+//     letter branch, never the octal one (survived finding 2)
+//   - the two verbatim short forms (`\\"`, `\\\\`)
+//   - all four JSON-legal short forms git also spells with a letter
+//     (`\\b`, `\\f`, `\\r`, `\\t`) — only `\\t` was covered before this
+//   - BEL, which git spells `\\a` (a git short form JSON has none for)
+//   - VT, which git spells `\\v` (the other git-only short form, untested
+//     before this — survived finding 3)
+// `jesc` treats BEL and VT alike: replaced with a space, the same treatment
+// json.sh's `tr` gives every short-form-less C0 byte.
+//
+// Node re-encodes every JS string as UTF-8 on the way to the filesystem, so a
+// source-literal `\u00e9` lands as the two bytes git C-quotes as `\\303\\251` — the
+// exact input the bug needs. That route reaches VALID UTF-8 only: an invalid
+// byte cannot be written from a JS string at all, and APFS refuses to hold one
+// either; #582 covers that shape one script over. Every control byte here is
+// spelled `\\uXXXX` rather than embedded, to keep a raw control byte out of
+// this source file.
+test("dirty filenames that git C-quotes round-trip to the real names", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  const names = [
+    "caf\u00e9.txt",
+    'q"q.txt',
+    "b\\s.txt",
+    "so\u000e.txt",
+    "bs\u0008.txt",
+    "ff\u000c.txt",
+    "cr\u000d.txt",
+    "ta\tb.txt",
+    "bel\u0007.txt",
+    "vt\u000b.txt",
+  ];
+  for (const n of names) writeFileSync(join(wt, n), "uncommitted\n");
+
+  const { code, json } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.dirty, names.length);
+  // Sorted rather than in git's order: git orders by raw bytes and JS by UTF-16
+  // code unit, so pinning the order here would pin the wrong thing.
+  assert.deepEqual(
+    [...e.dirtyFiles].sort(),
+    [
+      "b\\s.txt",
+      "so .txt",
+      "bs\u0008.txt",
+      "ff\u000c.txt",
+      "cr\u000d.txt",
+      "bel .txt",
+      "vt .txt",
+      "caf\u00e9.txt",
+      'q"q.txt',
+      "ta\tb.txt",
+    ].sort(),
+    "a C-quoted dirty filename no longer round-trips to the name on disk",
+  );
+  assert.equal(entryFor(json, w).readable, true, "one bad element must not cost the caller every other entry");
+});
+
+// #617 survived finding 1: the unrecognized-escape fallback used to be
+// `else out=out c` — a silently dropped backslash with the following byte
+// passed through unescaped, no error, no non-zero exit. Dead code under real
+// git 2.50.1 (the enumeration above is exhaustive against it), so this drives
+// `jesc`'s own awk program directly with a synthetic C-quoted string rather
+// than trying to make real git emit an escape it never does. The program text
+// is extracted from the shipped script at test time, never hand-copied, so
+// this cannot drift from what actually ships.
+function extractJescAwkProgram() {
+  const src = readFileSync(SCRIPT, "utf8");
+  const anchor = src.indexOf("function jesc");
+  assert.ok(anchor > -1, "fixture: worktree-audit.sh must still define jesc");
+  const startMarker = "awk '";
+  const start = src.lastIndexOf(startMarker, anchor) + startMarker.length;
+  const end = src.indexOf("'); then", anchor);
+  assert.ok(start > startMarker.length - 1 && end > start, "fixture: could not locate jesc's awk program bounds");
+  return src.slice(start, end);
+}
+
+test("jesc fails loud on an unrecognized C-quote escape, never corrupting the output", () => {
+  const program = extractJescAwkProgram();
+  const bad = spawnSync("awk", [program], { input: ' M "weird\\efile.txt"\n', env: ENV, encoding: "utf8" });
+  assert.notEqual(bad.status, 0, "an unrecognized escape must fail the awk program, not emit a corrupted string");
+  assert.equal(bad.stdout, "", "no corrupted string on stdout once the program has refused");
+  assert.match(bad.stderr, /unrecognized C-quote escape/);
+
+  // ACCEPT: the same program must still pass ordinary input, so the refusal
+  // above is discrimination, not a program that fails unconditionally.
+  const good = spawnSync("awk", [program], { input: ' M "caf\\303\\251.txt"\n', env: ENV, encoding: "utf8" });
+  assert.equal(good.status, 0);
+  assert.equal(good.stdout, '"caf\u00e9.txt"\n');
 });
 
 // #525: this script parses no positional argument — an argument was silently
