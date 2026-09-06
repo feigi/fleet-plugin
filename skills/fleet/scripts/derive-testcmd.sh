@@ -21,10 +21,21 @@ set -eu
 # byte that is not valid UTF-8 — measured over a three-name listing whose middle
 # entry is `b\377ad.test.mjs`: `grep -cE` with this script's own regex matches 2
 # under `en_US.UTF-8` and 3 under `C`, stderr empty either way — so such a name
-# reads as "no test files" with nothing there to notice. It reaches us from a
-# fetched tree even where the local filesystem refuses to hold the name. #582
-# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
-# list reported as a clean, confident answer.
+# reads as "no test files" with nothing there to notice. #582 measured the cost
+# of leaving this ambient in no-undo-audit.sh: a truncated list reported as a
+# clean, confident answer.
+#
+# What that measurement does NOT establish is that the byte can REACH this grep,
+# and #614 measured that it cannot: the listing above is `git ls-tree -r
+# --name-only`, and git C-quotes any path holding a high-bit byte, so what
+# arrives here is the ASCII text `"b\377ad.test.mjs"` — no raw byte, and no
+# locale difference either way (measured, git 2.50.1). The pin therefore stays
+# as defence against a future caller feeding this grep unquoted bytes, and it is
+# the reason this script has a source assertion in locale-pin-prose.test.mjs and
+# no behavioural fixture: there is no input through git that discriminates. Note
+# separately that a C-quoted name does not match `$testfile_re` at all — the
+# trailing `"` defeats the `$` anchor — which is a coverage question, not a
+# locale one.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things

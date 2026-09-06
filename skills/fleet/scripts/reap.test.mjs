@@ -578,6 +578,58 @@ test("a dirty worktree on an otherwise-mergeable [gone] branch is kept, not reap
   assert.equal(existsSync(wt), true, "a dirty worktree must survive untouched");
 });
 
+// #614: the BEHAVIOURAL twin of locale-pin-prose.test.mjs' source assertion for
+// this script — that file checks `export LC_ALL=C` is PRESENT, this one checks
+// it is load-bearing.
+//
+// The ambient locale must reach the child genuinely, not merely differ from
+// `C`: a POSIX shell keeps a variable's export attribute once it is already in
+// the environment, so seeding `LC_ALL: "en_US.UTF-8"` here would leave a mutant
+// that drops only the `export` keyword still propagating `C` downstream. `LANG`
+// with `LC_ALL` and `LC_CTYPE` absent is what an unset `LC_ALL` really looks
+// like — the shape #599's own regression test got wrong.
+const AMBIENT_UTF8 = { LANG: "en_US.UTF-8", LC_ALL: undefined, LC_CTYPE: undefined };
+
+// CEILING: this kills its mutant on macOS only. BWK awk aborts (rc 2,
+// `towc: multibyte conversion failure`) on a record it must scan past and
+// cannot convert to wide characters; gawk 5.4.1 and mawk 1.3.4 both answer
+// rc 0 on the same input, so on `ubuntu-latest` — the one platform ci.yml runs
+// — the unpinned script already gives the right answer and this test is
+// vacuous. It asserts the CORRECT answer, so it is green on both. #790.
+//
+// The byte reaches the sweep through the registry, never the filesystem: APFS
+// refuses the name outright, but `git worktree list --porcelain` derives the
+// path it prints from the entry's `gitdir` file and emits it raw and unquoted.
+// One such SIBLING entry is enough — awk tests every rule against every record,
+// so the `/^branch /` rule scans the bad `worktree` record and dies there,
+// taking the lookup for the branch actually under sweep with it. Measured with
+// the pin deleted: `$wt` comes back empty, the dirty check never runs, and
+// `--apply` REAPS feature/merged — the uncommitted work gone at exit 0, which
+// is the direction this file's header calls load-bearing.
+test("an invalid UTF-8 byte in a SIBLING worktree's registered path does not cost a dirty worktree its keep (#614)", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  const other = join(w, ".worktrees", "other");
+  git(w, "worktree", "add", "-q", other, "-b", "feature/other", "main");
+  writeFileSync(
+    join(adminEntry(w, other), "gitdir"),
+    Buffer.concat([Buffer.from(`${w}/.worktrees/b`), Buffer.from([0xff]), Buffer.from("ad/.git\n")]),
+  );
+  rmSync(other, { recursive: true, force: true });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], AMBIENT_UTF8);
+
+  assert.equal(code, 0, `stderr: ${stderr}`);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.find((k) => k.branch === "feature/merged");
+  assert.ok(kept, `feature/merged must still be kept, got ${JSON.stringify(json.kept)}`);
+  assert.match(kept.reason, /^dirty worktree /);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(join(wt, "scratch.txt")), true, "the uncommitted work must survive untouched");
+});
+
 test("a status probe that dies (rc 128) is kept with git's own message, not just a label (#625)", (t) => {
   // Before #625, this probe's stderr went to /dev/null and the reason named
   // only the step ("could not be read"), never the fault. Git's own message —
