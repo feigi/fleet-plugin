@@ -36,6 +36,12 @@ test("the dependencies step says the cut runs on step 1 data alone, never the Ag
   assert.match(s, phrase("never the Agent Brief"));
 });
 
+test("the dependencies step still states the cut this limitation is about", () => {
+  // The antecedent the line-41 clause depends on — without it, "never sees
+  // the Agent Brief" is an orphaned note about a cut the doc no longer states.
+  assert.match(dependenciesStep(), phrase("Cut to oldest 3–5 here"));
+});
+
 test("the dependencies step says a Brief-promoted candidate is dropped before the Brief is fetched", () => {
   // The consequence that makes the limitation concrete: without this an
   // agent reads "cut runs on step 1 data alone" as a description, not a
