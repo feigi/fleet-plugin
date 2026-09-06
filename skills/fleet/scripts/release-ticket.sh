@@ -438,20 +438,6 @@ stray=$(printf '%s\n' "$wt_list" |
 has_branch=false
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=true
 
-# A mistyped <slug>/<type> names a branch that does not exist, and without this
-# the run would drop the label off a ticket whose real claim is untouched —
-# invisible to candidates.mjs and still in-flight. Refuse instead of guessing.
-#
-# Deferred past the orphan probe below (#624) rather than fired here: this exact
-# input — no branch, no worktree, no stray — is also what #208's knock-on
-# leaves behind, a claim whose branch a prior half-release already deleted with
-# its directory still on disk. Fired here, unconditionally, that state got the
-# same "check the <slug> and <type> arguments" prose as a genuine typo, naming
-# the wrong cause over a directory sitting right there with a real remedy. The
-# orphan probe already answers that question in the precondition block, so this
-# die now runs only once it has had its say — never reached at all when the
-# orphan block()s, since that block leaves `blockers` non-empty.
-
 # Every string that reaches the JSON goes through `jstr` from json.sh. <slug>
 # and <type> are caller-supplied and git's own stderr is quoted back verbatim,
 # so without it a single `"` or backslash anywhere emits a payload the caller
@@ -940,14 +926,34 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
   elif ! gone "$orphan"; then
     block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
-  elif [ "$has_branch" = false ] && [ -z "$blockers" ]; then
-    # Reaches here (#624) only once the orphan probe has established there is
-    # truly nothing of this claim's left — no branch, no registered worktree,
-    # no orphaned directory either — and nothing else already blocked. The
-    # `-z "$blockers"` guard keeps this from overriding a real finding (a
-    # newline in $main_wt, say) with the generic usage-error prose: the
-    # deferred die from above, and only ever the last word on an otherwise
-    # silent run.
+  elif [ "$has_branch" = false ]; then
+    # A mistyped <slug>/<type> names a branch that does not exist, and without
+    # this die the run would drop the label off a ticket whose real claim is
+    # untouched — invisible to candidates.mjs and still in-flight. Refuse
+    # instead of guessing.
+    #
+    # Deferred past the orphan probe above (#624) rather than fired the moment
+    # `has_branch` reads false: this exact input — no branch, no worktree, no
+    # stray — is also what #208's knock-on leaves behind, a claim whose branch
+    # a prior half-release already deleted with its directory still on disk.
+    # Fired unconditionally, that state got the same "check the <slug> and
+    # <type> arguments" prose as a genuine typo, naming the wrong cause over a
+    # directory sitting right there with a real remedy. The orphan probe above
+    # answers that question first, so this die runs only once it has had its
+    # say.
+    #
+    # No `-z "$blockers"` conjunct here (one was tried and dropped): every
+    # other way THIS if-block's own occupied/gone checks could report a
+    # finding is an elif sibling above, mutually exclusive with this arm — and
+    # the only OTHER blocker reachable with $wt and $stray both empty, a
+    # newline in $main_wt, is caught earlier still, by `! gone "$orphan"`
+    # (gone() refuses outright on the byte `wt_listing` substitutes for a
+    # newline, so that arm fires first and this one is never reached for that
+    # case — the scenario an earlier draft of this comment cited as the
+    # guard's reason to exist was, measured against the current elif chain,
+    # already unreachable). So `$blockers` is provably empty on every path
+    # that reaches here; this die is the last word on an otherwise silent run
+    # regardless.
     die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
   fi
 fi
