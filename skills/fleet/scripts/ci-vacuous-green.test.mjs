@@ -32,7 +32,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { phrase } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../../.github/scripts/check-tracked.sh", import.meta.url));
 const CI_YML = fileURLToPath(new URL("../../../.github/workflows/ci.yml", import.meta.url));
@@ -216,12 +216,11 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   // commenting out the wiring, is exactly the one that hands the engine gates
   // back their skip. Both comment forms, because killing only whole-line ones
   // leaves the trailing form as the same hole.
-  const ci = flat(
-    readFileSync(CI_YML, "utf8")
-      .split("\n")
-      .map((l) => l.replace(/(^|\s)#.*$/, ""))
-      .join("\n"),
-  );
+  const ciRaw = readFileSync(CI_YML, "utf8")
+    .split("\n")
+    .map((l) => l.replace(/(^|\s)#.*$/, ""))
+    .join("\n");
+  const ci = flat(ciRaw);
 
   assert.ok(
     phrase("go install github.com/itchyny/gojq/cmd/gojq@v0.12.19").test(ci),
@@ -235,9 +234,18 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   // GOJQ_BIN pointing at nothing. That does red the job — but it reds it saying
   // `GOJQ_BIN=… is not gojq`, naming the variable that is still correct. This
   // assertion exists to name the one that went missing.
+  //
+  // Scoped to the Install-gojq step's own slice, not the whole flattened file:
+  // an unscoped phrase() match is a substring test, so GOBIN moved verbatim
+  // into the Tests step's env block would still satisfy it. And the phrase is
+  // followed by a negative lookahead for a non-whitespace character, so a
+  // value with an extra path segment tacked on (`.../gojq/bin`, which still
+  // starts with the pinned value) cannot slide through as a prefix match —
+  // `go install` would drop the binary somewhere GOJQ_BIN does not point at.
+  const installStep = flat(between(ciRaw, "- name: Install gojq", "- name: Tests", "ci.yml Install gojq step"));
   assert.ok(
-    phrase("GOBIN: ${{ runner.temp }}/gojq").test(ci),
-    "the Install gojq step lost its GOBIN, so `go install` no longer deposits gojq where GOJQ_BIN points — restore GOBIN, whatever the job's own failure says about GOJQ_BIN",
+    new RegExp(phrase("GOBIN: ${{ runner.temp }}/gojq").source + String.raw`(?!\S)`).test(installStep),
+    "the Install gojq step lost its GOBIN, or GOBIN no longer points at exactly ${{ runner.temp }}/gojq — restore it, whatever the job's own failure says about GOJQ_BIN",
   );
   assert.ok(
     phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
