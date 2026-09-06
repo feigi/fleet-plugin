@@ -550,12 +550,16 @@ for arg do
     # Byte semantics for the two tools that read find's output, because a
     # filename is bytes and neither tool is told which. Measured on macOS with
     # a name holding \377, under en_US.UTF-8: \`grep\` drops that line silently
-    # (#582's own false-green shape — a green over a smaller suite) and BSD
-    # \`sed\` gives up on the whole stream ("RE error: illegal byte sequence",
-    # still exit 0), which empties \$files and refuses a suite that is right
-    # there. Under LC_ALL=C both pass every line through. GNU is byte-oriented
-    # and already does, so this changes nothing on Linux — the platform CI runs,
-    # which is why no behavioural test here can fail on CI. (#600)
+    # (#582's own false-green shape — a green over a smaller suite). Measured
+    # with \`sed\` fed that byte directly, BSD \`sed\` gives up on the whole
+    # stream ("RE error: illegal byte sequence", exit 1) — but in THIS pipeline
+    # grep's own drop reaches the byte first, so sed never sees it here and its
+    # pin is defense in depth, not a live defect in this ordering. It stays: if
+    # sed ever is reached, it empties \$files outright, which is worse than
+    # grep's silent shrink. Under LC_ALL=C both pass every line through. GNU is
+    # byte-oriented and already does, so this changes nothing on Linux — the
+    # platform CI runs, which is why no behavioural test here can fail on CI.
+    # (#600)
     # A per-command prefix, not \`export LC_ALL=C\` in this runner's prologue,
     # which is the form the six fleet scripts use. This runner \`exec\`s the
     # suite: an exported pin would reach node and every process the tests spawn,
@@ -702,11 +706,11 @@ for arg do
       # directory branch already does to find's output (\`sed 's/\[/[[]/g'\`);
       # a file named directly needs the same escape or #100's own bracketed
       # case survives the fix meant to close it.
-      # Pinned for the reason the directory branch's pipeline is (#600): under a
-      # UTF-8 locale BSD \`sed\` refuses a name holding an invalid byte and emits
-      # nothing, so \$arg would empty and the runner would hand node one fewer
-      # path than it was given — silently, whenever anything else in argv
-      # resolves, which is #100's own drop.
+      # Same failure the directory branch's own sed pin guards against (#600) —
+      # but no grep runs ahead of this \$arg to drop the byte first, so this pin
+      # is the only guard here, not defense in depth: sed emits nothing, \$arg
+      # empties, and node runs one path fewer than it was given, silently
+      # (#100's own drop).
       arg=\$(printf '%s\n' "\$arg" | LC_ALL=C sed 's/\[/[[]/g')
     else
       case "\$arg" in
