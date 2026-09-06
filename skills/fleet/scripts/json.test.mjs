@@ -42,8 +42,14 @@ const LIB = fileURLToPath(new URL("./json.sh", import.meta.url));
  *
  * `break` names a tool to shadow with a failing stub — the only way to observe
  * a stage failing without editing the library under test.
+ *
+ * `raw` skips Node's own UTF-8 decoding of stdout, returning a Buffer instead
+ * of a string. Required for any test asserting on a raw invalid-UTF-8 byte
+ * (#613): `encoding: "utf8"` makes Node itself silently substitute U+FFFD on
+ * the way OUT, which would hide the exact bug under test — a caller (`jq`,
+ * `python3 json.load`) that does not launder the bytes first.
  */
-function drive(body, { args = [], input, break: broken } = {}) {
+function drive(body, { args = [], input, break: broken, raw = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "json-sh-"));
   try {
     const env = { ...process.env };
@@ -57,7 +63,7 @@ function drive(body, { args = [], input, break: broken } = {}) {
     }
     const f = join(dir, "drive.sh");
     writeFileSync(f, `. ${JSON.stringify(LIB)}\n${body}\n`);
-    return spawnSync("sh", [f, ...args], { env, input, encoding: "utf8" });
+    return spawnSync("sh", [f, ...args], { env, input, encoding: raw ? "buffer" : "utf8" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -122,6 +128,39 @@ test("jstr leaves DEL alone — \\177 is not a C0 byte and JSON permits it", () 
   assert.equal(JSON.parse(`"${out}"`), "a\x7fb");
 });
 
+// A byte that is not valid UTF-8 at all — not merely a C0 control byte, a
+// byte no UTF-8 sequence starts or continues with. Built as a raw Buffer
+// rather than a JS string: `execFileSync`/`spawnSync` re-encode a JS string
+// argv as UTF-8, so a JS `"\xFF"` (U+00FF) would arrive as the two-byte
+// sequence \303\277 — valid UTF-8, which reproduces nothing (same pitfall
+// no-undo-audit.test.mjs's `byteConflictRepo` comment names). Piped to stdin
+// as a Buffer and captured inside the driven script with `$(cat)` sidesteps
+// it: Node writes a Buffer to a child's stdin unchanged, and shell command
+// substitution is byte-transparent.
+const INVALID_UTF8 = Buffer.concat([Buffer.from("b"), Buffer.from([0xff]), Buffer.from("ad")]);
+
+test("jstr replaces an invalid UTF-8 byte with U+FFFD rather than emitting it raw, and the result is valid UTF-8 JSON (#613)", () => {
+  const r = drive(`x=$(cat); jstr "$x"`, { input: INVALID_UTF8, raw: true });
+  assert.equal(r.status, 0, `driver failed: ${r.stderr}`);
+  const wrapped = Buffer.concat([Buffer.from('"'), r.stdout, Buffer.from('"')]);
+  const decoded = wrapped.toString("utf8");
+  // Strict UTF-8 validity via round-trip: Node's decoder is itself lossy —
+  // it substitutes U+FFFD for a raw invalid byte on the way IN — so
+  // re-encoding the decoded string reproduces the same bytes only when the
+  // buffer was already valid UTF-8. A raw invalid byte that jstr failed to
+  // repair shows up here as a length/content mismatch, not a thrown error.
+  assert.deepEqual(Buffer.from(decoded, "utf8"), wrapped,
+    "jstr's output is not valid UTF-8 — a raw invalid byte reached the JSON body");
+  assert.equal(JSON.parse(decoded), "b�ad",
+    "the fault must render as U+FFFD, not vanish or truncate the string");
+});
+
+test("a failing python3 makes jstr report failure", () => {
+  const { rc, out } = call("jstr", 'evil"branch', { break: "python3" });
+  assert.notEqual(out, 'evil\\"branch', "the python3 stub did not shadow the real python3 — this test proves nothing");
+  assert.notEqual(rc, 0);
+});
+
 test("jstr on an empty string is empty at exit 0, forking nothing", () => {
   const { rc, out } = call("jstr", "");
   assert.equal(rc, 0);
@@ -132,7 +171,7 @@ test("jstr on an empty string survives a broken sed and tr — it never calls th
   // The short circuit is what lets a field that legitimately found nothing stay
   // empty during the PATH-wide tool outage inflight.sh measures at its own top:
   // that field never runs the broken tool, so it cannot observe the failure.
-  for (const broken of ["sed", "tr"]) {
+  for (const broken of ["sed", "tr", "python3"]) {
     const { rc, out } = call("jstr", "", { break: broken });
     assert.equal(rc, 0, `empty jstr must not fail on a broken ${broken}`);
     assert.equal(out, "");
@@ -191,6 +230,23 @@ test("a failing tr makes jrewritten report failure rather than a confident answe
   assert.notEqual(rc, 0);
 });
 
+test("a failing python3 makes jrewritten report failure rather than a confident answer", () => {
+  const { rc } = call("jrewritten", "a\x0bb", { break: "python3" });
+  assert.notEqual(rc, 0);
+});
+
+test("jrewritten is true when a byte was not valid UTF-8, not just for the C0 replacement set (#613)", () => {
+  const r = drive(`x=$(cat); jrewritten "$x"`, { input: INVALID_UTF8 });
+  assert.equal(r.status, 0, `driver failed: ${r.stderr}`);
+  assert.equal(r.stdout, "true");
+});
+
+test("jrewritten stays false for valid multi-byte UTF-8 under the new UTF-8 check (#613)", () => {
+  const { rc, out } = call("jrewritten", "brée/ünïcode");
+  assert.equal(rc, 0);
+  assert.equal(out, "false");
+});
+
 // ---------------------------------------------------------------- jarr
 
 test("jarr emits one quoted JSON string per line, comma-joined", () => {
@@ -211,12 +267,37 @@ test("a failing tr makes jarr report failure", () => {
   assert.notEqual(rc, 0);
 });
 
+test("a failing python3 makes jarr report failure", () => {
+  const { rc } = pipe("jarr", 'a\nb"c\n', { break: "python3" });
+  assert.notEqual(rc, 0);
+});
+
+test("jarr replaces an invalid UTF-8 byte with U+FFFD rather than emitting it raw, other elements untouched (#613)", () => {
+  const input = Buffer.concat([Buffer.from("plain\n"), INVALID_UTF8]);
+  const r = drive("jarr", { input, raw: true });
+  assert.equal(r.status, 0, `driver failed: ${r.stderr}`);
+  const wrapped = Buffer.concat([Buffer.from("["), r.stdout, Buffer.from("]")]);
+  const decoded = wrapped.toString("utf8");
+  assert.deepEqual(Buffer.from(decoded, "utf8"), wrapped,
+    "jarr's output is not valid UTF-8 — a raw invalid byte reached the JSON body");
+  assert.deepEqual(JSON.parse(decoded), ["plain", "b�ad"]);
+});
+
 test("jarr_rewritten is a parallel boolean array, last line included", () => {
   // `read` alone drops a final line with no trailing newline, so the last
   // element is the one that goes missing — pinned with input that has none.
   const { rc, out } = pipe("jarr_rewritten", "plain\na\x0bb");
   assert.equal(rc, 0);
   assert.deepEqual(JSON.parse(`[${out}]`), [false, true]);
+});
+
+test("jarr_rewritten flags a line holding an invalid UTF-8 byte, not just the C0 replacement set (#613)", () => {
+  // jarr_rewritten delegates to jrewritten per line, so this pins the
+  // delegation carries the new check rather than re-testing jrewritten itself.
+  const input = Buffer.concat([Buffer.from("plain\n"), INVALID_UTF8]);
+  const r = drive("jarr_rewritten", { input });
+  assert.equal(r.status, 0, `driver failed: ${r.stderr}`);
+  assert.deepEqual(JSON.parse(`[${r.stdout}]`), [false, true]);
 });
 
 test("a failing tr makes jarr_rewritten report failure, not a short array", () => {
