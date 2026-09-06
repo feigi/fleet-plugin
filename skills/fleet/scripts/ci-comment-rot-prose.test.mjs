@@ -106,6 +106,32 @@ test("the Shellcheck comment does not present its examples as the complete set",
   );
 });
 
+// #953. The same file, the same failure mode, one axis over: a rationale can rot
+// by MOVING rather than by going stale. The failglob paragraph drifted above the
+// gojq provisioning block and two steps it says nothing about, so a reader at the
+// step it explains had to scroll past an unrelated toolchain to find it. Nothing
+// caught that, for the reason ci.yml states about itself: no test reads its
+// comments. Anchored on the step's name, walking UP over the whole contiguous
+// comment run above it — never on a line number, the drift this pins is exactly
+// a line number changing — so a fix that reunites the step's NAME with its
+// rationale while leaving one sibling paragraph behind still reds: the failglob
+// paragraph is not the only one this step's reader needs.
+test("the failglob rationale sits against the Tests step it documents", () => {
+  const lines = read("../../../.github/workflows/ci.yml").split("\n");
+  const step = lines.findIndex((l) => /^\s*- name: Tests$/.test(l));
+  assert.ok(step >= 0, "ci.yml no longer has a Tests step");
+  let i = step;
+  while (/^\s*#/.test(lines[i - 1])) i--;
+  const block = lines.slice(i, step).join(" ");
+  for (const claim of [/failglob/, /Explicit glob/, /stubs `gh`/]) {
+    assert.match(
+      block,
+      claim,
+      `the Tests step's rationale lost ${claim} — it has drifted away from the step it explains`,
+    );
+  }
+});
+
 test("the vendored-tree sentence makes a structural claim, not a size claim", () => {
   // The sentence exists to say there is nothing to walk INTO under that
   // directory. A file count neither supports that nor survives a commit.

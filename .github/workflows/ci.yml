@@ -114,8 +114,10 @@ jobs:
       #     — no other reader in this repo would notice a syntax error" already
       #     uses to catch exactly this, reused here rather than reinvented.
       #     Cited by test NAME, not by line: a refactor that shifts that file
-      #     silently re-points a line number at unrelated code, and nothing in
-      #     this workflow's comments is checked by any test.
+      #     silently re-points a line number at unrelated code, and this
+      #     particular argument isn't pinned by any test — skills/fleet/scripts/
+      #     ci-comment-rot-prose.test.mjs checks several other claims in this
+      #     file, but not this one.
       #     That test pins review-pr.js BY NAME, so for that one file this loop
       #     is redundant today. The loop is here so workflows/merge-wave.js
       #     (docs/specs/2026-07-23-fleet-plugin-design.md, section `## Layout`:
@@ -188,20 +190,6 @@ jobs:
       - name: Syntax-check python
         run: .github/scripts/check-tracked.sh '*.py' -n1 python3 -m py_compile
 
-      # Explicit glob, not the directory, to pin exactly which files run.
-      # NOT because node would otherwise walk into a vendored tree: node's own
-      # discovery excludes `node_modules` (measured), and the defect behind
-      # 'the runner's directory expansion ran vendored tests' was a `find` in
-      # the emitted runner — see claim-ticket.sh, which says so itself: "this
-      # walk, not node, is what keeps vendored tests out". There is no
-      # vendored tree under skills/fleet/scripts/ anyway.
-      # The suite stubs `gh` and sets its own git identity, so it needs no auth
-      # and no network.
-      # `failglob` because the bare glob is exactly the silent green this repo
-      # already documents in review-and-fix.md — unmatched, bash passes the
-      # pattern through literally, node globs it itself, finds nothing, and
-      # exits 0 having run not one test. No node flag fails a zero-test run,
-      # so the shell has to be the guard.
       # gh applies `--jq` with its own embedded gojq (RE2), not the system jq
       # the candidates stub execs, so candidates.test.mjs gates its engine-parity
       # tests on a real gojq binary being resolvable — and a gate that does not
@@ -226,6 +214,20 @@ jobs:
           GOBIN: ${{ runner.temp }}/gojq
         run: go install github.com/itchyny/gojq/cmd/gojq@v0.12.19
 
+      # Explicit glob, not the directory, to pin exactly which files run.
+      # NOT because node would otherwise walk into a vendored tree: node's own
+      # discovery excludes `node_modules` (measured), and the defect behind
+      # 'the runner's directory expansion ran vendored tests' was a `find` in
+      # the emitted runner — see claim-ticket.sh, which says so itself: "this
+      # walk, not node, is what keeps vendored tests out". There is no
+      # vendored tree under skills/fleet/scripts/ anyway.
+      # The suite stubs `gh` and sets its own git identity, so it needs no auth
+      # and no network.
+      # `failglob` because the bare glob is exactly the silent green this repo
+      # already documents in review-and-fix.md — unmatched, bash passes the
+      # pattern through literally, node globs it itself, finds nothing, and
+      # exits 0 having run not one test. No node flag fails a zero-test run,
+      # so the shell has to be the guard.
       - name: Tests
         env:
           # Naming the binary, rather than leaving findGojq() to probe PATH and
