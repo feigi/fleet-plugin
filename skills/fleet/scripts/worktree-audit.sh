@@ -163,7 +163,6 @@ while IFS="$(printf '\t')" read -r br wt; do
     # dirty" — indistinguishable from a genuinely clean worktree.
     elif ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain 2>/dev/null); then
-      readable=true
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')
       # substr, not $2: a dirty file's own name may hold a space — "XY " is
       # always exactly three bytes in porcelain v1, so the path starts at the
@@ -191,10 +190,14 @@ while IFS="$(printf '\t')" read -r br wt; do
       # Not `jstr`: the value arriving here is already an ESCAPED form, not the
       # raw bytes jstr's rules are written for, and it arrives one per line
       # inside awk where no shell function is reachable. The two agree on where
-      # it matters — `jesc` replaces exactly the C0 bytes json.sh's `tr`
-      # replaces (\001-\007 \013 \016-\037 → space), emits the same five short
-      # forms, and leaves \177 alone (#146).
-      files=$(printf '%s\n' "$status_out" | awk '
+      # it matters — `jesc` replaces the same C0 bytes json.sh's `tr` replaces
+      # (\001-\007 \013 \016-\037 → space), plus \000: `tr`'s range starts at
+      # \001 because a shell string cannot hold a real NUL byte to feed it, but
+      # `jesc` meets \000 as three literal digit characters (git's own octal
+      # spelling of the byte), never as an embedded NUL, so the exclusion that
+      # protects `tr` does not apply here. Emits the same five short forms, and
+      # leaves \177 alone (#146).
+      if jfiles=$(printf '%s\n' "$status_out" | awk '
       # git C-quoting to JSON, byte for byte. An UNQUOTED path is returned
       # untouched: git quotes for `"`, `\`, any control byte and any byte with
       # the high bit set, so what it left bare is printable ASCII with nothing
@@ -202,9 +205,11 @@ while IFS="$(printf '\t')" read -r br wt; do
       # — locale-pin-prose.test.mjs scans this file for collation ranges and a
       # range here would read as one (#612). git spells an octal escape with
       # exactly three digits, so the two lookahead reads below always land.
+      # jesc_err is a global, deliberately never reset: an unrecognized escape
+      # exits the awk program (below) before a second call could matter, so
+      # nothing here ever needs to un-set it.
       function jesc(p,   out,i,c,n) {
         if (substr(p,1,1) != "\"") return p
-        out=""
         i=2
         while (i < length(p)) {
           c=substr(p,i,1); i++
@@ -215,7 +220,14 @@ while IFS="$(printf '\t')" read -r br wt; do
             out = out (n < 32 ? " " : sprintf("%c", n))
           } else if (c=="a" || c=="v") out=out " "
           else if (index("bfnrt\\\"", c) > 0) out=out "\\" c
-          else out=out c
+          # An escape letter git 2.50.1 never emits (the #617 enumeration
+          # above is exhaustive against it) — dead code under real git, same
+          # as the header states. Fail loud rather than pass the byte through
+          # unescaped: this file has one rule above every other one, never
+          # silently report a wrong answer as a clean one, and a
+          # silently-dropped backslash here is exactly that, one dirtyFiles[]
+          # entry at a time.
+          else { jesc_err=c; return out }
         }
         return out
       }
@@ -245,8 +257,22 @@ while IFS="$(printf '\t')" read -r br wt; do
             if (i) p=substr(p,i+4)
           }
         }
-        print "\"" jesc(p) "\""
-      }' | paste -sd, -)
+        e=jesc(p)
+        # Checked here, not after the pipeline: `awk ... | paste -sd, -` would
+        # otherwise report the PASTE exit status, and paste never fails on
+        # this input — the jesc_err below would kill awk with nothing
+        # downstream ever finding out (#617 suggestion 3).
+        if (jesc_err != "") {
+          print "jesc: unrecognized C-quote escape \\" jesc_err > "/dev/stderr"
+          exit 1
+        }
+        print "\"" e "\""
+      }'); then
+        readable=true
+        files=$(printf '%s\n' "$jfiles" | paste -sd, -)
+      else
+        unknown "jesc: unrecognized C-quote escape — refusing a corrupted dirtyFiles entry"
+      fi
     else
       unknown "git rev-list/status failed — treat as unknown, not empty"
     fi
