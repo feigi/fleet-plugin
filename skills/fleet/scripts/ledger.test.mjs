@@ -2051,7 +2051,8 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // The flag that separates them already existed. What was missing is where it
 // was read: the guard sat inside runCheck(), so `check` honoured it and the
 // other four subcommands did not. It is read ahead of the dispatch now, which
-// is what docs/specs/2026-07-23-fleet-plugin-design.md:200 already documented
+// is what docs/specs/2026-07-23-fleet-plugin-design.md's `ledger.mjs` row
+// already documented
 // ("Exit 2 on any subcommand — ... `--require-file` with no ledger file") and
 // what the implementation had never matched.
 //

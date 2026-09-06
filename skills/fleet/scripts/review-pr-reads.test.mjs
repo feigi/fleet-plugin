@@ -8,8 +8,8 @@ import { lift } from "./lift.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
-// SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs:23-40`
-// and `review-pr-testcmd.test.mjs`'s lift of `resolveTestCmd`, and for the same
+// SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs`'s
+// `liftFromSource` and `review-pr-testcmd.test.mjs`'s lift of `resolveTestCmd`, and for the same
 // reason: extraction to a module would need `import` to resolve inside the
 // Workflow sandbox, and it does not. That was the documented claim until #538
 // executed it — `import()` refused for any specifier and `require` undefined,
@@ -476,8 +476,8 @@ test("the declared-exactly-once guard accepts the benign repeats of a name", () 
 // chain printed `diff is 0 lines` for an ABSENT `diffLines`, so a run where
 // `gh pr diff` produced 500 real lines and only `wc -l` failed read as an empty
 // PR and nobody looked at `wc`. Both deferred follow-ups in the spec read this
-// line for their evidence. Shape from `select-dimensions.test.mjs:211-216`:
-// match the call, then assert on what it prints.
+// line for their evidence. Shape from `select-dimensions.test.mjs`'s
+// `reviewDispatchOptions`: match the call, then assert on what it prints.
 test("the no-diff log reports the raw fields, not a guard it did not measure", () => {
   const m = CODE.match(/^log\(\n\s*usable[\s\S]*?^\);$/m);
   assert.ok(m, "the diff-decision log line is gone — `usableDiff` returning null forever is then invisible");

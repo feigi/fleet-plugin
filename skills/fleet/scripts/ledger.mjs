@@ -258,7 +258,8 @@ function save(d) {
 // absent file printed the empty payload at exit 0, byte-identical to a real
 // empty ledger on both streams, and `row --require-file` CREATED the very file
 // whose absence the flag exists to refuse (#816). One flag read in one place is
-// also what docs/specs/2026-07-23-fleet-plugin-design.md:200 already documents
+// also what docs/specs/2026-07-23-fleet-plugin-design.md's `ledger.mjs` row
+// already documents
 // — "Exit 2 on any subcommand — ... `--require-file` with no ledger file" — so
 // the implementation is what had drifted, not the contract.
 //
@@ -540,7 +541,7 @@ function runCheck() {
   // scores tie across it routinely — measured, five rows at 1.00 with the
   // caller shown three — so the cut is arbitrary among equals. A bare
   // three-row list is then indistinguishable from a complete one, which is
-  // the "no silent caps" rule `candidates.mjs:279` legislates one script over
+  // the "no silent caps" rule `candidates.mjs`'s `refuseIfCapped` legislates one script over
   // (#154). It enforces that rule by refusing outright; refusing is wrong
   // here — these rows are advisory context for a decision, not the work queue,
   // and a single tracker hit already forces exit 3. Report the COUNT withheld

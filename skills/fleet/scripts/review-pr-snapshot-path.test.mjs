@@ -672,7 +672,8 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
 // COPY lifted from the source text: it stays green while the feature
 // disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
 // resolveTestCmd once the snapshot is validated" records this exact defect for
-// resolveTestCmd and `select-dimensions.test.mjs:251-256` for the fan-out.
+// resolveTestCmd, and `select-dimensions.test.mjs`'s "review-pr.js actually
+// calls resolveDimensions, then selectDimensions, to pick the fan-out" for the fan-out.
 // Delete the `snapshotMissing(snap)` call and its `throw` in review-pr.js and
 // #140's refusal is dead code with this whole file green.
 test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
@@ -735,7 +736,7 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
 // newline of a blank line and glues the paragraphs either side of it. No pin
 // below changes verdict either way — phrase() joins on `\s+`, which already
 // spans a blank line — so this is the sibling spelling from
-// `review-pr-citation-prose.test.mjs:23`, kept as one idiom rather than two.
+// `review-pr-citation-prose.test.mjs`'s `PROSE`, kept as one idiom rather than two.
 const rationale = () =>
   between(
     SOURCE,

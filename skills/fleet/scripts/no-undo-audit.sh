@@ -120,7 +120,8 @@ base=${BASE_REF:-origin/main}
 # that could never fire and an ordering dependency that did not exist.
 #
 # `--show-toplevel` compared against `$wt` is the spelling to avoid: it needs a
-# string compare, and `$wt` arrives relative (`claim-ticket.sh:26`), through a
+# string compare, and `$wt` arrives relative (claim-ticket.sh's
+# `wt=".worktrees/$issue-$slug"`), through a
 # symlink, or under a macOS tmpdir git reports back through `/private` — three
 # false-refusal classes `--show-prefix` cannot have, comparing nothing. git's
 # `prunable` is no use either: it marks a worktree whose DIRECTORY is gone, and
@@ -149,7 +150,8 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # is no rc/emptiness shortcut for "do these two name the same tree".
 #
 # `pwd -P` puts all three in ONE spelling. Only `$wt` needs it to be correct
-# today: it arrives as the caller typed it — relative (`claim-ticket.sh:26`), or
+# today: it arrives as the caller typed it — relative (claim-ticket.sh's
+# `wt=".worktrees/$issue-$slug"`), or
 # through a symlink — and never goes through git, while git's
 # `--path-format=absolute` answers came back already resolved on every shape
 # measured, symlinked `$wt` and symlinked `.git` included (measured: dropping

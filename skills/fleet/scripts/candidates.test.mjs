@@ -174,8 +174,8 @@ test("a drop from the no-label run is tagged [unfiltered] — the one pass tag n
   // Every other run() in this file passes --require-label, so the pass-1
   // ternary always takes its `label:` arm and the `unfiltered` arm is
   // unpinned: rename it to anything and the whole suite stays green. Both
-  // documented callers do pass the flag (next-ticket/SKILL.md:15,
-  // run-team/SKILL.md's **Candidate scan** step), so this arm is reachable only by a hand-run — but
+  // documented callers do pass the flag (next-ticket/SKILL.md's `## 1. Candidates`
+  // step, run-team/SKILL.md's **Candidate scan** step), so this arm is reachable only by a hand-run — but
   // it is a supported invocation, and its tag is what tells a reader which
   // query dropped what. Two rows, not one: the spec supplies the drop line,
   // the ticket keeps the queue non-empty so this exits 0, not the empty-queue 1.
@@ -858,7 +858,8 @@ for (const v of ["=true", "=false", "="]) {
 // The control for the test above. Without it, "refuses the = form" is equally
 // satisfied by a guard that refuses `--allow-fallback` in every spelling, which
 // would break the one caller that legitimately passes it
-// (next-ticket/SKILL.md:15). Same fixtures, space-separated: the fallback has
+// (next-ticket/SKILL.md's `## 1. Candidates` step). Same fixtures,
+// space-separated: the fallback has
 // to run and ship the unfiltered row at exit 0.
 test("--allow-fallback still falls back in its space-separated spelling — the = refusal is not a blanket one", () => {
   const { status, stderr, rows } = run(
@@ -1179,8 +1180,8 @@ test("a multi-word label is quoted into the search term — unquoted, every word
 
 test("a single-word label still resolves to itself — quoting must not disturb the only label every caller passes", () => {
   // AC-3's other half, and the half a quoting fix can newly break: this term
-  // is what next-ticket/SKILL.md:15, run-team/SKILL.md's **Candidate scan**
-  // step and fleet-tick.mjs's `supply` all send, so a change that widened or narrowed it would
+  // is what next-ticket/SKILL.md's `## 1. Candidates` step, run-team/SKILL.md's
+  // **Candidate scan** step and fleet-tick.mjs's `supply` all send, so a change that widened or narrowed it would
   // empty the fleet's queue at exit 1 — #175's own defect, relocated. Measured
   // against the live repo 2026-08-17: `label:ready-for-agent` and
   // `label:"ready-for-agent"` return the same count, so the quoting is a no-op

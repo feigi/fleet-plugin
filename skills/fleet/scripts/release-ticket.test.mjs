@@ -2859,8 +2859,8 @@ test("a gitdir-less HUSK left by a failed removal does not refuse the NEXT run (
   // 1-against-1 the skip's direction is invisible to the final tally: whichever
   // of the pair it counts, registered and linked still land on 1==1, so an
   // inverted skip (count the husk, drop the live entry) passed this test just
-  // as cleanly as the correct one (measured against `release-ticket.sh:303`
-  // flipped from `[ -z "$contents" ]` to `[ -n "$contents" ]`). With one husk
+  // as cleanly as the correct one (measured against release-ticket.sh's
+  // empty-entry skip flipped from `[ -z "$contents" ]` to `[ -n "$contents" ]`). With one husk
   // against two live entries, the correct skip counts 2 registered against
   // git's 2 linked; the inverted skip counts 1 (the husk) against git's
   // unchanged 2 linked — a mismatch, and a refusal, not a silent pass.

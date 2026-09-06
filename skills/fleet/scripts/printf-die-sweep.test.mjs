@@ -94,9 +94,9 @@ const run = (cwd, script, args, extraEnv = {}) =>
 const CASES = [
   {
     // The `\c` sits in the BRANCH slot, not the sha slot. Both reach `die()`,
-    // but only the branch reaches the fetch trace at verify-sha.sh:33 — the
-    // one line in these scripts where raw argv is printed before any git
-    // command has accepted it. With the escape in the sha slot the suite was
+    // but only the branch reaches verify-sha.sh's fetch trace, `printf '$ git
+    // fetch --quiet origin %s\n' "$branch"` — the one line in these scripts
+    // where raw argv is printed before any git command has accepted it. With the escape in the sha slot the suite was
     // green over that line: the sha is read after the fetch, so it can never
     // get there. `trace` below is what pins it.
     script: "verify-sha.sh",

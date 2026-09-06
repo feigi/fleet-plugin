@@ -6,9 +6,10 @@
 //
 // The condition these pins describe is derived from the script, not from the
 // ticket's paraphrase: `allFilteredOut = rawCount > 0 && rows.length === 0`
-// (candidates.mjs:378), reassigned WHOLESALE in the fallback branch (:390) and
-// never OR'd with pass 1's value, then `rows.length === 0 ? (allFilteredOut ? 3
-// : 1) : 0` (:424). So exit 3 is "the FINAL query attempt returned rows and
+// (candidates.mjs's `allFilteredOut`), reassigned WHOLESALE in the fallback
+// branch and never OR'd with pass 1's value, then `rows.length === 0 ?
+// (allFilteredOut ? 3 : 1) : 0` at that script's `process.exitCode`
+// assignment. So exit 3 is "the FINAL query attempt returned rows and
 // dropSpecs removed every one" — a labeled pass the filter emptied that falls
 // back to a genuinely empty unfiltered pass is exit 1, which candidates.test.mjs
 // pins from the other side.

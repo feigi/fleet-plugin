@@ -438,7 +438,8 @@ test("the declared model is a bare alias, never a pinned version", () => {
 });
 
 test("the definition lists no tools — a list would drop the Agent tool", () => {
-  // references/member-lifecycle.md:7 — a `tools:` list that omits `Agent` costs
+  // references/member-lifecycle.md's "The name is what carries the `Agent`
+  // tool" — a `tools:` list that omits `Agent` costs
   // the member its delegation, silently and with no error. Omit the key.
   assert.doesNotMatch(frontmatterOf("fleet-implementer"), /^tools:/m);
 });
