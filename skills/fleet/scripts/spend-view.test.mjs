@@ -177,7 +177,7 @@ test("a success object with no cache-write but a non-zero skipped count reports 
     { kind: "note", text: "3 transcripts skipped; no spend recorded yet" });
   // Same conflation one step earlier: totals absent entirely rather than zeroed.
   assert.deepEqual(spendView({ ok: true, skipped: 1 }),
-    { kind: "note", text: "1 transcripts skipped; no spend recorded yet" });
+    { kind: "note", text: "1 transcript skipped; no spend recorded yet" });
 });
 
 test("no cache-write and nothing skipped is the one legitimate hide", () => {
@@ -217,6 +217,37 @@ test("the tool column is capped and both columns tolerate a missing list", () =>
   const bare = spendView(ok({ roles: undefined, tools: undefined }));
   assert.deepEqual(bare.roles, []);
   assert.deepEqual(bare.tools, []);
+});
+
+test("#602: a metaErrors-only run reports the corruption, not nothing", () => {
+  // Sibling of the #371 case above, one field over: a run whose transcripts all
+  // failed to produce any cache-write, but whose sidecars were corrupt rather
+  // than the transcripts themselves. Before this fix nothing routed metaErrors
+  // to the page at all, so this rendered identically to "nothing happened yet".
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 2 })),
+    { kind: "note", text: "2 meta sidecars corrupt; no spend recorded yet" });
+  // Singular wording at 1, and combined with a skip in the same tick.
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 1, metaErrors: 1 })),
+    { kind: "note", text: "1 transcript skipped; 1 meta sidecar corrupt; no spend recorded yet" });
+});
+
+test("#602: a genuinely zero run with metaErrors absent or zero is still the one legitimate hide", () => {
+  // The no-false-positive half: a normal empty run must not start reporting a
+  // corruption note just because `metaErrors` is undefined rather than 0. The
+  // absent case is pinned by "no cache-write and nothing skipped is the one
+  // legitimate hide" above; this pins the explicit-zero case specifically.
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 0 })),
+    { kind: "hidden" });
+});
+
+test("#602: a funded run's panel note names a corrupt sidecar distinctly from a skip", () => {
+  // The main-line case — reviewPct 0 from a torn reviewer sidecar, reproduced at
+  // the view layer: cache-write is non-zero (the transcript still contributed),
+  // so this is the panel branch, and the note is where the fault has to surface.
+  assert.equal(spendView(ok({ metaErrors: 1 })).note,
+    "1 meta sidecar corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
+  assert.equal(spendView(ok({ skipped: 2, metaErrors: 3 })).note,
+    "2 transcripts skipped; 3 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
 });
 
 test("an error with no usable message still renders the error panel (#959)", () => {

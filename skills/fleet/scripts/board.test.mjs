@@ -433,13 +433,21 @@ test("a meta.json that exists but cannot be read is reported, not swallowed", ()
   // real tokens from the totals — a wrong total in place of a wrong role.
   assert.equal(s.totals.cacheWrite, 1000);
   assert.equal(s.skipped, 0);
+  // #602: booked does not mean undetectable. The role/label are still wrong —
+  // "other" and the bare filename — and metaErrors is the one field on this
+  // return that says so, distinct from a genuinely zero reviewPct.
+  assert.equal(s.metaErrors, 1);
 });
 
 test("a genuinely absent meta.json — the real unnamed agent — stays silent", () => {
   // The false-positive half. The unnamed-agent path is the existsSync guard, and
   // it must not start emitting a warning: every controller-dispatched agent
   // without a sidecar would print one, every tick.
-  assert.deepEqual(withStderr(() => gatherSpend({ dir: fixture(TURN) })), []);
+  let s;
+  assert.deepEqual(withStderr(() => { s = gatherSpend({ dir: fixture(TURN) }); }), []);
+  // #602: the false-positive half of metaErrors too — an unnamed agent is
+  // normal operation, not a fault, and must not inflate the tally.
+  assert.equal(s.metaErrors, 0);
 });
 
 test("a meta.json holding valid JSON of the wrong SHAPE is a SIDECAR fault", () => {
@@ -455,6 +463,33 @@ test("a meta.json holding valid JSON of the wrong SHAPE is a SIDECAR fault", () 
   assert.match(errs[0], /agent-x\.meta\.json/);
   assert.equal(s.totals.cacheWrite, 1000);
   assert.equal(s.skipped, 0);
+  assert.equal(s.metaErrors, 1);
+});
+
+test("#602: a reviewer's torn meta sidecar is distinguishable from a genuine zero reviewPct", () => {
+  // Reproduces the issue's measured refuter probe: a reviewer + an implementer,
+  // the reviewer's sidecar torn. reviewPct still reads 0 — fixing that number is
+  // the #325 defect this ticket was explicitly deferred FROM, not this one's
+  // business — but metaErrors is the new field that says the 0 is not to be
+  // trusted, where before nothing on this return did.
+  const dir = mkdtempSync(join(tmpdir(), "spend-"));
+  const reviewerTurn = JSON.stringify({ type: "assistant", message: { id: "r1", usage: { cache_creation_input_tokens: 4000, output_tokens: 1 }, content: [] } });
+  const implTurn = JSON.stringify({ type: "assistant", message: { id: "i1", usage: { cache_creation_input_tokens: 1000, output_tokens: 1 }, content: [] } });
+  writeFileSync(join(dir, "agent-reviewer.jsonl"), reviewerTurn + "\n");
+  writeFileSync(join(dir, "agent-reviewer.meta.json"), '{"description":"Review PR 1"'); // torn mid-write
+  writeFileSync(join(dir, "agent-impl.jsonl"), implTurn + "\n");
+  writeFileSync(join(dir, "agent-impl.meta.json"), JSON.stringify({ description: "impl-1" }));
+  const s = gatherSpend({ dir });
+  assert.equal(s.reviewPct, 0); // unchanged — the fault this ticket does not fix
+  assert.equal(s.metaErrors, 1); // but now visible as a fault, not a legitimate zero
+  assert.equal(s.skipped, 0); // both transcripts still contributed their tokens
+  assert.equal(s.totals.cacheWrite, 5000);
+});
+
+test("#602: a legitimately zero reviewPct with no sidecar fault reports no metaErrors — no false positive", () => {
+  const s = gatherSpend({ dir: fixture(TURN, { description: "impl-1" }) });
+  assert.equal(s.reviewPct, 0); // genuinely no review-side spend this run
+  assert.equal(s.metaErrors, 0); // and nothing claims otherwise
 });
 
 test("a broken sidecar warns ONCE across ticks, not once per tick", () => {

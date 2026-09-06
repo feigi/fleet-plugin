@@ -318,6 +318,12 @@ function newestTranscriptMs(dir) {
 // on the transcript's FULL PATH for that same reason.
 function readAgent(file, metaFile) {
   let meta = {};
+  // Set only inside the catch below — never for the existsSync-false path,
+  // which is the ordinary unnamed agent, not a fault. This is #602's signal:
+  // `meta` staying `{}` already made the fault survive (role "other", label
+  // the bare filename), but nothing carried it past this function, so a
+  // corrupt sidecar and a genuinely absent one were the same return shape.
+  let metaFault = false;
   try {
     if (existsSync(metaFile)) {
       // JSON.parse SUCCEEDS on `null`, a bare number, a string, an array — none
@@ -333,6 +339,7 @@ function readAgent(file, metaFile) {
     }
   }
   catch (e) {
+    metaFault = true;
     warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other": ${e.message}`);
   }
 
@@ -383,7 +390,7 @@ function readAgent(file, metaFile) {
     }
   }
   const output = entries.reduce((n, e) => n + (e.output ?? 0), 0);
-  return { meta, cacheWrite, output, cacheRead, maxCtx, entries };
+  return { meta, cacheWrite, output, cacheRead, maxCtx, entries, metaFault };
 }
 
 // The `no-spend-dir` gate warns at most once per process. `dir.error` is not
@@ -442,6 +449,14 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     const agents = [];
     const toolTables = [];
     let skipped = 0;
+    // #602: a corrupt meta sidecar does not throw past readAgent — the agent is
+    // still booked, under role "other" and its bare filename as label, which is
+    // indistinguishable on the page from a genuinely unnamed agent. `skipped`
+    // cannot carry this: that count means "contributed nothing", and this agent
+    // still does. A second tally, reaching the browser the same way `skipped`
+    // does — via this return and spendView's note — is the channel #325 shipped
+    // for the transcript half of this exact fault but not the sidecar half.
+    let metaErrors = 0;
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
       const file = join(dir, f);
       // One unreadable transcript must not take the whole panel down with it.
@@ -462,6 +477,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         // throw, and readAgent's own throws land here before anything is pushed.
         // Ordering, not a guard — keep it if this block is edited again.
         const tools = attributeTools(a.entries);
+        if (a.metaFault) metaErrors++;
         agents.push({
           label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
           role: classifyRole(a.meta),
@@ -487,7 +503,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     // `ok` last, so a future field named `ok` on computeSpend's return cannot
     // silently untag a success (a later spread key always wins over an earlier one).
-    return { ...spend, tools, attributedPct, skipped, since: sinceMs, ok: true };
+    return { ...spend, tools, attributedPct, skipped, metaErrors, since: sinceMs, ok: true };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
