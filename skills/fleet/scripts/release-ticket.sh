@@ -438,13 +438,6 @@ stray=$(printf '%s\n' "$wt_list" |
 has_branch=false
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && has_branch=true
 
-# A mistyped <slug>/<type> names a branch that does not exist, and without this
-# the run would drop the label off a ticket whose real claim is untouched —
-# invisible to candidates.mjs and still in-flight. Refuse instead of guessing.
-if [ "$has_branch" = false ] && [ -z "$wt" ] && [ -z "$stray" ]; then
-  die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
-fi
-
 # Every string that reaches the JSON goes through `jstr` from json.sh. <slug>
 # and <type> are caller-supplied and git's own stderr is quoted back verbatim,
 # so without it a single `"` or backslash anywhere emits a payload the caller
@@ -933,6 +926,37 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
   elif ! gone "$orphan"; then
     block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
+  elif [ "$has_branch" = false ] && [ -z "$blockers" ]; then
+    # A mistyped <slug>/<type> names a branch that does not exist, and without
+    # this die the run would drop the label off a ticket whose real claim is
+    # untouched — invisible to candidates.mjs and still in-flight. Refuse
+    # instead of guessing.
+    #
+    # Deferred past the orphan probe above (#624) rather than fired the moment
+    # `has_branch` reads false: this exact input — no branch, no worktree, no
+    # stray — is also what #208's knock-on leaves behind, a claim whose branch
+    # a prior half-release already deleted with its directory still on disk.
+    # Fired unconditionally, that state got the same "check the <slug> and
+    # <type> arguments" prose as a genuine typo, naming the wrong cause over a
+    # directory sitting right there with a real remedy. The orphan probe above
+    # answers that question first, so this die runs only once it has had its
+    # say.
+    #
+    # The `-z "$blockers"` conjunct is load-bearing, not dead weight (a prior
+    # round of this comment argued the opposite and was wrong): `$blockers` can
+    # be non-empty here even though this arm's own occupied/gone siblings above
+    # did not fire. `git checkout --orphan release/5-foo` on the MAIN checkout
+    # points HEAD at refs/heads/release/5-foo before any commit exists, so
+    # `main_branch` (read off `git worktree list --porcelain`) already equals
+    # `refs/heads/$branch` and the EARLIER, unrelated "branch ... is checked
+    # out in the main checkout" guard above has already `block`ed — while
+    # `git rev-parse --verify --quiet refs/heads/$branch` fails on the unborn
+    # ref, so `has_branch` still reads false (measured). Without this guard the
+    # die fires anyway, appending its own usage-error prose to a receipt that
+    # already named the real cause, and exiting 2 instead of the correct
+    # blocked-at-1 verdict. Guarding on `$blockers` lets that earlier finding
+    # stand as the only word on an otherwise silent run.
+    die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
   fi
 fi
 

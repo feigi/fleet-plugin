@@ -2096,6 +2096,57 @@ test("the dry run and --apply report an orphaned directory identically", (t) => 
   assert.equal(existsSync(c.wt), true, "and --apply removed nothing either");
 });
 
+test("a branch already gone does not shadow the orphan sitting behind it (#624)", (t) => {
+  // The state #208's pre-fix knock-on left: a run that deleted the branch and
+  // dropped the label but never cleared the directory, because its
+  // registration was already gone before that run even started. The next
+  // release then had no branch and no registered worktree of its own — the
+  // same input the "no branch and no worktree" die also answers for a
+  // mistyped slug (see "a mistyped slug refuses...", above) — so the die fired
+  // first and named the wrong cause, over a directory with a real remedy
+  // sitting right there.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  orphan(r, c);
+  git(r.w, "branch", "-D", c.branch);
+
+  const dry = release(r, c, { apply: false });
+  const applied = release(r, c);
+
+  for (const { code, json } of [dry, applied]) {
+    assert.equal(code, 1, "blocked with a receipt, not the usage-error die");
+    assert.equal(json.released, false);
+    assert.equal(json.blockers.length, 1, `only the orphan can fire: ${json.blockers}`);
+    assert.match(json.blockers[0], /has no registration/);
+    assert.match(json.blockers[0], /remove the directory by hand/);
+    assert.doesNotMatch(json.blockers[0], /check the <slug> and <type> arguments/);
+  }
+  assert.deepEqual(dry.json.blockers, applied.json.blockers, "the same blocker, word for word");
+  assert.equal(existsSync(c.wt), true, "nothing here touches the directory");
+});
+
+test("an orphan branch checked out on the main checkout does not also trip the usage-error die", (t) => {
+  // `git checkout --orphan release/5-foo` on the MAIN checkout points HEAD at
+  // refs/heads/release/5-foo before any commit exists on it. `main_branch`
+  // (read off `git worktree list --porcelain`) already equals
+  // `refs/heads/$branch`, so the earlier "branch ... is checked out in the
+  // main checkout" guard blocks — but `git rev-parse --verify --quiet` fails
+  // on the unborn ref, so `has_branch` still reads false. That contradicts the
+  // "mutually exclusive" reasoning a prior round of the `has_branch = false`
+  // guard relied on to drop its `-z "$blockers"` conjunct: both fire, and
+  // without the conjunct the die appends its own usage-error prose to a
+  // receipt that already named the real cause, and exits 2 instead of 1.
+  const r = repo(t);
+  git(r.w, "checkout", "-q", "--orphan", "release/5-foo");
+
+  const { code, json } = release(r, { args: ["5", "foo", "release"] });
+  assert.equal(code, 1, "blocked with a receipt, not the usage-error die");
+  assert.equal(json.released, false);
+  assert.equal(json.blockers.length, 1, `only the real blocker can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /checked out in the main checkout/);
+  assert.doesNotMatch(json.blockers[0], /check the <slug> and <type> arguments/);
+});
+
 test("a clean claim is not mistaken for an orphaned directory", (t) => {
   // The other half of the new precondition: it must not refuse a state that is
   // fine. A healthy claim's worktree sits at exactly the path the orphan probe
