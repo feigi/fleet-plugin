@@ -97,10 +97,10 @@ for (const f of PINNED) {
 // range, the case map for `-i`/`toupper`, class membership for `[:space:]`.
 const SENSITIVE = [
   [/\[:[a-z]+:\]/, "POSIX character class"],
-  [/\[\^?!?[^\]\s]*[A-Za-z0-9]-[A-Za-z0-9][^\]\s]*\]/, "collation range"],
-  [/(^|[|;&(]|\$\()\s*(LC_ALL=\S+\s+)?sort\b/, "sort"],
+  [/\[[^\]]*[A-Za-z0-9]-[A-Za-z0-9][^\]]*\]/, "collation range"],
+  [/\bsort\b/, "sort"],
   [/\btr\b[^|;&]*[A-Za-z0-9]-[A-Za-z0-9]/, "tr range"],
-  [/\bgrep\b(\s+-\S+)*\s+-[A-Za-z]*i\b/, "case-insensitive grep"],
+  [/\bgrep\b(\s+-\S+)*\s+(-[A-Za-z]*i[A-Za-z]*|--ignore-case)\b/, "case-insensitive grep"],
   [/\b(toupper|tolower)\s*\(/, "case folding"],
   [/\$\{[A-Za-z_]\w*[\^,]/, "shell case conversion"],
 ];
@@ -153,8 +153,9 @@ for (const f of PINNED) {
 // mutant is appended at its end — nowhere a reader of the pin comment looks,
 // which is the whole reason the real one survived review.
 test("the scan catches a construct planted far below the comment denying it", () => {
-  const lines = read("reap.sh").split("\n");
-  assert.deepEqual(localeSensitive(lines.join("\n")), []);
+  const source = read("reap.sh");
+  assert.deepEqual(localeSensitive(source), []);
+  const lines = source.split("\n");
 
   for (const [mutant, what] of [
     ['back=${back%"${back##*[![:space:]]}"}', "POSIX character class"],
@@ -163,6 +164,7 @@ test("the scan catches a construct planted far below the comment denying it", ()
     ["upper=$(printf '%s' \"$b\" | tr a-z A-Z)", "tr range"],
     ['printf %s "$b" | grep -qi fix', "case-insensitive grep"],
     ["printf '%s' \"$b\" | awk '{print toupper($0)}'", "case folding"],
+    ["x=${x^}", "shell case conversion"],
   ]) {
     const hits = localeSensitive([...lines, mutant].join("\n"));
     assert.deepEqual(hits.map((h) => h.what), [what], `${mutant} went unseen`);
