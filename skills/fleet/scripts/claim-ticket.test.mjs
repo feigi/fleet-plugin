@@ -178,6 +178,46 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
   assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
 });
 
+// #600: a filename is bytes, and the two tools that read find's output are told
+// which only by the ambient locale. Under en_US.UTF-8 with a name holding \377,
+// measured on macOS: `grep` drops that line silently — a green over a smaller
+// suite, #582's own false-green — and BSD `sed` abandons the whole stream ("RE
+// error: illegal byte sequence", still exit 0), which empties $files and refuses
+// a suite that is right there. `LC_ALL=C` on each command is the fix.
+//
+// Two stubs, because neither half of the fixture can be built for real. APFS
+// refuses the name outright (`Illegal byte sequence`), so no filesystem this
+// suite can create holds it — `find` is stubbed to emit what a filesystem that
+// does would. And node cannot be asked what it ran, so it is stubbed to report
+// how many arguments survived discovery: `--test` plus both paths is 3, and the
+// unpinned runner reaches this assertion with none of them.
+//
+// LC_ALL is set on the child rather than inherited: the ambient locale is the
+// hostile input here, so pre-seeding it is what makes the test discriminate at
+// all instead of depending on the operator's environment.
+//
+// THE CEILING, inherited from locale-pin-prose.test.mjs: this kills its mutant
+// on macOS only. GNU grep and sed are byte-oriented and pass every line through
+// whatever the locale says, so on ubuntu-latest — the one platform ci.yml runs —
+// deleting both pins keeps this test green.
+test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-locale-"));
+  // The byte cannot be spelled in JS — node re-encodes every string as UTF-8 on
+  // the way to argv, turning `\xFF` into the two valid bytes `\303\277`. POSIX
+  // `printf` interprets the octal escape, so the fixture stays pure ASCII and
+  // the shell makes the byte.
+  writeFileSync(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n", { mode: 0o755 });
+  writeFileSync(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n', { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}`, LC_ALL: "en_US.UTF-8" },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout, "3", "discovery lost a path holding an invalid UTF-8 byte");
+});
+
 // Why the trailing slash, and why not `-L`: claim-ticket.sh, above `found=`.
 // The symlink is written into the worktree rather than through `repo()` because
 // the runner only ever stats a path in its cwd — whether a commit or a local
