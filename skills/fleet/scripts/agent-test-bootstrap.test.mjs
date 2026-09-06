@@ -5,10 +5,12 @@
 // root that materializes the CURRENT runner from the one emitter and execs it,
 // rather than carrying a 24 KB copy that would freeze at the commit adding it.
 //
-// Four properties, each pinning a failure the change would otherwise buy:
+// Six properties, each pinning a failure the change would otherwise buy:
 // generate-only must not claim, it must emit the claim path's own bytes, the
-// claim path must not overwrite the tracked bootstrap, and the bootstrap must
-// read its isolation issue from the worktree it stands in.
+// claim path must not overwrite the tracked bootstrap, the runner must never
+// be written over a path git tracks, an untracked destination outside any
+// repo must still get its runner, and the bootstrap must read its isolation
+// issue from the worktree it stands in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -104,6 +106,40 @@ test("a claim leaves a runner the checkout already tracks alone", () => {
     "",
     "the claim left the worktree dirty — `git worktree remove` will refuse it and the release strands",
   );
+});
+
+test("the runner is never written over a path git tracks", () => {
+  // #1262. The test above pins the claim path's own condition; this pins the
+  // DAMAGE, which is what every route to it shares. `--write-runner` reads no
+  // condition at all — $dest is caller-supplied and the `-e` test is skipped
+  // for it by design — so a dest that happens to be tracked was clobbered
+  // silently, leaving the modified tracked path `git worktree remove` refuses.
+  // That is the shape #1262 reported: a claim run from a checkout whose
+  // `claim-ticket.sh` predated the `-e` test overwrote the bootstrap
+  // `git worktree add` had just checked out, and nothing said so.
+  const committed = "#!/bin/sh\n# tracked bootstrap\nexit 7\n";
+  const { dir } = repo({ "agent-test": committed });
+  const dest = join(dir, "agent-test");
+  const r = spawnSync("sh", [SCRIPT, "--write-runner", dest, "42"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /is tracked/);
+  assert.equal(readFileSync(dest, "utf8"), committed, "the tracked runner was overwritten");
+});
+
+test("an untracked destination outside the repo still gets its runner", () => {
+  // The refusal above fires on established trackedness, never on a question it
+  // could not put. $dest need not live in the repo the cwd is in, and a `git`
+  // that answers "no repository" there must not be read as "tracked" — that
+  // direction would refuse the emission outright, which is every run of the
+  // bootstrap after such a move rather than a corrupted file.
+  const { dir } = repo();
+  const outside = mkdtempSync(join(tmpdir(), "bootstrap-outside-"));
+  const dest = join(outside, ".agent-test.sh");
+  const r = spawnSync("sh", [SCRIPT, "--write-runner", dest, "42"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(readFileSync(dest, "utf8"), /^#!\/bin\/sh\n/);
 });
 
 test("the bootstrap reads its isolation issue from the worktree it stands in", () => {

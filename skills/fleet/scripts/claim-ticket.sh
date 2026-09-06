@@ -342,11 +342,76 @@ else
   # the bootstrap that asks this script for the current runner anyway, so the
   # worktree gets a fresher one than this branch could have written. #55
   #
-  # `--write-runner` is exempt — $dest is the artifact it was asked to produce,
-  # and refusing to overwrite it would refuse every run after the first.
+  # `--write-runner` is exempt from THAT test — $dest is the artifact it was
+  # asked to produce, and refusing to overwrite it would refuse every run after
+  # the first — but not from the tracked-path refusal below.
+  #
+  # Existence is the wrong question to be the only one asked, because it
+  # answers about the caller's intent rather than about the damage. The damage
+  # is a MODIFIED TRACKED path, and every route to it routes through this one
+  # write: the claim path when its own condition is wrong, and `--write-runner`
+  # with a caller-supplied $dest, which no guard reads at all today. #1262 is
+  # what that costs — a claim run from a checkout whose `claim-ticket.sh`
+  # predated the `-e` test overwrote the bootstrap `git worktree add` had just
+  # checked out, and the corruption was silent until three implementers each
+  # diagnosed it by hand. Asking git makes the same clobber a refusal.
+  #
+  # Fail-open when git cannot answer, unlike the `gone()` pair above, and the
+  # asymmetry is deliberate: those guard a CLAIM, where an unmeasured path is a
+  # worktree that may already exist, while this one guards a WRITE whose only
+  # hazard is trackedness. $dest need not sit in the repo the cwd is in, so
+  # `git -C` outside one is an ordinary input rather than a fault, and nothing
+  # untracked is lost by writing. The refusal fires on trackedness this
+  # established, never on a question it could not put.
   if [ "$writeonly" = false ] && [ -e "$runner" ]; then
     printf '    %s already present — tracked runner, checked out with the worktree; left as is\n' "$runner" >&2
   else
+    # Gated to --write-runner only. On the claim path $runner is always the
+    # worktree's own agent-test — freshly checked out by `git worktree add`
+    # whenever it is tracked at all, so the `-e` branch above already catches
+    # every real case; reaching this far on the claim path means an untracked
+    # path, and firing a `die` here would land AFTER the label, the worktree
+    # and the install already happened — a half-claim needing manual
+    # release-ticket.sh, for a check the claim path gets no protection from
+    # (`--write-runner`'s $dest has no such checkout to shortcut it, so it's
+    # the one path this guard actually protects). #1262
+    if [ "$writeonly" = true ]; then
+      runner_dir=$(dirname -- "$runner")
+      runner_base=$(basename -- "$runner")
+      # `:(literal)` pins the pathspec to $runner_base's own literal text.
+      # Bare, it is a pathspec, not a filename — a $dest whose basename holds
+      # `*`, `?` or `[` matched a DIFFERENT tracked file sharing that
+      # directory and answered about that file's trackedness instead of this
+      # one's (measured — 'agent-test-?' matched a real 'agent-test-x').
+      #
+      # The exit STATUS alone cannot tell a real git failure apart from the
+      # two states this guard fails open on — a corrupted or unreadable index
+      # exits 128, the same code "not a git repository" does — so both sides
+      # of this branch route through the message git itself printed, captured
+      # with stdout discarded and stderr kept (`2>&1 >/dev/null`, order
+      # matters): the ls-files call this replaced folded errors into rc alone
+      # and could not distinguish "genuinely untracked" from "git could not
+      # tell" — the latter silently read as the former, which is #1262's own
+      # clobber through a different door (a live git fault standing in for
+      # "outside any repo").
+      if trackedmsg=$(git -C "$runner_dir" ls-files --error-unmatch -- ":(literal)$runner_base" 2>&1 >/dev/null); then
+        die "$runner is tracked — writing the generated runner over it would leave a modified tracked path, which \`git worktree remove\` refuses and every release would then strand on; refusing"
+      fi
+      case "$trackedmsg" in
+        # $runner_dir is not inside any repository at all — $dest need not
+        # share a repo with the cwd, so this is an ordinary input, not a
+        # fault, and nothing untracked is lost by writing.
+        *'not a git repository'*) ;;
+        # A real repo, ':(literal)' pathspec, genuinely no match — this is
+        # what "untracked" actually looks like once the wildcard hazard above
+        # is closed.
+        *'did not match any file'*) ;;
+        # Anything else is git unable to answer at all — a corrupted or
+        # locked index, a permission fault — and folding that into "untracked"
+        # is the exact silent clobber #1262 exists to refuse.
+        *) die "could not determine whether $runner is tracked — refusing rather than risk overwriting a tracked path; git said: $trackedmsg" ;;
+      esac
+    fi
 
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
