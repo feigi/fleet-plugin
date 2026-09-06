@@ -1115,11 +1115,15 @@ config, but that strictness cuts both ways and the size tier trims again on top.
 Measured: a docs PR that also adds one test file is profile `tests-only` and runs
 **three** (correctness+tests+comments), not six; a docs+config diff too big for
 the size tier runs correctness+comments without being docs-only at all; and any
-`single-file` or `small` profile trims to correctness+silent-failure, keeping
-comments only when a docs file is in the diff and tests only when a test file is.
+`single-file` or `small` profile trims to correctness+silent-failure+comments,
+keeping tests only when a test file is in the diff. `comments` is on that floor
+unconditionally since #218 — it used to need a docs FILE, and `classify()` scores
+any code extension `src` before it checks docs, so five production PRs whose whole
+substance was prose inside a `.js`/`.mjs`/`.sh` comment scored `docs: 0` and ran
+without the one specialist that fit them, `dimensionsUnrun` empty every time.
 That floor holds **regardless of `hasSrc`** (#236) — a one-file `.yml` or
-`.github/` shell change runs correctness+silent-failure, not correctness alone,
-and a *small* docs+config diff runs all three. It is the size **tier's** floor,
+`.github/` shell change gets silent-failure too, not correctness alone.
+It is the size **tier's** floor,
 so `tests-only` outranks it: that profile is assigned ahead of
 `single-file`/`small`, so a no-src diff that also touches a test file gets no
 silent-failure-hunter (#739). `single-file` means one file at **any** size, so a

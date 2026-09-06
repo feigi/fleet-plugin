@@ -108,8 +108,37 @@ test("a production diff runs everything, less `tests` when the diff has none", (
 
 // --- Size tier. `profile` is assigned through an else-if chain in computeStats,
 // --- so these values are mutually exclusive and cannot race `docsOnly`.
-test("a single-file source diff trims to correctness + silent-failure", () => {
-  assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), ["correctness", "silent-failure"]);
+// #218: `comments` is part of the size-tier floor, so this row carries it. This
+// single `.js` file whose whole substance is prose scores `docs: 0`, because
+// `classify()` returns `src` for any code extension before it checks `isDocs`
+// — one shape of the diffs #218 measured in production (four of them, below).
+test("a single-file source diff trims to correctness + silent-failure + comments", () => {
+  assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), [
+    "correctness",
+    "silent-failure",
+    "comments",
+  ]);
+});
+
+// The measured instances, as file lists, driven through the real classifier: a
+// comment-only `.mjs` (#682), a comment-only `.mjs` (#710), a `.sh` + its test
+// (#1091), and a majority-comment `.sh` + test at `small` (#1172). Every one
+// scores `docs: 0` and every one now keeps `comments`. Under the old
+// `stats.kinds?.docs !== 0` carve-out all four returned without it.
+test("the diffs #218 measured in production all keep comments — none of them has a docs file", () => {
+  for (const files of [
+    [f("skills/fleet/scripts/board.mjs", 1, 1)],
+    [f("skills/fleet/scripts/arg.mjs", 2, 1)],
+    [f("skills/fleet/scripts/no-undo-audit.sh", 1, 1), f("skills/fleet/scripts/no-undo-audit.test.mjs", 1, 1)],
+    [f("skills/fleet/scripts/claim-ticket.sh", 7, 0), f("skills/fleet/scripts/claim-ticket.test.mjs", 20, 2)],
+  ]) {
+    const stats = computeStats(files);
+    assert.equal(stats.kinds.docs, 0, `${files.map((x) => x.path)} unexpectedly scores a docs file`);
+    assert.ok(
+      dimensionKeys(files).includes("comments"),
+      `${files.map((x) => x.path)} lost the comments dimension`,
+    );
+  }
 });
 
 // The size-tier floor OUTRANKS the hasSrc guard for `silent-failure` (#236). A
@@ -119,11 +148,19 @@ test("a single-file source diff trims to correctness + silent-failure", () => {
 // `dimensionsRun: ["correctness"]`. A CI workflow diff is mostly shell, which is
 // what the silent-failure hunter is for, and it is where this fleet got bitten.
 test("a single-file config diff keeps the silent-failure floor", () => {
-  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), ["correctness", "silent-failure"]);
+  assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), [
+    "correctness",
+    "silent-failure",
+    "comments",
+  ]);
   // Shell under `.github/` is the ticket's other named case, and it classifies
   // `config` for the same reason. A `.sh` ANYWHERE ELSE is classify()'s `src`
   // residue, so it always had silent-failure and is not part of this class.
-  assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), ["correctness", "silent-failure"]);
+  assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), [
+    "correctness",
+    "silent-failure",
+    "comments",
+  ]);
 });
 
 // AC-2: `small` is the other size-tier profile and gets the same floor. Two
@@ -132,7 +169,7 @@ test("a single-file config diff keeps the silent-failure floor", () => {
 test("a small config-only diff keeps the silent-failure floor", () => {
   assert.deepEqual(
     dimensionKeys([f(".github/workflows/ci.yml", 2, 1), f(".github/workflows/release.yml", 2, 1)]),
-    ["correctness", "silent-failure"],
+    ["correctness", "silent-failure", "comments"],
   );
 });
 
@@ -168,54 +205,32 @@ test("docsOnly returns before the size tier — the floor never reaches a docs d
   );
 });
 
-test("a small multi-file source diff trims to correctness + silent-failure", () => {
+test("a small multi-file source diff trims to correctness + silent-failure + comments", () => {
   assert.deepEqual(
     dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/b.mjs", 5, 4)]),
-    ["correctness", "silent-failure"],
-  );
-});
-
-// `comments` survives the size trim on any diff touching a docs-CLASSIFIED FILE,
-// not just a `docsOnly` one. Both rows below are profile `small` with `docsOnly`
-// FALSE — one config file or one source file is enough to falsify it — so before
-// the carve-out they lost comment-analyzer entirely. Key ordering follows
-// DEFAULT_DIMENSIONS because `.filter()` preserves it. Prose living in a source
-// comment is NOT covered: that scores `docs: 0`. See #218.
-//
-// The docs+config row carries `silent-failure` since #236 — hasSrc is false, but
-// `small` is a size-tier profile and the floor is unconditional on it. The ticket
-// names this row only in passing, through `small`; it is the one row the floor
-// widens beyond the config-only cases above.
-test("a small mixed docs+config diff keeps comments, which docsOnly alone would miss", () => {
-  assert.deepEqual(
-    dimensionKeys([f("README.md", 5, 3), f(".github/workflows/ci.yml", 2, 1)]),
-    ["correctness", "silent-failure", "comments"],
-  );
-});
-
-test("a small mixed docs+source diff keeps comments alongside silent-failure", () => {
-  assert.deepEqual(
-    dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("README.md", 5, 5)]),
     ["correctness", "silent-failure", "comments"],
   );
 });
 
 // Same carve-out shape for `tests`: when the diff's substance IS a test, the
 // mutation-discrimination check is the one it most needs. Without this the row
-// below trims to correctness + silent-failure.
+// below trims to whatever else the size tier keeps (`SIZE_TIER_DIMS`) — not
+// restated here as a count, which is exactly what went stale last time (#218).
 test("a small diff that adds a test keeps the tests dimension", () => {
   assert.deepEqual(
     dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/a.test.mjs", 5, 5)]),
-    ["correctness", "silent-failure", "tests"],
+    ["correctness", "silent-failure", "tests", "comments"],
   );
 });
 
 // Fail DIRECTION, not a matrix row. The blob reaches review-pr.js relayed by an
-// agent, so a field can go missing without failing JSON.parse. Absence must
-// widen — `!== 0` — matching the `=== true` guards. Under `> 0` this row loses
-// comments, making a dropped field the one input that narrows coverage.
-test("a size-tier stats blob missing `kinds` keeps comments rather than dropping it", () => {
-  const stats = { profile: "small", docsOnly: false, hasSrc: true, hasTests: false };
+// agent, so a field can go missing without failing JSON.parse, and absence must
+// widen rather than narrow — the `=== true` guards elsewhere in selectDimensions
+// exist for that. `comments` no longer reads any field at all since #218, so what
+// this row pins is the surviving half: `tests` is `=== true`, so a blob without
+// `hasTests` loses it, while `comments` cannot be lost to a missing field.
+test("a size-tier stats blob missing `kinds` and `hasTests` still keeps comments", () => {
+  const stats = { profile: "small", docsOnly: false, hasSrc: true };
   assert.deepEqual(
     selectDimensions(DEFAULT_DIMENSIONS, stats).map((d) => d.key),
     ["correctness", "silent-failure", "comments"],

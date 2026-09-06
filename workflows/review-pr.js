@@ -139,8 +139,9 @@ const VERDICT_SCHEMA = {
 // A weak `tests`/`comments`/`types` pass leaves something a later run or a
 // reader still catches; a refute pass kills false POSITIVES and never false
 // NEGATIVES, so recoverability is the whole of the argument. `correctness` and
-// `silent-failure` miss silently and permanently — the same pair, for the same
-// reason, that `SIZE_TIER_DIMS` keeps. `simplify` is omitted for the vendored-
+// `silent-failure` miss silently and permanently — the pair `SIZE_TIER_DIMS`
+// keeps for that reason; `comments` sits beside them there for a different one
+// (#218), and is downgraded. `simplify` is omitted for the vendored-
 // pin reason above instead; it does draw 0 refuters, but VIA SEVERITY — its
 // prompt directs every finding to `suggestion`, which is budgeted 0 — and the
 // size tier is where its cost is paid.
@@ -468,19 +469,22 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // is `loc < 30`, both already named once in diff-stats.mjs's computeStats — this
 // reads the profile it already computed rather than re-deriving a size.
 const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
-// A trimmed diff still gets the two dimensions whose misses are silent and
-// permanent — the same pair, for the same reason, that the model rule above
-// `DEFAULT_DIMENSIONS` declines to downgrade. Four are dropped: `tests`,
-// `comments`, `types`, `simplify`. NOT because those four alone face refuters
-// (#221) — `verifiersFor` takes a severity and nothing else, so the two kept
-// here draw exactly the refuters the dropped ones do. A miss in the first three
-// is RECOVERABLE: a later run or a reader still catches it. `simplify` is the
-// only one of the four the model rule leaves un-downgraded — its `opus` pin is
-// vendored — so this tier is where its cost is paid instead. Two of the four,
-// `comments` and `tests`, are carved back in below when the diff's own substance
-// is theirs; `types` and `simplify` never are. `single-file` is `files === 1` at
-// ANY size, so this trims a one-file rewrite too — not only a short diff.
-const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure"]);
+// A trimmed diff keeps `correctness` and `silent-failure`, whose misses are
+// silent and permanent — the same pair, for the same reason, that the model rule
+// above `DEFAULT_DIMENSIONS` declines to downgrade — and `comments`, which is
+// here for a different reason (#218) and IS downgraded: a small diff is the only
+// shape whose entire substance can be prose, and nothing in this workflow's
+// return value says so when it is. Three are dropped: `tests`, `types`,
+// `simplify`. NOT because those face refuters (#221) — `verifiersFor` takes a
+// severity and nothing else, so the three kept here draw exactly the refuters the
+// dropped ones do. A miss in `tests` or `types` is RECOVERABLE: a later run or a
+// reader still catches it. `simplify` is the only one of the three the model rule
+// leaves un-downgraded — its `opus` pin is vendored — so this tier is where its
+// cost is paid instead. `tests` is carved back in below when the diff's own
+// substance is a test; `types` and `simplify` never are. `single-file` is
+// `files === 1` at ANY size, so this trims a one-file rewrite too — not only a
+// short diff.
+const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure", "comments"]);
 
 // Scale the fan-out to the diff. The fleet docs prescribe this ("two or three
 // for annotation-only or single-file; the full set for production") but nothing
@@ -547,33 +551,27 @@ function selectDimensions(all, stats) {
   // floor. Kept as a filter regardless: it is the form that stays correct without
   // re-proving that equivalence every time a guard is added above.
   //
-  // `comments` survives the size trim whenever the diff touches a docs-CLASSIFIED
-  // FILE. The docsOnly branch above keeps comment-analyzer because the failure
-  // mode of prose is a wrong CLAIM — four correction tickets each shipped a fresh
-  // wrong one — but `docsOnly` is strict: a single config or src file in the same
-  // diff falsifies it, and the size trim then dropped `comments` outright. That
-  // left the mixed prose PR — this repo's modal PR, and its most defect-prone
-  // category — with zero comment coverage.
+  // `comments` sits in SIZE_TIER_DIMS unconditionally (#218). It used to be
+  // carved in here on `stats.kinds?.docs !== 0` — a FILE test, not a prose test,
+  // because `classify()` scores any code extension `src` before it checks
+  // `isDocs`. A comment-only edit to one `.js` file therefore scored `docs: 0`
+  // and lost comment coverage precisely where added prose was the whole
+  // deliverable, and `dimensionsUnrun` stayed EMPTY because the trim is by
+  // design — so the payload read as full coverage. Measured five times in
+  // production: #682, #710, #1091, #1223 and #843, all correction-class and all
+  // 100%-comment, plus #1172, where five of the seven lines added to the src file
+  // were comment and `docs` was still 0. Every one is a size-tier profile, so the
+  // profile is the discriminator that covers all of them; a `linesOfComment`
+  // signal out of diff-stats.mjs would too, at more cost. The price is one extra
+  // specialist on a small diff that happens to add no prose.
   //
-  // It is a file test, NOT a prose test: `classify()` scores any code extension
-  // `src` before it checks isDocs, so a comment-only edit to one `.js` file is
-  // `docs: 0` and still loses comment coverage. Widening that is #218.
-  //
-  // `!== 0`, not `> 0`, matching the `=== true` guards above: absence must not be
-  // the one value that NARROWS coverage. A blob relayed without `kinds` keeps
-  // comment-analyzer rather than silently dropping it.
-  //
-  // `tests` gets the same carve-out on the same reasoning: when the diff's own
-  // substance IS a test, mutation-discrimination is the check it most needs, and
-  // a vacuous pin shipping green is this repo's recurring defect. Trimming the
-  // test analyzer off a 20-loc test PR drops coverage exactly where it counts.
+  // `tests` keeps a file-kind carve-out: when the diff's own substance IS a test,
+  // mutation-discrimination is the check it most needs, and a vacuous pin shipping
+  // green is this repo's recurring defect. Trimming the test analyzer off a 20-loc
+  // test PR drops coverage exactly where it counts. `=== true`, matching the
+  // guards above: only an affirmative boolean narrows.
   if (SIZE_TIER_PROFILES.has(stats.profile))
-    dims = dims.filter(
-      (d) =>
-        SIZE_TIER_DIMS.has(d.key) ||
-        (d.key === "comments" && stats.kinds?.docs !== 0) ||
-        (d.key === "tests" && stats.hasTests === true),
-    );
+    dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "tests" && stats.hasTests === true));
   return dims.length ? dims : all;
 }
 
