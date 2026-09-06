@@ -84,7 +84,19 @@ function mergeNoFf(w, head, msg) {
 
 function prove(cwd, pre, post, merge) {
   const r = spawnSync("sh", [SCRIPT, pre, post, merge], { cwd, env: ENV, encoding: "utf8" });
-  return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
+  const json = r.stdout.trim() ? JSON.parse(r.stdout) : null;
+  // #18. The `gates` object's entire contract: `proved` is true exactly when
+  // every value in it is true. Checked here rather than in one test of its own,
+  // so every fixture in this file — each verdict, each attack — pins it, and a
+  // gate that stops being load-bearing cannot be added or dropped in silence.
+  if (json) {
+    assert.equal(
+      json.proved,
+      Object.values(json.gates).every((v) => v === true),
+      "proved must be exactly the conjunction of the gates object",
+    );
+  }
+  return { code: r.status, json, stderr: r.stderr };
 }
 
 test("already-current merge (pre == post, behind_by=0) proves true", (t) => {
@@ -112,6 +124,17 @@ test("already-current merge (pre == post, behind_by=0) proves true", (t) => {
   // makes pre — the same commit — an ancestor too. Legs 1 and 2 are jointly
   // unsatisfiable when pre == post, which is why leg 1 is dropped on this path.
   assert.equal(json.preIsAncestor, true);
+  // #18: and that true reading sits next to proved:true without contradiction
+  // only because it is an observation here, not a gate. Its ABSENCE from `gates`
+  // is the machine-readable form of "leg 1 was dropped on this path" — the thing
+  // a consumer previously had to infer from `proofPath`.
+  assert.deepEqual(json.gates, {
+    postIsAncestor: true,
+    secondParentIsHead: true,
+    exactlyTwoParents: true,
+    headWasCurrent: true,
+  });
+  assert.ok(!("preDidNotLand" in json.gates), "leg 1 is not a gate when pre == post");
 });
 
 test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
@@ -139,6 +162,16 @@ test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
     { pre: json.preIsAncestor, post: json.postIsAncestor, second: json.secondParent },
     { pre: false, post: true, second: post },
   );
+  // #18. Leg 1 IS a gate here, and the gate reads true while the observation it
+  // is derived from reads false — the polarity a bare list of gate NAMES could
+  // not carry, and the reason `gates` holds booleans rather than field names.
+  assert.deepEqual(json.gates, {
+    preDidNotLand: true,
+    postIsAncestor: true,
+    secondParentIsHead: true,
+    exactlyTwoParents: true,
+    headWasCurrent: true,
+  });
   assert.equal(code, 0);
 });
 
@@ -209,6 +242,9 @@ test("ATTACK: wrong head — merge second parent is not the verified-green head"
     "every other gate must pass, so only leg 3 can explain the disproof",
   );
   assert.equal(json.secondParent, other);
+  // Leg 3 is the only false gate, so the object names the cause on its own —
+  // without the caller diffing `secondParent` against a head it has to remember.
+  assert.equal(json.gates.secondParentIsHead, false);
   assert.equal(json.proved, false);
   assert.equal(code, 1);
 });
@@ -394,6 +430,10 @@ test("ATTACK: octopus merge dragging in an unreviewed third parent proves false"
 
   const { code, json } = prove(w, head, head, merge);
   assert.equal(json.parentCount, 3);
+  // The gate, not just the observation: `parentCount >= 2` is a precondition
+  // that dies at exit 2, while `== 2` is what decides this verdict, and only the
+  // second one belongs in `gates`.
+  assert.equal(json.gates.exactlyTwoParents, false);
   assert.equal(json.proved, false, "only a two-parent merge can be proved");
   assert.equal(code, 1);
 });

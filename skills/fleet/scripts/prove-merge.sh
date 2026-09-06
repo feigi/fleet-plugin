@@ -31,6 +31,25 @@
 # the only place currency is proven". Both paths also require exactly two parents,
 # so an octopus merge cannot drag an unreviewed third parent along behind a second
 # parent that looks right.
+#
+# The payload splits the checks into three kinds, because a flat object could not
+# say which of its fields were load-bearing for the verdict it sits next to (#18):
+#
+#   preconditions — every `die` above the verdict. They exit 2 with NO payload, so
+#                   they never appear as a false field beside `proved`. `merge ∈
+#                   base` is one of these: by the time anything is emitted it has
+#                   already been proven true, which is why it is not a "gate".
+#   gates         — the `gates` object. `proved` is true exactly when every value
+#                   in it is true, so a consumer asserts all-true rather than
+#                   inferring load-bearing-ness from `proofPath`. Membership is
+#                   per-invocation: `preDidNotLand` (leg 1) is present only on the
+#                   rebase path, because it is the leg the no-rebase path drops.
+#   observations  — the flat fields. They are the raw readings, and a true one can
+#                   sit next to `proved:true` without contradiction. The one that
+#                   prompted all this is `preIsAncestor` on the no-rebase path: it
+#                   reads true there, and leg 1 — which wants it false — is not a
+#                   gate on that path at all. `firstParent` and `proofPath` are
+#                   likewise informational.
 set -eu
 
 NAME=prove-merge
@@ -172,8 +191,22 @@ else
 fi
 echo "    headWasCurrent = $head_current (want true, both paths)" >&2
 
+# Named before the conjunction rather than tested inside it, so the verdict and
+# the `gates` object below read the same booleans. Two spellings of one gate is
+# how the payload drifts from what actually decided the answer.
+if [ "$second" = "$post_full" ]; then second_is_head=true; else second_is_head=false; fi
+if [ "$parents" -eq 2 ]; then two_parents=true; else two_parents=false; fi
+# `$teeth` is a constant true on the no-rebase path, and it is left OUT of the
+# object there rather than emitted as one: leg 1 is dropped on that path, and a
+# gate that cannot fail is not a gate. Its absence is the machine-readable form
+# of "leg 1 did not carry this proof".
+gates="\"postIsAncestor\":$post_anc,\"secondParentIsHead\":$second_is_head,\"exactlyTwoParents\":$two_parents,\"headWasCurrent\":$head_current"
+if [ "$proof_path" = rebase ]; then
+  gates="\"preDidNotLand\":$teeth,$gates"
+fi
+
 if [ "$teeth" = true ] && [ "$head_current" = true ] && [ "$post_anc" = true ] &&
-   [ "$second" = "$post_full" ] && [ "$parents" -eq 2 ]; then
+   [ "$second_is_head" = true ] && [ "$two_parents" = true ]; then
   proved=true
   rc=0
 else
@@ -192,6 +225,10 @@ echo "$NAME: proved=$proved (path=$proof_path)" >&2
 # failure, and printf still exits 0 with a malformed payload.
 second_j=$(jstr "$second") && first_j=$(jstr "$first") && path_j=$(jstr "$proof_path") \
   || die "could not escape the proof fields for $merge"
-printf '{"preIsAncestor":%s,"postIsAncestor":%s,"secondParent":"%s","firstParent":"%s","parentCount":%s,"proofPath":"%s","headWasCurrent":%s,"proved":%s}\n' \
-  "$pre_anc" "$post_anc" "$second_j" "$first_j" "$parents" "$path_j" "$head_current" "$proved"
+# `$gates` interpolates whole rather than through a %s-per-field list: its keys
+# are this script's own literals and its values are the `true`/`false` words
+# is_ancestor emits, so nothing in it comes from the caller. It is built above,
+# never here, for the same reason the escaped fields are.
+printf '{"preIsAncestor":%s,"postIsAncestor":%s,"secondParent":"%s","firstParent":"%s","parentCount":%s,"proofPath":"%s","headWasCurrent":%s,"gates":{%s},"proved":%s}\n' \
+  "$pre_anc" "$post_anc" "$second_j" "$first_j" "$parents" "$path_j" "$head_current" "$gates" "$proved"
 exit "$rc"
