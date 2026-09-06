@@ -48,7 +48,7 @@ Cut runs on step 1 data alone — number, title, labels, `d` — never the Agent
 
 Runs all three — a PR about the ticket, a remote branch, a local worktree or branch. Exit 1 → taken. "Shipped" memory not proof; open PR means unmerged. Exit 2 is not free: the question went unanswered (`gh` failed, no such issue, not a repo), so treat it as taken until you know.
 
-Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body; honor its `Respec` block — can rule out hypotheses body raises. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
+Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
 Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on #7) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: the script makes three network round-trips (`gh issue view`, `gh pr list`, `git ls-remote`; the local probe is free) — so it stays behind step 2's cut and never runs over the whole step 1 list.
 

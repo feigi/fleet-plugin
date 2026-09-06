@@ -13,11 +13,14 @@
 // `run-team/SKILL.md` and `docs/agents/issue-tracker.md` are deliberately not
 // compared here. `run-team`'s copy sits inside a verbatim subagent prompt that
 // has to carry its own context and cannot reference anything, so it is prose
-// for a different audience. `issue-tracker.md`'s brief-outranks-body and
-// `Respec` rules are pinned by `issue-tracker-prose.test.mjs` under #79, but
-// its wrong-forms caveat is pinned by nothing, and is deliberately left that
-// way here: the four-site decision #23's last comment asks for is not made in
-// this ticket.
+// for a different audience. `issue-tracker.md`'s brief-outranks-body rule is
+// pinned by `issue-tracker-prose.test.mjs` under #79 (the sibling `Respec`
+// rule that test also pinned was dropped repo-wide by #25 — undefined,
+// uninstanced, and redundant with brief-outranks-body). Its wrong-forms
+// caveat is pinned too, but only incidentally: `tracker-block-copy-prose.
+// test.mjs` (#374) carries it along inside a whole-block equality check
+// against `run-team/SKILL.md`, not by a pin naming the caveat itself — the
+// four-site decision #23's last comment asks for is not made in this ticket.
 //
 // THE CEILING: this proves the two clauses AGREE. It cannot prove either is
 // correct — a wrong sentence written into both files agrees with itself and
@@ -53,7 +56,7 @@ const clause = (text, from, to, what) =>
 const caveat = (text, what) =>
   clause(text, "Not `--json body`", "silent loss).", what);
 const brief = (text, what) =>
-  clause(text, "`## Agent Brief` comment outranks body", "hypotheses body raises.", what);
+  clause(text, "`## Agent Brief` comment outranks body", ".", what);
 
 test("both skills state the wrong-forms caveat in one wording", () => {
   // The half this ticket was filed for: the sizing skill carried the read

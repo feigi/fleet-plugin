@@ -1,19 +1,23 @@
-// Pins the two rules that `docs/agents/issue-tracker.md` states nowhere else.
+// Pins the rule that `docs/agents/issue-tracker.md` states nowhere else.
 // #79: the section reproduced the issue-read command and its bare `--comments`
-// caveat verbatim but carried neither rule, so the copy read as complete while
-// the two rules that decide WHICH TEXT WINS were absent.
+// caveat verbatim but carried neither of the (then two) WHICH-TEXT-WINS rules,
+// so the copy read as complete while they were absent. #25 later dropped the
+// second of those rules — the `Respec` block was instructed nowhere else and
+// never defined, in this doc or in any real issue — leaving the
+// brief-outranks-body rule pinned here alone.
 //
-// Nothing in the tree routes an agent to this doc: grepping for
-// `issue-tracker` matches only this test file, and no skill file contains the
-// phrase "fetch the relevant ticket" it would defer to. The rules reach
-// agents through three SKILL.md files that each carry their own copy —
-// run-team word-for-word inside its verbatim implementer prompt, next-ticket
-// and sizing-a-ticket paraphrased. #79 brings the doc into sync with those; it
-// is the catch-up copy, not their source, so this pin keeps the doc from
-// drifting back out, nothing more.
+// No SKILL.md instructs an agent to READ this doc as its entry point for
+// the fetch-the-relevant-ticket rule: the rule reaches agents through three
+// SKILL.md files that each carry their own copy — run-team word-for-word
+// inside its verbatim implementer prompt, next-ticket and sizing-a-ticket
+// paraphrased — not by deferring here. (run-team/SKILL.md does link this
+// doc once, at its closing-keyword exemption — an unrelated rule, not a
+// hand-off to this section.) #79 brought the doc into sync with those three
+// copies; it is the catch-up copy, not their source, so this pin keeps the
+// doc from drifting back out, nothing more.
 //
-// THE CEILING, same as fleet-tick-prose.test.mjs: these prove a phrase is
-// PRESENT. Neither can prove it is not negated by a sentence added beside it.
+// THE CEILING, same as fleet-tick-prose.test.mjs: this proves a phrase is
+// PRESENT. It cannot prove it is not negated by a sentence added beside it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -42,10 +46,4 @@ test("the fetch section says the Agent Brief comment outranks the issue body", (
   // Without it an agent that reads the documented entry point takes the body as
   // authoritative and never learns a brief can overrule it.
   assert.match(fetchSection(), /`## Agent Brief` comment\s+is\s+authoritative over the issue body/);
-});
-
-test("the fetch section says a Respec block can rule out hypotheses the body raises", () => {
-  // The brief-outranks-body rule alone does not say a brief may SUBTRACT: an
-  // agent can honor it and still chase a hypothesis Respec already killed.
-  assert.match(fetchSection(), /Respec` block — it may\s+explicitly\s+rule out hypotheses the body raises/);
 });
