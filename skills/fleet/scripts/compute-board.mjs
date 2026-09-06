@@ -170,10 +170,11 @@ export function computeBoard(inputs) {
     // of computeBoard builds its inputs by hand and means a ledger it read.
     ledgerState: ledger.state ?? "read",
     // Telemetry, not pipeline state: null when this run has produced no
-    // transcripts yet, `{ error }` when they cannot be read. Those are
-    // deliberately not the same value — the UI hides the panel on null rather
-    // than rendering zeroes, which would read as "this run was free", and shows
-    // the error, which is a bug the operator has to act on.
+    // transcripts yet, `{ ok: false, error }` when they cannot be read,
+    // `{ ok: true, ... }` when they can. Those are deliberately not the same
+    // value — the UI hides the panel on null rather than rendering zeroes,
+    // which would read as "this run was free", and shows the error, which is
+    // a bug the operator has to act on.
     spend: inputs.spend ?? null,
     attention,
   };
