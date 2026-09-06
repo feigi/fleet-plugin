@@ -1443,8 +1443,16 @@ test("a conflicting path holding an invalid-UTF-8 byte round-trips as valid, par
   assert.deepEqual(Buffer.from(raw.toString("utf8"), "utf8"), raw,
     "the audit's own stdout is not valid UTF-8 — a raw invalid byte reached the payload");
 
+  // `jq -e '.'` cannot pin the #613 bug on its own — it is one of the two
+  // LENIENT consumers the issue names, silently substituting U+FFFD at exit 0
+  // on a raw invalid byte just like Node's own decode above, so it would
+  // exit 0 against the pre-fix payload too. The round-trip check above and
+  // the strict `python3 json.load` below are what actually pin validity;
+  // this only confirms a real downstream consumer of this payload (several
+  // fleet scripts pipe conflicts/atRisk through jq) can parse it as
+  // well-formed JSON at all.
   const jq = spawnSync("jq", ["-e", "."], { input: raw });
-  assert.equal(jq.status, 0, `jq must accept the payload as-is; stderr: ${jq.stderr?.toString("utf8")}`);
+  assert.equal(jq.status, 0, `jq must accept the payload as well-formed JSON; stderr: ${jq.stderr?.toString("utf8")}`);
 
   const py = spawnSync("python3", ["-c", "import json,sys; json.load(sys.stdin.buffer)"], { input: raw });
   assert.equal(py.status, 0,

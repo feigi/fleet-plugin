@@ -231,7 +231,12 @@ test("a failing tr makes jrewritten report failure rather than a confident answe
 });
 
 test("a failing python3 makes jrewritten report failure rather than a confident answer", () => {
-  const { rc } = call("jrewritten", "a\x0bb", { break: "python3" });
+  // Must hold a byte >= \200 and no C0 byte — jrewritten now short-circuits
+  // to `true` on a C0 byte alone (it already has its answer) and to `false`
+  // on pure ASCII (already valid UTF-8 by construction), and neither path
+  // reaches python3 at all, so an input that hits either would pass this
+  // test against a jrewritten that never calls python3 in the first place.
+  const { rc } = call("jrewritten", "café", { break: "python3" });
   assert.notEqual(rc, 0);
 });
 
@@ -308,6 +313,40 @@ test("a failing tr makes jarr_rewritten report failure, not a short array", () =
   // way to notice, because the two are emitted as separate JSON fields.
   const { rc } = pipe("jarr_rewritten", "plain\na\x0bb\n", { break: "tr" });
   assert.notEqual(rc, 0);
+});
+
+test("jarr keeps a trailing empty element — the same input must yield the same length as jarr_rewritten's parallel array (#613 regression)", () => {
+  // The #613 UTF-8 repair stage captured python3's output through `$()`,
+  // which strips ALL trailing newlines before jarr's own blank-line-sensitive
+  // sed/paste stages ever saw them — silently dropping trailing empty array
+  // elements. `jarr_rewritten` reads stdin line-by-line, not through a
+  // capture, so it did NOT drop them: the two arrays desynced in length,
+  // breaking the "parallel boolean array to jarr's own output" invariant
+  // both are documented to hold. Pinned here so the LENGTH match — not just
+  // the content of either array alone — is what future edits are checked
+  // against.
+  const input = "a\n\n";
+  const { rc: rc1, out: out1 } = pipe("jarr", input);
+  const { rc: rc2, out: out2 } = pipe("jarr_rewritten", input);
+  assert.equal(rc1, 0);
+  assert.equal(rc2, 0);
+  const arr1 = JSON.parse(`[${out1}]`);
+  const arr2 = JSON.parse(`[${out2}]`);
+  assert.equal(arr1.length, arr2.length,
+    `jarr produced ${arr1.length} elements but jarr_rewritten produced ${arr2.length} for the same input`);
+  assert.deepEqual(arr1, ["a", ""]);
+  assert.deepEqual(arr2, [false, false]);
+});
+
+test("jarr on stdin holding only a newline is a proper one-element array, not indistinguishable from zero elements (#613 regression)", () => {
+  // Same root cause as the test above: `$()` stripping the python3 stage's
+  // only trailing newline turned `[""]` (one element, an empty string) into
+  // empty output — the same shape as `jarr` on genuinely empty stdin, a
+  // distinction this file's header and the empty-stdin test below both
+  // guard explicitly.
+  const { rc, out } = pipe("jarr", "\n");
+  assert.equal(rc, 0);
+  assert.deepEqual(JSON.parse(`[${out}]`), [""]);
 });
 
 test("jarr on empty stdin is empty, not a one-element array holding nothing", () => {
