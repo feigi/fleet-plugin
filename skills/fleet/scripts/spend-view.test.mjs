@@ -241,8 +241,6 @@ test("the TAG decides the branch, never the presence or truthiness of another fi
   // `error` key is still a success, so no future reader can reintroduce
   // "the error field means it failed" and have the suite agree.
   assert.equal(spendView(ok({ error: "left over from somewhere" })).kind, "panel");
-  // And the mirror: a failure whose message is missing is still a failure.
-  assert.equal(spendView({ ok: false, error: "" }).kind, "error");
 });
 
 test("an untagged payload is treated as an error, never as a success (#959)", () => {

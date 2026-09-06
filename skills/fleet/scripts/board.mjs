@@ -485,9 +485,9 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // are not.
     const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
-    // `ok` first, so a future field named `ok` on computeSpend's return cannot
-    // silently untag a success.
-    return { ok: true, ...spend, tools, attributedPct, skipped, since: sinceMs };
+    // `ok` last, so a future field named `ok` on computeSpend's return cannot
+    // silently untag a success (a later spread key always wins over an earlier one).
+    return { ...spend, tools, attributedPct, skipped, since: sinceMs, ok: true };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
