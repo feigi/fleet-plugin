@@ -6,14 +6,15 @@
 // never defined, in this doc or in any real issue — leaving the
 // brief-outranks-body rule pinned here alone.
 //
-// Nothing in the tree routes an agent to this doc: grepping for
-// `issue-tracker` matches only this test file, and no skill file contains the
-// phrase "fetch the relevant ticket" it would defer to. The rule reaches
-// agents through three SKILL.md files that each carry their own copy —
-// run-team word-for-word inside its verbatim implementer prompt, next-ticket
-// and sizing-a-ticket paraphrased. #79 brought the doc into sync with those; it
-// is the catch-up copy, not their source, so this pin keeps the doc from
-// drifting back out, nothing more.
+// No SKILL.md instructs an agent to READ this doc as its entry point for
+// the fetch-the-relevant-ticket rule: the rule reaches agents through three
+// SKILL.md files that each carry their own copy — run-team word-for-word
+// inside its verbatim implementer prompt, next-ticket and sizing-a-ticket
+// paraphrased — not by deferring here. (run-team/SKILL.md does link this
+// doc once, at its closing-keyword exemption — an unrelated rule, not a
+// hand-off to this section.) #79 brought the doc into sync with those three
+// copies; it is the catch-up copy, not their source, so this pin keeps the
+// doc from drifting back out, nothing more.
 //
 // THE CEILING, same as fleet-tick-prose.test.mjs: this proves a phrase is
 // PRESENT. It cannot prove it is not negated by a sentence added beside it.

@@ -16,8 +16,10 @@
 // for a different audience. `issue-tracker.md`'s brief-outranks-body rule is
 // pinned by `issue-tracker-prose.test.mjs` under #79 (the sibling `Respec`
 // rule that test also pinned was dropped repo-wide by #25 — undefined,
-// uninstanced, and redundant with brief-outranks-body), but its wrong-forms
-// caveat is pinned by nothing, and is deliberately left that way here: the
+// uninstanced, and redundant with brief-outranks-body). Its wrong-forms
+// caveat is pinned too, but only incidentally: `tracker-block-copy-prose.
+// test.mjs` (#374) carries it along inside a whole-block equality check
+// against `run-team/SKILL.md`, not by a pin naming the caveat itself — the
 // four-site decision #23's last comment asks for is not made in this ticket.
 //
 // THE CEILING: this proves the two clauses AGREE. It cannot prove either is
