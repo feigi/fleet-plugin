@@ -2,11 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **This plan is a dated record of the argument, not the shipped schema.** Review
-> on 2026-08-27 changed three things after it was written, so the dictated code
-> below no longer matches `member-outcomes.mjs` and is kept as history rather
-> than rewritten. Read the shipped file, and `docs/metrics/member-outcomes.tsv`'s
-> own header, for what is true:
+> **This plan is a dated record of the argument, not the shipped schema.** Four
+> things below are superseded — the first three by review on 2026-08-27, the
+> fourth by work that landed after — so the dictated code below no longer matches
+> `member-outcomes.mjs` and is kept as history rather than rewritten. Read the
+> shipped file, and `docs/metrics/member-outcomes.tsv`'s own header, for what is
+> true:
 >
 > 1. **The `errored` column does not exist.** Every `errored` in this plan —
 >    the row shape, the `turns > 0 && lastTs === firstTs` rule, the fixture, the
@@ -19,6 +20,14 @@
 >    across models. `board.mjs` already folded; the two must not fork.
 > 3. **The walk is recursive.** The plan reads `subagents/*.jsonl`; a Workflow's
 >    fan-out writes one level deeper, and that is roughly half the corpus.
+> 4. **The finisher-spelling count is superseded.** Task 3's member-naming
+>    paragraph names "the two live finisher spellings". Four are live —
+>    `finisher-pr-<n>`, `finish-pr-<n>`, `finisher-<n>`, `finish-<n>` — with
+>    `finisher-pr-<n>` the canonical name run-team now fixes (#326) and the other
+>    three matched as deliberate compatibility with runs already in the record.
+>    That paragraph was accurate when this plan was written and is kept as
+>    written, never rewritten to read as though it had said four; read
+>    `compute-spend.mjs` and `member-outcomes.mjs` for the live set.
 
 **Goal:** Record which model and effort every fleet member ran at, for every run,
 into a regenerable metrics file — and backfill it from the 154 sessions on disk
