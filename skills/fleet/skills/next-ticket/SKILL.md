@@ -38,6 +38,8 @@ read off the exit code rather than a second rule.
 
 Use `d` array. Blocker open → drop ticket, or surface blocker instead. Cut to oldest 3–5 here — step 3 runs per candidate. Count is next-ticket's own; fleet Phase 0 sets its own.
 
+Cut runs on step 1 data alone — number, title, labels, `d` — never the Agent Brief; a candidate the Brief would have promoted into survivors is dropped here, before that Brief is ever fetched (#22).
+
 ## 3. In-flight check (all three, per candidate) — then fetch
 
 ```bash
