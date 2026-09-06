@@ -2777,6 +2777,63 @@ test("a registry entry whose gitdir is GONE is unknown, not a stray to skip (#39
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+test("a gitdir-less HUSK left by a failed removal does not refuse the NEXT run (#623)", (t) => {
+  // The other end of the case above, and what separates them is what the entry
+  // still holds. `git worktree remove` deletes the checkout, then the registry
+  // entry — and when only the final rmdir fails (an unwritable `.git/worktrees`)
+  // the entry survives EMPTY, its checkout already gone. Measured, git 2.50.1
+  // (Apple Git-155), `chmod 555 .git/worktrees`: remove exits 255,
+  // `ls -A .git/worktrees/9-rel` prints nothing, the porcelain lists the main
+  // checkout alone, `prune --dry-run -v` names the entry removable, and the
+  // checkout directory is gone. Three separate git reads agree it is dead, so
+  // counting it as a registration is `linked 0` against `registered 1` and kills every
+  // LATER release in the repo with no receipt — this ticket's whole complaint.
+  //
+  // The husk sits beside a live claim rather than being the released claim's
+  // own, because the run that CREATES a husk is fine; it is the next one that
+  // could not proceed.
+  //
+  // Built by hand rather than through the chmod that produced the measurement:
+  // permission bits are what makes such a fixture leak on failure and go
+  // vacuous under euid 0 (#184), and the end state above is the whole of what
+  // the count reads.
+  //
+  // This shares its failing branch with "a registry entry whose gitdir is GONE"
+  // above (#395) — both trip the same emptiness-keyed skip. No new discriminator
+  // lives here; this pins the #623 scenario specifically, not a new code path.
+  //
+  // A SECOND live worktree, alongside the one husk, so the skip's two roles —
+  // "counted" and "skipped" — land on different numbers of entries (2 live
+  // against 1 husk) instead of the 1-against-1 the fixture had before. At
+  // 1-against-1 the skip's direction is invisible to the final tally: whichever
+  // of the pair it counts, registered and linked still land on 1==1, so an
+  // inverted skip (count the husk, drop the live entry) passed this test just
+  // as cleanly as the correct one (measured against `release-ticket.sh:303`
+  // flipped from `[ -z "$contents" ]` to `[ -n "$contents" ]`). With one husk
+  // against two live entries, the correct skip counts 2 registered against
+  // git's 2 linked; the inverted skip counts 1 (the husk) against git's
+  // unchanged 2 linked — a mismatch, and a refusal, not a silent pass.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const sibling = claim(r.w, 77, "other-claim");
+  const dead = claim(r.w, 7, "earlier-claim");
+  const entry = join(r.w, ".git", "worktrees", "7-earlier-claim");
+  rmSync(dead.wt, { recursive: true, force: true });
+  for (const f of readdirSync(entry)) rmSync(join(entry, f), { recursive: true, force: true });
+  assert.deepEqual(readdirSync(entry), [], "fixture: a husk is an entry with nothing left in it");
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("7-earlier-claim"),
+    "fixture: git must already consider the husk unregistered",
+  );
+  assert.equal(readdirSync(join(r.w, ".git", "worktrees")).length, 3,
+    "fixture: two live entries and one husk really are registered");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 0, `a husk git itself drops is not an entry git failed to report: ${stderr}`);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+});
+
 test("git listing MORE than the registry reports THAT, not an incomplete listing (#395)", (t) => {
   // The mismatch has two directions with opposite causes, and one message
   // cannot serve both. FEWER listed than registered is git dropping an entry it
