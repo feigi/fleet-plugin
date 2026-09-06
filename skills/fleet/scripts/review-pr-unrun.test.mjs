@@ -208,20 +208,58 @@ test("a small-but-complete run, a half-todo run, and one that omitted pass are N
   }
 });
 
-// The ratio must not swallow the failing suite the `fail > 0` clause reports: a
-// run that collected 937, passed 4 and failed 6 RAN, and refusing it here is the
-// over-refusal #137 removed — reached only because this fixture files findings,
-// which is what keeps the sibling clause below off it.
-test("a mostly-failing run is NOT unrun by the ratio — a suite that failed ran", () => {
+// The ratio must not swallow a failing suite that actually EXECUTED its whole
+// collection: pass+fail equals tests here, so every test collected ran, and
+// refusing it would be the over-refusal #137 removed — reached only because
+// this fixture files findings, which is what keeps the sibling clause below
+// off it.
+test("a fully-executed failing run is NOT unrun by the ratio — a suite that failed ran", () => {
   assert.equal(
     unrunReason({
       dimension: "tests",
       scope_searched: "the snapshot's own suite",
       findings: [{ severity: "critical", claim: "x", evidence: "y" }],
-      test_run: { command: "node --test", tests: 937, pass: 4, fail: 6 },
+      test_run: { command: "node --test", tests: 10, pass: 4, fail: 6 },
     }),
     null,
-    "a suite that reported failures still ran, however few tests reached the reporter",
+    "a suite that reported failures still ran, having executed everything it collected",
+  );
+});
+
+// #651 CONTINUED: the ratio clause above was gated on `!run.fail`, so a crash
+// that left even ONE failing test alongside its one pass skipped it entirely
+// and fell to the CONJUNCTION clause below, which one filed finding defeats —
+// `{tests:937, pass:1, fail:1}` plus a finding read clean, 935 of 937 never
+// run. The ratio now sums pass AND fail against the same half floor, findings-
+// INDEPENDENT for the same reason the fail-free ratio test above is.
+test("a run that executed a fraction of what it collected through a MIX of pass and fail is unrun", () => {
+  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
+    for (const run of [
+      { command: "node --test", tests: 937, pass: 1, fail: 1 },
+      { command: "node --test", tests: 937, pass: 200, fail: 200 },
+    ]) {
+      const reason = unrunReason({ dimension: "tests", scope_searched: "x", findings, test_run: run });
+      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
+      assert.equal(typeof reason, "string", `a mostly-unexecuted mixed run (${where}) must yield a reason`);
+      assert.match(reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
+    }
+  }
+});
+
+// THE ACCEPT SIDE of the mixed-ratio test above: pass+fail reaching past half
+// of tests is work done, whatever the split between the two. A finding is
+// attached so the sibling CONJUNCTION clause (`fail > 0 && no findings`)
+// cannot be the thing keeping this clean — only the ratio is under test here.
+test("a mixed pass/fail run that executed past half its collection is NOT unrun", () => {
+  assert.equal(
+    unrunReason({
+      dimension: "tests",
+      scope_searched: "the snapshot's own suite",
+      findings: [{ severity: "critical", claim: "x", evidence: "y" }],
+      test_run: { command: "node --test", tests: 937, pass: 300, fail: 300 },
+    }),
+    null,
+    "a mixed run past the half floor did its work",
   );
 });
 

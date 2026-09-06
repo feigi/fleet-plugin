@@ -1067,11 +1067,22 @@ function unrunReason(review) {
   // as work done — and it is far enough from 1-of-937 that no plausible sharpening
   // of the number changes that verdict. `typeof pass === "number"` because `pass`
   // is optional and `null * 2 < tests` would refuse a run that simply omitted it.
-  if (!run.fail && typeof run.pass === "number" && run.pass * 2 < run.tests)
-    return `\`${cmd}\` passed ${run.pass} of the ${run.tests} tests it collected and failed none — most of what it collected never ran`;
+  //
+  // NOT gated on `!run.fail` (#651 continued): that gate made `{tests:937,
+  // pass:1, fail:1}` skip this clause entirely and fall to the CONJUNCTION
+  // below, which one filed finding defeats — so a crash that left ONE test
+  // failed alongside its one pass read clean. `executed` sums both counts, so
+  // a suite that crashed partway through a MIX of passes and fails is caught
+  // by the same floor a fail-free partial run already is.
+  const executed = run.pass + (run.fail ?? 0);
+  if (typeof run.pass === "number" && executed * 2 < run.tests)
+    return `\`${cmd}\` passed ${run.pass} and failed ${run.fail ?? 0} of the ${run.tests} tests it collected — most of what it collected never ran`;
   // The CONJUNCTION, never `fail > 0` alone: a failing suite ran, and reading
   // that as unrun is the over-refusal #137 removed. Zero findings is provably
   // wrong only next to failures the reviewer was looking at and wrote up none of.
+  // ADDITIONAL to the ratio above, not the only guard on a mixed run: the ratio
+  // catches a crash that left too little executed; this catches a suite that
+  // executed enough (or all of it) but reported failures nobody wrote up.
   if (run.fail > 0 && !review.findings?.length)
     return `\`${cmd}\` reported ${run.fail} failing tests and the reviewer filed no findings about them`;
   // #143's remaining case — a count below the WHOLE TREE's size, the partial-tree
@@ -1222,7 +1233,7 @@ that collected tests and did none of the work — 0 passes with no failures is
 everything skipped. And a count well below what the whole tree reports means you
 ran a PARTIAL copy: nothing downstream can catch that one for you, because only
 your own run knows what the full tree reports. Run from the snapshot's root, and
-report any of the three as unrun.
+report any of these as unrun.
 Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
