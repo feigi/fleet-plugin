@@ -221,6 +221,30 @@ test("ATTACK: un-rebased head that merged cleanly still proves false", (t) => {
   assert.equal(code, 1);
 });
 
+test("gates.postIsAncestor is false when the claimed head never landed", (t) => {
+  // No existing fixture drives a false postIsAncestor through to the payload:
+  // the only way `post` itself fails to be an ancestor while `merge` still
+  // lands is to hand the script a `post` that is not the merge's real second
+  // parent at all — every fixture where they DO match has post_anc forced true
+  // by transitivity (post is a parent of merge, merge lands, so post lands).
+  const w = repo(t);
+  // A real, unrelated merge that landed on main.
+  git(w, "checkout", "-q", "-b", "feat");
+  const realHead = commit(w, "feature work");
+  const merge = mergeNoFf(w, realHead, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  // A head that never merged anywhere, passed as the claimed post/pre.
+  git(w, "checkout", "-q", "-b", "unmerged", "main");
+  const claimedHead = commit(w, "an unmerged head passed as the claimed post");
+
+  const { code, json } = prove(w, claimedHead, claimedHead, merge);
+  assert.equal(json.postIsAncestor, false, "fixture: the claimed head really never landed");
+  assert.equal(json.gates.postIsAncestor, false);
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
 test("ATTACK: wrong head — merge second parent is not the verified-green head", (t) => {
   // Leg 3 has to be the *only* gate that bites here, or this test proves nothing
   // about leg 3. So the green head really does land (leg 2 passes) and the wrong

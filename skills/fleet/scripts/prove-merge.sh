@@ -205,14 +205,15 @@ if [ "$proof_path" = rebase ]; then
   gates="\"preDidNotLand\":$teeth,$gates"
 fi
 
-if [ "$teeth" = true ] && [ "$head_current" = true ] && [ "$post_anc" = true ] &&
-   [ "$second_is_head" = true ] && [ "$two_parents" = true ]; then
-  proved=true
-  rc=0
-else
-  proved=false
-  rc=1
-fi
+# Derived FROM $gates, not restated: two independently hand-written booleans
+# for the same invariant is how they drift apart, and only a fixture that
+# happens to drive one gate false would ever have caught it. Every gate value
+# above is the literal word `true` or `false`, and none of the keys contains
+# "false" as a substring, so one match is exactly "some gate is false".
+case $gates in
+  *false*) proved=false; rc=1 ;;
+  *) proved=true; rc=0 ;;
+esac
 echo "$NAME: proved=$proved (path=$proof_path)" >&2
 
 # None of the three string fields is reachable today — `$second` and `$first`
