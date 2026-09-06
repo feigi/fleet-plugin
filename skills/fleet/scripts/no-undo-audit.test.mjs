@@ -1419,6 +1419,55 @@ test("a conflicting path holding an invalid-UTF-8 byte still names every conflic
     "and the commit a careless resolution would eat is named, rather than atRisk: [] at exit 0");
 });
 
+// #613: the test above parses the payload through `audit()`'s
+// `encoding: "utf8"`, and Node decodes a child's stdout as UTF-8 LOSSILY on
+// the way in — the same silent U+FFFD substitution `jq` performs — so it
+// cannot tell "the script emitted valid UTF-8" from "the script emitted a raw
+// invalid byte and Node papered over it before JSON.parse ever saw it". This
+// reads the raw bytes instead and checks them against the two consumers the
+// issue measured: `jq`, which substitutes U+FFFD silently at exit 0
+// (corrupting the data without saying so), and `python3 json.load`, a strict
+// parser that refuses the payload outright with `UnicodeDecodeError`. Both
+// must now accept the SAME bytes the script wrote, and the field naming which
+// element lost a byte must say so honestly rather than silently.
+test("a conflicting path holding an invalid-UTF-8 byte round-trips as valid, parseable UTF-8 JSON, with the fault flagged rather than hidden (#613)", (t) => {
+  const c = byteConflictRepo(t, "b\\377ad.txt");
+
+  const r = spawnSync("sh", [SCRIPT, c.w, c.branch], { env: ENV, encoding: "buffer" });
+  assert.equal(r.status, 0,
+    `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr?.toString("utf8")}`);
+  const raw = r.stdout;
+
+  // Round-trip validity: re-encoding what a lossy UTF-8 decode produces
+  // reproduces the same bytes only when the buffer was already valid UTF-8.
+  assert.deepEqual(Buffer.from(raw.toString("utf8"), "utf8"), raw,
+    "the audit's own stdout is not valid UTF-8 — a raw invalid byte reached the payload");
+
+  // `jq -e '.'` cannot pin the #613 bug on its own — it is one of the two
+  // LENIENT consumers the issue names, silently substituting U+FFFD at exit 0
+  // on a raw invalid byte just like Node's own decode above, so it would
+  // exit 0 against the pre-fix payload too. The round-trip check above and
+  // the strict `python3 json.load` below are what actually pin validity;
+  // this only confirms a real downstream consumer of this payload (several
+  // fleet scripts pipe conflicts/atRisk through jq) can parse it as
+  // well-formed JSON at all.
+  const jq = spawnSync("jq", ["-e", "."], { input: raw });
+  assert.equal(jq.status, 0, `jq must accept the payload as well-formed JSON; stderr: ${jq.stderr?.toString("utf8")}`);
+
+  const py = spawnSync("python3", ["-c", "import json,sys; json.load(sys.stdin.buffer)"], { input: raw });
+  assert.equal(py.status, 0,
+    `a strict UTF-8 JSON parser must accept the payload; stderr: ${py.stderr?.toString("utf8")}`);
+
+  const json = JSON.parse(raw.toString("utf8"));
+  assert.equal(json.conflicts.length, 2, "both conflicting paths are present");
+  assert.match(json.conflicts[0], /^b.ad\.txt$/, "the bad path arrives whole, not cut down to `b`");
+  assert.equal(json.conflicts[0].includes("�"), true,
+    "the fault must render as U+FFFD, not the original invalid byte and not silence");
+  assert.equal(json.conflictsRewritten[0], true,
+    "the path that lost a byte to U+FFFD must be flagged rewritten — a caller must not treat it as the real path");
+  assert.equal(json.conflictsRewritten[1], false, "the untouched path must not be flagged");
+});
+
 // The other half of the same pin, and the half a fix-only suite never covers:
 // what does `export LC_ALL=C` now REFUSE? It makes every `tr`, `sed` and `awk`
 // in the script byte-oriented, so a path of legitimate multi-byte UTF-8 must

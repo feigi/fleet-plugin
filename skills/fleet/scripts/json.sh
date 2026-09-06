@@ -95,6 +95,30 @@
 #
 # Scratch variables are `json_`-prefixed because /bin/sh has no `local` and
 # these land in the sourcing script's namespace.
+#
+# A path or ref is a byte string with no UTF-8 guarantee (a fetched tree can
+# carry a Linux- or latin-1-authored name), but the string these functions
+# build is JSON TEXT, which must be valid UTF-8. Every rule above operates
+# below \200 or adds ASCII bytes, so a genuinely invalid byte — one that is
+# not even part of a malformed multi-byte sequence, just a byte no UTF-8
+# sequence starts or continues with — sailed through untouched and landed raw
+# in the payload: `jq` then silently substitutes U+FFFD on decode (changing
+# what the caller reads back) and a strict parser (`python3 json.load`)
+# refuses the payload outright (#613). `jstr` and `jarr` now run the value
+# through Python's own UTF-8 decoder with `errors="replace"` first — the same
+# U+FFFD a lenient consumer already substitutes, made explicit and JSON-legal
+# at the source instead of implicit and consumer-dependent — and `jrewritten`
+# reports it as a rewrite like any other replaced byte.
+
+# Python's own UTF-8 decoder with errors="replace" (#613), shared script text
+# rather than a function: a function called on the right side of a pipe runs
+# in its own subshell, and a `json_u8=` assigned inside it would not survive
+# back to the caller — every call site below runs this as
+# `python3 -c "$JSON_UTF8_PY"` and captures the result itself.
+JSON_UTF8_PY='
+import sys
+sys.stdout.buffer.write(sys.stdin.buffer.read().decode("utf-8", "replace").encode("utf-8"))
+'
 
 # Escape $1 into a JSON string BODY — no surrounding quotes, the caller adds
 # those. Exit 0 with the escaped value, non-zero if any stage failed.
@@ -104,7 +128,8 @@ jstr() {
   # field that legitimately found nothing untouched: that field never calls the
   # broken tool, so it cannot observe its failure.
   [ -n "$1" ] || return 0
-  json_esc=$(printf '%s' "$1" \
+  json_u8=$(printf '%s' "$1" | LC_ALL=C python3 -c "$JSON_UTF8_PY") || return 1
+  json_esc=$(printf '%s' "$json_u8" \
     | LC_ALL=C sed -e ':a' -e '$!N' -e '$!ba' \
         -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
         -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' -e 's/\n/\\n/g' \
@@ -125,20 +150,41 @@ jrewritten() {
   # need to ask a tool that might not be there.
   [ -n "$1" ] || { printf false; return 0; }
   # `|| return 1` is load-bearing, not belt-and-braces. This function's last
-  # command is `[ … ] && printf false || printf true`, an AND-OR list that
-  # always exits 0, so a failed `tr` reaches the caller only by `set -e`
-  # aborting the function — and a call site inside an `if` condition is exempt
-  # from `set -e`. Whether that exemption also reaches this assignment is the
-  # shell's own choice, and shells disagree. Measured: `dash`, Apple's
-  # `/bin/sh`, and bash 3.2.57 in POSIX/sh mode abort here, which is correct;
-  # bash 5.3 in EVERY mode — plain, invoked as `sh`, and `--posix` — plus bash
-  # 3.2.57 outside POSIX mode and zsh 5.9 all run on to the always-0 last line
-  # and hand back a confident `true` about bytes nothing ever examined. That
-  # second list covers every distro whose `/bin/sh` is bash 5.x. Returning
-  # explicitly makes the status this function's own on all of them.
+  # command is an AND-OR list that always exits 0 on its own (`[ … ] && printf
+  # false || printf true`, and the early `printf true; return 0` below is its
+  # own explicit return), so a failed `tr` (or `python3`) reaches the caller
+  # only by `set -e` aborting the function — and a call site inside an `if`
+  # condition is exempt from `set -e`. Whether that exemption also reaches
+  # this assignment is the shell's own choice, and shells disagree. Measured:
+  # `dash`, Apple's `/bin/sh`, and bash 3.2.57 in POSIX/sh mode abort here,
+  # which is correct; bash 5.3 in EVERY mode — plain, invoked as `sh`, and
+  # `--posix` — plus bash 3.2.57 outside POSIX mode and zsh 5.9 all run on to
+  # the always-0 last line and hand back a confident `true` about bytes
+  # nothing ever examined. That second list covers every distro whose
+  # `/bin/sh` is bash 5.x. Returning explicitly makes the status this
+  # function's own on all of them.
   json_raw=$(printf '%s' "$1" | LC_ALL=C tr -d '\001-\007\013\016-\037') || return 1
   json_orig=$(printf '%s' "$1")
-  [ "$json_raw" = "$json_orig" ] && printf false || printf true
+  # The C0 scrub above already answers `true` on its own — no need to also
+  # fork python3 to ask whether UTF-8 needed repairing too, the OR is already
+  # satisfied.
+  [ "$json_raw" = "$json_orig" ] || { printf true; return 0; }
+  # `jarr_rewritten` calls this once per line, and a repo's own paths are
+  # overwhelmingly plain ASCII — the case the C0 check above does NOT catch,
+  # since it only differs on a rewrite. A value holding no byte >= \200 at
+  # all decodes as UTF-8 to itself unconditionally (pure ASCII is already
+  # valid UTF-8), so python3 has nothing to find; this tr is what lets that
+  # common case skip the interpreter start instead of paying for one on every
+  # line regardless of content (measured 8.4x slower before this and the
+  # short-circuit above existed).
+  json_ascii=$(printf '%s' "$1" | LC_ALL=C tr -d '\200-\377') || return 1
+  [ "$json_ascii" = "$json_orig" ] && { printf false; return 0; }
+  # jstr also repairs a byte that is not valid UTF-8 (#613) — a second,
+  # independent replacement alongside the C0 scrub above, so a second,
+  # independent check: this value must decode as strict UTF-8 unchanged, or
+  # jstr rewrote it too.
+  json_u8=$(printf '%s' "$1" | LC_ALL=C python3 -c "$JSON_UTF8_PY") || return 1
+  [ "$json_u8" = "$json_orig" ] && printf false || printf true
 }
 
 # The array form: stdin's lines to one quoted JSON string each, comma-joined,
@@ -156,7 +202,26 @@ jrewritten() {
 # the `printf '%s\n'` re-emit below would turn "no elements" into one empty
 # line and `paste` would answer `""`, inventing an element out of nothing.
 jarr() {
-  json_esc=$(LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+  # Same repair as jstr, same reason (#613), run once over the whole
+  # (possibly multi-line) input rather than per line: \n is ASCII and never a
+  # byte of a multi-byte UTF-8 sequence, so decoding the joined blob in one
+  # pass cannot manufacture or hide a line boundary.
+  #
+  # Unlike jstr's single opaque value, THIS input's own trailing newlines ARE
+  # the record separator between array elements — a plain `$()` capture
+  # strips every one of them, which silently drops trailing empty elements
+  # (measured: `printf 'a\n\n' | jarr` lost its second, empty element, and
+  # `printf '\n' | jarr` lost its only one, collapsing `[""]` into the same
+  # empty output as a zero-element array). Appending `x` after python3's own
+  # output gives `$()` a non-newline character to stop stripping at;
+  # `${json_u8%x}` removes exactly that one character back off, and only on
+  # the success path — `&&` (not `;`) keeps python3's own exit status as the
+  # substitution's, so a failed python3 returns 1 before ever reaching the
+  # strip. json_u8 now holds python3's output byte-for-byte, so it is fed to
+  # sed with `printf '%s'` (no added newline) rather than `printf '%s\n'`.
+  json_u8=$(LC_ALL=C python3 -c "$JSON_UTF8_PY" && printf x) || return 1
+  json_u8=${json_u8%x}
+  json_esc=$(printf '%s' "$json_u8" | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
       -e "s/$(printf '\010')/\\\\b/g" -e 's/\t/\\t/g' \
       -e "s/$(printf '\014')/\\\\f/g" -e 's/\r/\\r/g' \
       -e 's/^/"/' -e 's/$/"/') || return 1
