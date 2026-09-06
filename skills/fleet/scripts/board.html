@@ -129,14 +129,30 @@ function spendView(sp) {
   // rendered identically to "nothing yet". stderr does not cover it (see
   // above), so the note goes out on its own, without the zeroed two-column body.
   if (!sp.totals || !sp.totals.cacheWrite) {
-    return sp.skipped
-      ? { kind: "note", text: `${sp.skipped} transcripts skipped; no spend recorded yet` }
+    // A corrupt meta sidecar does not zero out cache-write — the transcript it
+    // sits beside still books its tokens — so this branch is `skipped`'s alone
+    // in practice. Checked anyway, the same way the panel note below does, so
+    // this branch cannot regress into hiding metaErrors if that ever changes.
+    const bits = [];
+    if (sp.skipped) bits.push(`${sp.skipped} transcripts skipped`);
+    if (sp.metaErrors) bits.push(`${sp.metaErrors} meta sidecar${sp.metaErrors === 1 ? "" : "s"} corrupt`);
+    return bits.length
+      ? { kind: "note", text: `${bits.join("; ")}; no spend recorded yet` }
       : { kind: "hidden" };
   }
   return {
     kind: "panel",
     lede: `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`,
-    note: (sp.skipped ? `${sp.skipped} transcripts skipped; ` : "") + "ranked on cache-creation; tool split is attributed, not billed",
+    // `skipped` means "contributed nothing"; `metaErrors` means "contributed,
+    // but under a degraded role and label" (#602) — classifyRole read `{}` and
+    // fell back to "other", and gatherSpend fell back to the bare filename. Two
+    // different lies, so two different phrases, both routed through the one
+    // channel that already reaches the browser every tick.
+    note: [
+      sp.skipped ? `${sp.skipped} transcripts skipped` : null,
+      sp.metaErrors ? `${sp.metaErrors} meta sidecar${sp.metaErrors === 1 ? "" : "s"} corrupt — role/label degraded` : null,
+      "ranked on cache-creation; tool split is attributed, not billed",
+    ].filter(Boolean).join("; "),
     // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
     // number: only a turn FOLLOWING a tool result can be charged to a tool, and an
     // agent's first turn — usually its single largest write — follows nothing. Say
