@@ -63,3 +63,110 @@ for (const f of PINNED) {
       `${f} pins the locale at line ${at + 1}, but line ${early + 1} already does work above it: ${JSON.stringify(lines[early])}. An export below the pipelines it protects is not a pin.`);
   });
 }
+
+// #612. Everything above guards the pin. What it does not guard is the
+// PRECONDITION that makes a file-global pin safe, which five of the six state
+// as prose and nothing checked: "nothing in this script sorts, folds case, or
+// uses a `[a-z]` range or a POSIX class". That sentence shipped FALSE.
+// `no-undo-audit.sh` held `${back%"${back##*[![:space:]]}"}` — a POSIX class,
+// and locale-sensitive (measured: a trailing NBSP is stripped under
+// `en_US.UTF-8` and kept under `C`) — in the worktree-linkage check, far out
+// of sight of the paragraph denying any class existed and never read beside
+// it. PR #599 corrected that one paragraph by hand. Nothing stopped
+// the next drift, and a `sort` or a `grep -i` added to any of the six would
+// keep every assertion above green.
+//
+// So scan each pinned script's CODE for the constructs the prose denies and
+// require the result to equal a list written out here. A newly added one fails;
+// a listed one that DISAPPEARS fails too, so the inventory can only move in
+// both directions at once and a script cannot quietly become stricter than its
+// own comment claims. That list is also the escape hatch — a legitimate
+// `sort -u` over ASCII-only data belongs in it — and adding an entry is the
+// moment the script's comment gets fixed, since the entry exists for no other
+// reason.
+//
+// Why not shellcheck (#612's second option): it has no rule for this class and
+// no plugin mechanism to add one, so that route is a fork of shellcheck.
+// Why not simply delete the claim (#612's third): re-verified on this commit,
+// the claim is TRUE in all five, and `no-undo-audit.sh`'s narrower "one,
+// unreachable" is true in the sixth. Deleting a true justification to avoid
+// having to check it is the trade that produced the shipped-false sentence.
+//
+// Behaviour, not just prose, is what these patterns track: each is a construct
+// whose RESULT `LC_ALL=C` changes — collation order for `sort` and a `[a-z]`
+// range, the case map for `-i`/`toupper`, class membership for `[:space:]`.
+const SENSITIVE = [
+  [/\[:[a-z]+:\]/, "POSIX character class"],
+  [/\[[^\]]*[A-Za-z0-9]-[A-Za-z0-9][^\]]*\]/, "collation range"],
+  [/\bsort\b/, "sort"],
+  [/\btr\b[^|;&]*[A-Za-z0-9]-[A-Za-z0-9]/, "tr range"],
+  [/\bgrep\b(\s+-\S+)*\s+(-[A-Za-z]*i[A-Za-z]*|--ignore-case)\b/, "case-insensitive grep"],
+  [/\b(toupper|tolower)\s*\(/, "case folding"],
+  [/\$\{[A-Za-z_]\w*[\^,]/, "shell case conversion"],
+];
+
+// ponytail: whole-line `#` comments only, the same ceiling as
+// strip-comments.mjs. A trailing `cmd  # mentions [a-z]` false-alarms into the
+// list below; a construct hidden in one is impossible, which is the direction
+// that matters here.
+export function localeSensitive(source) {
+  const hits = [];
+  source.split("\n").forEach((line, i) => {
+    if (/^\s*#/.test(line)) return;
+    const found = SENSITIVE.find(([re]) => re.test(line));
+    if (found) hits.push({ line: i + 1, what: found[1], text: line.trim() });
+  });
+  return hits;
+}
+
+// Keyed by script, values are the exact source lines. Absent means the
+// comment's "none" is the whole inventory.
+//
+// The two `*[!0-9]*` entries are what this guard found on its first run: both
+// scripts' comments said they used a `[a-z]` range NOWHERE while each held a
+// digit range in its issue-number guard — the shipped-false shape again, live
+// on `main`, in two more scripts than #612 knew about. Measured inert and the
+// comments corrected to say so, rather than deleted: under `C`, `en_US.UTF-8`,
+// `de_DE.UTF-8` and `tr_TR.UTF-8` the range matches the ASCII digits and
+// nothing else — superscript `²`, Arabic-Indic digits and `½` are excluded in
+// all four, so no locale reachable here reads the guard differently.
+const ALLOWED = {
+  "inflight.sh": [
+    `case "$n" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$n'";; esac`,
+  ],
+  "no-undo-audit.sh": ['back=${back%"${back##*[![:space:]]}"}'],
+  "release-ticket.sh": [
+    `case "$issue" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$issue'";; esac`,
+  ],
+};
+
+for (const f of PINNED) {
+  test(`${f}'s locale precondition holds in code, not only in prose`, () => {
+    const hits = localeSensitive(read(f));
+    assert.deepEqual(hits.map((h) => h.text), ALLOWED[f] ?? [],
+      `${f}'s locale-sensitive inventory no longer matches the one recorded in locale-pin-prose.test.mjs. Found: ${JSON.stringify(hits)}. Either the construct is new — in which case the script's \`export LC_ALL=C\` comment claiming it has none is now false, exactly the way it shipped false in no-undo-audit.sh — or it went away and the entry is stale. Fix the comment and this list together.`);
+  });
+}
+
+// The mutation the guard exists for: the historical shape, a POSIX class in a
+// script whose paragraph denies one. `reap.sh` is long and clean, and the
+// mutant is appended at its end — nowhere a reader of the pin comment looks,
+// which is the whole reason the real one survived review.
+test("the scan catches a construct planted far below the comment denying it", () => {
+  const source = read("reap.sh");
+  assert.deepEqual(localeSensitive(source), []);
+  const lines = source.split("\n");
+
+  for (const [mutant, what] of [
+    ['back=${back%"${back##*[![:space:]]}"}', "POSIX character class"],
+    ["names=$(printf '%s\\n' \"$x\" | sort)", "sort"],
+    ["case $b in [a-z]*) : ;; esac", "collation range"],
+    ["upper=$(printf '%s' \"$b\" | tr a-z A-Z)", "tr range"],
+    ['printf %s "$b" | grep -qi fix', "case-insensitive grep"],
+    ["printf '%s' \"$b\" | awk '{print toupper($0)}'", "case folding"],
+    ["x=${x^}", "shell case conversion"],
+  ]) {
+    const hits = localeSensitive([...lines, mutant].join("\n"));
+    assert.deepEqual(hits.map((h) => h.what), [what], `${mutant} went unseen`);
+  }
+});

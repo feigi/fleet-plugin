@@ -33,7 +33,10 @@ set -eu
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
-# `LC_ALL=C` otherwise changes — have nothing here to act on.
+# `LC_ALL=C` otherwise changes — have nothing here to act on. "Nothing" is an
+# inventory, not a hope: locale-pin-prose.test.mjs enforces it (#612), because
+# this sentence shipped false in no-undo-audit.sh and a `sort` added below
+# would otherwise leave every test in this suite green.
 export LC_ALL=C
 
 NAME=worktree-audit
