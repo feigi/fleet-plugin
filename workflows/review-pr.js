@@ -1055,14 +1055,29 @@ function unrunReason(review) {
   // `skipped` is not a declared field of `test_run`, so however the harness treats
   // an undeclared one, this is the only shape an all-skipped run reaches here in.
   if (run.pass === 0 && !run.fail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
+  // The clause above at exactly zero was the whole of the no-work check, so a run
+  // that collected 937 and executed 1 read clean on a technicality (#651). Same
+  // fact, one test further along. Both counts are INSIDE `test_run`, so the
+  // purity that defers the partial-tree case below does not defer this one.
+  //
+  // A RATIO, and never `run.pass + (run.fail ?? 0) === run.tests`: `node --test`
+  // counts a `todo` outside `pass` (measured: tests 2 / pass 1 / fail 0 / todo 1),
+  // so equality false-reds any host repo carrying one. Half is the coarsest floor
+  // that survives that — a suite may be up to half todo or skipped and still read
+  // as work done — and it is far enough from 1-of-937 that no plausible sharpening
+  // of the number changes that verdict. `typeof pass === "number"` because `pass`
+  // is optional and `null * 2 < tests` would refuse a run that simply omitted it.
+  if (!run.fail && typeof run.pass === "number" && run.pass * 2 < run.tests)
+    return `\`${cmd}\` passed ${run.pass} of the ${run.tests} tests it collected and failed none — most of what it collected never ran`;
   // The CONJUNCTION, never `fail > 0` alone: a failing suite ran, and reading
   // that as unrun is the over-refusal #137 removed. Zero findings is provably
   // wrong only next to failures the reviewer was looking at and wrote up none of.
   if (run.fail > 0 && !review.findings?.length)
     return `\`${cmd}\` reported ${run.fail} failing tests and the reviewer filed no findings about them`;
-  // #143's remaining case — a count below the suite's own size, the partial-tree
-  // one — is deliberately NOT here and cannot be: this stays pure, so the size of
-  // the suite is not a fact it holds. It is a reading rule in the specialist
+  // #143's remaining case — a count below the WHOLE TREE's size, the partial-tree
+  // one, where `tests` itself is the undercount — is deliberately NOT here and
+  // cannot be: this stays pure, so the size of the suite is not a fact it holds.
+  // The ratio above needs no such fact; it reads `tests` against `pass`. It is a reading rule in the specialist
   // prompt instead, where the agent that ran the command can compare the two.
   return null;
 }
