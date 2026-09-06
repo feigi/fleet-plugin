@@ -2777,6 +2777,44 @@ test("a registry entry whose gitdir is GONE is unknown, not a stray to skip (#39
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+test("a gitdir-less HUSK left by a failed removal does not refuse the NEXT run (#623)", (t) => {
+  // The other end of the case above, and what separates them is what the entry
+  // still holds. `git worktree remove` deletes the checkout, then the registry
+  // entry — and when only the final rmdir fails (an unwritable `.git/worktrees`)
+  // the entry survives EMPTY, its checkout already gone. Measured, git 2.50.1
+  // (Apple Git-155), `chmod 555 .git/worktrees`: remove exits 255,
+  // `ls -A .git/worktrees/9-rel` prints nothing, the porcelain lists the main
+  // checkout alone, `prune --dry-run -v` names the entry removable, and the
+  // checkout directory is gone. Git calls that dead three ways, so counting it
+  // as a registration is `linked 0` against `registered 1` and kills every
+  // LATER release in the repo with no receipt — this ticket's whole complaint.
+  //
+  // The husk sits beside a live claim rather than being the released claim's
+  // own, because the run that CREATES a husk is fine; it is the next one that
+  // could not proceed.
+  //
+  // Built by hand rather than through the chmod that produced the measurement:
+  // permission bits are what makes such a fixture leak on failure and go
+  // vacuous under euid 0 (#184), and the end state above is the whole of what
+  // the count reads.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const dead = claim(r.w, 7, "earlier-claim");
+  const entry = join(r.w, ".git", "worktrees", "7-earlier-claim");
+  rmSync(dead.wt, { recursive: true, force: true });
+  for (const f of readdirSync(entry)) rmSync(join(entry, f), { recursive: true, force: true });
+  assert.deepEqual(readdirSync(entry), [], "fixture: a husk is an entry with nothing left in it");
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("7-earlier-claim"),
+    "fixture: git must already consider the husk unregistered",
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(code, 0, "a husk git itself drops is not an entry git failed to report");
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+});
+
 test("git listing MORE than the registry reports THAT, not an incomplete listing (#395)", (t) => {
   // The mismatch has two directions with opposite causes, and one message
   // cannot serve both. FEWER listed than registered is git dropping an entry it
