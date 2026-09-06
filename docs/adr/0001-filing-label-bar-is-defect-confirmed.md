@@ -91,10 +91,21 @@ The guard's input is deferrals filed *after* `6d0c1f6` — the filing-step half
 dated in the Status line, because that is what moved filer behaviour, not this
 record's own merge. The standing backlog is not that input — it is mostly
 pre-reprice filings, whose reconciliation is #593. Take that count over both
-states — `gh issue list --state all --search 'in:body "Deferred from PR"'`,
-narrowed to what was filed after that commit — and record the date taken with
-the verdict, for the same reason this guard's 2026-08-23 baseline figures are
-dated rather than presented as current.
+states — `gh issue list --state all --search 'in:body "Deferred from PR"'
+--limit 1000` (`gh`'s own default caps at 30; the live population already
+outgrew the sibling ADR's `gh issue list --state closed --limit 400`
+— measured 622 on 2026-09-06, re-measure at guard-fire time and raise the
+limit again once it nears 1000) — narrowed to what was filed after that
+commit, and excluding step 5's bulk-refutation records: closed, labelled
+`wontfix`, titled `PR #<n> review: the suggestion band, checked`. Those carry
+the search string but, per step 5, are never a real deferral filing —
+counting them inflates the denominator and makes the >50% trigger harder to
+fire, the closed-side mirror of the open-only gaming this population ruling
+exists to prevent. A title match that is not also closed-and-`wontfix` — a
+mixed record still carrying a live residual finding — is real deferred work
+and stays in the count — and record the date taken with the verdict, for the
+same reason this guard's 2026-08-23 baseline figures are dated rather than
+presented as current.
 
 Baseline for that comparison, measured against the tracker on 2026-08-23 — an
 as-of figure, never a live count, because the tracker is append-only and any

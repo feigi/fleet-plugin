@@ -173,10 +173,23 @@ const STATE_ALL = phrase("--state all");
 // rots on the next filing, so the date the count was taken is part of the count.
 const AS_OF = phrase("record the date taken with the verdict");
 
+// Presence alone doesn't defend a pin: a mutant can wrap the matched span in
+// markdown strikethrough or drop a negating sentence right after it, and a
+// bare `.test()` still finds every pinned word in order. Bound the match's own
+// surroundings too, not just its content.
+const notNeutralized = (s) => {
+  const m = s.match(POPULATION);
+  if (!m) return true; // population pin already reports the clause missing; don't double-fire
+  const before = s.slice(Math.max(0, m.index - 5), m.index);
+  const after = s.slice(m.index + m[0].length, m.index + m[0].length + 200);
+  return !/~~/.test(before + after) && !/Superseded/i.test(after);
+};
+
 const guardPins = {
   population: (s) => !POPULATION.test(s),
   stateAll: (s) => !STATE_ALL.test(s),
   asOf: (s) => !AS_OF.test(s),
+  notNeutralized: (s) => !notNeutralized(s),
 };
 const guardFiring = (s) => Object.keys(guardPins).filter((n) => guardPins[n](s));
 
@@ -200,6 +213,8 @@ const guardMutants = [
     (t) => t.replace(phrase("--state all"), "--state open")],
   ["the as-of duty is dropped", ["asOf"],
     (t) => t.replace(phrase("and record the date taken with the verdict"), "and read it off the tracker")],
+  ["the population clause is struck through and marked superseded", ["notNeutralized"],
+    (t) => t.replace(POPULATION, (m) => `~~${m}~~ Superseded: use open issues only, it is simpler to compute.`)],
 ];
 
 for (const [what, expected, mutate] of guardMutants) {
