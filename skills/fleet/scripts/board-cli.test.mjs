@@ -224,7 +224,7 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 //     end. If this test ever does red on a correct build, that is the cause and
 //     #889 is the fix; do not re-gate this on the platform for it.
 //
-// Nothing about the EAGAIN exit-code inversion (#299/#322) is claimed here.
+// Nothing about the EAGAIN exit-code inversion (#299/#328) is claimed here.
 // That is the other half of this file family — probabilistic, and genuinely
 // darwin-immune. This is the truncation half (#176/#246/#328/#363), which is
 // deterministic on both platforms. Do not merge the two.
@@ -288,8 +288,13 @@ test(
     // three calls: three sub-cap floods total past it while every one of
     // them arrives complete, refusal included. Measured against a
     // console.error die() at 22,000 B — 66,188 delivered, refusal PRESENT,
-    // all three assertions here green under the very bug they pin. The real
-    // outcomes sit far below FLOOD_BYTES (65,536 mutant, 65,599 fixed).
+    // all three assertions here green under the very bug they pin. That
+    // darwin-era (65,536 mutant, 65,599 fixed) pair reads as headroom this
+    // gate no longer has: the 100-run Linux measurement above puts the real
+    // outcomes at 146,176 (mutant) and 146,239-182,783 (fixed) — within
+    // ~17,217 B of FLOOD_BYTES, not far below it. The #889 outlier
+    // (546,301 B) clears FLOOD_BYTES outright, so it would fail this
+    // overrun assertion too, not only the refusal-match below.
     assert.ok(
       r.stderr.length < FLOOD_BYTES,
       `gh's flood must overrun the pipe, not arrive whole: got ${r.stderr.length} of ${FLOOD_BYTES}`,
