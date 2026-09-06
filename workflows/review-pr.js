@@ -243,8 +243,10 @@ function usableDiff(snap) {
 // construction and only needs stating, so a specialist stops hunting for a git
 // command to settle what the snapshot already settles.
 //
-// The specialists are pr-review-toolkit agents whose stated default is to read
-// `git diff` (code-reviewer.md's "Review Scope" section). The snapshot is `git archive HEAD | tar -x`
+// The specialists are pr-review-toolkit agents whose stated default is to
+// read `git diff` (code-reviewer.md's "Review Scope" section — vendored by
+// the pr-review-toolkit plugin, not tracked in this repo, so nothing here can
+// pin or re-verify the quote). The snapshot is `git archive HEAD | tar -x`
 // and therefore NOT a git repo, so that default fails and the only fallback is
 // reading files whole. Handing them the change is the fix; the bounding rule
 // alone would only treat the symptom.

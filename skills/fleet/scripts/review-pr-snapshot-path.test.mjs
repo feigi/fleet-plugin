@@ -672,8 +672,8 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
 // COPY lifted from the source text: it stays green while the feature
 // disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
 // resolveTestCmd once the snapshot is validated" records this exact defect for
-// resolveTestCmd, and `select-dimensions.test.mjs`'s "review-pr.js actually
-// calls resolveDimensions, then selectDimensions, to pick the fan-out" for the fan-out.
+// resolveTestCmd, and `select-dimensions.test.mjs`'s "actually calls
+// resolveDimensions" pin does for the fan-out.
 // Delete the `snapshotMissing(snap)` call and its `throw` in review-pr.js and
 // #140's refusal is dead code with this whole file green.
 test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
