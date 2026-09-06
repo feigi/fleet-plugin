@@ -2093,8 +2093,9 @@ failures arrive as *wrong findings*, not errors:
   still collide on one postgres. "I'm on my own copy" is exactly the intuition
   that skips the command — say both, every time. Which command depends on the
   audience: a member in a worktree uses `./agent-test`; a specialist on a
-  snapshot does not, and takes the one `review-and-fix.md` hands out. See
-  references/isolation.md.
+  snapshot does not — the tracked bootstrap (#55) needs a real git repository
+  to materialize the runner, which a `git archive` snapshot lacks — and takes
+  the one `review-and-fix.md` hands out. See references/isolation.md.
 - **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
   outside them.** Finding ids restart at 1 every review, so two fix-appliers on
   different PRs both reach for `unv1`; one agent overwrote a sibling's

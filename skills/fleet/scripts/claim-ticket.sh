@@ -51,6 +51,9 @@ if [ "${1:-}" = "--write-runner" ]; then
   [ $# -ge 2 ] || die "usage: claim-ticket.sh --write-runner <dest> [<issue>]"
   writeonly=true
   dest=$2
+  [ -n "$dest" ] || die "--write-runner destination must not be empty"
+  destdir=$(dirname -- "$dest")
+  [ -d "$destdir" ] || die "--write-runner destination's directory does not exist: $destdir"
   set -- "${3:-0}" write-runner fix --apply
 fi
 
@@ -112,28 +115,45 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # provenances with opposite claim states (rc-0 residue, and a release halted
 # mid-flight with the branch and the label still live), and only the hedge is
 # true of both. #728
-if [ -e "$wt" ] || [ -L "$wt" ]; then
-  die "$wt already exists — ticket may already be claimed"
-elif ! gone "$PWD/$wt"; then
-  die "could not establish whether $wt exists — an ancestor is unreadable, not searchable, or not a directory; refusing to claim a path nothing measured"
+# The claim-only guards: a fresh worktree/branch not yet existing is a claim
+# precondition, meaningless for `--write-runner`, which targets an arbitrary
+# `$dest` in a tree that may already exist (the main checkout, an existing
+# worktree). Ungated, these refused a runner emission over residue from a
+# claim this invocation never intends to make.
+if [ "$writeonly" = false ]; then
+  if [ -e "$wt" ] || [ -L "$wt" ]; then
+    die "$wt already exists — ticket may already be claimed"
+  elif ! gone "$PWD/$wt"; then
+    die "could not establish whether $wt exists — an ancestor is unreadable, not searchable, or not a directory; refusing to claim a path nothing measured"
+  fi
+  git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 fi
-git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
-# Everything below is derived from origin/main, the ref the worktree is built
-# from — never from $PWD. The checkout can hold untracked or gitignored files
-# the worktree will never have (this repo's own package.json is gitignored),
-# and can sit on a different commit entirely. Probing $PWD let the script
-# announce "no lockfile" and then build a worktree containing one.
-pkg=$(git show origin/main:package.json 2>/dev/null) || pkg=
+# Everything below is derived from $ref, the tree the runner reflects. The
+# claim path builds a fresh worktree FROM origin/main, so origin/main is the
+# only tree that exists to derive from — never $PWD, which can hold untracked
+# or gitignored files the worktree will never have (this repo's own
+# package.json is gitignored), or sit on a different commit entirely. Probing
+# $PWD there let the script announce "no lockfile" and then build a worktree
+# containing one.
+#
+# `--write-runner` is the opposite case: $dest already lives inside a tree
+# that exists NOW (the main checkout, an existing worktree), so HEAD is what
+# "the CURRENT runner" (#55, top of file) means, and requiring an origin/main
+# ref to exist at all — the main checkout need not have one — refused runner
+# emission over a precondition the claim path alone needs.
+ref=origin/main
+[ "$writeonly" = false ] || ref=HEAD
+pkg=$(git show "$ref:package.json" 2>/dev/null) || pkg=
 
 # Derive the frozen install from the lockfile. No match is a refusal, not a
 # default — guessing here is what corrupts the tree. The one safe exception is
 # nothing to install: no manifest, or one whose four dependency fields are all
 # empty and which is not a workspaces root. An unparseable manifest is not
 # evidence of an empty one, so it refuses too.
-if   git cat-file -e origin/main:package-lock.json 2>/dev/null; then install="npm ci"
-elif git cat-file -e origin/main:pnpm-lock.yaml    2>/dev/null; then install="pnpm i --frozen-lockfile"
-elif git cat-file -e origin/main:yarn.lock         2>/dev/null; then install="yarn --immutable"
+if   git cat-file -e "$ref:package-lock.json" 2>/dev/null; then install="npm ci"
+elif git cat-file -e "$ref:pnpm-lock.yaml"    2>/dev/null; then install="pnpm i --frozen-lockfile"
+elif git cat-file -e "$ref:yarn.lock"         2>/dev/null; then install="yarn --immutable"
 elif [ -z "$pkg" ]; then install="true"
 # Ahead of the capture below, and only on the arm that reaches it — every
 # lockfile arm and the no-manifest arm settle the install without an
@@ -154,7 +174,7 @@ elif [ -z "$pkg" ]; then install="true"
 elif ! nodeerr=$(node -e 0 </dev/null 2>&1); then
   die "node is unusable, refusing to claim without the interpreter this derivation needs — $nodeerr"
 elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(String(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)))' 2>&1); then
-  die "could not read origin/main:package.json — $ndeps"
+  die "could not read $ref:package.json — $ndeps"
 # The `2>&1` on the ndeps capture is load-bearing — without it the failure
 # path's die has no reason to print — but it merges node's stderr into $ndeps
 # on the SUCCESS path too. The hazard is not an enumerable set of env vars
@@ -170,9 +190,9 @@ elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").re
 # guard. What protects it is its callee folding its own node's stderr into the
 # reason it returns rather than emitting it — not the capture's shape.
 elif case "$ndeps" in ''|*[!0-9]*) true ;; *) false ;; esac; then
-  die "could not read origin/main:package.json — unexpected output: $ndeps"
+  die "could not read $ref:package.json — unexpected output: $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
-else die "origin/main declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
+else die "$ref declares $ndeps dependencies but has no lockfile — refusing to guess an install command"
 fi
 echo "    lockfile → install: $install" >&2
 
@@ -199,7 +219,7 @@ testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 # unreadable either way. derive-testcmd.sh writes nothing to stderr when it
 # succeeds, so the success path still captures the command alone.
 script_dir=$(dirname -- "$0")
-if ! testcmd=$("$script_dir/derive-testcmd.sh" . origin/main 2>&1); then
+if ! testcmd=$("$script_dir/derive-testcmd.sh" . "$ref" 2>&1); then
   die "$testcmd"
 fi
 echo "    test entrypoint → $testcmd" >&2
@@ -255,12 +275,13 @@ if [ "$apply" = false ]; then
   echo "    would: gh issue edit $issue --add-label in-progress" >&2
   printf '    would: git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
   printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
-  printf '    would: write %s and add it to .git/info/exclude\n' "$runner" >&2
+  printf '    would: write %s and add it to .git/info/exclude — skipped if %s is\n' "$runner" "$runner" >&2
+  printf '      already tracked, checked out with the worktree (#55)\n' >&2
 else
   # Everything down to the lockfile check is the CLAIM; `--write-runner` wants
   # none of it and must not be able to reach it. Left at the branch's own
   # indentation deliberately — re-indenting sixty lines to add a guard buys a
-  # whitespace diff over the block whose comments carry #119, #128 and #1141.
+  # whitespace diff over the block whose comments carry #128.
   if [ "$writeonly" = false ]; then
   echo "\$ gh issue edit $issue --add-label in-progress" >&2
   gh issue edit "$issue" --add-label in-progress >/dev/null || die "could not label issue $issue"

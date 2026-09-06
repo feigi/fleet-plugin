@@ -10,7 +10,7 @@ The runner is re-materialized on every invocation, so no copy of it survives a r
 
 ## Filesystem isolation is not stack isolation
 
-Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Symlinking `node_modules` does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not, and takes one `review-and-fix.md` hands out.
+Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Symlinking `node_modules` does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not — the tracked bootstrap (#55) needs a real git repository to materialize the runner, which a `git archive` snapshot lacks — and takes one `review-and-fix.md` hands out.
 
 ## Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`
 

@@ -57,6 +57,15 @@ test("--write-runner emits a runner and claims nothing", () => {
   // The positional rewrite hands the claim path a slug, so the branch it would
   // have cut has a name — that name is what must not exist.
   assert.equal(git("branch", "--list", "fix/42-write-runner").toString().trim(), "", "a branch was created");
+  // The claim path's own runner-write adds `agent-test` to `.git/info/exclude`
+  // — but only when it wrote the runner itself. `--write-runner`'s $dest is
+  // its own artifact, not a claim mutation, so that line must not appear.
+  const exclude = join(dir, ".git", "info", "exclude");
+  assert.equal(
+    existsSync(exclude) && readFileSync(exclude, "utf8").includes("agent-test"),
+    false,
+    ".git/info/exclude was mutated by a generate-only run",
+  );
 });
 
 test("--write-runner emits the claim path's own runner, byte for byte", () => {

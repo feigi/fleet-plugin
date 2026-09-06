@@ -1,7 +1,9 @@
-// #141. `review-and-fix.md` establishes that `./agent-test` cannot exist in a
-// review snapshot: the snapshot is `git archive HEAD | tar -x`, tracked files
-// only, and `claim-ticket.sh` writes the runner into the worktree and
-// `.git/info/exclude`s it. The "filesystem isolation is not stack isolation"
+// #141. `review-and-fix.md` establishes that `./agent-test` cannot run in a
+// review snapshot: `agent-test` is a TRACKED bootstrap (#55) present in any
+// `git archive HEAD | tar -x` copy, but the bootstrap materializes the runner
+// via `claim-ticket.sh --write-runner`, which requires a real git repository
+// (`git rev-parse --git-dir`) — a git-archive snapshot has no `.git`, so it
+// cannot. The "filesystem isolation is not stack isolation"
 // guard in both run-team documents said the opposite — it paired the snapshot
 // with `./agent-test` and closed with "say both, every time", handing a
 // specialist on a snapshot a command that is not there.
