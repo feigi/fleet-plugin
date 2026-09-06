@@ -389,7 +389,7 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 // #908: a controller brief predicted the merge would be "a fast-forward". True
 // of the CONTENT (merge tree == pin tree == 988f29d1, `git diff` empty) and false
 // of the SHAPE — `gh pr merge --merge` wrote two parents. The distinction is not
-// cosmetic: prove-merge.sh:173 is `[ "$parents" -ge 2 ] || die "... not a merge
+// cosmetic: prove-merge.sh has `[ "$parents" -ge 2 ] || die "... not a merge
 // commit"` and die() exits 2, so an actual fast-forward yields no proof and a
 // halt. Pinned so a future member cannot read the doc as permitting one.
 test("step 4 says why --merge is load-bearing, not merely which flag to type", () => {

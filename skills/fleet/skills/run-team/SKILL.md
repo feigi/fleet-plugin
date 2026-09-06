@@ -677,7 +677,7 @@ for d in "$HOME/.claude/projects/$PROJECT_DIR"/*/subagents; do
 done
 ```
 
-`encodeProjectDir` (`skills/fleet/scripts/board.mjs:153`) encodes the cwd the way
+`encodeProjectDir` (`skills/fleet/scripts/board.mjs`) encodes the cwd the way
 Claude Code does — `/Users/x/.claude` becomes `-Users-x--claude`, double dash — and
 hand-guessing that path is why the fleet's own panel once rendered nothing here.
 

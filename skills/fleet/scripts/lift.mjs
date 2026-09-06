@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 // `workflows/` scripts run inside the Workflow sandbox, which forbids the
 // filesystem/Node.js APIs an `import` would need to resolve, and a failed
 // import bricks the fleet's default review path
-// (docs/specs/2026-08-06-review-pr-specialist-read-rules-design.md:277). This
+// (docs/specs/2026-08-06-review-pr-specialist-read-rules-design.md, "a failed
+// import bricks the fleet's default review path"). This
 // convention — copying the source text rather than importing it — is what this
 // repo's test headers call text-lift pinning. Scripts under
 // skills/fleet/scripts/ may import each other freely; only the workflow file

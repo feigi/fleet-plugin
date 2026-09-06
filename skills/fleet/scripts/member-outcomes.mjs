@@ -74,7 +74,8 @@ export function parseMemberName(name) {
 // mid-run finished at the later one, and that is the tier its output reflects.
 // `effort` is last-wins for the same reason.
 //
-// USAGE IS FOLDED ONTO `message.id`, exactly as board.mjs:221-232 does. ONE
+// USAGE IS FOLDED ONTO `message.id`, exactly as board.mjs's "fold lines back
+// into turns on `message.id`" does. ONE
 // assistant API turn is written as SEVERAL jsonl lines — one per content block
 // (thinking, text, each tool_use) — and every one repeats the SAME message.id
 // and the SAME usage object. Summing per LINE counts each turn's cache_creation
