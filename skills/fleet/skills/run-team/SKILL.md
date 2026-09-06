@@ -784,6 +784,18 @@ spend is not available: `.spend.top` labels agents by their Agent-call
 **Never read the guard's silence as a pass** — and never read a single run's rows
 as its verdict.
 
+**The dispatch prompt pastes phase 0's own read of the ticket rather than telling
+the member to re-fetch it, and this still costs one `gh issue view` per ticket,
+never one per member.** The fresh-context design's isolation rationale — "every
+implementer re-reads its Agent Brief... from scratch"
+(`docs/specs/2026-07-22-run-team-agent-fleet-design.md:168`) — is about a member
+never inheriting another ticket's context, not about where the bytes come from.
+Pasting phase 0's own read into the prompt keeps that: the member still gets the
+brief verbatim and re-derives nothing from a sibling. What it drops is the
+unconditional re-fetch of an issue the controller already has open, on every
+dispatch and every refill — the fetch the prompt still carries is the backstop
+for a brief that turns out to be insufficient, not the default path.
+
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
 
@@ -795,6 +807,11 @@ number, worktree abs path, branch, and each of these verbatim:
 > You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
+
+> Here is the ticket's distilled brief, already read once in phase 0 step 4 —
+> title, the `## Agent Brief` comment, and its `Out of scope`, pasted verbatim:
+> `<distilled brief>`. Skip the fetch below if this already answers what you
+> need.
 
 > Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
 > Not bare `gh issue view <N> --comments` — non-interactively that prints only
@@ -1441,7 +1458,11 @@ heavy job is in `failure`** (the heavy diff-validating suites — not the
 fine — **solely** off that count, which is a condition to establish rather than
 infer, see the five-condition note in the fix-applier block above) — or
 `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
-**finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
+**finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
+with `model: "haiku"`, low effort.** Its four duties are a checklist — audit the
+worktree, read CI's per-job state, apply one release label, report — and the
+merge gate downstream still catches whatever it gets wrong, the same argument
+that puts the merge bot on the same tier below. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
@@ -1777,7 +1798,12 @@ there.
 Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then
 `SendMessage` you what it merged and what it held, then exit — and say that
-you dispatched it, which is what makes it skip its own watcher step.
+you dispatched it, which is what makes it skip its own watcher step. **Dispatch
+it with `model: "haiku"`, low effort** — rebase, wait for green, check the
+label, merge is checklist work, and a bad merge still needs the label and the
+per-job CI state to have been read correctly, which is exactly what a wrong
+merge later surfaces and a human resolves; the tier buys nothing the gate
+doesn't already backstop.
 
 **Put every gate trap in the bot's brief, not in a follow-up message.** A bot
 already looping cannot be corrected — the loop consumes the turns a correction
@@ -1957,7 +1983,15 @@ the reviewer cap buys no review parallelism at all — those slots hold
 fix-appliers, which do the cheap half (apply, commit, push, file). Five
 implementers still saturate the pipeline within the hour and every later PR
 queues; the queue now forms ahead of the workflow rather than ahead of a slot.
-Absent instruction, default **2 implementers / 5 reviewers** and say why.
+
+**Re-derived against `docs/metrics/member-outcomes.tsv`'s first full wave after
+#210 and #211 both landed** (`run_date=2026-08-10`; #210 merged 2026-08-05, #211
+2026-08-06): median implementer `wall_s` 428 against median fix-applier
+(`role=reviewer`) `wall_s` 1190 — a ~2.8x ratio, the same shape the
+minutes-based estimate above already states, not the reduction the tiered
+specialist models and size-scaled fan-out were expected to buy. That does not
+support tightening to **2/3** — a 1.5x ratio — against a measured 2.8x. Absent
+instruction, default stays **2 implementers / 5 reviewers**, and say why.
 
 **The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
 ≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
