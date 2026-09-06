@@ -100,6 +100,9 @@ function spendRows(host, items, { label, value, pct, highlight }) {
 // Both text-only outcomes carry the same `text` field because both render as one
 // `spend-wrap` div, differing only in wording.
 function spendView(sp) {
+  // Shared by both the early note-only branch and the funded panel's note
+  // below, so a rewording can't update one copy and silently miss the other.
+  const metaErrorsPhrase = (n, suffix = "") => `${n} meta sidecar${n === 1 ? "" : "s"} corrupt${suffix}`;
   if (!sp) return { kind: "hidden" }; // genuinely nothing yet — normal at run start
   // A read failure is a bug the operator has to act on, and it used to look
   // exactly like an idle run. stderr is not a channel here: the board is
@@ -130,12 +133,13 @@ function spendView(sp) {
   // above), so the note goes out on its own, without the zeroed two-column body.
   if (!sp.totals || !sp.totals.cacheWrite) {
     // A corrupt meta sidecar does not zero out cache-write — the transcript it
-    // sits beside still books its tokens — so this branch is `skipped`'s alone
-    // in practice. Checked anyway, the same way the panel note below does, so
-    // this branch cannot regress into hiding metaErrors if that ever changes.
+    // sits beside still books its tokens — but a freshly-dispatched agent with
+    // no cache-creation turn flushed yet can still land here with `skipped=0`
+    // and `metaErrors>0`: totals.cacheWrite is a sum across agents, so this
+    // branch is reachable by metaErrors alone, not just by `skipped`.
     const bits = [];
-    if (sp.skipped) bits.push(`${sp.skipped} transcripts skipped`);
-    if (sp.metaErrors) bits.push(`${sp.metaErrors} meta sidecar${sp.metaErrors === 1 ? "" : "s"} corrupt`);
+    if (sp.skipped) bits.push(`${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped`);
+    if (sp.metaErrors) bits.push(metaErrorsPhrase(sp.metaErrors));
     return bits.length
       ? { kind: "note", text: `${bits.join("; ")}; no spend recorded yet` }
       : { kind: "hidden" };
@@ -149,8 +153,8 @@ function spendView(sp) {
     // different lies, so two different phrases, both routed through the one
     // channel that already reaches the browser every tick.
     note: [
-      sp.skipped ? `${sp.skipped} transcripts skipped` : null,
-      sp.metaErrors ? `${sp.metaErrors} meta sidecar${sp.metaErrors === 1 ? "" : "s"} corrupt — role/label degraded` : null,
+      sp.skipped ? `${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped` : null,
+      sp.metaErrors ? metaErrorsPhrase(sp.metaErrors, " — role/label degraded") : null,
       "ranked on cache-creation; tool split is attributed, not billed",
     ].filter(Boolean).join("; "),
     // These bars are percentages of the ATTRIBUTED subtotal, not of the headline

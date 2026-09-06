@@ -175,6 +175,7 @@ source, and it can never move a ticket.
     "reviewPct": 84,        // specialists + reviewers, share of cache_creation
     "attributedPct": 48,    // share of cache-write the tool table explains; never 100
     "skipped": 0,           // transcripts that could not be read this tick
+    "metaErrors": 0,        // meta sidecars unreadable/wrong-shaped this tick (#602)
     "since": null           // --spend-since epoch-ms, when the caller scoped the run
   }
 }

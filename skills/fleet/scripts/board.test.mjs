@@ -487,11 +487,7 @@ test("#602: a reviewer's torn meta sidecar is distinguishable from a genuine zer
 });
 
 test("#602: a legitimately zero reviewPct with no sidecar fault reports no metaErrors — no false positive", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spend-"));
-  const implTurn = JSON.stringify({ type: "assistant", message: { id: "i1", usage: { cache_creation_input_tokens: 1000, output_tokens: 1 }, content: [] } });
-  writeFileSync(join(dir, "agent-impl.jsonl"), implTurn + "\n");
-  writeFileSync(join(dir, "agent-impl.meta.json"), JSON.stringify({ description: "impl-1" }));
-  const s = gatherSpend({ dir });
+  const s = gatherSpend({ dir: fixture(TURN, { description: "impl-1" }) });
   assert.equal(s.reviewPct, 0); // genuinely no review-side spend this run
   assert.equal(s.metaErrors, 0); // and nothing claims otherwise
 });
