@@ -108,10 +108,10 @@ test("a production diff runs everything, less `tests` when the diff has none", (
 
 // --- Size tier. `profile` is assigned through an else-if chain in computeStats,
 // --- so these values are mutually exclusive and cannot race `docsOnly`.
-// #218: `comments` is part of the size-tier floor, so this row carries it. The
-// diff shape is exactly the four measured production instances — a single `.js`
-// file whose whole substance is prose scores `docs: 0`, because `classify()`
-// returns `src` for any code extension before it checks `isDocs`.
+// #218: `comments` is part of the size-tier floor, so this row carries it. This
+// single `.js` file whose whole substance is prose scores `docs: 0`, because
+// `classify()` returns `src` for any code extension before it checks `isDocs`
+// — one shape of the diffs #218 measured in production (four of them, below).
 test("a single-file source diff trims to correctness + silent-failure + comments", () => {
   assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), [
     "correctness",
@@ -121,7 +121,7 @@ test("a single-file source diff trims to correctness + silent-failure + comments
 });
 
 // The measured instances, as file lists, driven through the real classifier: a
-// comment-only `.js` (#682), a comment-only `.mjs` (#710), a `.sh` + its test
+// comment-only `.mjs` (#682), a comment-only `.mjs` (#710), a `.sh` + its test
 // (#1091), and a majority-comment `.sh` + test at `small` (#1172). Every one
 // scores `docs: 0` and every one now keeps `comments`. Under the old
 // `stats.kinds?.docs !== 0` carve-out all four returned without it.
@@ -212,34 +212,10 @@ test("a small multi-file source diff trims to correctness + silent-failure + com
   );
 });
 
-// `comments` survives the size trim on ANY size-tier diff, whatever its files
-// classify as (#218). Both rows below are profile `small` with `docsOnly` FALSE —
-// one config file or one source file is enough to falsify it — so before the
-// carve-out landed they lost comment-analyzer entirely, and before #218 a diff
-// with no docs file lost it again. Key ordering follows DEFAULT_DIMENSIONS
-// because `.filter()` preserves it.
-//
-// The docs+config row carries `silent-failure` since #236 — hasSrc is false, but
-// `small` is a size-tier profile and the floor is unconditional on it. The ticket
-// names this row only in passing, through `small`; it is the one row the floor
-// widens beyond the config-only cases above.
-test("a small mixed docs+config diff keeps comments, which docsOnly alone would miss", () => {
-  assert.deepEqual(
-    dimensionKeys([f("README.md", 5, 3), f(".github/workflows/ci.yml", 2, 1)]),
-    ["correctness", "silent-failure", "comments"],
-  );
-});
-
-test("a small mixed docs+source diff keeps comments alongside silent-failure", () => {
-  assert.deepEqual(
-    dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("README.md", 5, 5)]),
-    ["correctness", "silent-failure", "comments"],
-  );
-});
-
 // Same carve-out shape for `tests`: when the diff's substance IS a test, the
 // mutation-discrimination check is the one it most needs. Without this the row
-// below trims to correctness + silent-failure.
+// below trims to whatever else the size tier keeps (`SIZE_TIER_DIMS`) — not
+// restated here as a count, which is exactly what went stale last time (#218).
 test("a small diff that adds a test keeps the tests dimension", () => {
   assert.deepEqual(
     dimensionKeys([f("skills/fleet/scripts/a.mjs", 5, 5), f("skills/fleet/scripts/a.test.mjs", 5, 5)]),

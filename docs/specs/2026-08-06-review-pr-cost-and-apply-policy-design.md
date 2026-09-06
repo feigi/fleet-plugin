@@ -268,16 +268,21 @@ comments, types, simplify]`):
 | `profile: "empty"` | all | 6 |
 | `docs` | correctness, comments | 2 |
 | `tests-only` | correctness, tests, comments | 3 |
-| `single-file`, has src | correctness, silent-failure | 2 |
-| `single-file`, config only | correctness, silent-failure | 2 |
-| `small`, config only | correctness, silent-failure | 2 |
-| `small`, has src | correctness, silent-failure | 2 |
+| `single-file`, has src | ~~correctness, silent-failure~~ **Superseded by #218:** correctness, silent-failure, comments | ~~2~~ **3** |
+| `single-file`, config only | ~~correctness, silent-failure~~ **Superseded by #218:** correctness, silent-failure, comments | ~~2~~ **3** |
+| `small`, config only | ~~correctness, silent-failure~~ **Superseded by #218:** correctness, silent-failure, comments | ~~2~~ **3** |
+| `small`, has src | ~~correctness, silent-failure~~ **Superseded by #218:** correctness, silent-failure, comments | ~~2~~ **3** |
 | `small`, docs + config (not `docsOnly`) | correctness, silent-failure, comments | 3 |
 | `small`, docs + src (not `docsOnly`) | correctness, silent-failure, comments | 3 |
-| `small`, src + test | correctness, silent-failure, tests | 3 |
+| `small`, src + test | ~~correctness, silent-failure, tests~~ **Superseded by #218:** correctness, silent-failure, tests, comments | ~~3~~ **4** |
 | `small`, `kinds` missing from the blob | correctness, silent-failure, comments | 3 |
 | `production`, has tests | all | 6 |
 | `production`, no tests | all but tests | 5 |
+
+**Superseded by #218:** the four size-tier rows without `comments` above were the
+rows the docs-file carve-out did not reach. `comments` is now on the size-tier
+floor unconditionally, so every `single-file`/`small` row carries it — not only
+the ones that already had a docs file mixed in.
 
 **The two cost changes barely compound — but "by construction" was too strong.**
 The base size tier keeps `correctness` + `silent-failure`, both of which carry no
@@ -287,11 +292,16 @@ three of six cheaper.
 
 Two things qualify it, both added after this paragraph was first written. Three
 dimensions carry no `model` override, not two — `simplify` is the third, and it
-is dropped rather than kept. And the carve-outs keep `comments` (on a docs file)
+is dropped rather than kept. ~~And the carve-outs keep `comments` (on a docs file)
 and `tests` (on a test file), both of which DO carry `model: "sonnet"` — so on a
 small mixed diff the fan-out is trimmed *and* a survivor is downgraded. Rows
-`small, docs+config` and `small, docs+src` in the matrix above are the cases.
-Worth knowing when measuring; still not a defect.
+`small, docs+config` and `small, docs+src` in the matrix above are the cases.~~
+**Superseded by #218:** `comments`' carve-out is gone — it sits in
+`SIZE_TIER_DIMS` unconditionally now, still carrying `model: "sonnet"`. So the
+trimmed-and-downgraded combination in the previous sentence is not a mixed-diff
+special case anymore; it is every `single-file`/`small` row in the matrix above.
+`tests` keeps its file-kind carve-out, unchanged. Worth knowing when measuring;
+still not a defect.
 
 `log()` names both trims and the model choice. No silent caps.
 

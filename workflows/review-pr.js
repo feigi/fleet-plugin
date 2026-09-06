@@ -139,8 +139,9 @@ const VERDICT_SCHEMA = {
 // A weak `tests`/`comments`/`types` pass leaves something a later run or a
 // reader still catches; a refute pass kills false POSITIVES and never false
 // NEGATIVES, so recoverability is the whole of the argument. `correctness` and
-// `silent-failure` miss silently and permanently — the same pair, for the same
-// reason, that `SIZE_TIER_DIMS` keeps. `simplify` is omitted for the vendored-
+// `silent-failure` miss silently and permanently — the pair `SIZE_TIER_DIMS`
+// keeps for that reason; `comments` sits beside them there for a different one
+// (#218), and is downgraded. `simplify` is omitted for the vendored-
 // pin reason above instead; it does draw 0 refuters, but VIA SEVERITY — its
 // prompt directs every finding to `suggestion`, which is budgeted 0 — and the
 // size tier is where its cost is paid.
