@@ -373,9 +373,9 @@ test("the design spec's script-surface row names every field the payload actuall
 // one JSON array, so a single unescaped byte costs the caller every entry, not
 // just the offending one.
 //
-// `dirtyFiles[]` is NOT covered here and that is deliberate: git C-quotes those
-// paths itself, conditionally, so JSON-escaping on top is a second and
-// different problem. The comment at the `files=` awk names it in place.
+// `dirtyFiles[]` was left out of #119 because git C-quotes those paths itself,
+// conditionally, and translating that form is a second and different problem.
+// #617 settled it — see the test below and the `jesc` comment in the script.
 test("a quote in a branch name still emits parseable JSON", (t) => {
   const w = repo(t);
   addWorktree(w, 'evil"branch');
@@ -413,6 +413,45 @@ test("an ordinary worktree is byte-identical — the escaping accepts what it sh
   assert.equal(code, 0);
   const e = entryFor(json, wt);
   assert.deepEqual(e, { worktree: wt, branch: "fix/119-json-sh-extract", ahead: 0, dirty: 0, dirtyFiles: [], readable: true });
+});
+
+// #617: `dirtyFiles[]` carries git's C-quoting, which is not JSON's. One
+// `café.txt` used to emit the literal `"caf\303\251.txt"` — `\3` is not a JSON
+// escape — and took the WHOLE array down with it, every other worktree's entry
+// included, which is why the sibling assertion at the end is the real gate.
+//
+// The remedy chosen is translate-then-emit: the payload names the file that is
+// on disk, so a controller reading it can hand the string straight back to the
+// filesystem. Every branch of that translation is exercised here — an octal
+// escape (`é`), the two verbatim short forms (`\"`, `\\`), one short form JSON
+// spells the same way (`\t`), and a C0 byte NEITHER format has a short form for
+// (BEL), which json.sh replaces with a space and `jesc` matches deliberately.
+//
+// Node re-encodes every JS string as UTF-8 on the way to the filesystem, so a
+// source-literal `é` lands as the two bytes git C-quotes as `\303\251` — the
+// exact input the bug needs. That route reaches VALID UTF-8 only: an invalid
+// byte cannot be written from a JS string at all, and APFS refuses to hold one
+// either; #582 covers that shape one script over. BEL is spelled `\u0007`
+// rather than embedded, to keep a control byte out of this source file.
+test("dirty filenames that git C-quotes round-trip to the real names", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  const names = ["café.txt", 'q"q.txt', "b\\s.txt", "ta\tb.txt", "bel\u0007.txt"];
+  for (const n of names) writeFileSync(join(wt, n), "uncommitted\n");
+
+  const { code, json } = runAudit(w);
+
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.dirty, names.length);
+  // Sorted rather than in git's order: git orders by raw bytes and JS by UTF-16
+  // code unit, so pinning the order here would pin the wrong thing.
+  assert.deepEqual(
+    [...e.dirtyFiles].sort(),
+    ["b\\s.txt", "bel .txt", "café.txt", 'q"q.txt', "ta\tb.txt"].sort(),
+    "a C-quoted dirty filename no longer round-trips to the name on disk",
+  );
+  assert.equal(entryFor(json, w).readable, true, "one bad element must not cost the caller every other entry");
 });
 
 // #525: this script parses no positional argument — an argument was silently
