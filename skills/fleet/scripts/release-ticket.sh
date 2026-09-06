@@ -39,9 +39,16 @@ set -eu
 # ambient in no-undo-audit.sh: a truncated list reported as a clean, confident
 # answer.
 #
-# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
-# range or a POSIX class, so collation and case-folding — the two things
-# `LC_ALL=C` otherwise changes — have nothing here to act on.
+# Safe as a global: nothing in this script sorts, folds case, or holds a POSIX
+# class. It does use ONE collation range — `*[!0-9]*`, the issue-number guard
+# below — and a range IS locale-sensitive by spec, its members drawn from the
+# collation sequence rather than the codepoint order. Measured inert here
+# (#612): `0-9` matches the ASCII digits and nothing else under `C`,
+# `en_US.UTF-8`, `de_DE.UTF-8` and `tr_TR.UTF-8` alike, with superscript `²`,
+# Arabic-Indic digits and `½` excluded in all four. So collation and
+# case-folding — the two things `LC_ALL=C` otherwise changes — have nothing
+# here to act on. locale-pin-prose.test.mjs holds that inventory as a list and
+# fails if the code drifts from this paragraph in either direction.
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no

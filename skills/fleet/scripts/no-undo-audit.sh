@@ -38,8 +38,11 @@ set -eu
 # locale can reach it here, because a `gitdir` file always ends `.git` and
 # `$(cat …)` has already eaten the trailing newline, so the last non-space byte
 # is always `t`. That one site is why this paragraph says "one, unreachable"
-# where the five sibling scripts' copies say "none" — theirs are accurate as
-# written, this one is the exception. Non-ASCII paths are untouched either way:
+# where the five sibling scripts' copies say "none" — two of theirs now name a
+# `*[!0-9]*` range instead, this one is the POSIX-class exception.
+# locale-pin-prose.test.mjs holds all six inventories as lists and fails if the
+# code drifts from them (#612); this paragraph is why the entry below exists.
+# Non-ASCII paths are untouched either way:
 # every scrub set below is \001-\037 and every byte of a multi-byte UTF-8
 # sequence is >= \200.
 export LC_ALL=C
