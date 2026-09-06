@@ -178,6 +178,74 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
   assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
 });
 
+// #600: a filename is bytes, and the two tools that read find's output are told
+// which only by the ambient locale. Under en_US.UTF-8 with a name holding \377,
+// measured on macOS: `grep` drops that line silently — a green over a smaller
+// suite, #582's own false-green — and BSD `sed`, fed that byte directly, abandons
+// the whole stream ("RE error: illegal byte sequence", exit 1), which empties
+// $files and refuses a suite that is right there. `LC_ALL=C` on each command is
+// the fix.
+//
+// Two stubs, because neither half of the fixture can be built for real. APFS
+// refuses the name outright (`Illegal byte sequence`), so no filesystem this
+// suite can create holds it — `find` is stubbed to emit what a filesystem that
+// does would. And node cannot be asked what it ran, so it is stubbed to report
+// how many arguments survived discovery: `--test` plus both paths is 3, and the
+// unpinned runner reaches this assertion with one of them (`2` — `--test` plus
+// the one path grep's own silent drop lets through; `sed`'s abort never enters
+// into it, since grep already dropped the bad line before sed would see it).
+//
+// LC_ALL is set on the child rather than inherited: the ambient locale is the
+// hostile input here, so pre-seeding it is what makes the test discriminate at
+// all instead of depending on the operator's environment.
+//
+// THE CEILING, inherited from locale-pin-prose.test.mjs: this kills its mutant
+// on macOS only. GNU grep and sed are byte-oriented and pass every line through
+// whatever the locale says, so on ubuntu-latest — the one platform ci.yml runs —
+// deleting both pins keeps this test green.
+test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-locale-"));
+  // The byte cannot be spelled in JS — node re-encodes every string as UTF-8 on
+  // the way to argv, turning `\xFF` into the two valid bytes `\303\277`. POSIX
+  // `printf` interprets the octal escape, so the fixture stays pure ASCII and
+  // the shell makes the byte.
+  writeFileSync(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n", { mode: 0o755 });
+  writeFileSync(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n', { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}`, LC_ALL: "en_US.UTF-8" },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout, "3", "discovery lost a path holding an invalid UTF-8 byte");
+});
+
+// The source-assertion half of #600, on both pins — same shape as
+// locale-pin-prose.test.mjs (that file's own list deliberately excludes
+// claim-ticket.sh; this is that decision, made here instead, since the emitted
+// runner is generated, not a checked-in script the list's globbing would find).
+//
+// This is the ONLY regression coverage the file-argument branch's own pin gets
+// (`arg=$(printf '%s\n' "$arg" | LC_ALL=C sed …)`, below). A behavioural twin of
+// the test above is not constructable for it, on either platform this suite
+// runs on: `[ -e "$arg" ]` gates that line, and it needs a REAL file — APFS
+// refuses to create one whose name holds an invalid UTF-8 byte at all (measured:
+// `touch` on such a name exits "Illegal byte sequence", not just Node's own
+// fs), and `[` is a shell builtin, not a PATH-resolved command, so it can't be
+// stubbed the way `find` and `node` are above. Where the filesystem WOULD allow
+// the name (ext4, ubuntu-latest — the platform CI actually runs), GNU sed's own
+// byte-orientation makes the pin invisible anyway, same ceiling as the
+// directory branch. Nothing behavioural can fail if this pin goes missing, on
+// any platform available here — only a source check can.
+test("claim-ticket.sh still pins the locale on both find-output commands", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.equal((src.match(/LC_ALL=C grep\b/g) ?? []).length, 1,
+    "the directory branch's grep pin (find's output, above) went missing or moved");
+  assert.equal((src.match(/LC_ALL=C sed\b/g) ?? []).length, 2,
+    "one of the two sed pins (directory branch above, file-argument branch below) went missing");
+});
+
 // Why the trailing slash, and why not `-L`: claim-ticket.sh, above `found=`.
 // The symlink is written into the worktree rather than through `repo()` because
 // the runner only ever stats a path in its cwd — whether a commit or a local

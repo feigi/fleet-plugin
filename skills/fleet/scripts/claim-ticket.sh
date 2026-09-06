@@ -547,7 +547,26 @@ for arg do
       */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "\$arg" >&2; exit 1 ;;
     esac
     found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
-    files=\$(printf '%s\n' "\$found" | grep -E '$testfile_re' | sed 's/\[/[[]/g')
+    # Byte semantics for the two tools that read find's output, because a
+    # filename is bytes and neither tool is told which. Measured on macOS with
+    # a name holding \377, under en_US.UTF-8: \`grep\` drops that line silently
+    # (#582's own false-green shape — a green over a smaller suite). Measured
+    # with \`sed\` fed that byte directly, BSD \`sed\` gives up on the whole
+    # stream ("RE error: illegal byte sequence", exit 1) — but in THIS pipeline
+    # grep's own drop reaches the byte first, so sed never sees it here and its
+    # pin is defense in depth, not a live defect in this ordering. It stays: if
+    # sed ever is reached, it empties \$files outright, which is worse than
+    # grep's silent shrink. Under LC_ALL=C both pass every line through. GNU is
+    # byte-oriented and already does, so this changes nothing on Linux — the
+    # platform CI runs, which is why no behavioural test here can fail on CI.
+    # (#600)
+    # A per-command prefix, not \`export LC_ALL=C\` in this runner's prologue,
+    # which is the form the six fleet scripts use. This runner \`exec\`s the
+    # suite: an exported pin would reach node and every process the tests spawn,
+    # so the fleet's OWN locale fixtures — which need a UTF-8 ambient locale to
+    # discriminate — would go green with their scripts' pins deleted. The pin
+    # belongs to these two commands, not to the suite they discover.
+    files=\$(printf '%s\n' "\$found" | LC_ALL=C grep -E '$testfile_re' | LC_ALL=C sed 's/\[/[[]/g')
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here and the refusal below would
     # never print. Read a status you care about explicitly, as find does above.
@@ -687,7 +706,12 @@ for arg do
       # directory branch already does to find's output (\`sed 's/\[/[[]/g'\`);
       # a file named directly needs the same escape or #100's own bracketed
       # case survives the fix meant to close it.
-      arg=\$(printf '%s\n' "\$arg" | sed 's/\[/[[]/g')
+      # Same failure the directory branch's own sed pin guards against (#600) —
+      # but no grep runs ahead of this \$arg to drop the byte first, so this pin
+      # is the only guard here, not defense in depth: sed emits nothing, \$arg
+      # empties, and node runs one path fewer than it was given, silently
+      # (#100's own drop).
+      arg=\$(printf '%s\n' "\$arg" | LC_ALL=C sed 's/\[/[[]/g')
     else
       case "\$arg" in
         # Only node can judge its own flags. Read as paths, every documented
