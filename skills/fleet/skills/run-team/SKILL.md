@@ -437,24 +437,29 @@ isolation runner in one serial pass. Infer branch/worktree convention from
 install in a throwaway worktree corrupts it for everyone; the script derives the
 frozen form from the lockfile and refuses to guess.
 
-**Materialize the isolation envelope as a file, not a briefing.** The script
-writes `.worktrees/<N>-slug/agent-test` (ports derived from `<N>`, so collisions
-are impossible) and `.git/info/exclude`s it. Brief members with `./agent-test
+**Materialize the isolation envelope as a file, not a briefing.** The runner is
+tracked at the repo root since #55, so every checkout has one; it derives its
+ports from the worktree's own `<N>-slug` directory name (so collisions stay
+impossible) and materializes the current runner from the one emitter rather than
+carrying a copy of it. Brief members with `./agent-test
 <file-or-dir>` and nothing else — anyone who finds the worktree finds the
 runner, including grandchildren you never dispatched. A directory works too and
 expands to the test files under it; one holding none refuses rather than passing
 vacuously, so a mistyped file or directory path cannot come back green. See
 references/isolation.md.
 
-**A reused worktree may lack the runner.** `claim-ticket.sh` writes `agent-test`
-only when it claims a *fresh* worktree. A worktree carried over from a prior run,
-or an already-open PR's worktree you send a rebaser/resolver into, predates the
-marker and has no `./agent-test` — a member told to use it stalls on a missing
-script (observed with a rebase-resolver in a prior-run worktree). When you
-dispatch into a NOT-freshly-claimed worktree, either re-materialize the runner
-first or tell the member the runner is absent and to run docker-free suites
-directly (`npx vitest run --config vitest.ci.config.ts <file>` — the CI unit
-config has no `globalSetup`, so there is no stack to collide on).
+**A reused worktree may lack the runner** — no longer here, and still can
+elsewhere. `claim-ticket.sh` used to write `agent-test` only when it claimed a
+*fresh* worktree, so a worktree carried over from a prior run, or an already-open
+PR's worktree you sent a rebaser/resolver into, had no `./agent-test` and the
+member stalled on a missing script (observed with a rebase-resolver in a
+prior-run worktree). #55 tracked the runner, so any worktree checked out from
+`origin/main` now carries it. A tree that is NOT a checkout — a `git archive`
+snapshot, a `cp -R` subset — still has whatever was copied into it, and a repo
+that tracks no runner never had one: there, tell the member the runner is absent
+and to run docker-free suites directly (`npx vitest run --config
+vitest.ci.config.ts <file>` — the CI unit config has no `globalSetup`, so there
+is no stack to collide on).
 
 **A reused worktree may also be on the wrong COMMIT.** `git worktree add <path>
 <branch>` checks out the existing LOCAL branch and never consults the remote, so
@@ -1535,8 +1540,8 @@ a minute apart showed *different* mutants, so a member's report and any single
    because the dirt may be someone's only copy. Here nothing in it is anyone's.
    Nothing sweeps a leak for you either: `reap.sh`'s branchless sweep is bounded
    to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
-   it reports and never collects. `claim-ticket.sh` writes `./agent-test` only
-   into a worktree it freshly claims, so the tree you added has none — run
+   it reports and never collects. The tree you added is a checkout, so since #55
+   it carries the tracked `./agent-test` like any other — run either that or
    `<testCmd>` in it, per **A reused worktree may lack the runner** above.
 
    **None of this licenses a write to the owned worktree.** Duty 1 is a read;
@@ -2088,8 +2093,9 @@ failures arrive as *wrong findings*, not errors:
   still collide on one postgres. "I'm on my own copy" is exactly the intuition
   that skips the command — say both, every time. Which command depends on the
   audience: a member in a worktree uses `./agent-test`; a specialist on a
-  snapshot does not, and takes the one `review-and-fix.md` hands out. See
-  references/isolation.md.
+  snapshot does not — the tracked bootstrap (#55) needs a real git repository
+  to materialize the runner, which a `git archive` snapshot lacks — and takes
+  the one `review-and-fix.md` hands out. See references/isolation.md.
 - **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
   outside them.** Finding ids restart at 1 every review, so two fix-appliers on
   different PRs both reach for `unv1`; one agent overwrote a sibling's

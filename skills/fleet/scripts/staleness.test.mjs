@@ -154,9 +154,9 @@ test("a --gone string that was never at this path answers unknown, never fixed",
 });
 
 // MUST STILL OFFER. The generated-artifact case: the file is right there on
-// disk and untracked in origin/main, which is what `agent-test` looks like in
-// every claimed worktree. Reading the on-disk copy would measure a snapshot
-// frozen at claim time; reading the absence as a clean tree would close the
+// disk and untracked in origin/main, which is what `.agent-test.sh` looks like
+// in any checkout `./agent-test` has run in. Reading the on-disk copy would
+// measure whatever the last run emitted; reading the absence as a clean tree would close the
 // ticket. Neither: unknown.
 test("a path untracked in origin/main answers unknown even though the file is on disk", (t) => {
   const w = repo(t);

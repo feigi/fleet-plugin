@@ -61,6 +61,13 @@ __pycache__/
 # Local state flags
 .last-cleanup
 
+# The runner `./agent-test` materializes from claim-ticket.sh on each run. Not
+# committed for the reason the bootstrap gives: a copy freezes, the emitter
+# does not. IGNORED rather than left untracked — `git worktree remove` refuses
+# on an untracked file and deletes an ignored one silently, so an untracked
+# generated runner would strand every release reap.sh attempts.
+.agent-test.sh
+
 # Fleet runtime state — the ledger, the cockpit board, the instrument pin; never committed
 .fleet/
 # Fleet worktrees claim-ticket.sh creates inside the checkout
