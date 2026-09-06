@@ -2125,6 +2125,28 @@ test("a branch already gone does not shadow the orphan sitting behind it (#624)"
   assert.equal(existsSync(c.wt), true, "nothing here touches the directory");
 });
 
+test("an orphan branch checked out on the main checkout does not also trip the usage-error die", (t) => {
+  // `git checkout --orphan release/5-foo` on the MAIN checkout points HEAD at
+  // refs/heads/release/5-foo before any commit exists on it. `main_branch`
+  // (read off `git worktree list --porcelain`) already equals
+  // `refs/heads/$branch`, so the earlier "branch ... is checked out in the
+  // main checkout" guard blocks — but `git rev-parse --verify --quiet` fails
+  // on the unborn ref, so `has_branch` still reads false. That contradicts the
+  // "mutually exclusive" reasoning a prior round of the `has_branch = false`
+  // guard relied on to drop its `-z "$blockers"` conjunct: both fire, and
+  // without the conjunct the die appends its own usage-error prose to a
+  // receipt that already named the real cause, and exits 2 instead of 1.
+  const r = repo(t);
+  git(r.w, "checkout", "-q", "--orphan", "release/5-foo");
+
+  const { code, json } = release(r, { args: ["5", "foo", "release"] });
+  assert.equal(code, 1, "blocked with a receipt, not the usage-error die");
+  assert.equal(json.released, false);
+  assert.equal(json.blockers.length, 1, `only the real blocker can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /checked out in the main checkout/);
+  assert.doesNotMatch(json.blockers[0], /check the <slug> and <type> arguments/);
+});
+
 test("a clean claim is not mistaken for an orphaned directory", (t) => {
   // The other half of the new precondition: it must not refuse a state that is
   // fine. A healthy claim's worktree sits at exactly the path the orphan probe

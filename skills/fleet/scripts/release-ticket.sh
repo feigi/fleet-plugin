@@ -926,7 +926,7 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
   elif ! gone "$orphan"; then
     block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
-  elif [ "$has_branch" = false ]; then
+  elif [ "$has_branch" = false ] && [ -z "$blockers" ]; then
     # A mistyped <slug>/<type> names a branch that does not exist, and without
     # this die the run would drop the label off a ticket whose real claim is
     # untouched — invisible to candidates.mjs and still in-flight. Refuse
@@ -942,18 +942,20 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     # answers that question first, so this die runs only once it has had its
     # say.
     #
-    # No `-z "$blockers"` conjunct here (one was tried and dropped): every
-    # other way THIS if-block's own occupied/gone checks could report a
-    # finding is an elif sibling above, mutually exclusive with this arm — and
-    # the only OTHER blocker reachable with $wt and $stray both empty, a
-    # newline in $main_wt, is caught earlier still, by `! gone "$orphan"`
-    # (gone() refuses outright on the byte `wt_listing` substitutes for a
-    # newline, so that arm fires first and this one is never reached for that
-    # case — the scenario an earlier draft of this comment cited as the
-    # guard's reason to exist was, measured against the current elif chain,
-    # already unreachable). So `$blockers` is provably empty on every path
-    # that reaches here; this die is the last word on an otherwise silent run
-    # regardless.
+    # The `-z "$blockers"` conjunct is load-bearing, not dead weight (a prior
+    # round of this comment argued the opposite and was wrong): `$blockers` can
+    # be non-empty here even though this arm's own occupied/gone siblings above
+    # did not fire. `git checkout --orphan release/5-foo` on the MAIN checkout
+    # points HEAD at refs/heads/release/5-foo before any commit exists, so
+    # `main_branch` (read off `git worktree list --porcelain`) already equals
+    # `refs/heads/$branch` and the EARLIER, unrelated "branch ... is checked
+    # out in the main checkout" guard above has already `block`ed — while
+    # `git rev-parse --verify --quiet refs/heads/$branch` fails on the unborn
+    # ref, so `has_branch` still reads false (measured). Without this guard the
+    # die fires anyway, appending its own usage-error prose to a receipt that
+    # already named the real cause, and exiting 2 instead of the correct
+    # blocked-at-1 verdict. Guarding on `$blockers` lets that earlier finding
+    # stand as the only word on an otherwise silent run.
     die "no branch $branch and no worktree on it — check the <slug> and <type> arguments"
   fi
 fi
