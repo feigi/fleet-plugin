@@ -229,12 +229,14 @@ function probe() {
   // origin/main:<path>` is FATAL, not empty, on a path this repo does not
   // track — while the file may sit right there in the working checkout — so
   // reading that failure as "the file is gone, the fix landed" closes a live
-  // ticket. And a GENERATED artifact is untracked by construction: `agent-test`
-  // is emitted into a claimed worktree by claim-ticket.sh's heredoc, so every
-  // copy under `.worktrees/` is frozen at whenever that worktree was claimed.
-  // Measured 2026-08-22: `git ls-tree origin/main -- agent-test` prints nothing
-  // at exit 0, `git show origin/main:agent-test` exits 128, and the file is on
-  // disk in every claimed worktree. A probe that resolved it by name would
+  // ticket. And a GENERATED artifact is untracked by construction:
+  // `.agent-test.sh` is claim-ticket.sh's heredoc output, materialized beside
+  // the tracked `agent-test` bootstrap on every run of it, so what is on disk
+  // is whatever the last run produced. Measured 2026-08-22 on `agent-test`
+  // itself, which was the generated one before #55 tracked the bootstrap:
+  // `git ls-tree origin/main -- <path>` prints nothing at exit 0 and `git show
+  // origin/main:<path>` exits 128, while the file sits right there in the
+  // checkout. A probe that resolved it by name would
   // measure an arbitrarily old build and report the answer with full
   // confidence, so this file NEVER reads the working tree and never executes
   // what it finds — `origin/main` or `unknown`, nothing else.

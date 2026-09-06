@@ -33,6 +33,27 @@ wt_lib="$(dirname "$0")/worktree.sh"
 # shellcheck source=worktree.sh
 . "$wt_lib" || die "$wt_lib failed to load"
 
+# Materializing the runner is not claiming a ticket: no label, no branch, no
+# worktree, no install. `--write-runner` reaches the emitter below and nothing
+# else, so the repo root's tracked `agent-test` can ask this script for the
+# CURRENT runner instead of carrying a copy of it (#55). A committed copy would
+# be the same decoy every `.worktrees/*/agent-test` already is — 24 KB frozen
+# at whichever commit added it, while this emitter moved on — and worse, being
+# tracked it would read as authoritative.
+#
+# <issue> only picks the isolation triple and defaults to 0: the main checkout
+# and any clone, which share a stack with no claim. The positional rewrite
+# below is what routes it through the argument validation the claim path
+# already has, `$issue` included.
+writeonly=false
+dest=
+if [ "${1:-}" = "--write-runner" ]; then
+  [ $# -ge 2 ] || die "usage: claim-ticket.sh --write-runner <dest> [<issue>]"
+  writeonly=true
+  dest=$2
+  set -- "${3:-0}" write-runner fix --apply
+fi
+
 [ $# -ge 3 ] || die "usage: claim-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
@@ -45,6 +66,10 @@ case "$issue" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$issue'";; e
 branch="$type/$issue-$slug"
 wt=".worktrees/$issue-$slug"
 runner="$wt/agent-test"
+# The one field `--write-runner` overrides. Everything else it derives is the
+# claim path's own derivation, unchanged, which is the point: one emitter, one
+# set of inputs, no second inference to drift.
+[ "$writeonly" = false ] || runner=$dest
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
@@ -232,6 +257,11 @@ if [ "$apply" = false ]; then
   printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
   printf '    would: write %s and add it to .git/info/exclude\n' "$runner" >&2
 else
+  # Everything down to the lockfile check is the CLAIM; `--write-runner` wants
+  # none of it and must not be able to reach it. Left at the branch's own
+  # indentation deliberately — re-indenting sixty lines to add a guard buys a
+  # whitespace diff over the block whose comments carry #119, #128 and #1141.
+  if [ "$writeonly" = false ]; then
   echo "\$ gh issue edit $issue --add-label in-progress" >&2
   gh issue edit "$issue" --add-label in-progress >/dev/null || die "could not label issue $issue"
 
@@ -280,6 +310,22 @@ else
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"
   fi
   echo "    lockfile clean after install" >&2
+  fi
+
+  # A runner is already there: the repo tracks one, and `git worktree add`
+  # checked it out with everything else. Overwriting it is what must not
+  # happen — the file is TRACKED, so the write leaves a modified tracked path,
+  # and `reap.sh` calls `git worktree remove` without `--force` (its own
+  # comment: "refuses on modified and untracked files"). Every release of every
+  # claim would then strand on a file this script wrote itself. Leave it: it is
+  # the bootstrap that asks this script for the current runner anyway, so the
+  # worktree gets a fresher one than this branch could have written. #55
+  #
+  # `--write-runner` is exempt — $dest is the artifact it was asked to produce,
+  # and refusing to overwrite it would refuse every run after the first.
+  if [ "$writeonly" = false ] && [ -e "$runner" ]; then
+    printf '    %s already present — tracked runner, checked out with the worktree; left as is\n' "$runner" >&2
+  else
 
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
@@ -670,10 +716,20 @@ SH
 exec $testcmd "\$@"
 SH
   chmod +x "$runner"
-  excl="$(git rev-parse --git-common-dir)/info/exclude"
-  grep -qx agent-test "$excl" 2>/dev/null || echo "agent-test" >> "$excl"
-  printf '    wrote %s and excluded it\n' "$runner" >&2
+  if [ "$writeonly" = false ]; then
+    excl="$(git rev-parse --git-common-dir)/info/exclude"
+    grep -qx agent-test "$excl" 2>/dev/null || echo "agent-test" >> "$excl"
+    printf '    wrote %s and excluded it\n' "$runner" >&2
+  else
+    printf '    wrote %s\n' "$runner" >&2
+  fi
+  fi
 fi
+
+# The receipt is a CLAIM receipt — an issue, a branch, a worktree, an install.
+# `--write-runner` created none of them, so printing one would report a claim
+# that never happened, in the shape the ledger reads.
+[ "$writeonly" = false ] || exit 0
 
 # `$issue` is guarded above (`case … ''|*[!0-9]*|0?*`), but <slug> and <type> are
 # not, and all four string fields derive from them — `$branch` is

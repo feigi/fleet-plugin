@@ -1,0 +1,44 @@
+#!/bin/sh
+# The fleet's test runner, tracked — so a checkout nobody claimed can run the
+# suite. `./agent-test` used to exist only inside a worktree `claim-ticket.sh`
+# had freshly claimed, and everywhere else it answered `no such file or
+# directory`: not a red, but shaped like one, arriving exactly when someone is
+# deciding whether a diff is broken. #55
+#
+# This is a BOOTSTRAP, not the runner. The runner is 24 KB of measured
+# guards — the directory-expansion shim, the node_modules refusals, the
+# zero-match refusal that stops a green over a suite nobody ran — and it is
+# EMITTED by skills/fleet/scripts/claim-ticket.sh. Committing a copy of it here
+# would make this file the same decoy every `.worktrees/*/agent-test` already
+# is, frozen at the commit that added it while the emitter moved on, and
+# tracked, so it would read as the authoritative one. Ask the emitter instead:
+# a run can then only ever get the current runner.
+set -eu
+
+# `$0`'s directory, not `$PWD`: the runner judges an argument's node_modules
+# divergence from `dirname "$0"`, and the arguments themselves are the caller's
+# to resolve, so the runner is materialized HERE and executed with the caller's
+# cwd untouched. A generated runner sitting in $TMPDIR would answer the
+# divergence question about the wrong tree entirely.
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+# The isolation triple is per-worktree, and a worktree already carries its
+# issue number in its own directory name — `.worktrees/<N>-<slug>`, the shape
+# claim-ticket.sh builds. Everything else (the main checkout, a clone, a
+# snapshot) is 0, which shares a stack with no claim. Derived rather than
+# written in at claim time, which is what lets the tracked file be identical in
+# every worktree and so never a modified path `git worktree remove` refuses.
+issue=${here##*/}
+issue=${issue%%-*}
+# claim-ticket.sh refuses a leading zero and anything non-numeric, and its
+# refusal would arrive here as a materialization failure rather than as the
+# "this checkout is not a claimed worktree" it actually means. Answer that
+# question here, where it is cheap.
+case $issue in ''|*[!0-9]*|0?*) issue=0 ;; esac
+
+gen=$here/.agent-test.sh
+if ! materialize=$(cd "$here" && ./skills/fleet/scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
+  printf 'agent-test: could not materialize the runner from skills/fleet/scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
+  exit 1
+fi
+exec "$gen" "$@"
