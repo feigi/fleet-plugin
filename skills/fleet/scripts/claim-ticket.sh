@@ -342,10 +342,33 @@ else
   # the bootstrap that asks this script for the current runner anyway, so the
   # worktree gets a fresher one than this branch could have written. #55
   #
-  # `--write-runner` is exempt — $dest is the artifact it was asked to produce,
-  # and refusing to overwrite it would refuse every run after the first.
+  # `--write-runner` is exempt from THAT test — $dest is the artifact it was
+  # asked to produce, and refusing to overwrite it would refuse every run after
+  # the first — but not from the tracked-path refusal below.
+  #
+  # Existence is the wrong question to be the only one asked, because it
+  # answers about the caller's intent rather than about the damage. The damage
+  # is a MODIFIED TRACKED path, and every route to it routes through this one
+  # write: the claim path when its own condition is wrong, and `--write-runner`
+  # with a caller-supplied $dest, which no guard reads at all today. #1262 is
+  # what that costs — a claim run from a checkout whose `claim-ticket.sh`
+  # predated the `-e` test overwrote the bootstrap `git worktree add` had just
+  # checked out, and the corruption was silent until three implementers each
+  # diagnosed it by hand. Asking git makes the same clobber a refusal.
+  #
+  # Fail-open when git cannot answer, unlike the `gone()` pair above, and the
+  # asymmetry is deliberate: those guard a CLAIM, where an unmeasured path is a
+  # worktree that may already exist, while this one guards a WRITE whose only
+  # hazard is trackedness. $dest need not sit in the repo the cwd is in, so
+  # `git -C` outside one is an ordinary input rather than a fault, and nothing
+  # untracked is lost by writing. The refusal fires on trackedness this
+  # established, never on a question it could not put.
+  runner_dir=$(dirname -- "$runner")
+  runner_base=$(basename -- "$runner")
   if [ "$writeonly" = false ] && [ -e "$runner" ]; then
     printf '    %s already present — tracked runner, checked out with the worktree; left as is\n' "$runner" >&2
+  elif git -C "$runner_dir" ls-files --error-unmatch -- "$runner_base" >/dev/null 2>&1; then
+    die "$runner is tracked — writing the generated runner over it would leave a modified tracked path, which \`git worktree remove\` refuses and every release would then strand on; refusing"
   else
 
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
