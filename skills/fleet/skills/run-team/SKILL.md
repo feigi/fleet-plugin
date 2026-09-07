@@ -206,8 +206,13 @@ At start, and whenever the pool empties.
    not be written — so never assume exit 2 parses.
 4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
    --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
-   answers both questions. Record the Agent Brief's `Out of scope` sequencing.
-   Then judge **decided?** — never size.
+   answers both questions. Record the ticket's real brief — the `## Agent
+   Brief` comment where one exists, otherwise the issue body, which is where
+   most tickets actually carry it (a controller probe found only 43/100 open
+   `ready-for-agent` issues have a separate Agent Brief comment; the rest,
+   this ticket included, carry the brief in the body) — plus its `Out of
+   scope` sequencing wherever that section is found. Then judge **decided?**
+   — never size.
 
    **Still live?** A backlog ticket's claims rot. Before `decided?`, settle the
    ticket's central claim against `origin/main` — never the working tree, never
@@ -784,6 +789,18 @@ spend is not available: `.spend.top` labels agents by their Agent-call
 **Never read the guard's silence as a pass** — and never read a single run's rows
 as its verdict.
 
+**The dispatch prompt pastes phase 0's own read of the ticket rather than telling
+the member to re-fetch it, and this still costs one `gh issue view` per ticket,
+never one per member.** The fresh-context design's isolation rationale — "every
+implementer re-reads its Agent Brief... from scratch"
+(`docs/specs/2026-07-22-run-team-agent-fleet-design.md:178-179`) — is about a member
+never inheriting another ticket's context, not about where the bytes come from.
+Pasting phase 0's own read into the prompt keeps that: the member still gets the
+brief verbatim and re-derives nothing from a sibling. What it drops is the
+unconditional re-fetch of an issue the controller already has open, on every
+dispatch and every refill — the fetch the prompt still carries is the backstop
+for a brief that turns out to be insufficient, not the default path.
+
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
 
@@ -795,6 +812,12 @@ number, worktree abs path, branch, and each of these verbatim:
 > You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
+
+> Here is the ticket's distilled brief, already read once in phase 0 step 4 —
+> title, plus whichever of the `## Agent Brief` comment or the issue body
+> carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:
+> `<distilled brief>`. Skip the fetch below if this already answers what you
+> need.
 
 > Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
 > Not bare `gh issue view <N> --comments` — non-interactively that prints only
@@ -1441,7 +1464,12 @@ heavy job is in `failure`** (the heavy diff-validating suites — not the
 fine — **solely** off that count, which is a condition to establish rather than
 infer, see the five-condition note in the fix-applier block above) — or
 `ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
-**finisher** — a fresh small agent, not the fix-applier resumed. **Never dispatch
+**finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
+with `model: "haiku"`.** Its four duties are a checklist — audit the
+worktree, confirm every deferral has a tracker home and re-run the acceptance
+mutation, apply one release label, report — and the
+merge gate downstream still catches whatever it gets wrong, the same argument
+that puts the merge bot on the same tier below. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
@@ -1777,7 +1805,14 @@ there.
 Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `~/.claude/skills/fleet/commands/run-merge-bot.md`, run **one** pass, then
 `SendMessage` you what it merged and what it held, then exit — and say that
-you dispatched it, which is what makes it skip its own watcher step.
+you dispatched it, which is what makes it skip its own watcher step. **Dispatch
+it with `model: "haiku"`** — rebase, wait for green, check the
+label, merge is checklist work, and a bad merge still needs the label and the
+per-job CI state to have been read correctly, which is exactly what a wrong
+merge later surfaces and a human resolves; `no-undo-audit.sh` is the
+deterministic, script-driven backstop run before every push specifically to
+catch a wrongly-resolved conflict, so the tier buys nothing that backstop
+doesn't already cover.
 
 **Put every gate trap in the bot's brief, not in a follow-up message.** A bot
 already looping cannot be corrected — the loop consumes the turns a correction
@@ -1957,7 +1992,24 @@ the reviewer cap buys no review parallelism at all — those slots hold
 fix-appliers, which do the cheap half (apply, commit, push, file). Five
 implementers still saturate the pipeline within the hour and every later PR
 queues; the queue now forms ahead of the workflow rather than ahead of a slot.
-Absent instruction, default **2 implementers / 5 reviewers** and say why.
+
+**Re-derived against the full post-#211 population in
+`docs/metrics/member-outcomes.tsv`, not one wave.** A single `run_date` is not
+representative — `run_date=2026-08-10`, the first full wave after #210
+(merged 2026-08-05) and #211 (2026-08-06) landed, gave median implementer
+`wall_s` 428 against median fix-applier (`role=reviewer`) `wall_s` 1190, a
+~2.8x ratio, but pooling every row since is a clearly declining trend, not a
+stable one: since 2026-08-07 (the complete post-#211 population, n=289
+implementer / 302 reviewer) → 1.49x; since 2026-08-28 (n=107/109) → 1.22x;
+since 2026-09-01 (n=62/61) → 1.13x. All three sit at or below the 1.5x ratio
+that would support narrowing, the opposite of the single-wave read. Taking the
+full post-#211 population as the most representative window (largest sample,
+not an outlier wave, not overfit to a narrow recent slice): median implementer
+`wall_s` 905 against median fix-applier `wall_s` 1348.5, a 1.49x ratio — right
+at the 1.5x line, and the narrower, more recent windows above show it
+continuing to fall rather than reverting. That supports narrowing to **2
+implementers / 3 reviewers**. Absent instruction, default is now **2
+implementers / 3 reviewers**, and say why.
 
 **The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
 ≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
