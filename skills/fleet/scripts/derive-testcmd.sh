@@ -36,8 +36,16 @@ set -eu
 # effect it also fixes a second, unrelated bug the C-quoted form carried: a
 # quoted name never matched `$testfile_re` at all, because the closing `"`
 # defeats the `$` anchor — so a repo whose test files carry non-ASCII names
-# under the (default) quoted form was refused as having none. Both are now
-# covered by a behavioural fixture in derive-testcmd.test.mjs.
+# under the (default) quoted form was refused as having none.
+#
+# Two separate fixtures in derive-testcmd.test.mjs, because one config does
+# not exercise the other bug: "...under core.quotePath's default true" pins
+# the C-quoting/`$`-anchor defect this comment just described — mutation-
+# verified, it goes red if `-z` is reverted. "...with core.quotePath false
+# survives an ambient UTF-8 locale" pins the separate, locale-dependent hazard
+# from #582 (an unquoted byte only surviving `tr`/`grep` under `LC_ALL=C`) —
+# `-z` is not load-bearing for that one, since plain `--name-only` already
+# emits the byte unquoted when `core.quotePath` is false.
 #
 # `-z` terminates each entry with NUL, and a shell variable cannot hold an
 # embedded NUL — POSIX `$()` strips it, silently concatenating every entry

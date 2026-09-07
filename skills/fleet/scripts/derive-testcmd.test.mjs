@@ -52,20 +52,72 @@ test("no scripts.test but test files present falls back to node --test", () => {
   assert.equal(out, "node --test");
 });
 
-// #614: the BEHAVIOURAL twin of locale-pin-prose.test.mjs' source assertion
-// for this script — that file checks `export LC_ALL=C` is PRESENT, this one
-// checks it is LOAD-BEARING. Reproduces the actual defect the review found:
-// with `core.quotePath false` set, `git ls-tree` used to emit an unquoted raw
-// byte, and grep's locale then decided whether a test file was found at all.
-// `-z` makes the byte reach grep unquoted regardless of quotePath, but the
-// byte only survives `tr`/`grep` correctly under `LC_ALL=C` — measured with
-// the pin deleted and this same fixture: `tr` dies on the byte under an
-// ambient UTF-8 locale (`tr: Illegal byte sequence`), the listing comes back
-// empty, and a repo that demonstrably has a test file is refused as having
-// none. `LANG` with `LC_ALL`/`LC_CTYPE` absent is what an unset `LC_ALL`
-// actually looks like.
+// #614 named TWO bugs, and each needs its own fixture — one config does not
+// exercise the other:
+//
+// 1. THE ONE `-z` ACTUALLY FIXES, below: under `core.quotePath`'s DEFAULT
+//    `true`, git C-quotes a path holding a high-bit byte — `"b\377ad.test.mjs"`,
+//    literal backslash-digits, wrapped in `"..."`. The trailing `"` defeats
+//    `$testfile_re`'s `$` anchor: the line ends in `"`, not `.mjs`, so a repo
+//    that demonstrably has a test file is refused as having none. This has
+//    NOTHING to do with locale — measured reproducing under both `LC_ALL=C`
+//    and an ambient UTF-8 locale identically (`derive-testcmd.sh` internally
+//    `export`s `LC_ALL=C` regardless of the caller's environment, so an
+//    ambient override cannot even reach the byte-sensitive `grep`). `-z`
+//    fixes it by never asking git to quote at all, in any locale.
+// 2. THE SEPARATE ONE BELOW ("regardless of core.quotePath, under an ambient
+//    UTF-8 locale"): with `core.quotePath false` set, plain
+//    `git ls-tree -r --name-only` ALREADY emits the byte unquoted — `-z` is
+//    not what makes that case work, and reverting `-z` alone leaves that
+//    fixture green. What that fixture pins instead is that the byte, once
+//    unquoted, survives `tr`/`grep` intact only under `LC_ALL=C`; it is a
+//    regression pin for the *locale* hazard (#582), not for the C-quoting
+//    defect `-z` fixes.
+//
+// Mutation-verified against fixture 1 (this repo, #1271): reverting the `-z`
+// fix to plain `git ls-tree -r --name-only` turns fixture 1 red — the script
+// reports "has no scripts.test and no test files" against a repo that
+// demonstrably has one — while fixture 2 stays green throughout, confirming
+// it does not cover this scenario. Restoring `-z` turns fixture 1 green
+// again.
+test("a non-ASCII test filename is found under core.quotePath's default true (#614)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+  // Explicit, not relied on as an implicit default: pins the scenario against
+  // a future git that ships a different default, rather than silently
+  // tracking whatever git on the test runner happens to default to.
+  execFileSync("git", ["config", "core.quotePath", "true"], { cwd: dir });
+  writeFileSync(join(dir, "readme.md"), "x");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "x"], { cwd: dir });
+  // A high-bit byte in the name: APFS refuses to hold it on disk, so it goes
+  // in through the index directly, spelled as a `printf` FORMAT — node
+  // re-encodes a JS string as UTF-8 on the way to argv, which would turn
+  // `\377` into valid UTF-8 and reproduce nothing.
+  const blob = execFileSync("sh", ["-c", "printf x | git hash-object -w --stdin"],
+    { cwd: dir, encoding: "utf8" }).trim();
+  execFileSync("sh", ["-c",
+    'git update-index --add --cacheinfo "100644,$1,$(printf "$2")"',
+    "sh", blob, "b\\377ad.test.mjs"], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "add bad name"], { cwd: dir });
+
+  const r = spawnSync("sh", [SCRIPT, dir, "HEAD"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "node --test");
+});
+
+// The SECOND #614 fixture (see the block comment above): with
+// `core.quotePath false` set, plain `git ls-tree -r --name-only` already
+// emits the high-bit byte unquoted — `-z` buys nothing here, this does NOT
+// exercise the C-quoting defect the fixture above pins. What this pins is the
+// separate, locale-dependent hazard #582 already named: the unquoted byte
+// only survives `tr`/`grep` intact under `LC_ALL=C`. Kept as its own
+// regression pin for that concern, not overclaiming coverage of the
+// C-quoting defect.
 const AMBIENT_UTF8 = { ...process.env, LANG: "en_US.UTF-8", LC_ALL: undefined, LC_CTYPE: undefined };
-test("a non-ASCII test filename is found regardless of core.quotePath, under an ambient UTF-8 locale (#614)", () => {
+test("a non-ASCII test filename with core.quotePath false survives an ambient UTF-8 locale (#614)", () => {
   const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
