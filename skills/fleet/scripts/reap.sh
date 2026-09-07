@@ -23,11 +23,22 @@ set -eu
 # whose commit subjects git constrains to no encoding at all, which makes it
 # arguably the likeliest carrier of the four. Under a UTF-8 locale BSD `tr`
 # exits 1 on a byte that is not valid UTF-8, `grep` silently drops the line
-# holding it, and `paste` truncates its whole output at it and still exits 0;
-# `awk` is immune, measured byte-identical in both locales. Such a byte reaches
-# us from a fetched tree even where the local filesystem refuses to hold the
-# name. #582 measured the cost of leaving this ambient in no-undo-audit.sh: a
-# truncated list reported as a clean, confident answer.
+# holding it, and `paste` truncates its whole output at it and still exits 0.
+#
+# `awk` is NOT immune, and reap.test.mjs's own #614 fixture measured the
+# earlier claim here false: it is byte-identical only when every rule matches
+# at an ANCHOR before the bad byte, never needing to convert it. A rule that
+# must SCAN PAST the byte to decide — here, the `/^branch /` match against a
+# worktree's raw, unquoted registry path, one SIBLING entry away from the
+# branch actually under sweep — dies instead: measured, BWK awk (macOS) aborts
+# at rc 2 (`towc: multibyte conversion failure`), and this script runs under
+# `set -eu`, so that death TERMINATES the whole sweep rather than merely
+# mis-scoring one record. gawk and mawk (Linux CI) tolerate the same byte and
+# answer rc 0, which is why this is a macOS-only ceiling, not a portable fix —
+# #790. Such a byte reaches us from a fetched tree even where the local
+# filesystem refuses to hold the name. #582 measured the cost of leaving this
+# ambient in no-undo-audit.sh: a truncated list reported as a clean, confident
+# answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things

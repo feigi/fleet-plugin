@@ -21,8 +21,11 @@
 // the pin sits in the file's prologue, ahead of the first line that does any
 // work. That is the mutant presence alone misses — the pin moved below its own
 // pipelines is genuinely broken and a presence check stays green on it. It does
-// NOT pin per-script behaviour: four of the six have no regression fixture at
-// all, which is deliberate and recorded on the PR rather than hidden.
+// NOT pin per-script behaviour: two of the six — inflight.sh and
+// release-ticket.sh — have no regression fixture at all, which is deliberate
+// and recorded on the PR rather than hidden. inflight.sh's own locale test
+// exercises probe 2's INLINE `LC_ALL=C awk`, not this file-global pin (#614),
+// so it does not count as coverage for the line asserted here.
 //
 // Not a list of every script that COULD carry the pin. claim-ticket.sh,
 // prove-merge.sh, drop-merged-label.sh and verify-sha.sh do not have it; whether

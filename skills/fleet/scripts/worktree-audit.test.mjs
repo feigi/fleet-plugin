@@ -545,12 +545,12 @@ test("dirty filenames survive an ambient UTF-8 locale byte-for-byte (#614)", (t)
   const wt = addWorktree(w, "fix/9-x");
   writeFileSync(join(wt, "caf\u00e9.txt"), "uncommitted\n");
   execFileSync("sh", ["-c",
-    'b=$(printf x | git hash-object -w --stdin) && git update-index --add --cacheinfo "100644,$b,$(printf "$1")"',
-    "sh", "b\\377ad.txt"], { cwd: wt, env: ENV });
+    'b=$(printf x | git hash-object -w --stdin) && git update-index --add --cacheinfo "100644,$b,$(printf "b\\377ad.txt")"'],
+    { cwd: wt, env: ENV });
 
-  const { code, stdout } = runAuditBytes(w, AMBIENT_UTF8);
+  const { code, stdout, stderr } = runAuditBytes(w, AMBIENT_UTF8);
 
-  assert.equal(code, 0);
+  assert.equal(code, 0, `stderr: ${stderr}`);
   assert.ok(
     stdout.includes('"dirtyFiles":["b\u00ffad.txt","caf\u00c3\u00a9.txt"]'),
     `the pin must hold both names whole and undecoded, got: ${JSON.stringify(stdout)}`,

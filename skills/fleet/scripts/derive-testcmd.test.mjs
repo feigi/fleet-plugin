@@ -52,6 +52,44 @@ test("no scripts.test but test files present falls back to node --test", () => {
   assert.equal(out, "node --test");
 });
 
+// #614: the BEHAVIOURAL twin of locale-pin-prose.test.mjs' source assertion
+// for this script — that file checks `export LC_ALL=C` is PRESENT, this one
+// checks it is LOAD-BEARING. Reproduces the actual defect the review found:
+// with `core.quotePath false` set, `git ls-tree` used to emit an unquoted raw
+// byte, and grep's locale then decided whether a test file was found at all.
+// `-z` makes the byte reach grep unquoted regardless of quotePath, but the
+// byte only survives `tr`/`grep` correctly under `LC_ALL=C` — measured with
+// the pin deleted and this same fixture: `tr` dies on the byte under an
+// ambient UTF-8 locale (`tr: Illegal byte sequence`), the listing comes back
+// empty, and a repo that demonstrably has a test file is refused as having
+// none. `LANG` with `LC_ALL`/`LC_CTYPE` absent is what an unset `LC_ALL`
+// actually looks like.
+const AMBIENT_UTF8 = { ...process.env, LANG: "en_US.UTF-8", LC_ALL: undefined, LC_CTYPE: undefined };
+test("a non-ASCII test filename is found regardless of core.quotePath, under an ambient UTF-8 locale (#614)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+  execFileSync("git", ["config", "core.quotePath", "false"], { cwd: dir });
+  writeFileSync(join(dir, "readme.md"), "x");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "x"], { cwd: dir });
+  // A high-bit byte in the name: APFS refuses to hold it on disk, so it goes
+  // in through the index directly, spelled as a `printf` FORMAT — node
+  // re-encodes a JS string as UTF-8 on the way to argv, which would turn
+  // `\377` into valid UTF-8 and reproduce nothing.
+  const blob = execFileSync("sh", ["-c", "printf x | git hash-object -w --stdin"],
+    { cwd: dir, encoding: "utf8" }).trim();
+  execFileSync("sh", ["-c",
+    'git update-index --add --cacheinfo "100644,$1,$(printf "$2")"',
+    "sh", blob, "b\\377ad.test.mjs"], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "add bad name"], { cwd: dir });
+
+  const r = spawnSync("sh", [SCRIPT, dir, "HEAD"], { encoding: "utf8", env: AMBIENT_UTF8 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "node --test");
+});
+
 test("neither a test script nor test files refuses rather than passing vacuously", () => {
   const dir = repo({ "README.md": "" });
   const { status, err } = derive(dir);
@@ -210,11 +248,13 @@ test("derive-testcmd.sh and claim-ticket.sh declare the same testfile_re", () =>
 // suites use it: a name is exactly what a stripped PATH cannot answer.
 // Nothing here mutates the ambient PATH.
 //
-// The list is closed: this script sources nothing, so `git` and `grep` are its
-// whole external set beside the shell. A name absent here is one no derivation
-// invokes — a wrapper that logged every exec under both derivations named no
-// others — so adding one back needs a call site, not a hunch.
-const SHIMMED = ["sh", "git", "grep"];
+// The list is closed: this script sources nothing, so `git`, `grep`, `mktemp`,
+// `cat`, `tr` and `rm` are its whole external set beside the shell (#614 added
+// the last four, for the byte-safe `-z` listing and its temp-file cleanup). A
+// name absent here is one no derivation invokes — a wrapper that logged every
+// exec under both derivations named no others — so adding one back needs a
+// call site, not a hunch.
+const SHIMMED = ["sh", "git", "grep", "mktemp", "cat", "tr", "rm"];
 function shimPath({ node }) {
   const bin = mkdtempSync(join(tmpdir(), "derive-path-"));
   for (const name of SHIMMED) {

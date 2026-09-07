@@ -13,9 +13,16 @@ set -eu
 # locale-sensitive: under a UTF-8 locale BSD tr exits 1 on a byte that is not
 # valid UTF-8. `tr` is not the only carrier: `sed` exits 1 on the same byte and
 # emits nothing at all, and `paste -sd, -` truncates its whole output at the
-# byte while still exiting 0. `awk` alone is immune, byte-identical in both
-# locales. Reachable only from a fetched tree — a Linux- or latin-1-authored
-# commit — since APFS refuses to hold the name locally. #582.
+# byte while still exiting 0.
+#
+# `awk` is NOT immune, and reap.sh's own #614 fixture measured the earlier
+# claim here false: it is byte-identical only when every rule matches at an
+# ANCHOR before the bad byte, never needing to convert it — a rule that must
+# SCAN PAST the byte to decide dies instead (BWK awk, macOS: rc 2, `towc:
+# multibyte conversion failure`), and under `set -eu` that death aborts the
+# whole script rather than mis-scoring one record. Reachable only from a
+# fetched tree — a Linux- or latin-1-authored commit — since APFS refuses to
+# hold the name locally. #582.
 #
 # What that cost was measured on the pipeline that used to split merge-tree's
 # output: PIPESTATUS `1 0 0` — its first stage exiting 1 and truncating, the

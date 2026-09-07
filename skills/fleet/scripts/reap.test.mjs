@@ -125,8 +125,12 @@ function adminEntry(w, wt) {
   return join(admin, name);
 }
 
+// `latin1`, not the default utf8: `dest` may carry a byte above 127 as its own
+// code unit (a #614 fixture's registry path, e.g. `bÿad`), and utf8 would
+// re-encode that to two bytes instead of writing the one the fixture means.
+// No behaviour change for an ASCII `dest` — latin1 and utf8 agree below 128.
 function relocate(w, wt, dest) {
-  writeFileSync(join(adminEntry(w, wt), "gitdir"), `${dest}/.git\n`);
+  writeFileSync(join(adminEntry(w, wt), "gitdir"), Buffer.from(`${dest}/.git\n`, "latin1"));
   rmSync(wt, { recursive: true, force: true });
   return dest;
 }
@@ -602,10 +606,18 @@ const AMBIENT_UTF8 = { LANG: "en_US.UTF-8", LC_ALL: undefined, LC_CTYPE: undefin
 // path it prints from the entry's `gitdir` file and emits it raw and unquoted.
 // One such SIBLING entry is enough — awk tests every rule against every record,
 // so the `/^branch /` rule scans the bad `worktree` record and dies there,
-// taking the lookup for the branch actually under sweep with it. Measured with
-// the pin deleted: `$wt` comes back empty, the dirty check never runs, and
-// `--apply` REAPS feature/merged — the uncommitted work gone at exit 0, which
-// is the direction this file's header calls load-bearing.
+// taking the lookup for the branch actually under sweep with it.
+//
+// Measured with the pin deleted: awk itself dies (`towc: multibyte conversion
+// failure`), and because this script runs under `set -eu` that failing command
+// substitution (line ~347) TERMINATES the whole script at exit 2 — nothing is
+// reaped, `feature/merged`'s branch and its uncommitted work both survive.
+// This test still catches the mutant (`assert.equal(code, 0)` fails, `2 !== 0`)
+// — only the narrative below used to be wrong, not the test. What this pins is
+// that the sweep must not silently ABORT mid-run on a sibling's bad path,
+// leaving the caller to guess whether anything was mutated before the crash —
+// not a data-loss-prevented story, since data loss was never actually
+// reachable here.
 test("an invalid UTF-8 byte in a SIBLING worktree's registered path does not cost a dirty worktree its keep (#614)", (t) => {
   const w = repo(t);
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
@@ -613,11 +625,7 @@ test("an invalid UTF-8 byte in a SIBLING worktree's registered path does not cos
 
   const other = join(w, ".worktrees", "other");
   git(w, "worktree", "add", "-q", other, "-b", "feature/other", "main");
-  writeFileSync(
-    join(adminEntry(w, other), "gitdir"),
-    Buffer.concat([Buffer.from(`${w}/.worktrees/b`), Buffer.from([0xff]), Buffer.from("ad/.git\n")]),
-  );
-  rmSync(other, { recursive: true, force: true });
+  relocate(w, other, `${w}/.worktrees/bÿad`);
 
   const { code, json, stderr } = runReap(w, ["--apply"], AMBIENT_UTF8);
 
