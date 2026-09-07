@@ -606,8 +606,11 @@ function selectDimensions(all, stats) {
 // until now only objects worked: a key array passed straight through and every
 // dereference below (`d.key`, `d.prompt`, `d.model`, `d.agentType` — FOUR, not
 // three) came back `undefined`, with no throw and no warning (#113). Resolve
-// strings against the workflow's own catalog, and check every object for the
-// three fields it REQUIRES (`model` is optional; absent means the agent's own
+// strings against the workflow's own catalog, and check every object has the
+// three fields it REQUIRES AND that each of those (plus `model`, when
+// present) is a string — presence alone let a non-string field reach the
+// specialist dispatch machinery downstream instead of failing at this
+// validated boundary (`model` is optional; absent means the agent's own
 // frontmatter pin decides, which for `correctness` and `simplify` is `opus` —
 // which is why the models-sent log below reports `frontmatter` there and NOT
 // "inherit").
@@ -645,15 +648,40 @@ function resolveDimensions(override, all) {
     const missing = REQUIRED.filter((f) => !entry[f]);
     if (missing.length)
       throw new Error(`review-pr: args.dimensions[${i}] is missing required field(s): ${missing.join(", ")}`);
+    // Presence alone does not mean USABLE: a non-string `key`/`prompt`/
+    // `agentType` passed the check above and reached `d.prompt` interpolated
+    // into the review prompt and `d.agentType`/`d.model` at the specialist
+    // dispatch, further down this file, with no throw — exactly the
+    // validated-boundary contract this function exists to establish. Same
+    // indexed-error convention as the missing-field throw.
+    const wrongType = REQUIRED.find((f) => typeof entry[f] !== "string");
+    if (wrongType)
+      throw new Error(
+        `review-pr: args.dimensions[${i}] field "${wrongType}" must be a string, got ${kind(entry[wrongType])}`,
+      );
+    if (entry.model !== undefined && typeof entry.model !== "string")
+      throw new Error(
+        `review-pr: args.dimensions[${i}] field "model" must be a string, got ${kind(entry.model)}`,
+      );
     return entry;
   });
   // A repeated key resolves ONCE (#274). Duplicated, the fan-out dispatches the
   // same specialist twice against one scratch dir and the coverage record
   // double-counts it — and `run-team/SKILL.md` reads that record AS coverage.
-  // Redundant-but-valid input, so dedupe SILENTLY; a throw would refuse a
-  // request that has an unambiguous meaning. First occurrence wins.
+  // Redundant-but-valid input WHEN THE ENTRIES AGREE, so dedupe SILENTLY in
+  // that case — first occurrence wins, no throw, no log. A second entry under
+  // the same key that DIVERGES (different `prompt`, `agentType`, or `model`)
+  // is not redundant, it is a caller's real attempt to override or customize a
+  // catalog entry, and silently keeping the first would discard that with no
+  // signal — the one silent exception to what this whole function exists to do
+  // (#279/#281: turn silent/ambiguous failures into loud, indexed ones).
   const byKey = new Map();
-  for (const d of normalized) if (!byKey.has(d.key)) byKey.set(d.key, d);
+  for (const [i, d] of normalized.entries()) {
+    const held = byKey.get(d.key);
+    if (held && (held.prompt !== d.prompt || held.agentType !== d.agentType || held.model !== d.model))
+      throw new Error(`review-pr: args.dimensions[${i}] repeats key "${d.key}" with different fields`);
+    if (!held) byKey.set(d.key, d);
+  }
   const resolved = [...byKey.values()];
   // An override resolving to nothing (an empty array) is an error, not a
   // silent no-op — `[] || selectDimensions(...)` would otherwise pass `[]`

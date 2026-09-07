@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeStats } from "./diff-stats.mjs";
 import { lift } from "./lift.mjs";
+import { stripComments } from "./strip-comments.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing it
 // executes the workflow. Every value under test is lifted out of the SOURCE TEXT
@@ -338,6 +339,37 @@ test("an object override missing a required field stops the run and names the fi
   );
 });
 
+// Presence alone let a non-string field (a number, an object, ...) straight
+// through to the specialist dispatch machinery with no throw, contradicting
+// this function's own job of validating the boundary. Mutation-verified: with
+// the `wrongType`/`entry.model` checks in resolveDimensions loosened back to
+// the presence-only `missing` check, this test reds.
+test("a required field of the wrong type stops the run and names the field and the type it got", () => {
+  assert.throws(
+    () => resolveDimensions([{ key: 42, prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[0\] field "key" must be a string, got number$/,
+  );
+  // `0`, `""`, `null` etc are already caught as MISSING (falsy) above — a
+  // truthy non-string, like an object, is the case the presence check lets
+  // through unnoticed.
+  assert.throws(
+    () => resolveDimensions([{ key: "x", prompt: {}, agentType: "a" }], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[0\] field "prompt" must be a string, got object$/,
+  );
+  // `model` is optional, but when it IS present it must be a string too — the
+  // same standard applied to the three REQUIRED fields.
+  assert.throws(
+    () => resolveDimensions([{ key: "x", prompt: "p", agentType: "a", model: 7 }], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[0\] field "model" must be a string, got number$/,
+  );
+  // A missing `model` is still fine — absent means the agent's own
+  // frontmatter pin decides, and this check must not demand it.
+  assert.deepEqual(
+    resolveDimensions([{ key: "x", prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
+    [{ key: "x", prompt: "p", agentType: "a" }],
+  );
+});
+
 // #279. These five all used to produce "object is missing required field(s):
 // key, prompt, agentType" — a message asserting the entry IS an object and
 // sending the caller off to add three fields to a `42`. The type is the defect;
@@ -353,19 +385,31 @@ test("a non-object entry is reported as the wrong TYPE, not as an object missing
     [true, "boolean"],
     [["x"], "array"],
   ]) {
+    // Deliberately NOT anchored on the `[0]` index here — index coverage for
+    // THIS type-mismatch branch is a dedicated assertion below, not this one:
+    // dropping `[${i}]` from the throw does not fail #281's "identifies which
+    // entry" test either, since that test only exercises the missing-field
+    // and unknown-key branches. "Reverting one must red one" does not hold
+    // for this branch without that dedicated assertion.
     assert.throws(
       () => resolveDimensions([entry], DEFAULT_DIMENSIONS),
-      // Deliberately NOT anchored on the `[0]` index — that is #281's fix and
-      // has its own test. Reverting one must red one.
-      new RegExp(`must be a key string or a dimension object, got ${name}$`),
-      `a ${name} entry no longer names its own type`,
-    );
-    assert.throws(
-      () => resolveDimensions([entry], DEFAULT_DIMENSIONS),
-      (e) => !/missing required field/.test(e.message),
-      `a ${name} entry is still described as an object missing fields`,
+      new RegExp(`review-pr: args\\.dimensions\\[0\\] must be a key string or a dimension object, got ${name}$`),
+      `a ${name} entry no longer names its own type, and not as an object missing fields`,
     );
   }
+});
+
+// The loop above only ever indexes ONE entry ([0]), so it cannot pin the
+// index for a multi-entry override — and separately from #281's "identifies
+// which entry" test above, which never exercises this branch at all. Dropping
+// `[${i}]` from the type-mismatch throw (workflows/review-pr.js) fails no
+// test above. Mutation-verified: reverting the `${i}` in that throw back to a
+// fixed string reds this assertion.
+test("a type-mismatch entry error identifies which entry of a multi-entry override failed", () => {
+  assert.throws(
+    () => resolveDimensions(["correctness", 42], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[1\] must be a key string or a dimension object, got number$/,
+  );
 });
 
 // #281. With a multi-entry override the field names alone do not say WHICH
@@ -385,9 +429,10 @@ test("an entry error identifies which entry of a multi-entry override failed", (
 // #274. A repeated key resolved to two entries pointing at ONE dimension
 // object: the fan-out dispatched the same specialist twice against a single
 // scratch dir, and the coverage record double-counted it — which
-// `run-team/SKILL.md` reads AS coverage. Redundant-but-valid input, so it
-// dedupes silently; throwing would refuse a request whose meaning is not in
-// doubt.
+// `run-team/SKILL.md` reads AS coverage. Redundant-but-valid input WHEN THE
+// ENTRIES AGREE, so it dedupes silently in that case; throwing would refuse a
+// request whose meaning is not in doubt. A DIVERGENT collision is a different
+// case — see the dedicated test below.
 test("a repeated key resolves once, and does not throw", () => {
   assert.deepEqual(
     resolveDimensions(["correctness", "comments", "correctness"], DEFAULT_DIMENSIONS),
@@ -398,13 +443,31 @@ test("a repeated key resolves once, and does not throw", () => {
     resolveDimensions(["correctness", DEFAULT_DIMENSIONS[0]], DEFAULT_DIMENSIONS),
     [DEFAULT_DIMENSIONS[0]],
   );
-  // Two distinct objects sharing a key collide too — the coverage record is
-  // keyed by `d.key`, so a second one is a double-count whatever it holds.
-  const dup = { key: "correctness", prompt: "other", agentType: "code-reviewer" };
-  assert.deepEqual(resolveDimensions([DEFAULT_DIMENSIONS[0], dup], DEFAULT_DIMENSIONS), [DEFAULT_DIMENSIONS[0]]);
   // Dedupe must not empty a set that had entries: an all-duplicate override
   // resolves to one dimension, not to the "resolved to no dimensions" throw.
   assert.equal(resolveDimensions(["types", "types", "types"], DEFAULT_DIMENSIONS).length, 1);
+});
+
+// A second entry sharing a key but DIVERGING (different `prompt`/`agentType`/
+// `model`) used to dedupe SILENTLY too, discarding a caller's real attempt to
+// override or customize a catalog entry with zero signal — the one silent
+// exception to what this whole function exists to do (#279/#281 turn silent/
+// ambiguous failures into loud, indexed ones). Mutation-verified: comparing
+// only `d.key` in the dedupe loop (the old behaviour) reds this test; the
+// identical-duplicate cases above stay green either way, so this is
+// independent of them, not a replacement.
+test("a repeated key with different fields throws — a divergent collision is not silently dropped", () => {
+  const dup = { key: "correctness", prompt: "other", agentType: "code-reviewer" };
+  assert.throws(
+    () => resolveDimensions([DEFAULT_DIMENSIONS[0], dup], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[1\] repeats key "correctness" with different fields$/,
+  );
+  // Diverging only on `model` counts too — not just `prompt`/`agentType`.
+  const sameFieldsDifferentModel = { key: "types", prompt: DEFAULT_DIMENSIONS[4].prompt, agentType: DEFAULT_DIMENSIONS[4].agentType, model: "opus" };
+  assert.throws(
+    () => resolveDimensions([DEFAULT_DIMENSIONS[4], sameFieldsDifferentModel], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[1\] repeats key "types" with different fields$/,
+  );
 });
 
 test("an override resolving to nothing stops the run", () => {
@@ -429,7 +492,14 @@ test("the resolveDimensions header states the dereferenced-field situation corre
   const m = SOURCE.match(/((?:^\/\/.*\n)+)^function resolveDimensions\(/m);
   assert.ok(m, "resolveDimensions no longer carries a header comment block — update this test");
   const header = m[1];
-  const dereferenced = [...new Set([...SOURCE.matchAll(/\bd\.([a-zA-Z]+)/g)].map((x) => x[1]))].sort();
+  // Comments stripped BEFORE deriving the dereferenced set: the header's own
+  // prose lists `d.key`, `d.prompt`, `d.model`, `d.agentType` in backticks,
+  // which matches the same `\bd\.` pattern used to derive the set. Deriving
+  // from raw SOURCE would let the header vote for its own claim — it could
+  // catch the header UNDER-counting a field the code dereferences, but never
+  // OVER-counting one the code no longer does, since the header's mention
+  // would keep padding the derived set to match itself.
+  const dereferenced = [...new Set([...stripComments(SOURCE).matchAll(/\bd\.([a-zA-Z]+)/g)].map((x) => x[1]))].sort();
   assert.deepEqual(dereferenced, ["agentType", "key", "model", "prompt"], "the dereferenced field set changed");
   for (const f of dereferenced) {
     assert.match(header, new RegExp("`d\\." + f + "`"), `the header no longer enumerates d.${f}`);
