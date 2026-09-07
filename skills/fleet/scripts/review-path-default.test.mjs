@@ -48,6 +48,86 @@ function section(source, startAnchor, endAnchor, label) {
   return source.slice(at, end);
 }
 
+// Keys at an object literal's OWN depth, whatever the line layout. A per-line
+// regex (`/^ {2}(\w+)[,:]/gm`) read one field per line and so could not see a
+// field added on a line it SHARES with an existing one — measured in #667: the
+// same added field is caught when it lands on its own line and missed when it
+// shares, decided by nothing but where the newline fell. Depth is tracked so a
+// value's own commas and nested braces never register as fields, and `expectKey`
+// is what separates `head` the key from `head` in `snap.head` — both sit at
+// depth 0, only one follows a `,` or the opening brace.
+// String/template literals are dropped whole before tokenizing, quote and all
+// — a `//` or a bracket inside a field's VALUE (a URL, say) used to be read as
+// a real comment or a real brace, which could desync `expectKey` and silently
+// drop the NEXT field from the list even though that field's own line was
+// never touched. Escapes (`\'`, `\"`, `` \` ``) are honored so the scan can't
+// mistake an escaped quote for the closing one.
+// ponytail: no regex-literal awareness, and a template literal's `${...}`
+// interpolation is dropped along with the string rather than re-entering code
+// mode — a brace/comma inside an interpolation would miscount. Block comments
+// are not stripped either. All upgrades for the day the return grows one.
+function stripStringsAndComments(body) {
+  let out = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      for (i++; i < body.length && body[i] !== quote; i++) {
+        if (body[i] === "\\") i++;
+      }
+      continue;
+    }
+    if (ch === "/" && body[i + 1] === "/") {
+      for (; i < body.length && body[i] !== "\n"; i++);
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function objectKeys(body) {
+  const keys = [];
+  let depth = 0;
+  let expectKey = true;
+  for (const [tok] of stripStringsAndComments(body).matchAll(/\w+|\S/g)) {
+    if ("([{".includes(tok)) {
+      depth++;
+    } else if (")]}".includes(tok)) {
+      depth--;
+    } else if (depth === 0) {
+      if (tok === ",") {
+        expectKey = true;
+      } else {
+        if (expectKey && /^\w+$/.test(tok)) keys.push(tok);
+        expectKey = false;
+      }
+    }
+  }
+  assert.equal(
+    depth,
+    0,
+    "objectKeys: brace/paren/bracket depth didn't return to 0 — a quote or comment is likely hiding one from the scanner; update this parser",
+  );
+  return keys;
+}
+
+test("objectKeys reads fields by depth, not by line, and ignores brackets/commas hiding in string values", () => {
+  assert.deepEqual(objectKeys("a, b: f(c, d), e,"), ["a", "b", "e"]);
+  // The bug this PR fixes: a nested call's own commas must not register as
+  // top-level fields.
+  assert.deepEqual(objectKeys("head: snap.head, snapshot: snap.path,"), ["head", "snapshot"]);
+  // The SURVIVED finding this PR fixes: a `//` inside a string value used to
+  // be read as a line comment, eating the rest of the line — including the
+  // trailing comma — and silently dropping the NEXT field.
+  assert.deepEqual(
+    objectKeys('snapshot: snap.path + "//x", dimensionsRun: d,'),
+    ["snapshot", "dimensionsRun"],
+  );
+  // A brace or comma inside a string value must not move `depth` either.
+  assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
+});
+
 const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
@@ -495,11 +575,10 @@ test("run-team's documented return shape is exactly review-pr.js's actual return
   // dropped from the prose and not the script.
   const src = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
   // The workflow's own result is the file's only top-level `return {` — the
-  // others are inside helpers and indented. Fields sit one per line at exactly
-  // two spaces, as `key,` or `key: expr`.
-  const returned = [...section(src, "\nreturn {", "\n};", "review-pr.js return").matchAll(/^ {2}(\w+)[,:]/gm)]
-    .map((m) => m[1]);
-  assert.ok(returned.length, "review-pr.js's top-level return no longer reads one field per line — update this test");
+  // others are inside helpers and indented. Read by brace depth, not by line,
+  // so a field added on a line it shares with another is still a field (#667).
+  const returned = objectKeys(section(src, "\nreturn {", "\n};", "review-pr.js return").replace("\nreturn {", ""));
+  assert.ok(returned.length, "review-pr.js's top-level return no longer parses as a plain object — update this test");
   const documented = section(RUN_TEAM, "It returns `{", "}`", "run-team return shape")
     .replace("It returns `{", "")
     .split(",")
