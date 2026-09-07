@@ -56,14 +56,41 @@ function section(source, startAnchor, endAnchor, label) {
 // value's own commas and nested braces never register as fields, and `expectKey`
 // is what separates `head` the key from `head` in `snap.head` — both sit at
 // depth 0, only one follows a `,` or the opening brace.
-// ponytail: no string/template/regex-literal awareness — a brace or comma
-// inside one of those would miscount. Line comments are stripped; block
-// comments are not. Both are upgrades for the day the return grows one.
+// String/template literals are dropped whole before tokenizing, quote and all
+// — a `//` or a bracket inside a field's VALUE (a URL, say) used to be read as
+// a real comment or a real brace, which could desync `expectKey` and silently
+// drop the NEXT field from the list even though that field's own line was
+// never touched. Escapes (`\'`, `\"`, `` \` ``) are honored so the scan can't
+// mistake an escaped quote for the closing one.
+// ponytail: no regex-literal awareness, and a template literal's `${...}`
+// interpolation is dropped along with the string rather than re-entering code
+// mode — a brace/comma inside an interpolation would miscount. Block comments
+// are not stripped either. All upgrades for the day the return grows one.
+function stripStringsAndComments(body) {
+  let out = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      for (i++; i < body.length && body[i] !== quote; i++) {
+        if (body[i] === "\\") i++;
+      }
+      continue;
+    }
+    if (ch === "/" && body[i + 1] === "/") {
+      for (; i < body.length && body[i] !== "\n"; i++);
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function objectKeys(body) {
   const keys = [];
   let depth = 0;
   let expectKey = true;
-  for (const [tok] of body.replace(/\/\/.*$/gm, "").matchAll(/\w+|\S/g)) {
+  for (const [tok] of stripStringsAndComments(body).matchAll(/\w+|\S/g)) {
     if ("([{".includes(tok)) {
       depth++;
     } else if (")]}".includes(tok)) {
@@ -77,8 +104,29 @@ function objectKeys(body) {
       }
     }
   }
+  assert.equal(
+    depth,
+    0,
+    "objectKeys: brace/paren/bracket depth didn't return to 0 — a quote or comment is likely hiding one from the scanner; update this parser",
+  );
   return keys;
 }
+
+test("objectKeys reads fields by depth, not by line, and ignores brackets/commas hiding in string values", () => {
+  assert.deepEqual(objectKeys("a, b: f(c, d), e,"), ["a", "b", "e"]);
+  // The bug this PR fixes: a nested call's own commas must not register as
+  // top-level fields.
+  assert.deepEqual(objectKeys("head: snap.head, snapshot: snap.path,"), ["head", "snapshot"]);
+  // The SURVIVED finding this PR fixes: a `//` inside a string value used to
+  // be read as a line comment, eating the rest of the line — including the
+  // trailing comma — and silently dropping the NEXT field.
+  assert.deepEqual(
+    objectKeys('snapshot: snap.path + "//x", dimensionsRun: d,'),
+    ["snapshot", "dimensionsRun"],
+  );
+  // A brace or comma inside a string value must not move `depth` either.
+  assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
+});
 
 const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
