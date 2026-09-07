@@ -516,7 +516,9 @@ function selectDimensions(all, stats) {
     // correctness (scope) + comments (every asserted fact vs the tree); drop
     // tests/types/silent-failure/simplify, which have nothing to run, type-check,
     // or simplify.
-    return all.filter((d) => d.key === "correctness" || d.key === "comments");
+    const docsOnlyDims = all.filter((d) => d.key === "correctness" || d.key === "comments");
+    if (!docsOnlyDims.length) throw new Error("review-pr: selectDimensions produced an empty dimension set");
+    return docsOnlyDims;
   }
   let dims = all;
   if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
@@ -577,14 +579,17 @@ function selectDimensions(all, stats) {
   // that could never fire (#669). `all` is `DEFAULT_DIMENSIONS` on every
   // reachable path: the sole call site passes it, and an `args.dimensions`
   // override is resolved by `resolveDimensions` and short-circuits this function
-  // entirely. With that `all`, neither branch can empty: `correctness` is in no
-  // drop list above and is in `SIZE_TIER_DIMS`, so `dims` always keeps it, and
-  // `docsDims` keeps correctness ∪ comments. Pinned by "…never returns an empty
-  // set" in select-dimensions.test.mjs, which sweeps the stats shape.
+  // entirely. With that `all`, neither exit point can empty: `correctness` is
+  // in no drop list above and is in `SIZE_TIER_DIMS`, so `dims` always keeps
+  // it, and the docs-only return above keeps correctness ∪ comments. Pinned by
+  // "no stats shape empties the dimension set" in select-dimensions.test.mjs,
+  // which sweeps the stats shape.
   //
-  // If a future caller ever passes a narrowed `all`, the answer is a THROW at
-  // that call site, not a silent widen back to a set the caller did not ask for
-  // — the shape `resolveDimensions` already uses for its own zero-dimension case.
+  // A future caller passing a narrowed `all` gets a THROW here, not a silent
+  // widen back to a set it did not ask for — the same idiom `resolveDimensions`
+  // uses for its own zero-dimension case (below), now enforced at both exit
+  // points, not just documented.
+  if (!dims.length) throw new Error("review-pr: selectDimensions produced an empty dimension set");
   return dims;
 }
 

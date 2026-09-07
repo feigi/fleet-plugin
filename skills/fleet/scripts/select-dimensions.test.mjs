@@ -452,20 +452,23 @@ test("a truncated file list widens to the full set, whatever it profiles as", ()
 // unforeseen blob, so the values under test include the non-booleans and
 // unknown profiles a real payload could carry, not only what computeStats emits.
 test("no stats shape empties the dimension set — `correctness` survives every filter", () => {
-  const profiles = [undefined, null, "", "empty", "docs", "tests-only", "single-file", "small", "production", "bogus"];
+  // `""` stands in for the whole falsy family (`undefined`, `null`, `""`) plus
+  // `"empty"`: all four hit `!stats.profile || stats.profile === "empty"` and
+  // return `all` before any other field is read, so they are one outcome, not
+  // four — verified by re-reading that guard, not assumed from this trim.
+  const profiles = ["", "docs", "tests-only", "single-file", "small", "production", "bogus"];
   const values = [true, false, undefined, null, "yes", 0, 1];
-  let combos = 0;
   for (const profile of profiles)
     for (const docsOnly of values)
       for (const hasSrc of values)
         for (const hasTests of values)
           for (const truncated of values) {
             const stats = { profile, docsOnly, hasSrc, hasTests, truncated };
-            const keys = selectDimensions(DEFAULT_DIMENSIONS, stats).map((d) => d.key);
-            combos++;
-            assert.ok(keys.includes("correctness"), `correctness was filtered out by ${JSON.stringify(stats)}`);
+            assert.ok(
+              selectDimensions(DEFAULT_DIMENSIONS, stats).some((d) => d.key === "correctness"),
+              `correctness was filtered out by ${JSON.stringify(stats)}`,
+            );
           }
-  assert.equal(combos, profiles.length * values.length ** 4, "the sweep stopped covering the shape it claims to");
   // The non-object arms of the same guard.
   for (const stats of [null, undefined, 0, "", false])
     assert.equal(selectDimensions(DEFAULT_DIMENSIONS, stats).length, DEFAULT_DIMENSIONS.length);
