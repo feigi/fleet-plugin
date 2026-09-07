@@ -19,9 +19,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readFileSync, readdirSync, existsSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { createServer } from "node:net";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
@@ -85,6 +85,15 @@ const REAL_PYTHON3 = execFileSync("/bin/sh", ["-c", "command -v python3"], { enc
 // off to the real binary, and calling `git` from inside it would find the shim.
 const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+// Every chmod-denial fixture below rests on the mode being ENFORCED, and root
+// ignores it: it reads a 0o000 directory and removes a 0o555 one just fine.
+// Under euid 0 those fixtures would not test a weaker thing, they would test a
+// different one — going green under the mutation they exist to catch, exactly
+// the reasoning release-ticket.test.mjs's own `EUID0` carries (#184). Named
+// once rather than inlined at each site, same as there.
+const EUID0 = process.geteuid?.() === 0;
+const NO_DENIAL = "chmod denies nothing under euid 0";
+
 /**
  * A branch in the bare origin, built from an empty tree straight in that repo.
  *
@@ -116,7 +125,17 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, o
                          awkFailWhenProgramHas = null,
                          trFailWhenArgsHave = null, python3FailWhenProgramHas = null }) {
   const root = mkdtempSync(join(tmpdir(), "inflight-"));
-  t.after(() => execFileSync("rm", ["-rf", root]));
+  // Restore the search bits before deleting, rather than trusting each
+  // fixture's own inline restore to have run. A fixture that chmods a
+  // directory unsearchable and then fails BEFORE restoring it leaves `rm -rf`
+  // unable to remove it as a non-root user, and the temp dir leaks with
+  // nothing said (release-ticket.test.mjs's `repo()` measured the same class,
+  // #184). spawnSync, not execFileSync: a chmod that fails must not become a
+  // second error masking the first.
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", root]);
+    execFileSync("rm", ["-rf", root]);
+  });
 
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -260,6 +279,32 @@ exec '${REAL_PYTHON3}' "$@"
   if (prErr !== null) env.GH_PR_ERR = prErr;
   return { repo, env, bin };
 }
+
+test("fixture()'s teardown deletes a root a case left unsearchable (#184, #660)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // Mirrors release-ticket.test.mjs's own pin for the same class ("repo()'s
+  // teardown deletes a root a fixture left unsearchable (#184)"). The shape
+  // cannot be reproduced by letting a test body throw: node reports only the
+  // body's error and drops the teardown's own ENOTEMPTY on the floor
+  // (measured) — the temp dir leaks with nothing said, which is exactly the
+  // silence this fix exists to close. `t.after` reaches the runner only
+  // through `t`, so a stand-in collects it here, where its effect is
+  // assertable directly. Without the `chmod -R u+rwX` before `rm -rf`, the
+  // removal below leaves `root` behind and this case is the one that goes red.
+  const afters = [];
+  const { repo } = fixture({ after: (fn) => afters.push(fn) }, 8, {});
+  const root = dirname(repo);
+  // Belt and braces: the stand-in's teardown is what is under test, so it must
+  // not also be this case's only cleanup.
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", root]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  chmodSync(join(repo, ".git"), 0o000);
+  for (const after of afters) after();
+  assert.equal(existsSync(root), false, "the temp root must not survive an unrestored chmod");
+});
 
 function inflight(n, opts, t) {
   const { repo, env } = fixture(t, n, opts);
@@ -653,6 +698,7 @@ test("probe 3: a translation that cannot run refuses, rather than reading an emp
 // no way to fake a degraded git read other than triggering the real one.
 
 test("probe 3: an unreadable refs directory is unknown, never a free ticket", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // The issue's own repro: a live branch, `chmod 000 .git/refs/heads`, and the
   // pre-fix script answers `taken=false`.
   const { repo, env } = fixture(t, 55, {});
@@ -682,6 +728,7 @@ test("probe 3: an unreadable refs directory is unknown, never a free ticket", (t
 });
 
 test("probe 3: an unreadable refs SUBdirectory is unknown too — every fleet branch is in one", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // The case above chmods the top of `refs/heads`, and no fleet branch lives
   // there: `claim-ticket.sh` builds `branch="$type/$issue-$slug"`, so the real
   // ref is `refs/heads/fix/95-…`, one level down. A guard that tests only the
@@ -721,6 +768,7 @@ test("probe 3: an unreadable refs SUBdirectory is unknown too — every fleet br
 });
 
 test("probe 3: an unreadable worktree registry is unknown, never a free ticket", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // Same repro shape, aimed at `.git/worktrees` (git's own admin dir) instead
   // of refs/heads — matches release-ticket.sh's worktree-registry check (#84).
   const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" }, );
@@ -741,6 +789,7 @@ test("probe 3: an unreadable worktree registry is unknown, never a free ticket",
 });
 
 test("probe 3: an entry git cannot read INSIDE is unknown too, not just an unreadable entry", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // #84 itself: naming a registry entry needs read+execute on the PARENT
   // only, so the entry directory stays readable while the `gitdir` file git
   // opens inside it does not. `worktree list --porcelain` drops it anyway, at
@@ -806,6 +855,7 @@ test("probe 3: a stray DIRECTORY in the registry is not a worktree git failed to
 });
 
 test("probe 3: a registry entry git cannot even open is unknown, not a stray to skip", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // The other half of that skip, and why it tests `-x` before `gitdir`: an
   // entry chmod'd 000 answers "no gitdir file" to precisely the same test a
   // stray directory does. But git DROPS this one (measured: 2 listed, then 1),
@@ -1824,6 +1874,7 @@ test("probe 1: a PR filter that could not run is unknown, never free", (t) => {
 });
 
 test("accumulate: all three probes unanswerable is exit 2 WITH a payload naming all three", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   const { repo, env } = fixture(t, 999, {
     issueErr: "dial tcp: lookup api.github.com: no such host", origin: "unreachable",
   });
@@ -1911,7 +1962,10 @@ test("accumulate: an unpadded issue number still reaches a parseable verdict", (
 
 test("accumulate: outside a git repository is still refused before any probe runs, with no payload", (t) => {
   const outside = mkdtempSync(join(tmpdir(), "inflight-not-a-repo-"));
-  t.after(() => execFileSync("rm", ["-rf", outside]));
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", outside]);
+    execFileSync("rm", ["-rf", outside]);
+  });
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: outside, encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "", "nothing has been established yet — this is not a probe failure");
@@ -1991,6 +2045,7 @@ test("mktemp failing leaves probe 2 to answer, rather than abandoning the run", 
 });
 
 test("cleanup that cannot remove the capture file never rewrites the verdict", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
   // The EXIT trap runs OUTSIDE the probe bodies, where `set -e` is live, so a
   // bare `rm -f` that fails aborts the shell with status 1 — and 1 is this
   // script's code for "taken". Measured on the unguarded trap: this free
@@ -2037,7 +2092,10 @@ test("a missing json.sh exits 2, never the exit 1 that means `taken`", (t) => {
   // half-installed plugin takes. `dirname "$0"` resolves here, so this is the
   // real resolution path and not a stubbed stand-in for it.
   const lone = mkdtempSync(join(tmpdir(), "inflight-nolib-"));
-  t.after(() => execFileSync("rm", ["-rf", lone]));
+  t.after(() => {
+    spawnSync("chmod", ["-R", "u+rwX", lone]);
+    execFileSync("rm", ["-rf", lone]);
+  });
   copyFileSync(SCRIPT, join(lone, "inflight.sh"));
 
   const r = spawnSync("sh", [join(lone, "inflight.sh"), "7"], { cwd: repo, env, encoding: "utf8" });
