@@ -488,14 +488,10 @@ test("a dirty worktree blocks on its own", (t) => {
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
-// #730. The untracked mode is CONFIG: with `status.showUntrackedFiles = no` the
-// dirty capture exits 0 with EMPTY output over a worktree holding untracked
-// work, the `if !` above it fails closed only on a NON-ZERO exit and so never
-// fires, and the `-eq 0` count reads clean — releasing a claim whose only copy
-// of that work is the directory about to be deleted. Measured with a control on
-// the identical fixture: config set -> 0 bytes at rc 0 from the unpinned probe;
-// config unset -> `?? scratch.txt`. The `git worktree remove` refusal this
-// block's own comment leans on is no backstop — same machinery, same config.
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads clean over a dirty tree under
+// `status.showUntrackedFiles = no`, releasing a claim whose only copy of
+// that work is the directory about to be deleted.
 test("a dirty worktree blocks under status.showUntrackedFiles=no (#730)", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");

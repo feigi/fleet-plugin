@@ -442,26 +442,29 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
       #
       # This is the one shape the fail-closed `if ! …` idiom structurally
       # cannot see, because the status IS 0 — #730, the rc-0 sibling of the
-      # `git cherry` swallow (#264) this file's header already documents, where
+      # `git cherry` swallow (#264) this file's branch sweep already documents, where
       # rc was non-zero and taking the status was the whole fix. Nor can #625's
       # stderr work reach it: the config yields rc 0, empty stdout AND empty
       # stderr, so there is nothing for `gp_cut_short` to match. Pinning the
-      # mode on the command line is the only fix, and every probe whose EMPTY
-      # answer licenses an action pins it — the three in this file, plus
-      # release-ticket.sh's, worktree-audit.sh's, no-undo-audit.sh's and
-      # claim-ticket.sh's. `git worktree remove`'s own refusal is no backstop,
-      # being the same machinery the same config silences (measured at the
-      # --apply call below).
+      # mode on the command line is the only fix: a probe whose EMPTY answer
+      # licenses an action pins an explicit mode; a probe that only reports
+      # after a gate has already refused need not (see below). `git worktree
+      # remove`'s own refusal is no backstop, being the same machinery the
+      # same config silences (measured at the --apply call below).
       #
-      # The one bare `--porcelain` left in the fleet is deliberate:
+      # The one bare `--porcelain` left in a SCRIPT is deliberate:
       # instruments.sh prints one to stderr to say WHAT changed, after a digest
       # over `git ls-files` has already refused. That digest covers TRACKED
       # files only, so no untracked file can trigger it and the silenced mode
-      # cannot hide the thing being reported. A report, not a gate.
+      # cannot hide the thing being reported. A report, not a gate. (Prose
+      # instructions to an agent are a separate inventory — see SKILL.md and
+      # docs/specs/2026-07-22-run-team-agent-fleet-design.md, pinned
+      # alongside the scripts.)
       #
-      # `-uall` over `-unormal`: both override the config, `-uall` is strictly
-      # stronger (it names files inside an untracked directory rather than
-      # collapsing to the directory), and it is the form #730 measured.
+      # `-uall` here, not `-unormal`: both override the config, but this probe
+      # IS the dirty gate itself (unlike the `--ignored` reason-string probe
+      # below, whose keep/reap verdict does not depend on per-file detail),
+      # and `-uall` is the form #730 measured against this site.
       if ! git_probe -C "$wt" status --porcelain -uall; then
         keep "$b" "worktree $wt could not be read$(gp_why)"
         continue
@@ -498,16 +501,27 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
       case "$wt" in
         */.worktrees/*) : ;;
         *)
-          # `-uall` for the reason the plain scan above states, and it is NOT
-          # redundant with it: this probe is the same machinery, so the same
-          # `status.showUntrackedFiles = no` silences the backstop that exists
-          # to catch what the primary gate misses, and the apparent defence in
-          # depth is only apparent. Measured on the same fixture: under that
-          # config `--porcelain --ignored` answers 0 bytes at rc 0 — the `!!`
-          # lines are suppressed too, so a precious ignored file reads as
-          # absent — while `--porcelain -uall --ignored` lists both `??` and
-          # `!!` entries. #730.
-          if ! git_probe -C "$wt" status --porcelain -uall --ignored; then
+          # An explicit mode for the reason the plain scan above states, and
+          # it is NOT redundant with it: this probe is the same machinery, so
+          # the same `status.showUntrackedFiles = no` silences the backstop
+          # that exists to catch what the primary gate misses, and the
+          # apparent defence in depth is only apparent. Measured on the same
+          # fixture: under that config `--porcelain --ignored` answers 0
+          # bytes at rc 0 — the `!!` lines are suppressed too, so a precious
+          # ignored file reads as absent — while `--porcelain -unormal
+          # --ignored` lists both `??` and `!!` entries. #730.
+          #
+          # `-unormal`, not `-uall`, here: this probe only builds the
+          # human-readable "keep" reason string below, and the keep/reap
+          # verdict is unaffected either way — `-uall` would additionally
+          # expand every file INSIDE an ignored directory (e.g. `node_modules`)
+          # into its own `!!` line instead of the one line `-unormal` gives
+          # the directory, detail nobody downstream reads. Measured: 5000
+          # ignored files under one directory cost 129KB/6.8s under `-uall`
+          # versus 293B/0.19s under `-unormal`; at 10000 files, 259KB/27.8s,
+          # roughly quadratic. `-unormal` defeats the config equally well at
+          # none of that cost.
+          if ! git_probe -C "$wt" status --porcelain -unormal --ignored; then
             keep "$b" "worktree $wt unreadable (git status --ignored failed)$(gp_why)"
             continue
           fi
@@ -790,11 +804,10 @@ else
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      # `-uall` for the reason the branch sweep's copy of this probe states in
-      # full: without it `status.showUntrackedFiles = no` answers 0 bytes at
-      # rc 0 and the dirty check below reads a worktree holding untracked work
-      # as clean. This sweep removes DIRECTORIES, so it is the arm where that
-      # misread costs the files themselves. #730.
+      # `-uall`: #730, see the branch sweep's copy of this probe above for the
+      # full explanation. This sweep removes DIRECTORIES, so it is the arm
+      # where the misread a bare `--porcelain` produces costs the files
+      # themselves.
       if ! git_probe -C "$wt" status --porcelain -uall; then
         keep "" "worktree $wt could not be read$(gp_why)"
         continue

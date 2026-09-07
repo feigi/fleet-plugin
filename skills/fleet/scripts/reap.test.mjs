@@ -215,7 +215,18 @@ function cherryShim(t) {
  * subcommand slot, and pinning it is what keeps this shim off the OTHER git
  * calls in the sweep.
  */
-const IGNORED_PROBE = `[ "$3" = status ] && { case " $* " in *" --ignored "*) : ;; *) false ;; esac; }`;
+const IGNORED_PROBE = `[ "$3" = status ] && case " $* " in *" --ignored "*) : ;; *) false ;; esac`;
+
+/**
+ * A `failOnlyShim` match selecting the PLAIN status probe (`git -C <wt>
+ * status --porcelain …`, no `--ignored`) and nothing else.
+ *
+ * Positional on `$4`, deliberately, not content-based like `IGNORED_PROBE`'s
+ * `case`: a content match for `--porcelain` alone would also catch the
+ * `--ignored` probe, which carries that flag too — the two have to stay
+ * distinguishable, not accidentally merged into one shim.
+ */
+const STATUS_PROBE = `[ "$3" = status ] && [ "$4" = --porcelain ]`;
 
 function runReap(cwd, args, envOverrides = {}) {
   const r = spawnSync("sh", [SCRIPT, ...args], {
@@ -743,7 +754,7 @@ test("a status probe that dies (rc 128) is kept with git's own message, not just
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["fatal: not a git repository: /some/admin/path"],
     128,
   );
@@ -774,7 +785,7 @@ test("a clean worktree with a warning on the plain status probe's stderr is stil
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: unrelated advice from git, not about this worktree's contents"],
     0,
   );
@@ -836,7 +847,7 @@ test("a plain status probe that warns its walk was cut short keeps the branch, n
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: could not open directory 'wip/': Permission denied"],
     0,
   );
@@ -923,7 +934,7 @@ test("the branchless sweep's status probe reports git's own message when it dies
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["fatal: not a git repository: /some/admin/path"],
     128,
   );
@@ -954,7 +965,7 @@ test("the branchless sweep keeps a worktree whose status walk was cut short, too
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: could not open directory 'wip/': Permission denied"],
     0,
   );

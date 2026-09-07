@@ -1498,7 +1498,10 @@ a minute apart showed *different* mutants, so a member's report and any single
 
 1. **Audit the worktree** — run `worktree-audit.sh` (it takes no argument; it
    audits every worktree in one pass, so find this worktree's row in its
-   output) or run `git status --porcelain` inside the worktree itself. Dirty
+   output) or run `git status --porcelain -unormal` inside the worktree
+   itself — the explicit mode, never bare `--porcelain`, or
+   `status.showUntrackedFiles = no` reads a dirty worktree as clean (#730).
+   Dirty
    or diverged halts the finisher *here*, before the label: it reports
    what it found and labels nothing. A finisher that verifies the dirt is
    harmless and labels anyway has substituted the rule's purpose for the rule,
@@ -1623,13 +1626,14 @@ instead of asking anyone:
 > head differs from your pin, decide which of two things happened — both cheap,
 > both self-checkable:
 >
-> - **Live editor.** `git status --porcelain` is dirty. Sample `git diff --stat`
->   twice, a minute apart — diffstat growing means someone is still writing.
->   Halt, name `live editor`, report both samples.
-> - **Rebase.** `git status --porcelain` is clean, head still differs from your
->   pin. `git reflog` in the worktree: a `reset`/rebase entry near the move, not
->   a plain `commit`, means the branch replayed onto a new base — its own
->   commits on a new parent, content-identical only on a conflict-free replay.
+> - **Live editor.** `git status --porcelain -unormal` is dirty. Sample
+>   `git diff --stat` twice, a minute apart — diffstat growing means someone
+>   is still writing. Halt, name `live editor`, report both samples.
+> - **Rebase.** `git status --porcelain -unormal` is clean, head still differs
+>   from your pin. `git reflog` in the worktree: a `reset`/rebase entry near
+>   the move, not a plain `commit`, means the branch replayed onto a new
+>   base — its own commits on a new parent, content-identical only on a
+>   conflict-free replay.
 >   Halt, name `rebase`, report the reflog line.
 >
 > Either cause halts, always — you never verify the dirt is harmless and label
@@ -2087,8 +2091,11 @@ deletes the remote branch anyway.
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
 `git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.
-Non-empty `git status --porcelain` → stop and report — stashing empties it, so
-that check and `no-undo-audit.sh` both go quiet on work nothing else holds.
+Non-empty `git status --porcelain -unormal` → stop and report — the explicit
+mode, never bare `--porcelain`, or `status.showUntrackedFiles = no` reads an
+empty answer here and licenses the rebase over work this check exists to
+protect (#730). Stashing empties it either way, so that check and
+`no-undo-audit.sh` both go quiet on work nothing else holds.
 
 **Cross-check what members report about their environment.** Wrong often enough
 to matter, and a confident wrong report from a reviewer flips a verdict.

@@ -1513,14 +1513,10 @@ test("an unsearchable worktree refuses with git's own denial, never an absence n
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug", ".git")), true);
 });
 
-// #730, the pathspec'd member of the same family. The untracked mode is CONFIG
-// and it governs a pathspec'd scan too — measured, git 2.50.1 (Apple Git-155),
-// with a control on this fixture: under `status.showUntrackedFiles = no` a
-// `--porcelain <path>` over an untracked file answers 0 bytes at rc 0 while
-// `--porcelain -uall <path>` answers `?? <path>`. So an install that CREATES a
-// lockfile the tree does not track — exactly the mutation this die exists to
-// catch — is invisible at rc 0, the `elif !` never fires (it fails closed only
-// on a NON-ZERO exit), and the chain reads verified-clean over it.
+// #730, the pathspec'd member of the same family (see reap.sh's branch sweep
+// for the full explanation) — the untracked mode is CONFIG and governs a
+// pathspec'd scan too, so an install that CREATES a lockfile the tree does
+// not track is invisible at rc 0 unpinned.
 test("an install that creates an UNTRACKED lockfile is caught under status.showUntrackedFiles=no (#730)", () => {
   const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
   // On the repo's own config, so the linked worktree the check runs in shares it.

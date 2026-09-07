@@ -162,17 +162,23 @@ while IFS="$(printf '\t')" read -r br wt; do
     # never fires and a permissions/corruption failure reads as "0 ahead, 0
     # dirty" — indistinguishable from a genuinely clean worktree.
     #
-    # `-uall`, never a bare `--porcelain`: the untracked mode is CONFIG, so
-    # with `status.showUntrackedFiles = no` this scan exits 0 with EMPTY output
-    # over a worktree holding untracked work and reports `dirty: 0` — and the
-    # `&&` chain above, which exists precisely so a failure to look is never
-    # scored as clean, cannot see it, because the status IS 0. Measured with a
-    # control, git 2.50.1 (Apple Git-155): under that config `--porcelain`
-    # answers 0 bytes at rc 0 and `--porcelain -uall` answers `?? …`. This
-    # report is what a fleet controller reads to decide whether a replacement
-    # member would REDO work or DESTROY it, so a false clean here misinforms
-    # exactly the decision the audit exists to inform. #730; reap.sh's branch
-    # sweep states the class in full.
+    # `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+    # bare `--porcelain` reads `dirty: 0` over a dirty tree under
+    # `status.showUntrackedFiles = no`, and the `&&` chain above, built
+    # precisely so a failure to look is never scored as clean, cannot see it
+    # either, because the status IS 0.
+    #
+    # `-uall` over `-unormal` here specifically, unlike reap.sh's `--ignored`
+    # reason-string probe (which switched to `-unormal`, same PR): this
+    # report's `dirtyFiles[]` is what a fleet controller reads to decide
+    # whether a replacement member would REDO work or DESTROY it, and #617
+    # already invested in translating git's C-quoting to JSON precisely so
+    # `dirtyFiles[]` round-trips to the real path on disk — infrastructure
+    # that exists to let the array name individual files, not just
+    # directories. `-unormal` would collapse an untracked directory to one
+    # entry, silently dropping that granularity for whoever reads this
+    # array. Proven, not just asserted: see the nested-directory test in
+    # worktree-audit.test.mjs.
     elif ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain -uall 2>/dev/null); then
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')

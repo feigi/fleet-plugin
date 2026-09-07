@@ -340,7 +340,10 @@ or silently strands the feature worktree on `main`. The merge-bot merges with
 
 **No destructive rebase prep.** Never `git clean`, `git checkout .`, or
 `git reset --hard` to make a rebase start. A worktree's uncommitted changes may
-exist nowhere else. Non-empty `git status --porcelain` → stop and report.
+exist nowhere else. Non-empty `git status --porcelain -unormal` → stop and
+report — the explicit mode, never bare `--porcelain`, or
+`status.showUntrackedFiles = no` reads an empty answer and licenses the
+rebase over work this check exists to protect (#730).
 
 **Agent Brief over body.** `gh issue view <n>` shows no comments. The brief
 lives in a comment and can invert the body's framing; working from the body

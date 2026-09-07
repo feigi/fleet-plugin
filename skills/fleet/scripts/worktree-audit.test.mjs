@@ -140,17 +140,12 @@ test("a dirty worktree lists its dirty files and their count", (t) => {
   assert.deepEqual(e.dirtyFiles, ["scratch.txt"]);
 });
 
-// #730. `git status --porcelain` honours `status.showUntrackedFiles`, so with
-// it set to `no` this scan exits 0 with EMPTY output over a worktree holding
-// untracked work and the entry reports `dirty: 0, dirtyFiles: []`. The `&&`
-// chain the script builds precisely so a failure to look is never scored as
-// clean cannot see it, because the status IS 0. Measured, git 2.50.1 (Apple
-// Git-155), with a control on the identical fixture: config set -> 0 bytes at
-// rc 0 from the unpinned probe; config unset -> `?? scratch.txt`.
-//
-// This report is what a fleet controller reads to decide whether a replacement
-// member would REDO work or DESTROY it, so a false clean here misinforms
-// exactly the decision the audit exists to inform.
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads `dirty: 0, dirtyFiles: []` over a dirty tree under
+// `status.showUntrackedFiles = no`. This report is what a fleet controller
+// reads to decide whether a replacement member would REDO work or DESTROY
+// it, so a false clean here misinforms exactly the decision the audit
+// exists to inform.
 test("a dirty worktree is still reported dirty under status.showUntrackedFiles=no (#730)", (t) => {
   const w = repo(t);
   const wt = addWorktree(w, "fix/9-x");
@@ -167,6 +162,24 @@ test("a dirty worktree is still reported dirty under status.showUntrackedFiles=n
   // into an UNKNOWN would also stop reporting 0, and unknown is a different —
   // and here wrong — verdict about a worktree git answered for perfectly well.
   assert.deepEqual(e, { worktree: wt, branch: "fix/9-x", ahead: 0, dirty: 1, dirtyFiles: ["scratch.txt"], readable: true });
+});
+
+// `-uall`, not `-unormal`: proves the granularity `-uall` buys is real, not
+// just asserted in the script's comment. An untracked file inside an
+// untracked SUBDIRECTORY is named on its own line — `-unormal` would
+// collapse it to one entry for the directory (`sub/`), which is what
+// reap.sh's `--ignored` reason-string probe switched to, same PR, because
+// nothing downstream there reads per-file detail. Here something does:
+// `dirtyFiles[]` is what a fleet controller reads to decide REDO vs DESTROY.
+test("a dirty file inside an untracked subdirectory is named, not collapsed to the directory", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  mkdirSync(join(wt, "sub"));
+  writeFileSync(join(wt, "sub", "deep.txt"), "uncommitted\n");
+
+  const { json } = runAudit(w);
+  const e = entryFor(json, wt);
+  assert.deepEqual(e.dirtyFiles, ["sub/deep.txt"]);
 });
 
 test("a dirty file whose own name holds a space is not truncated", (t) => {

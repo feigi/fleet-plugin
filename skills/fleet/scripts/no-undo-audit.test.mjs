@@ -590,18 +590,11 @@ test("a dirty worktree still refuses, and names the worktree not the stash", (t)
   assert.match(r.stderr, /`git stash` to make a rebase start/);
 });
 
-// #730. The untracked mode is CONFIG: with `status.showUntrackedFiles = no` the
-// scan exits 0 with EMPTY output over a worktree holding untracked work, so the
-// `|| die` cannot fire — it fails closed only on a NON-ZERO exit — and this
-// audit prints `clean` over a dirty tree, which the script's own comment names
-// as the outcome nothing else would catch once the stash stopped gating.
-// Measured with a control on the identical fixture: config set -> 0 bytes at
-// rc 0 from the unpinned probe; config unset -> `?? uncommitted.txt`.
-//
-// Load-bearing here beyond a reap: the merge bot leans on this audit to
-// authorize a REBASE, and the work a rebase replays over may exist nowhere
-// else. An exit 0 from this script is only trustworthy if the probe behind it
-// was entitled to its answer.
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads `clean` over a dirty tree under
+// `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the
+// merge bot leans on this audit to authorize a REBASE, and the work a
+// rebase replays over may exist nowhere else.
 test("a dirty worktree still refuses under status.showUntrackedFiles=no (#730)", (t) => {
   const c = repo(t);
   writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");

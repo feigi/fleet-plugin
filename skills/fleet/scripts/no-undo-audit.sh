@@ -251,18 +251,13 @@ git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
 # (`check-ref-format` rejects it, `git branch` refuses to create it), so
 # `$base`, `$branch` and `$fork` cannot carry one.
 #
-# `-uall`, never a bare `--porcelain`: the untracked mode is CONFIG. With
-# `status.showUntrackedFiles = no` the scan exits 0 with EMPTY output over a
-# worktree holding untracked work, so the `|| die` above cannot fire — it fails
-# closed only on a NON-ZERO exit — and this audit prints `clean` over a dirty
-# tree, which is the very outcome the paragraph above says nothing else would
-# catch. Measured with a control, git 2.50.1 (Apple Git-155): under that config
-# `--porcelain` answers 0 bytes at rc 0 and `--porcelain -uall` answers `?? …`.
-# Load-bearing here beyond a reap: the merge bot leans on this audit to
-# authorize a REBASE, and the work a rebase replays over may exist nowhere
-# else. #730; reap.sh's branch sweep states the class in full. The trace line
-# below echoes the command as RUN, flag included, so a reader reproducing it by
-# hand does not reproduce the unsound form.
+# `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+# bare `--porcelain` reads clean over a dirty tree under
+# `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the merge
+# bot leans on this audit to authorize a REBASE, and the work a rebase
+# replays over may exist nowhere else. The trace line below echoes the
+# command as RUN, flag included, so a reader reproducing it by hand does not
+# reproduce the unsound form.
 printf '$ git -C %s status --porcelain -uall\n' "$wt" >&2
 porcelain=$(git -C "$wt" status --porcelain -uall) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
