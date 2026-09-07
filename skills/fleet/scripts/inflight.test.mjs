@@ -2335,3 +2335,42 @@ test("probe 2: a credential helper that never answers is bounded like any other 
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr, /did not finish within/);
 });
+
+test("the euid-0 guard does not fire on a normal run, and the modes it guards really deny (#184, #660)", (t) => {
+  // Mirrors release-ticket.test.mjs's own pin for the same class. The 8
+  // `if (EUID0) return t.skip(NO_DENIAL)` guards above are by construction
+  // unreachable wherever this suite actually runs, so a green suite says
+  // nothing about them — an inverted comparison would turn all 8 into skips
+  // with nothing failing, indistinguishable in the summary from that many
+  // tests passing (measured: flipping `=== 0` to `!== 0` drops this file from
+  // 91 pass/0 skip to 83 pass/8 skip while the suite still exits 0). What a
+  // green suite CAN say is the half that matters: that the guard reads false
+  // here, and that the modes it guards really deny when it does.
+  if (process.geteuid?.() === 0) return t.skip(NO_DENIAL);
+  assert.equal(EUID0, false, "a guard that fires here voids every permission fixture in this file, silently");
+
+  const dir = mkdtempSync(join(tmpdir(), "inflight-euid-"));
+  t.after(() => {
+    chmodSync(dir, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  writeFileSync(join(dir, "f"), "x");
+  const read = () => readFileSync(join(dir, "f"), "utf8");
+
+  // 0o000 and 0o400 are the two modes the refs/heads, .git/worktrees and
+  // registry-entry fixtures above chmod a DIRECTORY to. Both drop the search
+  // bit — 0o000 is the realistic fault the issues measured, 0o400 is what
+  // tells a fixed guard's `&&` from an `||` — and opening a file inside the
+  // directory needs that bit regardless of the directory's own read bit.
+  for (const mode of [0o000, 0o400]) {
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    chmodSync(dir, mode);
+    assert.throws(read, { code: "EACCES" }, `the search must be denied, ${at}`);
+  }
+
+  // The `gitdir`-file fixture instead chmods a FILE 0o000 while its parent
+  // stays searchable — a different precondition, pinned separately.
+  chmodSync(dir, 0o755);
+  chmodSync(join(dir, "f"), 0o000);
+  assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
+});
