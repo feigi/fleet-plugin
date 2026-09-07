@@ -107,6 +107,20 @@ function tryParse(json, fallback, what) {
   catch (e) { console.error(`${NAME}: ${what} parse failed: ${e.message}`); return fallback; }
 }
 
+// A row without a usable `number` cannot be placed: compute-board.mjs joins
+// issues/PRs to ledger rows and to each other BY number (Map keys, Set
+// membership, `.find`), so a numberless row does not fail to render on its
+// own — it collides with every other numberless row on the shared `undefined`
+// key. Drop it, loudly, the way candidates.mjs guards what it consumes (#786).
+function withNumber(rows, what) {
+  const kept = [];
+  for (const r of rows) {
+    if (r && typeof r.number === "number") kept.push(r);
+    else console.error(`${NAME}: ${what}: dropping row with no usable number: ${JSON.stringify(r)}`);
+  }
+  return kept;
+}
+
 // ci-state.mjs exits 0 for green, 1 for not-green or no-ci, 2 for a hard
 // failure — no-ci is its own verdict and shares exit 1 because this call omits
 // --declare-no-ci, the only thing that would move it to exit 0 — and on
@@ -550,14 +564,26 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
 
   const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
-  const issues = tryParse(issuesJson, [], "gh issue list").map((i) => ({
-    number: i.number, title: i.title, labels: (i.labels || []).map((l) => l.name),
+  // title: falls back to the same `#<number>` placeholder titleFor() already
+  // uses for an issue it cannot find at all (compute-board.mjs), so a row
+  // found but unable to describe itself reads the same way rather than as
+  // literal `undefined` on the operator's page (#786).
+  const issues = withNumber(tryParse(issuesJson, [], "gh issue list"), "gh issue list").map((i) => ({
+    number: i.number,
+    title: typeof i.title === "string" ? i.title : `#${i.number}`,
+    labels: (i.labels || []).map((l) => l.name),
   }));
 
   const prsJson = tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
     "--json", "number,state,labels,title"]);
-  const prs = tryParse(prsJson, [], "gh pr list").map((p) => ({
-    number: p.number, state: p.state, title: p.title, labels: (p.labels || []).map((l) => l.name),
+  // state: defaulted to a value that can never equal "OPEN" (compute-board.mjs
+  // derives `open` by strict equality), so a row that cannot describe its own
+  // state reads as not-open rather than as a boolean asserted from nothing.
+  const prs = withNumber(tryParse(prsJson, [], "gh pr list"), "gh pr list").map((p) => ({
+    number: p.number,
+    state: typeof p.state === "string" ? p.state : "UNKNOWN",
+    title: typeof p.title === "string" ? p.title : `#${p.number}`,
+    labels: (p.labels || []).map((l) => l.name),
   }));
 
   // CI per open PR. On failure, carry the previous board's value for that PR.

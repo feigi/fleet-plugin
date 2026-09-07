@@ -224,6 +224,68 @@ test("gather: an unparseable verdict payload → unknown, with a stderr line nam
   assert.match(r.stderr, /PR 42/);
 });
 
+// #786: `gh issue list`/`gh pr list` rows had no per-row shape guard, so a row
+// missing `number` or `title` reached the operator's page as `undefined`.
+//
+// Stubs both `gh` reads directly rather than reusing gatherCi's fixed PR row,
+// and stubs ci-state.mjs to answer "unknown" unconditionally — the PR loop
+// only needs to complete without throwing, its verdict is not what these
+// tests pin. Out of process for the same reason as gatherCi: gather() reads
+// process.argv and would otherwise read the test runner's.
+function gatherRows({ issuesJson, prsJson }) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-rows-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(bin, "gh"),
+    `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+                       prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
+    console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr };
+}
+
+test("gather: a well-formed issue/PR row passes through unchanged", () => {
+  const r = gatherRows({
+    issuesJson: JSON.stringify([{ number: 9, title: "real title", labels: [] }]),
+    prsJson: JSON.stringify([{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]),
+  });
+  assert.deepEqual(r.issues, [{ number: 9, title: "real title", labels: [] }]);
+  assert.deepEqual(r.prs, [{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]);
+});
+
+test("gather: an issue row with no number is dropped, loudly, not placed as undefined", () => {
+  const r = gatherRows({ issuesJson: JSON.stringify([{ title: "orphan" }]), prsJson: "[]" });
+  assert.deepEqual(r.issues, []);
+  assert.match(r.stderr, /gh issue list: dropping row with no usable number/);
+});
+
+test("gather: an issue row missing its title reads as its number, not undefined", () => {
+  const r = gatherRows({ issuesJson: JSON.stringify([{ number: 55 }]), prsJson: "[]" });
+  assert.equal(r.issues.length, 1);
+  assert.equal(r.issues[0].number, 55);
+  assert.equal(r.issues[0].title, "#55");
+});
+
+test("gather: a PR row with no number is dropped, loudly, not placed as undefined", () => {
+  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ title: "orphan pr", state: "OPEN" }]) });
+  assert.deepEqual(r.prs, []);
+  assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
+});
+
+test("gather: a PR row missing its state reads as UNKNOWN, never OPEN by default", () => {
+  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ number: 77, title: "t" }]) });
+  assert.equal(r.prs.length, 1);
+  assert.equal(r.prs[0].number, 77);
+  assert.equal(r.prs[0].state, "UNKNOWN");
+});
+
 test("createBoardServer serves board.json and the page", async () => {
   const dir = mkdtempSync(join(tmpdir(), "board-"));
   writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));
