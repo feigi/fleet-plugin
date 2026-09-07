@@ -1513,6 +1513,31 @@ test("an unsearchable worktree refuses with git's own denial, never an absence n
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug", ".git")), true);
 });
 
+// #730, the pathspec'd member of the same family (see reap.sh's branch sweep
+// for the full explanation) — the untracked mode is CONFIG and governs a
+// pathspec'd scan too, so an install that CREATES a lockfile the tree does
+// not track is invisible at rc 0 unpinned.
+test("an install that creates an UNTRACKED lockfile is caught under status.showUntrackedFiles=no (#730)", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  // On the repo's own config, so the linked worktree the check runs in shares it.
+  execFileSync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: dir, stdio: "pipe" });
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // Runs with cwd=$wt, so the stray lockfile lands in the worktree under check.
+  writeFileSync(join(bin, "npm"), "#!/bin/sh\nprintf '{}' > yarn.lock\nexit 0\n", { mode: 0o755 });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  // The stated cause, not merely a refusal: several guards in this chain exit 2,
+  // and triage reads the reason.
+  assert.match(r.stderr, /install mutated the lockfile/);
+});
+
 test("a worktree whose .git vanishes during install refuses instead of trusting a leaked parent status", () => {
   const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));

@@ -317,15 +317,20 @@ else
     die "$wt has no .git file — cannot verify the lockfile was not mutated"
   # No `2>&1` here, unlike the two captures above: those capture a refusal
   # REASON, this captures DATA that is then compared. The comment above
-  # release-ticket.sh's own `git -C "$wt" status --porcelain` capture already
-  # states it — folded-in stderr would be counted as a change. A git
+  # release-ticket.sh's own dirty-worktree status capture already states it
+  # — folded-in stderr would be counted as a change. A git
   # that exits 0 still writes to stderr for a malformed `.gitattributes` line
   # or a chatty `core.fsmonitor`, and merged that chatter became the whole of
   # $dirty and refused a lockfile it had just verified as clean — after the
   # label, the branch and the worktree were already created. git's denial
   # reaches this terminal on its own, which is the "its own denial" the
   # paragraph above means; the die names the failure, not the reason.
-  elif ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock); then
+  #
+  # `-uall`: #730 (see reap.sh's branch sweep for the full explanation) —
+  # the untracked mode is CONFIG, and not decorative under a pathspec: an
+  # install that CREATES a lockfile the tree does not track is exactly the
+  # mutation this die exists to catch, and unpinned it is invisible at rc 0.
+  elif ! dirty=$(git -C "$wt" status --porcelain -uall package-lock.json pnpm-lock.yaml yarn.lock); then
     die "could not verify lockfile state in $wt"
   elif [ -n "$dirty" ]; then
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"

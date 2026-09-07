@@ -250,8 +250,16 @@ git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
 # digit count or the literal `null`, and git forbids a backslash in a refname
 # (`check-ref-format` rejects it, `git branch` refuses to create it), so
 # `$base`, `$branch` and `$fork` cannot carry one.
-printf '$ git -C %s status --porcelain\n' "$wt" >&2
-porcelain=$(git -C "$wt" status --porcelain) \
+#
+# `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+# bare `--porcelain` reads clean over a dirty tree under
+# `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the merge
+# bot leans on this audit to authorize a REBASE, and the work a rebase
+# replays over may exist nowhere else. The trace line below echoes the
+# command as RUN, flag included, so a reader reproducing it by hand does not
+# reproduce the unsound form.
+printf '$ git -C %s status --porcelain -uall\n' "$wt" >&2
+porcelain=$(git -C "$wt" status --porcelain -uall) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
   clean=false

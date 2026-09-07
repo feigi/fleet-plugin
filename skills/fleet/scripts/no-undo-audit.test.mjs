@@ -590,6 +590,29 @@ test("a dirty worktree still refuses, and names the worktree not the stash", (t)
   assert.match(r.stderr, /`git stash` to make a rebase start/);
 });
 
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads `clean` over a dirty tree under
+// `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the
+// merge bot leans on this audit to authorize a REBASE, and the work a
+// rebase replays over may exist nowhere else.
+test("a dirty worktree still refuses under status.showUntrackedFiles=no (#730)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+  git(c.w, "config", "status.showUntrackedFiles", "no");
+  assert.equal(git(c.w, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, `a silenced probe must not become a clean verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+  assert.match(r.stderr, /REFUSED/);
+  assert.match(r.stderr, /commit the worktree before rebasing/);
+  // Exit 1 is the refusal that means dirty; exit 2 means unanswerable. A fix
+  // that turned the silenced answer into a refusal-to-answer would satisfy a
+  // bare "not 0" and report the wrong thing about a worktree git can read.
+  assert.match(r.stderr, /uncommitted\.txt/, "the file git could only see with the mode pinned must be named");
+});
+
 test("a dirty worktree refuses with an empty stash stack", (t) => {
   const c = repo(t);
   writeFileSync(join(c.w, "uncommitted.txt"), "work\n");

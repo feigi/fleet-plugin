@@ -201,6 +201,33 @@ function cherryShim(t) {
   );
 }
 
+/**
+ * A `failOnlyShim` match selecting the `--ignored` probe and nothing else.
+ *
+ * Selected on CONTENT, never on argv POSITION. It was `[ "$5" = --ignored ]`,
+ * which #730 broke by inserting `-uall` ahead of the flag: two of the three
+ * tests using it went red, and the third — the one asserting a REAP — went
+ * green vacuously, its shim silently matching nothing while the assertions it
+ * makes about a probe that never ran still held. A positional match is a
+ * false-green generator the next flag re-arms, so the position is gone.
+ *
+ * `$3` stays positional deliberately: it is `git -C <wt> status …`, the
+ * subcommand slot, and pinning it is what keeps this shim off the OTHER git
+ * calls in the sweep.
+ */
+const IGNORED_PROBE = `[ "$3" = status ] && case " $* " in *" --ignored "*) : ;; *) false ;; esac`;
+
+/**
+ * A `failOnlyShim` match selecting the PLAIN status probe (`git -C <wt>
+ * status --porcelain …`, no `--ignored`) and nothing else.
+ *
+ * Positional on `$4`, deliberately, not content-based like `IGNORED_PROBE`'s
+ * `case`: a content match for `--porcelain` alone would also catch the
+ * `--ignored` probe, which carries that flag too — the two have to stay
+ * distinguishable, not accidentally merged into one shim.
+ */
+const STATUS_PROBE = `[ "$3" = status ] && [ "$4" = --porcelain ]`;
+
 function runReap(cwd, args, envOverrides = {}) {
   const r = spawnSync("sh", [SCRIPT, ...args], {
     cwd,
@@ -582,6 +609,85 @@ test("a dirty worktree on an otherwise-mergeable [gone] branch is kept, not reap
   assert.equal(existsSync(wt), true, "a dirty worktree must survive untouched");
 });
 
+// #730, and the reason the probe above carries `-uall`. The untracked mode is
+// CONFIG: `git status --porcelain` honours `status.showUntrackedFiles`, so with
+// it set to `no` the probe exits 0 with EMPTY output over a worktree holding
+// untracked work. The `if !` idiom fails closed only on a NON-ZERO exit, so it
+// never fires; `gp_cut_short` has no stderr to match; `[ -n "$gp_out" ]` reads
+// clean. Measured on the unmodified script before the fix, with a control on
+// the identical fixture: config set -> `REAPED feature/merged` at exit 0, the
+// worktree directory and the untracked file gone, no KEEP and nothing on
+// stderr; config unset -> `KEEP feature/merged — dirty worktree …`, file alive.
+//
+// A FLEET worktree deliberately, under `.worktrees/`: that home is exempt from
+// the `--ignored` probe below, so this gate is the only thing between the file
+// and `git worktree remove` — and `remove` without `--force` is no backstop,
+// being the same machinery the same config silences.
+//
+// The config goes in the repo's own config, not GIT_CONFIG_GLOBAL: ENV already
+// pins that to /dev/null, and the repo config is what a linked worktree shares
+// — which is the point, since it is set from the main checkout and silences the
+// worktree's probe.
+test("a worktree holding untracked work is kept under status.showUntrackedFiles=no (#730)", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "precious.txt"), "untracked, and it exists nowhere else\n");
+  git(w, "config", "status.showUntrackedFiles", "no");
+  // The fixture's own positive control. Without it a git that stopped honouring
+  // the config would leave this test green while pinning nothing at all.
+  assert.equal(git(wt, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  // The reason, not merely the keep: several other guards also leave `reaped`
+  // empty, so the pair alone does not say which one answered.
+  assert.equal(json.kept[0].reason, `dirty worktree ${wt}`);
+  assert.match(stderr, /KEEP feature\/merged — dirty worktree/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "untracked, and it exists nowhere else\n",
+    "the untracked file must survive the run — this is the data loss the ticket measured");
+});
+
+test("an ignored file is still seen under status.showUntrackedFiles=no (#730)", (t) => {
+  // The backstop, and it is the SAME machinery as the gate above — so one
+  // config silences both and the defence in depth is only apparent. Measured on
+  // this fixture: under `showUntrackedFiles = no`, `--porcelain --ignored`
+  // answers 0 bytes at rc 0, the `!!` lines suppressed along with the `??`
+  // ones, so a precious ignored file reads as absent. Outside `.worktrees/`
+  // this probe is the only thing left between a merged, linked, tracked-clean
+  // worktree and a `git worktree remove` that deletes ignored files silently
+  // under every config.
+  //
+  // No untracked file in this fixture, only an ignored one: the plain scan
+  // above answers empty either way, so the verdict here is the `--ignored`
+  // probe's alone and a fix applied to only the first site fails this test.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  writeFileSync(join(wt, ".env"), "SECRET=exists nowhere else\n");
+  git(w, "config", "status.showUntrackedFiles", "no");
+  assert.equal(git(wt, "status", "--porcelain", "--ignored"), "",
+    "fixture: the config must silence the unpinned --ignored probe, or this test measures nothing");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /^ignored files present in .*: \.env$/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(readFileSync(join(wt, ".env"), "utf8"), "SECRET=exists nowhere else\n",
+    "the precious ignored file must survive the run");
+});
+
 // #614: the BEHAVIOURAL twin of locale-pin-prose.test.mjs' source assertion for
 // this script — that file checks `export LC_ALL=C` is PRESENT, this one checks
 // it is load-bearing.
@@ -648,7 +754,7 @@ test("a status probe that dies (rc 128) is kept with git's own message, not just
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["fatal: not a git repository: /some/admin/path"],
     128,
   );
@@ -679,7 +785,7 @@ test("a clean worktree with a warning on the plain status probe's stderr is stil
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: unrelated advice from git, not about this worktree's contents"],
     0,
   );
@@ -710,7 +816,7 @@ test("an `--ignored` probe that warns at rc 0 is kept, listing incomplete, never
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    IGNORED_PROBE,
     ["warning: could not open directory 'secret/': Permission denied"],
     0,
   );
@@ -741,7 +847,7 @@ test("a plain status probe that warns its walk was cut short keeps the branch, n
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: could not open directory 'wip/': Permission denied"],
     0,
   );
@@ -772,7 +878,7 @@ test("ambient git noise on the `--ignored` probe's stderr does not strand a clea
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    IGNORED_PROBE,
     ["error: key does not contain a section: stray"],
     0,
   );
@@ -797,7 +903,7 @@ test("an `--ignored` probe that DIES is kept with git's own message, not just a 
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ] && [ "$5" = --ignored ]`,
+    IGNORED_PROBE,
     ["fatal: unable to read index file .git/index"],
     128,
   );
@@ -828,7 +934,7 @@ test("the branchless sweep's status probe reports git's own message when it dies
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["fatal: not a git repository: /some/admin/path"],
     128,
   );
@@ -859,7 +965,7 @@ test("the branchless sweep keeps a worktree whose status walk was cut short, too
 
   const bin = failOnlyShim(
     t,
-    `[ "$3" = status ] && [ "$4" = --porcelain ]`,
+    STATUS_PROBE,
     ["warning: could not open directory 'wip/': Permission denied"],
     0,
   );
@@ -1775,6 +1881,29 @@ test("a DIRTY detached worktree is kept with a reason, never removed (#381)", (t
   assert.equal(json.kept[0].branch, null, "there is no branch to name, and `` would claim there were one");
   assert.equal(json.kept[0].reason, `dirty worktree ${wt}`);
   assert.ok(stderr.includes("KEEP"), "silently skipping it is the defect, not the fix");
+});
+
+test("a DIRTY detached worktree is kept under status.showUntrackedFiles=no (#730)", (t) => {
+  // The third gate, and the one where the misread costs the FILES rather than
+  // just a branch: this sweep's whole job is removing directories. The branch
+  // sweep never reaches a detached worktree, so its own `-uall` does not cover
+  // this arm — a fix applied to the two sites the ticket named leaves this one
+  // blind, which is why it is pinned separately.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  writeFileSync(join(wt, "precious.txt"), "uncommitted, exists nowhere else\n");
+  git(w, "config", "status.showUntrackedFiles", "no");
+  assert.equal(git(wt, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `dirty worktree ${wt}`);
+  assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "uncommitted, exists nowhere else\n",
+    "the uncommitted file must survive the run");
 });
 
 test("a detached worktree holding commits that exist nowhere else is kept (#381)", (t) => {

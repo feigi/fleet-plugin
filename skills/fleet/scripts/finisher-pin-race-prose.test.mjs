@@ -162,7 +162,7 @@ test("the head-equality short-circuit compares against the dispatch pin, on a cl
   // `git status --porcelain.*dirty` pin above walks straight through it.
   assert.match(
     text,
-    /\*\*Live editor\.\*\* `git status --porcelain` is dirty\./,
+    /\*\*Live editor\.\*\* `git status --porcelain -unormal` is dirty\./,
     "the live-editor cause is no longer keyed on a dirty tree alone — a head predicate in front of the dirty read strands the mid-mutation case with no named cause",
   );
 });

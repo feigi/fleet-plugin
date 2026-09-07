@@ -1152,7 +1152,14 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   fi
 
   # Same reason: folded-in stderr would be counted as uncommitted changes.
-  if ! dirty=$(git -C "$wt" status --porcelain); then
+  #
+  # `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+  # bare `--porcelain` reads clean over a dirty tree under
+  # `status.showUntrackedFiles = no`, releasing a claim whose only copy of
+  # that work is the directory about to be deleted. The `git worktree remove`
+  # refusal this block's own comment leans on is no backstop — same
+  # machinery, same config.
+  if ! dirty=$(git -C "$wt" status --porcelain -uall); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
   fi
   # Ignored files are deliberately not a blocker: the tracked `agent-test`

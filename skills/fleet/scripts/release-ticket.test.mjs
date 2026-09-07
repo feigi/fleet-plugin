@@ -488,6 +488,27 @@ test("a dirty worktree blocks on its own", (t) => {
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads clean over a dirty tree under
+// `status.showUntrackedFiles = no`, releasing a claim whose only copy of
+// that work is the directory about to be deleted.
+test("a dirty worktree blocks under status.showUntrackedFiles=no (#730)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+  git(r.w, "config", "status.showUntrackedFiles", "no");
+  assert.equal(git(c.wt, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `no commit exists, so only the dirty check can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /1 uncommitted change\(s\)/);
+  assert.equal(code, 1);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+  assert.equal(readFileSync(join(c.wt, "scratch.txt"), "utf8"), "work that exists nowhere else\n",
+    "the untracked file must survive the run");
+});
+
 // #119, the other direction: the library is present and its tools are not.
 // `block()` used to splice `$(jstr "$1")` straight into the accumulator, which
 // is not a simple command, so `set -e` read only the assignment — a failed

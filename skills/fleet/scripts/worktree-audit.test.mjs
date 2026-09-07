@@ -140,6 +140,48 @@ test("a dirty worktree lists its dirty files and their count", (t) => {
   assert.deepEqual(e.dirtyFiles, ["scratch.txt"]);
 });
 
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads `dirty: 0, dirtyFiles: []` over a dirty tree under
+// `status.showUntrackedFiles = no`. This report is what a fleet controller
+// reads to decide whether a replacement member would REDO work or DESTROY
+// it, so a false clean here misinforms exactly the decision the audit
+// exists to inform.
+test("a dirty worktree is still reported dirty under status.showUntrackedFiles=no (#730)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+  git(w, "config", "status.showUntrackedFiles", "no");
+  // The fixture's own positive control: without it a git that stopped honouring
+  // the config would leave this test green while pinning nothing.
+  assert.equal(git(wt, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const { json } = runAudit(w);
+  const e = entryFor(json, wt);
+  // `readable: true` alongside the count: a fix that turned the silenced answer
+  // into an UNKNOWN would also stop reporting 0, and unknown is a different —
+  // and here wrong — verdict about a worktree git answered for perfectly well.
+  assert.deepEqual(e, { worktree: wt, branch: "fix/9-x", ahead: 0, dirty: 1, dirtyFiles: ["scratch.txt"], readable: true });
+});
+
+// `-uall`, not `-unormal`: proves the granularity `-uall` buys is real, not
+// just asserted in the script's comment. An untracked file inside an
+// untracked SUBDIRECTORY is named on its own line — `-unormal` would
+// collapse it to one entry for the directory (`sub/`), which is what
+// reap.sh's `--ignored` reason-string probe switched to, same PR, because
+// nothing downstream there reads per-file detail. Here something does:
+// `dirtyFiles[]` is what a fleet controller reads to decide REDO vs DESTROY.
+test("a dirty file inside an untracked subdirectory is named, not collapsed to the directory", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  mkdirSync(join(wt, "sub"));
+  writeFileSync(join(wt, "sub", "deep.txt"), "uncommitted\n");
+
+  const { json } = runAudit(w);
+  const e = entryFor(json, wt);
+  assert.deepEqual(e.dirtyFiles, ["sub/deep.txt"]);
+});
+
 test("a dirty file whose own name holds a space is not truncated", (t) => {
   // Porcelain v1 is "XY<space>PATH" — always three bytes before the path, so
   // the fourth byte on is the whole rest of the line. Reading it as awk's $2
