@@ -224,6 +224,121 @@ test("gather: an unparseable verdict payload → unknown, with a stderr line nam
   assert.match(r.stderr, /PR 42/);
 });
 
+// #786: `gh issue list`/`gh pr list` rows had no per-row shape guard. A row
+// missing `number` is the real "reaches the page as literal `undefined`" case
+// — compute-board.mjs joins rows to the ledger BY number, so a numberless row
+// collided with every other one on the shared `undefined` key. A row missing
+// `title` was never that: compute-board.mjs's titleFor() already falls
+// through a falsy PR title to the real issue title, and an issue row with no
+// title already fell through to the `#<number>` placeholder — both worked
+// before this fix. `labels`, unguarded either way, was the real regression:
+// a non-array or null-containing `labels` array crashes gather() outright,
+// worse than any `undefined` on the page.
+//
+// Stubs both `gh` reads directly rather than reusing gatherCi's fixed PR row,
+// and stubs ci-state.mjs to answer "unknown" unconditionally — the PR loop
+// only needs to complete without throwing, its verdict is not what these
+// tests pin. Out of process for the same reason as gatherCi: gather() reads
+// process.argv and would otherwise read the test runner's.
+function gatherRows({ issuesJson, prsJson }) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-rows-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(bin, "gh"),
+    `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+                       prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
+    console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr };
+}
+
+// tryParse only checks that gh's stdout is valid JSON, not that it is an
+// array — a syntactically-valid object payload used to reach withNumber's
+// `for...of` and throw "rows is not iterable", contrary to this PR's own
+// premise that tryParse "establishes... that it is an array" (#786 review).
+test("gather: a non-array gh payload degrades to an empty list, not a crash", () => {
+  const r = gatherRows({ issuesJson: JSON.stringify({ not: "an array" }), prsJson: "[]" });
+  assert.deepEqual(r.issues, []);
+  assert.match(r.stderr, /gh issue list: expected an array of rows/);
+});
+
+test("gather: a well-formed issue/PR row passes through unchanged", () => {
+  const r = gatherRows({
+    issuesJson: JSON.stringify([{ number: 9, title: "real title", labels: [] }]),
+    prsJson: JSON.stringify([{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]),
+  });
+  assert.deepEqual(r.issues, [{ number: 9, title: "real title", labels: [] }]);
+  assert.deepEqual(r.prs, [{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]);
+});
+
+test("gather: an issue row with no number is dropped, loudly, not placed as undefined", () => {
+  const r = gatherRows({ issuesJson: JSON.stringify([{ title: "orphan" }]), prsJson: "[]" });
+  assert.deepEqual(r.issues, []);
+  assert.match(r.stderr, /gh issue list: dropping row with no usable number/);
+});
+
+test("gather: an issue row missing its title reads as its number, not undefined", () => {
+  const r = gatherRows({ issuesJson: JSON.stringify([{ number: 55 }]), prsJson: "[]" });
+  assert.equal(r.issues.length, 1);
+  assert.equal(r.issues[0].number, 55);
+  assert.equal(r.issues[0].title, "#55");
+});
+
+test("gather: a PR row with no number is dropped, loudly, not placed as undefined", () => {
+  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ title: "orphan pr", state: "OPEN" }]) });
+  assert.deepEqual(r.prs, []);
+  assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
+});
+
+// `state` and `title` used to default to a sentinel ("UNKNOWN" / `#<number>`)
+// on a PR row. Both defaults are gone: `state`'s only consumer is
+// `pr.state === "OPEN"` (compute-board.mjs), already false for `undefined`
+// exactly as it was for "UNKNOWN" — an inert guard. `title`'s default made a
+// titleless PR row unconditionally truthy, which SILENTLY DISABLED titleFor()'s
+// existing fallback to the real issue title (see compute-board.test.mjs for
+// the column-placement pin this can't reach — `open`, the boolean `state`
+// feeds, is itself never read past that comparison). Raw passthrough, pinned
+// here as gather()'s actual output shape.
+test("gather: a PR row missing state/title passes through raw, not coerced to a sentinel", () => {
+  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ number: 77 }]) });
+  assert.equal(r.prs.length, 1);
+  // Round-tripped through JSON (gatherRows' driver), so an undefined value
+  // survives as an absent key, not a key holding `undefined` — same as what
+  // JSON.stringify(model) already does to board.json on every real tick.
+  assert.deepEqual(r.prs[0], { number: 77, labels: [] });
+});
+
+// The #786 regression review reproduced this live: `labels` was the one field
+// this PR's own guard comment claimed was covered ("a row without a usable
+// field... doesn't fail the tick") but was never actually guarded — a
+// non-array `labels` throws `TypeError: ... .map is not a function`, crashing
+// gather() entirely rather than degrading the row.
+test("gather: a non-array labels field degrades to [], not a TypeError crash", () => {
+  const r = gatherRows({
+    issuesJson: JSON.stringify([{ number: 1, title: "t", labels: "not-an-array" }]),
+    prsJson: JSON.stringify([{ number: 2, title: "t", state: "OPEN", labels: "not-an-array" }]),
+  });
+  assert.deepEqual(r.issues[0].labels, []);
+  assert.deepEqual(r.prs[0].labels, []);
+});
+
+// The second reproduced crash: a `labels` array whose elements are the right
+// TYPE (an array) but a WRONG-shaped or null element throws reading `.name`.
+test("gather: a malformed element inside labels is dropped, not the whole row", () => {
+  const r = gatherRows({
+    issuesJson: JSON.stringify([{ number: 1, title: "t", labels: [{ name: "keep" }, null, {}] }]),
+    prsJson: "[]",
+  });
+  assert.deepEqual(r.issues[0].labels, ["keep"]);
+});
+
 test("createBoardServer serves board.json and the page", async () => {
   const dir = mkdtempSync(join(tmpdir(), "board-"));
   writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));
