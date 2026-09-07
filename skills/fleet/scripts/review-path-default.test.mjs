@@ -48,6 +48,38 @@ function section(source, startAnchor, endAnchor, label) {
   return source.slice(at, end);
 }
 
+// Keys at an object literal's OWN depth, whatever the line layout. A per-line
+// regex (`/^ {2}(\w+)[,:]/gm`) read one field per line and so could not see a
+// field added on a line it SHARES with an existing one — measured in #667: the
+// same added field is caught when it lands on its own line and missed when it
+// shares, decided by nothing but where the newline fell. Depth is tracked so a
+// value's own commas and nested braces never register as fields, and `expectKey`
+// is what separates `head` the key from `head` in `snap.head` — both sit at
+// depth 0, only one follows a `,` or the opening brace.
+// ponytail: no string/template/regex-literal awareness — a brace or comma
+// inside one of those would miscount. Line comments are stripped; block
+// comments are not. Both are upgrades for the day the return grows one.
+function objectKeys(body) {
+  const keys = [];
+  let depth = 0;
+  let expectKey = true;
+  for (const [tok] of body.replace(/\/\/.*$/gm, "").matchAll(/\w+|\S/g)) {
+    if ("([{".includes(tok)) {
+      depth++;
+    } else if (")]}".includes(tok)) {
+      depth--;
+    } else if (depth === 0) {
+      if (tok === ",") {
+        expectKey = true;
+      } else {
+        if (expectKey && /^\w+$/.test(tok)) keys.push(tok);
+        expectKey = false;
+      }
+    }
+  }
+  return keys;
+}
+
 const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
@@ -495,11 +527,10 @@ test("run-team's documented return shape is exactly review-pr.js's actual return
   // dropped from the prose and not the script.
   const src = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
   // The workflow's own result is the file's only top-level `return {` — the
-  // others are inside helpers and indented. Fields sit one per line at exactly
-  // two spaces, as `key,` or `key: expr`.
-  const returned = [...section(src, "\nreturn {", "\n};", "review-pr.js return").matchAll(/^ {2}(\w+)[,:]/gm)]
-    .map((m) => m[1]);
-  assert.ok(returned.length, "review-pr.js's top-level return no longer reads one field per line — update this test");
+  // others are inside helpers and indented. Read by brace depth, not by line,
+  // so a field added on a line it shares with another is still a field (#667).
+  const returned = objectKeys(section(src, "\nreturn {", "\n};", "review-pr.js return").replace("\nreturn {", ""));
+  assert.ok(returned.length, "review-pr.js's top-level return no longer parses as a plain object — update this test");
   const documented = section(RUN_TEAM, "It returns `{", "}`", "run-team return shape")
     .replace("It returns `{", "")
     .split(",")
