@@ -325,7 +325,16 @@ else
   # label, the branch and the worktree were already created. git's denial
   # reaches this terminal on its own, which is the "its own denial" the
   # paragraph above means; the die names the failure, not the reason.
-  elif ! dirty=$(git -C "$wt" status --porcelain package-lock.json pnpm-lock.yaml yarn.lock); then
+  #
+  # `-uall` for the reason #730 states at reap.sh's branch sweep, and it is not
+  # decorative under a pathspec: the untracked mode is CONFIG and applies to a
+  # pathspec'd scan too — measured, git 2.50.1 (Apple Git-155), with
+  # `status.showUntrackedFiles = no` a `--porcelain <path>` over an untracked
+  # file answers 0 bytes at rc 0 while `--porcelain -uall <path>` answers
+  # `?? <path>`. An install that CREATES a lockfile the tree does not track is
+  # exactly the mutation this die exists to catch, and without the flag it is
+  # invisible at rc 0, which the `elif` chain then reads as verified-clean.
+  elif ! dirty=$(git -C "$wt" status --porcelain -uall package-lock.json pnpm-lock.yaml yarn.lock); then
     die "could not verify lockfile state in $wt"
   elif [ -n "$dirty" ]; then
     die "install mutated the lockfile in $wt — wrong command, fix before dispatching"

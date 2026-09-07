@@ -140,6 +140,35 @@ test("a dirty worktree lists its dirty files and their count", (t) => {
   assert.deepEqual(e.dirtyFiles, ["scratch.txt"]);
 });
 
+// #730. `git status --porcelain` honours `status.showUntrackedFiles`, so with
+// it set to `no` this scan exits 0 with EMPTY output over a worktree holding
+// untracked work and the entry reports `dirty: 0, dirtyFiles: []`. The `&&`
+// chain the script builds precisely so a failure to look is never scored as
+// clean cannot see it, because the status IS 0. Measured, git 2.50.1 (Apple
+// Git-155), with a control on the identical fixture: config set -> 0 bytes at
+// rc 0 from the unpinned probe; config unset -> `?? scratch.txt`.
+//
+// This report is what a fleet controller reads to decide whether a replacement
+// member would REDO work or DESTROY it, so a false clean here misinforms
+// exactly the decision the audit exists to inform.
+test("a dirty worktree is still reported dirty under status.showUntrackedFiles=no (#730)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+  git(w, "config", "status.showUntrackedFiles", "no");
+  // The fixture's own positive control: without it a git that stopped honouring
+  // the config would leave this test green while pinning nothing.
+  assert.equal(git(wt, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const { json } = runAudit(w);
+  const e = entryFor(json, wt);
+  // `readable: true` alongside the count: a fix that turned the silenced answer
+  // into an UNKNOWN would also stop reporting 0, and unknown is a different —
+  // and here wrong — verdict about a worktree git answered for perfectly well.
+  assert.deepEqual(e, { worktree: wt, branch: "fix/9-x", ahead: 0, dirty: 1, dirtyFiles: ["scratch.txt"], readable: true });
+});
+
 test("a dirty file whose own name holds a space is not truncated", (t) => {
   // Porcelain v1 is "XY<space>PATH" — always three bytes before the path, so
   // the fourth byte on is the whole rest of the line. Reading it as awk's $2
