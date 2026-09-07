@@ -516,8 +516,9 @@ function selectDimensions(all, stats) {
     // correctness (scope) + comments (every asserted fact vs the tree); drop
     // tests/types/silent-failure/simplify, which have nothing to run, type-check,
     // or simplify.
-    const docsDims = all.filter((d) => d.key === "correctness" || d.key === "comments");
-    return docsDims.length ? docsDims : all;
+    const docsOnlyDims = all.filter((d) => d.key === "correctness" || d.key === "comments");
+    if (!docsOnlyDims.length) throw new Error("review-pr: selectDimensions produced an empty dimension set");
+    return docsOnlyDims;
   }
   let dims = all;
   if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
@@ -574,7 +575,22 @@ function selectDimensions(all, stats) {
   // guards above: only an affirmative boolean narrows.
   if (SIZE_TIER_PROFILES.has(stats.profile))
     dims = dims.filter((d) => SIZE_TIER_DIMS.has(d.key) || (d.key === "tests" && stats.hasTests === true));
-  return dims.length ? dims : all;
+  // Both returns above used to be `x.length ? x : all` — a widen-on-empty net
+  // that could never fire (#669). `all` is `DEFAULT_DIMENSIONS` on every
+  // reachable path: the sole call site passes it, and an `args.dimensions`
+  // override is resolved by `resolveDimensions` and short-circuits this function
+  // entirely. With that `all`, neither exit point can empty: `correctness` is
+  // in no drop list above and is in `SIZE_TIER_DIMS`, so `dims` always keeps
+  // it, and the docs-only return above keeps correctness ∪ comments. Pinned by
+  // "no stats shape empties the dimension set" in select-dimensions.test.mjs,
+  // which sweeps the stats shape.
+  //
+  // A future caller passing a narrowed `all` gets a THROW here, not a silent
+  // widen back to a set it did not ask for — the same idiom `resolveDimensions`
+  // uses for its own zero-dimension case (below), now enforced at both exit
+  // points, not just documented.
+  if (!dims.length) throw new Error("review-pr: selectDimensions produced an empty dimension set");
+  return dims;
 }
 
 // The "Specialists" section of `skills/fleet/commands/review-and-fix.md`

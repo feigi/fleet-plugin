@@ -442,3 +442,34 @@ test("a truncated file list widens to the full set, whatever it profiles as", ()
     "the docs trim no longer fires on a complete docs-only list",
   );
 });
+
+// The invariant that made two `x.length ? x : all` fallbacks dead code, deleted
+// in #669. This is the pin that has to hold for the deletion to stay safe: with
+// `all = DEFAULT_DIMENSIONS` — which is what the ONE call site passes, an
+// `args.dimensions` override having short-circuited via `resolveDimensions` —
+// no combination of stats can empty the set. Sweeping the stats SHAPE rather
+// than a file list on purpose: the fallbacks guarded against a corrupt or
+// unforeseen blob, so the values under test include the non-booleans and
+// unknown profiles a real payload could carry, not only what computeStats emits.
+test("no stats shape empties the dimension set — `correctness` survives every filter", () => {
+  // `""` stands in for the whole falsy family (`undefined`, `null`, `""`) plus
+  // `"empty"`: all four hit `!stats.profile || stats.profile === "empty"` and
+  // return `all` before any other field is read, so they are one outcome, not
+  // four — verified by re-reading that guard, not assumed from this trim.
+  const profiles = ["", "docs", "tests-only", "single-file", "small", "production", "bogus"];
+  const values = [true, false, undefined, null, "yes", 0, 1];
+  for (const profile of profiles)
+    for (const docsOnly of values)
+      for (const hasSrc of values)
+        for (const hasTests of values)
+          for (const truncated of values) {
+            const stats = { profile, docsOnly, hasSrc, hasTests, truncated };
+            assert.ok(
+              selectDimensions(DEFAULT_DIMENSIONS, stats).some((d) => d.key === "correctness"),
+              `correctness was filtered out by ${JSON.stringify(stats)}`,
+            );
+          }
+  // The non-object arms of the same guard.
+  for (const stats of [null, undefined, 0, "", false])
+    assert.equal(selectDimensions(DEFAULT_DIMENSIONS, stats).length, DEFAULT_DIMENSIONS.length);
+});
