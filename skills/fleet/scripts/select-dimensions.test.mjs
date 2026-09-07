@@ -278,8 +278,8 @@ test("the refuter budget is keyed on severity alone, never on a dimension", () =
 // --- args.dimensions normalization (#113). The "Specialists" section of
 // `skills/fleet/commands/review-and-fix.md` documents the override as
 // accepting "keys or dimension objects"; before this, only objects worked and
-// a key array passed through untouched, dereferencing `d.key`, `d.prompt` and
-// `d.agentType` to `undefined` with no throw and no warning.
+// a key array passed through untouched, dereferencing `d.key`, `d.prompt`,
+// `d.model` and `d.agentType` to `undefined` with no throw and no warning.
 test("no override leaves the size tier in charge", () => {
   assert.equal(resolveDimensions(undefined, DEFAULT_DIMENSIONS), null);
   assert.equal(resolveDimensions(null, DEFAULT_DIMENSIONS), null);
@@ -325,24 +325,86 @@ test("an object override missing a required field stops the run and names the fi
     () => resolveDimensions([{ key: "x", agentType: "y" }], DEFAULT_DIMENSIONS),
     /missing required field\(s\): prompt/,
   );
-  // All three dereferenced fields are checked, not just one.
+  // All three REQUIRED fields are checked, not just one. `model` is not among
+  // them — it is dereferenced but optional, and demanding it here would refuse
+  // every dimension that lets its agent's own frontmatter pin decide.
   assert.throws(
     () => resolveDimensions([{}], DEFAULT_DIMENSIONS),
     /missing required field\(s\): key, prompt, agentType/,
   );
+  assert.deepEqual(
+    resolveDimensions([{ key: "x", prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
+    [{ key: "x", prompt: "p", agentType: "a" }],
+  );
 });
 
-// The `?.` in `!entry?.[f]` is what turns a hole in the array into the named
-// error above instead of an uncaught `TypeError: Cannot read properties of
-// null (reading 'key')`. Every other negative case here passes an object, so
-// nothing else fails when that `?.` is dropped.
-test("a null or undefined entry stops the run instead of crashing on the field check", () => {
-  for (const entry of [null, undefined]) {
+// #279. These five all used to produce "object is missing required field(s):
+// key, prompt, agentType" — a message asserting the entry IS an object and
+// sending the caller off to add three fields to a `42`. The type is the defect;
+// say so. `null` and `undefined` are the case the old `!entry?.[f]` optional
+// chain covered by accident: it kept the run from dying on an uncaught
+// `TypeError: Cannot read properties of null (reading 'key')`, but it answered
+// with the wrong diagnosis. The explicit type check answers with the right one.
+test("a non-object entry is reported as the wrong TYPE, not as an object missing fields", () => {
+  for (const [entry, name] of [
+    [42, "number"],
+    [null, "null"],
+    [undefined, "undefined"],
+    [true, "boolean"],
+    [["x"], "array"],
+  ]) {
     assert.throws(
       () => resolveDimensions([entry], DEFAULT_DIMENSIONS),
-      /missing required field\(s\): key, prompt, agentType/,
+      // Deliberately NOT anchored on the `[0]` index — that is #281's fix and
+      // has its own test. Reverting one must red one.
+      new RegExp(`must be a key string or a dimension object, got ${name}$`),
+      `a ${name} entry no longer names its own type`,
+    );
+    assert.throws(
+      () => resolveDimensions([entry], DEFAULT_DIMENSIONS),
+      (e) => !/missing required field/.test(e.message),
+      `a ${name} entry is still described as an object missing fields`,
     );
   }
+});
+
+// #281. With a multi-entry override the field names alone do not say WHICH
+// entry is short — and the map callback has the index already. Both throwing
+// branches carry it, so an unknown key in a long list is locatable too.
+test("an entry error identifies which entry of a multi-entry override failed", () => {
+  assert.throws(
+    () => resolveDimensions(["correctness", "comments", { key: "x", agentType: "y" }], DEFAULT_DIMENSIONS),
+    /args\.dimensions\[2\] is missing required field\(s\): prompt/,
+  );
+  assert.throws(
+    () => resolveDimensions(["correctness", "not-a-real-dimension"], DEFAULT_DIMENSIONS),
+    /args\.dimensions\[1\] named an unknown key "not-a-real-dimension"/,
+  );
+});
+
+// #274. A repeated key resolved to two entries pointing at ONE dimension
+// object: the fan-out dispatched the same specialist twice against a single
+// scratch dir, and the coverage record double-counted it — which
+// `run-team/SKILL.md` reads AS coverage. Redundant-but-valid input, so it
+// dedupes silently; throwing would refuse a request whose meaning is not in
+// doubt.
+test("a repeated key resolves once, and does not throw", () => {
+  assert.deepEqual(
+    resolveDimensions(["correctness", "comments", "correctness"], DEFAULT_DIMENSIONS),
+    [DEFAULT_DIMENSIONS[0], DEFAULT_DIMENSIONS[3]],
+  );
+  // A key and the object it names are the same dimension; first occurrence wins.
+  assert.deepEqual(
+    resolveDimensions(["correctness", DEFAULT_DIMENSIONS[0]], DEFAULT_DIMENSIONS),
+    [DEFAULT_DIMENSIONS[0]],
+  );
+  // Two distinct objects sharing a key collide too — the coverage record is
+  // keyed by `d.key`, so a second one is a double-count whatever it holds.
+  const dup = { key: "correctness", prompt: "other", agentType: "code-reviewer" };
+  assert.deepEqual(resolveDimensions([DEFAULT_DIMENSIONS[0], dup], DEFAULT_DIMENSIONS), [DEFAULT_DIMENSIONS[0]]);
+  // Dedupe must not empty a set that had entries: an all-duplicate override
+  // resolves to one dimension, not to the "resolved to no dimensions" throw.
+  assert.equal(resolveDimensions(["types", "types", "types"], DEFAULT_DIMENSIONS).length, 1);
 });
 
 test("an override resolving to nothing stops the run", () => {
@@ -353,17 +415,79 @@ test("a non-array override stops the run rather than crashing on .map", () => {
   assert.throws(() => resolveDimensions({ key: "correctness" }, DEFAULT_DIMENSIONS), /must be an array/);
 });
 
+// #278. The header claimed "the three fields the fan-out actually dereferences"
+// and enumerated three; four are dereferenced. Derived from the source rather
+// than hand-listed, because hand-derived count claims about this function have
+// been wrong twice already (#118) — a fifth dereferenced field reds this and
+// forces the prose to be updated with it.
+//
+// The refuted reword is pinned too: `model` absent does NOT mean "inherit", it
+// means the agent's own frontmatter pin decides, which for `correctness` and
+// `simplify` is `opus`. That is the one behaviour the models-sent log exists to
+// deny, and it must not be re-asserted two hundred lines above it.
+test("the resolveDimensions header states the dereferenced-field situation correctly", () => {
+  const m = SOURCE.match(/((?:^\/\/.*\n)+)^function resolveDimensions\(/m);
+  assert.ok(m, "resolveDimensions no longer carries a header comment block — update this test");
+  const header = m[1];
+  const dereferenced = [...new Set([...SOURCE.matchAll(/\bd\.([a-zA-Z]+)/g)].map((x) => x[1]))].sort();
+  assert.deepEqual(dereferenced, ["agentType", "key", "model", "prompt"], "the dereferenced field set changed");
+  for (const f of dereferenced) {
+    assert.match(header, new RegExp("`d\\." + f + "`"), `the header no longer enumerates d.${f}`);
+  }
+  assert.doesNotMatch(header, /three fields the fan-out actually dereferences/, "the header undercounts again");
+  assert.doesNotMatch(header, /absent means inherit/i, "the refuted reword is back — see the models-sent log");
+});
+
 // Everything above tests a LIFTED COPY. Nothing above proves review-pr.js
 // wires resolveDimensions AND selectDimensions into the same call site:
 // replacing it with `explicitDimensions || DEFAULT_DIMENSIONS` left this file
 // green before (#118) by disconnecting the size tier, and a version that
 // dropped resolveDimensions here would do the same to the override
 // normalization, silently. This is the only assertion that fails on either.
+//
+// The two halves now sit ~570 lines apart (#275 moved normalization up to the
+// required-args guard), so this pin is TWO pins — one per line. Weakening either
+// to a looser match, or dropping one because the other still passes, restores
+// exactly the hole #118 opened.
 test("review-pr.js actually calls resolveDimensions, then selectDimensions, to pick the fan-out", () => {
   assert.match(
     SOURCE,
-    /^const dimensions = resolveDimensions\(explicitDimensions, DEFAULT_DIMENSIONS\) \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
+    /^const explicitDimensions = resolveDimensions\(A\.dimensions, DEFAULT_DIMENSIONS\);$/m,
+    "the args.dimensions normalization changed — the override may be passed through unresolved",
+  );
+  assert.match(
+    SOURCE,
+    /^const dimensions = explicitDimensions \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
     "the dimensions call site changed — override normalization and/or size-tier selection may be disconnected",
+  );
+});
+
+// #275, AC: "refused with no agent dispatched and no snapshot directory
+// created". Both are pinned by ONE ordering fact, because the snapshot
+// directory is `mkdir -p`'d inside the snapshot agent's own bash — the dispatch
+// is the only thing that creates it. Asserting the message alone would stay
+// green with the throw back below the snapshot, which is the whole defect.
+//
+// The workflow cannot be imported to test this by execution: it runs a
+// top-level `await pipeline(...)` and compiles as a function body (#538), so
+// source position is the observable. Same shape as
+// review-pr-snapshot-path.test.mjs's guard-ordering pin.
+test("an unresolvable override is refused before the snapshot agent is dispatched", () => {
+  const resolveAt = SOURCE.indexOf("const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);");
+  const guardAt = SOURCE.indexOf('if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");');
+  const snapshotAt = SOURCE.indexOf("const snap = await agent(");
+  const mkdirAt = SOURCE.indexOf('mkdir -p "${runRootParent}"');
+  assert.ok(resolveAt !== -1 && guardAt !== -1 && snapshotAt !== -1, "one of the three sites moved — update this test");
+  assert.ok(guardAt < resolveAt, "the required-args guard no longer runs first — args.pr errors are now masked");
+  assert.ok(
+    resolveAt < snapshotAt,
+    "args.dimensions is validated after the snapshot agent — a typo'd key pays for a snapshot agent first (#275)",
+  );
+  // The directory is created by that dispatch, not before it, so "no snapshot
+  // directory" follows from "no dispatch" only while the mkdir stays inside.
+  assert.ok(
+    mkdirAt > snapshotAt,
+    "the run-root mkdir moved out of the snapshot agent's bash — 'no directory created' no longer follows from 'no agent dispatched'",
   );
 });
 

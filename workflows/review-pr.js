@@ -429,7 +429,6 @@ const scratch = A.scratch || `/tmp/review-pr-${pr}`;
 // asked to follow. See `snapshotMissing`.
 const runRootParent = `${scratch}/pr${pr}`;
 const runRootPrefix = `${runRootParent}/run-`;
-const explicitDimensions = A.dimensions; // caller override; else derived from the diff below
 const verifiers = A.verifiers || 2;
 const snapshotModel = A.snapshotModel || "haiku";
 const verifierEffort = A.verifierEffort || "low";
@@ -466,6 +465,15 @@ const verifiersBySeverity = A.verifiersBySeverity || {
 const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
+
+// Resolved HERE, beside the required-args guard, not at the call site 500 lines
+// down (#275). The override is caller input and needs nothing from the diff, so
+// validating it late bought a full snapshot agent and a snapshot directory on
+// disk before a one-character typo in a key could be refused. Nothing was
+// silently wrong — it just failed later, and more expensively, than it could.
+// `null` when the override is absent; the size-tier fallback stays at the call
+// site, which is the only thing down there that needs `stats`.
+const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 
 // Thresholds are NOT redefined here. `single-file` is `files === 1` and `small`
 // is `loc < 30`, both already named once in diff-stats.mjs's computeStats — this
@@ -596,12 +604,16 @@ function selectDimensions(all, stats) {
 // The "Specialists" section of `skills/fleet/commands/review-and-fix.md`
 // documents `args.dimensions` as accepting "keys or dimension objects" — but
 // until now only objects worked: a key array passed straight through and every
-// dereference below (`d.key`, `d.prompt`, `d.agentType`) came back `undefined`,
-// with no throw and no warning (#113). Resolve strings against the workflow's
-// own catalog, and check every object for the three fields the fan-out actually
-// dereferences. Anything unresolvable stops the run and names what was not
-// recognised — a misconfigured review is worse than no review, because its
-// findings look like findings.
+// dereference below (`d.key`, `d.prompt`, `d.model`, `d.agentType` — FOUR, not
+// three) came back `undefined`, with no throw and no warning (#113). Resolve
+// strings against the workflow's own catalog, and check every object for the
+// three fields it REQUIRES (`model` is optional; absent means the agent's own
+// frontmatter pin decides, which for `correctness` and `simplify` is `opus` —
+// which is why the models-sent log below reports `frontmatter` there and NOT
+// "inherit").
+// Anything unresolvable stops the run and names what was not recognised — a
+// misconfigured review is worse than no review, because its findings look like
+// findings.
 function resolveDimensions(override, all) {
   // `== null` is exact where `!override` was not: only an ABSENT override
   // falls through to the size tier. `!override` also swallowed `""`, `0` and
@@ -613,17 +625,36 @@ function resolveDimensions(override, all) {
   if (!Array.isArray(override))
     throw new Error("review-pr: args.dimensions must be an array of keys or dimension objects");
   const REQUIRED = ["key", "prompt", "agentType"];
-  const resolved = override.map((entry) => {
+  const kind = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+  const normalized = override.map((entry, i) => {
     if (typeof entry === "string") {
       const found = all.find((d) => d.key === entry);
-      if (!found) throw new Error(`review-pr: args.dimensions named an unknown key "${entry}"`);
+      if (!found) throw new Error(`review-pr: args.dimensions[${i}] named an unknown key "${entry}"`);
       return found;
     }
-    const missing = REQUIRED.filter((f) => !entry?.[f]);
+    // A number, `null`, a boolean or a nested array is the WRONG TYPE, not an
+    // object with absent fields (#279). The old message asserted "object is
+    // missing required field(s): key, prompt, agentType" for all four, which
+    // sends the caller looking for fields to add to a `42` (#281 adds the
+    // index: with a multi-entry override the fields alone do not say WHICH
+    // entry). Both branches carry `[i]` — the map already has it.
+    if (kind(entry) !== "object")
+      throw new Error(
+        `review-pr: args.dimensions[${i}] must be a key string or a dimension object, got ${kind(entry)}`,
+      );
+    const missing = REQUIRED.filter((f) => !entry[f]);
     if (missing.length)
-      throw new Error(`review-pr: args.dimensions object is missing required field(s): ${missing.join(", ")}`);
+      throw new Error(`review-pr: args.dimensions[${i}] is missing required field(s): ${missing.join(", ")}`);
     return entry;
   });
+  // A repeated key resolves ONCE (#274). Duplicated, the fan-out dispatches the
+  // same specialist twice against one scratch dir and the coverage record
+  // double-counts it — and `run-team/SKILL.md` reads that record AS coverage.
+  // Redundant-but-valid input, so dedupe SILENTLY; a throw would refuse a
+  // request that has an unambiguous meaning. First occurrence wins.
+  const byKey = new Map();
+  for (const d of normalized) if (!byKey.has(d.key)) byKey.set(d.key, d);
+  const resolved = [...byKey.values()];
   // An override resolving to nothing (an empty array) is an error, not a
   // silent no-op — `[] || selectDimensions(...)` would otherwise pass `[]`
   // through unnoticed, since an empty array is truthy.
@@ -1016,7 +1047,7 @@ if (snap.diffStats) {
     log(`diff-stats unparseable (${e.message}) — full set`);
   }
 }
-const dimensions = resolveDimensions(explicitDimensions, DEFAULT_DIMENSIONS) || selectDimensions(DEFAULT_DIMENSIONS, stats);
+const dimensions = explicitDimensions || selectDimensions(DEFAULT_DIMENSIONS, stats);
 log(
   `dimensions ${dimensions.length}/${DEFAULT_DIMENSIONS.length} [${dimensions.map((d) => d.key).join(", ")}]` +
     (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
