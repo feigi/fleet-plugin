@@ -40,12 +40,24 @@ set -eu
 # flattens `gh`'s error text into a diagnostic, and scrubs control bytes inside
 # `jstr`, which `sed` shares; `awk` parses refs, branch names and worktree
 # paths. Under a UTF-8 locale BSD `tr` and `sed` exit 1 on a byte that is not
-# valid UTF-8 — `sed` emitting nothing at all, measured — while `awk` is immune,
-# byte-identical in both locales. Such a byte reaches us from a fetched tree
-# even where the local filesystem refuses to hold the name, and inside `$(...)`
-# a `tr` failure empties the cause out of the diagnostic without a trace. #582
-# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
-# list reported as a clean, confident answer.
+# valid UTF-8 — `sed` emitting nothing at all, measured.
+#
+# `awk` is NOT immune, and reap.sh's own #614 fixture measured the earlier
+# claim here false: it is byte-identical only when every rule matches at an
+# ANCHOR before the bad byte, never needing to convert it — a rule that must
+# SCAN PAST the byte to decide dies instead (BWK awk, macOS: rc 2, `towc:
+# multibyte conversion failure`). What keeps every `awk` call below safe from
+# that is not the global pin two paragraphs down: each one already carries its
+# OWN inline `LC_ALL=C` (grep this file for it), independent of the ambient
+# locale or this global export — which is also why a regression test for this
+# script's global pin has to attack one of those inline pins directly;
+# deleting the global `export LC_ALL=C` below changes nothing for any of them.
+#
+# Such a byte reaches us from a fetched tree even where the local filesystem
+# refuses to hold the name, and inside `$(...)` a `tr` failure empties the
+# cause out of the diagnostic without a trace. #582 measured the cost of
+# leaving this ambient in no-undo-audit.sh: a truncated list reported as a
+# clean, confident answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or holds a POSIX
 # class. It does use ONE collation range — `*[!0-9]*`, the issue-number guard

@@ -16,15 +16,45 @@
 set -eu
 
 # Byte semantics for the one byte-sensitive call below: `grep -qE
-# "$testfile_re"` over the changed file paths. There is no `tr`, `sed` or `awk`
-# in this script. Under a UTF-8 locale BSD grep silently DROPS a line holding a
-# byte that is not valid UTF-8 — measured over a three-name listing whose middle
-# entry is `b\377ad.test.mjs`: `grep -cE` with this script's own regex matches 2
-# under `en_US.UTF-8` and 3 under `C`, stderr empty either way — so such a name
-# reads as "no test files" with nothing there to notice. It reaches us from a
-# fetched tree even where the local filesystem refuses to hold the name. #582
-# measured the cost of leaving this ambient in no-undo-audit.sh: a truncated
-# list reported as a clean, confident answer.
+# "$testfile_re"` over the listed file paths. There is no `sed` or plain `awk`
+# in this script; `tr` joined it below.
+#
+# #614 measured the earlier claim here FALSE: git C-quotes a path holding a
+# high-bit byte only under the DEFAULT `core.quotePath true` — with
+# `core.quotePath false` set, `git ls-tree -r --name-only` emits the raw byte
+# UNQUOTED, and that raw byte is exactly what makes grep locale-sensitive
+# (#582's own hazard). Measured on a repo whose one test file is named
+# `b\377ad.test.mjs`: with the pin's `LC_ALL=C`, `core.quotePath false` finds
+# it (exit 0, `node --test`); with an ambient `en_US.UTF-8` and the pin
+# deleted, the identical repo is refused as having no tests at all — so the
+# byte-reaches-grep behaviour DID depend on an operator's git config, not on
+# anything this script controls.
+#
+# Fixed by listing with `-z`: `git ls-tree -r -z --name-only` always emits the
+# raw byte, unquoted, regardless of `core.quotePath` — the config dependence
+# above is closed outright rather than argued into never mattering. As a side
+# effect it also fixes a second, unrelated bug the C-quoted form carried: a
+# quoted name never matched `$testfile_re` at all, because the closing `"`
+# defeats the `$` anchor — so a repo whose test files carry non-ASCII names
+# under the (default) quoted form was refused as having none.
+#
+# Two separate fixtures in derive-testcmd.test.mjs, because one config does
+# not exercise the other bug: "...under core.quotePath's default true" pins
+# the C-quoting/`$`-anchor defect this comment just described — mutation-
+# verified, it goes red if `-z` is reverted. "...with core.quotePath false
+# survives an ambient UTF-8 locale" pins the separate, locale-dependent hazard
+# from #582 (an unquoted byte only surviving `tr`/`grep` under `LC_ALL=C`) —
+# `-z` is not load-bearing for that one, since plain `--name-only` already
+# emits the byte unquoted when `core.quotePath` is false.
+#
+# `-z` terminates each entry with NUL, and a shell variable cannot hold an
+# embedded NUL — POSIX `$()` strips it, silently concatenating every entry
+# after the first bad byte into one unmatchable blob. So the raw listing is
+# captured to a FILE, never a variable, and translated to newlines only once
+# every NUL is already gone from the stream. `git`'s own exit status is still
+# checked directly against that write, never through a pipe whose status would
+# belong to `tr` instead — the same swallow the comment below still guards
+# against for `grep`.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
@@ -49,7 +79,18 @@ git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git re
 # matches" and the refusal below would name a cause that is not the cause —
 # on a repo that demonstrably HAS test files. Same class as reap.sh's
 # `git cherry ... | grep -q`, which cost a branch deletion.
-files=$(git -C "$repo" ls-tree -r --name-only "$ref" 2>&1) || die "cannot list $ref — $files"
+#
+# A FILE, not a variable: `-z`'s NUL terminators cannot survive `$()` (see the
+# header comment), so git's raw output is written to disk first — where an
+# embedded NUL is just a byte — and only translated to newlines by the `tr`
+# below, after which nothing downstream ever sees one again.
+ls_tmp=$(mktemp) || die "cannot create a temporary file to list $ref"
+trap 'rm -f "$ls_tmp"' EXIT
+if ! git -C "$repo" ls-tree -r -z --name-only "$ref" >"$ls_tmp" 2>&1; then
+  ls_err=$(cat "$ls_tmp")
+  die "cannot list $ref — $ls_err"
+fi
+files=$(tr '\0' '\n' <"$ls_tmp")
 
 pkg=$(git -C "$repo" show "$ref:package.json" 2>/dev/null) || pkg=
 

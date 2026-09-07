@@ -1783,11 +1783,14 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
 // The list is closed over what a dry run reaches, transitive calls included:
 // `sed`, `tr` and `python3` are json.sh's `jstr` (the UTF-8 repair stage
 // added for #613 is a new call site of its own), which the receipt goes
-// through, and `cksum` is the runner's hash. A name absent here is one no
-// path under test invokes — a wrapper that logged every exec under each of
-// these fixtures named no others — so adding one back needs a call site, not
-// a hunch.
-const SHIMMED = ["sh", "git", "sed", "tr", "python3", "dirname", "cksum", "grep"];
+// through, and `cksum` is the runner's hash. `mktemp`, `cat` and `rm` joined
+// it for #614: derive-testcmd.sh's own `git ls-tree -r -z` listing now writes
+// to a temp file rather than a variable (a NUL terminator cannot survive
+// `$()`), and claim-ticket.sh calls that script directly. A name absent here
+// is one no path under test invokes — a wrapper that logged every exec under
+// each of these fixtures named no others — so adding one back needs a call
+// site, not a hunch.
+const SHIMMED = ["sh", "git", "sed", "tr", "python3", "dirname", "cksum", "grep", "mktemp", "cat", "rm"];
 function shimPath({ node }) {
   const bin = mkdtempSync(join(tmpdir(), "claim-path-"));
   for (const name of SHIMMED) {

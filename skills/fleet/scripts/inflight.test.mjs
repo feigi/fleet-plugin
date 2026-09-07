@@ -1481,6 +1481,20 @@ test("41 is not claimed by a remote branch, a local branch or a worktree named f
 // Written straight into `packed-refs`, a plain text file: no such filename is
 // ever created, so the filesystem never has to accept one, and the bytes still
 // reach probe 2 through `git ls-remote`.
+//
+// #614: this pins probe 2's own INLINE `LC_ALL=C awk` (inflight.sh, the filter
+// over `git ls-remote`'s output), not the script's file-global `export
+// LC_ALL=C`. The two are not the same pin, and this test cannot be widened
+// into a regression gate for the global one: the inline prefix sets `LC_ALL`
+// on that one command's environment unconditionally, so no ambient shell
+// state — an `AMBIENT_UTF8`-style env, or even the global export deleted
+// outright — ever reaches it. Measured directly: deleting inflight.sh's
+// `export LC_ALL=C` and rerunning this exact case with the global pin's
+// ambient-vs-explicit env shape both leave `taken:false` at exit 0 —
+// unmoved, because probe 2 never depended on either. inflight.sh's own header
+// comment records this for every awk call in the file, and #614's own count
+// of scripts still lacking a fixture for the global pin counts inflight.sh
+// among them, not among the covered ones.
 test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main"] });
   const bare = join(repo, "..", "remote.git");

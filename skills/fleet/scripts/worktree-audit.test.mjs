@@ -502,6 +502,61 @@ test("dirty filenames that git C-quotes round-trip to the real names", (t) => {
   assert.equal(entryFor(json, w).readable, true, "one bad element must not cost the caller every other entry");
 });
 
+// #614: the BEHAVIOURAL twin of locale-pin-prose.test.mjs' source assertion for
+// this script. That file checks the pin is PRESENT; this one checks it is
+// LOAD-BEARING — with `export LC_ALL=C` deleted, the answer below changes.
+//
+// The ambient locale has to reach the child genuinely, not merely differ from
+// `C`: a POSIX shell keeps a variable's export attribute once it is already in
+// the environment, so seeding `LC_ALL: "en_US.UTF-8"` here would let a mutant
+// that drops the `export` keyword still propagate `C` to every child. `LANG`
+// with `LC_ALL` and `LC_CTYPE` absent is what an unset `LC_ALL` actually looks
+// like — the shape #599's own regression test got wrong.
+const AMBIENT_UTF8 = { LANG: "en_US.UTF-8", LC_ALL: undefined, LC_CTYPE: undefined };
+
+/** Like runAudit, but byte-exact: an invalid UTF-8 byte cannot survive a utf8 decode. */
+function runAuditBytes(cwd, envOverrides) {
+  const r = spawnSync("sh", [SCRIPT], { cwd, env: { ...ENV, ...envOverrides } });
+  return { code: r.status, stdout: r.stdout.toString("latin1"), stderr: r.stderr.toString("latin1") };
+}
+
+// Unlike every sibling fixture in this class, this one is vacuous on NEITHER
+// platform — both halves of the payload below kill the mutant, on a different
+// tool each:
+//   - macOS (BWK awk, BSD paste): `jesc` decodes `\377` back to the raw byte,
+//     and `paste -sd, -` then truncates its whole output at it, exit 0, stderr
+//     empty. Measured: `"dirtyFiles":["b` — an unterminated JSON string that
+//     takes the rest of the payload with it.
+//   - Linux CI (gawk 5.4.1): awk survives, but `sprintf("%c", 195)` emits the
+//     two-byte UTF-8 encoding of U+00C3 instead of the byte. Measured, mutant:
+//     `["b\303\277ad.txt","caf\303\203\302\251.txt"]` — every non-ASCII dirty
+//     filename double-encoded, and the payload no longer names a file the
+//     caller can hand back to the filesystem.
+// Pinned, both awks answer `["b\377ad.txt","caf\303\251.txt"]`.
+//
+// The `\377` entry goes in through `update-index --cacheinfo` with no working
+// tree write: APFS refuses the name outright, and git reports the index-only
+// blob as `AD` — deleted from the worktree — which is dirty all the same. The
+// name is spelled as a `printf` FORMAT because node re-encodes every JS string
+// as UTF-8 on the way to argv, which would turn `\377` into valid UTF-8 and
+// reproduce nothing.
+test("dirty filenames survive an ambient UTF-8 locale byte-for-byte (#614)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  writeFileSync(join(wt, "caf\u00e9.txt"), "uncommitted\n");
+  execFileSync("sh", ["-c",
+    'b=$(printf x | git hash-object -w --stdin) && git update-index --add --cacheinfo "100644,$b,$(printf "b\\377ad.txt")"'],
+    { cwd: wt, env: ENV });
+
+  const { code, stdout, stderr } = runAuditBytes(w, AMBIENT_UTF8);
+
+  assert.equal(code, 0, `stderr: ${stderr}`);
+  assert.ok(
+    stdout.includes('"dirtyFiles":["b\u00ffad.txt","caf\u00c3\u00a9.txt"]'),
+    `the pin must hold both names whole and undecoded, got: ${JSON.stringify(stdout)}`,
+  );
+});
+
 // #617 survived finding 1: the unrecognized-escape fallback used to be
 // `else out=out c` — a silently dropped backslash with the following byte
 // passed through unescaped, no error, no non-zero exit. Dead code under real
