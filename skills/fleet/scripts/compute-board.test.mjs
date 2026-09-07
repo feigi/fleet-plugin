@@ -136,6 +136,22 @@ test("computeBoard: one ticket per column, POOL from an unrowed ready issue", ()
   assert.equal(col(341), "POOL");
 });
 
+// #786 review: board.mjs used to default a PR row's missing `state` to
+// "UNKNOWN" before handing it here. That default was inert — `pr.state ===
+// "OPEN"` (below) is already false for `undefined`, same as for "UNKNOWN" —
+// so board.mjs now passes `state` through raw. Pin the OBSERVABLE effect
+// rather than the internal sentinel value: a PR row with no `state` at all
+// still lands in REVIEW like any other open-PR ticket, not crashed or
+// silently misplaced by the missing field.
+test("computeBoard: a PR row with no state still lands in REVIEW", () => {
+  const b = computeBoard({
+    ...baseInputs(),
+    prs: [{ number: 344, labels: [], title: "impl 332" }],
+    ledger: { rows: ["#332 impl-332 → PR#344"], filed: [], ruled: [] },
+  });
+  assert.equal(b.tickets.find((t) => t.issue === 332).column, "REVIEW");
+});
+
 test("computeBoard: ruling attaches to the PR ticket", () => {
   const b = computeBoard(baseInputs());
   assert.equal(b.tickets.find((t) => t.issue === 324).ruling, "6-applies keep the fallback");

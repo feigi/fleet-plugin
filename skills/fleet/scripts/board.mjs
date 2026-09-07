@@ -111,14 +111,49 @@ function tryParse(json, fallback, what) {
 // issues/PRs to ledger rows and to each other BY number (Map keys, Set
 // membership, `.find`), so a numberless row does not fail to render on its
 // own — it collides with every other numberless row on the shared `undefined`
-// key. Drop it, loudly, the way candidates.mjs guards what it consumes (#786).
+// key. Drop it, loudly. candidates.mjs's row guard is a different shape —
+// comprehensive and hard-failing (die() on the first bad row) — this one is
+// narrower: it only checks `number`, the one field whose absence corrupts
+// OTHER rows, and degrades instead of dying (#786).
+//
+// `rows` itself can be the wrong shape too: `tryParse` only checks that its
+// input is valid JSON, not that it is an array, so a syntactically-valid
+// object or scalar from `gh` would otherwise reach the `for...of` below and
+// throw "rows is not iterable" — an uncaught throw that reaches main()'s
+// build path or serve()'s tick catch, exactly the crash-instead-of-degrade
+// failure this guard exists to prevent for individual rows.
 function withNumber(rows, what) {
+  if (!Array.isArray(rows)) {
+    console.error(`${NAME}: ${what}: expected an array of rows, got ${JSON.stringify(rows)}`);
+    return [];
+  }
   const kept = [];
   for (const r of rows) {
     if (r && typeof r.number === "number") kept.push(r);
     else console.error(`${NAME}: ${what}: dropping row with no usable number: ${JSON.stringify(r)}`);
   }
   return kept;
+}
+
+// tryParse + withNumber are always paired for a `gh ... list` read — one
+// helper rather than the same two-call chain typed twice for issues and PRs.
+function ghRows(json, what) {
+  return withNumber(tryParse(json, [], what), what);
+}
+
+// labels: gh emits an array of {name,...} objects, but a malformed row can
+// hand back a non-array `labels` (`.map` throws) or an array containing a
+// null/malformed element (`.name` throws) — reproduced live: either crashes
+// gather() entirely, reaching main()'s `die()` on the build path or freezing
+// the board on its last-known value on the serve path. Strictly worse than
+// this ticket's original "shows undefined on the page" bug. Drop-and-continue,
+// like withNumber above: a bad label never takes its row's whole labels array
+// down, and a bad labels field never takes the row down.
+function labelsOf(row) {
+  if (!Array.isArray(row.labels)) return [];
+  return row.labels
+    .map((l) => (l && typeof l.name === "string") ? l.name : null)
+    .filter(Boolean);
 }
 
 // ci-state.mjs exits 0 for green, 1 for not-green or no-ci, 2 for a hard
@@ -565,25 +600,35 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
   // title: falls back to the same `#<number>` placeholder titleFor() already
-  // uses for an issue it cannot find at all (compute-board.mjs), so a row
-  // found but unable to describe itself reads the same way rather than as
-  // literal `undefined` on the operator's page (#786).
-  const issues = withNumber(tryParse(issuesJson, [], "gh issue list"), "gh issue list").map((i) => ({
+  // uses for an issue it cannot find at all (compute-board.mjs). An unrowed
+  // issue becomes a POOL card straight from this array — compute-board.mjs's
+  // POOL loop reads `iss.title` RAW, never through titleFor()'s fallback
+  // chain — so this row genuinely needs a guaranteed string: an issue found
+  // but unable to describe itself reads as its number rather than literal
+  // `undefined` on the operator's page (#786).
+  const issues = ghRows(issuesJson, "gh issue list").map((i) => ({
     number: i.number,
     title: typeof i.title === "string" ? i.title : `#${i.number}`,
-    labels: (i.labels || []).map((l) => l.name),
+    labels: labelsOf(i),
   }));
 
   const prsJson = tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
     "--json", "number,state,labels,title"]);
-  // state: defaulted to a value that can never equal "OPEN" (compute-board.mjs
-  // derives `open` by strict equality), so a row that cannot describe its own
-  // state reads as not-open rather than as a boolean asserted from nothing.
-  const prs = withNumber(tryParse(prsJson, [], "gh pr list"), "gh pr list").map((p) => ({
+  // No default for `title` or `state` here, unlike the issue row above — raw
+  // passthrough, deliberately. `title`: compute-board.mjs's titleFor() already
+  // falls through a falsy `pr.title` to the real issue title (`if (pr &&
+  // pr.title) return pr.title;`); nothing else reads a PR row's `title` field
+  // raw, so defaulting it to `#<number>` made it unconditionally truthy and
+  // SILENTLY DISABLED that fallback — a titleless PR row showed the PR number
+  // instead of the real issue title, worse than doing nothing. `state`: its
+  // only consumer is `pr.state === "OPEN"` (compute-board.mjs), already false
+  // for `undefined` exactly as it was for the old "UNKNOWN" sentinel, so the
+  // default was inert — pure indirection with no behaviour to show for it.
+  const prs = ghRows(prsJson, "gh pr list").map((p) => ({
     number: p.number,
-    state: typeof p.state === "string" ? p.state : "UNKNOWN",
-    title: typeof p.title === "string" ? p.title : `#${p.number}`,
-    labels: (p.labels || []).map((l) => l.name),
+    state: p.state,
+    title: p.title,
+    labels: labelsOf(p),
   }));
 
   // CI per open PR. On failure, carry the previous board's value for that PR.
