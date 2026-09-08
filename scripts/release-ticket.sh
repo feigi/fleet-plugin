@@ -14,19 +14,22 @@
 #
 # Every precondition is recomputed inside THIS invocation rather than trusted
 # from an earlier tool call, for the reason reap.sh gives: the dangerous
-# direction is a worktree that gained work after it was checked. Only the dirty
-# check is also recomputed at the moment of the delete, by git itself — that is
-# what `worktree remove` without --force is for, and it is why it and the branch
-# delete both run before the label is dropped rather than after. That second
-# opinion is the worktree's alone: the branch delete is `-D`, authorized by the
-# `ahead` and `git cherry` guards below, because `-d`'s own opinion is measured
-# against local HEAD and answers a staleness question, not a safety one (#760).
-# That second opinion
-# covers the live-directory case ONLY: `worktree remove` gates its own clean
-# check on the same stat this script does, so wherever the path cannot be
-# stat'ed git reaches the same conclusion rather than an independent one, and
-# the guard at the dirty check below is left as sole arbiter — which is why it
-# establishes absence instead of inferring it.
+# direction is a worktree that gained work after it was checked. Two of them are
+# recomputed a second time at the moment of the delete, which is why both
+# deletes run before the label is dropped rather than after.
+#
+# The dirty check's second opinion is git's own — that is what `worktree remove`
+# without --force is for. It covers the live-directory case ONLY: `worktree
+# remove` gates its own clean check on the same stat this script does, so
+# wherever the path cannot be stat'ed git reaches the same conclusion rather
+# than an independent one, and the guard at the dirty check below is left as
+# sole arbiter — which is why it establishes absence instead of inferring it.
+#
+# The commit check's is this script's own. The branch delete is `-D`, which
+# refuses nothing, so the `ahead` count is re-run against $base immediately
+# before it. `-d` cannot supply that opinion: it measures against local HEAD,
+# and a claim has no upstream (#760), so it answers a staleness question rather
+# than a safety one.
 set -eu
 
 # Byte semantics for the `awk`, `grep`, `sed` and `tr` below — all four really
@@ -221,6 +224,15 @@ base=${BASE_REF:-origin/main}
 case "$base" in
   origin/*|refs/remotes/*) ;;
   *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
+esac
+# The accept-list alone does not deliver that: `origin/$branch` IS a
+# remote-tracking ref and passes it, while making both guards vacuous in exactly
+# the way described above — ahead 0 and cherry empty against the branch's own
+# upstream, whatever it carries. `-D` then deletes a commit that exists nowhere
+# else at exit 0. Name-based, not a rev-parse comparison: a pristine claim's tip
+# legitimately equals origin/main's, so equal SHAs are the normal case.
+case "$base" in
+  */"$branch") die "BASE_REF must not name the claim's own branch, got '$base'";;
 esac
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
@@ -1251,16 +1263,29 @@ else
   fi
 
   if [ "$has_branch" = true ]; then
-    # -D, and authorized by the `ahead` and `git cherry` guards above and by
-    # nothing else — the same pairing reap.sh uses for its own [gone] branches.
-    # Both measure against $base, a remote-tracking ref; `-d` measures against
-    # HEAD and the branch's upstream, and a claim has no upstream until its
-    # first push (claim-ticket.sh passes --no-track, #760), so `-d` falls back
-    # to local HEAD alone and refuses a pristine claim whenever local main is
-    # behind origin/main — half-releasing it: worktree deleted, branch stranded,
-    # in-progress still on the issue. Measured. The guards above are strictly
-    # stronger than what `-d` would have checked: zero commits ahead of $base
-    # AND nothing patch-unique, both already blocking at exit 1 before here.
+    # Recount at the delete, because `-D` carries no opinion of its own. The
+    # precondition block ran before the `gh issue view` above, so a commit
+    # landing in this worktree across that call reaches the delete having been
+    # measured by nothing — destroyed at exit 0 with "released":true and an
+    # empty blockers list. `-d` used to refuse that ("not fully merged"); the
+    # recount is what replaces it. Measured against $base, not local HEAD, so it
+    # answers the safety question without reintroducing the staleness `-d` fails
+    # on (#760). The `git cherry` half is deliberately not recounted: a commit
+    # that landed in the window is ahead of $base by construction, and one
+    # cherry would mark `-` is patch-equivalent to something already upstream.
+    n=$(git rev-list --count "$base..refs/heads/$branch") ||
+      halt "cannot recount commits on $branch against $base at the delete"
+    [ "$n" -eq 0 ] ||
+      halt "$branch gained $n commit(s) since the checks — not deleted"
+
+    # -D, authorized by the `ahead` and `git cherry` guards above, that recount,
+    # and nothing else. reap.sh authorizes its own [gone] deletes with `git
+    # cherry` ALONE — not this pairing. `-d` measures against HEAD and the
+    # branch's upstream, and a claim has no upstream until its first push
+    # (claim-ticket.sh passes --no-track, #760), so `-d` falls back to local
+    # HEAD alone and refuses a pristine claim whenever local main is behind
+    # origin/main — half-releasing it: worktree deleted, branch stranded,
+    # in-progress still on the issue. Measured.
     echo "\$ git branch -D $branch" >&2
     if ! err=$(git branch -D "$branch" 2>&1); then
       halt "git branch -D refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"

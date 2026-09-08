@@ -147,6 +147,11 @@ esac
 # The check-then-act window: this call sits between the last precondition and
 # the first delete, so writing here is a member committing during the round trip.
 [ -z "\${GH_DIRTY:-}" ] || echo late > "\$GH_DIRTY"
+# The same window, in the shape the dirty check cannot see: the member COMMITS.
+# The worktree is clean again by delete time, so \`git worktree remove\` allows it
+# and the branch carries a commit that exists nowhere else. Only the recount at
+# the branch delete stands between that commit and \`-D\`.
+[ -z "\${GH_COMMIT:-}" ] || { echo late > "\$GH_COMMIT/late.txt" && git -C "\$GH_COMMIT" add late.txt && git -C "\$GH_COMMIT" commit -q -m late; }
 # Same window, a different appearance: the claim's directory is replaced by a
 # symlink standing in for it. That is the shape \`git worktree remove\` clears the
 # registration for and only THEN fails on, and the precondition that refuses a
@@ -1794,11 +1799,23 @@ test("the script carries no escape hatch", () => {
     .filter((l) => !l.trimStart().startsWith("#"))
     .join("\n");
   assert.doesNotMatch(src, /--force/);
-  // Matched on the INVOCATION, `$(git branch -D …)`, not on the string
-  // `branch -D` — that also appears in the dry-run plan, the echoed command
-  // and the halt message, all of which name the one call rather than being it.
-  assert.equal(src.match(/\$\(git branch -D /g)?.length, 1, "exactly one authorized force-delete");
-  assert.doesNotMatch(src, /\$\(git branch -d /, "and no -d, which refuses on a stale local main");
+  // Counted on the bare command, in whatever syntax surrounds it: an added
+  // `git branch -D "$b"` as a plain statement is not a command substitution,
+  // so a `$(…)`-anchored count scored it as zero and let it through. What
+  // separates a call from a mention is the mention's `echo`/`printf`/`halt`
+  // prefix — the dry-run plan, the echoed command and the halt message all
+  // name the one call rather than being it.
+  const forceDeletes = src
+    .split("\n")
+    .filter((l) => /\bgit branch -D\b/.test(l))
+    .filter((l) => !/\b(echo|printf|halt|die|block)\b/.test(l.slice(0, l.indexOf("git branch -D"))));
+  assert.equal(forceDeletes.length, 1, "exactly one authorized force-delete");
+  assert.match(forceDeletes[0], /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
+  assert.doesNotMatch(src, /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
+  // The recount that replaces `-d`'s own delete-time refusal. Without it a
+  // commit landing across the `gh issue view` between the guards and the
+  // delete is destroyed at exit 0 with "released":true.
+  assert.match(src, /n=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "and the delete-time recount stands");
   assert.match(src, /ahead=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
   assert.match(src, /cherry=\$\(git cherry "\$base" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");
 });
@@ -1876,6 +1893,48 @@ test("a refused worktree removal leaves the label on the issue", (t) => {
     !r.calls().some((l) => l.startsWith("issue edit")),
     `in-progress must survive so the ticket keeps reading as taken: ${r.calls()}`,
   );
+});
+
+test("a commit landing in the check-then-act window is not deleted", (t) => {
+  // The half `git worktree remove` cannot cover. A commit makes the worktree
+  // CLEAN, so the dirty check's delete-time second opinion allows the removal,
+  // and the commit itself was measured only by the precondition block that ran
+  // before the `gh issue view` above it. Under `-d` that commit was refused at
+  // the delete ("not fully merged"); under `-D` nothing refuses, so the ahead
+  // count is recomputed there instead. Without it the branch is destroyed at
+  // exit 0 with "released":true and an empty blockers list.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const { code, json, stderr } = release(r, c, { env: { GH_COMMIT: c.wt } });
+
+  assert.equal(code, 2);
+  assert.match(stderr, /#9 PARTIALLY RELEASED — fix\/9-release-ticket gained 1 commit\(s\) since the checks/);
+  assert.equal(json.released, false);
+  assert.equal(artefacts(r, c).branch, true, "the member's commit must survive the release");
+  assert.ok(
+    !r.calls().some((l) => l.startsWith("issue edit")),
+    `in-progress must survive so the ticket keeps reading as taken: ${r.calls()}`,
+  );
+});
+
+test("BASE_REF must not name the claim's own branch", (t) => {
+  // The hole the remote-tracking accept-list above does not close: `origin/$branch`
+  // IS a remote-tracking ref and passes it. A stale remote-tracking ref left by a
+  // pushed-then-deleted branch is how one exists locally with no branch on the
+  // remote, so the pushed-branch precondition does not fire either — and both
+  // commit guards then measure the branch against itself, reading ahead 0 and an
+  // empty cherry whatever it carries. `-d` used to be the backstop for that.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "work that exists nowhere else", "work\n");
+  git(r.w, "update-ref", `refs/remotes/origin/${c.branch}`, `refs/heads/${c.branch}`);
+  assert.equal(git(r.w, "rev-list", "--count", `origin/${c.branch}..refs/heads/${c.branch}`), "0", "fixture: vacuous");
+
+  const { code, json, stderr } = release(r, c, { env: { BASE_REF: `origin/${c.branch}` } });
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /BASE_REF must not name the claim's own branch/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
 test("a tracker that fails after both deletes still emits a receipt", (t) => {

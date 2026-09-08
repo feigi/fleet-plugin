@@ -1954,8 +1954,17 @@ invocation as the delete: 0 commits ahead of `origin/main`, no unique commits
 there to read — a clean worktree. Where that directory is established absent the
 dirty check does not run at all, and `git worktree remove` is no backstop for it:
 it gates its own clean check on the same `stat`, so the script's absence
-measurement is sole arbiter there. All clear → drops the label,
-removes the worktree without `--force`, deletes the branch with `-d`. Any one of
+measurement is sole arbiter there. Two of the four are recomputed a second time
+at the delete itself: the dirty check by git, which is what `worktree remove`
+without `--force` is; and the ahead count, re-run against `origin/main`
+immediately before the branch delete, because a commit can land across the
+`gh issue view` between the checks and the delete. The `git cherry` and
+pushed-branch checks are **not** re-run there — a commit landing in that window
+is ahead of `origin/main` by construction, so the recount covers it. All clear →
+drops the label, removes the worktree without `--force`, deletes the branch with
+`-D`, authorized by those two commit checks plus the recount and by nothing else
+(`-d` measures against local HEAD, and a claim has no upstream, so it refuses a
+pristine claim whenever local `main` is behind `origin/main` — #760). Any one of
 them failing → it touches nothing and names the blocker. **That refusal is the
 finding, never an obstacle**: a claim carrying commits or a pushed branch is not
 auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find
