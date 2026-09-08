@@ -189,6 +189,23 @@ test("a large config-only diff still drops silent-failure — the floor is the s
   assert.deepEqual(keys, ["correctness", "comments"]);
 });
 
+// #739. `tests-only` is assigned AHEAD of `single-file`/`small` in computeStats'
+// else-if chain, so a config diff that also touches a test file never reaches
+// SIZE_TIER_PROFILES and the #236 floor could not re-admit silent-failure. That
+// made coverage NON-MONOTONIC: `ci.yml` alone kept the hunter and `ci.yml` + a
+// test SUBTRACTED it — adding a file to a diff removed a specialist, on #236's
+// own motivating class (CI gating logic, no src). The gate's other half — a pure
+// test diff has no config, so it must still lose silent-failure — is already
+// pinned above by `a tests-only diff drops types, silent-failure and simplify`.
+test("a tests-only diff keeps the silent-failure floor when it also carries config", () => {
+  const configPlusTest = [
+    f(".github/workflows/ci.yml", 2, 1),
+    f("skills/fleet/scripts/ci-vacuous-green.test.mjs", 3, 1),
+  ];
+  assert.equal(computeStats(configPlusTest).profile, "tests-only");
+  assert.deepEqual(dimensionKeys(configPlusTest), ["correctness", "silent-failure", "tests", "comments"]);
+});
+
 // AC-3: the floor must not reach a diff with nothing for it to do, and the ORDER
 // is the whole guarantee — `docsOnly` returns BEFORE the tier. A file list cannot
 // pin that: computeStats assigns profile `docs` ahead of `files === 1`, so a docs
