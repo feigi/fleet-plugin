@@ -551,15 +551,13 @@ function selectDimensions(all, stats) {
   // gets the hunter where the config-only `production` diff beside it does not,
   // which is the safe asymmetry — the alternative re-breaks monotonicity to buy
   // back a symmetry nothing needs.
-  if (stats.hasSrc === false)
+  if (stats.hasSrc === false) {
+    const keepsSilentFailure =
+      SIZE_TIER_PROFILES.has(stats.profile) || (stats.profile === "tests-only" && stats.hasConfig === true);
     dims = dims.filter(
-      (d) =>
-        d.key !== "types" &&
-        d.key !== "simplify" &&
-        (d.key !== "silent-failure" ||
-          SIZE_TIER_PROFILES.has(stats.profile) ||
-          (stats.profile === "tests-only" && stats.hasConfig === true)),
+      (d) => d.key !== "types" && d.key !== "simplify" && (d.key !== "silent-failure" || keepsSilentFailure),
     );
+  }
   // COMPOSES with the guards above rather than replacing them — it filters `dims`,
   // not `all`. Since #236 that composition no longer changes any OUTCOME: every
   // dimension the guards above can remove is one this filter would not have kept
@@ -571,10 +569,8 @@ function selectDimensions(all, stats) {
   // is NOT the first arm's: `tests-only` is disjoint from SIZE_TIER_PROFILES by
   // construction — computeStats' else-if chain assigns exactly one profile — so
   // that arm can only fire on a run where this filter does not execute at all.
-  // Re-derived over profile x hasSrc x hasTests x hasConfig x docsOnly x kinds x
-  // truncated: cases=5832 diffs=0. Kept as a filter regardless: it is the form
-  // that stays correct without re-proving that equivalence every time a guard is
-  // added above.
+  // Kept as a filter regardless: it is the form that stays correct without
+  // re-proving that equivalence every time a guard is added above.
   //
   // `comments` sits in SIZE_TIER_DIMS unconditionally (#218). It used to be
   // carved in here on `stats.kinds?.docs !== 0` — a FILE test, not a prose test,

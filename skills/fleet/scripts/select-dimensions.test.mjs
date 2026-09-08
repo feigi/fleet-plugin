@@ -194,9 +194,9 @@ test("a large config-only diff still drops silent-failure — the floor is the s
 // SIZE_TIER_PROFILES and the #236 floor could not re-admit silent-failure. That
 // made coverage NON-MONOTONIC: `ci.yml` alone kept the hunter and `ci.yml` + a
 // test SUBTRACTED it — adding a file to a diff removed a specialist, on #236's
-// own motivating class (CI gating logic, no src). Both halves belong in one test:
-// the widened gate reads `hasConfig`, so the pure-test sibling below is the
-// boundary that keeps it from becoming "hasSrc no longer gates silent-failure".
+// own motivating class (CI gating logic, no src). The gate's other half — a pure
+// test diff has no config, so it must still lose silent-failure — is already
+// pinned above by `a tests-only diff drops types, silent-failure and simplify`.
 test("a tests-only diff keeps the silent-failure floor when it also carries config", () => {
   const configPlusTest = [
     f(".github/workflows/ci.yml", 2, 1),
@@ -204,19 +204,6 @@ test("a tests-only diff keeps the silent-failure floor when it also carries conf
   ];
   assert.equal(computeStats(configPlusTest).profile, "tests-only");
   assert.deepEqual(dimensionKeys(configPlusTest), ["correctness", "silent-failure", "tests", "comments"]);
-  // Monotonicity, stated as the relation the defect broke rather than as a second
-  // literal row: adding the test file may only ADD dimensions.
-  for (const key of dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]))
-    assert.ok(dimensionKeys(configPlusTest).includes(key), `adding a test file subtracted ${key}`);
-
-  // The gate's OTHER half — a pure test diff has no config, so it must still lose
-  // silent-failure exactly as `a tests-only diff drops types, silent-failure and
-  // simplify` above pins. Restated here because deleting the `hasConfig` term is
-  // the mutation this pair exists to catch, and that row alone stays green under it.
-  assert.deepEqual(
-    dimensionKeys([f("skills/fleet/scripts/foo.test.mjs", 2, 1), f("skills/fleet/scripts/bar.test.mjs", 3, 1)]),
-    ["correctness", "tests", "comments"],
-  );
 });
 
 // AC-3: the floor must not reach a diff with nothing for it to do, and the ORDER

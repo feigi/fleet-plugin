@@ -1152,9 +1152,10 @@ without the one specialist that fit them, `dimensionsUnrun` empty every time.
 That floor holds **regardless of `hasSrc`** (#236) — a one-file `.yml` or
 `.github/` shell change gets silent-failure too, not correctness alone.
 It is the size **tier's** floor,
-so `tests-only` outranks it: that profile is assigned ahead of
-`single-file`/`small`, so a no-src diff that also touches a test file gets no
-silent-failure-hunter (#739). `single-file` means one file at **any** size, so a
+so `tests-only` outranks it when the diff has no config file: that profile is
+assigned ahead of `single-file`/`small`, so a no-src, no-config diff that also
+touches a test file gets no silent-failure-hunter — a tests-only diff that also
+carries a config file keeps it (#739). `single-file` means one file at **any** size, so a
 one-file rewrite trims too. An unknown profile widens to the full six, the safe
 direction, so a trim is never something to count on in advance — and a full six
 is never something to assume.
