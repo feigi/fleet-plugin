@@ -1,66 +1,3 @@
-# Runtime / cache
-history.jsonl
-cache/
-image-cache/
-paste-cache/
-mcp-needs-auth-cache.json
-stats-cache.json
-session-env/
-shell-snapshots/
-sessions/
-debug/
-file-history/
-telemetry/
-
-# Project-specific state
-projects/
-tasks/
-teams/
-todos/
-scheduled-tasks/
-
-# Security warning state files
-security_warnings_state_*.json
-
-# Runtime state, logs and secrets — never portable config
-security/
-# daemon/ holds control.key
-daemon/
-jobs/
-chrome/
-daemon.log
-recall-debug.log
-gh-pr-status-cache.json
-.last-update-result.json
-
-# Backups (auto-generated)
-*.bak
-*.bak.*
-
-# Auto-managed by Claude Code
-plugins/
-ide/
-package.json
-
-# Transient plan files
-plans/
-
-# Skills: symlinks to local skill repos aren't portable config; own skills are.
-# Trailing-slash ignore blocks re-inclusion, so exclude contents and negate.
-skills/*
-# Kept after uninstalling the caveman plugin — now our own copy, not vendored.
-!skills/caveman-compress/
-!skills/fleet/
-# Vendored skills stay ignored whether installed as symlink or copy — list them:
-#   jq -r '.skills|to_entries[]|"\(.key)\t\(.value.source)"' ~/.agents/.skill-lock.json
-
-# Python bytecode (skills/*/scripts run as modules)
-__pycache__/
-*.pyc
-
-# Local state flags
-.last-cleanup
-
 # The runner `./agent-test` materializes from claim-ticket.sh on each run. Not
 # committed for the reason the bootstrap gives: a copy freezes, the emitter
 # does not. IGNORED rather than left untracked — `git worktree remove` refuses
@@ -73,17 +10,9 @@ __pycache__/
 # Fleet worktrees claim-ticket.sh creates inside the checkout
 .worktrees/
 
-# Auto-generated backups
-backups/
-*.original.md
-
-# caveman-compress runtime marker — writer unidentified, but it reappears
-.caveman-active
-# ponytail runtime marker — same kind of transient *-active flag
-.ponytail-active
-
-# agent-brain — installer output, not our config. Reinstalled on every update.
+# agent-brain writes a memory cache into whatever repo it is invoked from
 .agent-brain/
-hooks/memory-*.sh
-hooks/lib/
-agents/memory-*.agent.md
+
+# Backups (auto-generated)
+*.bak
+*.bak.*

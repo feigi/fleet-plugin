@@ -142,6 +142,30 @@ lives outside the plugin and carries one resolved path.
 
 ## Layout
 
+**SUPERSEDED 2026-09-08 — kept as the record of what was built, not of what is.**
+The plugin left `feigi/claude-config` for its own repo, `feigi/fleet-plugin`, and
+was hoisted to that repo's ROOT so the layout matches a single-plugin
+marketplace (`.claude-plugin/marketplace.json`, `source: "./"`). It is installed
+back into `~/.claude` from a local-directory marketplace. Three claims in this
+section and the constraint above are now false, and each was measured false
+rather than assumed:
+
+- **`workflows/` IS a plugin component.** The "Constraint accepted" paragraph
+  above was true when written and is not now; `agents/`, `monitors/`,
+  `output-styles/`, `themes/` and `bin/` are components too. `review-pr.js`
+  therefore ships INSIDE the plugin rather than beside it.
+- **`fleet@skills-dir` is gone.** The plugin is `fleet@fleet-plugin`. Invocation
+  names are unchanged (`/fleet:run-merge-bot`, `fleet:next-ticket`) because they
+  derive from the plugin name, not the marketplace.
+- **A directory-source marketplace COPIES** into
+  `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, and
+  `claude plugin update` is a no-op unless `plugin.json`'s version changed. So
+  the resolved paths in the runbooks name the SOURCE tree, `~/dev/fleet-plugin/`,
+  which is stable across version bumps — the same reason they named
+  `~/.claude/skills/fleet/` before.
+
+The tree below is the pre-move arrangement, at `origin/main` as of 2026-09-07.
+
 ```
 ~/.claude/skills/fleet/              ← tracked; auto-loads as fleet@skills-dir
 ├── .claude-plugin/

@@ -1,6 +1,6 @@
 # Blockers-Array Accessor Extraction
 
-`skills/fleet/scripts/release-ticket.sh` accumulates refusal reasons in a
+`scripts/release-ticket.sh` accumulates refusal reasons in a
 `$blockers` variable that carries an implicit contract — **empty, or ends in a
 trailing comma** — and each receipt site derives the JSON array body from it
 separately:

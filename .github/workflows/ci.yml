@@ -99,8 +99,10 @@ jobs:
         run: .github/scripts/check-tracked.sh '*.mjs' -n1 node --check
 
       # The two tracked `.js` files need DIFFERENT invocations, not a wider glob:
-      #   - hooks/statusline.js is an ordinary CommonJS script. `node --check`
-      #     accepts it as-is.
+      #   - an ordinary CommonJS script, which `node --check` accepts as-is.
+      #     hooks/statusline.js was the only one and left with the 2026-09-08
+      #     config split, so today the `*)` branch matches nothing — it stays
+      #     for the next plain .js this repo grows.
       #   - workflows/*.js (review-pr.js) is a Workflow-harness script: the
       #     harness reads `export const meta = …` off it without running it,
       #     then wraps the REST of the file's body in an async function it
@@ -110,12 +112,12 @@ jobs:
       #     CJS script (the `export`) — `node --check` rejects it either way.
       #     `new AsyncFunction(...)` is the one thing that compiles both parts
       #     without running them; it's also what
-      #     skills/fleet/scripts/review-pr-reads.test.mjs's "review-pr.js parses
+      #     scripts/review-pr-reads.test.mjs's "review-pr.js parses
       #     — no other reader in this repo would notice a syntax error" already
       #     uses to catch exactly this, reused here rather than reinvented.
       #     Cited by test NAME, not by line: a refactor that shifts that file
       #     silently re-points a line number at unrelated code, and this
-      #     particular argument isn't pinned by any test — skills/fleet/scripts/
+      #     particular argument isn't pinned by any test — scripts/
       #     ci-comment-rot-prose.test.mjs checks several other claims in this
       #     file, but not this one.
       #     That test pins review-pr.js BY NAME, so for that one file this loop
@@ -163,10 +165,12 @@ jobs:
             esac
           done
 
-      # Exactly two tracked JSON files: settings.json and the fleet plugin
-      # manifest. The runtime caches are NOT covered and cannot be — every one
-      # of them is gitignored, so `git ls-files` never sees them. Do not read
-      # this step as saying anything about a cache.
+      # Exactly two tracked JSON files, both plugin manifests:
+      # .claude-plugin/plugin.json and .claude-plugin/marketplace.json.
+      # `settings.json` used to be the first of them and left with the
+      # 2026-09-08 config split. The runtime caches are NOT covered and cannot
+      # be — every one of them is gitignored, so `git ls-files` never sees
+      # them. Do not read this step as saying anything about a cache.
       # `jq empty`, not `jq -e .`: `-e` takes its status from the last OUTPUT
       # value, so it exits 1 on a file holding `null` or `false` — both valid
       # JSON — and a step named "Validate JSON" then fails saying nothing.
@@ -184,11 +188,6 @@ jobs:
       # silencing them at the source.
       - name: Shellcheck
         run: .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning
-
-      # The caveman-compress skill ships tracked .py that runs as modules; no
-      # other step here would catch a syntax error in it.
-      - name: Syntax-check python
-        run: .github/scripts/check-tracked.sh '*.py' -n1 python3 -m py_compile
 
       # gh applies `--jq` with its own embedded gojq (RE2), not the system jq
       # the candidates stub execs, so candidates.test.mjs gates its engine-parity
@@ -220,7 +219,7 @@ jobs:
       # 'the runner's directory expansion ran vendored tests' was a `find` in
       # the emitted runner — see claim-ticket.sh, which says so itself: "this
       # walk, not node, is what keeps vendored tests out". There is no
-      # vendored tree under skills/fleet/scripts/ anyway.
+      # vendored tree under scripts/ anyway.
       # The suite stubs `gh` and sets its own git identity, so it needs no auth
       # and no network.
       # `failglob` because the bare glob is exactly the silent green this repo
@@ -238,4 +237,4 @@ jobs:
           GOJQ_BIN: ${{ runner.temp }}/gojq/gojq
         run: |
           shopt -s failglob
-          node --test skills/fleet/scripts/*.test.mjs
+          node --test scripts/*.test.mjs
