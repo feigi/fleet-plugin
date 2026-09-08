@@ -185,6 +185,28 @@ test("CLI: --pr given an empty value dies naming the flag", () => {
 // REFUSE. Nothing above ever hands main() a well-formed value, so #367's
 // shared arg() could return `undefined` for every accepted input and this
 // file would stay green. `--pr 5` must reach gh and succeed.
+// The fail-closed guard this file never exercised: `gh pr view --json
+// files,changedFiles` can exit 0 with a body holding no `files` key at all
+// (an unexpected `gh` output shape, or a proxy's JSON error envelope). Before
+// this guard, `info.files` read as `undefined` and computeStats([]) silently
+// reported `profile: "empty"` — exit 0, indistinguishable from a real empty
+// PR, review-pr.js WIDENS that to the full specialist set on the strength of
+// a lie. The guard must refuse instead.
+test("CLI: gh returning no files array dies (exit 2) rather than reporting a fabricated empty PR", () => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  const gh = join(bin, "gh");
+  writeFileSync(gh, '#!/bin/sh\necho \'{"changedFiles":1}\'\n');
+  chmodSync(gh, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 2, `a missing files array must refuse, not report an empty PR; got ${r.status} ${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload — a payload here would be the fabricated measurement this guard exists to prevent");
+  assert.match(r.stderr, /gh returned no files array/);
+});
+
 test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const gh = join(bin, "gh");
