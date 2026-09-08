@@ -717,6 +717,18 @@ fi
 # or not anything matched and every non-zero status is a real failure.
 listed=$(printf '%s\n' "$worktrees" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
   { add_unknown "local" "could not count the worktrees git listed for #$n"; return 1; }
+# The guard above closes only the route where awk could not RUN. An empty but
+# SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
+# cannot fire, and the mismatch report below blames `git worktree list` for the
+# very count that guard exists to keep out of an operator's face. One comparison
+# closes it for every branch below at once, the recount included. `-ge 1`, not
+# `-gt 1`: `listed=1` is the main checkout alone, `linked=0`, the ordinary repo
+# with no linked worktree — a guard that refused that would make every probe in
+# a clean repo unknown. Real `git worktree list --porcelain` always prints the
+# main worktree, so reaching this needs a broken or shimmed git; the refusal
+# direction was already right, only the number was nonsense. #699
+[ "$listed" -ge 1 ] ||
+  { add_unknown "local" "git listed no worktrees at all for #$n — not even the main checkout, so the listing cannot be trusted"; return 1; }
 linked=$((listed - 1))
 # Recount before refusing. The two reads happen at different instants, and the
 # gap is not theoretical: measured at ~10ms (two independent methods agreeing —

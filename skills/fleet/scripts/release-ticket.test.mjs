@@ -2967,6 +2967,60 @@ test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", 
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+test("an EMPTY but successful listing refuses without ever printing -1 worktrees (#699)", (t) => {
+  // The second route to the tally the test above pins out. #395's `|| die`
+  // closes only the awk that could not RUN; an awk that ran over nothing exits
+  // 0 printing `0`, the guard cannot fire, and `$((0 - 1))` walks into the
+  // mismatch report as "git listed -1 worktrees" — the count no listing can
+  // produce, which is exactly what that guard exists to keep off an operator's
+  // screen.
+  //
+  // Shimmed at the listing rather than at awk, because it is awk SUCCEEDING
+  // that makes this route distinct: an awk shim reproduces #395's case, not
+  // this one. Real `git worktree list --porcelain` always prints the main
+  // worktree, so no unshimmed repo reaches here.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  gitShim(r, `case "$*" in "worktree list --porcelain -z") exit 0 ;; esac`);
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "a listing that cannot be trusted is exit 2, not the exit 0 that releases");
+  assert.equal(json, null, "refused before any mutation");
+  assert.match(stderr, /git listed no worktrees at all for #9/);
+  assert.match(stderr, /not even the main checkout/);
+  assert.doesNotMatch(stderr, /-1 worktrees/,
+    "the whole point: no branch below may report a negative tally");
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "and not the mismatch message either — nothing was compared");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+test("a repo whose ONLY worktree is the main checkout still releases (#699)", (t) => {
+  // The boundary the #699 guard must not swallow, and the reason it is `-ge 1`
+  // rather than `-gt 1`. `listed=1` is the main checkout by itself: `linked=0`
+  // against `registered=0`, the ordinary shape of a claim whose worktree was
+  // already removed and pruned. A guard written one off would refuse this and
+  // take most releases in this repo with it. Reds under `-gt 1` (measured).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  git(r.w, "worktree", "remove", c.wt);
+  git(r.w, "worktree", "prune");
+  // The prune takes the registry DIRECTORY with the last entry, so `readdirSync`
+  // here would throw ENOENT rather than report the emptiness it is asserting.
+  assert.equal(existsSync(join(r.w, ".git", "worktrees")), false,
+    "fixture: no registry entries left at all — registered=0");
+  assert.equal(
+    git(r.w, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length,
+    1,
+    "fixture: git lists exactly the main checkout — listed=1, linked=0",
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 0, `no linked worktrees is the normal case, not a broken listing: ${stderr}`);
+  assert.deepEqual(json.blockers, []);
+  assert.equal(json.released, true);
+});
+
 test("a healthy repo with a second live worktree still releases (#395)", (t) => {
   // The acceptance case every guard on a refusal path needs: a guard that
   // refuses everything passes every "does it refuse?" test above. Two real

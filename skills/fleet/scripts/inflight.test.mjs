@@ -949,6 +949,44 @@ exec '${REAL_GIT}' "$@"
   assert.doesNotMatch(r.stderr, /the listing is incomplete/);
 });
 
+test("probe 3: an EMPTY but successful listing refuses without ever printing -1 worktrees (#699)", (t) => {
+  // The counter's `|| return 1` closes only the awk that could not RUN. An awk
+  // that ran over nothing exits 0 printing `0`, that guard cannot fire, and
+  // `$((0 - 1))` walks into the mismatch report as "git listed -1 worktrees" —
+  // the count no listing can produce, which is the very tally the guard exists
+  // to keep off an operator's screen.
+  //
+  // Shimmed at the listing, not at awk: it is awk SUCCEEDING that makes this
+  // route distinct from the `awkFailWhenProgramHas` case. Real
+  // `git worktree list --porcelain` always prints the main checkout, so no
+  // unshimmed repo reaches here.
+  //
+  // The opposite boundary — `listed=1`, `linked=0`, the main checkout alone —
+  // needs no case of its own: every `fixture(t, n, {})` in this file has
+  // exactly that shape, so a guard written `-gt 1` reds most of the suite
+  // (measured).
+  const { repo, env, bin } = fixture(t, 8, {});
+  writeFileSync(join(bin, "git"), `#!/bin/sh
+case "$*" in
+  "worktree list --porcelain -z") exit 0 ;;
+esac
+exec '${REAL_GIT}' "$@"
+`);
+  chmodSync(join(bin, "git"), 0o755);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "a listing that cannot be trusted is unknown, never the exit 0 that means free");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+  assert.match(r.stderr, /git listed no worktrees at all for #8/);
+  assert.match(r.stderr, /not even the main checkout/);
+  assert.doesNotMatch(r.stderr, /-1 worktrees/,
+    "the whole point: no branch below may report a negative tally");
+  assert.doesNotMatch(r.stderr, /the listing is incomplete/,
+    "and not the mismatch message either — nothing was compared");
+});
+
 /**
  * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
  * registry, then hands off to the real binary.
