@@ -154,8 +154,18 @@ const ticket = (n, body, labels = ["ready-for-agent"]) => ({
 // reordered term sits in the gap BETWEEN two such matches and neither would
 // see it. One `assert.equal` over the exact captured span covers every term
 // and their order together.
+//
+// Read through stripComments(), not raw source — the same escape :1039's
+// `die()` pin already closes. An unanchored match against raw text is
+// satisfied by a declaration parked in a `/* */` block above a reverted one:
+// measured, with the correct five-term EXCLUDE moved into a block comment
+// and the live declaration reverted to the pre-#1306 five terms, a raw-source
+// version of this assertion still passed while the unfiltered scan leaked
+// all eight wayfinder tickets back in. stripComments() blanks whole-line and
+// block comments (its own documented ceiling), so the mutant reds under it
+// and the real declaration's capture is unaffected either way.
 test("EXCLUDE carries every canonical exclusion term, in order, as one pinned string (#1306)", () => {
-  const src = readFileSync(SCRIPT, "utf8");
+  const src = stripComments(readFileSync(SCRIPT, "utf8"));
   const m = src.match(/const EXCLUDE =\n\s*"([^"]+)";/);
   assert.notEqual(m, null, "candidates.mjs's EXCLUDE declaration no longer matches this pin's shape — update this test");
   assert.equal(
