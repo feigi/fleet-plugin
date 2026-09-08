@@ -781,7 +781,8 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   assert.doesNotMatch(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
     "fixture: garbage content, like chmod, prints no detached line");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   // Anchored against the exact branch-mismatch phrase, not a shared word: this
@@ -842,7 +843,8 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
     assert.match(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
       `fixture: the ${shape} shape must really print the detached line`);
 
-    const { code, json } = release(r, c);
+    const { code, json, stderr } = release(r, c);
+    assert.ok(json, `no payload: the arm refused instead of blocking, ${shape} — ${stderr}`);
     assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
     assert.match(json.blockers[0], /could not read its HEAD/, shape);
     assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, `the worktree IS on this branch, ${shape}`);
@@ -884,7 +886,7 @@ test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` li
   // below: `artefacts()` runs `worktree list` itself, so an assert that fired
   // here would leave the mode at 000 for the rest of the case.
   const porcelain = git(r.w, "worktree", "list", "--porcelain");
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
   // Guarded, because the restore runs before the first assert and must not
   // become the failure itself: strip this fixture's `chmodSync(head, 0o000)`
   // and the release SUCCEEDS, taking the whole worktree with it, so a bare
@@ -904,6 +906,10 @@ test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` li
   // why `unresolved_head` can key on that line in neither direction.
   assert.doesNotMatch(porcelain, /^detached$/m, "fixture: and chmod, unlike the symlink and directory shapes, prints no detached line");
 
+  // Below the restore above, never before it: an assert that fired here while
+  // the bit was still off would leave the mode at 000, the hazard that line's
+  // own comment documents.
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — the mode just stopped git reading it");
