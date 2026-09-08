@@ -149,6 +149,21 @@ const ticket = (n, body, labels = ["ready-for-agent"]) => ({
   body,
 });
 
+// #1306: EXCLUDE is a single string literal, pinned whole rather than by N
+// independent `assert.match` calls for individual terms — a dropped or
+// reordered term sits in the gap BETWEEN two such matches and neither would
+// see it. One `assert.equal` over the exact captured span covers every term
+// and their order together.
+test("EXCLUDE carries every canonical exclusion term, in order, as one pinned string (#1306)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  const m = src.match(/const EXCLUDE =\n\s*"([^"]+)";/);
+  assert.notEqual(m, null, "candidates.mjs's EXCLUDE declaration no longer matches this pin's shape — update this test");
+  assert.equal(
+    m[1],
+    "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task",
+  );
+});
+
 test("a to-spec spec is dropped — it is to-tickets' input, not a claimable ticket", () => {
   const { rows } = run([
     ticket(10, "## Problem Statement\n\nx\n\n## User Stories\n\n1. As a user, I want…\n"),
