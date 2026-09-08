@@ -1110,7 +1110,8 @@ test("a MOVED worktree with an unresolvable HEAD blocks instead of releasing sil
   // family passes `--apply`, so a regression reaching only the default mode
   // would ship green — and the dry run is the half an operator runs first.
   for (const apply of [false, true]) {
-    const { code, json } = release(r, c, { apply });
+    const { code, json, stderr } = release(r, c, { apply });
+    assert.ok(json, `apply=${apply}: no payload — the arm refused instead of blocking — ${stderr}`);
     assert.equal(json.released, false, `apply=${apply}: a claim git cannot identify is not released`);
     assert.equal(json.applied, apply, `apply=${apply}: the receipt reports the mode it ran in`);
     assert.equal(json.blockers.length, 1, `apply=${apply}: nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
@@ -1229,7 +1230,8 @@ test("a claim whose registry entry git renamed is still found by the directory s
     `${realpathSync(decoy)}/.git`, "fixture: the unsuffixed entry names the decoy, not the claim");
   writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
@@ -1270,7 +1272,8 @@ test("a MOVED entry thief does not displace the claim's own broken worktree (#45
   const c = movedEntryThief(r);
   writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/, "the claim's own HEAD is the fault, not a branch mismatch");
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
@@ -1343,8 +1346,8 @@ test("the unresolved-HEAD blocker hands over a search for the entry, never a nam
     "fixture: the tail sibling's entry ends with the claim's own gitdir line, which a substring search cannot tell apart",
   );
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)), `the blocker names this claim's own worktree: ${json.blockers[0]}`);
@@ -1379,8 +1382,8 @@ test("the entry search survives a `$` in the worktree path (#455)", (t) => {
   const c = claim(r.w, 9, "release$ticket");
   writeFileSync(join(r.w, ".git", "worktrees", "9-release$ticket", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
 
@@ -1410,8 +1413,8 @@ test("the entry search treats a regex metacharacter in the path as a character (
   git(r.w, "worktree", "add", "-q", join(r.w, ".worktrees", "9-axb"), "-b", "sib/9", "origin/main");
   writeFileSync(join(r.w, ".git", "worktrees", "9-a.b", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
 
