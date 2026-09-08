@@ -353,6 +353,18 @@ wt_listing || die "could not read the worktree list for #$issue: $wt_err"
 # construction — one `worktree ` line per record, whatever the path holds. #551
 listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
   die "could not count the worktrees git listed for #$issue"
+# The `|| die` above closes only the route where awk could not RUN. An empty but
+# SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
+# cannot fire, and the mismatch report below blames `git worktree list` for the
+# very count the guard above exists to keep out of an operator's face. One
+# comparison closes it for every branch below at once. `-ge 1`, not `-gt 1`:
+# `listed=1` is the main checkout alone, `linked=0`, the ordinary repo with no
+# linked worktree at all — a guard that refused that would refuse most releases
+# in this repo. Real `git worktree list --porcelain` always prints the main
+# worktree, so reaching this needs a broken or shimmed git; the refusal
+# direction was already right, only the number was nonsense. #699
+[ "$listed" -ge 1 ] ||
+  die "git listed no worktrees at all for #$issue — not even the main checkout, so the listing cannot be trusted"
 linked=$((listed - 1))
 # Name the direction actually observed. The two disagreements have opposite
 # causes and send the reader to opposite places, so one message cannot serve

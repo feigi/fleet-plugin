@@ -85,6 +85,17 @@ const REAL_PYTHON3 = execFileSync("/bin/sh", ["-c", "command -v python3"], { enc
 // off to the real binary, and calling `git` from inside it would find the shim.
 const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+/**
+ * Writes a `git` shim into `bin`, `body` first, falling through to the real
+ * binary. Same shape as release-ticket.test.mjs's `gitShim` — factored out
+ * here for the same reason: four sites hand-rolling shebang + `exec REAL_GIT`
+ * + a separate `chmodSync` is the duplication, not the shim itself.
+ */
+function gitShim(bin, body) {
+  writeFileSync(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+}
+
 // Every chmod-denial fixture below rests on the mode being ENFORCED, and root
 // ignores it: it reads a 0o000 directory and removes a 0o555 one just fine.
 // Under euid 0 those fixtures would not test a weaker thing, they would test a
@@ -929,16 +940,12 @@ test("probe 3: git listing MORE than the registry reports THAT, not an incomplet
   // the old argument string stops matching silently and the phantom is never
   // appended, which is a green for a case that measured nothing — the same
   // trap `registryRaceShim`'s `fired` sentinel exists to catch.
-  writeFileSync(join(bin, "git"), `#!/bin/sh
-case "$*" in
+  gitShim(bin, `case "$*" in
   "worktree list --porcelain -z")
     '${REAL_GIT}' "$@"
     printf 'worktree /tmp/phantom-worktree\\000HEAD ${"0".repeat(40)}\\000detached\\000\\000'
     exit 0 ;;
-esac
-exec '${REAL_GIT}' "$@"
-`);
-  chmodSync(join(bin, "git"), 0o755);
+esac`);
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2);
@@ -947,6 +954,40 @@ exec '${REAL_GIT}' "$@"
   assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
   assert.match(r.stderr, /git listed 1 worktrees but only 0 registry entries were counted/);
   assert.doesNotMatch(r.stderr, /the listing is incomplete/);
+});
+
+test("probe 3: an EMPTY but successful listing refuses without ever printing -1 worktrees (#699)", (t) => {
+  // The counter's `|| return 1` closes only the awk that could not RUN. An awk
+  // that ran over nothing exits 0 printing `0`, that guard cannot fire, and
+  // `$((0 - 1))` walks into the mismatch report as "git listed -1 worktrees" —
+  // the count no listing can produce, which is the very tally the guard exists
+  // to keep off an operator's screen.
+  //
+  // Shimmed at the listing, not at awk: it is awk SUCCEEDING that makes this
+  // route distinct from the `awkFailWhenProgramHas` case. Real
+  // `git worktree list --porcelain` always prints the main checkout, so no
+  // unshimmed repo reaches here.
+  //
+  // The opposite boundary — `listed=1`, `linked=0`, the main checkout alone —
+  // needs no case of its own: every `fixture(t, n, {})` in this file has
+  // exactly that shape, so a guard written `-gt 1` reds most of the suite
+  // (measured).
+  const { repo, env, bin } = fixture(t, 8, {});
+  gitShim(bin, `case "$*" in
+  "worktree list --porcelain -z") exit 0 ;;
+esac`);
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "a listing that cannot be trusted is unknown, never the exit 0 that means free");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+  assert.match(r.stderr, /git listed no worktrees at all for #8/);
+  assert.match(r.stderr, /not even the main checkout/);
+  assert.doesNotMatch(r.stderr, /-1 worktrees/,
+    "the whole point: no branch below may report a negative tally");
+  assert.doesNotMatch(r.stderr, /the listing is incomplete/,
+    "and not the mismatch message either — nothing was compared");
 });
 
 /**
@@ -965,17 +1006,13 @@ exec '${REAL_GIT}' "$@"
  */
 function registryRaceShim(bin, mutation) {
   const fired = join(bin, "race-fired");
-  writeFileSync(join(bin, "git"), `#!/bin/sh
-case "$*" in
+  gitShim(bin, `case "$*" in
   "worktree list --porcelain -z")
     if [ ! -e '${fired}' ]; then
       : > '${fired}'
       ${mutation}
     fi ;;
-esac
-exec '${REAL_GIT}' "$@"
-`);
-  chmodSync(join(bin, "git"), 0o755);
+esac`);
   return fired;
 }
 
@@ -1436,11 +1473,7 @@ test("probe 3: a branch LOOKUP that could not run is unknown, never free", (t) =
   // helpers and cleanup shell out to git through this same PATH, so a counted
   // shim would fire on whichever call happened to be nth. `for-each-ref` is the
   // one stage of inflight.sh that runs it, so the subcommand names it alone.
-  writeFileSync(join(bin, "git"), `#!/bin/sh
-case "$1" in for-each-ref) exit 1 ;; esac
-exec '${REAL_GIT}' "$@"
-`);
-  chmodSync(join(bin, "git"), 0o755);
+  gitShim(bin, `case "$1" in for-each-ref) exit 1 ;; esac`);
 
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
