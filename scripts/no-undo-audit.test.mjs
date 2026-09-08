@@ -1222,6 +1222,54 @@ test("an xargs-side failure listing the at-risk commits is unanswerable, and doe
   );
 });
 
+/**
+ * Shadows `awk` on PATH with a wrapper that fails ONLY the dedupe call this
+ * guard reads — matched on its exact program text, `!seen[$1]++` — and
+ * defers to the real awk otherwise, so the earlier stash-counting
+ * `awk 'END{print NR}'` keeps working and the fault lands on the one
+ * statement under test. Same technique as `withBrokenEscaper`.
+ */
+function withFailingDedupeAwk(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "awk"), `#!/bin/sh
+case "$1" in
+  '!seen[$1]++') echo "SHIM: forced awk failure for test" >&2; exit 13 ;;
+esac
+exec ${real} "$@"
+`);
+  chmodSync(join(bin, "awk"), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
+// This statement is kept separate from the xargs/git-log pipe above it (see
+// the comment ahead of the dedupe line in the script) precisely so an
+// awk-side fault is diagnosed by name instead of swallowed into that pipe's
+// status. Nothing forced that statement to fail before this test, so the
+// separation it documents was unpinned -- deleting the `|| die` left this
+// exact fixture green (measured): under `set -eu` a bare
+// `at_risk=$(... | awk ...)` still aborts on the shim's exit 13, but with
+// awk's own status and no named message, which is what the assertions below
+// discriminate from the guard actually firing.
+test("an awk-side failure deduplicating the at-risk commits is unanswerable, and names awk rather than the git-log/xargs pipe ahead of it", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withFailingDedupeAwk(t) });
+  assert.equal(r.status, 2, `an at-risk list that could not be deduplicated is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload -- a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /awk failed deduplicating the at-risk commits/,
+    "the guard must name awk, not fall through to a bare set -e abort",
+  );
+  assert.doesNotMatch(
+    r.stderr,
+    /listing commits for the conflicting paths failed \(git log or xargs\)/,
+    "an awk-side fault must not be misreported as the git-log/xargs pipe ahead of it",
+  );
+});
+
 // #583: a POSIX pipeline's status is its LAST command's, so a fault in any
 // earlier stage is invisible to `set -e` and to a trailing `|| die` alike. The
 // stage that reads merge-tree's output is the one that can fail — measured on
