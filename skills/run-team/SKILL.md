@@ -1133,37 +1133,69 @@ open PR stalls unlabelled while the run reads as merely quiet; observed live
 twice. So check the REST budget *before* polling — `gh api rate_limit` is itself
 unmetered (`gh api rate_limit --jq '.resources.core.remaining'`, re-confirmed
 2026-09-08) — and give an unreadable `ci-state` payload the same treatment one
-level down:
+level down. The shape is **one outer tick loop with an inner pass over the open
+PRs**, because the two causes live at different levels — the budget is one
+account, the payload is one PR:
 
 ```sh
-rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
-if [ "$rl" = ERR ] || [ "${rl:-0}" -lt 200 ] 2>/dev/null; then
-  if [ "$degraded" != budget ]; then
-    echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
-    degraded=budget
+while :; do                                   # one tick
+  rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
+  case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
+  if [ "$rl" = ERR ] || [ "$rl" -lt 200 ]; then
+    if [ -z "$budget_out" ]; then             # ONE global latch: a quota outage hits every PR
+      echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+      budget_out=1
+    fi
+  else
+    if [ -n "$budget_out" ]; then
+      echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+      budget_out=
+    fi
+    for pr in $(gh pr list --state open --json number --jq '.[].number'); do
+      st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
+      if [ -z "$st" ] || ! printf '%s' "$st" | jq -e '.verdict != "rate-limited"' >/dev/null 2>&1; then
+        case " $blind " in *" $pr "*) ;; *)   # latch keyed BY PR: this cause is per-PR
+          echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+          blind="$blind $pr" ;;
+        esac
+        continue                              # inner continue — still reaches the tick sleep
+      fi
+      case " $blind " in *" $pr "*)
+        echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+        keep=; for b in $blind; do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+      esac
+      : # your normal handling of $st for this PR
+    done
   fi
-  sleep 120; continue
-fi
-st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
-if [ -z "$st" ] || ! printf '%s' "$st" | jq -e . >/dev/null 2>&1; then
-  if [ "$degraded" != payload ]; then
-    echo "WATCHER DEGRADED: ci-state returned no parseable payload for #$pr — silence is NOT green"
-    degraded=payload
-  fi
-  continue
-fi
-if [ -n "$degraded" ]; then
-  echo "WATCHER RECOVERED: core budget=$rl, ci-state parsing again — CI polling resumed"
-  degraded=
-fi
+  sleep 120                                   # the block's only pacing, once per tick
+done
 ```
+
+**One gate, not a gate plus a caveat.** `jq -e '.verdict != "rate-limited"'`
+exits non-zero on unparseable input *and* on a false result, so that single test
+covers empty, garbage AND a self-named quota refusal. Leaving the named verdict
+to prose instead is how a watcher clears its latch on an outage payload and
+hands it downstream as CI state — the very blindness this section exists to
+remove, one level in.
 
 **It has to latch** — one line entering the degraded state, one leaving it,
 never one per tick. An unlatched line at a 120s poll gets the Monitor
 auto-stopped for volume during even a two-minute outage, reintroducing the same
-blindness by another route. The recovery line is what says the watch is alive
-again, so emit it on the first good pass even when nothing about the CI state
-changed; without it a reader cannot tell a recovered watcher from a dead one.
+blindness by another route. **Latch each cause at the level its cause lives
+at**: the budget is one global flag, but the payload latch is keyed by PR, and a
+shared scalar for both is an unlatched line wearing a latch's clothes — one
+persistently blind PR alongside one healthy PR re-clears the flag on every tick,
+emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
+what says the watch is alive again, so emit it on the first good pass even when
+nothing about the CI state changed; without it a reader cannot tell a recovered
+watcher from a dead one.
+
+**All pacing in exactly one place — the tick loop's own tail `sleep`.** A sleep
+inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
+of pause per tick, against the 24s outage reset measured below), and a degraded
+branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
+probe pairs during exactly the outage it is reporting. Both degraded branches
+above fall through to the same single sleep instead.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 **gate on the payload's own fields**, applied to the watcher. `not-green` is an
@@ -1172,7 +1204,8 @@ exit as an outage misfires constantly on PRs that are merely in progress. Empty
 or unparseable output is the degraded case; parseable JSON reading
 `verdict: "not-green"` is normal. An exhausted quota may also name itself,
 `verdict: "rate-limited"` on stdout — likewise degraded, and likewise not a
-reading.
+reading, which is why the gate above tests the verdict rather than mere
+parseability: that payload is perfectly good JSON.
 
 **Do not back off and wait.** These outages are short — a rolling window; one
 measured reset came 24 seconds after `remaining: 0` — and pausing members for a
