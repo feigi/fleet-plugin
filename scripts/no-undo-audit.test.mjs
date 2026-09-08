@@ -1224,23 +1224,41 @@ test("an xargs-side failure listing the at-risk commits is unanswerable, and doe
 
 /**
  * Shadows `awk` on PATH with a wrapper that fails ONLY the dedupe call this
- * guard reads — matched on its exact program text, `!seen[$1]++` — and
- * defers to the real awk otherwise, so the earlier stash-counting
- * `awk 'END{print NR}'` keeps working and the fault lands on the one
- * statement under test. Same technique as `withBrokenEscaper`.
+ * guard reads, and defers to the real awk otherwise — so the earlier
+ * stash-counting `awk 'END{print NR}'` keeps working and the fault lands on
+ * the one statement under test. Same technique as `withBrokenEscaper`, and
+ * for its reason: the call is selected on the at-risk list flowing THROUGH
+ * it, never on the program text handed to it. Selecting on the literal
+ * `!seen[$1]++` looked equivalent and was not — a behaviour-preserving
+ * rewrite to `{if(!seen[$1]++)print}` fell straight through to the real awk,
+ * disarming the injection while the test went red as if the `|| die` had
+ * regressed (measured).
+ *
+ * Input is captured to a file and replayed byte-for-byte rather than through
+ * `printf`, which would turn the stash call's empty input into one blank line
+ * and its `NR` from 0 into 1.
+ *
+ * `fired` is the residual that selecting on content cannot cover: a rewrite
+ * routing the dedupe away from awk altogether still disarms the fault, and
+ * without this the run would again red as a guard regression rather than as
+ * an injection that never fired.
  */
 function withFailingDedupeAwk(t) {
   const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
   writeFileSync(join(bin, "awk"), `#!/bin/sh
-case "$1" in
-  '!seen[$1]++') echo "SHIM: forced awk failure for test" >&2; exit 13 ;;
-esac
-exec ${real} "$@"
+f="${bin}/stdin.$$"
+cat > "$f"
+if grep -qF 'MAIN COMMIT AT RISK' "$f"; then
+  : > "${bin}/fired"
+  echo "SHIM: forced awk failure for test" >&2
+  exit 13
+fi
+exec ${real} "$@" < "$f"
 `);
   chmodSync(join(bin, "awk"), 0o755);
-  return `${bin}:${process.env.PATH}`;
+  return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
 }
 
 // This statement is kept separate from the xargs/git-log pipe above it (see
@@ -1255,7 +1273,10 @@ exec ${real} "$@"
 test("an awk-side failure deduplicating the at-risk commits is unanswerable, and names awk rather than the git-log/xargs pipe ahead of it", (t) => {
   const c = bareConflictRepo(t, "plain.txt");
 
-  const r = audit(c, { ...ENV, PATH: withFailingDedupeAwk(t) });
+  const awk = withFailingDedupeAwk(t);
+  const r = audit(c, { ...ENV, PATH: awk.path });
+  assert.ok(existsSync(awk.fired),
+    "the fault injection never fired — the at-risk list no longer flows through awk, so every assertion below is measuring an unmutated run");
   assert.equal(r.status, 2, `an at-risk list that could not be deduplicated is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
   assert.equal(r.stdout.trim(), "", `exit 2 emits no payload -- a payload is an answer; got ${r.stdout}`);
   assert.match(
