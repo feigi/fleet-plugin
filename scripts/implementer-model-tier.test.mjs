@@ -242,7 +242,7 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // somewhere the reader of this phase can neither find nor audit.
   assert.match(
     slice,
-    /subagent_type: "fleet-implementer"/,
+    /subagent_type: "fleet:fleet-implementer"/,
     "phase 2 no longer dispatches the declared subagent type",
   );
   assert.match(
