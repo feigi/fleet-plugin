@@ -113,8 +113,24 @@ if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without
 // rather than send a query whose empty answer would read as exit 1.
 if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot contain a double quote or a backslash, got '${requireLabel}'`);
 
+// The five `wayfinder:*` terms are separate `-label:` clauses, not a wildcard —
+// GitHub's search has no `-label:"wayfinder:*"` — and none is quoted despite
+// the colon each value carries. Measured 2026-09-08 against feigi/fleet-plugin:
+// negating `wayfinder:map` alone excludes exactly one more issue than the
+// unfiltered open count, and that issue is #1292 — a colon inside a label
+// value is parsed as part of the label, not as a delimiter that ends it early
+// and spills the remainder into free text, the failure mode `label:"…"`
+// quoting exists for a SPACE (see `query()`'s comment below). Stated as a
+// relationship rather than a pinned count for the same reason `query()`'s own
+// comment gives it below: the queue churns hourly, so a digit is wrong within
+// a day and reads as a regression. Quoting every value anyway would cost
+// nothing (`-label:"wayfinder:map"` measured identical: same one-issue
+// exclusion, same issue) — left unquoted here because an unconditional
+// quote-everything rule belongs at the one call site building every label
+// term (`query()` below), and EXCLUDE is a static literal no caller
+// assembles.
 const EXCLUDE =
-  "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info";
+  "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task";
 // `d` walks the body line by line rather than one regex over the whole
 // string, because RE2 (gojq's engine — gh applies `--jq` with gojq, not the
 // system jq this file's own tests stub; see #63) has no lookahead, so
