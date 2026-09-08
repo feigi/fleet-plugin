@@ -177,12 +177,24 @@ function unmergedGoneBranch(w, name, msg) {
  * nothing, and nothing in it can say so. Spliced into `failOnlyShim`'s body
  * automatically; a fall-through `match` (one ending in `false`, so the real
  * git still answers) has to splice it in by hand — no body ever runs. #759
+ *
+ * Records `$*`, not just presence: `reap.sh` calls `git cherry $base $target`
+ * from two sweeps with the same `match`, so a bare touch is satisfied by
+ * EITHER sweep's probe — an arm testing one sweep's own cherry call reads as
+ * pinned when only the other sweep's ever fired. `assertShimFired`'s `expect`
+ * regex matches this file's contents to require the argv this arm names.
  */
-const SHIM_FIRED = `: >> "$0.fired"`;
+const SHIM_FIRED = `printf '%s\\n' "$*" >> "$0.fired"`;
 
-/** Asserts the fault `failOnlyShim` injects actually reached the script under test. */
-function assertShimFired(bin, why) {
-  assert.equal(existsSync(join(bin, "git.fired")), true, why);
+/**
+ * Asserts the fault `failOnlyShim` injects actually reached the script under
+ * test — and, with `expect`, that it reached THIS call's own argv rather than
+ * a same-named git call elsewhere in the run.
+ */
+function assertShimFired(bin, why, expect) {
+  const path = join(bin, "git.fired");
+  assert.equal(existsSync(path), true, why);
+  if (expect) assert.match(readFileSync(path, "utf8"), expect, why);
 }
 
 /** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
@@ -404,7 +416,11 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   // with the shim argument replaced by `{}` (measured, #759): the arm could not
   // tell an absent anchoring bug from an absent fault. This is what makes it a
   // test of the anchoring rather than of the fixture.
-  assertShimFired(bin, "no `+` ever reached the merge check — the rest of this arm passes on any fixture");
+  assertShimFired(
+    bin,
+    "no `+` ever reached the merge check — the rest of this arm passes on any fixture",
+    /^cherry \S+ refs\/heads\//m,
+  );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
   assert.deepEqual(json.reaped, ["feature/merged"]);
@@ -2326,7 +2342,17 @@ test("a `+` inside a cherry diagnostic does not strand a detached worktree (#381
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
-  assertShimFired(bin, "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture");
+  // `mergedGoneBranchWithWorktree` leaves `refs/heads/docs/79-brief` behind —
+  // detaching the worktree's HEAD un-checks-out the branch, it doesn't delete
+  // it — so the BRANCH sweep also sees this same name as `[gone]` and runs its
+  // own `git cherry`, which the bare match above fires on too. A regex on the
+  // recorded argv, not just presence, is what proves THIS sweep's own probe
+  // (target a full SHA, never a `refs/heads/...` name) is what fired. #759
+  assertShimFired(
+    bin,
+    "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture",
+    /^cherry \S+ [0-9a-f]{40}$/m,
+  );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
   assert.deepEqual(json.worktreesRemoved, [wt], "noisy stderr must not strand a merged worktree");
