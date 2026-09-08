@@ -540,17 +540,25 @@ function selectDimensions(all, stats) {
   // exactly where a swallowed error hides, so the floor wins THERE and the guard
   // still drops silent-failure everywhere else — a 50-loc MULTI-FILE config-only
   // PR profiles `production`, never reaches the tier, and keeps the old behaviour.
-  // The floor is the size TIER's, so `tests-only` OUTRANKS it: computeStats
-  // assigns that profile ahead of `single-file`/`small`, so a no-src diff that
-  // also touches a test file never reaches SIZE_TIER_PROFILES and still loses
-  // silent-failure. Out of #236's scope — its ACs are keyed on the two size-tier
-  // profiles — and filed as #739.
+  // #739 carved out the third profile. The floor was the size TIER's, and
+  // computeStats assigns `tests-only` AHEAD of `single-file`/`small`, so a no-src
+  // diff that also touched a test file never reached SIZE_TIER_PROFILES and lost
+  // silent-failure — making coverage NON-MONOTONIC on #236's own motivating class:
+  // `ci.yml` alone kept the hunter, `ci.yml` + one test file SUBTRACTED it, and
+  // adding a file to a diff removed a specialist. `hasConfig` is what keeps that
+  // widening off a PURE test diff, which has nothing for the hunter and keeps the
+  // old behaviour. Deliberately not size-gated as well: a big config+test diff
+  // gets the hunter where the config-only `production` diff beside it does not,
+  // which is the safe asymmetry — the alternative re-breaks monotonicity to buy
+  // back a symmetry nothing needs.
   if (stats.hasSrc === false)
     dims = dims.filter(
       (d) =>
         d.key !== "types" &&
         d.key !== "simplify" &&
-        (d.key !== "silent-failure" || SIZE_TIER_PROFILES.has(stats.profile)),
+        (d.key !== "silent-failure" ||
+          SIZE_TIER_PROFILES.has(stats.profile) ||
+          (stats.profile === "tests-only" && stats.hasConfig === true)),
     );
   // COMPOSES with the guards above rather than replacing them — it filters `dims`,
   // not `all`. Since #236 that composition no longer changes any OUTCOME: every
@@ -559,8 +567,14 @@ function selectDimensions(all, stats) {
   // negation; `types`/`simplify` are not in `SIZE_TIER_DIMS`; `comments` and
   // `correctness` are never removed above). `silent-failure` on a no-src diff was
   // the single case where the two forms differed, and it is now deliberately the
-  // floor. Kept as a filter regardless: it is the form that stays correct without
-  // re-proving that equivalence every time a guard is added above.
+  // floor. #739's second floor arm does not reopen the gap, and for a reason that
+  // is NOT the first arm's: `tests-only` is disjoint from SIZE_TIER_PROFILES by
+  // construction — computeStats' else-if chain assigns exactly one profile — so
+  // that arm can only fire on a run where this filter does not execute at all.
+  // Re-derived over profile x hasSrc x hasTests x hasConfig x docsOnly x kinds x
+  // truncated: cases=5832 diffs=0. Kept as a filter regardless: it is the form
+  // that stays correct without re-proving that equivalence every time a guard is
+  // added above.
   //
   // `comments` sits in SIZE_TIER_DIMS unconditionally (#218). It used to be
   // carved in here on `stats.kinds?.docs !== 0` — a FILE test, not a prose test,
