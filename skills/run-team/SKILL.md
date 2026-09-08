@@ -1125,6 +1125,69 @@ Also: the newest
 run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
 entirely. See references/ci-and-staleness.md.
 
+**A probe that cannot read is a transition event, not silence.** The natural
+watcher shape — `st=$(ci-state.mjs --pr "$pr" 2>/dev/null) || continue` — fails
+closed correctly and then throws the failure away, so a rate-limited probe emits
+NOTHING and "no event" becomes indistinguishable from "not green yet". Every
+open PR stalls unlabelled while the run reads as merely quiet; observed live
+twice. So check the REST budget *before* polling — `gh api rate_limit` is itself
+unmetered (`gh api rate_limit --jq '.resources.core.remaining'`, re-confirmed
+2026-09-08) — and give an unreadable `ci-state` payload the same treatment one
+level down:
+
+```sh
+rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
+if [ "$rl" = ERR ] || [ "${rl:-0}" -lt 200 ] 2>/dev/null; then
+  if [ "$degraded" != budget ]; then
+    echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+    degraded=budget
+  fi
+  sleep 120; continue
+fi
+st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
+if [ -z "$st" ] || ! printf '%s' "$st" | jq -e . >/dev/null 2>&1; then
+  if [ "$degraded" != payload ]; then
+    echo "WATCHER DEGRADED: ci-state returned no parseable payload for #$pr — silence is NOT green"
+    degraded=payload
+  fi
+  continue
+fi
+if [ -n "$degraded" ]; then
+  echo "WATCHER RECOVERED: core budget=$rl, ci-state parsing again — CI polling resumed"
+  degraded=
+fi
+```
+
+**It has to latch** — one line entering the degraded state, one leaving it,
+never one per tick. An unlatched line at a 120s poll gets the Monitor
+auto-stopped for volume during even a two-minute outage, reintroducing the same
+blindness by another route. The recovery line is what says the watch is alive
+again, so emit it on the first good pass even when nothing about the CI state
+changed; without it a reader cannot tell a recovered watcher from a dead one.
+
+**Judge `ci-state` on its payload, never its exit code** — the same rule as
+**gate on the payload's own fields**, applied to the watcher. `not-green` is an
+ordinary, frequent state that exits non-zero, so a watcher treating any non-zero
+exit as an outage misfires constantly on PRs that are merely in progress. Empty
+or unparseable output is the degraded case; parseable JSON reading
+`verdict: "not-green"` is normal. An exhausted quota may also name itself,
+`verdict: "rate-limited"` on stdout — likewise degraded, and likewise not a
+reading.
+
+**Do not back off and wait.** These outages are short — a rolling window; one
+measured reset came 24 seconds after `remaining: 0` — and pausing members for a
+fixed interval stalls the fleet longer than the outage itself would have. A
+retry-and-wait loop is what turns a 60s outage into a stalled member. Report it,
+keep the local work moving (git, tests and mutation runs are all unaffected),
+re-probe.
+
+**While the budget is exhausted, `ledger.mjs check` reads
+`verdict: "unverified"`** — the ledger was read and the tracker was not. That is
+correct behaviour, but `unverified` exits **0**, the same as `clean`, so a
+member treating exit 0 as "safe to file" files blind during exactly this window.
+Say so when you flag the outage: members read `verdict` explicitly until you
+report recovery, never the exit code alone.
+
 ### Reviewers
 
 **You run the review yourself: `Workflow({name: "fleet:review-pr", args: {pr, branch,
