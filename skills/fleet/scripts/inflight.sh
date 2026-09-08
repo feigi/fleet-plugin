@@ -625,11 +625,19 @@ count_registry() {
     # HEAD, index, logs, refs — so emptiness separates it from a stray and the
     # missing `gitdir` does not.
     #
-    # `-x` first, and the order is the whole point: an entry chmod'd 000 reads
-    # as empty to the same test, and git drops that one too (measured: 2
-    # listed, then 1). Unsearchable, so we cannot tell → count it and let the
-    # mismatch below fire.
-    if [ -x "$entry" ] && [ -z "$(ls -A "$entry" 2>/dev/null)" ]; then continue; fi
+    # `ls`'s STATUS, not just its output, and that is the whole point: an entry
+    # we could not LIST is not an empty one, and `2>/dev/null` hides the
+    # difference. A stray `mkdir` lists empty at rc 0; an entry chmod'd 000
+    # (unsearchable) OR 0111 (searchable, so an `-x` test passes it, but not
+    # readable) fails EACCES and prints nothing just the same. Reading only the
+    # output skips that entry as "not git's" — and git drops it too, so the
+    # counts AGREE, no refusal fires, and the probe answers `taken=false` for a
+    # ticket whose checkout is still on disk (measured: 2 listed, then 1, and an
+    # output-only skip counts 0 to match). Could not read it, so we cannot tell
+    # → count it and let the mismatch below fire. No `-x` test: it answers a
+    # narrower question than the status does — it covers only the 000 half — and
+    # a failed `ls` already settles both. #697
+    if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
   return 0
