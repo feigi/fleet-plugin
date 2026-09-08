@@ -167,6 +167,36 @@ function unmergedGoneBranch(w, name, msg) {
   return sha;
 }
 
+/**
+ * Shell leaving proof, beside the shim itself, that the injected fault fired.
+ *
+ * A fixture whose verdict is the SAME with and without the fault — every
+ * "noise on stderr must not change this negative verdict" arm in this file —
+ * stays green when the shim never runs at all: a PATH order slip, or a match
+ * that drifted off its argv slot the way #730's did. The arm then pins
+ * nothing, and nothing in it can say so. Spliced into `failOnlyShim`'s body
+ * automatically; a fall-through `match` (one ending in `false`, so the real
+ * git still answers) has to splice it in by hand — no body ever runs. #759
+ *
+ * Records `$*`, not just presence: `reap.sh` calls `git cherry $base $target`
+ * from two sweeps with the same `match`, so a bare touch is satisfied by
+ * EITHER sweep's probe — an arm testing one sweep's own cherry call reads as
+ * pinned when only the other sweep's ever fired. `assertShimFired`'s `expect`
+ * regex matches this file's contents to require the argv this arm names.
+ */
+const SHIM_FIRED = `printf '%s\\n' "$*" >> "$0.fired"`;
+
+/**
+ * Asserts the fault `failOnlyShim` injects actually reached the script under
+ * test — and, with `expect`, that it reached THIS call's own argv rather than
+ * a same-named git call elsewhere in the run.
+ */
+function assertShimFired(bin, why, expect) {
+  const path = join(bin, "git.fired");
+  assert.equal(existsSync(path), true, why);
+  if (expect) assert.match(readFileSync(path, "utf8"), expect, why);
+}
+
 /** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
 function failOnlyShim(t, match, stderr, code = 1) {
   const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
@@ -175,6 +205,7 @@ function failOnlyShim(t, match, stderr, code = 1) {
     join(bin, "git"),
     `#!/bin/sh\n` +
       `if ${match}; then\n` +
+      `  ${SHIM_FIRED}\n` +
       // Shell-quoted, not `JSON.stringify`: that escapes for JSON, but the
       // splice lands in shell, where a `$` in a fixture line would expand
       // instead of reaching git's stderr as data.
@@ -377,10 +408,19 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   // diagnostic containing a `+` to stderr, which the capture's 2>&1 folds into
   // the value the merge check matches. Only the line-start `+` is a commit, so
   // this branch must still be reaped. An unanchored match keeps it forever.
-  const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; false; }`, []);
+  const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; ${SHIM_FIRED}; false; }`, []);
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
+  // The fixture branch is genuinely merged, so every assertion below also held
+  // with the shim argument replaced by `{}` (measured, #759): the arm could not
+  // tell an absent anchoring bug from an absent fault. This is what makes it a
+  // test of the anchoring rather than of the fixture.
+  assertShimFired(
+    bin,
+    "no `+` ever reached the merge check — the rest of this arm passes on any fixture",
+    /^cherry \S+ refs\/heads\//m,
+  );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
   assert.deepEqual(json.reaped, ["feature/merged"]);
@@ -792,6 +832,7 @@ test("a clean worktree with a warning on the plain status probe's stderr is stil
 
   const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
+  assertShimFired(bin, "the warning never reached the dirty check — the rest of this arm passes on any fixture");
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a warning unrelated to dirtiness must not keep this branch");
   assert.deepEqual(json.reaped, ["feature/merged"]);
@@ -885,6 +926,7 @@ test("ambient git noise on the `--ignored` probe's stderr does not strand a clea
 
   const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
+  assertShimFired(bin, "the noise never reached the `--ignored` gate — the rest of this arm passes on any fixture");
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "noise that left the listing whole must not keep this branch");
   assert.deepEqual(json.reaped, ["feature/merged"]);
@@ -2296,10 +2338,21 @@ test("a `+` inside a cherry diagnostic does not strand a detached worktree (#381
   // check still reads a genuine cherry run's stdout.
   const w = repo(t);
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
-  const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; false; }`, []);
+  const bin = failOnlyShim(t, `[ "$1" = cherry ] && { printf '%s\\n' "warning: unable to access '/x/c++/lib/.gitattributes'" >&2; ${SHIM_FIRED}; false; }`, []);
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
+  // `mergedGoneBranchWithWorktree` leaves `refs/heads/docs/79-brief` behind —
+  // detaching the worktree's HEAD un-checks-out the branch, it doesn't delete
+  // it — so the BRANCH sweep also sees this same name as `[gone]` and runs its
+  // own `git cherry`, which the bare match above fires on too. A regex on the
+  // recorded argv, not just presence, is what proves THIS sweep's own probe
+  // (target a full SHA, never a `refs/heads/...` name) is what fired. #759
+  assertShimFired(
+    bin,
+    "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture",
+    /^cherry \S+ [0-9a-f]{40}$/m,
+  );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
   assert.deepEqual(json.worktreesRemoved, [wt], "noisy stderr must not strand a merged worktree");
