@@ -326,7 +326,7 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
   # so the failure reason can carry git's own words — and an unanchored match
   # reads a `+` anywhere in a diagnostic as a commit line, keeping a branch that
   # is merged. This pipe is safe where the one it replaces was not: it consumes
-  # a variable, never git, and git's status was already taken on the line above,
+  # a variable, never git, and the `git cherry` probe already took git's status,
   # so grep's is the only status left to take. Anchored like release-ticket.sh's.
   if printf '%s\n' "$cherry" | grep -q '^+'; then
     keep "$b" "unmerged commits"

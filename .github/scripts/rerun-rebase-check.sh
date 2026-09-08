@@ -67,9 +67,9 @@ for RUN in "$@"; do
   fi
   # `first(...)` inside jq rather than `| head -1`: it short-circuits on the
   # first match instead of building the whole list. Note gh is NOT in this
-  # pipeline — its output was captured into $JOBS_JSON on the line above — so
-  # the SIGPIPE-the-fetch hazard this guards against in other code does not
-  # apply here.
+  # pipeline — its output was captured into $JOBS_JSON by the `gh api` guard
+  # that opens this loop body — so the SIGPIPE-the-fetch hazard this guards
+  # against in other code does not apply here.
   JOB=$(printf '%s' "$JOBS_JSON" \
     | jq -r 'first(.jobs[] | select(.name == "rebase-check") | .id) // empty')
   if [ -z "$JOB" ]; then

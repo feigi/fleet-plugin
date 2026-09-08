@@ -438,9 +438,10 @@ fi
 if [ -n "$msg" ]; then
   stash=null
   # One of those causes is one git will name outright — the missing object,
-  # where it says `fatal: bad object refs/stash` and the line above degrades
-  # that into a guess across all four. So ask a second time, on this branch
-  # only, and let git speak for itself. `stash list` is silent in the other
+  # where it says `fatal: bad object refs/stash` and the "refs/stash is not
+  # absent" message degrades that into a guess across all four. So ask a second
+  # time, on this branch only, and let git speak for itself. `stash list` is
+  # silent in the other
   # three (rc 0, no stderr — measured, git 2.50.1), so `$diag` is empty there
   # and the line comes out exactly as it did before.
   #
@@ -490,10 +491,10 @@ elif [ "$stash_reflog_rc" -ne 0 ]; then
   # Its own sentence, and asked BEFORE the `-s` test the resolved path feeds:
   # `$stash_reflog` is empty here, `[ -s "" ]` is false, and the trailing
   # branch prints the confident `0` this exists to remove. It says only that
-  # the reflog could not be reached. The line below asserts what the reflog
-  # CONTAINS — "still names entries no ref points at" — and that is a claim
-  # about a file this state has not read; one sentence spanning both states
-  # is the conflation the header rule forbids.
+  # the reflog could not be reached. The `-s "$stash_reflog"` branch asserts
+  # what the reflog CONTAINS — "still names entries no ref points at" — and
+  # that is a claim about a file this state has not read; one sentence spanning
+  # both states is the conflation the header rule forbids.
   echo "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read" >&2
 elif [ -s "$stash_reflog" ]; then
   stash=null
