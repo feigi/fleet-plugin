@@ -466,13 +466,14 @@ const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
 
-// Resolved HERE, beside the required-args guard, not at the call site 500 lines
-// down (#275). The override is caller input and needs nothing from the diff, so
-// validating it late bought a full snapshot agent and a snapshot directory on
-// disk before a one-character typo in a key could be refused. Nothing was
-// silently wrong — it just failed later, and more expensively, than it could.
-// `null` when the override is absent; the size-tier fallback stays at the call
-// site, which is the only thing down there that needs `stats`.
+// Resolved HERE, beside the required-args guard, not at the `const dimensions =
+// explicitDimensions || selectDimensions(…)` call site (#275). The override is
+// caller input and needs nothing from the diff, so validating it late bought a
+// full snapshot agent and a snapshot directory on disk before a one-character
+// typo in a key could be refused. Nothing was silently wrong — it just failed
+// later, and more expensively, than it could. `null` when the override is
+// absent; the size-tier fallback stays at that call site, which is the only
+// thing there that needs `stats`.
 const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 
 // Thresholds are NOT redefined here. `single-file` is `files === 1` and `small`

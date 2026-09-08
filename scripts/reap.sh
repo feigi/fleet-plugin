@@ -185,9 +185,9 @@ keep() {
 # worktree status probes used to throw stderr away, so a `fatal:` at rc 128 named
 # no cause and a `warning:` at rc 0 (measured, PR #726 review — a
 # permission-denied ignored directory) reached nobody. The wrong fix is
-# `2>&1`: the very next line after one of these probes tests whether the
-# captured text is non-empty to decide dirty, so folding a warning in would
-# make a clean worktree with ANY git warning on it read as dirty forever.
+# `2>&1`: each of these probes is followed by a `[ -n "$gp_out" ]` dirty test,
+# which reads the captured text as content, so folding a warning in would make a
+# clean worktree with ANY git warning on it read as dirty forever.
 #
 # No temp file (this file creates none): git's stderr goes to fd3, which the
 # group below dupes from fd1 before git runs, so it lands live in the SAME

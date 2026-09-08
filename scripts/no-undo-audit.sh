@@ -441,9 +441,8 @@ if [ -n "$msg" ]; then
   # where it says `fatal: bad object refs/stash` and the "refs/stash is not
   # absent" message degrades that into a guess across all four. So ask a second
   # time, on this branch only, and let git speak for itself. `stash list` is
-  # silent in the other
-  # three (rc 0, no stderr — measured, git 2.50.1), so `$diag` is empty there
-  # and the line comes out exactly as it did before.
+  # silent in the other three (rc 0, no stderr — measured, git 2.50.1), so
+  # `$diag` is empty there and the line comes out exactly as it did before.
   #
   # CEILING: git is not silent in two of those three — only `stash list` is.
   # `show-ref`, called above with its stderr thrown away, prints `fatal: git

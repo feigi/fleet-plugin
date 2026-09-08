@@ -265,9 +265,8 @@ test("a rev-parse that cannot resolve origin/<branch> is fatal — the script st
   // produces this exact wording rather than a bare rev-parse's `ambiguous
   // argument`) is the other bracket: it proves rev-parse ran and failed HERE,
   // rather than this test passing off an earlier guard that stopped the script
-  // before it. Neither
-  // bracket names a `die` string, so rewording any guard's message — this one
-  // included — leaves both standing.
+  // before it. Neither bracket names a `die` string, so rewording any guard's
+  // message — this one included — leaves both standing.
   const w = repo(t);
   // The fixture of the case above: with no refspec configured the fetch still
   // succeeds, into FETCH_HEAD, so deleting the tracking ref leaves this guard to
