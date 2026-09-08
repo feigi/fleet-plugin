@@ -389,7 +389,7 @@ function readAgent(file, metaFile) {
   }
   catch (e) {
     metaFault = true;
-    warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other": ${e.message}`);
+    warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other" and labelling it from its filename: ${e.message}`);
   }
 
   let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
