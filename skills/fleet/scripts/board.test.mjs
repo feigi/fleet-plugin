@@ -543,6 +543,10 @@ test("a meta.json that exists but cannot be read is reported, not swallowed", ()
   const errs = withStderr(() => { s = gatherSpend({ dir }); });
   assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
   assert.match(errs[0], /agent-x\.meta\.json/);
+  // #686: the {} fallback drops the panel label to the filename stem too, not
+  // just the role — the warning must name both consequences, or the operator
+  // reading stderr learns the role changed and is never told the row was renamed.
+  assert.match(errs[0], /labelling it from its filename/);
   // Still BOOKED, not skipped. The transcript itself is readable, so letting the
   // fault throw would hand it to the per-file catch above and drop this agent's
   // real tokens from the totals — a wrong total in place of a wrong role.
@@ -552,6 +556,15 @@ test("a meta.json that exists but cannot be read is reported, not swallowed", ()
   // "other" and the bare filename — and metaErrors is the one field on this
   // return that says so, distinct from a genuinely zero reviewPct.
   assert.equal(s.metaErrors, 1);
+  // #686: pin the label fallback itself, not just the warning that announces it.
+  assert.equal(s.top[0].label, "x");
+});
+
+test("#686: an intact sidecar's description still wins as the label, unaffected", () => {
+  // The accept-path guard for #686: a fix aimed at the fallback label's wording
+  // must not start affecting the ordinary case where meta.json is fine.
+  const s = gatherSpend({ dir: fixture(TURN, { description: "Review PR 1" }) });
+  assert.equal(s.top[0].label, "Review PR 1");
 });
 
 test("a genuinely absent meta.json — the real unnamed agent — stays silent", () => {
