@@ -16,8 +16,12 @@
 # from an earlier tool call, for the reason reap.sh gives: the dangerous
 # direction is a worktree that gained work after it was checked. Only the dirty
 # check is also recomputed at the moment of the delete, by git itself — that is
-# what `worktree remove` without --force and `branch -d` are for, and it is why
-# both run before the label is dropped rather than after. That second opinion
+# what `worktree remove` without --force is for, and it is why it and the branch
+# delete both run before the label is dropped rather than after. That second
+# opinion is the worktree's alone: the branch delete is `-D`, authorized by the
+# `ahead` and `git cherry` guards below, because `-d`'s own opinion is measured
+# against local HEAD and answers a staleness question, not a safety one (#760).
+# That second opinion
 # covers the live-directory case ONLY: `worktree remove` gates its own clean
 # check on the same stat this script does, so wherever the path cannot be
 # stat'ed git reaches the same conclusion rather than an independent one, and
@@ -475,7 +479,7 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # Enumerate what landed, name the compensating action, still emit the receipt.
 #
 # WHAT LANDED decides the headline, never the call site: the first mutation
-# attempted — the worktree removal when there is one, `git branch -d` when the
+# attempted — the worktree removal when there is one, `git branch -D` when the
 # registration is already cleared — refuses with nothing landed, and announcing
 # a partial release over that overstates exactly the state this script exists to
 # report precisely. A partial release is a refusal that followed a successful
@@ -483,7 +487,7 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # preconditions, which means nothing was ATTEMPTED.
 #
 # The two are NOT a matched pair, and one evenly-shaped detail line asserted
-# that they were. `git branch -d` updates a ref, which lands or does not, so a
+# that they were. `git branch -D` updates a ref, which lands or does not, so a
 # boolean call log answers for it completely. `git worktree remove` has TWO
 # effects and drops them in order: it deletes the registration before the
 # directory and does not put the registration back when the directory delete
@@ -1218,7 +1222,7 @@ if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2
   [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label in-progress" >&2
   [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
-  [ "$has_branch" = true ] && echo "    would: git branch -d $branch" >&2
+  [ "$has_branch" = true ] && echo "    would: git branch -D $branch" >&2
 else
   # Label LAST. The two local deletes are the ones that refuse — that refusal is
   # the dirty check recomputed by git at the moment of the delete, so it is
@@ -1247,13 +1251,19 @@ else
   fi
 
   if [ "$has_branch" = true ]; then
-    # -d, never -D. Unlike reap.sh's [gone] branches, this one still has its
-    # upstream, so -d compares against THAT — origin/main for a fresh claim —
-    # and accepts an unmodified claim even when local main is behind. A refusal
-    # means the branch carries something the checks above did not see.
-    echo "\$ git branch -d $branch" >&2
-    if ! err=$(git branch -d "$branch" 2>&1); then
-      halt "git branch -d refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"
+    # -D, and authorized by the `ahead` and `git cherry` guards above and by
+    # nothing else — the same pairing reap.sh uses for its own [gone] branches.
+    # Both measure against $base, a remote-tracking ref; `-d` measures against
+    # HEAD and the branch's upstream, and a claim has no upstream until its
+    # first push (claim-ticket.sh passes --no-track, #760), so `-d` falls back
+    # to local HEAD alone and refuses a pristine claim whenever local main is
+    # behind origin/main — half-releasing it: worktree deleted, branch stranded,
+    # in-progress still on the issue. Measured. The guards above are strictly
+    # stronger than what `-d` would have checked: zero commits ahead of $base
+    # AND nothing patch-unique, both already blocking at exit 1 before here.
+    echo "\$ git branch -D $branch" >&2
+    if ! err=$(git branch -D "$branch" 2>&1); then
+      halt "git branch -D refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
     done_branch=true
   fi

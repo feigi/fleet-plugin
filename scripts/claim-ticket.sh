@@ -273,7 +273,7 @@ tmpl_stamp=${tmpl_stamp%% *}
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
   echo "    would: gh issue edit $issue --add-label in-progress" >&2
-  printf '    would: git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
+  printf '    would: git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
   printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
   printf '    would: write %s and add it to .git/info/exclude — skipped if %s is\n' "$runner" "$runner" >&2
   printf '      already tracked, checked out with the worktree (#55)\n' >&2
@@ -286,19 +286,31 @@ else
   echo "\$ gh issue edit $issue --add-label in-progress" >&2
   gh issue edit "$issue" --add-label in-progress >/dev/null || die "could not label issue $issue"
 
-  printf '$ git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
-  git worktree add "$wt" -b "$branch" origin/main >/dev/null || die "worktree add failed"
-
-  # `-b … origin/main` above sets $branch's upstream to origin/main, not to its
-  # own future remote ref — a bare `git push` then silently no-ops against
-  # origin/main instead of publishing $branch, and after merge the remote
-  # branch is gone but origin/main never is, so `[gone]` (what reap.sh keys on)
-  # never appears and the ticket stays permanently unclaimable. `--set-upstream-to`
-  # refuses here because origin/$branch does not exist yet; `git config` does
-  # not validate the ref, so it is the way to point the upstream at a ref that
-  # will only exist after the first push. #760
-  git -C "$wt" config "branch.$branch.remote" origin || die "could not set upstream remote for $branch"
-  git -C "$wt" config "branch.$branch.merge" "refs/heads/$branch" || die "could not set upstream ref for $branch"
+  # `--no-track`: without it, `-b … origin/main` leaves $branch tracking
+  # origin/main, so `@{u}` RESOLVES — to main. Every "did my push land?" check a
+  # member might reach for (`git rev-parse HEAD @{u}`, `git status -sb`) then
+  # answers a question about main and reads healthy no matter what the push did.
+  # That is #760's sharp half, measured on two live worktrees. Under
+  # push.default=upstream the same config is a live hazard rather than a
+  # misleading guard: a bare `git push` would push $branch's commits onto
+  # origin/main. (Under the default push.default=simple it refuses loudly, exit
+  # 128 — so the ticket's "silently no-ops" framing does not reproduce; the
+  # observed silent no-op came from a push through an explicit URL, which sets
+  # no upstream either way.) With no upstream, all of those fail loudly instead.
+  #
+  # No upstream at all, rather than one pre-seeded at refs/heads/$branch: git
+  # computes `%(upstream:track)` against the REMOTE ref, and an upstream naming
+  # a remote ref that has never existed reads as `[gone]`, not as "no upstream"
+  # — measured, a freshly claimed branch was reaped by `reap.sh --apply` before
+  # any work was done in it. The real upstream arrives with the documented first
+  # push, `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
+  # step 7; its no-lease fallback carries `-u` too), and only then can be `[gone]`.
+  #
+  # release-ticket.sh's branch delete is `-D` because of this line: `-d` measures
+  # an upstream-less branch against local HEAD and refuses a pristine claim
+  # whenever local main is behind origin/main.
+  printf '$ git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
+  git worktree add --no-track "$wt" -b "$branch" origin/main >/dev/null || die "worktree add failed"
 
   printf '$ (cd %s && %s)\n' "$wt" "$install" >&2
   (cd "$wt" && $install >/dev/null 2>&1) || die "install failed in $wt"

@@ -1775,16 +1775,32 @@ test("an already-dropped label still releases the worktree and branch", (t) => {
 });
 
 test("the script carries no escape hatch", () => {
-  // `git worktree remove --force` discards uncommitted work and `git branch -D`
-  // deletes commits that exist nowhere else — the two calls that make
-  // commit-commands:clean_gone unusable here, and the two a future edit would
-  // reach for the first time a precondition refuses.
+  // `git worktree remove --force` discards uncommitted work — the call that
+  // makes commit-commands:clean_gone unusable here, and the one a future edit
+  // would reach for the first time a precondition refuses. Still banned flat.
+  //
+  // `git branch -D` used to be banned flat beside it, on the same reasoning:
+  // it deletes commits that exist nowhere else. Since #760 a claim carries no
+  // upstream until its first push, so `-d` compares against local HEAD alone
+  // and refuses a pristine claim whenever local `main` is behind
+  // `origin/main` — half-releasing it. So the ban is narrowed rather than
+  // dropped: ONE `-D`, and only with the guards that make its premise false.
+  // `ahead` and `git cherry` both measure against `$base`, a remote-tracking
+  // ref, and both block at exit 1 before any delete, so a commit existing
+  // nowhere else cannot reach the call. A second `-D`, or this one with either
+  // guard removed, is still the edit this test exists to catch.
   const src = readFileSync(fileURLToPath(new URL("./release-ticket.sh", import.meta.url)), "utf8")
     .split("\n")
     .filter((l) => !l.trimStart().startsWith("#"))
     .join("\n");
   assert.doesNotMatch(src, /--force/);
-  assert.doesNotMatch(src, /branch\s+-D/);
+  // Matched on the INVOCATION, `$(git branch -D …)`, not on the string
+  // `branch -D` — that also appears in the dry-run plan, the echoed command
+  // and the halt message, all of which name the one call rather than being it.
+  assert.equal(src.match(/\$\(git branch -D /g)?.length, 1, "exactly one authorized force-delete");
+  assert.doesNotMatch(src, /\$\(git branch -d /, "and no -d, which refuses on a stale local main");
+  assert.match(src, /ahead=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
+  assert.match(src, /cherry=\$\(git cherry "\$base" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");
 });
 
 test("usage errors exit 2", (t) => {
@@ -1868,7 +1884,7 @@ test("a tracker that fails after both deletes still emits a receipt", (t) => {
   // caller cannot reconstruct by looking, and the one it must not guess at.
   // `die` printed prose and exited before every printf, so stdout was empty
   // exactly there. Of the other two halt() sites, the worktree removal is
-  // reached with nothing deleted and `git branch -d` with the worktree already
+  // reached with nothing deleted and `git branch -D` with the worktree already
   // gone — which is why this one is the only PARTIALLY RELEASED naming both.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
@@ -1910,7 +1926,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // The measured outcome, not the exit code: the shim refuses before real git
   // runs, so the registration and the directory really are both still there and
   // `Unreleased` is what the probe finds. The half that is a call log still
-  // reads as one — the line is deliberately uneven, because `git branch -d`
+  // reads as one — the line is deliberately uneven, because `git branch -D`
   // lands atomically and `git worktree remove` does not.
   assert.ok(
     none.stderr.includes(`worktree ${wt} is Unreleased — registration and directory both still present`),
@@ -1932,11 +1948,11 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // release takes, the other being both deletes landing and the label edit
   // refusing, pinned by the tracker case above. Runs second on purpose: it
   // consumes the worktree the case above left standing. Keyed on what landed
-  // and not on the call site, since this same `git branch -d` refusal is
+  // and not on the call site, since this same `git branch -D` refusal is
   // reached with nothing removed on a claim that has no worktree.
-  const partial = release(r, c, { env: { GIT_FAIL: "branch -d" } });
+  const partial = release(r, c, { env: { GIT_FAIL: "branch -D" } });
   assert.equal(partial.code, 2);
-  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git branch -d refused/);
+  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git branch -D refused/);
   assert.ok(
     partial.stderr.includes(`worktree ${wt} is Released — registration and directory both gone`),
     `a removal that returned 0 really did both deletes: ${partial.stderr}`,
@@ -1945,7 +1961,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   assert.equal(
     partial.out,
     receipt(
-      "git branch -d refused fix/9-release-ticket: refused by the git shim" +
+      "git branch -D refused fix/9-release-ticket: refused by the git shim" +
         ` — worktree ${wt} is Released — registration and directory both gone`,
     ),
   );
@@ -1956,7 +1972,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   // The two cases above leave the design's central claim unpinned: both reach
   // `git worktree remove` first, so keying the headline on the CALL SITE passes
   // them. A claim whose worktree was removed by hand separates the two — the
-  // removal is skipped entirely, so `git branch -d` halts with nothing landed,
+  // removal is skipped entirely, so `git branch -D` halts with nothing landed,
   // and the branch delete then halts with a branch gone and no worktree ever
   // touched. Without this the (false, true) row of the table is unreachable
   // too, and dropping `done_branch` from the condition survives the suite.
@@ -1967,9 +1983,9 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
 
   // Call site says "the branch delete refused"; what landed says nothing did.
-  const none = release(r, c, { env: { GIT_FAIL: "branch -d" } });
+  const none = release(r, c, { env: { GIT_FAIL: "branch -D" } });
   assert.equal(none.code, 2);
-  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -d refused/);
+  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -D refused/);
   assert.doesNotMatch(none.stderr, /PARTIALLY/, "the same call site as the partial case above, and nothing landed");
   assert.match(none.stderr, /branch deleted: false, in-progress: still on the issue/, "the detail line agrees");
   // No worktree line at all. `Unreleased` means registration and directory both
@@ -1979,7 +1995,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.equal(
     none.out,
     '{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"","worktreeRewritten":false,"label":true,' +
-      '"released":false,"applied":true,"blockers":["git branch -d refused fix/9-release-ticket: ' +
+      '"released":false,"applied":true,"blockers":["git branch -D refused fix/9-release-ticket: ' +
       'refused by the git shim"]}\n',
     "an empty worktree field, and the receipt still whole",
   );
@@ -3295,7 +3311,7 @@ test("an ambient GIT_DIR does not aim the release at another repository (#427)",
   // A second clone of the same origin, carrying a branch of the claim's exact
   // name, is what makes that damage legible: with only GIT_WORK_TREE unset,
   // discovery follows the ambient GIT_DIR, the script finds the claim's branch
-  // name over THERE, and `git branch -d` — no `-C` either — deletes it in the
+  // name over THERE, and `git branch -D` — no `-C` either — deletes it in the
   // wrong repository while reporting `released: true` and leaving this
   // repository's own directory, worktree and branch all standing. Measured:
   // both of the last two assertions go red under that mutation, and either
