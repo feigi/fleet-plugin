@@ -440,9 +440,9 @@ test("the fix commit is gated on a test run, in both files", () => {
   assert.match(step3, /tests 0/, "step 3 no longer treats a zero-test run as a failure");
   // #143: `tests 0` was the whole rule, and two runs that report counts still
   // walk through it — every test skipped, and a partial tree. Both are scoped to
-  // step 3 for the same reason the line above is: the Specialists section states
-  // the same widened rule, so a file-wide match is satisfied by that prose no
-  // matter what this step says.
+  // step 3 for the same reason the `tests 0` assert is: the Specialists section
+  // states the same widened rule, so a file-wide match is satisfied by that
+  // prose no matter what this step says.
   assert.match(
     step3,
     /0 passes with no failures/,

@@ -204,11 +204,13 @@ test("a failed fetch is fatal — the script stops rather than answering off a s
   // of them can see whether this one was fatal.
   //
   // What only fatality produces is the absence of progress: the `tip =` trace is
-  // echoed on the line after this guard, so it appears if and only if execution
-  // got past it. That line is pinned verbatim by "a healthy run stays quiet", so
-  // it cannot be reworded out from under this assertion unseen — and unlike a
-  // `doesNotMatch` on some later guard's message, it does not depend on which of
-  // them happens to fire, or on how it is worded.
+  // echoed once the `rev-parse --verify` guard that follows this one has passed
+  // — and it does pass here, off the tracking ref — so the trace appears if and
+  // only if execution got past THIS guard. That line is pinned verbatim by "a
+  // healthy run stays quiet", so it cannot be reworded out from under this
+  // assertion unseen — and unlike a `doesNotMatch` on some later guard's
+  // message, it does not depend on which of them happens to fire, or on how it
+  // is worded.
   const w = repo(t);
   // One fixture: a bad URL and a removed remote both take this guard's `|| die`
   // branch, differing only in git's own line — the distinction #565 pinned next
@@ -256,15 +258,15 @@ test("a rev-parse that cannot resolve origin/<branch> is fatal — the script st
   // conjunction of those three can see whether this guard was fatal.
   //
   // What only fatality produces is the absence of progress. The `tip =` trace is
-  // echoed on the line after this guard, so it appears if and only if execution
-  // got past it, and it is pinned verbatim by "a healthy run stays quiet", so it
-  // cannot be reworded out from under this assertion unseen. git's own `Needed a
-  // single revision` (#1146 added --verify, which is what produces this exact
-  // wording rather than a bare rev-parse's `ambiguous argument`) is the other
-  // bracket: it proves rev-parse ran and failed HERE, rather than this test
-  // passing off an earlier guard that stopped the script before it. Neither
-  // bracket names a `die` string, so rewording any guard's message — this one
-  // included — leaves both standing.
+  // echoed by the `echo` this guard falls through to, so it appears if and only
+  // if execution got past it, and it is pinned verbatim by "a healthy run stays
+  // quiet", so it cannot be reworded out from under this assertion unseen.
+  // git's own `Needed a single revision` (#1146 added --verify, which is what
+  // produces this exact wording rather than a bare rev-parse's `ambiguous
+  // argument`) is the other bracket: it proves rev-parse ran and failed HERE,
+  // rather than this test passing off an earlier guard that stopped the script
+  // before it. Neither bracket names a `die` string, so rewording any guard's
+  // message — this one included — leaves both standing.
   const w = repo(t);
   // The fixture of the case above: with no refspec configured the fetch still
   // succeeds, into FETCH_HEAD, so deleting the tracking ref leaves this guard to
@@ -398,9 +400,11 @@ test("an object that is present but is not a commit is not reported as absent", 
 
 test("a sha the cat-file guard rejects is fatal — the script stops rather than asking merge-base about it", (t) => {
   // #580's second site, and the one where the #574 remedy does not transcribe.
-  // The guards around this one each have a progress marker on the line below
-  // them; this one has none. The script emits nothing between it and the
-  // merge-base status guard, and on both fixtures its two sibling cases use — 40
+  // The guards around this one each emit a progress marker once they pass — the
+  // `tip =` trace after the rev-parse guard, the `IS reachable` / `is NOT
+  // reachable` echoes inside the merge-base branch; this one emits none. The
+  // script emits nothing between it and the merge-base status guard, and on
+  // both fixtures its two sibling cases use — 40
   // zeros, and a tree object — merge-base cannot resolve the object either, so
   // it exits 128 and that status guard kills the run. Measured: exit 2, empty
   // stdout and this guard's own line on stderr, all reproduced, and the suite

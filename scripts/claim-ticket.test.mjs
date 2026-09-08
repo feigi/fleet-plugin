@@ -421,8 +421,9 @@ test("runner: a relative argument through the shared ancestor is refused from ou
 // runner's own location, so the two are no longer the same anchor and a
 // subdirectory invocation exercises a different path than a root one. Measured:
 // anchoring the argument at `$root` instead (`cd -- "$root/$arg"`, a one-token
-// slip now that `$root` sits on the line above) is green on every OTHER test in
-// this file while reporting the vendored test as a pass from one directory down.
+// slip now that claim-ticket.sh's `root=` assignment sits directly above its
+// `resolved=` one) is green on every OTHER test in this file while reporting
+// the vendored test as a pass from one directory down.
 // Second leg stops the fix degenerating into "refuse everything named from a
 // subdirectory"; the stderr assert is load-bearing, since status alone cannot
 // tell a refusal from a vendored test that threw.

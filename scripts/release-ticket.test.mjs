@@ -1683,8 +1683,8 @@ test("the dry run's plan names a backslashed worktree path verbatim", (t) => {
   // The plan is the operator's only chance to see what `--apply` would delete,
   // and it ran through `echo`, which expands escapes in its operand: a `\c` in
   // the path truncated the line at `back` and swallowed its newline, so the
-  // plan named a directory that does not exist and the line after it collided
-  // onto the remains (#484).
+  // plan named a directory that does not exist and its next line of output
+  // collided onto the remains (#484).
   //
   // `back\clue`, not the `back\slash` the lock fixture above uses: `\s` is an
   // unknown escape and passes through `echo` untouched, which is what makes a
