@@ -134,6 +134,26 @@ const SUITE = {
   "empty/README.md": "",
 };
 
+// `-b … origin/main` on `git worktree add` sets the new branch's upstream to
+// origin/main, not to its own future remote ref (#760): a bare `git push`
+// then silently no-ops against main, and after merge the remote branch is
+// gone but origin/main never is, so reap.sh's `[gone]` sweep can never see
+// it. Pinned on the config directly, not on `@{u}`: origin/$branch does not
+// exist yet, so `@{u}` is `fatal: ambiguous argument` right after a correct
+// claim too (measured against a branch that DID push -u and had its remote
+// deleted) — a red herring, not a discriminator.
+test("claim points the new branch's upstream at its own ref, not origin/main", () => {
+  const { wt } = apply(SUITE);
+  const branch = execFileSync("git", ["-C", wt, "config", "--get", "branch.fix/42-slug.merge"], {
+    encoding: "utf8",
+  }).trim();
+  assert.equal(branch, "refs/heads/fix/42-slug");
+  const remote = execFileSync("git", ["-C", wt, "config", "--get", "branch.fix/42-slug.remote"], {
+    encoding: "utf8",
+  }).trim();
+  assert.equal(remote, "origin");
+});
+
 // `node --test <dir>` resolves the directory as a module specifier and dies
 // with MODULE_NOT_FOUND before a single test runs. A directory is the
 // ergonomic way to say "run this suite", and the red it produced was read as

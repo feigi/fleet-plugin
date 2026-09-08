@@ -289,6 +289,17 @@ else
   printf '$ git worktree add %s -b %s origin/main\n' "$wt" "$branch" >&2
   git worktree add "$wt" -b "$branch" origin/main >/dev/null || die "worktree add failed"
 
+  # `-b … origin/main` above sets $branch's upstream to origin/main, not to its
+  # own future remote ref — a bare `git push` then silently no-ops against
+  # origin/main instead of publishing $branch, and after merge the remote
+  # branch is gone but origin/main never is, so `[gone]` (what reap.sh keys on)
+  # never appears and the ticket stays permanently unclaimable. `--set-upstream-to`
+  # refuses here because origin/$branch does not exist yet; `git config` does
+  # not validate the ref, so it is the way to point the upstream at a ref that
+  # will only exist after the first push. #760
+  git -C "$wt" config "branch.$branch.remote" origin || die "could not set upstream remote for $branch"
+  git -C "$wt" config "branch.$branch.merge" "refs/heads/$branch" || die "could not set upstream ref for $branch"
+
   printf '$ (cd %s && %s)\n' "$wt" "$install" >&2
   (cd "$wt" && $install >/dev/null 2>&1) || die "install failed in $wt"
 
