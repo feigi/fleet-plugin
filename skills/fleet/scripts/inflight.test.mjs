@@ -854,61 +854,41 @@ test("probe 3: a stray DIRECTORY in the registry is not a worktree git failed to
   assert.equal(JSON.parse(r.stdout).taken, false);
 });
 
-test("probe 3: a registry entry git cannot even open is unknown, not a stray to skip", (t) => {
+test("probe 3: an entry git cannot fully read is unknown, not a stray to skip (#697)", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
-  // The other half of that skip, and why it reads `ls`'s STATUS rather than
-  // only its output: an entry chmod'd 000 answers "empty" to precisely the same
-  // `ls -A` test a stray directory does. But git DROPS this one (measured: 2
-  // listed, then 1), so skipping it as "not git's" would reinstate the silent
-  // free — the same defect one layer in from the one this whole change removes.
-  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
-  const entries = readdirSync(join(repo, ".git", "worktrees"));
-  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
-  const entry = join(repo, ".git", "worktrees", entries[0]);
+  // Two EACCES shapes, both landing on the same wrong "empty" answer if the
+  // skip reads only `ls`'s output. 0o000 is unsearchable, so nothing inside it
+  // — `gitdir` included — resolves at all. 0o111 is searchable, so an `-x`
+  // test passes it and `gitdir` still resolves, but the entry itself is not
+  // readable: `ls -A` fails EACCES and — its stderr discarded — prints exactly
+  // what an empty stray `mkdir` prints. Skip on the OUTPUT alone and either
+  // shape is waved through as "not git's"; git drops both too (measured: 2
+  // listed, then 1), the counts AGREE, no mismatch fires, and the probe
+  // answers `taken=false` for a ticket whose checkout is still on disk.
+  for (const mode of [0o000, 0o111]) {
+    const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+    const entries = readdirSync(join(repo, ".git", "worktrees"));
+    assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
+    const entry = join(repo, ".git", "worktrees", entries[0]);
+    const gitdir = join(entry, "gitdir");
 
-  chmodSync(entry, 0o000);
-  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
-  // Restored before the first assert, or the suite's own cleanup inherits it.
-  chmodSync(entry, 0o755);
+    // 0o111 keeps the entry searchable, so `gitdir` inside it still resolves —
+    // blind it too, or this case degenerates into the 0o000 one.
+    if (mode === 0o111) chmodSync(gitdir, 0o000);
+    chmodSync(entry, mode);
+    const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+    // Restored innermost first, before the first assert, or the suite's own
+    // cleanup inherits it.
+    chmodSync(entry, 0o755);
+    if (mode === 0o111) chmodSync(gitdir, 0o644);
 
-  assert.equal(r.status, 2);
-  const json = JSON.parse(r.stdout);
-  assert.deepEqual(json.hits, []);
-  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
-  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
-});
-
-test("probe 3: an entry that is searchable but UNREADABLE is unknown too, not an empty stray (#697)", (t) => {
-  if (EUID0) return t.skip(NO_DENIAL);
-  // The half an `-x` test cannot reach, and the one that costs a member their
-  // work: 0111 is searchable, so `-x` passes it, but it is not readable, so
-  // `ls -A` fails EACCES and — its stderr discarded — prints exactly what an
-  // empty stray `mkdir` prints. Skip on the OUTPUT alone and this entry is
-  // waved through as "not git's"; git drops it too (the `gitdir` inside is
-  // unreadable), the counts AGREE at 0, no mismatch fires, and the probe
-  // answers `taken=false` for a ticket whose checkout is still on disk. Both
-  // anomalies together is what makes this the dangerous one — they cancel,
-  // where either alone disagrees in the safe direction.
-  const { repo, env } = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
-  const entries = readdirSync(join(repo, ".git", "worktrees"));
-  assert.equal(entries.length, 1, "fixture: exactly one linked worktree registered");
-  const entry = join(repo, ".git", "worktrees", entries[0]);
-  const gitdir = join(entry, "gitdir");
-
-  chmodSync(gitdir, 0o000);
-  chmodSync(entry, 0o111);
-  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
-  // Restored innermost first, before the first assert, or the suite's own
-  // cleanup inherits it. 0111 keeps the entry searchable, so naming `gitdir`
-  // inside it still resolves while the restore runs.
-  chmodSync(gitdir, 0o644);
-  chmodSync(entry, 0o755);
-
-  assert.equal(r.status, 2, "an entry we could not read is unknown, never the exit 0 that means free");
-  const json = JSON.parse(r.stdout);
-  assert.deepEqual(json.hits, []);
-  assert.deepEqual(json.unknown, ["local"]);
-  assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/);
+    const at = `mode 0o${mode.toString(8).padStart(3, "0")}`;
+    assert.equal(r.status, 2, `${at}: an entry we could not read is unknown, never the exit 0 that means free`);
+    const json = JSON.parse(r.stdout);
+    assert.deepEqual(json.hits, [], at);
+    assert.deepEqual(json.unknown, ["local"], `#96: exit 2 now carries a payload naming the probe, ${at}`);
+    assert.match(r.stderr, /git listed 0 worktrees for 1 registry entries/, at);
+  }
 });
 
 test("probe 3: a registry entry whose gitdir is GONE is unknown, not a stray to skip", (t) => {

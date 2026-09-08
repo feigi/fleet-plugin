@@ -588,10 +588,9 @@ fi
 # and this comment no longer claims they match. Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
 # direction split — were ported to that copy by #395; the recount below is the
-# one still open against it (#694). The divergence now runs the other way too:
-# that copy's skip reads `ls`'s exit STATUS, so an entry it could not list is
-# counted rather than skipped as a stray, where the `-x` test below covers only
-# the unsearchable half of that (#697).
+# one still open against it (#694). That copy's skip reading only `ls`'s output,
+# not its exit STATUS, was the last divergence — this change closes it (#697):
+# both copies' skip now reads the exit status.
 #
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
