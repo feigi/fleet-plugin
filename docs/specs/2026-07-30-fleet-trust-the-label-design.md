@@ -3,6 +3,24 @@
 Date: 2026-07-30
 Status: implemented in PR #59 (`candidates.mjs`, `run-team`, `sizing-a-ticket`, `next-ticket`)
 
+> **Superseded in part.** A member demotes nothing itself. That applies to every
+> statement of member self-demotion below, of which there are three: the
+> `## Phase 2` opening paragraph — *"it bails before implementing, **naming the
+> cause**, and demotes accordingly"* — together with the cause/label table it
+> introduces and the *"Either way:"* sentence closing that block; the later
+> undecided-case paragraph, the one on a brief that will not support a plan,
+> instructing *"bail and demote, do not brainstorm"*; and the `## Edits` ledger
+> row for `run-team:133-135`, *"bail+demote if undecided"*.
+> `skills/run-team/SKILL.md` now splits those halves across the two roles. Its
+> member-facing sizing instruction states *"A brief that will not support a plan
+> is the undecided case: bail and name the cause, never a heavy row"*, and the
+> line closing its phase-2 dispatch section, addressed to the controller, states
+> *"A member that bails demotes nothing itself; demotion by cause is yours"*.
+> Demotion is the controller's phase-3 **Implementer bails before implementing**
+> action, which carries the cause-to-label table and the `gh issue edit` that
+> applies it. The paragraphs below are left as written, as the record of what was
+> designed on 2026-07-30; do not act on their demotion instructions.
+
 Artifacts: `skills/fleet/skills/run-team/SKILL.md`,
 `skills/fleet/skills/sizing-a-ticket/SKILL.md`,
 `skills/fleet/scripts/candidates.mjs` (repo `feigi/claude-config`)
