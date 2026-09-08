@@ -1,6 +1,6 @@
 # ledger.mjs's Verdict Region
 
-`skills/fleet/scripts/ledger.mjs` computes a `verdict` — one of `already-filed`,
+`scripts/ledger.mjs` computes a `verdict` — one of `already-filed`,
 `tracker-hit`, `soft-hit`, `clean`, `unverified` — from two sites: a nested ternary
 that yields every value except `already-filed`, and the early-return literal in the
 exact-match short-circuit that emits that one. The domain exists only as string
@@ -71,7 +71,7 @@ For the domain constant: a verdict value constructed **outside this module** —
 another script emitting one, or a value read from a payload — at which point there
 is a boundary for a predicate to guard and the tests no longer cover the whole
 surface. Outside the *ternary* is not the bar: the short-circuit already emits one
-there, as `grep -n 'verdict: *"' skills/fleet/scripts/ledger.mjs` shows.
+there, as `grep -n 'verdict: *"' scripts/ledger.mjs` shows.
 
 For the restyling: a measured defect traced to the expression's shape, or an
 actual project rule about ternaries, in which case it applies to the tree rather

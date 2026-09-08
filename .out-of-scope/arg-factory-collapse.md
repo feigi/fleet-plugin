@@ -1,6 +1,6 @@
 # arg.mjs Factory Collapse
 
-`skills/fleet/scripts/arg.mjs` exports separate factories — `makeDie(name)`,
+`scripts/arg.mjs` exports separate factories — `makeDie(name)`,
 `makeArg(die)`, `makeHas(die)`, `makeSweep(die)` — and each consumer wires them
 in a short stanza:
 

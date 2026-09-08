@@ -47,7 +47,7 @@ looks arbitrary.
 
 Write one deliberate `Closes #N` and give every other issue mention a word in
 front of it. That is how `next-ticket` has fleet implementers open PRs
-(`skills/fleet/skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
+(`skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
 go into one `--body`, so the single keyword there is the deliberate one, and
 their PRs are the model.
 

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "fleet-plugin",
+  "description": "The agent fleet: a run-team controller, a merge bot, a PR reviewer, and the ticket pipeline they share.",
+  "owner": {
+    "name": "Christian Ziegler",
+    "url": "https://github.com/feigi"
+  },
+  "plugins": [
+    {
+      "name": "fleet",
+      "source": "./",
+      "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
+      "category": "productivity"
+    }
+  ]
+}

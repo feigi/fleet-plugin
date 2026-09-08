@@ -30,7 +30,7 @@
 # a workflow, so logic living in `run: |` is reachable only by assertions over
 # its source text — and a text assertion that survives deleting the behaviour
 # it names checks nothing (measured in #161's review). Extracted, the loop runs
-# under a stub `gh` in skills/fleet/scripts/rerun-rebase-check.test.mjs.
+# under a stub `gh` in scripts/rerun-rebase-check.test.mjs.
 set -euo pipefail
 
 if [ "$#" -lt 4 ]; then

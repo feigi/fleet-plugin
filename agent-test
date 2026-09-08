@@ -8,7 +8,7 @@
 # This is a BOOTSTRAP, not the runner. The runner is 24 KB of measured
 # guards — the directory-expansion shim, the node_modules refusals, the
 # zero-match refusal that stops a green over a suite nobody ran — and it is
-# EMITTED by skills/fleet/scripts/claim-ticket.sh. Committing a copy of it here
+# EMITTED by scripts/claim-ticket.sh. Committing a copy of it here
 # would make this file the same decoy every `.worktrees/*/agent-test` already
 # is, frozen at the commit that added it while the emitter moved on, and
 # tracked, so it would read as the authoritative one. Ask the emitter instead:
@@ -37,8 +37,8 @@ issue=${issue%%-*}
 case $issue in ''|*[!0-9]*|0?*) issue=0 ;; esac
 
 gen=$here/.agent-test.sh
-if ! materialize=$(cd "$here" && ./skills/fleet/scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
-  printf 'agent-test: could not materialize the runner from skills/fleet/scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
+if ! materialize=$(cd "$here" && ./scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
+  printf 'agent-test: could not materialize the runner from scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
   exit 1
 fi
 exec "$gen" "$@"

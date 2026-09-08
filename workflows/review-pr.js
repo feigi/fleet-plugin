@@ -233,7 +233,7 @@ function usableDiff(snap) {
 // recurring pin defect.
 //
 // The read-rule paragraph of the "Specialists" section of
-// `skills/fleet/commands/review-and-fix.md` ("`git show <sha>:<path>` is the
+// `commands/review-and-fix.md` ("`git show <sha>:<path>` is the
 // source of truth" … "Then bound the read") owns the prose rationale, for the
 // hand-dispatch path. This is the operational form for the workflow path, where
 // the premise differs: there is no live worktree to be contaminated BY, because
@@ -611,7 +611,7 @@ function selectDimensions(all, stats) {
   return dims;
 }
 
-// The "Specialists" section of `skills/fleet/commands/review-and-fix.md`
+// The "Specialists" section of `commands/review-and-fix.md`
 // documents `args.dimensions` as accepting "keys or dimension objects" — but
 // until now only objects worked: a key array passed straight through and every
 // dereference below (`d.key`, `d.prompt`, `d.model`, `d.agentType` — FOUR, not
@@ -818,7 +818,7 @@ Then derive this repository's own test command — reusing the SAME inference
 claim-ticket.sh runs at claim time, refusal included, so nothing here
 reinvents it:
 
-    ~/.claude/skills/fleet/scripts/derive-testcmd.sh ${worktree} HEAD
+    ~/dev/fleet-plugin/scripts/derive-testcmd.sh ${worktree} HEAD
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\` — never invent a
@@ -826,7 +826,7 @@ command of your own when it refuses.
 
 Then size the diff:
 
-    ~/.claude/skills/fleet/scripts/diff-stats.mjs --pr ${pr}
+    ~/dev/fleet-plugin/scripts/diff-stats.mjs --pr ${pr}
 
 Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value the block above printed and
 \`path\` = the SNAPSHOT_DEST value it printed, both copied verbatim. Each ends
@@ -939,7 +939,7 @@ their command failed. Do not modify ${worktree}.`,
 // presence as a result. Cited as observed, not as a specification: the
 // registry is the harness's, and nothing in this repo can settle what its
 // loader guarantees. The shape rule is guarded for the files in `workflows/`
-// by skills/fleet/scripts/workflow-meta-first.test.mjs, which discovers them
+// by scripts/workflow-meta-first.test.mjs, which discovers them
 // rather than listing them; a throwaway in a scratch project is guarded by
 // nothing, which is where it bit. (#853)
 //

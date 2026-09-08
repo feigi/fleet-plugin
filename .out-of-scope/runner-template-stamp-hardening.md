@@ -19,7 +19,7 @@
 > that sibling emitted runners of very different sizes under one stamp.
 >
 > Nothing would have caught this drift. The repo's line-distance prose gate
-> walks `skills/fleet/scripts/` and keys on `.sh`/`.mjs`/`.js` comment markers,
+> walks `scripts/` and keys on `.sh`/`.mjs`/`.js` comment markers,
 > so it scans no file in this directory — measured, its own idiom pattern does
 > match the sentence quoted above. The analysis below is left as written, in
 > the tense it was written in.

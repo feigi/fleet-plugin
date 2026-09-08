@@ -2,7 +2,7 @@
 
 `workflows/review-pr.js` states a rule in a comment above `DEFAULT_DIMENSIONS`
 — *downgrade a dimension's model only where a MISS by the cheaper finder is
-RECOVERABLE* — and `skills/fleet/scripts/select-dimensions.test.mjs` pins the
+RECOVERABLE* — and `scripts/select-dimensions.test.mjs` pins the
 resulting six model choices as a literal list. Nothing connects the two: no
 mechanism derives a model from the rule.
 
