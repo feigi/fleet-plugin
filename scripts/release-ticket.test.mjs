@@ -1804,17 +1804,23 @@ test("the script carries no escape hatch", () => {
   // so a `$(…)`-anchored count scored it as zero and let it through. What
   // separates a call from a mention is the mention's `echo`/`printf`/`halt`
   // prefix — the dry-run plan, the echoed command and the halt message all
-  // name the one call rather than being it.
+  // name the one call rather than being it. That wrapper has to be the
+  // command the `-D` actually belongs to, not merely a word earlier on the
+  // line: `echo x && git branch -D "$stray"` is a real second delete, and a
+  // prefix-wide match excused the whole line. So cut the prefix at the last
+  // `;`/`&&`/`||` and require the wrapper at the head of what remains — the
+  // dry-run plan's own `[ … ] && echo` mention still lands there.
   const forceDeletes = src
     .split("\n")
     .filter((l) => /\bgit branch -D\b/.test(l))
-    .filter((l) => !/\b(echo|printf|halt|die|block)\b/.test(l.slice(0, l.indexOf("git branch -D"))));
+    .filter((l) => !/^\s*(echo|printf|halt|die|block)\b/.test(l.slice(0, l.indexOf("git branch -D")).split(/;|&&|\|\|/).pop()));
   assert.equal(forceDeletes.length, 1, "exactly one authorized force-delete");
   assert.match(forceDeletes[0], /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
   assert.doesNotMatch(src, /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
-  // The recount that replaces `-d`'s own delete-time refusal. Without it a
+  // The recount standing in for `-d`'s own delete-time refusal. Without it a
   // commit landing across the `gh issue view` between the guards and the
-  // delete is destroyed at exit 0 with "released":true.
+  // delete is destroyed at exit 0 with "released":true. It narrows that window
+  // rather than closing it — see the delete site's comment.
   assert.match(src, /n=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "and the delete-time recount stands");
   assert.match(src, /ahead=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
   assert.match(src, /cherry=\$\(git cherry "\$base" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");

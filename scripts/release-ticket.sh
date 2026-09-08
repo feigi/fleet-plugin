@@ -25,11 +25,10 @@
 # than an independent one, and the guard at the dirty check below is left as
 # sole arbiter — which is why it establishes absence instead of inferring it.
 #
-# The commit check's is this script's own. The branch delete is `-D`, which
-# refuses nothing, so the `ahead` count is re-run against $base immediately
-# before it. `-d` cannot supply that opinion: it measures against local HEAD,
-# and a claim has no upstream (#760), so it answers a staleness question rather
-# than a safety one.
+# The commit check's is this script's own: `-D` refuses nothing, so the `ahead`
+# count is re-run against $base immediately before it. Why `-D` and not `-d`,
+# and what that recount does and does not cover, is argued once at the delete
+# site below — don't restate it here.
 set -eu
 
 # Byte semantics for the `awk`, `grep`, `sed` and `tr` below — all four really
@@ -1268,7 +1267,13 @@ else
     # landing in this worktree across that call reaches the delete having been
     # measured by nothing — destroyed at exit 0 with "released":true and an
     # empty blockers list. `-d` used to refuse that ("not fully merged"); the
-    # recount is what replaces it. Measured against $base, not local HEAD, so it
+    # recount narrows that window rather than closing it, because it is its own
+    # git invocation: a commit landing in the milliseconds between this count
+    # and the `git branch -D` below is still force-deleted at exit 0. Closing it
+    # would take a compare-and-swap on the SHA counted here (`git update-ref -d
+    # refs/heads/$branch $tip`), which does not carry `-D`'s own refusal on a
+    # branch checked out in a registered worktree — trading this window for that
+    # gap, deliberately not taken. Measured against $base, not local HEAD, so it
     # answers the safety question without reintroducing the staleness `-d` fails
     # on (#760). The `git cherry` half is deliberately not recounted: a commit
     # that landed in the window is ahead of $base by construction, and one
