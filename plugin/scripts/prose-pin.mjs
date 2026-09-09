@@ -20,3 +20,22 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.repla
 // `#`. Strip the gutter and rejoin with the single inter-word space a wrap point
 // replaces.
 export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
+
+// A markdown blockquote wraps every line in a leading `>` gutter, so a
+// dispatch instruction embedded inside a quoted prompt (#1341's grandchild
+// recipe, nested under run-team's fix-applier prompt) does not begin with its
+// harness token until the gutter is stripped. Mirrors stripHashGutter's
+// reason for existing, one gutter shape later.
+export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*>+\s?/, "")).join("\n");
+
+// A Marked line (CONTEXT.md § Dialect) is `CLAUDE: ` or `OMP: ` as the
+// line's first token, once any comment/quote gutter is stripped — never a
+// keyword search, or the divergence hazard #1299 named (a line loose enough
+// to match both dialects matches neither claim) reappears one gutter later.
+// Asserts exactly one such line for `label` exists, so a duplicated or
+// deleted marker reds here rather than silently matching the wrong copy.
+export function markedLine(text, label, what) {
+  const lines = text.split("\n").filter((l) => new RegExp(`^\\s*${label}: `).test(l));
+  assert.equal(lines.length, 1, `${what}: expected exactly one "${label}: " marked line, found ${lines.length}`);
+  return lines[0];
+}
