@@ -134,6 +134,14 @@ const SUITE = {
   "empty/README.md": "",
 };
 
+// #760 — that a claim carries no upstream, and what that means to reap.sh and
+// release-ticket.sh — is pinned in claim-lifecycle.test.mjs, not here. This
+// file's `repo()` fixture fabricates refs/remotes/origin/main with
+// `update-ref` and configures no `origin` remote, so git declines to set an
+// upstream from it at all: every assertion about upstream config passes here
+// whatever `worktree add` was handed. Measured — a config pin in this fixture
+// stayed green with `--no-track` removed.
+
 // `node --test <dir>` resolves the directory as a module specifier and dies
 // with MODULE_NOT_FOUND before a single test runs. A directory is the
 // ergonomic way to say "run this suite", and the red it produced was read as

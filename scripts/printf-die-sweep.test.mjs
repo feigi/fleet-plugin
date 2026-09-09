@@ -310,7 +310,7 @@ test("claim-ticket: the dry-run plan names a backslashed worktree path verbatim"
   const r = run(w, "claim-ticket.sh", ["7", "back\\clue", "fix"]);
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(
-    r.stderr.includes("would: git worktree add .worktrees/7-back\\clue -b fix/7-back\\clue origin/main\n"),
+    r.stderr.includes("would: git worktree add --no-track .worktrees/7-back\\clue -b fix/7-back\\clue origin/main\n"),
     `the planned path and branch must arrive verbatim — \`echo\` truncates both at the \`\\c\`; got ${JSON.stringify(r.stderr)}`,
   );
 });

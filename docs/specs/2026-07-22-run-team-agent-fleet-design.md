@@ -253,9 +253,16 @@ subagent.
 
 ```bash
 gh issue edit <N> --add-label in-progress
-git worktree add .worktrees/<N>-slug -b <type>/<N>-slug origin/main
+git worktree add --no-track .worktrees/<N>-slug -b <type>/<N>-slug origin/main
 (cd .worktrees/<N>-slug && npm install)
 ```
+
+`--no-track` (#760): without it `-b <type>/<N>-slug origin/main` leaves the claim
+tracking `origin/main`, so `@{u}` resolves — to main — and every "did my push
+land?" check a member reaches for answers a question about main and reads healthy
+whatever the push did. See `scripts/claim-ticket.sh` for the full rationale,
+including why the branch is left with no upstream rather than one pre-seeded at
+its own ref.
 
 Branch and worktree naming follow the repo's existing convention, inferred from
 `git worktree list` / `git branch -r`. In agent-brain that is
