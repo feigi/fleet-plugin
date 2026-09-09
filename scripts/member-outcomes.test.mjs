@@ -305,10 +305,10 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 13/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 14/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /14 fields/);
+  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /15 fields/);
 });
 
 const row = (o = {}) => ({
@@ -318,7 +318,7 @@ const row = (o = {}) => ({
   // Default agent tracks the default/overridden member, so fixtures that vary
   // only `member` still get distinct transcript ids, and fixtures that share
   // the default member (untouched) still key as the SAME agent.
-  agent: `agent-a${o.member ?? "impl-580"}`, ...o,
+  agent: `agent-a${o.member ?? "impl-580"}`, harness: "claude", ...o,
 });
 
 test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {
@@ -417,6 +417,40 @@ test("an unrecognised flag is refused, not silently dropped", () => {
   const r = spawnSync(process.execPath, [CLI, dir, "--wat"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--wat/);
+});
+
+test("#1342: a Claude run and an omp run over separate sessions merge into one TSV carrying both harness values", () => {
+  const claudeDir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+
+  const ompRoot = mkdtempSync(join(tmpdir(), "mo-omp-"));
+  const ompSessionName = "2026-09-09T03-00-00-000Z_deadbeef-dead-dead-dead-deadbeefdead";
+  const ompSessionDir = join(ompRoot, ompSessionName);
+  mkdirSync(ompSessionDir, { recursive: true });
+  const ompLine = (o) => JSON.stringify(o);
+  writeFileSync(join(ompSessionDir, "Solo.jsonl"), [
+    ompLine({ type: "session", version: 3, id: "s1", timestamp: "2026-09-09T03:00:00.000Z", cwd: "/Users/chris/dev/fleet-plugin" }),
+    ompLine({ type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T03:00:01.000Z", thinkingLevel: "high", configured: null }),
+    ompLine({
+      type: "message", id: "m1", parentId: "t1", timestamp: "2026-09-09T03:00:02.000Z",
+      message: {
+        role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-sonnet-5",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.001 } },
+      },
+    }),
+  ].join("\n") + "\n");
+
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const runClaude = spawnSync(process.execPath, [CLI, claudeDir, "--file", out], { encoding: "utf8" });
+  assert.equal(runClaude.status, 0, runClaude.stderr);
+  const runOmp = spawnSync(process.execPath, [CLI, ompSessionDir, "--file", out], { encoding: "utf8" });
+  assert.equal(runOmp.status, 0, runOmp.stderr);
+
+  const rows = parseTsv(readFileSync(out, "utf8"));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(new Set(rows.map((r) => r.harness)), new Set(["claude", "omp"]));
+  const omp = rows.find((r) => r.harness === "omp");
+  assert.equal(omp.session, ompSessionName);
+  assert.equal(omp.agent, "Solo");
 });
 
 test("a run writes rows, and a second run over the same session changes nothing", () => {
