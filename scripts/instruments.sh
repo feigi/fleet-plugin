@@ -83,6 +83,12 @@ while [ $# -gt 0 ]; do
     --repo)
       [ $# -ge 2 ] || die "usage: instruments.sh [--pin] [--repo <path>]"
       repo=$2
+      # An empty value falls through the `[ -n "$repo" ]` branch below and
+      # silently re-derives from cwd — measured (#1350 review): `--repo ""`
+      # pinned the CALLER's cwd repo instead of refusing, exactly the
+      # wrong-tree-write class this ticket exists to close. Refuse here,
+      # before that check ever runs.
+      [ -n "$repo" ] || die "--repo requires a non-empty path"
       shift 2
       ;;
     *) die "usage: instruments.sh [--pin] [--repo <path>]" ;;

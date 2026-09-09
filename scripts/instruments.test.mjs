@@ -269,6 +269,27 @@ test("--repo with a missing path argument refuses with usage", (t) => {
   assert.match(r.stderr, /usage/);
 });
 
+test("--repo with an empty path or a non-repo directory refuses, and writes nothing", (t) => {
+  const root = repo(t);
+
+  const empty = run(root, ["--pin", "--repo", ""]);
+  assert.equal(empty.status, 2, empty.stderr);
+  assert.match(empty.stderr, /--repo requires a non-empty path/);
+
+  const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "instruments-not-a-repo-")));
+  t.after(() => rmSync(notARepo, { recursive: true, force: true }));
+  const nonRepo = run(root, ["--pin", "--repo", notARepo]);
+  assert.equal(nonRepo.status, 2, nonRepo.stderr);
+  assert.match(nonRepo.stderr, /not inside a git checkout/);
+
+  // Neither refusal writes anything: not into cwd's own repo — the silent
+  // fallback an empty --repo took before this guard existed, measured in
+  // PR #1350 review — and not into the directory named by the bad --repo
+  // path either.
+  assert.deepEqual(findFleetDirs(root), []);
+  assert.deepEqual(findFleetDirs(notARepo), []);
+});
+
 // ---------------------------------------------------------------------------
 // ACCEPT. Everything below is an ordinary run, and every one of them must stay
 // exit 0. These are what keep the guard from becoming noise.
