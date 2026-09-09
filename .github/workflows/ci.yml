@@ -177,6 +177,21 @@ jobs:
       - name: Validate JSON
         run: .github/scripts/check-tracked.sh '*.json' -n1 jq empty
 
+      # The allow-list checker (#1314, #1347). frontmatter-check.mjs enforces
+      # frontmatter-allowlist.json's three key sets (agents, skills, commands)
+      # in BOTH directions — unknown keys rejected, required keys enforced —
+      # plus a forbidden class for keys that ARE documented on a harness but
+      # silently reroute a member's tier, tree, or dispatch. One
+      # check-tracked.sh call per kind: each glob's own non-vacuity refusal
+      # covers the day one of the three directories goes missing entirely,
+      # the same discipline every other step here already uses.
+      - name: Allow-list check — agent/skill/command frontmatter
+        run: |
+          set -euo pipefail
+          .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs
+          .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs
+          .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs
+
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
       # not to expand, SC1003 on an OSC-8 escape, SC2015 on the
@@ -238,3 +253,115 @@ jobs:
         run: |
           shopt -s failglob
           node --test plugin/scripts/*.test.mjs
+
+  # #1314's ruling: a separate job, not a step inside `check` — keeps "the
+  # manifest is bad" distinguishable from "omp/Claude cannot load the tree"
+  # at a glance, and neither shares `check`'s already-tight time budget.
+  # Blocking, every PR, no `paths:` filter (#1314: a path filter silently
+  # stops covering a renamed or newly added component directory).
+  validate-claude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # Pinned, not `@latest` — a Claude Code release would otherwise change
+      # what this job verifies without a commit here (#1314), and #1347's own
+      # routed note measured this exact version's warning wording, which
+      # validate-claude-warning-allowlist.test.mjs pins against the same pin.
+      - name: Install pinned Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.265
+
+      - name: validate-claude
+        run: .github/scripts/validate-claude.sh
+
+  # #1314's ruling, #1293's findings on what "loaded" can mean headlessly.
+  # Registers this checkout as a throwaway `file://` git-subdir catalog
+  # (never the tracked marketplace, never a directory source — ADR 0003) and
+  # asserts commands via substitution, agents and skills by presence in the
+  # installed copy. See .github/scripts/smoke-omp.sh's header for the full
+  # reasoning, including why agents are presence-only here (no API key in
+  # CI, and this job must never reach for a non-configured provider).
+  smoke-omp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # A real local branch, not detached HEAD — the dev catalog's
+          # `file://` git-subdir source clones by BRANCH NAME
+          # (`git clone --branch`), which cannot resolve a bare SHA or the
+          # literal `HEAD` a detached checkout leaves behind (measured).
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      # Pinned via the exact package `omp` resolves to on this box
+      # (`@oh-my-pi/pi-coding-agent`), not `omp`/`omp.sh` — measured: neither
+      # of those npm names is this package (#1319's own collision class).
+      - name: Install pinned omp
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+
+      - name: smoke-omp
+        run: .github/scripts/smoke-omp.sh
+
+  # #1347's second comment (2026-09-09): a permanent npm-availability gate,
+  # added to this ticket's scope by the maintainer after `fleetctl` — picked
+  # unverified — turned out to be a real npm package and
+  # `omp plugin install fleetctl` silently installed IT. See
+  # .github/scripts/npm-name-gate.sh for the full reasoning and its
+  # false-negative caveat (a 404 today is not a guarantee for tomorrow).
+  npm-name-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: npm-name-gate
+        run: .github/scripts/npm-name-gate.sh
+
+  # #1294 hand-off §2, #1339, #1347. Installs the plugin on BOTH harnesses
+  # for real and runs the suite FROM the installed copy's `scripts/`, so
+  # scripts resolving from the Install root while their target repo is
+  # elsewhere is actually exercised — unit tests run from the checkout alone
+  # never touch that invariant. See .github/scripts/install-and-test.sh's
+  # header for the full reasoning: why HOME is deliberately nested inside
+  # this checkout, why the git-identity sweep suites are excluded by name
+  # rather than left to throw, and why "run from the checkout with
+  # FLEET_INSTALL_ROOT" was not chosen (that override does not exist).
+  # `#1339`'s own fix is what makes this job's green non-vacuous; its
+  # pre-#1339 false pass is demonstrated once in this ticket's PR
+  # description, not re-proven on every run.
+  install-and-test:
+    runs-on: ubuntu-latest
+    # Runs the suite TWICE (once per harness) from a genuinely different
+    # cwd each time — double `check`'s own already-generous ceiling.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install pinned omp
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+
+      - name: Install pinned Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.265
+
+      - name: install-and-test
+        run: .github/scripts/install-and-test.sh
