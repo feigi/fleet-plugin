@@ -158,26 +158,40 @@ _Avoid_: return value, retrieve
 **Marked line**:
 A one-line, per-harness statement of a dispatch instruction, adjacent to its
 partner and pinned as its own slice — never a section. The marker is the
-line's first token once any markdown blockquote gutter is stripped,
-`CLAUDE: ` or `OMP: ` (uppercase, colon, space), so a pin addresses exactly
-one line by `^\s*(?:>+\s*)?(CLAUDE|OMP): ` — the shape that keeps a
+line's first token once any GUTTER is stripped, `CLAUDE: ` or `OMP: `
+(uppercase, colon, space), so a pin addresses exactly one line by
+`^\s*(?:>+\s*)?(CLAUDE|OMP): ` in markdown prose — the shape that keeps a
 two-dialect rule from becoming the fat slice that let 22 of 33 mutations
-survive. A pair embedded inside a quoted dispatch prompt (a `>` blockquote)
-is still two adjacent Marked lines; the gutter is a rendering artifact, not
-part of the marker. Neither token occurs anywhere else in the prose tree
-(verified 2026-09-09).
+survive. Three gutter shapes are recognized, one per carrier: a markdown
+blockquote (`>`, prose embedded in a quoted dispatch prompt — the gutter is
+a rendering artifact, not part of the marker); a `.js` `//` line comment
+(the shape a future single-line comment pair would use); and a bare line
+inside a `/* ... */` block comment, no per-line gutter at all — #1361's
+`review-pr.js` `resumeFor` cross-reference, the first `.js` marked pair,
+uses this third shape, because `.js` files (`workflows/`) cannot `import` a
+shared prose module and so carry the pair as a documentary code comment
+instead of prose. Scope: `.md` under `skills/`, `commands/`, `agents/`, and
+`.js` under `workflows/`; `docs/` is out (read by humans, never dispatched).
+A marker written as a markdown code EXAMPLE (inside a ` ``` ` fence) is
+scanned and pinned exactly like real prose — fences are not tracked, by
+design (#1346): an example is a pair, so write examples clean, rather than
+risk a real pair mistakenly indented into a fence going unseen. Neither
+token occurs anywhere else in the prose tree (verified 2026-09-09).
 _Avoid_: dialect card, shell
 
 **Pair**:
 The two adjacent Marked lines for one rule. A same-rule pair differs only in
 dialect tokens (tool names, agent-name conventions) once those are stripped;
 a does-not-apply pair states the absence explicitly, on the harness where the
-rule does not hold, using the literal phrase **"does not apply"** — the
-wording both landed instances (`member-lifecycle.md`'s grandchild-recipe and
-result-consumption pairs) actually use, grepped before fixing it here — never
-a translation of the rule that does hold on the other harness. #1346's
-divergence check greps for this exact phrase to classify a pair; a pair
-carrying it on both lines, or on neither, is a defect, not a third shape.
+rule does not hold, using one of two recognized literal idioms — **"does not
+apply"** (the wording `member-lifecycle.md`'s grandchild-recipe and
+result-consumption pairs use) or **"has no slot for"** (the Settle/liveness
+pair's wording, added after #1346's review found it being misclassified as a
+same-rule pair the equality bar could never satisfy) — grepped before fixing
+either here, never a translation of the rule that does hold on the other
+harness. #1346's divergence check greps for these exact phrases to classify
+a pair; a pair carrying a recognized idiom on both lines, or on neither, is
+a defect, not a third shape.
 _Avoid_: translation, duplicate
 
 ### Tier

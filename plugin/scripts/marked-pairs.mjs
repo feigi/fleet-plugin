@@ -13,24 +13,40 @@
 // in scope, for comment-form pairs: a Workflow script cannot `import`
 // (measured, cited in `review-core.js`'s own header — the sandbox forbids
 // it), so a marked pair that needs to exist inside `review-pr.js` cannot be
-// prose at all, only a `//`-commented cross-reference. #1361 adds the first
-// one (`resumeFor`'s `CLAUDE:`/`OMP:` comment beside its Claude-only
-// message) — verified absent from `workflows/` as of this file's writing
-// (2026-09-09, pre-#1361 merge), so real-tree coverage of that directory is
-// currently a scan of zero pairs, not a guess about their shape. `docs/` is
-// deliberately OUT: #1299's ruling and CONTEXT.md's own inventory scope the
-// pair discipline to agent-executed prose, and `docs/` is read by humans,
-// never dispatched.
+// prose at all, only a comment cross-reference. #1361 landed the first one:
+// `resumeFor`'s `CLAUDE:`/`OMP:` lines sit as two BARE lines (no `//` gutter
+// at all) inside a `/* ... */` block comment (`workflows/review-pr.js`,
+// `resumeFor`'s doc block) — `stripSlashGutter` (prose-pin.mjs) exists for a
+// future single-line `// CLAUDE: ...` comment, not this instance; the block
+// form needs no gutter stripped because `gutterStrip` runs it through
+// unchanged and the bare marker is already the line's first token. `docs/`
+// is deliberately OUT: #1299's ruling and CONTEXT.md's own inventory scope
+// the pair discipline to agent-executed prose, and `docs/` is read by
+// humans, never dispatched.
 //
-// ADJACENCY, measured against every real pair landed by #1341/#1344: a
+// FENCED CODE BLOCKS are NOT special-cased — a ` ``` ` fence is not tracked,
+// so a `CLAUDE:`/`OMP:` pair written as a markdown CODE EXAMPLE (illustrating
+// the marker grammar itself, say) is scanned, paired and checked exactly
+// like real prose. Decided, not merely unhandled: an example is a pair, so
+// write examples clean rather than teaching this scanner to look away from
+// them — the alternative (skip anything inside a fence) would also hide a
+// REAL pair mistakenly indented into a fence by a stray triple-backtick
+// elsewhere in the file, which is a worse failure mode than an intentionally
+// illustrative example needing to satisfy the same bar as real prose. No
+// real instance exists in the tree today (verified against all 13 real
+// pairs, 2026-09-09).
+//
+// ADJACENCY, measured against every real pair landed by #1341/#1344/#1361: a
 // Marked line's partner is the line immediately following it (line N, N+1)
 // after gutter-stripping — never separated by a blank line, never a
-// section-bounded search. Checked against all nine real pairs currently in
-// the tree (five in `member-lifecycle.md`, four restated/original in
+// section-bounded search. Checked against all 13 real pairs currently in the
+// tree (five in `member-lifecycle.md`; six restated/original in
 // `run-team/SKILL.md`, including the one embedded inside a `>` blockquote at
-// SKILL.md's fix-applier prompt) — every one is two consecutive physical
-// lines. `pairFile` below never looks past N+1 for a partner, so a marker
-// separated from its partner by so much as a blank line is an orphan, named.
+// SKILL.md's fix-applier prompt; one in `commands/review-and-fix.md`; one
+// bare-in-block-comment pair in `workflows/review-pr.js`) — every one is two
+// consecutive physical lines. `pairFile` below never looks past N+1 for a
+// partner, so a marker separated from its partner by so much as a blank
+// line is an orphan, named.
 //
 // PAIRING is per FILE, never a whole-tree line count: `scanTree` returns
 // markers grouped by file, and `pairFile` runs once per file's own list, so
@@ -40,64 +56,98 @@
 // themselves (#1299's "resume"/"truncated" collision).
 //
 // CLASSIFICATION heuristic: a pair is `does-not-apply` if exactly one of its
-// two lines contains the literal phrase "does not apply" (case-insensitive).
-// This is not invented — it is the wording #1341's landed prose actually
-// uses, grepped before picking it (`member-lifecycle.md`: "the tail/jq
-// recipe does not apply", "the lost-if-unconsumed hazard does not apply" —
-// both omp lines, both this exact phrase, no variant). #1299's ruling names
-// the requirement ("the omp line contains the explicit 'does not apply on
-// omp' form") without giving the literal string; this is that string, pinned
-// in CONTEXT.md § Dialect's Pair entry so a future author has one fixed
-// spelling to write, not a phrase to reinvent per pair. A pair with the
-// phrase on BOTH lines is `invalid`, not `does-not-apply` — nothing states
-// the rule on either harness, which is its own defect, not a pair shape.
+// two lines matches `DOES_NOT_APPLY_RE` — two recognized, grepped (not
+// invented) idioms, not one: the literal phrase "does not apply"
+// (`member-lifecycle.md`: "the tail/jq recipe does not apply", "the
+// lost-if-unconsumed hazard does not apply" — both omp lines, both this
+// exact phrase originally), and "has no slot for" — added on Review1363's
+// finding that the Settle/liveness pair (`member-lifecycle.md:60-61`,
+// restated `SKILL.md:2477-2478`) states an absence in this second wording
+// ("a bucket Claude's triad has no slot for") and was being absorbed into
+// `KNOWN_EQUALITY_EXCEPTIONS` as a same-rule pair instead of recognized for
+// what it is. Verified exactly two real instances of "has no slot for"
+// (both this pair and its restatement), zero collisions elsewhere in the
+// tree, before widening. #1299's ruling names the requirement ("the omp
+// line contains the explicit 'does not apply on omp' form") without giving
+// a literal string; both recognized idioms are pinned in CONTEXT.md §
+// Dialect's Pair entry, so a future author has fixed spellings to write, not
+// phrases to reinvent per pair. A pair with a recognized idiom on BOTH lines
+// is `invalid`, not `does-not-apply` — nothing states the rule on either
+// harness, which is its own defect, not a pair shape.
 //
-// EQUALITY, for `same-rule` pairs: `normalizeDialect` finds every backtick
-// code span in a line, and — if the span's content matches either side of a
-// `DIALECT_TOKENS` entry (prose-pin.mjs) — replaces the WHOLE span with that
-// entry's placeholder, after first stripping any `` `fleet-ctl: `` prefix (the
-// agent-name convention CONTEXT.md's Pair entry names as a dialect token in
-// its own right: `` `fleet-ctl:fleet-implementer` `` and `` `fleet-implementer` ``
-// normalize to the same span). Two lines are `same-rule`-equal iff their
-// normalized, whitespace-collapsed forms are identical.
+// EQUALITY, for `same-rule` pairs: `normalizeDialect(text, file)` finds
+// every backtick code span in a line, and — if the span's content matches
+// either side of a `DIALECT_TOKENS` entry (prose-pin.mjs) — replaces the
+// WHOLE span with that entry's placeholder, after first stripping any
+// `` `fleet-ctl: `` prefix (the agent-name convention CONTEXT.md's Pair
+// entry names as a dialect token in its own right: `` `fleet-ctl:fleet-implementer` ``
+// and `` `fleet-implementer` `` normalize to the same span). `file` disables
+// exactly one entry's omp side inside `workflows/` — see DISAMBIGUATION
+// below. Two lines are `same-rule`-equal iff their normalized,
+// whitespace-collapsed forms are identical.
+//
+// DISAMBIGUATION: the `dispatch field` entry's omp token, `` `agent( ``,
+// false-positives inside `workflows/*.js` — `review-pr.js` names its OWN
+// Claude-side Workflow-script builtin with the identical spelling (ADR
+// 0004's own caution: "no dialect rewrite may substitute on that spelling
+// alone"), which the token table did not actually honor before Review1363
+// measured it (`foreignTokens("dispatch via \`agent({...})\` here", "OMP")`
+// returned `['dispatch field']` for a synthetic CLAUDE-line-shaped string).
+// `normalizeDialect`/`foreignTokens` both take `file` and skip the omp side
+// of `dispatch field` when `file` starts with `workflows/` — the one
+// directory where the ambiguity is real; `.md` prose never names Claude's
+// Workflow builtin by that token, so the guard is scoped as narrowly as the
+// hazard.
 //
 // THE MEASURED GAP this equality bar finds on the real tree, and why it is
 // not closed by loosening the check: #1299's ruling text says a same-rule
 // pair's lines "differ only in the dialect tokens... normalised comparison
 // after stripping the tool names and agent-name conventions." Run against
-// the real tree (`marked-pairs.test.mjs`'s real-tree test), ALL SIX same-rule
-// pairs currently in the tree — Wake and Settle/liveness (each stated once
-// in `member-lifecycle.md` and restated in SKILL.md), Receipts, and the
-// worktree/claim-model cwd recipe — fail literal equality after this
-// normalization; the three does-not-apply pairs all pass cleanly. Each
-// omp line carries its own measured supporting detail (`hub cancel` →
-// `cancelled`, the 16-hex message id, the two-axis state machine, the
-// `task` item-schema field list) that has no Claude-side counterpart
-// sentence to normalize against — independently elaborated content, not a
-// token substituted for another token. This is a real finding against
-// already-merged, already mutation-tested prose (#1341, #1344, #1360's
-// review), not a bug in this file's token table — mutation-testing the
-// check itself against a controlled fixture (below, and
+// the real tree (`marked-pairs.test.mjs`'s real-tree test), SEVEN same-rule
+// pairs currently in the tree fail literal equality after this
+// normalization: Wake (`member-lifecycle.md`, restated `SKILL.md`),
+// Receipts, the worktree/claim-model cwd recipe (#1344), the review-path
+// default statement (`review-and-fix.md`, restated `SKILL.md`, #1361), and
+// `review-pr.js`'s `resumeFor` cross-reference (#1361). One pair
+// (`review-and-fix.md:8-9`, the `fleet-review-<key>` agent-name pair)
+// passes cleanly — the `fleet-ctl:` strip alone closes that gap, proving
+// normalization is not vacuous. The five does-not-apply pairs all pass
+// cleanly too (widened from three: the CLASSIFICATION section above moved two
+// Settle/liveness pairs out of same-rule). Each failing omp line carries
+// its own measured supporting detail (`hub cancel` → `cancelled`, the
+// 16-hex message id, the `task` item-schema field list, the Resolver
+// invocation recipe) that has no Claude-side counterpart sentence to
+// normalize against — independently elaborated content, not a token
+// substituted for another token. This is a real finding against
+// already-merged, already mutation-tested prose (#1341, #1344, #1361,
+// #1360's review), not a bug in this file's token table — mutation-testing
+// the check itself against a controlled fixture (below, and
 // `marked-pairs.test.mjs`) confirms the mechanism does distinguish
 // inversion and token-swap from a benign reword; it is the specific bar of
-// "differ ONLY in dialect tokens" that every real same-rule pair misses,
-// 6/6. Filed as #1362 rather than silently loosened or silently rewriting
-// reviewed, mutation-tested prose out from under its own pins; the pairs
-// are named as `KNOWN_EQUALITY_EXCEPTIONS` below, each carrying that issue
-// number, so the exception is visible and bounded rather than absorbed
-// into the check's normal-case tolerance — a NEW same-rule pair that fails
-// this bar is not grandfathered in by adding itself to this list.
+// "differ ONLY in dialect tokens" that every real same-rule pair still
+// misses, 7/7 as counted today (updated from 6/6 — #1361 landed three more
+// same-rule pairs restating the same review-path recipe, all added; two
+// pairs earlier counted here reclassified as does-not-apply, see
+// CLASSIFICATION above). Filed as #1362 rather than silently loosened or
+// silently rewriting reviewed, mutation-tested prose out from under its own
+// pins; the pairs are named as `KNOWN_EQUALITY_EXCEPTIONS` below, each
+// carrying that issue number, so the exception is visible and bounded
+// rather than absorbed into the check's normal-case tolerance — a NEW
+// same-rule pair that fails this bar is not grandfathered in by adding
+// itself to this list, and the list's own size is pinned by
+// `marked-pairs.test.mjs`'s membership test so a silent addition reds it.
 //
 // THE SECOND, INDEPENDENT check every same-rule pair must ALSO pass:
-// `foreignTokens(text, otherHarness)` — neither line may contain a
-// recognized token from the OTHER harness's side of `DIALECT_TOKENS`. This
-// is what actually catches #1299's run-4 mutant (the two lines' tool tokens
-// swapped in place): after a swap, `normalizeDialect` alone would still
-// report the two lines equal (both sides' tokens map to the same
-// placeholder regardless of which line carries which), so equality cannot be
-// the whole check — only the foreign-token test reds on a swap, and it
-// passes on every real pair today (verified: none of the nine real pairs
-// names the other harness's tool inside its own line).
+// `foreignTokens(text, otherHarness, file)` — neither line may contain a
+// recognized token from the OTHER harness's side of `DIALECT_TOKENS` (modulo
+// the `file`-scoped `agent(` exception above). This is what actually
+// catches #1299's run-4 mutant (the two lines' tool tokens swapped in
+// place): after a swap, `normalizeDialect` alone would still report the two
+// lines equal (both sides' tokens map to the same placeholder regardless of
+// which line carries which), so equality cannot be the whole check — only
+// the foreign-token test reds on a swap, and it passes on every real pair
+// today (verified: none of the 13 real pairs names the other harness's tool
+// inside its own line).
 //
 // MUTATION PROCEDURE (#1299's four runs, one mutant applied to ONE copy at a
 // time, never both — applying to both is exactly the edit the divergence
@@ -140,36 +190,104 @@ export { DIALECT_TOKENS };
 // The marker grammar CONTEXT.md § Dialect fixes: `CLAUDE: `/`OMP: ` as a
 // line's first token once its gutter is stripped. Captures the harness and
 // everything after the label, so callers never re-split the "`CLAUDE: `"
-// prefix off themselves.
-export const MARKER_RE = /^\s*(CLAUDE|OMP): (.*)$/;
+// prefix off themselves. `\r?` before `$`: CRLF-authored files split on
+// `\n` (scanFile) leave a trailing `\r` on every line, which `.` (no `s`
+// flag) does not consume and an un-flagged `$` then refuses to match past —
+// `"CLAUDE: x\r".match(/^\s*(CLAUDE|OMP): (.*)$/)` is `null`. Measured on a
+// fixture (one CRLF pair among LF pairs in the same file): without `\r?`
+// the CRLF pair produced neither a pair nor an orphan — silently invisible,
+// the one failure mode this instrument exists to prevent.
+export const MARKER_RE = /^\s*(CLAUDE|OMP): (.*?)\r?$/;
 
-// Grepped, not invented — see this file's header. Both landed instances use
-// this exact phrase; pinned in CONTEXT.md § Dialect's Pair entry too.
-export const DOES_NOT_APPLY_RE = /does not apply/i;
+// Grepped, not invented — see this file's header (CLASSIFICATION). Two
+// recognized idioms: "does not apply" (both original landed instances) and
+// "has no slot for" (added after Review1363's finding; exactly two real
+// instances, zero collisions elsewhere in the tree, verified before
+// widening).
+export const DOES_NOT_APPLY_RE = /does not apply|has no slot for/i;
 
 export const MD_DIRS = ["skills", "commands", "agents"];
 export const JS_DIRS = ["workflows"];
 
 // #1362 (filed by this ticket): every same-rule pair currently in the tree
-// (6/6, see this file's header) does not satisfy literal
-// equality-after-normalization. Named by file + the CLAUDE line's 1-based
-// line number in the GUTTER-STRIPPED text `pairFile` reports against (none
-// of these six sit inside a `>` blockquote, so it also matches the raw
-// source here), so an entry here can be matched against a real failure by
-// eye. A pair not on this list must pass; this list must never be widened
-// by a future pair simply failing the same way — that is a new finding,
-// filed separately, never silently folded in here.
+// that does not satisfy literal equality-after-normalization (7/7 as of
+// this writing). Keyed by `file` + BOTH lines' EXACT text — CONTENT, never
+// a line number. Review1363 measured why a line-number key fails: rebasing
+// this branch onto #1361 shifted two of the six original entries (SKILL.md
+// 2182→2187, 2472→2477 — #1361 inserts a pair earlier in the same file),
+// which detached both exemptions and simultaneously reintroduced the same
+// two pairs as unexempted equality failures — a numeric key breaks on any
+// insertion ABOVE the pair, not just an edit to the pair itself. A content
+// key survives that kind of shift and still fails loudly, exactly as
+// desired, the moment the prose itself changes. BOTH lines, not just
+// CLAUDE's: keying on the CLAUDE line alone (the first cut of this fix)
+// left the OMP line free to change under an unchanged CLAUDE line and keep
+// the exemption — measured directly, mutating the Wake pair's OMP line
+// alone on a scratch copy stayed 18/18 green with the CLAUDE-only key,
+// exactly the run-1/2 gap this exception list should not be able to hide a
+// SECOND way. Either line changing now drops the match, which is the
+// desired reaction: mutating either half of an exempted pair makes it
+// re-surface as a real, unexempted equality failure until a human re-adds
+// it deliberately with the new text. A pair not on this list must pass;
+// this list must never be widened by a future pair simply failing the same
+// way — that is a new finding, filed separately, never silently folded in
+// here. Its own size is pinned by `marked-pairs.test.mjs`'s membership test
+// (bidirectional: no stale entry, and no real failure left unlisted), so a
+// silent addition or deletion reds the suite rather than passing quietly.
 export const KNOWN_EQUALITY_EXCEPTIONS = [
-  { file: join("skills", "run-team", "references", "member-lifecycle.md"), claudeLine: 32, issue: 1362, why: "Wake pair: omp line's re-dispatch/auto-suffix detail has no Claude-side counterpart clause" },
-  { file: join("skills", "run-team", "references", "member-lifecycle.md"), claudeLine: 49, issue: 1362, why: "Receipts pair: omp line's native delivered/failed receipt detail has no Claude-side counterpart clause" },
-  { file: join("skills", "run-team", "references", "member-lifecycle.md"), claudeLine: 60, issue: 1362, why: "Settle/liveness pair: two genuinely different state machines, not a token swap of one" },
-  { file: join("skills", "run-team", "SKILL.md"), claudeLine: 87, issue: 1362, why: "Wake pair, restated in SKILL.md's Fresh-context-per-member passage" },
-  { file: join("skills", "run-team", "SKILL.md"), claudeLine: 2182, issue: 1362, why: "Worktree/claim-model cwd recipe (#1344): omp line's item-schema field list and measured-gap detail has no Claude-side counterpart clause" },
-  { file: join("skills", "run-team", "SKILL.md"), claudeLine: 2472, issue: 1362, why: "Settle/liveness pair, restated in SKILL.md's Failure-handling passage" },
+  {
+    file: join("skills", "run-team", "references", "member-lifecycle.md"),
+    claude: "`SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.",
+    omp: "`hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.",
+    issue: 1362,
+    why: "Wake pair: omp line's re-dispatch/auto-suffix detail has no Claude-side counterpart clause",
+  },
+  {
+    file: join("skills", "run-team", "references", "member-lifecycle.md"),
+    claude: "only the controller holds the message id, so only the controller detects the discrepancy — reconciliation is hand-rolled around a bare send.",
+    omp: "`hub send` returns a structured `delivered`/`failed` receipt inline, replies thread by a 16-hex message id, and `await: true` returns the reply in the same call — the bookkeeping Claude hand-rolls is native.",
+    issue: 1362,
+    why: "Receipts pair: omp line's native delivered/failed receipt detail has no Claude-side counterpart clause",
+  },
+  {
+    file: join("skills", "run-team", "SKILL.md"),
+    claude: "`SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.",
+    omp: "`hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.",
+    issue: 1362,
+    why: "Wake pair, restated in SKILL.md's Fresh-context-per-member passage",
+  },
+  {
+    file: join("skills", "run-team", "SKILL.md"),
+    claude: "the `Agent` tool call this runbook dispatches through (`subagent_type`, no working-directory field anywhere in this file) hands a member its cwd purely through the dispatch prompt — **Phase 2**'s \"You are ALREADY in worktree `<abs-path>`\" — so every write that member makes is addressed there by the absolute path alone.",
+    omp: "the `task` tool's item schema — `name`/`agent`/`task`/`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own settings enable them — carries no working-directory field either; measured directly: a member dispatched through it with none of those fields, told only to report `pwd`, returned the calling session's own cwd, not the claimed worktree, the same output an un-`cwd`-set `bash` call gives from that session, so the recipe is the same dispatch-prompt absolute path, plus `bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`.",
+    issue: 1362,
+    why: "Worktree/claim-model cwd recipe (#1344): omp line's item-schema field list and measured-gap detail has no Claude-side counterpart clause",
+  },
+  {
+    file: join("commands", "review-and-fix.md"),
+    claude: '`Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})` is the fleet\'s **default** review path on this harness.',
+    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet\'s **default** review path on this harness.',
+    issue: 1362,
+    why: "Review-path-default pair (#1361): omp line's Resolver invocation recipe has no Claude-side counterpart clause",
+  },
+  {
+    file: join("skills", "run-team", "SKILL.md"),
+    claude: '`Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.',
+    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.',
+    issue: 1362,
+    why: "Review-path-default pair (#1361), restated in SKILL.md",
+  },
+  {
+    file: join("workflows", "review-pr.js"),
+    claude: "point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.",
+    omp: "review-core.js's `resumeFor` reports the same crash population and says re-run — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
+    issue: 1362,
+    why: "review-pr.js's resumeFor cross-reference (#1361): omp line names the actual ADR/gap citation, no Claude-side counterpart",
+  },
 ];
 
 function isExempt(pair) {
-  return KNOWN_EQUALITY_EXCEPTIONS.some((e) => e.file === pair.file && e.claudeLine === pair.claudeLine);
+  return KNOWN_EQUALITY_EXCEPTIONS.some((e) => e.file === pair.file && e.claude === pair.claude && e.omp === pair.omp);
 }
 
 function walk(dir) {
@@ -285,16 +403,31 @@ export function classifyPair(pair) {
   return "same-rule";
 }
 
+// The `dispatch field` entry's omp token (`` `agent( ``) is ambiguous inside
+// `workflows/*.js`: `review-pr.js` names its OWN Claude-side Workflow-script
+// builtin with the identical spelling (ADR 0004). `WORKFLOWS_DIR` is the one
+// place that ambiguity is resolved — every other `DIALECT_TOKENS` entry
+// applies everywhere.
+const WORKFLOWS_DIR = "workflows" + "/";
+function tokenSideApplies(entry, side, file) {
+  if (entry.name === "dispatch field" && side === "omp" && typeof file === "string" && file.startsWith(WORKFLOWS_DIR)) return false;
+  return true;
+}
+
 // Widens a token hit to its WHOLE enclosing backtick span before replacing
 // with a placeholder — see this file's header for why (a token regex like
 // `` /`hub\b/ `` only anchors the span's opening word; `` `hub send` `` and
 // `` `hub cancel` `` must normalize to the SAME placeholder, not leave their
 // tails behind to break equality on a difference that isn't dialect at all).
-export function normalizeDialect(text) {
+// `file`, optional: disables the `dispatch field` entry's omp side inside
+// `workflows/*.js` (see DISAMBIGUATION, this file's header, and
+// `tokenSideApplies` above).
+export function normalizeDialect(text, file) {
   let out = text.replace(/`fleet-ctl:/g, "`");
   out = out.replace(/`[^`]*`/g, (span) => {
-    for (const { name, claude, omp } of DIALECT_TOKENS) {
-      if (claude.test(span) || omp.test(span)) return `<${name}>`;
+    for (const entry of DIALECT_TOKENS) {
+      if (tokenSideApplies(entry, "claude", file) && entry.claude.test(span)) return `<${entry.name}>`;
+      if (tokenSideApplies(entry, "omp", file) && entry.omp.test(span)) return `<${entry.name}>`;
     }
     return span;
   });
@@ -305,10 +438,10 @@ export function normalizeDialect(text) {
 // point of view) found inside `text`. A non-empty result on a line is always
 // a defect: the line's own harness needs none of its own name checked here
 // (equality/content pins do that), only that it carries none of the
-// partner's.
-export function foreignTokens(text, harness) {
+// partner's. `file`, optional, same disambiguation as `normalizeDialect`.
+export function foreignTokens(text, harness, file) {
   const side = harness === "CLAUDE" ? "claude" : "omp";
-  return DIALECT_TOKENS.filter((t) => t[side].test(text)).map((t) => t.name);
+  return DIALECT_TOKENS.filter((t) => tokenSideApplies(t, side, file) && t[side].test(text)).map((t) => t.name);
 }
 
 // One pair's full verdict: violations is empty iff the pair is clean.
@@ -323,15 +456,15 @@ export function checkPair(pair) {
   const exemptViolations = [];
   const exempt = isExempt(pair);
 
-  const claudeForeign = foreignTokens(pair.claude, "OMP");
-  const ompForeign = foreignTokens(pair.omp, "CLAUDE");
+  const claudeForeign = foreignTokens(pair.claude, "OMP", pair.file);
+  const ompForeign = foreignTokens(pair.omp, "CLAUDE", pair.file);
   if (claudeForeign.length) violations.push(`${pair.file}:${pair.claudeLine}: CLAUDE line carries omp token(s): ${claudeForeign.join(", ")}`);
   if (ompForeign.length) violations.push(`${pair.file}:${pair.ompLine}: OMP line carries Claude token(s): ${ompForeign.join(", ")}`);
 
   if (kind === "invalid") {
-    violations.push(`${pair.file}:${pair.claudeLine}-${pair.ompLine}: both lines say "does not apply" — neither states the rule`);
+    violations.push(`${pair.file}:${pair.claudeLine}-${pair.ompLine}: both lines carry a non-applicability idiom — neither states the rule`);
   } else if (kind === "same-rule") {
-    const eq = normalizeDialect(pair.claude) === normalizeDialect(pair.omp);
+    const eq = normalizeDialect(pair.claude, pair.file) === normalizeDialect(pair.omp, pair.file);
     if (!eq) {
       const msg = `${pair.file}:${pair.claudeLine}-${pair.ompLine}: same-rule pair is not equal after stripping dialect tokens`;
       if (exempt) exemptViolations.push(msg);

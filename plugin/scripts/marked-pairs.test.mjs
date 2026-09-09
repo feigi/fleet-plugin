@@ -18,41 +18,55 @@
 // `KNOWN_EQUALITY_EXCEPTIONS` (see `marked-pairs.mjs`'s header and #1362 —
 // filed by this ticket, not silently absorbed by loosening the check).
 //
-// MUTATION RECORD — the four runs actually executed, once, on a real pair
+// MUTATION RECORD — the four runs actually executed, on a real pair
 // (member-lifecycle.md:32-33, the Wake pair), scratch-copy method (`cp -R
 // plugin/` to a tmp dir, mutate the copy, `node --test` the copy, read
-// counts, discard). Baseline on the unmutated copy: this file 18/18,
-// `member-lifecycle-dialect-prose.test.mjs` 10/10.
+// counts, discard, one mutant per copy). Run twice: once when
+// `KNOWN_EQUALITY_EXCEPTIONS` was keyed by `file` + the CLAUDE line's exact
+// text alone, and again — the numbers recorded below — after Review1363's
+// finding that the CLAUDE-only key left the OMP line free to change under
+// an unchanged CLAUDE line and keep the exemption (measured: mutating only
+// the OMP line with the CLAUDE-only key stayed 18/18 green). The key now
+// covers BOTH lines; every number below is from that version. Baseline on
+// the unmutated copy: this file 18/18, `member-lifecycle-dialect-prose.
+// test.mjs` 10/10.
 //
 //   1. CLAUDE line inverted ("does not resume its transcript ... drags no
-//      old ticket in"): the Wake pair's own pin failed, and so did the
-//      SKILL.md-restates-Wake-identically pin (8/10). THIS file stayed
-//      18/18 — a real, measured gap this record exists to surface: the Wake
-//      pair is already a `KNOWN_EQUALITY_EXCEPTIONS` entry (#1362), so its
-//      equality check is not live, and a plain inversion introduces no
-//      foreign token for `foreignTokens` to catch either. On a pair NOT on
-//      that list, run 1 reds this file directly (`mutation run 1/2` above,
-//      against the controlled `CLEAN_PAIR` fixture, proves that half). This
-//      is why the exception list is scoped as narrowly as `checkPair`
-//      makes it (`exemptViolations` only ever holds the equality gap) and
-//      why #1362 stays open rather than being treated as cosmetic.
-//   2. OMP line inverted symmetrically: same outcome, mirrored (own pin
-//      8/10; this file 18/18, same reason).
+//      old ticket in"): the Wake pair's own pin failed (8/10, with
+//      SKILL.md's restates-Wake-identically pin). THIS file: 16/18 — "every
+//      same-rule pair is equal..." failed (the pair's CLAUDE text no longer
+//      matches the exception entry, so `isExempt` returns false and the
+//      pre-existing equality gap becomes an unexempted violation) and
+//      "KNOWN_EQUALITY_EXCEPTIONS is exactly the set..." failed alongside it
+//      (the mutated pair now needs exemption under a text the list does not
+//      contain). The content key catches an inversion NOT by detecting the
+//      inversion's meaning, but by detecting that the exempted pair no
+//      longer exists in its exempted form — sufficient here because #1362's
+//      exemption is itself contingent on the exact wording measured.
+//   2. OMP line inverted symmetrically ("does not wake it into its old
+//      transcript"): own pin 8/10; THIS file 16/18, the SAME two tests,
+//      confirming the both-line key (the CLAUDE-only key's asymmetry — this
+//      run alone stayed 18/18 under it — is exactly what widening to both
+//      lines closed).
 //   3. Benign reword of the shared sentence above the pair ("One member,
 //      one unit of work, gone." -> "One member, one piece of work, then
 //      gone."): own pin 10/10, this file 18/18 — neither marked line
-//      touched, so nothing this file reads changed.
+//      touched, so nothing this file reads changed, including the
+//      exemption key.
 //   4. Token swap (CLAUDE line renamed to say `` `hub send` ``, OMP line
 //      renamed to say `` `SendMessage` ``, rest of each line unchanged): own
-//      pin 8/10 (the Wake pair's own `doesNotMatch` pins). THIS file: 16/18
-//      — "no pair's line carries the other harness's dialect token" and the
-//      same-rule-equality test (which reports any non-exempt violation, and
-//      the foreign-token hit is never exempt) both failed, naming the Wake
-//      pair. This is the mutant the exception list does NOT blind the check
-//      to: `foreignTokens` is independent of `normalizeDialect`-equality by
-//      construction, exactly as `mutation run 4` (below, on the controlled
-//      fixture) predicts, and this real run confirms it on an already-
-//      exempted pair, not just a clean synthetic one.
+//      pin 8/10. THIS file: 15/18 — "no pair's line carries the other
+//      harness's dialect token" failed (the swap itself), plus the same two
+//      equality/membership tests from runs 1/2 (both lines' text changed,
+//      so the exemption match breaks here too). `foreignTokens` is still
+//      the mutant-specific catch — `normalizeDialect` alone maps both
+//      swapped tokens to the same placeholder and would report the lines
+//      "equal" if the content key had not already unexempted the pair
+//      first; on a pair that starts genuinely equal (this file's own
+//      `CLEAN_PAIR` fixture, `mutation run 4` below) `foreignTokens` is the
+//      ONLY thing that reds, which is the case this repo's real same-rule
+//      pairs cannot demonstrate today (none of them are equal to begin
+//      with).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -68,6 +82,7 @@ import {
   foreignTokens,
   checkPair,
   KNOWN_EQUALITY_EXCEPTIONS,
+  DOES_NOT_APPLY_RE,
   MD_DIRS,
   JS_DIRS,
 } from "./marked-pairs.mjs";
@@ -154,6 +169,38 @@ test("fixture: a duplicated marker (two adjacent CLAUDE lines) is its own orphan
   assert.match(orphans[0].text, /first claude line/);
   // The real pair beside the duplicate must still be found, not swallowed by it.
   assert.match(pairs[0].claude, /second claude line/);
+});
+
+// Review1363's finding: MARKER_RE (pre-fix) could not match a line ending in
+// `\r` — CRLF-authored files leave a trailing `\r` on every line after
+// `scanFile`'s `\n` split, and an un-flagged `$` refuses to match past it.
+// Mixed on purpose (one CRLF pair beside two LF ones, same file) so a
+// regression that reintroduces the bug drops exactly the CRLF pair, not the
+// whole file.
+test("fixture: a CRLF-authored pair is found, not silently invisible", (t) => {
+  const fixture = ["## Section", "", "CLAUDE: LF pair, found normally.", "OMP: LF partner.", "", "CLAUDE: CRLF pair, must not vanish.\r", "OMP: CRLF partner.\r", ""].join("\n");
+  const root = fixtureTree(t, { "skills/crlf.md": fixture });
+  const { pairs, orphans } = pairTree(root);
+  assert.deepEqual(orphans, []);
+  assert.equal(pairs.length, 2, "both the LF and the CRLF pair must be found");
+  const crlf = pairs.find((p) => /CRLF pair/.test(p.claude));
+  assert.ok(crlf, "the CRLF pair must not be silently dropped");
+  assert.equal(crlf.claude, "CRLF pair, must not vanish.", "the captured text must not retain a trailing \\r");
+  assert.equal(crlf.omp, "CRLF partner.");
+});
+
+// FENCED CODE BLOCKS, documented (not fixed) in this file's header: a marker
+// written as a markdown code EXAMPLE is scanned and checked exactly like
+// real prose. Canary, not a bug report — if a future edit adds fence
+// tracking, this test's own expectation (pairs.length === 1) is the one to
+// update, so that change cannot land silently either.
+test("fixture: a marker inside a fenced code block is still scanned and paired (documented, not tracked)", (t) => {
+  const fixture = ["## Section", "", "Illustrating the marker grammar:", "", "```", "CLAUDE: `SendMessage` wakes the member.", "OMP: `hub send` wakes the member.", "```"].join("\n");
+  const root = fixtureTree(t, { "skills/fence.md": fixture });
+  const { pairs, orphans } = pairTree(root);
+  assert.deepEqual(orphans, []);
+  assert.equal(pairs.length, 1, "a pair inside a fence is scanned like any other line — fences are not tracked, by design");
+  assert.equal(classifyPair(pairs[0]), "same-rule");
 });
 
 // ---------------------------------------------------------------------------
@@ -273,21 +320,21 @@ test("real tree: no marker is orphaned", () => {
   );
 });
 
-test("real tree: at least the nine pairs #1341/#1344 landed are found, correctly classified", () => {
+test("real tree: at least the 13 pairs #1341/#1344/#1361 landed are found, correctly classified", () => {
   const { pairs } = pairTree(REPO);
-  assert.ok(pairs.length >= 9, `expected at least 9 real pairs, found ${pairs.length}`);
+  assert.ok(pairs.length >= 13, `expected at least 13 real pairs, found ${pairs.length}`);
   const byKind = { "same-rule": 0, "does-not-apply": 0, invalid: 0 };
   for (const p of pairs) byKind[classifyPair(p)]++;
-  assert.ok(byKind["does-not-apply"] >= 3, "the three landed does-not-apply pairs (two in member-lifecycle.md, one restated in SKILL.md) must classify as such");
-  assert.equal(byKind.invalid, 0, "no real pair states \"does not apply\" on both lines");
+  assert.ok(byKind["does-not-apply"] >= 5, "the five landed does-not-apply pairs (three literal-phrase, two \"has no slot for\" Settle/liveness pairs) must classify as such");
+  assert.equal(byKind.invalid, 0, "no real pair states a non-applicability idiom on both lines");
 });
 
-test("real tree: does-not-apply pairs carry the exact literal phrase, on exactly one line", () => {
+test("real tree: does-not-apply pairs carry a recognized non-applicability idiom, on exactly one line", () => {
   const { pairs } = pairTree(REPO);
   for (const p of pairs.filter((p) => classifyPair(p) === "does-not-apply")) {
-    const onClaude = /does not apply/i.test(p.claude);
-    const onOmp = /does not apply/i.test(p.omp);
-    assert.notEqual(onClaude, onOmp, `${p.file}:${p.claudeLine}-${p.ompLine}: exactly one line must carry "does not apply"`);
+    const onClaude = DOES_NOT_APPLY_RE.test(p.claude);
+    const onOmp = DOES_NOT_APPLY_RE.test(p.omp);
+    assert.notEqual(onClaude, onOmp, `${p.file}:${p.claudeLine}-${p.ompLine}: exactly one line must carry a recognized non-applicability idiom`);
   }
 });
 
@@ -295,8 +342,8 @@ test("real tree: no pair's line carries the other harness's dialect token", () =
   const { pairs } = pairTree(REPO);
   const offenders = [];
   for (const p of pairs) {
-    const cf = foreignTokens(p.claude, "OMP");
-    const of = foreignTokens(p.omp, "CLAUDE");
+    const cf = foreignTokens(p.claude, "OMP", p.file);
+    const of = foreignTokens(p.omp, "CLAUDE", p.file);
     if (cf.length) offenders.push(`${p.file}:${p.claudeLine} carries omp token(s) ${cf.join(",")}`);
     if (of.length) offenders.push(`${p.file}:${p.ompLine} carries Claude token(s) ${of.join(",")}`);
   }
@@ -317,18 +364,33 @@ test("real tree: every same-rule pair is equal after stripping dialect tokens, o
   assert.deepEqual(offenders, [], "same-rule pairs failing equality outside the named exception list are a NEW finding — do not add them to KNOWN_EQUALITY_EXCEPTIONS without filing an issue");
 });
 
-test("real tree: KNOWN_EQUALITY_EXCEPTIONS names exactly the pairs that need it — an entry with no matching real pair is dead weight", () => {
+// Bidirectional, so the list's SIZE is pinned without a magic number that
+// goes stale on every legitimate addition: no listed entry may lack a real
+// pair that still needs it (a stale entry, caught below), and no real pair
+// needing exemption may be absent from the list (a SILENT, un-filed
+// addition — the growth Review1363's finding named as unguarded). Keyed by
+// `file` + BOTH lines' exact text, never a line number — the content key
+// `marked-pairs.mjs`'s header explains (a numeric key breaks on any
+// insertion above the pair; content survives it and still reacts to an
+// edit of EITHER line, which is the change that should invalidate an
+// exemption — a CLAUDE-only key left the OMP line free to change under an
+// unchanged CLAUDE line and keep the exemption, measured directly on a
+// scratch copy before this file's own key was widened to both).
+test("real tree: KNOWN_EQUALITY_EXCEPTIONS is exactly the set of same-rule pairs that need it — no stale entries, nothing added silently", () => {
   const { pairs } = pairTree(REPO);
+  const sameRule = pairs.filter((p) => classifyPair(p) === "same-rule");
+  const needExemption = sameRule.filter((p) => normalizeDialect(p.claude, p.file) !== normalizeDialect(p.omp, p.file));
+
   for (const ex of KNOWN_EQUALITY_EXCEPTIONS) {
-    const p = pairs.find((p) => p.file === ex.file && p.claudeLine === ex.claudeLine);
-    assert.ok(p, `KNOWN_EQUALITY_EXCEPTIONS names ${ex.file}:${ex.claudeLine}, which no real pair occupies — stale entry`);
-    assert.equal(classifyPair(p), "same-rule", `${ex.file}:${ex.claudeLine} is exempted from the SAME-RULE equality check but classifies as ${classifyPair(p)}`);
-    assert.notEqual(
-      normalizeDialect(p.claude),
-      normalizeDialect(p.omp),
-      `${ex.file}:${ex.claudeLine} is listed as an equality exception but its lines are already equal — the entry (and #${ex.issue}) is stale, remove it`,
-    );
+    assert.equal(ex.issue, 1362, `${ex.file}: every exception must cite the filed issue (#1362)`);
+    const p = needExemption.find((p) => p.file === ex.file && p.claude === ex.claude && p.omp === ex.omp);
+    assert.ok(p, `KNOWN_EQUALITY_EXCEPTIONS names ${ex.file}: ${JSON.stringify(ex.claude)}, which no real pair still needing exemption occupies — stale entry`);
   }
+  for (const p of needExemption) {
+    const ex = KNOWN_EQUALITY_EXCEPTIONS.find((e) => e.file === p.file && e.claude === p.claude && e.omp === p.omp);
+    assert.ok(ex, `${p.file}:${p.claudeLine}-${p.ompLine} fails equality but is not in KNOWN_EQUALITY_EXCEPTIONS — a NEW finding: file an issue before adding it here`);
+  }
+  assert.equal(KNOWN_EQUALITY_EXCEPTIONS.length, needExemption.length, "the exception list's size must exactly match the real exempted set — a silent addition or a stale leftover would pass this far without this line");
 });
 
 // ---------------------------------------------------------------------------
