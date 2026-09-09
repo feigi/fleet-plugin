@@ -26,6 +26,23 @@
 // non-vacuity — an empty tracked-script list is suspicious — and a wrong root
 // that is non-empty sailed straight through it.
 //
+// The first fix here compared the resolved root's OWN `.claude-plugin/
+// plugin.json` name against this file's — and #1354's review measured that a
+// DIFFERENT checkout of this same plugin, sitting above some unrelated caller
+// directory, still passed: same name, wrong tree. Name equality is not
+// identity. What repoRoot now insists on is CONTAINMENT: the running script
+// (this very file, realpath'd) and its own manifest (found self-relatively,
+// never by guessing a depth below the root) must both resolve INSIDE the
+// answered root. A root that does not contain the script asking the question
+// cannot be that script's own tree, whatever a manifest somewhere else on disk
+// happens to be named — so repoRoot never reads any manifest but its own.
+// That self-relative lookup is also what survives #1336's planned re-nesting
+// of the payload under `plugin/`: a hardcoded `root/.claude-plugin/
+// plugin.json` breaks the moment the manifest moves a level deeper, while
+// `dirname(thisFile)/../.claude-plugin/plugin.json` does not care where `root`
+// (the git toplevel) ends up relative to that — it only has to still contain
+// it, which containment checks directly.
+//
 // THE CONDITIONS BELOW MUST NOT MERGE. `repoRoot` answers `null` for exactly
 // one of them, THROWS for two more, and only ever returns a path for the last:
 //
@@ -43,18 +60,15 @@
 //                                  inside its own fix. `repoRoot` THROWS here,
 //                                  which is the loud module-load failure the
 //                                  pre-#1149 code produced for these.
-//   the root answers, but its      identity, not non-emptiness (#1339): the
-//   `.claude-plugin/plugin.json`   root's manifest name is compared against
-//   is missing or names a          THIS file's own manifest, read via a path
-//   different plugin               relative to repo-root.mjs itself rather than
-//                                  a literal, because the plugin is mid-rename
-//                                  (#1352) and a literal would go stale the
-//                                  moment that lands. A non-empty answer from a
-//                                  stranger's tree is exactly as wrong as an
-//                                  empty one from this plugin's own — more
-//                                  dangerous, even, since it LOOKS usable.
-//                                  `repoRoot` THROWS here too, naming the
-//                                  rejected path and why.
+//   the root answers, but it       identity, not non-emptiness, and not name
+//   does not CONTAIN this file     equality either (#1339, then #1354): a
+//   or this file's own manifest    root that merely names the same plugin, or
+//                                  answers non-empty for some other reason, is
+//                                  still a stranger's tree unless the running
+//                                  script is actually inside it. `repoRoot`
+//                                  THROWS here too, naming the rejected root
+//                                  and the script or manifest path it failed to
+//                                  contain.
 //   the root answers, and it IS    a real failure — a broken glob or path join
 //   this plugin's own, but the     inside a tree that genuinely is this
 //   list of tracked scripts is     plugin's own. `trackedShellScripts` is
@@ -70,8 +84,8 @@
 // Zero deps: `node --test scripts/repo-root.test.mjs`.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // git's message for a discovery walk that reached the top without finding a
@@ -95,20 +109,44 @@ import { fileURLToPath } from "node:url";
 const NO_REPOSITORY_ANYWHERE = /not a git repository \(or any /;
 
 /**
- * This plugin's own `name`, read from the manifest that ships beside this
- * file — `../.claude-plugin/plugin.json`, relative to repo-root.mjs's own
- * location, not to `cwd` and not a literal. Relative to `cwd` would ask the
- * wrong question, since `cwd` is exactly the thing under test. A literal would
- * go stale the moment #1352 renames the plugin; this does not, because
- * wherever this file is copied — a checkout, a worktree, an installed plugin
- * cache — its own manifest travels with it at the same relative path.
+ * This plugin's own manifest path: `../.claude-plugin/plugin.json`, relative
+ * to repo-root.mjs's own location, not to `cwd` and not to a `root` some
+ * caller resolved. Relative to `cwd` would ask the wrong question, since
+ * `cwd` is exactly the thing under test; relative to a resolved `root` would
+ * have to guess how many levels separate the manifest from the git toplevel,
+ * and #1336 is about to change that answer. This guesses nothing — wherever
+ * this file is copied (a checkout, a worktree, an installed plugin cache, and
+ * after #1336 a `plugin/` subdirectory), its own manifest is always exactly
+ * one directory up from it.
+ */
+function ownManifestPath() {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", ".claude-plugin", "plugin.json");
+}
+
+/**
+ * This plugin's own `name`, read from `ownManifestPath()`.
+ *
+ * Guarded rather than a bare `JSON.parse(readFileSync(...))`: a missing or
+ * malformed manifest here is the same class of environment fault the rest of
+ * this module goes to lengths to make legible, and every caller of `repoRoot`
+ * reaches this at module scope — an unguarded throw would read as an
+ * `ENOENT` or a `SyntaxError` at line 1 of whichever sweep imported it, with
+ * nothing to say the failure was about identity verification.
  *
  * Exported so the regression tests can build a fixture that matches without
  * duplicating (or hardcoding) the name themselves.
  */
 export function ownPluginName() {
-  const manifestPath = join(dirname(fileURLToPath(import.meta.url)), "..", ".claude-plugin", "plugin.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const manifestPath = ownManifestPath();
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (e) {
+    throw new Error(
+      `${manifestPath} (this plugin's own manifest) could not be read (${e.message}) — `
+      + "repoRoot cannot verify identity without it",
+    );
+  }
   if (typeof manifest.name !== "string" || manifest.name === "") {
     throw new Error(
       `${manifestPath} (this plugin's own manifest) has no usable "name" — repoRoot cannot verify identity against it`,
@@ -121,31 +159,37 @@ export function ownPluginName() {
  * `root` is a git working tree; this asserts it is THIS plugin's own rather
  * than an ambient repository the caller's directory happened to nest under
  * (#1339 — an installed plugin copy has no `.git` of its own, so the walk that
- * finds one can land on an unrelated repository above it). The check is
- * identity, not non-emptiness: does `root`'s own `.claude-plugin/plugin.json`
- * name the same plugin as this file's? Anything else throws, naming the
- * rejected path and the reason — a caller must never receive a foreign root as
- * though it were a usable answer.
+ * finds one can land on an unrelated repository above it), OR a different
+ * checkout of this same plugin sitting above some unrelated caller directory
+ * (#1354's review of #1339's first attempt, which compared `root`'s own
+ * manifest name against this file's and missed exactly that: same name,
+ * wrong tree).
+ *
+ * The check is CONTAINMENT, realpath'd on both sides so a symlinked checkout
+ * is not rejected: this running script, and its own manifest, must both
+ * resolve inside `root`. Nothing here ever reads a manifest other than this
+ * file's own — there is no "their name" to compare, which is what keeps this
+ * free of the depth assumption `#1336`'s planned re-nesting would otherwise
+ * break. Anything that fails containment throws, naming the rejected root and
+ * the path it failed to contain — a caller must never receive a foreign root
+ * as though it were a usable answer.
  */
 function assertOwnRoot(root) {
   const name = ownPluginName();
-  const theirManifestPath = join(root, ".claude-plugin", "plugin.json");
-  if (!existsSync(theirManifestPath)) {
+  const realRoot = realpathSync(root);
+  const self = realpathSync(fileURLToPath(import.meta.url));
+  if (!self.startsWith(realRoot + sep)) {
     throw new Error(
-      `${root} is a git working tree, but not this plugin's: no ${theirManifestPath} — `
-      + "refusing to answer about a stranger's tree rather than return a foreign root",
+      `${root} is a git working tree, but it does not contain ${self} — a tree that merely names the same `
+      + `plugin (${JSON.stringify(name)}) is another checkout, not this one; refusing to answer about a `
+      + "stranger's tree rather than return a foreign root",
     );
   }
-  let theirName;
-  try {
-    theirName = JSON.parse(readFileSync(theirManifestPath, "utf8")).name;
-  } catch (e) {
-    throw new Error(`${theirManifestPath} could not be read as a plugin manifest (${e.message}) — refusing ${root}`);
-  }
-  if (theirName !== name) {
+  const manifestPath = realpathSync(ownManifestPath());
+  if (!manifestPath.startsWith(realRoot + sep)) {
     throw new Error(
-      `${root} is a git working tree, but its plugin is ${JSON.stringify(theirName)}, not this plugin's `
-      + `${JSON.stringify(name)} — refusing to answer about a stranger's tree rather than return a foreign root`,
+      `${root} is a git working tree containing ${self}, but not this plugin's own manifest (${manifestPath} `
+      + "lies outside it) — refusing to answer about a stranger's tree rather than return a foreign root",
     );
   }
 }
