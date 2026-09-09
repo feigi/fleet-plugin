@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -71,4 +71,58 @@ test("phrase escapes regex metacharacters taken from its input", () => {
   // construction instead of failing an assertion.
   assert.doesNotThrow(() => phrase("*.mjs"));
   assert.match("run node --test *.mjs here", phrase("*.mjs"));
+});
+
+// #1346/#1361: the third gutter shape, exercised nowhere else until a real
+// `.js` comment-form pair lands. Written here rather than left for that
+// consumer, per this file's own header: a guard with no dedicated test is a
+// guard nobody is pinning.
+test("stripSlashGutter strips a leading `// ` and leaves everything else untouched", () => {
+  assert.equal(stripSlashGutter("// CLAUDE: dispatch it"), "CLAUDE: dispatch it");
+  assert.equal(stripSlashGutter("  //CLAUDE: no space after slash"), "CLAUDE: no space after slash");
+  // A trailing comment is not a marked line's gutter — stripping mid-line
+  // would turn code-with-a-note into a false marker.
+  assert.equal(stripSlashGutter('const x = 1; // CLAUDE: not a marked line'), 'const x = 1; // CLAUDE: not a marked line');
+  assert.equal(stripSlashGutter("plain code\nmore code"), "plain code\nmore code");
+});
+
+// pairSlices' four throw guards, each isolated — #1346's acceptance
+// criterion ("a pin that matches both lines is rejected at construction")
+// is one of these four, demonstrated again in `marked-pairs.test.mjs`
+// against the divergence-check module; here each guard gets its OWN case,
+// independent of that module ever existing.
+const SECTION = (claude, omp) => `## S\n\nCLAUDE: ${claude}\nOMP: ${omp}\n\n## Next`;
+
+test("pairSlices: a clean pair returns both one-line slices", () => {
+  const { claude, omp } = pairSlices(SECTION("`SendMessage` wakes it.", "`hub send` wakes it."), "## S", "## Next");
+  assert.equal(claude, "CLAUDE: `SendMessage` wakes it.");
+  assert.equal(omp, "OMP: `hub send` wakes it.");
+});
+
+test("pairSlices throws when the CLAUDE line names no recognized dialect token", () => {
+  assert.throws(
+    () => pairSlices(SECTION("nothing tool-shaped here.", "`hub send` wakes it."), "## S", "## Next"),
+    /CLAUDE line names no recognized dialect token/,
+  );
+});
+
+test("pairSlices throws when the OMP line names no recognized dialect token", () => {
+  assert.throws(
+    () => pairSlices(SECTION("`SendMessage` wakes it.", "nothing tool-shaped here."), "## S", "## Next"),
+    /OMP line names no recognized dialect token/,
+  );
+});
+
+test("pairSlices throws when the CLAUDE line's own token also matches the OMP line", () => {
+  assert.throws(
+    () => pairSlices(SECTION("`SendMessage` wakes it.", "`hub send` and `SendMessage` both wake it."), "## S", "## Next"),
+    /the CLAUDE line's "send\/wake channel" token also matches the OMP line/,
+  );
+});
+
+test("pairSlices throws when the OMP line's own token also matches the CLAUDE line", () => {
+  assert.throws(
+    () => pairSlices(SECTION("`SendMessage` and `hub send` both wake it.", "`hub send` wakes it."), "## S", "## Next"),
+    /the OMP line's "send\/wake channel" token also matches the CLAUDE line/,
+  );
 });

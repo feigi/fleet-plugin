@@ -171,8 +171,13 @@ _Avoid_: dialect card, shell
 **Pair**:
 The two adjacent Marked lines for one rule. A same-rule pair differs only in
 dialect tokens (tool names, agent-name conventions) once those are stripped;
-a does-not-apply pair states the absence explicitly on the harness where the
-rule does not hold, rather than offering a translation of it.
+a does-not-apply pair states the absence explicitly, on the harness where the
+rule does not hold, using the literal phrase **"does not apply"** — the
+wording both landed instances (`member-lifecycle.md`'s grandchild-recipe and
+result-consumption pairs) actually use, grepped before fixing it here — never
+a translation of the rule that does hold on the other harness. #1346's
+divergence check greps for this exact phrase to classify a pair; a pair
+carrying it on both lines, or on neither, is a defect, not a third shape.
 _Avoid_: translation, duplicate
 
 ### Tier
