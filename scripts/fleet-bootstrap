@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+// The Resolver's one-time bootstrap (#1335, ADR 0003 point 4). Places a copy
+// of `fleet-run` at `~/.fleet/bin/fleet-run` — the one artefact this repo
+// owns OUTSIDE the plugin, because the Resolver cannot resolve itself and no
+// per-session mechanism can carry it (nothing survives between harness
+// Bash-tool calls). Idempotent: re-running reports "unchanged" once the
+// placed copy already matches.
+//
+// SOURCE, and the one licensed exception. Every other script's rule is
+// "only installed scripts run" (ADR 0003 point 3) — never a source checkout.
+// This script's source is always ITS OWN sibling `fleet-run`, i.e. whatever
+// directory this file itself is running from. Two shapes exist for that:
+//   - run as an INSTALLED script (this file's own directory IS a registry
+//     installPath's scripts/ — the steady state, e.g. invoked as
+//     `fleet-run fleet-bootstrap` once a Resolver already exists), or
+//   - run DIRECTLY FROM A CHECKOUT (this file's own directory is not any
+//     registered installPath) — the state the world is actually in the
+//     first time this ever runs, since no install anywhere yet carries
+//     `scripts/fleet-run`. ADR 0003 licenses exactly this once, loudly.
+// This file cannot tell those apart by calling git (that would be exactly
+// the self-location-derives-a-repo pattern #1335's audit test forbids); it
+// tells them apart by comparing its own directory's PARENT against the
+// registries' recorded installPath strings — a plain string compare, no git
+// involved, so it never anchors a git root to its own location.
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const crypto = require("node:crypto");
+
+const NAME = "fleet-bootstrap";
+
+function die(message) {
+  process.stderr.write(`${NAME}: ${message}\n`);
+  process.exit(2);
+}
+
+function readInstallPath(registryPath, pluginKey) {
+  let raw;
+  try {
+    raw = fs.readFileSync(registryPath, "utf8");
+  } catch {
+    return null;
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const entries = json && json.plugins && json.plugins[pluginKey];
+  const installPath = entries && entries[0] && entries[0].installPath;
+  return typeof installPath === "string" && installPath !== "" ? installPath : null;
+}
+
+function sha256(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+function main() {
+  const ownDir = __dirname;
+  const source = path.join(ownDir, "fleet-run");
+
+  let sourceBuf;
+  try {
+    sourceBuf = fs.readFileSync(source);
+  } catch (e) {
+    die(`cannot read ${source} — bootstrap copies fleet-run from its OWN directory and found nothing there (${e.code || e.message})`);
+  }
+
+  const home = os.homedir();
+  const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
+  const claudeInstall = readInstallPath(path.join(home, ".claude", "plugins", "installed_plugins.json"), PLUGIN_KEY);
+  const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "installed_plugins.json"), PLUGIN_KEY);
+  const parent = path.dirname(ownDir);
+  const runningFromInstall = parent === claudeInstall || parent === ompInstall;
+
+  if (!runningFromInstall) {
+    process.stderr.write(
+      `${NAME}: BOOTSTRAP EXCEPTION — running from a source checkout (${ownDir}), not a registry-resolved `
+      + "install (looked at "
+      + `${claudeInstall ? `claude: ${claudeInstall}` : "claude: not installed"}; `
+      + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}). `
+      + "ADR 0003 licenses this ONCE, as the Resolver's own bootstrap, because no install anywhere yet carries "
+      + "scripts/fleet-run for a registry-driven copy to come from. Every other fleet script must run through "
+      + "the Resolver once it exists.\n",
+    );
+  }
+
+  const target = path.join(home, ".fleet", "bin", "fleet-run");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+
+  let existingBuf = null;
+  try {
+    existingBuf = fs.readFileSync(target);
+  } catch {
+    existingBuf = null;
+  }
+
+  const changed = existingBuf === null || !existingBuf.equals(sourceBuf);
+  if (changed) {
+    fs.writeFileSync(target, sourceBuf);
+  }
+  fs.chmodSync(target, 0o755);
+
+  const sourceHash = sha256(sourceBuf);
+  if (existingBuf === null) {
+    process.stdout.write(`${NAME}: wrote ${target} (new, sha256 ${sourceHash})\n`);
+  } else if (changed) {
+    process.stdout.write(`${NAME}: wrote ${target} (changed: sha256 ${sha256(existingBuf)} -> ${sourceHash})\n`);
+  } else {
+    process.stdout.write(`${NAME}: unchanged — ${target} already matches ${source} (sha256 ${sourceHash})\n`);
+  }
+  process.stdout.write(`${NAME}: source ${source}\n`);
+
+  const pathDirs = (process.env.PATH || "").split(path.delimiter);
+  const binDir = path.dirname(target);
+  if (pathDirs.includes(binDir)) {
+    process.stdout.write(`${NAME}: PATH already includes ${binDir}\n`);
+  } else {
+    process.stdout.write(
+      `${NAME}: PATH does not include ${binDir} — add it yourself if you want to run "fleet-run" bare `
+      + `(e.g. add \`export PATH="${binDir}:$PATH"\` to your shell rc); this script edits no rc file\n`,
+    );
+  }
+}
+
+main();

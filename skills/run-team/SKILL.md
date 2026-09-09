@@ -685,9 +685,11 @@ for d in "$HOME/.claude/projects/$PROJECT_DIR"/*/subagents; do
 done
 ```
 
-`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way
-Claude Code does — `/Users/x/.claude` becomes `-Users-x--claude`, double dash — and
-hand-guessing that path is why the fleet's own panel once rendered nothing here.
+`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way Claude Code
+does — every non-alphanumeric character becomes `-`, so a leading dot segment
+doubles its dash (`board.test.mjs`'s regression case: `.claude` becomes
+`--claude`, not `-.claude`) — and hand-guessing that path is why the fleet's
+own panel once rendered nothing here.
 
 **Do not narrow this to "this run's session" with `findSubagentsDir`.** That helper
 answers a different question — the session with the NEWEST transcript for this cwd,
