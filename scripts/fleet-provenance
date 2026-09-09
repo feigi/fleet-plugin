@@ -1,0 +1,264 @@
+#!/usr/bin/env node
+// The Provenance check (#1335, ADR 0003 point 4, CONTEXT.md § Install
+// "Provenance check"). Names the live Install root and its recorded
+// version/commit for every harness present, hashes the placed Resolver
+// (`~/.fleet/bin/fleet-run`) against each install's own copy and refuses on
+// drift, and asserts omp's `enabledProviders: ["claude-plugins"]`
+// precondition (ADR 0003 point 8). Writes nothing, mutates no config — every
+// path below is read-only.
+//
+// SEPARATE FILE, not `fleet-run --check`. `fleet-run` is deliberately a
+// single self-contained file because it alone gets copied to
+// `~/.fleet/bin/fleet-run` (see that file's own header) — folding a second,
+// unrelated responsibility into it would grow the one artefact outside the
+// plugin for a feature that never needs to travel there. This script stays
+// inside the install and is reached like every other one, through the
+// Resolver: `fleet-run fleet-provenance`.
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const crypto = require("node:crypto");
+
+const NAME = "fleet-provenance";
+const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
+
+function readRegistry(registryPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(registryPath, "utf8");
+  } catch (e) {
+    return { present: false, registryPath, reason: `no registry at ${registryPath} (${e.code || e.message})` };
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    return { present: false, registryPath, reason: `${registryPath} is not valid JSON (${e.message})` };
+  }
+  const entries = json && json.plugins && json.plugins[PLUGIN_KEY];
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
+  }
+  const selected = selectEntry(entries);
+  if (selected.error) {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
+  }
+  const entry = selected.entry;
+  if (typeof entry.installPath !== "string" || entry.installPath === "") {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
+  }
+  return {
+    present: true,
+    registryPath,
+    installPath: entry.installPath,
+    version: typeof entry.version === "string" ? entry.version : null,
+    gitCommitSha: typeof entry.gitCommitSha === "string" ? entry.gitCommitSha : null,
+  };
+}
+
+// See scripts/fleet-run's own selectEntry for the full measurement (a
+// Claude --scope=project install adds an entry alongside any --scope=user
+// one in the SAME registry this reads) — duplicated rather than shared for
+// the same "this file has no siblings once it matters" reasoning fleet-run's
+// header gives for its own duplication.
+function selectEntry(entries) {
+  if (entries.length === 1) return { entry: entries[0] };
+  const userScoped = entries.filter((e) => e && e.scope === "user");
+  if (userScoped.length === 1) return { entry: userScoped[0] };
+  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
+    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
+  return {
+    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
+  };
+}
+
+// Every regular file under `<root>/scripts`, repo-relative, sorted — a
+// filesystem walk rather than `git ls-files`: an installed copy need not
+// carry `.git` at all (a directory-source Claude install excludes it,
+// measured, ADR 0003), so git is not an instrument this check can rely on
+// being present in the tree it is reading.
+function walkFiles(dir, base = dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return { error: `cannot list ${dir} (${e.code || e.message})` };
+  }
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const r = walkFiles(full, base, out);
+      if (r && r.error) return r;
+    } else if (entry.isFile()) {
+      out.push(path.relative(base, full));
+    }
+  }
+  return { files: out };
+}
+
+function sha256(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+// One digest over every file's content under `<root>/scripts`, keyed by
+// relative path so a rename changes it and a mtime-only touch does not.
+function digestScriptsDir(root) {
+  const scriptsDir = path.join(root, "scripts");
+  const listed = walkFiles(scriptsDir);
+  if (listed.error) return { error: listed.error };
+  if (listed.files.length === 0) return { error: `no files under ${scriptsDir} — refusing to certify an empty set` };
+  const lines = listed.files.map((rel) => {
+    const buf = fs.readFileSync(path.join(scriptsDir, rel));
+    return `${sha256(buf)}  ${rel}`;
+  });
+  return { digest: sha256(Buffer.from(lines.join("\n") + "\n", "utf8")), fileCount: listed.files.length };
+}
+
+function kindOf(installPath) {
+  if (installPath.includes(`${path.sep}.claude${path.sep}plugins${path.sep}cache${path.sep}`)) return "claude-install";
+  if (installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)) return "omp-install";
+  return "unrecognized-install-shape";
+}
+
+// Minimal top-level YAML read for exactly the one key this checks. Not a
+// general YAML parser — no nesting under other keys, no quoting rules
+// beyond a bare `"…"`/`'…'` strip. `~/.omp/agent/config.yml` in the wild
+// (this box, 2026-09-09) is a flat top-level map, block-list style
+// (`enabledProviders:` then `  - foo` lines); the REMEDY this same check
+// prints instructs the flow form (`enabledProviders: ["claude-plugins"]`),
+// which omp itself also accepts — so both forms are read here, or an
+// operator who follows the printed remedy verbatim is told the key it just
+// added is absent (measured, #1355 review).
+function enabledProvidersFromYaml(text) {
+  const flow = text.match(/^enabledProviders:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) {
+    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  }
+  const lines = text.split("\n");
+  const headerIdx = lines.findIndex((l) => /^enabledProviders:\s*$/.test(l));
+  if (headerIdx === -1) return [];
+  const values = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*-\s*(\S+)\s*$/);
+    if (!m) break;
+    values.push(m[1]);
+  }
+  return values;
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  let ompConfigPath = path.join(os.homedir(), ".omp", "agent", "config.yml");
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--omp-config") {
+      if (i + 1 >= argv.length) {
+        process.stderr.write(`${NAME}: --omp-config needs a path\n`);
+        process.exit(2);
+      }
+      ompConfigPath = argv[i + 1];
+      i++;
+    } else {
+      process.stderr.write(`${NAME}: unrecognized argument ${argv[i]}\n`);
+      process.exit(2);
+    }
+  }
+
+  const home = os.homedir();
+  const regs = {
+    claude: readRegistry(path.join(home, ".claude", "plugins", "installed_plugins.json")),
+    omp: readRegistry(path.join(home, ".omp", "plugins", "installed_plugins.json")),
+  };
+  const present = ["claude", "omp"].filter((h) => regs[h].present);
+
+  if (present.length === 0) {
+    process.stderr.write(`${NAME}: no registry carries "${PLUGIN_KEY}" — ${regs.claude.reason}; ${regs.omp.reason}\n`);
+    process.exit(2);
+  }
+
+  const placedPath = path.join(home, ".fleet", "bin", "fleet-run");
+  let placedBuf = null;
+  let placedError = null;
+  try {
+    placedBuf = fs.readFileSync(placedPath);
+  } catch (e) {
+    placedError = `${e.code || e.message}`;
+  }
+
+  let failed = false;
+
+  for (const h of present) {
+    const r = regs[h];
+    const kind = kindOf(r.installPath);
+    process.stdout.write(`${NAME}: [${h}] Install root: ${r.installPath}\n`);
+    process.stdout.write(`${NAME}: [${h}] kind: ${kind}\n`);
+    process.stdout.write(`${NAME}: [${h}] version: ${r.version ?? "(none recorded)"}\n`);
+    process.stdout.write(`${NAME}: [${h}] gitCommitSha: ${r.gitCommitSha ?? "(none recorded)"}\n`);
+
+    const digest = digestScriptsDir(r.installPath);
+    if (digest.error) {
+      process.stdout.write(`${NAME}: [${h}] scripts/ digest: UNAVAILABLE — ${digest.error}\n`);
+    } else {
+      process.stdout.write(`${NAME}: [${h}] scripts/ digest: sha256 ${digest.digest} (${digest.fileCount} files)\n`);
+    }
+
+    const installedRunPath = path.join(r.installPath, "scripts", "fleet-run");
+    let installedRunBuf = null;
+    let installedRunError = null;
+    try {
+      installedRunBuf = fs.readFileSync(installedRunPath);
+    } catch (e) {
+      installedRunError = `${e.code || e.message}`;
+    }
+
+    if (placedError) {
+      process.stdout.write(`${NAME}: [${h}] Resolver drift: REFUSED — placed copy ${placedPath} unreadable (${placedError})\n`);
+      failed = true;
+    } else if (installedRunError) {
+      process.stdout.write(`${NAME}: [${h}] Resolver drift: REFUSED — installed copy ${installedRunPath} unreadable (${installedRunError})\n`);
+      failed = true;
+    } else if (!placedBuf.equals(installedRunBuf)) {
+      process.stdout.write(
+        `${NAME}: [${h}] Resolver drift: REFUSED — ${placedPath} (sha256 ${sha256(placedBuf)}) `
+        + `!= ${installedRunPath} (sha256 ${sha256(installedRunBuf)})\n`,
+      );
+      failed = true;
+    } else {
+      process.stdout.write(`${NAME}: [${h}] Resolver drift: none — ${placedPath} matches ${installedRunPath}\n`);
+    }
+  }
+
+  if (present.includes("omp")) {
+    let ompConfigText = null;
+    let ompConfigError = null;
+    try {
+      ompConfigText = fs.readFileSync(ompConfigPath, "utf8");
+    } catch (e) {
+      ompConfigError = `${e.code || e.message}`;
+    }
+    const remedy = `add \`enabledProviders: ["claude-plugins"]\` to ${ompConfigPath} — plugin agents are `
+      + "invisible on omp without it (measured, can1357/oh-my-pi#11362); this check never writes it for you";
+    if (ompConfigError) {
+      process.stdout.write(`${NAME}: [omp] enabledProviders: REFUSED — cannot read ${ompConfigPath} (${ompConfigError})\n`);
+      process.stdout.write(`${NAME}: [omp] remedy: ${remedy}\n`);
+      failed = true;
+    } else {
+      const providers = enabledProvidersFromYaml(ompConfigText);
+      if (providers.includes("claude-plugins")) {
+        process.stdout.write(`${NAME}: [omp] enabledProviders: includes claude-plugins (${ompConfigPath})\n`);
+      } else {
+        process.stdout.write(
+          `${NAME}: [omp] enabledProviders: REFUSED — ${ompConfigPath} does not list claude-plugins `
+          + `(found: ${providers.length ? providers.join(", ") : "(no enabledProviders key)"})\n`,
+        );
+        process.stdout.write(`${NAME}: [omp] remedy: ${remedy}\n`);
+        failed = true;
+      }
+    }
+  }
+
+  process.exit(failed ? 1 : 0);
+}
+
+main();

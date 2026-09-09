@@ -1,0 +1,316 @@
+#!/usr/bin/env node
+// The Resolver (#1335, ADR 0003, CONTEXT.md § Install "Resolver"). The single
+// door between prose and an installed script: a prose callsite names a
+// SCRIPT, never a path, and this reads whichever harness registry is live to
+// find where that script actually lives right now.
+//
+// LANGUAGE CHOICE: node, not POSIX sh. Every other fleet script written in
+// sh sources `json.sh` for JSON escaping because sh has no JSON support of
+// its own; the registries this file reads ARE JSON
+// (`installed_plugins.json`), and `jq` is not a guaranteed CI dependency —
+// node is (the whole test suite is `node --test`). Parsing two small JSON
+// files by hand in POSIX sh would need either a `jq` dependency this repo
+// cannot assume or a hand-rolled parser riskier than the file it replaces.
+// node's `JSON.parse` is exact and already required.
+//
+// SINGLE FILE, ON PURPOSE. `fleet-bootstrap` places a copy of exactly this
+// file at `~/.fleet/bin/fleet-run`, OUTSIDE the plugin (CONTEXT.md's
+// Resolver entry: "cannot resolve itself"). Once there it has no siblings —
+// `scripts/repo-root.mjs`, `scripts/arg.mjs` and every other shared helper
+// in this directory are unreachable from that path. So this file requires
+// nothing from the rest of the plugin (CommonJS, core `node:*` modules
+// only) even though `scripts/fleet-provenance` duplicates a few lines of its
+// registry-reading AND scripts/-digest logic rather than sharing a module
+// with it, for the same reason: a module this file `require()`s would need
+// to travel with it, and nothing else does.
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
+
+const NAME = "fleet-run";
+const PLUGIN_KEY = "fleet-ctl@fleet-plugin"; // ADR 0006 — the registry key since #1348.
+
+function die(message) {
+  process.stderr.write(`${NAME}: ${message}\n`);
+  process.exit(2);
+}
+
+function sha256(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+// Every regular file under `dir`, repo-relative to `dir` itself, sorted — a
+// filesystem walk rather than `git ls-files`: an installed copy need not
+// carry `.git` at all (a directory-source Claude install excludes it,
+// measured, ADR 0003). Duplicated from `fleet-provenance`'s own
+// `walkFiles`/`digestScriptsDir` — see this file's header for why.
+function walkFiles(dir, base = dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return { error: `cannot list ${dir} (${e.code || e.message})` };
+  }
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const r = walkFiles(full, base, out);
+      if (r && r.error) return r;
+    } else if (entry.isFile()) {
+      out.push(path.relative(base, full));
+    }
+  }
+  return { files: out };
+}
+
+// One digest over every file's content under `<root>/scripts`, keyed by
+// relative path. Used ONLY to decide whether an undetectable harness pick
+// is MATERIAL — see resolveInstall below — never printed as a provenance
+// verdict itself (that stays `fleet-provenance`'s job).
+function digestScriptsDir(root) {
+  const scriptsDir = path.join(root, "scripts");
+  const listed = walkFiles(scriptsDir);
+  if (listed.error) return { error: listed.error };
+  if (listed.files.length === 0) return { error: `no files under ${scriptsDir}` };
+  const lines = listed.files.map((rel) => `${sha256(fs.readFileSync(path.join(scriptsDir, rel)))}  ${rel}`);
+  return { digest: sha256(Buffer.from(lines.join("\n") + "\n", "utf8")) };
+}
+
+// Reads one harness's registry for PLUGIN_KEY's installPath. Never throws —
+// every failure mode (file missing, bad JSON, key absent, no installPath,
+// ambiguous entry) is an ordinary "this harness isn't a candidate" result,
+// reported in `reason` so a resolver failure can name the exact path it
+// looked at.
+function readRegistry(registryPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(registryPath, "utf8");
+  } catch (e) {
+    return { present: false, registryPath, reason: `no registry at ${registryPath} (${e.code || e.message})` };
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    return { present: false, registryPath, reason: `${registryPath} is not valid JSON (${e.message})` };
+  }
+  const entries = json && json.plugins && json.plugins[PLUGIN_KEY];
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
+  }
+  const selected = selectEntry(entries);
+  if (selected.error) {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
+  }
+  const installPath = selected.entry.installPath;
+  if (typeof installPath !== "string" || installPath === "") {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
+  }
+  return { present: true, registryPath, installPath };
+}
+
+// One registry key can carry MULTIPLE entries — measured: a Claude
+// `--scope=project` install adds an entry to the SAME user-global registry
+// this reads, alongside any `--scope=user` entry, and `entries[0]` picks
+// whichever happened to install first with no regard for which is live from
+// the caller's own cwd. A single entry is never ambiguous regardless of its
+// scope. With more than one, prefer the single `scope: "user"` entry — the
+// one that answers regardless of cwd, which is what a Resolver with no cwd
+// scoping of its own needs — and refuse, naming every candidate, if zero or
+// more than one entry qualifies.
+function selectEntry(entries) {
+  if (entries.length === 1) return { entry: entries[0] };
+  const userScoped = entries.filter((e) => e && e.scope === "user");
+  if (userScoped.length === 1) return { entry: userScoped[0] };
+  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
+    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
+  return {
+    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
+  };
+}
+
+function registries() {
+  const home = os.homedir();
+  return {
+    claude: readRegistry(path.join(home, ".claude", "plugins", "installed_plugins.json")),
+    omp: readRegistry(path.join(home, ".omp", "plugins", "installed_plugins.json")),
+  };
+}
+
+// Which harness is running THIS process, for the tie-break below — trusted
+// ONLY when it can be positive and exclusive.
+//
+// MEASURED 2026-09-09, this box: a Bash-tool shell dispatched by omp carries
+// BOTH `OMPCODE=1` and `CLAUDECODE=1` — omp sets `CLAUDECODE` too, for
+// compatibility with anything (this script included) that gates on it.
+// Environment variables are INHERITED by child processes (measured: `sh -c
+// 'sh -c "printenv OMPCODE"'` prints `1`), so `OMPCODE`'s presence is NOT
+// exclusive to "this process IS omp" the way its ABSENCE is exclusive to
+// "this process is not omp" — a Claude Code process launched from ANY shell
+// that has `OMPCODE` set (an omp-orchestrated one, directly or nested)
+// inherits it and is indistinguishable, by this or any other env probe, from
+// omp itself. Reviewed and measured directly (#1355): a sandboxed run with
+// both registries present and `OMPCODE=1 CLAUDECODE=1` executed the OMP
+// install even where the actual intent was Claude. So this trusts exactly
+// one shape — `CLAUDECODE` set and `OMPCODE` unset — because omp is measured
+// to ALWAYS set both together, making that absence the one reliable
+// negative signal this has. Every other combination (both set, neither set)
+// is genuinely ambiguous and refuses below rather than guess.
+function detectRunningHarness() {
+  if (process.env.CLAUDECODE && !process.env.OMPCODE) return "claude";
+  return null;
+}
+
+// The chosen { harness, registryPath, installPath }, or a die() that names
+// every registry this looked at.
+function resolveInstall() {
+  const override = process.env.FLEET_HARNESS;
+  if (override !== undefined && override !== "" && override !== "claude" && override !== "omp") {
+    die(`FLEET_HARNESS must be "claude" or "omp", got ${JSON.stringify(override)}`);
+  }
+
+  const regs = registries();
+  const present = ["claude", "omp"].filter((h) => regs[h].present);
+
+  if (present.length === 0) {
+    die(`no registry carries "${PLUGIN_KEY}" — ${regs.claude.reason}; ${regs.omp.reason}`);
+  }
+
+  if (override) {
+    if (!regs[override].present) die(`FLEET_HARNESS=${override} but ${regs[override].reason}`);
+    return { harness: override, ...regs[override] };
+  }
+
+  if (present.length === 1) {
+    const h = present[0];
+    return { harness: h, ...regs[h] };
+  }
+
+  // Both registries carry the key. Prefer the running harness's install
+  // ONLY where detection is reliable — see detectRunningHarness's own
+  // header for why "detected" here means something narrower than "OMPCODE
+  // or CLAUDECODE happens to be set".
+  const running = detectRunningHarness();
+  if (running !== null) {
+    process.stderr.write(
+      `${NAME}: both registries carry "${PLUGIN_KEY}" — running harness detected as ${running} `
+      + "(CLAUDECODE set, OMPCODE unset — the one combination this trusts), "
+      + `preferring its installPath: ${regs[running].installPath} `
+      + "(set FLEET_HARNESS=claude or FLEET_HARNESS=omp to override)\n",
+    );
+    return { harness: running, ...regs[running] };
+  }
+
+  // No positive signal. Refusing is only right when the pick MATTERS —
+  // measured (#1355 review, round 2): this box's own ambient env has BOTH
+  // OMPCODE and CLAUDECODE set (an omp session launched from a Claude
+  // shell), so a bare refusal here makes every one of the 35 callsites
+  // unusable by default. Where both installs' `scripts/` are
+  // byte-identical, which one gets picked cannot change what runs, so the
+  // choice is immaterial and this picks deterministically instead of
+  // refusing: the harness a positive signal would have named (none, in
+  // this branch) else `claude`'s user-scope entry. Only a REAL divergence
+  // — different digests, still no positive signal, no override — refuses.
+  const digestClaude = digestScriptsDir(regs.claude.installPath);
+  const digestOmp = digestScriptsDir(regs.omp.installPath);
+  if (!digestClaude.error && !digestOmp.error && digestClaude.digest === digestOmp.digest) {
+    const picked = "claude"; // documented fallback order: positive signal, else claude
+    process.stderr.write(
+      `${NAME}: both registries carry "${PLUGIN_KEY}" and the running harness cannot be told apart, but `
+      + `scripts/ is byte-identical on both (sha256 ${digestClaude.digest}) — the choice is immaterial, `
+      + `picking ${picked} (documented fallback order): ${regs[picked].installPath}\n`,
+    );
+    return { harness: picked, ...regs[picked] };
+  }
+
+  die(
+    `both registries carry "${PLUGIN_KEY}" (claude: ${regs.claude.installPath}; omp: ${regs.omp.installPath}) `
+    + "and the running harness cannot be reliably told apart here (OMPCODE is measured to propagate to a "
+    + "Claude process nested under omp, so its presence proves nothing either way); their scripts/ digests "
+    + `differ (${digestClaude.error ? `claude: ${digestClaude.error}` : `claude: ${digestClaude.digest}`}; `
+    + `${digestOmp.error ? `omp: ${digestOmp.error}` : `omp: ${digestOmp.digest}`}), so the pick is material `
+    + "— set FLEET_HARNESS=claude or FLEET_HARNESS=omp to disambiguate; refusing to guess",
+  );
+}
+
+function scriptPathFor(installPath, script) {
+  return path.join(installPath, "scripts", script);
+}
+
+function usage() {
+  process.stderr.write(
+    `usage: ${NAME} <script> [args...]\n`
+    + `       ${NAME} --path <script>   (print the resolved path; do not exec)\n`
+    + `       ${NAME} --root            (print the resolved Install root)\n`,
+  );
+  process.exit(2);
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+
+  if (argv.length === 0) usage();
+
+  if (argv[0] === "--root") {
+    if (argv.length !== 1) usage();
+    const r = resolveInstall();
+    process.stdout.write(r.installPath + "\n");
+    return;
+  }
+
+  if (argv[0] === "--path") {
+    const script = argv[1];
+    if (!script || argv.length !== 2) usage();
+    const r = resolveInstall();
+    process.stdout.write(scriptPathFor(r.installPath, script) + "\n");
+    return;
+  }
+
+  const script = argv[0];
+  const args = argv.slice(1);
+  const r = resolveInstall();
+  const scriptPath = scriptPathFor(r.installPath, script);
+
+  if (!fs.existsSync(scriptPath)) {
+    die(`script not found: ${scriptPath} (resolved via ${r.harness} registry ${r.registryPath})`);
+  }
+
+  // `.mjs` scripts run via node, `.sh` via sh, anything else execs directly
+  // (its own shebang decides, and it must be executable — an unreadable or
+  // non-executable "anything else" surfaces as the child's own EACCES/ENOENT
+  // below, named at the path this already resolved).
+  let cmd;
+  let cmdArgs;
+  if (scriptPath.endsWith(".mjs")) {
+    cmd = process.execPath;
+    cmdArgs = [scriptPath, ...args];
+  } else if (scriptPath.endsWith(".sh")) {
+    cmd = "sh";
+    cmdArgs = [scriptPath, ...args];
+  } else {
+    cmd = scriptPath;
+    cmdArgs = args;
+  }
+
+  // stdio: "inherit" and no `cwd` override — the caller's cwd and std
+  // streams reach the child untouched, which is the "arguments and working
+  // directory reach the script unchanged" acceptance criterion.
+  const result = spawnSync(cmd, cmdArgs, { stdio: "inherit" });
+
+  if (result.error) {
+    die(`could not exec ${scriptPath}: ${result.error.message}`);
+  }
+  if (result.signal) {
+    process.stderr.write(`${NAME}: ${scriptPath} was killed by ${result.signal}\n`);
+    process.exit(1);
+  }
+  // Pass the child's own exit code through untouched — 2 is reserved for a
+  // RESOLVER failure (above), never for what the child itself decided.
+  process.exit(result.status === null ? 1 : result.status);
+}
+
+main();
