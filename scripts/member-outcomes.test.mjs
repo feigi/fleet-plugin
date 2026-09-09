@@ -305,10 +305,10 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 13/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 14/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /14 fields/);
+  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /15 fields/);
 });
 
 const row = (o = {}) => ({
@@ -318,7 +318,7 @@ const row = (o = {}) => ({
   // Default agent tracks the default/overridden member, so fixtures that vary
   // only `member` still get distinct transcript ids, and fixtures that share
   // the default member (untouched) still key as the SAME agent.
-  agent: `agent-a${o.member ?? "impl-580"}`, ...o,
+  agent: `agent-a${o.member ?? "impl-580"}`, harness: "claude", ...o,
 });
 
 test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {

@@ -13,6 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
+import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -256,18 +257,11 @@ export function mapCi(ciJson, pr) {
 }
 
 // Where this session's subagent transcripts live: Claude Code writes them to
-// ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/.
-//
-// The encoding replaces every non-alphanumeric character with `-`, so
-// /Users/x/.claude encodes to `-Users-x--claude` (double dash), not
-// `-Users-x-.claude`. Replacing only slashes silently missed every cwd
-// containing a dot — including this repo, which is what the fleet skills
-// themselves run out of, so the panel never rendered here at all. The miss is
-// invisible by construction: a wrong path just fails existsSync and returns
-// null, which looks exactly like "no data".
-export function encodeProjectDir(cwd) {
-  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
-}
+// ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/. The encoder
+// itself now lives in member-record.mjs (#1342), shared with the omp reader
+// and with member-outcomes.mjs; re-exported here under its original name so
+// nothing importing `encodeProjectDir` from this file needs to change.
+export { encodeProjectDir };
 
 // The session uuid is not knowable from here, so take the most recently active
 // one. Rank on the newest TRANSCRIPT mtime, not on the subagents directory's
@@ -392,54 +386,19 @@ function readAgent(file, metaFile) {
     warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other" and labelling it from its filename: ${e.message}`);
   }
 
-  let cacheWrite = 0, cacheRead = 0, maxCtx = 0;
-  const entries = [];
-  const turnById = new Map();
-  const lines = readFileSync(file, "utf8").split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    let j;
-    try { j = JSON.parse(line); }
-    catch (e) {
-      // The position check stays OUTSIDE the gate: a legitimate torn tail must
-      // not reach warnOnce at all, or it consumes this file's one `lines` line
-      // and permanently silences the real fault when the tear later moves.
-      if (i !== lines.length - 1)
-        warnOnce("lines", file, `${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${e.message}`);
-      continue;
-    }
-    // `message.content` is an array of blocks on tool-bearing turns but a plain
-    // STRING on ordinary prose turns — the first cut assumed an array and threw
-    // on the very first user line, which the catch below turned into a silent
-    // null spend panel. Normalise once, here.
-    const blocks = Array.isArray(j.message?.content) ? j.message.content : [];
-    const u = j.message?.usage;
-    if (u) {
-      const id = j.message?.id;
-      let turn = id == null ? undefined : turnById.get(id);
-      if (!turn) {
-        // First line of this turn — bill its usage now, once.
-        const cw = u.cache_creation_input_tokens ?? 0;
-        const cr = u.cache_read_input_tokens ?? 0;
-        cacheWrite += cw;
-        cacheRead += cr;
-        maxCtx = Math.max(maxCtx, (u.input_tokens ?? 0) + cr + cw);
-        turn = { kind: "assistant", cacheWrite: cw, tools: [], output: 0 };
-        entries.push(turn);
-        if (id != null) turnById.set(id, turn);
-      }
-      turn.output = Math.max(turn.output, u.output_tokens ?? 0);
-      for (const c of blocks) if (c?.type === "tool_use") turn.tools.push({ id: c.id, name: c.name });
-    } else if (j.type === "user") {
-      const results = blocks
-        .filter((c) => c?.type === "tool_result")
-        .map((c) => ({ id: c.tool_use_id, chars: typeof c.content === "string" ? c.content.length : JSON.stringify(c.content ?? "").length }));
-      if (results.length) entries.push({ kind: "result", results });
-    }
+  const folded = foldClaudeTranscript(readFileSync(file, "utf8"));
+  if (folded.malformedNonLastLine) {
+    // The position check lives in foldClaudeTranscript now: a legitimate torn
+    // tail must not reach warnOnce at all, or it consumes this file's one
+    // `lines` line and permanently silences the real fault when the tear
+    // later moves.
+    warnOnce("lines", file, `${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${folded.malformedNonLastLineError}`);
   }
-  const output = entries.reduce((n, e) => n + (e.output ?? 0), 0);
-  return { meta, cacheWrite, output, cacheRead, maxCtx, entries, metaFault };
+  return {
+    meta, cacheWrite: folded.cacheWrite, output: folded.output,
+    cacheRead: folded.cacheRead, maxCtx: folded.maxCtx, entries: folded.entries,
+    metaFault,
+  };
 }
 
 // The `no-spend-dir` gate warns at most once per process. `dir.error` is not

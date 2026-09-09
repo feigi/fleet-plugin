@@ -1,136 +1,42 @@
 // Scraper for per-member model/effort facts. Pure over the harness's own
 // subagent transcripts: no clock, no network, no gh. See
 // docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
+//
+// The Claude-specific parsing (message.id fold-back, model/effort
+// extraction, ticket/pr naming) now lives in member-record.mjs (#1342),
+// shared with board.mjs and with the omp reader. `normalizeModel` and
+// `parseMemberName` are re-exported here verbatim so nothing importing them
+// from this file needs to change.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 
-import { classifyRole } from "./compute-spend.mjs";
+import { readClaudeMember, normalizeModel, parseMemberName } from "./member-record.mjs";
 
-// `<synthetic>` is not a model — it is the harness labelling a turn it
-// generated itself, and mapping it to anything would invent a data point.
-//
-// The `[1m]` strip is DEFENSIVE, not load-bearing: meta.json carries the
-// context-window variant (`claude-opus-5[1m]`, 395 metas on disk) but this
-// scraper reads `message.model` from the transcript, where measurement found
-// ZERO bracketed spellings across every file. It fires only if the model source
-// ever moves to meta.json — a plausible change, since meta carries the
-// REQUESTED tier and the transcript the EFFECTIVE one.
-//
-// Note what is NOT handled: meta.json also carries bare aliases (`sonnet` 279,
-// `opus` 61, `haiku` 25). Those WOULD collide with the versioned ids and split
-// counts for real. Canonicalising them is only worth writing when something
-// actually reads meta.model.
-export function normalizeModel(raw) {
-  const s = String(raw ?? "").trim();
-  if (!s || s === "<synthetic>") return null;
-  return s.replace(/\[[^\]]*\]$/, "");
-}
+export { normalizeModel, parseMemberName };
 
-// A member's name is the only place its unit of work is recorded — nothing
-// writes ticket or PR into meta.json.
+// One row from one member's transcript plus its meta. Takes TEXT rather than
+// a path so it stays pure — the file reading lives in rowsForSession().
 //
-// FOUR finisher spellings are live on disk, measured 2026-08-27 across every
-// meta.json: finisher-pr-<n> 163, finish-pr-<n> 58, finisher-<n> 44,
-// finish-<n> 18. All four book a PR, and matching only the first cost 120 of
-// 283 finisher members their join key to tier-outcomes.tsv. The fix-pr-<n> and
-// review-pr-<n> families share the first pattern only because the infix is the
-// same — they are NOT finisher spellings. `finisher-pr-<n>` is the canonical
-// name run-team now fixes (#326); the other three stay matched because the runs
-// that used them are already in the record.
-//
-// merge-bot-<n> is deliberately excluded: its number is a WAVE index, and
-// booking it as a pr would join the row to an unrelated PR's verdict. A single
-// trailing lowercase letter is a retry suffix (-b, -c and -d all observed) and
-// is stripped first, because a re-dispatched member works the same unit.
-//
-// The NUMERIC suffix (`impl-137-2`) looks like the same retry spelling and is
-// deliberately NOT stripped. The one real instance on disk describes itself as
-// "Implement 137+138+139 set" — a multi-ticket batch that no single `ticket`
-// value represents. Blank is the honest answer; booking it to 137 would join
-// the row to two tickets it did not do.
-export function parseMemberName(name) {
-  const s = String(name ?? "").trim().replace(/-[a-z]$/, "");
-  let m = /^(?:fix|review|finish|finisher)-pr-(\d+)$/.exec(s);
-  if (m) return { ticket: "", pr: m[1] };
-  m = /^finish(?:er)?-(\d+)$/.exec(s);
-  if (m) return { ticket: "", pr: m[1] };
-  m = /^impl-(\d+)$/.exec(s);
-  if (m) return { ticket: m[1], pr: "" };
-  return { ticket: "", pr: "" };
-}
-
-// One row from one member's transcript plus its meta. Takes TEXT rather than a
-// path so it stays pure — the file reading lives in rowsForSession().
-//
-// The torn-line skip mirrors board.mjs: a transcript can be read while it is
-// still being appended to, and losing a whole member over its last few bytes
-// would be a blackout rather than degradation. `torn` rides on the row for
-// rowsForSession() to COUNT, but it is NOT a column: it records when the
-// scraper ran, not anything about the member, and it flips back to false on the
-// next re-scrape of the same file.
-//
-// `model` records the LAST turn's, not the first: a member whose model changed
-// mid-run finished at the later one, and that is the tier its output reflects.
-// `effort` is last-wins for the same reason.
-//
-// USAGE IS FOLDED ONTO `message.id`, exactly as board.mjs's "fold lines back
-// into turns on `message.id`" does. ONE
-// assistant API turn is written as SEVERAL jsonl lines — one per content block
-// (thinking, text, each tool_use) — and every one repeats the SAME message.id
-// and the SAME usage object. Summing per LINE counts each turn's cache_creation
-// once per block: measured across all 2,723 flat transcripts, +176.0% on
-// cache_creation and +140.9% on the turn count, with 2,704 of them affected.
-// Worse, the overcount is MODEL-DEPENDENT (opus-5 2.81x against sonnet-5 2.39x)
-// because blocks-per-turn tracks how tool-heavy a turn is — so summing per line
-// tilts the very cost comparison this file exists to support.
-//
-// `output_tokens` is a streaming snapshot, so the LARGEST value across a turn's
-// lines is the final one. Summing it overcounts too, by ~1.5%.
-//
-// A line with no `message.id` becomes its own turn — the honest reading when the
-// harness gives nothing to fold on. Measured: 0 of 127,102 real assistant lines
-// lack one, so that path is fixtures only.
+// A thin adapter over member-record.mjs's readClaudeMember(): this file's own
+// row shape stays camelCase (`effort`, `tokensCacheCreate`, `tokensOut`,
+// `wallS`) so the TSV/FIELD machinery below and every existing consumer are
+// untouched, while the actual transcript parsing — the message.id fold-back,
+// model/effort last-wins, ticket/pr naming — lives in exactly one place and
+// is the same primitive board.mjs's readAgent now calls too, so the two can
+// no longer drift the way they once did.
+// `effort` reads the record's `thinking` field: #1342 keeps the TSV COLUMN
+// named `effort` rather than renaming it, because every awk one-liner in
+// this file's header and in docs/specs indexes columns by position, and a
+// rename buys nothing a comment does not already say.
 export function readMember(jsonlText, meta) {
-  let model = null, effort = "";
-  let firstTs = null, lastTs = null, torn = false;
-  const turnById = new Map();
-  let anon = 0;
-  for (const raw of String(jsonlText ?? "").split("\n")) {
-    if (!raw.trim()) continue;
-    let d;
-    try { d = JSON.parse(raw); torn = false; } catch { torn = true; continue; }
-    const ts = d.timestamp;
-    if (ts) { firstTs ??= ts; lastTs = ts; }
-    const m = d.message;
-    if (!m || d.type !== "assistant") continue;
-    const norm = normalizeModel(m.model);
-    if (norm) model = norm;
-    if (typeof d.effort === "string") effort = d.effort;
-    const u = m.usage ?? {};
-    const id = m.id ?? `\0anon${anon++}`;
-    let turn = turnById.get(id);
-    if (!turn) {
-      // First line of this turn — bill its cache write now, once.
-      turn = { cache: Number(u.cache_creation_input_tokens ?? 0), out: 0 };
-      turnById.set(id, turn);
-    }
-    turn.out = Math.max(turn.out, Number(u.output_tokens ?? 0));
-  }
-  if (!model) return null;
-
-  let cache = 0, out = 0;
-  for (const t of turnById.values()) { cache += t.cache; out += t.out; }
-
-  const member = String(meta?.name ?? meta?.agentType ?? "");
-  const { ticket, pr } = parseMemberName(member);
-  const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
+  const rec = readClaudeMember(jsonlText, meta);
+  if (!rec) return null;
   return {
-    role: classifyRole(meta), member, model, effort, ticket, pr,
-    tokensCacheCreate: cache, tokensOut: out,
-    wallS: Number.isFinite(span) ? Math.round(span) : 0,
-    turns: turnById.size,
-    torn,
+    harness: rec.harness, role: rec.role, member: rec.member, model: rec.model,
+    effort: rec.thinking, ticket: rec.ticket, pr: rec.pr,
+    tokensCacheCreate: rec.tokens_cache_create, tokensOut: rec.tokens_out,
+    wallS: rec.wall_s, turns: rec.turns, torn: rec.torn,
   };
 }
 
@@ -196,7 +102,7 @@ export function rowsForSession(sessionDir, stats = {}) {
 
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
-  "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent",
+  "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
 ];
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
