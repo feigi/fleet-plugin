@@ -234,8 +234,34 @@ case "$base" in
   */"$branch") die "BASE_REF must not name the claim's own branch, got '$base'";;
 esac
 
+# Neither guard above can see the third route to a vacuous $base, because the
+# hijack is spelled as the legitimate DEFAULT. `origin/main` is a SHORTHAND, and
+# git resolves a shorthand through its own disambiguation order (gitrevisions:
+# refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>, …), in
+# which refs/remotes/origin/main comes LAST. So a local TAG named `origin/main`
+# — `git tag origin/main refs/heads/$branch` — outranks the remote-tracking ref
+# and every measurement against $base then answers about the claim's own tip:
+# ahead 0, cherry empty, and the delete-time recount 0 as well. All three guards
+# vacuous at once, and `-D` refuses nothing, so the branch and its unpushed
+# commit are destroyed at exit 0 with "released":true and an empty blocker list.
+# Measured on a real bare-origin fixture; `git rev-parse origin/main` prints the
+# tag's OID under git's own `refname 'origin/main' is ambiguous` warning, which
+# nothing here reads. Pre-#760 `-d` refused this ("not fully merged") — the
+# guards were already vacuous under it, so `-d` was the sole backstop, and this
+# is the one class its removal reopened.
+#
+# The fix is to stop MEASURING against a shorthand: the accept-list already
+# establishes $base names a remote-tracking ref, so qualify it to the full
+# refs/remotes/ path, where there is nothing left to disambiguate. $base itself
+# is unchanged and stays in every user-facing message — `12 commit(s) ahead of
+# origin/main` is what an operator wants to read, not the qualified spelling.
+case "$base" in
+  refs/remotes/*) base_rev=$base;;
+  *) base_rev="refs/remotes/$base";;
+esac
+
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
-git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
+git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 
 # Locate the worktree by the branch it has checked out, the way reap.sh does —
 # not by claim-ticket.sh's ".worktrees/$issue-$slug", which is relative to the
@@ -991,7 +1017,7 @@ if [ "$has_branch" = true ]; then
   # Commits ahead — a member that did work. Measured on the branch ref rather
   # than the worktree's HEAD: the worktree above was located BY that ref, so the
   # two agree, and this still runs when the worktree is already gone.
-  ahead=$(git rev-list --count "$base..refs/heads/$branch") ||
+  ahead=$(git rev-list --count "$base_rev..refs/heads/$branch") ||
     die "cannot count commits on $branch against $base"
   [ "$ahead" -eq 0 ] || block "$ahead commit(s) ahead of $base"
 
@@ -1005,7 +1031,7 @@ if [ "$has_branch" = true ]; then
   # `git cherry` that failed outright (rc 128 on a corrupt object store, say)
   # yielded a count of 0 and the check silently passed; only the `ahead` guard
   # above, failing on the same conditions, kept that from being a delete.
-  cherry=$(git cherry "$base" "refs/heads/$branch") ||
+  cherry=$(git cherry "$base_rev" "refs/heads/$branch") ||
     die "git cherry failed on $branch against $base, so whether it carries unique commits is unknown"
   uniq=$(printf '%s' "$cherry" | grep -c '^+' || true)
   [ "$uniq" -eq 0 ] || block "$uniq commit(s) unique to $branch (git cherry)"
@@ -1278,7 +1304,7 @@ else
     # on (#760). The `git cherry` half is deliberately not recounted: a commit
     # that landed in the window is ahead of $base by construction, and one
     # cherry would mark `-` is patch-equivalent to something already upstream.
-    n=$(git rev-list --count "$base..refs/heads/$branch") ||
+    n=$(git rev-list --count "$base_rev..refs/heads/$branch") ||
       halt "cannot recount commits on $branch against $base at the delete"
     [ "$n" -eq 0 ] ||
       halt "$branch gained $n commit(s) since the checks — not deleted"

@@ -367,12 +367,12 @@ test("a commit that exists nowhere else blocks, and `git cherry` says so", (t) =
 // accumulated into `$blockers`), then `git cherry` itself fails, which is the
 // die this fix reaches. The shim is matched on argv, never on content — `git
 // cherry origin/main ...` is the only call this script makes whose first two
-// words are "cherry origin/main".
+// words are "cherry refs/remotes/origin/main".
 test("a die after a block still emits the accumulated blockers, not a bare exit 2 (#387)", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "the member's work", "work\n");
-  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+  gitShim(r, `case "$1 $2" in "cherry refs/remotes/origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
 
   const { code, json, stderr } = release(r, c);
   const cause = `git cherry failed on ${c.branch} against origin/main, so whether it carries unique commits is unknown`;
@@ -405,7 +405,7 @@ test("the die receipt's applied field is the flag, not a constant (#387)", (t) =
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "the member's work", "work\n");
-  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+  gitShim(r, `case "$1 $2" in "cherry refs/remotes/origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
 
   const { code, json } = release(r, c, { apply: false });
 
@@ -430,7 +430,7 @@ test("a receipt that cannot be written still leaves the die reason and exit 2 (#
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "the member's work", "work\n");
-  gitShim(r, `case "$1 $2" in "cherry origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+  gitShim(r, `case "$1 $2" in "cherry refs/remotes/origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
 
   const res = spawnSync("sh", ["-c", 'exec >&-; exec sh "$@"', "sh", SCRIPT, ...c.args, "--apply"], {
     cwd: r.w,
@@ -1808,22 +1808,58 @@ test("the script carries no escape hatch", () => {
   // command the `-D` actually belongs to, not merely a word earlier on the
   // line: `echo x && git branch -D "$stray"` is a real second delete, and a
   // prefix-wide match excused the whole line. So cut the prefix at the last
-  // `;`/`&&`/`||` and require the wrapper at the head of what remains — the
+  // separator and require the wrapper at the head of what remains — the
   // dry-run plan's own `[ … ] && echo` mention still lands there.
+  //
+  // Match on a NORMALIZED line, not the source text. Three evasions of this
+  // one detector have now shipped past it, and the third was pure spelling:
+  // `git branch "-D" "$x"` is the same command the shell runs and `/\bgit
+  // branch -D\b/` does not see it at all, so the line was never even
+  // collected (measured: a real unguarded second delete, count still 1).
+  // Enumerating spellings is what lost the last three rounds, so strip what
+  // the shell strips instead — quote characters and runs of whitespace —
+  // and match once against the result. That covers `'-D'`, `-"D"` and
+  // `git  branch   -D` in the same stroke. `|` joins `;`/`&&`/`||` in the
+  // separator set for the same reason: a delete reached through a pipe was
+  // excused by a wrapper that heads a different command.
+  //
+  // Normalization is for FINDING the call; the audited-form assertion below
+  // still reads the raw source line, so the one authorized call must be
+  // written exactly as it is written today.
+  const norm = (l) => l.replace(/['"]/g, "").replace(/\s+/g, " ");
   const forceDeletes = src
     .split("\n")
-    .filter((l) => /\bgit branch -D\b/.test(l))
-    .filter((l) => !/^\s*(echo|printf|halt|die|block)\b/.test(l.slice(0, l.indexOf("git branch -D")).split(/;|&&|\|\|/).pop()));
+    .map((l) => ({ raw: l, n: norm(l) }))
+    .filter(({ n }) => /\bgit branch -D\b/.test(n))
+    .filter(({ n }) => !/^\s*(echo|printf|halt|die|block)\b/.test(n.slice(0, n.indexOf("git branch -D")).split(/&&|[;|]/).pop()));
   assert.equal(forceDeletes.length, 1, "exactly one authorized force-delete");
-  assert.match(forceDeletes[0], /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
-  assert.doesNotMatch(src, /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
+  assert.match(forceDeletes[0].raw, /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
+  assert.doesNotMatch(src.replace(/['"]/g, "").replace(/[^\S\n]+/g, " "), /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
   // The recount standing in for `-d`'s own delete-time refusal. Without it a
   // commit landing across the `gh issue view` between the guards and the
   // delete is destroyed at exit 0 with "released":true. It narrows that window
   // rather than closing it — see the delete site's comment.
-  assert.match(src, /n=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "and the delete-time recount stands");
-  assert.match(src, /ahead=\$\(git rev-list --count "\$base\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
-  assert.match(src, /cherry=\$\(git cherry "\$base" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");
+  //
+  // The comparison, not just the assignment. A pin that only asserts the
+  // recount EXISTS is satisfied by a recount nothing reads — `n` computed and
+  // then never tested is the same vacuous guard with a line of evidence in
+  // front of it — so the `-eq 0` refusal that follows it is matched in the
+  // same expression.
+  assert.match(
+    src,
+    /n=\$\(git rev-list --count "\$base_rev\.\.refs\/heads\/\$branch"\)[\s\S]{0,200}?\[ "\$n" -eq 0 \] \|\|\s*\n\s*halt/,
+    "and the delete-time recount stands, with the zero comparison that enforces it",
+  );
+  assert.match(src, /ahead=\$\(git rev-list --count "\$base_rev\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
+  assert.match(src, /cherry=\$\(git cherry "\$base_rev" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");
+  // Every guard MEASURES against the qualified ref, never the `origin/main`
+  // shorthand: git resolves a shorthand through its own disambiguation order,
+  // where a local tag named `origin/main` outranks refs/remotes/origin/main
+  // and makes all three vacuous at once. The accept-list cannot catch that —
+  // the hijack is spelled as the legitimate default — so the qualification is
+  // the guard, and a revert to `"$base.."` here is the edit this pins.
+  assert.doesNotMatch(src, /git rev-list --count "\$base\./, "no guard measures against the ambiguous shorthand");
+  assert.doesNotMatch(src, /git cherry "\$base"/, "and neither does cherry");
 });
 
 test("usage errors exit 2", (t) => {
@@ -1940,6 +1976,47 @@ test("BASE_REF must not name the claim's own branch", (t) => {
   assert.equal(code, 2);
   assert.equal(json, null);
   assert.match(stderr, /BASE_REF must not name the claim's own branch/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a local ref shadowing `origin/main` cannot make the commit guards vacuous", (t) => {
+  // The third route to a vacuous base, and the one neither guard above can see:
+  // it is spelled as the legitimate DEFAULT. `origin/main` is a shorthand, and
+  // git resolves it through its own disambiguation order — refs/tags/<name>
+  // outranks refs/remotes/<name> — so a local TAG named `origin/main` pointing
+  // at the claim's own tip answers every measurement against it. `ahead` 0,
+  // `git cherry` empty, and the delete-time recount 0 as well: all three
+  // vacuous at once, and `-D` refuses nothing. Measured on this fixture before
+  // the fix: exit 0, "released":true, "blockers":[], the branch and its
+  // unpushed commit destroyed. `-d` refused it ("not fully merged"), so this is
+  // the one class #760's swap reopened.
+  //
+  // A tag, not a local branch: `refs/heads/origin/main` is ALSO ahead of
+  // refs/remotes in the order, but git refuses to create a branch under a name
+  // whose first component is a remote's. The tag is the reachable shape.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "work that exists nowhere else", "work\n");
+  git(r.w, "tag", "origin/main", `refs/heads/${c.branch}`);
+  assert.equal(
+    git(r.w, "rev-parse", "origin/main").trim(),
+    git(r.w, "rev-parse", `refs/heads/${c.branch}`).trim(),
+    "fixture: the shorthand really does resolve to the claim's own tip",
+  );
+  assert.notEqual(
+    git(r.w, "rev-parse", "refs/remotes/origin/main").trim(),
+    git(r.w, "rev-parse", `refs/heads/${c.branch}`).trim(),
+    "fixture: and the real upstream is a different commit, so the guards have something to find",
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  // BOTH, not either: the fix is that every measuring site was requalified, so
+  // a half-applied one leaves the other still reading the tag.
+  assert.equal(json.blockers.length, 2, `both commit guards must fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /1 commit\(s\) ahead of origin\/main/);
+  assert.match(json.blockers[1], /1 commit\(s\) unique to fix\/9-release-ticket \(git cherry\)/);
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
