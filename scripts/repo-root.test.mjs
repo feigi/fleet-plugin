@@ -1,24 +1,39 @@
-// The two answers repo-root.mjs exists to keep apart, pinned directly rather
-// than through a sub-suite.
+// The answers repo-root.mjs exists to keep apart, pinned directly rather than
+// through a sub-suite.
 //
 // The sweep suites that import it (muted-git-guard-sweep, unattended-git-sweep,
 // worktree-listing-sweep) skip themselves where there is no ambient working
 // tree, and a skip is an ABSENCE of coverage. Nothing inside a skipped file can
-// pin the condition that skipped it — so the pin lives here, where both answers
-// are reachable in one process: `null` where the root lookup cannot answer, a
-// path where it can. Without the second half the guard could fire everywhere
-// and the whole gate would be silently gone (#1149).
+// pin the condition that skipped it — so the pin lives here, where every answer
+// is reachable in one process: `null` where the root lookup cannot answer, a
+// path where it can, and a throw where it finds a repository whose own git
+// does not TRACK this file (#1339, then twice more in #1354's review).
+// Without the second half the guard could fire everywhere and the whole gate
+// would be silently gone (#1149); without the third, a non-empty wrong root —
+// a DIFFERENT checkout of this same plugin that merely shares its name, or an
+// installed copy sitting untracked inside an ambient repository — would sail
+// through as though it were a real answer.
+//
+// Several tests below need `repoRoot` to answer YES about a fixture, which
+// tracked-ness makes harder to fake than either of the checks tried before
+// it: a fixture has to actually TRACK a copy of repo-root.mjs and its
+// manifest, at the same relative layout this file ships in, and the test
+// then imports THAT copy rather than the module under test.
+// `selfContainedFixture` builds the simple case; the #1339-precise tests
+// build the installed-cache shape by hand.
 //
 // Zero deps: `node --test scripts/repo-root.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { ownPluginName, repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
@@ -61,6 +76,100 @@ function noRepo(t) {
   return { dir, env: { ...ENV, GIT_CEILING_DIRECTORIES: dirname(dir) } };
 }
 
+/**
+ * Writes `dir/.claude-plugin/plugin.json` naming the same plugin as this
+ * checkout's own — via `ownPluginName()`, not a literal, for the same reason
+ * repo-root.mjs itself reads it that way rather than hardcoding "fleet"
+ * (#1352 is mid-rename). This alone does NOT make `repoRoot` accept `dir`
+ * since #1354: a name match is not containment, and `dir` does not contain
+ * this file. That gap is exactly what the same-name-foreign-checkout test
+ * below exercises; fixtures that need a root `repoRoot` genuinely accepts use
+ * `selfContainedFixture` instead.
+ */
+function ownManifestFixture(dir) {
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: ownPluginName() }));
+}
+
+/**
+ * A fixture `repoRoot` can genuinely accept, post-#1354's tracked-ness check:
+ * a git repository that TRACKS a copy of repo-root.mjs at the same relative
+ * layout this file ships in (`scripts/repo-root.mjs` beside
+ * `.claude-plugin/plugin.json`), so the copy's own `import.meta.url` resolves
+ * inside the fixture AND `git ls-files --error-unmatch` finds it there.
+ *
+ * Returns the copy's own exports via dynamic `import()` — the module UNDER
+ * TEST (`./repo-root.mjs`) is never itself tracked by a disposable fixture,
+ * so asking it to answer for one always fails by construction. Every caller
+ * of this fixture is therefore exercising the SAME contract through a
+ * second, disposable instance of the module rather than a special case.
+ */
+async function selfContainedFixture(t) {
+  const { dir } = noRepo(t);
+  const scriptsDir = join(dir, "scripts");
+  mkdirSync(scriptsDir, { recursive: true });
+  copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  ownManifestFixture(dir);
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
+  assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
+  // Staged is enough for `git ls-files --error-unmatch` (measured) — no
+  // commit needed, and *.sh stays untracked either way since this fixture
+  // never writes any.
+  execFileSync("git", ["add", "-A"], { cwd: dir, env: ENV });
+  const mod = await import(pathToFileURL(join(scriptsDir, "repo-root.mjs")).href);
+  return { dir, scriptsDir, repoRoot: mod.repoRoot };
+}
+
+/**
+ * A foreign git repository with tracked `hooks/x.sh` and `y.sh` — the shape
+ * #1339 measured (the operator's own dotfiles, complete with its own
+ * unrelated tracked scripts). Returns `{ dir }`; callers add whatever
+ * plugin-cache-like structure their scenario needs inside it.
+ */
+function foreignRepoWithTrackedScripts(t) {
+  const { dir } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
+  const hooksDir = join(dir, "hooks");
+  mkdirSync(hooksDir);
+  writeFileSync(join(hooksDir, "x.sh"), "#!/bin/sh\n");
+  writeFileSync(join(dir, "y.sh"), "#!/bin/sh\n");
+  execFileSync("git", ["add", "hooks/x.sh", "y.sh"], { cwd: dir, env: ENV });
+  execFileSync("git", ["commit", "-q", "-m", "tracked scripts"], { cwd: dir, env: ENV });
+  assert.deepEqual(
+    execFileSync("git", ["ls-files", "*.sh"], { cwd: dir, encoding: "utf8" }).trim().split("\n").sort(),
+    ["hooks/x.sh", "y.sh"],
+    "fixture must have exactly the two tracked scripts #1339 measured, or the old guard's non-emptiness isn't exercised",
+  );
+  return { dir };
+}
+
+/**
+ * Copies THIS checkout's own `scripts/repo-root.mjs` and
+ * `.claude-plugin/plugin.json` into
+ * `<foreignRoot>/plugins/cache/mkt/fleet/0.1.1/{scripts,.claude-plugin}` —
+ * the exact layout an installed plugin's cache directory takes (#1339's own
+ * measured shape, `~/.claude/plugins/cache/fleet-plugin/fleet/0.1.1/...`).
+ *
+ * `tracked` decides whether the copy is committed into `foreignRoot`'s own
+ * index. `false` is the real #1339 shape: a cache directory that ships
+ * ALONGSIDE the ambient repository's tracked tree, never inside it. `true` is
+ * what happens the moment that copy IS committed there — it stops being a
+ * foreign file and becomes genuinely that repository's own.
+ */
+function installedCacheCopy(foreignRoot, { tracked }) {
+  const payloadDir = join(foreignRoot, "plugins", "cache", "mkt", "fleet", "0.1.1");
+  const scriptsDir = join(payloadDir, "scripts");
+  mkdirSync(scriptsDir, { recursive: true });
+  mkdirSync(join(payloadDir, ".claude-plugin"), { recursive: true });
+  copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  copyFileSync(join(DIR, "..", ".claude-plugin", "plugin.json"), join(payloadDir, ".claude-plugin", "plugin.json"));
+  if (tracked) {
+    execFileSync("git", ["add", "-A", "plugins"], { cwd: foreignRoot, env: ENV });
+    execFileSync("git", ["commit", "-q", "-m", "vendor the plugin payload"], { cwd: foreignRoot, env: ENV });
+  }
+  return scriptsDir;
+}
+
 test("repoRoot answers null where there is no ambient working tree", (t) => {
   const { dir, env } = noRepo(t);
   // The fixture first, or the assertion below could pass over a directory that
@@ -89,14 +198,13 @@ test("repoRoot answers null where there is no ambient working tree", (t) => {
     "and that is the one condition that produces a skip reason");
 });
 
-test("repoRoot answers the root where there IS one, and skipWithoutRepo then declines to skip", (t) => {
-  const { dir } = noRepo(t);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
-  // The artifact, not the exit status: `git init` under an ambient GIT_DIR
-  // returns 0 having created nothing here.
-  assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
+test("repoRoot answers the root where there IS one, and skipWithoutRepo then declines to skip", async (t) => {
+  // Since #1354, a bare `git init` plus a matching manifest is not enough —
+  // repoRoot also checks TRACKED-NESS, so the fixture has to actually track
+  // a copy of the module being asked about.
+  const { dir, scriptsDir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
 
-  const root = repoRoot(dir);
+  const root = fixtureRepoRoot(scriptsDir);
   assert.equal(root, dir);
   assert.equal(skipWithoutRepo(root, "the tests"), false,
     "a working tree that answers must never skip — that is the condition the sweeps are for");
@@ -107,16 +215,149 @@ test("repoRoot answers the root where there IS one, and skipWithoutRepo then dec
 // empty list and `skipWithoutRepo` still declines to skip, so the importing
 // sweep runs and its own non-vacuity guard is what fails. A skip here would turn
 // the nested-under-an-unrelated-repo failure into a silent green.
-test("an empty tracked-script list is NOT a skip — the sweep still runs and its guard still judges", (t) => {
-  const { dir } = noRepo(t);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
-  assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
+test("an empty tracked-script list is NOT a skip — the sweep still runs and its guard still judges", async (t) => {
+  // The fixture's copy of repo-root.mjs and its manifest ARE tracked (the
+  // identity check needs that), but no *.sh file is — trackedShellScripts
+  // reads a disjoint glob, so its list stays empty regardless.
+  const { dir, scriptsDir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
 
-  const root = repoRoot(dir);
+  const root = fixtureRepoRoot(scriptsDir);
   assert.notEqual(root, null);
   assert.deepEqual(trackedShellScripts(root), [], "a repository with no tracked shell scripts lists none");
   assert.equal(skipWithoutRepo(root, "the tests"), false,
-    "an empty match list is the wrong repository or a broken glob, and must reach the caller's guard as a FAILURE");
+    "an empty match list inside this plugin's own tree is a broken glob or path join, "
+    + "and must reach the caller's guard as a FAILURE");
+});
+
+// #1339's measured shape, broadly: a foreign git repository (the operator's
+// own dotfiles, in the field) with tracked *.sh files, and inside it a
+// directory that looks like an installed plugin's own scripts/ — no .git, no
+// copy of repo-root.mjs at all — so the discovery walk that starts there
+// lands on the foreign root. Before the fix, repoRoot returned that root
+// because its only guard was non-vacuity, and the foreign repo's tracked
+// scripts are a non-empty list; the caller's own non-vacuity guard never even
+// got a chance to be wrong, because there was nothing vacuous about the
+// answer.
+//
+// Measured against the pre-fix repoRoot (this file's repo-root.mjs copied to
+// a scratch path before this commit and imported from there — `git stash` is
+// forbidden by this repo's convention): `node prefix-repro.mjs` against that
+// copy printed `BUG REPRODUCED: repoRoot did NOT throw. root =
+// /private/var/.../repo-root-foreign-fhzHMH` and `trackedShellScripts(root) =
+// [ 'hooks/x.sh', 'y.sh' ]` — the assertion below would have failed against
+// it. Against the fixed repoRoot below: PASSES, and the thrown message names
+// the foreign root and the file it does not track.
+test("a foreign git repository with tracked scripts is refused, not returned — #1339", (t) => {
+  const { dir: foreignRoot } = foreignRepoWithTrackedScripts(t);
+
+  // The plugin-cache-like nested directory: no .git, no copy of this module,
+  // exactly what an installed copy's PARENT looks like when it lands inside
+  // an ambient working tree that is not its own (the shape #1339 measured
+  // under `~/.claude`). The more precise test below places an actual copy of
+  // this file there and asks IT about itself.
+  const nested = join(foreignRoot, "plugins", "cache", "fleet-plugin", "fleet", "0.1.1", "scripts");
+  mkdirSync(nested, { recursive: true });
+
+  const saved = process.env.GIT_CEILING_DIRECTORIES;
+  t.after(() => {
+    if (saved === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = saved;
+  });
+  process.env.GIT_CEILING_DIRECTORIES = dirname(foreignRoot);
+
+  assert.throws(
+    () => repoRoot(nested),
+    (err) => err instanceof Error && err.message.includes(foreignRoot) && /does not TRACK/.test(err.message),
+    "a wrong root that is non-empty must be refused as loudly as an empty one — #1339",
+  );
+});
+
+// #1339's shape, PRECISELY: not merely "some foreign repo with tracked
+// scripts" but the actual installed-cache layout — a real copy of THIS file
+// at `plugins/cache/mkt/fleet/0.1.1/scripts/repo-root.mjs`, UNTRACKED by the
+// ambient repository it happens to sit inside (a cache directory is never
+// committed there). This is the exact configuration #1339 measured under
+// `~/.claude`: self genuinely lives inside the foreign repository — so a
+// CONTAINMENT check (tried and reverted between #1354's first two rounds)
+// wrongly accepts it, and only tracked-ness tells them apart.
+//
+// Mutation-tested by hand: reverted `assertOwnRoot` to the containment-only
+// shape (`self.startsWith(realRoot + sep)`, no `isTrackedBy`) in a scratch
+// copy laid out at the same relative depth as a real checkout, then ran this
+// exact fixture shape against it — printed `MUTATION CONFIRMED LOAD-BEARING:
+// containment-only wrongly accepted /private/tmp/true1339-mut-BzsU`, i.e. the
+// untracked cache copy was answered about. Against the real, tracked-ness
+// based repoRoot below: throws.
+test("an untracked installed-cache copy inside a foreign repository is refused — #1339 (precise)", async (t) => {
+  const { dir: foreignRoot } = foreignRepoWithTrackedScripts(t);
+  const scriptsDir = installedCacheCopy(foreignRoot, { tracked: false });
+
+  const mod = await import(pathToFileURL(join(scriptsDir, "repo-root.mjs")).href);
+  assert.throws(
+    () => mod.repoRoot(scriptsDir),
+    (err) => err instanceof Error && err.message.includes(foreignRoot) && /does not TRACK/.test(err.message),
+    "an untracked cache copy must be refused even though it sits genuinely INSIDE the ambient repository — #1339",
+  );
+});
+
+// The other half: once the SAME copy is committed into the foreign
+// repository's own index, it genuinely IS that repository's file — this is
+// no longer a foreign root being mistaken for the answer, it is the
+// vendoring repository's own tree, and repoRoot must accept it exactly as it
+// would this checkout.
+test("a committed installed-cache copy inside a foreign repository is accepted as that repository's own", async (t) => {
+  const { dir: foreignRoot } = foreignRepoWithTrackedScripts(t);
+  const scriptsDir = installedCacheCopy(foreignRoot, { tracked: true });
+
+  const mod = await import(pathToFileURL(join(scriptsDir, "repo-root.mjs")).href);
+  assert.equal(mod.repoRoot(scriptsDir), foreignRoot,
+    "once the copy is committed it IS that repository's own file, and repoRoot must say so");
+});
+
+// #1336's planned re-nesting of the whole payload under `plugin/`, simulated
+// by committing this file's own scripts/ and .claude-plugin/ under a
+// `plugin/` subdirectory of a fresh repository, so the git toplevel no
+// longer has `.claude-plugin` directly beneath it. The self-relative
+// manifest lookup (`dirname(thisFile)/../.claude-plugin/plugin.json`) must
+// still find it regardless of how many levels separate it from the toplevel,
+// and repoRoot must still accept the checkout as its own.
+test("a plugin/-nested layout (#1336) is still accepted as this file's own tree", async (t) => {
+  const { dir } = noRepo(t);
+  const pluginDir = join(dir, "plugin");
+  const scriptsDir = join(pluginDir, "scripts");
+  mkdirSync(scriptsDir, { recursive: true });
+  mkdirSync(join(pluginDir, ".claude-plugin"), { recursive: true });
+  copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  copyFileSync(join(DIR, "..", ".claude-plugin", "plugin.json"), join(pluginDir, ".claude-plugin", "plugin.json"));
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
+  execFileSync("git", ["add", "-A"], { cwd: dir, env: ENV });
+  execFileSync("git", ["commit", "-q", "-m", "nested payload"], { cwd: dir, env: ENV });
+
+  const mod = await import(pathToFileURL(join(scriptsDir, "repo-root.mjs")).href);
+  assert.equal(mod.repoRoot(scriptsDir), dir,
+    "a hardcoded root/.claude-plugin/plugin.json would refuse this; the self-relative lookup must not — #1336");
+});
+
+// #1354's review of the first fix: comparing the resolved root's OWN manifest
+// name against this file's caught #1339's shape but missed a DIFFERENT
+// checkout of this same plugin sitting above some unrelated caller directory
+// — same name, wrong tree, still accepted. This fixture is exactly that: a
+// foreign repository whose `.claude-plugin/plugin.json` genuinely matches
+// this checkout's own plugin name, but which does not track this file.
+test("a different checkout of this same plugin, not tracking this file, is refused — #1354", (t) => {
+  const { dir } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
+  // Same plugin NAME as this checkout's own — the exact condition a
+  // name-only check would have accepted.
+  ownManifestFixture(dir);
+
+  const self = realpathSync(join(DIR, "repo-root.mjs"));
+  assert.throws(
+    () => repoRoot(dir),
+    (err) => err instanceof Error && err.message.includes(dir) && err.message.includes(self)
+      && /does not TRACK/.test(err.message),
+    "a foreign tree that merely shares this plugin's name must be refused exactly as an unnamed one is — #1354",
+  );
 });
 
 // #1149's own defect class, and the one place it could reappear inside the fix
