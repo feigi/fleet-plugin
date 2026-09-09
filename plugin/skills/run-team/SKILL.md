@@ -2146,6 +2146,70 @@ drains, and on the spot for a claim abandoned mid-run (a bail before
 implementing, a collision found after the claim). Update the released tickets'
 ledger rows in the same step. See references/reaping.md.
 
+## Worktree and claim model, on both harnesses
+
+Ruled on #1315, measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
+that never touched the real checkout. Container per #1297: one tree, neutral
+prose, the harness split stated inline as the marked pair below — no
+per-harness `SKILL.md`, no shell wrapping the shared claim.
+
+**Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
+`release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
+the single shared ref store every worktree and the main checkout read and
+write directly (**Phase 1**, **Reap after every wave**, **Release the claims
+that never became PRs** above); nothing in omp's `task` model touches that
+store, so none of the four scripts carries a dialect branch.
+
+**A fleet member is never dispatched with omp's `isolated: true`.** Measured:
+an isolated spawn builds its workspace under `~/.omp/wt/<hash>/m` — an APFS
+clone (on this box), never a registered `git worktree` of the repo — and,
+because `apply` defaults to `true`, its changes are patch-applied into the
+**calling session's own cwd** the instant the spawn completes: a file an
+isolated probe created there appeared as `?? probe-isolated.txt` in the probe
+session's own cwd — which for an actual fleet run is the controller's main
+checkout — not in the worktree the prompt named. That is the exact
+silent-spill hazard this section exists to guard against, on by default, so
+`isolated` stays unused for every member and `task.isolation.enabled` stays
+off.
+
+**A member's tree is the claimed worktree, addressed by absolute path — the
+shared contract, true on both harnesses without translation.** Claude carries
+the identical hazard for the identical reason: an `edit` header without the
+worktree prefix lands in the main checkout (**You read your instruments out of
+a tree every member can write to** above), so this is one rule, not two; only
+the mechanism for handing a member its cwd splits by harness:
+
+CLAUDE: the `Agent` tool call this runbook dispatches through (`subagent_type`, no working-directory field anywhere in this file) hands a member its cwd purely through the dispatch prompt — **Phase 2**'s "You are ALREADY in worktree `<abs-path>`" — so every write that member makes is addressed there by the absolute path alone.
+OMP: the `task` tool's item schema — `name`/`agent`/`task`/`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own settings enable them — carries no working-directory field either; measured directly: a member dispatched through it with none of those fields, told only to report `pwd`, returned the calling session's own cwd, not the claimed worktree, the same output an un-`cwd`-set `bash` call gives from that session, so the recipe is the same dispatch-prompt absolute path, plus `bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`.
+
+**The one open gap this ticket measured: `task` does not accept a per-dispatch
+working directory.** `omp://tools/task.md` documents non-isolated spawns as
+running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
+appears anywhere in the item schema — and the probe above confirms it in
+practice: the recipe is the absolute-path discipline above, not a placeholder
+for a `cwd` field that does not exist.
+
+**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
+unaffected by a running member.** Measured against a hand-built claim (a
+branch plus a `git worktree add`) with a member sleeping inside it: a `bash`
+call with `cwd` set to the worktree, and a non-isolated `task` spawn told to
+work there, both operate inside the existing worktree and leave `git worktree
+list` unchanged — they coexist with the claim rather than duplicating it. An
+isolated spawn is architecturally blind to the worktree — its relative writes
+land in its own `~/.omp/wt/…` workspace regardless of the prompt — but it
+neither removes nor hides the claim, and `~/.omp/wt/` was empty after every
+isolated run: omp's own teardown touches only omp's own workspace, never the
+claim. `release-ticket.sh`'s three-artifact teardown (label, worktree, branch)
+is therefore exactly as necessary as on Claude. With the member live inside
+the worktree, `git worktree list` and `git branch --list` from the main
+checkout reported the claim unchanged before, during and after — `inflight.sh`
+hides nothing from omp.
+
+**The controller's own cwd stays the main checkout on both harnesses,
+unchanged.** Nothing in this section's dispatch recipe — the marked pair
+above, the isolated-workspace measurement, or the teardown scoping — moves
+where the controller itself runs from.
+
 ## Queue depth
 
 - **pool** — approved, not yet dispatched
