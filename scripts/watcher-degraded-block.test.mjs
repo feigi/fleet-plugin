@@ -1,16 +1,20 @@
 // #784. The degraded-watcher snippet in `run-team/SKILL.md` is prescriptive
 // shell a controller copies verbatim, and it has now shipped a defect that its
-// OWN surrounding prose already ruled out — twice. So this pin RUNS the block
-// rather than matching strings in it: it lifts the fenced snippet out of the
-// document, stubs `gh`, `ci-state.mjs` and `sleep` on PATH, and asserts the
-// three behaviours the prose promises.
+// OWN surrounding prose already ruled out — three times. So this pin RUNS the
+// block rather than matching strings in it: it lifts the fenced snippet out of
+// the document, stubs `gh`, `ci-state.mjs` and `sleep` on PATH, and drives it
+// through the states the prose promises: every probe latched at the level its
+// cause lives at, each latch one-shot in both directions, one sleep per tick
+// whatever went wrong, an ordinary not-green left alone, and the per-PR loop
+// splitting per PR under zsh as well as sh.
 //
-// THE CEILING: the stubs cover only the two probes the block makes, and `sleep`
-// is counted rather than taken, so this measures the block's control flow and
-// nothing about real GitHub, real timing, or the "your normal handling of $st"
-// line the block leaves as a placeholder. It also assumes the block stays a
-// `while :; do` tick loop — that string is how the harness caps the run, and a
-// rewrite to another loop form must update this test rather than the document.
+// THE CEILING: the stubs cover only the three probes the block makes, and
+// `sleep` is counted rather than taken, so this measures the block's control
+// flow and nothing about real GitHub, real timing, or the "your normal handling
+// of $st" line the block leaves as a placeholder. It also assumes the block
+// stays a `while :; do` tick loop — that string is how the harness caps the run,
+// and a rewrite to another loop form must update this test rather than the
+// document.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -47,16 +51,28 @@ const stub = (name, body) => {
   chmodSync(p, 0o755);
 };
 
+// Every *SEQ variable names a file of one value per line, consumed one per
+// invocation, so a scenario can change what a probe returns between ticks. The
+// matching fixed variable is the alternative. `gh` needs this for RL too: a
+// latch is one-shot only if it stays quiet across a SUSTAINED outage and speaks
+// once on recovery, and neither is observable from a single static budget.
 stub("gh", `#!/bin/sh
+next() {
+  if [ -n "$1" ]; then
+    n=$(cat "$1.n" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$1.n"
+    sed -n "\${n}p" "$1"
+  else
+    printf '%s\\n' "$2"
+  fi
+}
 case "$2" in
-  list) for p in $PRS; do echo "$p"; done ;;
-  *) echo "\${RL-5000}" ;;
+  list)
+    if [ "$(next "$LISTSEQ" "\${LISTMODE-ok}")" = err ]; then exit 1; fi
+    for p in $PRS; do echo "$p"; done ;;
+  *) next "$RLSEQ" "\${RL-5000}" ;;
 esac
 `);
 
-// SEQ names a file of one mode per line, consumed one per invocation, so a
-// scenario can change what the probe returns between ticks. MODE is the fixed
-// alternative.
 stub("ci-state.mjs", `#!/bin/sh
 pr=$2
 if [ -n "$SEQ" ]; then
@@ -69,6 +85,9 @@ case "$mode" in
   empty) exit 1 ;;
   garbage) echo '<html>429</html>'; exit 1 ;;
   ratelimited) printf '{"pr":%s,"verdict":"rate-limited","reasons":["refused"]}\\n' "$pr"; exit 1 ;;
+  emptyobj) echo '{}'; exit 1 ;;
+  nulldoc) echo 'null'; exit 1 ;;
+  nullverdict) printf '{"pr":%s,"verdict":null}\\n' "$pr"; exit 1 ;;
   blind42) [ "$pr" = 42 ] && exit 1; printf '{"pr":%s,"verdict":"not-green"}\\n' "$pr"; exit 1 ;;
   *) printf '{"pr":%s,"verdict":"not-green"}\\n' "$pr"; exit 1 ;;
 esac
@@ -83,17 +102,26 @@ echo "SLEEP $1"
 const TICK_LOOP = "while :; do";
 assert.ok(BLOCK.includes(TICK_LOOP), `the block no longer opens with '${TICK_LOOP}'; the harness caps the run on that line — update this test`);
 
-function run(env, ticks) {
+function run(env, ticks, shell = "sh") {
   const harness = BLOCK
     .replace("~/dev/fleet-plugin/scripts/ci-state.mjs", "ci-state.mjs")
     .replace(TICK_LOOP, `tick=0\nwhile tick=$((tick+1)); [ "$tick" -le ${ticks} ]; do`);
   const path = join(DIR, "harness.sh");
   writeFileSync(path, harness);
-  return execFileSync("sh", [path], {
+  return execFileSync(shell, [path], {
     encoding: "utf8",
     env: { ...process.env, ...env, PATH: `${BIN}:${process.env.PATH}` },
   });
 }
+
+const hasShell = (s) => {
+  try {
+    execFileSync(s, ["-c", "exit 0"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const count = (out, needle) => out.split("\n").filter((l) => l.includes(needle)).length;
 
@@ -169,4 +197,79 @@ test("a non-numeric budget read is an outage, not a budget", () => {
 test("an ordinary not-green PR never trips the outage path", () => {
   const out = run({ MODE: "normal", PRS: "7" }, 3);
   assert.equal(count(out, "WATCHER"), 0, `not-green is a frequent, ordinary state that exits non-zero:\n${out}`);
+});
+
+test("a payload with no verdict at all is an outage, not a reading", () => {
+  // `.verdict != "rate-limited"` never tests that a verdict EXISTS: {}, null and
+  // an explicit null field all evaluate `null != "rate-limited"` -> true and
+  // clear the gate, handing an empty or error object downstream as CI state.
+  for (const MODE of ["emptyobj", "nulldoc", "nullverdict"]) {
+    const out = run({ MODE, PRS: "7" }, 1);
+    assert.equal(count(out, "WATCHER DEGRADED"), 1, `${MODE} cleared the gate — it tests inequality, not presence:\n${out}`);
+  }
+});
+
+test("a failing `gh pr list` is an outage, not zero open PRs", () => {
+  // The third probe, with the budget healthy: a non-quota failure (secondary
+  // limit, 5xx, token error) never lowers .resources.core.remaining, so the
+  // budget gate clears and an unguarded `for pr in $(gh pr list …)` iterates
+  // zero times over the empty substitution — no error, no latch, no line. Total
+  // silence per tick, which is the exact state this section exists to remove.
+  const out = run({ LISTMODE: "err", PRS: "7" }, 3);
+  assert.equal(count(out, "WATCHER DEGRADED"), 1, `expected one DEGRADED across three ticks, got:\n${out}`);
+  assert.equal(count(out, "SLEEP"), 3, `an unreadable PR list must still reach the tail sleep, got:\n${out}`);
+});
+
+test("the open-PR list latch clears once on recovery, not once per tick", () => {
+  const seq = join(DIR, "seq-list");
+  writeFileSync(seq, "err\nok\nok\n");
+  const out = run({ LISTSEQ: seq, MODE: "normal", PRS: "7" }, 3);
+  assert.equal(count(out, "WATCHER DEGRADED"), 1, out);
+  assert.equal(count(out, "WATCHER RECOVERED"), 1, `expected exactly one RECOVERED, got:\n${out}`);
+});
+
+test("the budget latch is one-shot across a sustained outage", () => {
+  // Its own semantics, not the payload latch's: a budget branch that lost its
+  // `[ -z "$budget_out" ]` guard spams a DEGRADED every tick during exactly the
+  // outage it is reporting, and no per-PR test can see it — the per-PR pass
+  // never runs while the budget is out.
+  const out = run({ RL: "5", PRS: "7" }, 3);
+  assert.equal(count(out, "WATCHER DEGRADED"), 1, `expected one DEGRADED across three ticks, got:\n${out}`);
+});
+
+test("the budget latch clears once on recovery, not once per tick", () => {
+  // The mirror mutation: a RECOVERED branch that never resets budget_out re-fires
+  // on every later tick, so the recovery line stops meaning "the watch is alive
+  // again" and becomes the per-tick volume the latch exists to prevent.
+  const seq = join(DIR, "seq-rl");
+  writeFileSync(seq, "5\n5000\n5000\n");
+  const out = run({ RLSEQ: seq, MODE: "normal", PRS: "7" }, 3);
+  assert.equal(count(out, "WATCHER DEGRADED"), 1, out);
+  assert.equal(count(out, "WATCHER RECOVERED"), 1, `expected exactly one RECOVERED, got:\n${out}`);
+});
+
+test("the per-PR loop splits per PR under zsh too, not once over the whole blob", () => {
+  // zsh word-splits a command substitution's RESULT but not a bare parameter
+  // expansion, so `for pr in $prs` runs ONE iteration there with every number
+  // glued into a single value (measured) while sh and bash split it correctly.
+  // A regression to the bare form is therefore invisible to every sh-only case
+  // above — and the same trap applies to the blind-latch removal loop, where it
+  // leaves a recovered PR latched forever.
+  for (const shell of ["sh", "bash", "zsh"]) {
+    if (!hasShell(shell)) continue;
+    const out = run({ MODE: "empty", PRS: "42 43" }, 1, shell);
+    assert.equal(count(out, "WATCHER DEGRADED"), 2, `${shell}: expected one DEGRADED per PR, got:\n${out}`);
+    assert.ok(out.includes("#42") && out.includes("#43"), `${shell}: PR numbers were not split individually:\n${out}`);
+  }
+});
+
+test("a recovered PR leaves the blind latch under zsh too", () => {
+  for (const shell of ["sh", "bash", "zsh"]) {
+    if (!hasShell(shell)) continue;
+    const seq = join(DIR, `seq-blind-${shell}`);
+    // One PR, blind on tick 1, readable on ticks 2 and 3.
+    writeFileSync(seq, "empty\nnormal\nnormal\n");
+    const out = run({ SEQ: seq, PRS: "42" }, 3, shell);
+    assert.equal(count(out, "WATCHER RECOVERED"), 1, `${shell}: the PR never left the blind list, so RECOVERED repeats:\n${out}`);
+  }
 });

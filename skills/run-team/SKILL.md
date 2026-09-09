@@ -1151,39 +1151,56 @@ while :; do                                   # one tick
       echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
       budget_out=
     fi
-    for pr in $(gh pr list --state open --json number --jq '.[].number'); do
-      st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
-      if [ -z "$st" ] || ! printf '%s' "$st" | jq -e '.verdict != "rate-limited"' >/dev/null 2>&1; then
-        case " $blind " in *" $pr "*) ;; *)   # latch keyed BY PR: this cause is per-PR
-          echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
-          blind="$blind $pr" ;;
-        esac
-        continue                              # inner continue — still reaches the tick sleep
+    prs=$(gh pr list --state open --json number --jq '.[].number' 2>/dev/null) || prs=ERR
+    if [ "$prs" = ERR ]; then
+      if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
+        echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
+        list_out=1
       fi
-      case " $blind " in *" $pr "*)
-        echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
-        keep=; for b in $blind; do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
-      esac
-      : # your normal handling of $st for this PR
-    done
+    else
+      if [ -n "$list_out" ]; then
+        echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
+        list_out=
+      fi
+      for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
+        st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
+        if [ -z "$st" ] || ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+          case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+            echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+            blind="$blind $pr" ;;
+          esac
+          continue                            # inner continue — still reaches the tick sleep
+        fi
+        case " $blind " in *" $pr "*)
+          echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+          keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+        esac
+        : # your normal handling of $st for this PR
+      done
+    fi
   fi
   sleep 120                                   # the block's only pacing, once per tick
 done
 ```
 
-**One gate, not a gate plus a caveat.** `jq -e '.verdict != "rate-limited"'`
-exits non-zero on unparseable input *and* on a false result, so that single test
-covers empty, garbage AND a self-named quota refusal. Leaving the named verdict
-to prose instead is how a watcher clears its latch on an outage payload and
-hands it downstream as CI state — the very blindness this section exists to
-remove, one level in.
+**One gate, not a gate plus a caveat.** `jq -e '.verdict and .verdict !=
+"rate-limited"'` exits non-zero on unparseable input *and* on a false result, so
+that single test covers empty, garbage AND a self-named quota refusal. Leaving
+the named verdict to prose instead is how a watcher clears its latch on an
+outage payload and hands it downstream as CI state — the very blindness this
+section exists to remove, one level in. **The `.verdict and` half is load-bearing
+and not belt-and-braces**: inequality alone never tests that a verdict *exists*,
+so `{}`, `null` and `{"verdict":null}` all evaluate `null != "rate-limited"` →
+true and clear the gate (measured), handing an empty or error object downstream
+as a CI reading. Require the field, then compare it.
 
 **It has to latch** — one line entering the degraded state, one leaving it,
 never one per tick. An unlatched line at a 120s poll gets the Monitor
 auto-stopped for volume during even a two-minute outage, reintroducing the same
 blindness by another route. **Latch each cause at the level its cause lives
-at**: the budget is one global flag, but the payload latch is keyed by PR, and a
-shared scalar for both is an unlatched line wearing a latch's clothes — one
+at**: the budget and the open-PR list are one global flag each — both fail at the
+account level — but the payload latch is keyed by PR, and a
+shared scalar for those is an unlatched line wearing a latch's clothes — one
 persistently blind PR alongside one healthy PR re-clears the flag on every tick,
 emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
 what says the watch is alive again, so emit it on the first good pass even when
@@ -1194,8 +1211,27 @@ watcher from a dead one.
 inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
 of pause per tick, against the 24s outage reset measured below), and a degraded
 branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
-probe pairs during exactly the outage it is reporting. Both degraded branches
-above fall through to the same single sleep instead.
+probe pairs during exactly the outage it is reporting. All three degraded
+branches above fall through to the same single sleep instead.
+
+**Guard every probe, not just the ones with a verdict field.** The block makes
+*three* API calls, and the third — `gh pr list` — is the one that looks like
+plumbing rather than a probe. A non-quota failure there (secondary/abuse limit,
+5xx, network blip, expired token) does not lower `.resources.core.remaining`, so
+the budget gate clears, and an unguarded `for pr in $(gh pr list …)` then
+iterates zero times over the empty substitution: no error, no latch, no DEGRADED
+line — total silence per tick, which is exactly what this section exists to
+remove. Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
+through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
+"$prs")` form, never a bare `for pr in $prs`** — measured, that bare form runs
+ONE iteration under zsh with both numbers glued into a single value, while
+`sh` and `bash` split it correctly, so the bug hides in whichever shell you
+happened to test in. zsh word-splits a command substitution's *result* but not a
+bare parameter expansion, so this applies to **every** loop in the block, the
+`blind`-latch removal included: under a bare `for b in $blind` a recovered PR
+never leaves the list and the block emits a fresh RECOVERED every tick
+thereafter — the per-tick volume the latch exists to prevent, wearing a latch's
+clothes again.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 **gate on the payload's own fields**, applied to the watcher. `not-green` is an
