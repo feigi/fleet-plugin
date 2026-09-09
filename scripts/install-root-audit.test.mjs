@@ -42,24 +42,34 @@ function stripShComments(src) {
 }
 
 // `git -C "$(dirname "$0")"`, inlined — the exact shape instruments.sh's own
-// comment names as the pre-#1337 contract.
-const SH_GIT_C_INLINE = /git\s+-C\s+"?\$\(\s*dirname\s+"?\$0"?\s*\)/;
-// A variable assigned EXACTLY `$(dirname "$0")` — bare, nothing appended.
-// This is what distinguishes it from sibling-library sourcing
+// comment names as the pre-#1337 contract — PLUS the parent-directory
+// spellings a production script one level below the repo root (every script
+// lives directly under `scripts/`) would naturally reach for: a trailing
+// `/..`, `dirname` applied twice, or a symlink-resolved `cd "$(dirname
+// "$0")" && pwd`. Measured (#1355 review) that the un-widened rule let all
+// three straight through against fixtures built from this file's own
+// exports.
+const SH_SELFLOC = String.raw`(?:\$\(\s*cd\s+"?\$\(\s*dirname\s+"?\$0"?\s*\)"?\s*&&\s*pwd\s*\)`
+  + String.raw`|\$\(\s*dirname\s+"?\$\(\s*dirname\s+"?\$0"?\s*\)"?\s*\)`
+  + String.raw`|\$\(\s*dirname\s+"?\$0"?\s*\))(?:/\.\.)?`;
+const SH_GIT_C_INLINE = new RegExp(String.raw`git\s+-C\s+"?${SH_SELFLOC}`);
+// A variable assigned EXACTLY one of the SH_SELFLOC shapes — bare (plus an
+// optional trailing `/..`), nothing else appended. This is what
+// distinguishes it from sibling-library sourcing
 // (`json_lib="$(dirname "$0")/json.sh"`), which always appends a filename
-// and therefore never matches this anchor.
-const SH_BARE_DIRNAME_ASSIGN = /^\s*(\w+)="?\$\(\s*dirname\s+"?\$0"?\s*\)"?\s*$/;
+// and therefore never matches this end-of-line anchor.
+const SH_BARE_DIRNAME_ASSIGN = new RegExp(String.raw`^\s*(\w+)="?${SH_SELFLOC}"?\s*$`);
 
 /** A description of the self-location violation in a POSIX-sh source, or `null`. */
 export function shSelfLocationViolation(src) {
   const code = stripShComments(src);
-  if (SH_GIT_C_INLINE.test(code)) return 'git -C anchored directly at "$(dirname "$0")"';
+  if (SH_GIT_C_INLINE.test(code)) return 'git -C anchored directly at "$(dirname "$0")" (or a parent/canonicalized spelling of it)';
   for (const line of code.split("\n")) {
     const m = SH_BARE_DIRNAME_ASSIGN.exec(line);
     if (!m) continue;
     const v = m[1];
     if (new RegExp(`git\\s+-C\\s+"?\\$\\{?${v}\\}?"?`).test(code)) {
-      return `git -C "$${v}" where ${v} := "$(dirname "$0")" (bare — no sibling filename appended)`;
+      return `git -C "$${v}" where ${v} := an own-location expression (bare — no sibling filename appended)`;
     }
   }
   return null;
@@ -69,7 +79,15 @@ const JS_SELFLOC = String.raw`(?:import\.meta\.dirname`
   + String.raw`|dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)`
   + String.raw`|fileURLToPath\(\s*new URL\(\s*["']\.["'],\s*import\.meta\.url\s*\)\s*\)`
   + String.raw`|__dirname)`;
-const JS_BARE_SELFLOC_ASSIGN = new RegExp(String.raw`(?:const|let|var)\s+(\w+)\s*=\s*${JS_SELFLOC}\s*;`, "g");
+// The parent-directory spelling — `join(SELFLOC, "..")` / `resolve(SELFLOC,
+// "..")` — reaches the repo root from a script one level below it, exactly
+// as naturally as the sh side's trailing `/..`. Measured (#1355 review) to
+// escape the un-widened rule.
+const JS_SELFLOC_MAYBE_PARENT = String.raw`(?:(?:join|resolve)\(\s*${JS_SELFLOC}\s*,\s*["'][.\/]+["']\s*\)|${JS_SELFLOC})`;
+const JS_BARE_SELFLOC_ASSIGN = new RegExp(
+  String.raw`(?:const|let|var)\s+(\w+)\s*=\s*${JS_SELFLOC_MAYBE_PARENT}\s*;`,
+  "g",
+);
 
 // A git invocation "anchored" at `target` (either the raw self-location
 // pattern or an escaped variable name), in either of the two shapes node
@@ -79,22 +97,26 @@ const JS_BARE_SELFLOC_ASSIGN = new RegExp(String.raw`(?:const|let|var)\s+(\w+)\s
 // against this repo's own sibling-sourcing shape during development (an
 // UNRELATED `git -C "$root"` call landing within a wide window of an
 // UNRELATED `dirname "$0"` sibling-sourcing line); these windows stay
-// inside one call expression's own text.
+// inside one call expression's own text. `(?!\w)` rather than `\b` after
+// `target`: `\b` requires a word/non-word transition and silently fails to
+// match when `target` is a compound expression ending in `)` followed by
+// more punctuation (`join(import.meta.dirname, "..")` inlined directly as
+// `cwd:`'s value) — measured (#1355 review) to let that exact shape through.
 function jsAnchoredAtTarget(code, target) {
   const cwdForm = new RegExp(
-    String.raw`\bgit\b[\s\S]{0,150}?(rev-parse|--show-toplevel|"-C")[\s\S]{0,250}?cwd\s*:\s*${target}\b`
+    String.raw`\bgit\b[\s\S]{0,150}?(rev-parse|--show-toplevel|"-C")[\s\S]{0,250}?cwd\s*:\s*${target}(?!\w)`
     + `|`
-    + String.raw`cwd\s*:\s*${target}\b[\s\S]{0,250}?\bgit\b[\s\S]{0,150}?(rev-parse|--show-toplevel|"-C")`,
+    + String.raw`cwd\s*:\s*${target}(?!\w)[\s\S]{0,250}?\bgit\b[\s\S]{0,150}?(rev-parse|--show-toplevel|"-C")`,
   );
-  const argvCForm = new RegExp(String.raw`\bgit\b[\s\S]{0,80}?\[[\s\S]{0,80}?["'\`]-C["'\`]\s*,\s*${target}\b`);
+  const argvCForm = new RegExp(String.raw`\bgit\b[\s\S]{0,80}?\[[\s\S]{0,80}?["'\`]-C["'\`]\s*,\s*${target}(?!\w)`);
   return cwdForm.test(code) || argvCForm.test(code);
 }
 
 /** A description of the self-location violation in a js/mjs source, or `null`. */
 export function jsSelfLocationViolation(src) {
   const code = stripComments(src);
-  if (jsAnchoredAtTarget(code, JS_SELFLOC)) {
-    return "a git rev-parse/-C call anchored (cwd: or -C) at this script's own location";
+  if (jsAnchoredAtTarget(code, JS_SELFLOC_MAYBE_PARENT)) {
+    return "a git rev-parse/-C call anchored (cwd: or -C) at this script's own location (or its parent)";
   }
   JS_BARE_SELFLOC_ASSIGN.lastIndex = 0;
   let m;
@@ -184,6 +206,21 @@ test("shSelfLocationViolation: a comment merely describing the old pattern does 
     + 'git -C "$root" rev-parse --show-toplevel\n';
   assert.equal(shSelfLocationViolation(src), null);
 });
+test("shSelfLocationViolation: flags the trailing /.. parent-directory spelling", () => {
+  const src = '#!/bin/sh\nroot="$(dirname "$0")/.."\ngit -C "$root" status\n';
+  assert.match(shSelfLocationViolation(src), /root/);
+});
+
+test("shSelfLocationViolation: flags the symlink-resolved cd \"$(dirname \"$0\")\" && pwd spelling", () => {
+  const src = '#!/bin/sh\nroot="$(cd "$(dirname "$0")" && pwd)"\ngit -C "$root" status\n';
+  assert.match(shSelfLocationViolation(src), /root/);
+});
+
+test("shSelfLocationViolation: flags the nested dirname \"$(dirname \"$0\")\" parent spelling", () => {
+  const src = '#!/bin/sh\nroot="$(dirname "$(dirname "$0")")"\ngit -C "$root" status\n';
+  assert.match(shSelfLocationViolation(src), /root/);
+});
+
 
 test("jsSelfLocationViolation: flags git rev-parse with cwd anchored at import.meta.dirname", () => {
   const src = 'execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: import.meta.dirname });';
@@ -195,6 +232,27 @@ test("jsSelfLocationViolation: flags a captured own-directory variable used as g
     + 'spawnSync("git", ["-C", SCRIPT_DIR, "rev-parse", "HEAD"]);\n';
   assert.match(jsSelfLocationViolation(src), /SCRIPT_DIR/);
 });
+test("jsSelfLocationViolation: flags the join(SELFLOC, \"..\") parent-directory spelling, captured", () => {
+  const src = 'const ROOT = join(import.meta.dirname, "..");\n'
+    + 'execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: ROOT });\n';
+  assert.match(jsSelfLocationViolation(src), /ROOT/);
+});
+
+test("jsSelfLocationViolation: flags join(SELFLOC, \"..\") inlined directly with no variable", () => {
+  const src = 'execFileSync("git", ["rev-parse"], { cwd: join(import.meta.dirname, "..") });';
+  assert.match(jsSelfLocationViolation(src), /own location/);
+});
+
+test("jsSelfLocationViolation: flags resolve(__dirname, \"..\") used as git's -C argument", () => {
+  const src = 'const ROOT = resolve(__dirname, "..");\nexecFileSync("git", ["-C", ROOT, "status"]);\n';
+  assert.match(jsSelfLocationViolation(src), /ROOT/);
+});
+
+test("jsSelfLocationViolation: does not flag SCRIPT_DIR's own \"..\" used only for an unrelated asset path", () => {
+  const src = 'const ASSET = join(SCRIPT_DIR, "..", "assets", "logo.png");\nreadFileSync(ASSET);\n';
+  assert.equal(jsSelfLocationViolation(src), null);
+});
+
 
 test("jsSelfLocationViolation: does not flag SCRIPT_DIR used only for a co-located asset path", () => {
   const src = 'const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));\n'

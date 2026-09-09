@@ -41,7 +41,11 @@ function readRegistry(registryPath) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
   }
-  const entry = entries[0] || {};
+  const selected = selectEntry(entries);
+  if (selected.error) {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
+  }
+  const entry = selected.entry;
   if (typeof entry.installPath !== "string" || entry.installPath === "") {
     return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
   }
@@ -51,6 +55,22 @@ function readRegistry(registryPath) {
     installPath: entry.installPath,
     version: typeof entry.version === "string" ? entry.version : null,
     gitCommitSha: typeof entry.gitCommitSha === "string" ? entry.gitCommitSha : null,
+  };
+}
+
+// See scripts/fleet-run's own selectEntry for the full measurement (a
+// Claude --scope=project install adds an entry alongside any --scope=user
+// one in the SAME registry this reads) — duplicated rather than shared for
+// the same "this file has no siblings once it matters" reasoning fleet-run's
+// header gives for its own duplication.
+function selectEntry(entries) {
+  if (entries.length === 1) return { entry: entries[0] };
+  const userScoped = entries.filter((e) => e && e.scope === "user");
+  if (userScoped.length === 1) return { entry: userScoped[0] };
+  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
+    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
+  return {
+    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
   };
 }
 
@@ -102,13 +122,20 @@ function kindOf(installPath) {
   return "unrecognized-install-shape";
 }
 
-// Minimal top-level-block-list YAML read for exactly the one key this
-// checks. Not a general YAML parser — no flow lists (`[a, b]`), no nesting
-// under other keys, no quoting rules. `~/.omp/agent/config.yml` in the wild
-// (this box, 2026-09-09) is a flat top-level map with block lists, which is
-// the one shape this needs to read; anything fancier is out of scope for a
-// read-only assertion over one field.
+// Minimal top-level YAML read for exactly the one key this checks. Not a
+// general YAML parser — no nesting under other keys, no quoting rules
+// beyond a bare `"…"`/`'…'` strip. `~/.omp/agent/config.yml` in the wild
+// (this box, 2026-09-09) is a flat top-level map, block-list style
+// (`enabledProviders:` then `  - foo` lines); the REMEDY this same check
+// prints instructs the flow form (`enabledProviders: ["claude-plugins"]`),
+// which omp itself also accepts — so both forms are read here, or an
+// operator who follows the printed remedy verbatim is told the key it just
+// added is absent (measured, #1355 review).
 function enabledProvidersFromYaml(text) {
+  const flow = text.match(/^enabledProviders:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) {
+    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  }
   const lines = text.split("\n");
   const headerIdx = lines.findIndex((l) => /^enabledProviders:\s*$/.test(l));
   if (headerIdx === -1) return [];
@@ -126,6 +153,10 @@ function main() {
   let ompConfigPath = path.join(os.homedir(), ".omp", "agent", "config.yml");
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--omp-config") {
+      if (i + 1 >= argv.length) {
+        process.stderr.write(`${NAME}: --omp-config needs a path\n`);
+        process.exit(2);
+      }
       ompConfigPath = argv[i + 1];
       i++;
     } else {

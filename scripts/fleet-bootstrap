@@ -58,7 +58,28 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
+// Both sides of the checkout-vs-install comparison, normalized the same
+// way: `ownDir`'s parent may have been reached through a symlinked path
+// (macOS resolves `/tmp` through `/private/tmp`, measured), and nothing
+// forbids a registry's recorded `installPath` from carrying a trailing
+// separator. `fs.realpathSync` where the path exists; a plain
+// `path.normalize` with the trailing separator stripped otherwise (an
+// absent/`null` install path, or one this process cannot stat) — either way
+// the two sides are compared in the same shape rather than raw strings from
+// two different sources.
+function canonical(p) {
+  if (typeof p !== "string" || p === "") return p;
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.normalize(p).replace(/[\\/]+$/, "");
+  }
+}
+
 function main() {
+  const argv = process.argv.slice(2);
+  const fromCheckoutFlag = argv.includes("--from-checkout");
+
   const ownDir = __dirname;
   const source = path.join(ownDir, "fleet-run");
 
@@ -73,8 +94,24 @@ function main() {
   const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
   const claudeInstall = readInstallPath(path.join(home, ".claude", "plugins", "installed_plugins.json"), PLUGIN_KEY);
   const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "installed_plugins.json"), PLUGIN_KEY);
-  const parent = path.dirname(ownDir);
-  const runningFromInstall = parent === claudeInstall || parent === ompInstall;
+  const parent = canonical(path.dirname(ownDir));
+  const runningFromInstall = parent === canonical(claudeInstall) || parent === canonical(ompInstall);
+
+  const target = path.join(home, ".fleet", "bin", "fleet-run");
+
+  // The exception is opt-in, not merely announced: a stray checkout run
+  // (a wrong branch, a stale worktree) must not silently overwrite the one
+  // artefact outside the plugin. Every steady-state invocation — through
+  // the Resolver, once it exists — runs from an install and never needs
+  // this flag at all.
+  if (!runningFromInstall && !fromCheckoutFlag) {
+    die(
+      `refusing to place ${target} from ${ownDir}, which is not a registry-resolved install (looked at `
+      + `${claudeInstall ? `claude: ${claudeInstall}` : "claude: not installed"}; `
+      + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}) — re-run with --from-checkout to take `
+      + "ADR 0003's one-time bootstrap exception explicitly",
+    );
+  }
 
   if (!runningFromInstall) {
     process.stderr.write(
@@ -88,7 +125,6 @@ function main() {
     );
   }
 
-  const target = path.join(home, ".fleet", "bin", "fleet-run");
   fs.mkdirSync(path.dirname(target), { recursive: true });
 
   let existingBuf = null;

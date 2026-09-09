@@ -39,9 +39,10 @@ function die(message) {
 }
 
 // Reads one harness's registry for PLUGIN_KEY's installPath. Never throws —
-// every failure mode (file missing, bad JSON, key absent, no installPath) is
-// an ordinary "this harness isn't a candidate" result, reported in `reason`
-// so a resolver failure can name the exact path it looked at.
+// every failure mode (file missing, bad JSON, key absent, no installPath,
+// ambiguous entry) is an ordinary "this harness isn't a candidate" result,
+// reported in `reason` so a resolver failure can name the exact path it
+// looked at.
 function readRegistry(registryPath) {
   let raw;
   try {
@@ -59,11 +60,35 @@ function readRegistry(registryPath) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
   }
-  const installPath = entries[0] && entries[0].installPath;
+  const selected = selectEntry(entries);
+  if (selected.error) {
+    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
+  }
+  const installPath = selected.entry.installPath;
   if (typeof installPath !== "string" || installPath === "") {
     return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
   }
   return { present: true, registryPath, installPath };
+}
+
+// One registry key can carry MULTIPLE entries — measured: a Claude
+// `--scope=project` install adds an entry to the SAME user-global registry
+// this reads, alongside any `--scope=user` entry, and `entries[0]` picks
+// whichever happened to install first with no regard for which is live from
+// the caller's own cwd. A single entry is never ambiguous regardless of its
+// scope. With more than one, prefer the single `scope: "user"` entry — the
+// one that answers regardless of cwd, which is what a Resolver with no cwd
+// scoping of its own needs — and refuse, naming every candidate, if zero or
+// more than one entry qualifies.
+function selectEntry(entries) {
+  if (entries.length === 1) return { entry: entries[0] };
+  const userScoped = entries.filter((e) => e && e.scope === "user");
+  if (userScoped.length === 1) return { entry: userScoped[0] };
+  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
+    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
+  return {
+    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
+  };
 }
 
 function registries() {
@@ -74,19 +99,27 @@ function registries() {
   };
 }
 
-// Which harness is running THIS process, for the tie-break below.
+// Which harness is running THIS process, for the tie-break below — trusted
+// ONLY when it can be positive and exclusive.
 //
 // MEASURED 2026-09-09, this box: a Bash-tool shell dispatched by omp carries
 // BOTH `OMPCODE=1` and `CLAUDECODE=1` — omp sets `CLAUDECODE` too, for
-// compatibility with anything (this script included) that gates on it. A
-// real Claude Code CLI shell carries `CLAUDECODE` alone; `OMPCODE` is never
-// set outside omp. So `CLAUDECODE` alone cannot tell the two apart — a
-// process under omp would misdetect as Claude — and `OMPCODE` is the one
-// that is exclusive to its harness. Check it FIRST for that reason, not
-// arbitrarily.
+// compatibility with anything (this script included) that gates on it.
+// Environment variables are INHERITED by child processes (measured: `sh -c
+// 'sh -c "printenv OMPCODE"'` prints `1`), so `OMPCODE`'s presence is NOT
+// exclusive to "this process IS omp" the way its ABSENCE is exclusive to
+// "this process is not omp" — a Claude Code process launched from ANY shell
+// that has `OMPCODE` set (an omp-orchestrated one, directly or nested)
+// inherits it and is indistinguishable, by this or any other env probe, from
+// omp itself. Reviewed and measured directly (#1355): a sandboxed run with
+// both registries present and `OMPCODE=1 CLAUDECODE=1` executed the OMP
+// install even where the actual intent was Claude. So this trusts exactly
+// one shape — `CLAUDECODE` set and `OMPCODE` unset — because omp is measured
+// to ALWAYS set both together, making that absence the one reliable
+// negative signal this has. Every other combination (both set, neither set)
+// is genuinely ambiguous and refuses below rather than guess.
 function detectRunningHarness() {
-  if (process.env.OMPCODE) return "omp";
-  if (process.env.CLAUDECODE) return "claude";
+  if (process.env.CLAUDECODE && !process.env.OMPCODE) return "claude";
   return null;
 }
 
@@ -115,20 +148,24 @@ function resolveInstall() {
     return { harness: h, ...regs[h] };
   }
 
-  // Both registries carry the key. Prefer the running harness's install;
-  // refuse rather than guess if the running harness cannot be detected.
+  // Both registries carry the key. Prefer the running harness's install
+  // ONLY where detection is reliable; refuse rather than guess otherwise —
+  // see detectRunningHarness's own header for why "detected" here means
+  // something narrower than "OMPCODE or CLAUDECODE happens to be set".
   const running = detectRunningHarness();
   if (running === null) {
     die(
       `both registries carry "${PLUGIN_KEY}" (claude: ${regs.claude.installPath}; omp: ${regs.omp.installPath}) `
-      + "and the running harness could not be detected (neither OMPCODE nor CLAUDECODE is set in this process's "
-      + "environment) — set FLEET_HARNESS=claude or FLEET_HARNESS=omp to disambiguate; refusing to guess",
+      + "and the running harness cannot be reliably told apart here (OMPCODE is measured to propagate to a "
+      + "Claude process nested under omp, so its presence proves nothing either way) — set FLEET_HARNESS=claude "
+      + "or FLEET_HARNESS=omp to disambiguate; refusing to guess",
     );
   }
   process.stderr.write(
     `${NAME}: both registries carry "${PLUGIN_KEY}" — running harness detected as ${running} `
-    + `(OMPCODE=${process.env.OMPCODE ? "1" : "unset"} CLAUDECODE=${process.env.CLAUDECODE ? "1" : "unset"}), `
-    + `preferring its installPath: ${regs[running].installPath}\n`,
+    + "(CLAUDECODE set, OMPCODE unset — the one combination this trusts), "
+    + `preferring its installPath: ${regs[running].installPath} `
+    + "(set FLEET_HARNESS=claude or FLEET_HARNESS=omp to override)\n",
   );
   return { harness: running, ...regs[running] };
 }
