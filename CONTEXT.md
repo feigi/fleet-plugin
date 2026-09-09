@@ -153,10 +153,11 @@ _Avoid_: return value, retrieve
 
 **Marked line**:
 A one-line, per-harness statement of a dispatch instruction, adjacent to its
-partner and pinned as its own slice — never a section. The marker is a
-fixed, greppable token so a pin addresses exactly one line, the shape that
-keeps a two-dialect rule from becoming the fat slice that let 22 of 33
-mutations survive.
+partner and pinned as its own slice — never a section. The marker is the line's first
+token, `CLAUDE: ` or `OMP: ` (uppercase, colon, space), so a pin addresses
+exactly one line by `^\s*(CLAUDE|OMP): ` — the shape that keeps a two-dialect
+rule from becoming the fat slice that let 22 of 33 mutations survive. Neither
+token occurs anywhere else in the prose tree (verified 2026-09-09).
 _Avoid_: dialect card, shell
 
 **Pair**:
