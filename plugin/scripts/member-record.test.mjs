@@ -7,7 +7,7 @@ import { join, dirname } from "node:path";
 import {
   encodeClaudeProjectDir, encodeOmpProjectDir,
   readClaudeMember, readClaudeSession,
-  readOmpMember, readOmpSession,
+  readOmpMember, readOmpSession, foldOmpTranscript,
   readMembers,
 } from "./member-record.mjs";
 
@@ -75,7 +75,7 @@ test("encodeOmpProjectDir: non-home cwd is realpath-resolved and double-dash wra
 const evt = (o) => JSON.stringify(o);
 const sessionEvt = (cwd) => evt({ type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd });
 const thinkingEvt = (level) => evt({ type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-08T15:11:49.494Z", thinkingLevel: level, configured: null });
-const sessionInitEvt = (task) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task });
+const sessionInitEvt = (task, resolvedModelIdentity) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task, resolvedModelIdentity });
 const assistantEvt = (model, usage, ts = "2026-09-08T15:12:00.000Z") => evt({
   type: "message", id: "m1", parentId: "i1", timestamp: ts,
   message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage },
@@ -113,6 +113,39 @@ test("readOmpMember: cost, tokens and thinking come off real usage/thinking_leve
   assert.equal(rec.tokens_out, 201);
   assert.ok(Math.abs(rec.cost - 0.0803115) < 1e-9);
   assert.equal(rec.turns, 1);
+});
+
+test("foldOmpTranscript: resolvedModelIdentity comes off session_init, present before any assistant turn (#1345)", () => {
+  // Measured shape: always provider-prefixed (`anthropic/claude-opus-5`),
+  // written at DISPATCH — before the member's first assistant turn, which
+  // is exactly why this is a different field from `model` above rather than
+  // a duplicate of it. No assistant turn at all here, so `model` stays null
+  // while `resolvedModelIdentity` is already populated.
+  const lines = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"),
+    thinkingEvt("xhigh"),
+    sessionInitEvt("Implement ticket 580", "anthropic/claude-opus-5"),
+  ];
+  const folded = foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl");
+  assert.equal(folded.model, null, "a member with no assistant turn yet must not fold a model from nowhere");
+  assert.equal(folded.resolvedModelIdentity, "anthropic/claude-opus-5");
+});
+
+test("foldOmpTranscript: resolvedModelIdentity is null, never guessed, when session_init carries none", () => {
+  const lines = [sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"), sessionInitEvt("Implement ticket 580")];
+  assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, null);
+});
+
+test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additive field, never replacing it", () => {
+  const lines = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"),
+    thinkingEvt("xhigh"),
+    sessionInitEvt("Implement ticket 580", "anthropic/claude-opus-5"),
+    assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }),
+  ];
+  const rec = readOmpMember(lines.join("\n"), "/fake/path.jsonl", "Memory1");
+  assert.equal(rec.model, "claude-opus-5", "the per-turn model board.mjs/member-outcomes.mjs already key on must stay unchanged");
+  assert.equal(rec.resolvedModelIdentity, "anthropic/claude-opus-5");
 });
 
 test("readOmpMember: cost and tokens sum across turns — one usage object per turn, no fold-back", () => {

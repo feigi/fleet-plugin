@@ -306,6 +306,45 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   );
 });
 
+// #1345: the dispatch-time tier check. A scripted step, not a prose
+// reminder — that distinction is the whole point (#1298's ruling: "prose
+// asking a controller to verify the tier is the thing that was measured not
+// to happen"), so this pins the actual invocation and the consequence, not
+// merely that tier-check is mentioned somewhere in the slice.
+test("phase 2 runs the tier check after the dispatch batch and stops the wave on a mismatch", () => {
+  const slice = dispatch();
+  // The runnable invocation itself — named by NAME, not by a paraphrase a
+  // reader could satisfy without ever running anything real.
+  assert.match(
+    slice,
+    /fleet-run tier-check\.mjs --batch/,
+    "phase 2 no longer names the runnable tier-check invocation",
+  );
+  // The exact failure line the script itself emits (tier-check.mjs's
+  // formatMismatch) — a paraphrase here would leave a reader unable to
+  // recognise the script's real output.
+  assert.match(
+    slice,
+    /`member: declared <m>\/<l> resolved <m>\/<l>`/,
+    "phase 2 no longer states the tier-check failure line's exact shape",
+  );
+  // The consequence, bound adjacent to "stops the" so a rewrite that keeps
+  // the word "stops" elsewhere in the slice (e.g. "stops nothing by
+  // itself") does not satisfy this on its own.
+  assert.match(
+    slice,
+    /non-zero exit \*\*stops the\s+wave\*\*/,
+    "phase 2 no longer says a tier-check failure stops the wave",
+  );
+  // Normative, not advisory — the same hedge-word guard the tier guard test
+  // below already applies to its own paragraph, applied here to this one.
+  assert.doesNotMatch(
+    slice,
+    /tier check[\s\S]{0,600}(?:\bOptional\b|\byou may\b)/i,
+    "the tier-check step has been downgraded to advice",
+  );
+});
+
 test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   const slice = guard();
 
@@ -429,12 +468,17 @@ test("the implementer definition declares BOTH a model and an effort", () => {
   assert.match(fm, /^effort:\s*\S+$/m, "the implementer definition declares no effort");
 });
 
-test("the declared model is a bare alias, never a pinned version", () => {
+test("the declared model is a bare alias, never a pinned version — both definitions", () => {
   // A pinned id rots into a superseded generation that is weaker AND dearer:
-  // pricing falls with each generation, so an older Opus is not the cheap
-  // option it looks like. The alias tracks the newest.
-  const model = /^model:\s*(\S+)$/m.exec(frontmatterOf("fleet-implementer"))?.[1];
-  assert.ok(["opus", "sonnet", "haiku"].includes(model), `pinned version: ${model}`);
+  // pricing falls with each generation. The alias tracks the newest. Both
+  // definitions, not just the default: #1345's dispatch-time tier check
+  // compares this same field on fleet-implementer-alt, and a pinned version
+  // there would fail the family comparison silently reading as a real
+  // mismatch rather than a declaration defect.
+  for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
+    const model = /^model:\s*(\S+)$/m.exec(frontmatterOf(name))?.[1];
+    assert.ok(["opus", "sonnet", "haiku"].includes(model), `${name}: pinned version: ${model}`);
+  }
 });
 
 test("the definition lists no tools — a list would drop the Agent tool", () => {
@@ -443,3 +487,24 @@ test("the definition lists no tools — a list would drop the Agent tool", () =>
   // the member its delegation, silently and with no error. Omit the key.
   assert.doesNotMatch(frontmatterOf("fleet-implementer"), /^tools:/m);
 });
+
+// #1298's ruling records the layer-1 (#1314) key set for every fleet agent
+// file: all five of `name`, `description`, `model`, `effort`,
+// `thinking-level`. This file only pins the two implementer definitions
+// #1345's dispatch-time tier check reads — #1314 owns the general checker
+// over every agent file in the tree.
+test("both implementer definitions carry all five required keys", () => {
+  for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
+    const fm = frontmatterOf(name);
+    for (const key of ["name", "description", "model", "effort", "thinking-level"]) {
+      assert.match(fm, new RegExp(`^${key}:\\s*\\S`, "m"), `${name}.agent.md declares no ${key}`);
+    }
+  }
+});
+
+// The alt definition differing from the default in MODEL ONLY is pinned in
+// within-run-pair-prose.test.mjs's "the alternate definition differs from
+// the default in MODEL ONLY" — not repeated here. That test already asserts
+// `effort` and `thinking-level` are shared and `model` alone diverges;
+// duplicating it here would just be a second copy to keep in sync with the
+// same two files.

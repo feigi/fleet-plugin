@@ -521,6 +521,37 @@ that the tier it resolves to is now declared and pinned rather than inherited by
 accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
 spend classifier and `member-outcomes.mjs` read it.
 
+**After dispatching the batch, run the tier check — a scripted step, never a
+prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
+compares what each dispatched member's definition declared against what the
+harness actually resolved, and exits 1 naming every mismatched member as
+`member: declared <m>/<l> resolved <m>/<l>`. A non-zero exit **stops the
+wave**: dispatching the next batch on top of an unresolved tier mismatch
+multiplies whatever silently degraded, so fix the definition or the dispatch
+and re-run the check before continuing.
+
+**The batch file is a JSON array, one entry per dispatched member:**
+`{member, agentFile, harness, ...}` plus exactly one of the three fields
+below, in the order the controller should prefer them:
+- `resolvedModel` **and** `resolvedThinkingLevel` together (omp only) — the
+  dispatch's own job record, when the controller already holds both; no
+  file is opened at all. Holding only one of the two does not count: give
+  `session` or `transcript` instead so the missing half is read, never
+  guessed.
+- `session` — a root the controller already knows: the SAME session or
+  `subagents/` directory `member-outcomes.mjs`/`board.mjs` are already
+  handed for this run. The check finds the named member under it itself
+  (member-record.mjs's own readers on Claude; the member's own
+  `<session>/<member>.jsonl` file directly on omp, so a member with no
+  assistant turn yet still resolves off its dispatch-time record).
+- `transcript` — the member's own transcript file, for a caller that
+  already holds the exact path.
+
+`agentFile` and `transcript`/`session` resolve relative to `--repo`
+(defaults to the plugin's own root). `member` is `impl-<N>` on Claude
+(`name:` on the Agent call) and the AgentId on omp — the same value either
+harness's own dispatch already returns.
+
 **The declaration names a bare alias (`opus`), never a versioned id.** An alias
 tracks the newest generation; a pinned id rots into a superseded one that is
 weaker AND more expensive, because pricing falls with each generation.

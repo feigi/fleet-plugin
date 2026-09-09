@@ -420,8 +420,20 @@ function assertNotClaudeShaped(d, filePath) {
 // nesting depth, as a REAL classifyRole() signal; it is never matched
 // against the bare agent id, which is a generated word pair and names
 // nothing.
+//
+// `resolvedModelIdentity` (#1345) is `session_init`'s OWN field, written at
+// DISPATCH — before the member's first assistant turn exists, which is what
+// makes it different from `model` above: a member still working folds to
+// `model: null` (no assistant turn yet) but already carries
+// `resolvedModelIdentity` (measured `anthropic/claude-opus-5` (61),
+// `anthropic/claude-sonnet-5` (103), `anthropic/claude-haiku-4-5` (68) across
+// real `~/.omp/agent/sessions/**` — always provider-prefixed, never a bare
+// alias). `model` itself is left untouched by this addition: board.mjs and
+// member-outcomes.mjs read `model` for cost/spend attribution, where the
+// per-turn value (which can in principle change mid-run) is the fact they
+// want, not the dispatch-time identity.
 export function foldOmpTranscript(jsonlText, filePath) {
-  let model = null, thinking = null, task = null;
+  let model = null, thinking = null, task = null, resolvedModelIdentity = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false;
@@ -435,7 +447,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
     assertNotClaudeShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
-    if (d.type === "session_init" && typeof d.task === "string") task = d.task;
+    if (d.type === "session_init") {
+      if (typeof d.task === "string") task = d.task;
+      if (typeof d.resolvedModelIdentity === "string") resolvedModelIdentity = d.resolvedModelIdentity;
+    }
     const m = d.message;
     if (d.type === "message" && m?.role === "assistant" && m.usage) {
       const u = m.usage;
@@ -450,7 +465,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
   return {
-    model, thinking, task,
+    model, thinking, task, resolvedModelIdentity,
     input, cacheWrite, cacheRead, output,
     cost: sawCost ? cost : null,
     turns,
@@ -487,6 +502,12 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
     role,
     member,
     model: folded.model,
+    // Additive only (#1345) — `model` above stays the per-turn value
+    // board.mjs/member-outcomes.mjs already key cost/spend attribution on;
+    // this is the dispatch-time identity `session_init` wrote before any
+    // turn existed, `null` when the transcript predates #1343 or carries no
+    // `session_init` line at all (never guessed).
+    resolvedModelIdentity: folded.resolvedModelIdentity ?? null,
     thinking: folded.thinking ?? "-",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
     tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
