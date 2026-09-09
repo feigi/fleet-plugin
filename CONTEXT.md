@@ -1,10 +1,19 @@
-# Claude Config
+# Fleet Plugin
 
-Personal Claude Code configuration — commands, skills, and the **fleet**: scripts and
-skills that run parallel agents against this repo's own issue tracker. This glossary
-covers the vocabulary those scripts share; it is a glossary only, not a spec.
+The **fleet**: scripts, skills, commands and agents that run parallel agents against
+this repo's own issue tracker, packaged as a plugin. This glossary covers the
+vocabulary those artefacts share; it is a glossary only, not a spec.
 
 ## Language
+
+### Harness
+
+**Harness**:
+The agent environment the fleet is loaded into — Claude Code or omp.sh. Both are
+supported permanently and neither is primary. A fleet artefact that names one
+harness's tools without the other's is harness-bound, which is a defect rather than
+a variant.
+_Avoid_: host, platform, client, runtime
 
 ### Claim lifecycle
 
