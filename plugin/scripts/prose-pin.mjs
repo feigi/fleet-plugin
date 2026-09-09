@@ -15,6 +15,31 @@ export function between(text, from, to, what) {
 // newline plus indent. Regex metacharacters in the phrase are escaped first.
 export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
 
+// The paragraph carrying a rule, and no more of the document than that. A
+// positive regex matched over a whole file is satisfiable from OUTSIDE the
+// clause it guards — a stray copy of the wording left anywhere else buys the
+// pass — so a prose pin's slice bound is the pin, and the regex is the easy
+// half. Ends at the blank line, because a paragraph boundary is the one
+// bound a rewrap cannot move; the ANCHOR goes through `phrase()` for the
+// mirror-image reason, since `between`'s literal `indexOf` would break on a
+// rewrap the pinned clause itself survives, turning a reflow into a red.
+// A missing anchor throws rather than widening: silently falling back to the
+// whole document is the false green this bound exists to prevent.
+//
+// Extracted here rather than copied a fifth time: `ci-state-prose`,
+// `liveness-rationale-prose`, `quiet-payload-prose` and
+// `staleness-qualifier-prose` each hand-rolled this same search-to-blank-line
+// slicer locally. Those four are already-merged, mutation-tested deliverables
+// of their own tickets, so migrating them is deliberately left out of #823 —
+// this export exists so the next pin does not become a fifth copy.
+export function paragraph(text, anchor, what) {
+  const at = text.search(phrase(anchor));
+  assert.notEqual(at, -1, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
+  const rest = text.slice(at);
+  const end = rest.indexOf("\n\n");
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
 // with the comment gutter, not whitespace, at the break — `\s+` does not span a
 // `#`. Strip the gutter and rejoin with the single inter-word space a wrap point
