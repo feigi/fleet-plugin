@@ -103,7 +103,7 @@ gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 
 **Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened (#375). Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
 
-**Session ends here.** Merge happens later, elsewhere: `/fleet:review-and-fix` → maintainer adds `ready-to-merge` → `/fleet:run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for merge that won't happen this session.
+**Session ends here.** Merge happens later, elsewhere: `/fleet-ctl:review-and-fix` → maintainer adds `ready-to-merge` → `/fleet-ctl:run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for merge that won't happen this session.
 
 `in-progress` stays until that out-of-session merge closes issue — harmless, step 1 lists open issues only. Report PR URL, stop.
 

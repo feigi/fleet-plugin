@@ -362,7 +362,7 @@ test("--pin re-baselines after a deliberate edit — the controller's own toolin
 
 // A plugin-cache-shaped fixture: instruments.sh nested several directories
 // deep inside a FOREIGN git repository — the shape `~/.claude/plugins/cache/
-// fleet-plugin/fleet/<version>/scripts/instruments.sh` takes when `~/.claude`
+// fleet-plugin/fleet-ctl/<version>/scripts/instruments.sh` takes when `~/.claude`
 // is itself the operator's personal dotfiles checkout (#1337's own report).
 // Built with `git init` in a fresh temp dir, never the real checkout or
 // `~/.claude`.

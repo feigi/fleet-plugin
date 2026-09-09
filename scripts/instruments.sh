@@ -98,7 +98,7 @@ done
 # The repository under audit is the WORKING DIRECTORY's checkout, never the
 # checkout this script happens to ship from. Under the install-only dev loop
 # (ADR 0003) this file runs out of a plugin cache — on a real install,
-# `~/.claude/plugins/cache/fleet-plugin/fleet/<version>/scripts/
+# `~/.claude/plugins/cache/fleet-plugin/fleet-ctl/<version>/scripts/
 # instruments.sh` — and the OLD own-location contract (`git -C "$(dirname
 # "$0")" …`) resolved the audited tree to whatever git checkout happens to
 # CONTAIN that cache path. Measured (#1337): on a real box that is the

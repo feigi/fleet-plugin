@@ -153,7 +153,7 @@ test("the Reviewers section names the workflow call as the default, ahead of the
   // after the paren changes no instruction — tight on the call being present.
   assert.match(
     dflt,
-    /Workflow\([\s\S]{0,12}name: "fleet:review-pr"/,
+    /Workflow\([\s\S]{0,12}name: "fleet-ctl:review-pr"/,
     "run-team no longer names the review-pr Workflow call on the default path",
   );
   // Pin the SENTENCE, not the word `default`. A bare /default/i over this slice

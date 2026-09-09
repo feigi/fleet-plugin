@@ -1,4 +1,4 @@
-# 0006 — The plugin is `fleetctl`: a bare name that fails loud
+# 0006 — The plugin is `fleet-ctl`: a bare name that fails loud
 
 **Status:** Accepted. Ruled 2026-09-09 on #1319, against the measurements below.
 
@@ -50,15 +50,22 @@ under its declared bare name `fleet`:
   reads the registry key `fleet@fleet-plugin` by name, so the rename must
   land before #1335 builds against it.
 
+**Corrected 2026-09-09 at implementation:** `fleetctl` was chosen unverified
+and is a real npm package (CoreOS wrapper, `4.91.0`) — `omp plugin install
+fleetctl` installed it with rc=0, reproducing the defect this ADR exists to
+close. Renamed to `fleet-ctl`, measured `404`. The pre-commit registry check
+is now part of the rename procedure, and #1347 gains it as a permanent CI
+gate.
+
 ## Decision
 
 1. **Rename the plugin off the collision entirely**, to a free kebab-case
    name — the only option that converts the bare form from *silent-wrong* to
    either harmless (Claude) or *loud-wrong* (omp: a 404, rc=1, rather than a
    wrong install).
-2. **Name picked by the maintainer: `fleetctl`.** Registry id
-   `fleetctl@fleet-plugin`; commands `/fleetctl:<name>` on both harnesses;
-   agents `fleetctl:fleet-implementer` on Claude, bare `fleet-implementer` on
+2. **Name picked by the maintainer: `fleet-ctl`.** Registry id
+   `fleet-ctl@fleet-plugin`; commands `/fleet-ctl:<name>` on both harnesses;
+   agents `fleet-ctl:fleet-implementer` on Claude, bare `fleet-implementer` on
    omp.
 3. **The qualified id stays canonical in every install instruction**, on both
    harnesses, regardless of the rename — the rename removes the
@@ -80,7 +87,9 @@ under its declared bare name `fleet`:
   negative the gate cannot see: a name free at CI time can be taken by a
   third party before the next install, and nothing in the repo would
   notice. It also proves the wrong thing — it would guard against a *future*
-  collision while the current one is already live and unaddressed.
+  collision while the current one is already live and unaddressed — rejected
+  as a substitute for the rename; adopted alongside it per the 2026-09-09
+  correction above.
 - **A scoped name (`@feigi/fleet`).** Measured unusable on both harnesses for
   tokenizer/npm-specifier reasons, not a documented grammar rejection either
   harness's docs would predict.
@@ -90,15 +99,15 @@ under its declared bare name `fleet`:
 - The residual exposure after the rename is the same third-party-
   publishes-later case the CI-gate alternative worried about — but with a
   free name that exposure is loud: a 404 becomes a wrong install only if
-  someone later publishes the exact string `fleetctl` to npm.
+  someone later publishes the exact string `fleet-ctl` to npm.
 - #1314's `smoke-omp` job derives the plugin id from the manifest at job time
   rather than a hardcoded literal, so the qualified path cannot regress
   behind this rename.
 - The rename changes Claude's dispatch namespace
-  (`fleet:fleet-implementer` → `fleetctl:fleet-implementer`) but not omp's,
+  (`fleet:fleet-implementer` → `fleet-ctl:fleet-implementer`) but not omp's,
   which was never namespaced — the two harnesses' namespace surfaces stay
   asymmetric after the rename, not by omission but because omp's registry
   has no namespace to change.
 - Rename work is filed as #1348, which now blocks #1335 so the Resolver is
-  built against the new registry key `fleetctl@fleet-plugin` rather than the
+  built against the new registry key `fleet-ctl@fleet-plugin` rather than the
   old one.

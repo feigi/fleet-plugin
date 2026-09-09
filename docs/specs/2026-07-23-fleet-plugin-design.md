@@ -154,9 +154,10 @@ rather than assumed:
   above was true when written and is not now; `agents/`, `monitors/`,
   `output-styles/`, `themes/` and `bin/` are components too. `review-pr.js`
   therefore ships INSIDE the plugin rather than beside it.
-- **`fleet@skills-dir` is gone.** The plugin is `fleet@fleet-plugin`. Invocation
-  names are unchanged (`/fleet:run-merge-bot`, `fleet:next-ticket`) because they
-  derive from the plugin name, not the marketplace.
+- **`fleet@skills-dir` is gone.** The plugin was named `fleet` on the
+  `fleet-plugin` marketplace as of this section's 2026-09-08 rewrite; renamed
+  `fleet-ctl@fleet-plugin` by #1348. Invocation names move in lockstep with the
+  plugin name, not the marketplace: `/fleet-ctl:run-merge-bot`, `fleet-ctl:next-ticket`.
 - **A directory-source marketplace COPIES** into
   `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, and
   `claude plugin update` is a no-op unless `plugin.json`'s version changed. So

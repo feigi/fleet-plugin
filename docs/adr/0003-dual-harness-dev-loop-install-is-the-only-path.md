@@ -73,7 +73,8 @@ step is manual and deliberate; the operator runs harness-native commands.
 3. **Only installed scripts run.** No prose callsite names a source path, a
    harness path, or a registry lookup. Every callsite calls the **resolver**,
    which reads the harness's own registry for `fleet@fleet-plugin`'s
-   `installPath` and execs from there.
+   `installPath` and execs from there — the key is `fleet-ctl@fleet-plugin`
+   since #1348 (ADR 0006).
 4. **The resolver is the one bootstrap exception.** It ships inside the plugin
    and is placed once, by hand, at a path this repo owns
    (`~/.fleet/bin/fleet-run`) — it cannot resolve itself, and no per-session
