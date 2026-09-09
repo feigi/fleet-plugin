@@ -26,6 +26,23 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.repla
 // A missing anchor throws rather than widening: silently falling back to the
 // whole document is the false green this bound exists to prevent.
 //
+// The blank line is matched as `\n[ \t]*\n`, never the literal `\n\n`: an
+// editor that keeps a list item's indent on the line between two paragraphs
+// writes `\n   \n`, which a literal search does not see — the slice then
+// widens silently into the next paragraph, and a decoy there buys the green
+// this bound exists to deny. No `*.md` in this repo carries a whitespace-only
+// line today and nothing enforces that — no `.editorconfig`, no prettier or
+// markdownlint config, no CI check — and every paragraph pinned so far is
+// indented list content, which is exactly where an editor produces that shape.
+//
+// The anchor must match EXACTLY ONCE, mirroring `markedLine`'s own count
+// assert for the same reason: a search takes the FIRST match silently, so an
+// un-gutter'd restatement of the anchored block ABOVE the real one — the
+// shape this repo's prose already uses where a phase quotes a member prompt
+// back at itself — binds the pin to the copy while the real rule is gutted.
+// A blockquoted copy is harmless (`\s+` cannot span the `>` gutter); a plain
+// one is not.
+//
 // Extracted here rather than copied a fifth time: `ci-state-prose`,
 // `liveness-rationale-prose`, `quiet-payload-prose` and
 // `staleness-qualifier-prose` each hand-rolled this same search-to-blank-line
@@ -33,10 +50,11 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.repla
 // of their own tickets, so migrating them is deliberately left out of #823 —
 // this export exists so the next pin does not become a fifth copy.
 export function paragraph(text, anchor, what) {
-  const at = text.search(phrase(anchor));
-  assert.notEqual(at, -1, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
-  const rest = text.slice(at);
-  const end = rest.indexOf("\n\n");
+  const hits = [...text.matchAll(new RegExp(phrase(anchor).source, "g"))];
+  assert.notEqual(hits.length, 0, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
+  assert.equal(hits.length, 1, `${what}: slice anchor "${anchor}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`);
+  const rest = text.slice(hits[0].index);
+  const end = rest.search(/\n[ \t]*\n/);
   return end === -1 ? rest : rest.slice(0, end);
 }
 

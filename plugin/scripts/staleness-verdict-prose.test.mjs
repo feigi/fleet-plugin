@@ -20,9 +20,10 @@
 // end-of-options separator #240 needs, the fold-into-a-neighbour hazard behind
 // the third value, the `origin/main`-only read, the absent-and-never-changed
 // positive control, and the refusal to run a reproduction. This file pins the
-// clauses a reader must obey to use the tool correctly — which direction flag
-// means what, that exactly one is given, what each exit code's verdict does to
-// supply, and that a `could not check` survivor is annotated as one. The rest is
+// clauses a reader must obey to use the tool correctly — the flag the script
+// actually accepts, which direction flag means what, that exactly one is
+// given, what each exit code's verdict does to supply, and that a
+// `could not check` survivor is annotated as one. The rest is
 // rationale for those rules; it is left unpinned on purpose, so a rewrite of the
 // reasoning is not a red. The `origin/main`-only paragraph also names
 // `claim-ticket.sh`, and no slice here reaches it.
@@ -40,9 +41,10 @@
 // MUTATION-TESTED BOTH WAYS, because a pin that reds on any edit discriminates
 // nothing. Reds measured on token-PRESERVING semantic flips, never on
 // vocabulary deletion — swapping the two verdict rows' supply actions, swapping
-// the `--gone` and `--present` glosses, and moving the annotate instruction onto
-// a different verdict each keep every pinned word and flip only the meaning, and
-// each reds its own assertion and no other. Greens measured on the containing
+// the `--gone` and `--present` glosses, moving the annotate instruction onto a
+// different verdict, and renaming the invocation's flag to one the script
+// rejects (`--path` → `--file`) each keep every pinned word and flip only the
+// meaning, and each reds its own assertion and no other. Greens measured on the containing
 // paragraphs rewrapped across 60-400 columns: `phrase()` joins words on `\s+`,
 // so a rewrap is a no-op.
 //
@@ -72,6 +74,13 @@ const USAGE = "**`staleness.mjs` runs that check";
 const TABLE = "| Exit | Verdict |";
 const SURVIVORS = "Annotate every survivor with its class";
 
+// The flag itself, not just the glosses around it: `--path` sits inside this
+// same paragraph and was asserted by nothing, so the doc could drift to a flag
+// the script does not accept with no red — measured green on
+// `--path` → `--file`. Pinned to the flag alone rather than the whole
+// invocation, so renaming the `<path>` placeholder stays a no-op.
+const INVOCATION = "staleness.mjs --path";
+
 const DIRECTIONS =
   "`--gone` is a defect the fix must remove, the wording the ticket quotes as wrong; `--present` is what the fix must add, the assertion a pin ticket asks for";
 const EXACTLY_ONE =
@@ -87,6 +96,14 @@ const VERDICT_ROWS = [
   ["1", "| 1 | provably fixed | do not offer; close citing the payload's `commit` and `subject` |"],
   ["2", "| 2 | could not check | offer it, **and say the probe could not check** |"],
 ];
+
+test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accepts`, () => {
+  assert.match(
+    paragraph(text, USAGE, SKILL),
+    phrase(INVOCATION),
+    `${SKILL} no longer spells the invocation "${INVOCATION}". A reader who copies a flag the script does not accept gets \`staleness: --path <path> is required\` at exit 2 — a could-not-check indistinguishable from a real one, which the table below then says to offer and annotate. Restore it, or re-anchor INVOCATION in this file to the new wording.`,
+  );
+});
 
 test(`${SKILL} keeps \`--gone\` and \`--present\` bound to the direction each one means`, () => {
   assert.match(

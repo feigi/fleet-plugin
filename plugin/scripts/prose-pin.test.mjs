@@ -132,13 +132,33 @@ test("pairSlices throws when the OMP line's own token also matches the CLAUDE li
 // of the document and a decoy copy of the wording anywhere below satisfies the
 // pin. The anchor: routed through `phrase()` rather than a literal `indexOf`,
 // so a rewrap that the pinned clause survives does not red the pin — the
-// false POSITIVE that a literal anchor introduces. The throw is what keeps a
-// moved anchor from silently widening the slice back to the whole file.
+// false POSITIVE that a literal anchor introduces. Two throws keep the anchor
+// honest: a moved one never widens the slice back to the whole file, and a
+// duplicated one never binds the pin to the wrong copy.
 test("paragraph cuts at the blank line, so a decoy below the rule cannot satisfy a pin", () => {
-  const doc = "intro\n\nTHE RULE says do X.\nstill the rule.\n\nlater prose.\n\nTHE RULE says do X.\n";
+  const doc = "intro\n\nTHE RULE says do X.\nstill the rule.\n\nlater prose.\n\na stray copy says do X.\n";
   assert.equal(paragraph(doc, "THE RULE", "the fixture"), "THE RULE says do X.\nstill the rule.");
   // The decoy is real: unbounded, the whole document contains the wording twice.
-  assert.doesNotMatch(paragraph("THE RULE says do Y.\n\nTHE RULE says do X.\n", "THE RULE", "the fixture"), phrase("do X"));
+  assert.doesNotMatch(paragraph("THE RULE says do Y.\n\na stray copy says do X.\n", "THE RULE", "the fixture"), phrase("do X"));
+});
+
+// The decoy above sits below a CLEAN blank line, so it passes both before and
+// after the bound moved off the literal `\n\n` — it cannot see that
+// regression. This one can: an editor keeping a list item's indent writes a
+// blank line carrying whitespace, which `indexOf("\n\n")` does not find, and
+// the slice then runs past the paragraph onto the decoy.
+test("paragraph cuts at a blank line that carries whitespace", () => {
+  assert.doesNotMatch(paragraph("THE RULE says do Y.\n   \na stray copy says do X.\n", "THE RULE", "the fixture"), phrase("do X"));
+});
+
+// The bound's mirror image: an anchor matching twice binds the pin to
+// whichever copy comes first, so the real rule below can be gutted with the
+// suite green. Same standard `markedLine` already holds its own marker to.
+test("paragraph throws when its anchor matches twice, rather than binding the wrong copy", () => {
+  assert.throws(
+    () => paragraph("THE RULE says do X.\n\nprose.\n\nTHE RULE says do X.\n", "THE RULE", "the fixture"),
+    /the fixture: slice anchor "THE RULE" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
+  );
 });
 
 test("paragraph anchors reflow-safely — a hard-wrapped anchor still matches", () => {
