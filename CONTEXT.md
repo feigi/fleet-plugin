@@ -1,8 +1,9 @@
 # Fleet Plugin
 
 The **fleet**: scripts, skills, commands and agents that run parallel agents against
-this repo's own issue tracker, packaged as a plugin. This glossary covers the
-vocabulary those artefacts share; it is a glossary only, not a spec.
+a repo's issue tracker, packaged as a plugin and supported on two harnesses
+indefinitely. This glossary covers the vocabulary those artefacts share; it is a
+glossary only, not a spec.
 
 ## Language
 
@@ -86,3 +87,30 @@ _Avoid_: deferred finding, follow-up
 A defect whose existence is verified and whose fix is not yet chosen. The state
 the filing-time label bar turns on.
 _Avoid_: undecided, unclear
+
+### Install
+
+**Install root**:
+The directory a harness actually loaded the plugin from, as recorded in its own
+registry. Never the checkout, and never a path any artefact may write down: Claude
+Code's is version- or commit-stamped and changes on every install, omp's is named
+differently again.
+_Avoid_: cache dir, plugin dir, install path
+
+**Resolver**:
+The shipped executable that maps a script name to the Install root and execs it there.
+The single door between prose and code — a callsite naming any other path is a defect.
+Placed once by hand outside the plugin, because it cannot resolve itself.
+_Avoid_: shim, wrapper, launcher
+
+**Provenance check**:
+The assertion naming the live Install root, its recorded version or commit, the
+Resolver's own drift against the installed copy, and the `enabledProviders`
+precondition. Refuses loudly; writes nothing.
+_Avoid_: doctor, healthcheck, preflight
+
+**Dev catalog**:
+The untracked marketplace outside the repo that pins a local branch of the working
+checkout, so pre-merge iteration never edits the tracked catalog. Distinct from the
+tracked catalog, which names the shipped branch and nothing else.
+_Avoid_: local marketplace, dev source
