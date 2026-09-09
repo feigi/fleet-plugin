@@ -20,14 +20,15 @@
 // in this directory are unreachable from that path. So this file requires
 // nothing from the rest of the plugin (CommonJS, core `node:*` modules
 // only) even though `scripts/fleet-provenance` duplicates a few lines of its
-// registry-reading logic rather than sharing a module with it, for the same
-// reason: a module this file `require()`s would need to travel with it, and
-// nothing else does.
+// registry-reading AND scripts/-digest logic rather than sharing a module
+// with it, for the same reason: a module this file `require()`s would need
+// to travel with it, and nothing else does.
 "use strict";
 
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 
 const NAME = "fleet-run";
@@ -36,6 +37,47 @@ const PLUGIN_KEY = "fleet-ctl@fleet-plugin"; // ADR 0006 — the registry key si
 function die(message) {
   process.stderr.write(`${NAME}: ${message}\n`);
   process.exit(2);
+}
+
+function sha256(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+// Every regular file under `dir`, repo-relative to `dir` itself, sorted — a
+// filesystem walk rather than `git ls-files`: an installed copy need not
+// carry `.git` at all (a directory-source Claude install excludes it,
+// measured, ADR 0003). Duplicated from `fleet-provenance`'s own
+// `walkFiles`/`digestScriptsDir` — see this file's header for why.
+function walkFiles(dir, base = dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return { error: `cannot list ${dir} (${e.code || e.message})` };
+  }
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const r = walkFiles(full, base, out);
+      if (r && r.error) return r;
+    } else if (entry.isFile()) {
+      out.push(path.relative(base, full));
+    }
+  }
+  return { files: out };
+}
+
+// One digest over every file's content under `<root>/scripts`, keyed by
+// relative path. Used ONLY to decide whether an undetectable harness pick
+// is MATERIAL — see resolveInstall below — never printed as a provenance
+// verdict itself (that stays `fleet-provenance`'s job).
+function digestScriptsDir(root) {
+  const scriptsDir = path.join(root, "scripts");
+  const listed = walkFiles(scriptsDir);
+  if (listed.error) return { error: listed.error };
+  if (listed.files.length === 0) return { error: `no files under ${scriptsDir}` };
+  const lines = listed.files.map((rel) => `${sha256(fs.readFileSync(path.join(scriptsDir, rel)))}  ${rel}`);
+  return { digest: sha256(Buffer.from(lines.join("\n") + "\n", "utf8")) };
 }
 
 // Reads one harness's registry for PLUGIN_KEY's installPath. Never throws —
@@ -149,25 +191,50 @@ function resolveInstall() {
   }
 
   // Both registries carry the key. Prefer the running harness's install
-  // ONLY where detection is reliable; refuse rather than guess otherwise —
-  // see detectRunningHarness's own header for why "detected" here means
-  // something narrower than "OMPCODE or CLAUDECODE happens to be set".
+  // ONLY where detection is reliable — see detectRunningHarness's own
+  // header for why "detected" here means something narrower than "OMPCODE
+  // or CLAUDECODE happens to be set".
   const running = detectRunningHarness();
-  if (running === null) {
-    die(
-      `both registries carry "${PLUGIN_KEY}" (claude: ${regs.claude.installPath}; omp: ${regs.omp.installPath}) `
-      + "and the running harness cannot be reliably told apart here (OMPCODE is measured to propagate to a "
-      + "Claude process nested under omp, so its presence proves nothing either way) — set FLEET_HARNESS=claude "
-      + "or FLEET_HARNESS=omp to disambiguate; refusing to guess",
+  if (running !== null) {
+    process.stderr.write(
+      `${NAME}: both registries carry "${PLUGIN_KEY}" — running harness detected as ${running} `
+      + "(CLAUDECODE set, OMPCODE unset — the one combination this trusts), "
+      + `preferring its installPath: ${regs[running].installPath} `
+      + "(set FLEET_HARNESS=claude or FLEET_HARNESS=omp to override)\n",
     );
+    return { harness: running, ...regs[running] };
   }
-  process.stderr.write(
-    `${NAME}: both registries carry "${PLUGIN_KEY}" — running harness detected as ${running} `
-    + "(CLAUDECODE set, OMPCODE unset — the one combination this trusts), "
-    + `preferring its installPath: ${regs[running].installPath} `
-    + "(set FLEET_HARNESS=claude or FLEET_HARNESS=omp to override)\n",
+
+  // No positive signal. Refusing is only right when the pick MATTERS —
+  // measured (#1355 review, round 2): this box's own ambient env has BOTH
+  // OMPCODE and CLAUDECODE set (an omp session launched from a Claude
+  // shell), so a bare refusal here makes every one of the 35 callsites
+  // unusable by default. Where both installs' `scripts/` are
+  // byte-identical, which one gets picked cannot change what runs, so the
+  // choice is immaterial and this picks deterministically instead of
+  // refusing: the harness a positive signal would have named (none, in
+  // this branch) else `claude`'s user-scope entry. Only a REAL divergence
+  // — different digests, still no positive signal, no override — refuses.
+  const digestClaude = digestScriptsDir(regs.claude.installPath);
+  const digestOmp = digestScriptsDir(regs.omp.installPath);
+  if (!digestClaude.error && !digestOmp.error && digestClaude.digest === digestOmp.digest) {
+    const picked = "claude"; // documented fallback order: positive signal, else claude
+    process.stderr.write(
+      `${NAME}: both registries carry "${PLUGIN_KEY}" and the running harness cannot be told apart, but `
+      + `scripts/ is byte-identical on both (sha256 ${digestClaude.digest}) — the choice is immaterial, `
+      + `picking ${picked} (documented fallback order): ${regs[picked].installPath}\n`,
+    );
+    return { harness: picked, ...regs[picked] };
+  }
+
+  die(
+    `both registries carry "${PLUGIN_KEY}" (claude: ${regs.claude.installPath}; omp: ${regs.omp.installPath}) `
+    + "and the running harness cannot be reliably told apart here (OMPCODE is measured to propagate to a "
+    + "Claude process nested under omp, so its presence proves nothing either way); their scripts/ digests "
+    + `differ (${digestClaude.error ? `claude: ${digestClaude.error}` : `claude: ${digestClaude.digest}`}; `
+    + `${digestOmp.error ? `omp: ${digestOmp.error}` : `omp: ${digestOmp.digest}`}), so the pick is material `
+    + "— set FLEET_HARNESS=claude or FLEET_HARNESS=omp to disambiguate; refusing to guess",
   );
-  return { harness: running, ...regs[running] };
 }
 
 function scriptPathFor(installPath, script) {
