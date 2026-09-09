@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { between, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
+import { between, paragraph, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -125,4 +125,55 @@ test("pairSlices throws when the OMP line's own token also matches the CLAUDE li
     () => pairSlices(SECTION("`SendMessage` and `hub send` both wake it.", "`hub send` wakes it."), "## S", "## Next"),
     /the OMP line's "send\/wake channel" token also matches the CLAUDE line/,
   );
+});
+
+// `paragraph`'s two halves are its bound and its anchor, and each has its own
+// false green. The bound: without the blank-line cut the slice runs to the end
+// of the document and a decoy copy of the wording anywhere below satisfies the
+// pin. The anchor: routed through `phrase()` rather than a literal `indexOf`,
+// so a rewrap that the pinned clause survives does not red the pin — the
+// false POSITIVE that a literal anchor introduces. Two throws keep the anchor
+// honest: a moved one never widens the slice back to the whole file, and a
+// duplicated one never binds the pin to the wrong copy.
+test("paragraph cuts at the blank line, so a decoy below the rule cannot satisfy a pin", () => {
+  const doc = "intro\n\nTHE RULE says do X.\nstill the rule.\n\nlater prose.\n\na stray copy says do X.\n";
+  assert.equal(paragraph(doc, "THE RULE", "the fixture"), "THE RULE says do X.\nstill the rule.");
+  // The decoy is real: unbounded, the whole document contains the wording twice.
+  assert.doesNotMatch(paragraph("THE RULE says do Y.\n\na stray copy says do X.\n", "THE RULE", "the fixture"), phrase("do X"));
+});
+
+// The decoy above sits below a CLEAN blank line, so it passes both before and
+// after the bound moved off the literal `\n\n` — it cannot see that
+// regression. This one can: an editor keeping a list item's indent writes a
+// blank line carrying whitespace, which `indexOf("\n\n")` does not find, and
+// the slice then runs past the paragraph onto the decoy.
+test("paragraph cuts at a blank line that carries whitespace", () => {
+  assert.doesNotMatch(paragraph("THE RULE says do Y.\n   \na stray copy says do X.\n", "THE RULE", "the fixture"), phrase("do X"));
+});
+
+// The bound's mirror image: an anchor matching twice binds the pin to
+// whichever copy comes first, so the real rule below can be gutted with the
+// suite green. Same standard `markedLine` already holds its own marker to.
+test("paragraph throws when its anchor matches twice, rather than binding the wrong copy", () => {
+  assert.throws(
+    () => paragraph("THE RULE says do X.\n\nprose.\n\nTHE RULE says do X.\n", "THE RULE", "the fixture"),
+    /the fixture: slice anchor "THE RULE" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
+  );
+});
+
+test("paragraph anchors reflow-safely — a hard-wrapped anchor still matches", () => {
+  const doc = "**a long anchor\n   spanning a wrap** and the rule.\n\nnext.\n";
+  assert.match(paragraph(doc, "**a long anchor spanning a wrap**", "the fixture"), phrase("and the rule"));
+});
+
+test("paragraph throws when its anchor moved, rather than widening to the whole file", () => {
+  assert.throws(
+    () => paragraph("no anchor here\n\nGONE\n", "MISSING ANCHOR", "the fixture"),
+    /the fixture: slice anchor "MISSING ANCHOR" moved — re-anchor this test, never widen it to the whole file/,
+  );
+});
+
+// A document with no blank line at all is one paragraph, not a failure.
+test("paragraph returns the remainder when the rule's block ends the document", () => {
+  assert.equal(paragraph("x\n\nTHE RULE ends here.", "THE RULE", "the fixture"), "THE RULE ends here.");
 });
