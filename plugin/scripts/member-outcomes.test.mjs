@@ -255,9 +255,12 @@ test("a Workflow's nested fan-out is scraped too, keyed on its path-relative ste
   // Transcripts live at TWO depths. A one-level readdir saw 2,723 files and
   // missed 2,894 under subagents/workflows/wf_<id>/ across 37 sessions — 52% of
   // the corpus, and specifically `workflows/review-pr.js`'s specialists, which
-  // is the population where model is DELIBERATELY varied (that file pins
-  // `model: "sonnet"` on three of its six dimensions). No fixture had a nested
-  // directory, so 1,223 tests passed over a scraper that saw half the disk.
+  // is the population where the dispatched agent (and therefore its resolved
+  // model) is DELIBERATELY varied per dimension — six distinct
+  // `fleet-review-*` names since #1349, each carrying its own frontmatter
+  // tier (previously three of six carried a per-call `model: "sonnet"`,
+  // before that knob was removed). No fixture had a nested directory, so
+  // 1,223 tests passed over a scraper that saw half the disk.
   //
   // Mutation this must survive: dropping `{ recursive: true }`. That reads 1.
   const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
@@ -265,7 +268,7 @@ test("a Workflow's nested fan-out is scraped too, keyed on its path-relative ste
   mkdirSync(wf, { recursive: true });
   writeFileSync(join(wf, "agent-anested.jsonl"), assistant("claude-sonnet-5", "xhigh"));
   writeFileSync(join(wf, "agent-anested.meta.json"),
-    JSON.stringify({ agentType: "pr-review-toolkit:code-reviewer", description: "Review PR 943", spawnDepth: 1 }));
+    JSON.stringify({ agentType: "fleet-ctl:fleet-review-correctness", description: "Review PR 943", spawnDepth: 1 }));
 
   const rows = rowsForSession(dir);
   assert.equal(rows.length, 2);

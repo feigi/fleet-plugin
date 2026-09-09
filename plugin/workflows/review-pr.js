@@ -123,66 +123,73 @@ const VERDICT_SCHEMA = {
   },
 };
 
-// `model` is optional and deliberately absent on three entries. Absent means
-// INHERIT, which is not one behaviour: pr-review-toolkit pins `code-reviewer`
-// (correctness) and `code-simplifier` (simplify) to `model: opus` in frontmatter,
-// while the other four are `model: inherit`. So omitting it keeps a vendor pin
-// for two dimensions and follows the session model for one. That frontmatter is
-// vendored third-party — editing it is clobbered on the next plugin update, so
-// this is the only durable lever.
+// Every entry names only `key`, `agentType` and `prompt` — no `model`, no
+// `effort`. Per-call tier passed to `agent()` is what the port ruled out
+// entirely (#1349, per #1303's gap 3): measured on omp, `agent(prompt,
+// {model, effort})` resolves to the identical model as the baseline, silently
+// — a per-call lever that only works on one harness is the exact silent-
+// degradation shape the map forbids. So tier lives in exactly one place now:
+// the fleet-owned agent definition's frontmatter (`model:` bare alias,
+// `effort:` for Claude, `thinking-level:` for omp — CONTEXT.md § Tier's
+// "Declared tier"). `agentType` here is the ONLY thing this file threads
+// through to the dispatch — the Claude-side copy (this file) spells it
+// `fleet-ctl:fleet-review-<key>` (the Task tool's `<plugin>:<agent>`
+// convention); review-core.js's host-neutral copy spells the same field bare
+// (`fleet-review-<key>`), which is already omp's native form. Both values
+// are carried in the same field name, `agentType`, so the two
+// DEFAULT_DIMENSIONS arrays differ ONLY in that one string per entry — see
+// review-core-parity.test.mjs.
 //
-// The rule: downgrade a dimension only when a MISS by the cheaper finder is
-// RECOVERABLE. Refuters do not separate these six: nothing keys a refuter
-// budget off a dimension, because `verifiersFor` takes a severity and nothing
-// else. `silent-failure` findings at critical/important therefore draw the same
-// refuters `tests` findings do. What separates them is what a miss costs.
-// A weak `tests`/`comments`/`types` pass leaves something a later run or a
-// reader still catches; a refute pass kills false POSITIVES and never false
-// NEGATIVES, so recoverability is the whole of the argument. `correctness` and
-// `silent-failure` miss silently and permanently — the pair `SIZE_TIER_DIMS`
-// keeps for that reason; `comments` sits beside them there for a different one
-// (#218), and is downgraded. `simplify` is omitted for the vendored-
-// pin reason above instead; it does draw 0 refuters, but VIA SEVERITY — its
-// prompt directs every finding to `suggestion`, which is budgeted 0 — and the
-// size tier is where its cost is paid.
+// The six agents replace the vendored third-party specialist plugin
+// outright (the fork ruled on #1303): `fleet-review-correctness` and
+// `fleet-review-simplify` carry `model: opus` in their own frontmatter,
+// matching the vendor's `code-reviewer`/`code-simplifier` pins;
+// `fleet-review-tests`, `-comments` and `-types` carry `model: sonnet`,
+// matching this file's PREVIOUS per-call override (removed below); and
+// `fleet-review-silent-failure` also carries `model: sonnet` — the vendored
+// `silent-failure-hunter` had neither a frontmatter pin nor a per-call
+// override, so it ran at whatever model the session inherited, a value this
+// port cannot reproduce (there is no "session model" a named definition can
+// point at) and does not try to: it gets an explicit, documented tier
+// instead of an implicit one. See each `.agent.md` for its own `effort`/
+// `thinking-level`.
 //
-// So the omissions have two causes, and a new dimension needs both asked: is a
-// miss recoverable, and does its agent carry a frontmatter pin worth keeping?
+// The refuter-budget rule below (`SIZE_TIER_DIMS`) is UNCHANGED by any of
+// this: it keys on recoverability of a MISS, not on tier, and
+// `verifiersFor` takes a severity and nothing else — a dimension's tier and
+// its refuter budget have never been the same knob.
 const DEFAULT_DIMENSIONS = [
   {
     key: "correctness",
-    agentType: "pr-review-toolkit:code-reviewer",
+    agentType: "fleet-ctl:fleet-review-correctness",
     prompt: "logic errors, missed cases, scope creep beyond the ticket",
   },
   {
     key: "silent-failure",
-    agentType: "pr-review-toolkit:silent-failure-hunter",
+    agentType: "fleet-ctl:fleet-review-silent-failure",
     prompt:
       "swallowed errors, fallbacks that hide faults, catch blocks that mislabel what failed, and any NEW dereference the diff moved inside an existing try",
   },
   {
     key: "tests",
-    agentType: "pr-review-toolkit:pr-test-analyzer",
-    model: "sonnet",
+    agentType: "fleet-ctl:fleet-review-tests",
     prompt:
       "whether each test DISCRIMINATES: apply the mutation it should catch, confirm that test goes red, revert, then apply one it should NOT catch and confirm green. Vary the syntactic form — a guard catching `// whole-line` may let `code; // trailing` through",
   },
   {
     key: "comments",
-    agentType: "pr-review-toolkit:comment-analyzer",
-    model: "sonnet",
+    agentType: "fleet-ctl:fleet-review-comments",
     prompt:
       "every added factual assertion checked against the tree, INCLUDING comments in files this diff does not touch but whose claims it falsifies (test-name references, 'N of 3' counts, tracking-issue pointers)",
   },
   {
     key: "types",
-    agentType: "pr-review-toolkit:type-design-analyzer",
-    model: "sonnet",
+    agentType: "fleet-ctl:fleet-review-types",
     prompt: "invariants expressed vs merely documented; casts that erase conformance",
   },
   {
     key: "simplify",
-    agentType: "pr-review-toolkit:code-simplifier",
+    agentType: "fleet-ctl:fleet-review-simplify",
     prompt:
       "simplification opportunities — dead branches, redundant state, needless indirection. REPORT ONLY, read-only: a finding's claim is what to simplify, suggested_fix is the simpler form, severity 'suggestion'. Never edit a file. A simplification that changes observable behavior is a defect, not a suggestion",
   },
@@ -242,14 +249,12 @@ function usableDiff(snap) {
 // BOUNDING half of that rule ports here; the source-of-truth half is true by
 // construction and only needs stating, so a specialist stops hunting for a git
 // command to settle what the snapshot already settles.
-//
-// The specialists are pr-review-toolkit agents whose stated default is to
-// read `git diff` (code-reviewer.md's "Review Scope" section — vendored by
-// the pr-review-toolkit plugin, not tracked in this repo, so nothing here can
-// pin or re-verify the quote). The snapshot is `git archive HEAD | tar -x`
-// and therefore NOT a git repo, so that default fails and the only fallback is
-// reading files whole. Handing them the change is the fix; the bounding rule
-// alone would only treat the symptom.
+// The specialists are fleet-owned `fleet-review-*` agents (the fork ruled on
+// #1303) whose default, like the vendored definitions they replaced, is to
+// read `git diff`. The snapshot is `git archive HEAD | tar -x` and therefore
+// NOT a git repo, so that default fails and the only fallback is reading
+// files whole. Handing them the change is the fix; the bounding rule alone
+// would only treat the symptom.
 //
 // The third argument is the raw snapshot report, and it is here for one reason:
 // `readRules(diffPath, stats)` structurally cannot know WHY a diff was dropped,
@@ -430,16 +435,17 @@ const scratch = A.scratch || `/tmp/review-pr-${pr}`;
 const runRootParent = `${scratch}/pr${pr}`;
 const runRootPrefix = `${runRootParent}/run-`;
 const verifiers = A.verifiers || 2;
-const snapshotModel = A.snapshotModel || "haiku";
-const verifierEffort = A.verifierEffort || "low";
-// Applies to ALL six dimensions when set — that is what an override is for.
-// Unset, each dimension falls back to its own optional `model`, and `undefined`
-// inherits. UNVERIFIED, confirm on the first run: whether opts.model beats
-// agentType frontmatter in workflow agent(). It does for the Agent tool. Only
-// correctness and simplify have a pin to lose, and neither is sent a model here,
-// so a wrong answer costs nothing — but read the dispatched model off the
-// subagent JSONL once and record it.
-const specialistModel = A.specialistModel || null;
+// snapshotModel/specialistModel/verifierEffort — the three per-call tier
+// knobs this block used to expose — are GONE, not renamed. #1349 (per
+// #1303's gap 3) ruled that no `agent()` call may carry `model`/`effort`
+// anywhere: measured on omp, a per-call override silently resolves to the
+// baseline model, and a caller-facing knob that only works on one harness is
+// the exact silent-degradation shape the map forbids. Every dispatch below
+// now names a fleet-owned `fleet-review-*`/`fleet-review-snapshot`/
+// `fleet-review-verifier` definition instead, whose OWN frontmatter is the
+// tier — see DEFAULT_DIMENSIONS above and each `.agent.md`. A caller that
+// wants a different tier edits the definition, on both harnesses at once,
+// rather than reaching for a lever that worked on one of them.
 
 // Verification budget follows WHERE a finding gets checked, not how much it
 // matters. A critical/important finding is applied off this pass alone — nothing
@@ -614,17 +620,16 @@ function selectDimensions(all, stats) {
 
 // The "Specialists" section of `commands/review-and-fix.md`
 // documents `args.dimensions` as accepting "keys or dimension objects" — but
-// until now only objects worked: a key array passed straight through and every
-// dereference below (`d.key`, `d.prompt`, `d.model`, `d.agentType` — FOUR, not
-// three) came back `undefined`, with no throw and no warning (#113). Resolve
-// strings against the workflow's own catalog, and check every object has the
-// three fields it REQUIRES AND that each of those (plus `model`, when
-// present) is a string — presence alone let a non-string field reach the
-// specialist dispatch machinery downstream instead of failing at this
-// validated boundary (`model` is optional; absent means the agent's own
-// frontmatter pin decides, which for `correctness` and `simplify` is `opus` —
-// which is why the models-sent log below reports `frontmatter` there and NOT
-// "inherit").
+// until now only objects worked: a key array passed straight through and
+// every dereference below (`d.key`, `d.prompt`, `d.agentType` — three) came
+// back `undefined`, with no throw and no warning (#113). Resolve strings
+// against the workflow's own catalog, and check every object has the three
+// fields it REQUIRES AND that each of those is a string — presence alone let
+// a non-string field reach the specialist dispatch machinery downstream
+// instead of failing at this validated boundary. `model` is no longer a
+// fourth optional field (#1349): an override entry that still sends one is
+// refused outright, loudly, rather than silently accepted and ignored — see
+// the check below.
 // Anything unresolvable stops the run and names what was not recognised — a
 // misconfigured review is worse than no review, because its findings look like
 // findings.
@@ -661,18 +666,24 @@ function resolveDimensions(override, all) {
       throw new Error(`review-pr: args.dimensions[${i}] is missing required field(s): ${missing.join(", ")}`);
     // Presence alone does not mean USABLE: a non-string `key`/`prompt`/
     // `agentType` passed the check above and reached `d.prompt` interpolated
-    // into the review prompt and `d.agentType`/`d.model` at the specialist
-    // dispatch, further down this file, with no throw — exactly the
-    // validated-boundary contract this function exists to establish. Same
-    // indexed-error convention as the missing-field throw.
+    // into the review prompt and `d.agentType` at the specialist dispatch,
+    // further down this file, with no throw — exactly the validated-boundary
+    // contract this function exists to establish. Same indexed-error
+    // convention as the missing-field throw.
     const wrongType = REQUIRED.find((f) => typeof entry[f] !== "string");
     if (wrongType)
       throw new Error(
         `review-pr: args.dimensions[${i}] field "${wrongType}" must be a string, got ${kind(entry[wrongType])}`,
       );
-    if (entry.model !== undefined && typeof entry.model !== "string")
+    // `model` used to be a fourth, optional field here, dereferenced at the
+    // specialist dispatch to override the dimension's own tier. #1349 removed
+    // every per-call tier knob (see the comment above `verifiers` further
+    // down): a caller that still sends one is refused, loudly, rather than
+    // silently accepted and ignored — the ignoring is exactly the silent
+    // degradation this port exists to close.
+    if (entry.model !== undefined)
       throw new Error(
-        `review-pr: args.dimensions[${i}] field "model" must be a string, got ${kind(entry.model)}`,
+        `review-pr: args.dimensions[${i}] field "model" is no longer supported — dispatch tier lives in the fleet-owned agent definition's own frontmatter, never per call`,
       );
     return entry;
   });
@@ -681,15 +692,15 @@ function resolveDimensions(override, all) {
   // double-counts it — and `run-team/SKILL.md` reads that record AS coverage.
   // Redundant-but-valid input WHEN THE ENTRIES AGREE, so dedupe SILENTLY in
   // that case — first occurrence wins, no throw, no log. A second entry under
-  // the same key that DIVERGES (different `prompt`, `agentType`, or `model`)
-  // is not redundant, it is a caller's real attempt to override or customize a
+  // the same key that DIVERGES (different `prompt` or `agentType`) is not
+  // redundant, it is a caller's real attempt to override or customize a
   // catalog entry, and silently keeping the first would discard that with no
   // signal — the one silent exception to what this whole function exists to do
   // (#279/#281: turn silent/ambiguous failures into loud, indexed ones).
   const byKey = new Map();
   for (const [i, d] of normalized.entries()) {
     const held = byKey.get(d.key);
-    if (held && (held.prompt !== d.prompt || held.agentType !== d.agentType || held.model !== d.model))
+    if (held && (held.prompt !== d.prompt || held.agentType !== d.agentType))
       throw new Error(`review-pr: args.dimensions[${i}] repeats key "${d.key}" with different fields`);
     if (!held) byKey.set(d.key, d);
   }
@@ -842,7 +853,7 @@ string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
 omit diffStats entirely. Only runRoot, path, head and pathVerified are ever required —
 diffStats, diffPath, diffLines and prHead are each omitted independently when
 their command failed. Do not modify ${worktree}.`,
-  { label: "snapshot", phase: "Snapshot", model: snapshotModel, schema: {
+  { label: "snapshot", phase: "Snapshot", agentType: "fleet-ctl:fleet-review-snapshot", schema: {
       type: "object",
       additionalProperties: false,
       required: ["runRoot", "path", "head", "pathVerified"],
@@ -1092,12 +1103,13 @@ log(
     (stats && stats.profile ? ` — profile=${stats.profile}` : " — profile unknown, full set") +
     (stats && SIZE_TIER_PROFILES.has(stats.profile) && !explicitDimensions ? " — size tier" : ""),
 );
-// "sent", not "used": this reports what the dispatch passes. `frontmatter` means
-// no model was sent, so the agent's own pin decides — which for `correctness` and
-// `simplify` is `opus`, NOT the session model. Printing `inherit` there named the
-// one behaviour the comment above DEFAULT_DIMENSIONS exists to deny.
+// "dispatched", not "used": this reports which fleet-owned agent definition
+// each dimension's dispatch names — the only place its tier lives now
+// (#1349; see the comment above `verifiers`). There is no `frontmatter`/
+// `inherit` distinction left to report: every entry always names a
+// definition.
 log(
-  `models sent ${dimensions.map((d) => `${d.key}=${specialistModel || d.model || "frontmatter"}`).join(" ")}`,
+  `agents dispatched ${dimensions.map((d) => `${d.key}=${d.agentType}`).join(" ")}`,
 );
 
 // Why a dimension did NOT cover its ground, or null when it did.
@@ -1269,6 +1281,15 @@ function verdictFor(dispatched, votes) {
 // text pin does not cover it. Measured on this predicate while it was still
 // inline at the report block: deleting the filter left this file's own tests
 // green.
+// Marked pair (CONTEXT.md § Dialect), documentary only — this file never
+// executes on omp, so nothing here branches on harness at runtime. Recorded
+// so a reader auditing review-core.js's `resumeFor(unverified, harness)`
+// against this file's own hardcoded Claude message can find the omp half
+// without leaving this file.
+/*
+CLAUDE: point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.
+OMP: review-core.js's `resumeFor` reports the same crash population and says re-run — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).
+*/
 function resumeFor(unverified) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
   return {
@@ -1329,7 +1350,6 @@ Report only what you RAN. A claim you reasoned to but did not execute belongs in
       {
         label: `review:${d.key}`,
         phase: "Review",
-        model: specialistModel || d.model,
         agentType: d.agentType,
         schema: FINDINGS_SCHEMA,
       },
@@ -1406,7 +1426,7 @@ checkout — and bracket a fixture's own git with \`git rev-parse --show-topleve
 before \`git init\` it must NOT resolve to the repository, and a fresh scratch
 dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
 before any \`git commit\` it must equal your scratch path.`,
-              { label: `verify:${d.key}`, phase: "Verify", effort: verifierEffort, schema: VERDICT_SCHEMA },
+              { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-ctl:fleet-review-verifier", schema: VERDICT_SCHEMA },
             ),
           ),
         ).then((votes) => {

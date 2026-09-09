@@ -255,22 +255,21 @@ test("a size-tier stats blob missing `kinds` and `hasTests` still keeps comments
   );
 });
 
-// Downgrade only where a MISS is recoverable, NOT "faces refuters" (#221): the
-// refuter budget is keyed on severity, never on a dimension, so `silent-failure`
-// findings draw the same refuters `tests` findings do. The omissions split two
-// ways — the vendored `model: opus` frontmatter pin and the silent-permanent
-// miss — and the rule above `DEFAULT_DIMENSIONS` in review-pr.js owns the why.
-test("only the recoverable-miss dimensions carry a model downgrade", () => {
-  const models = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d.model]));
-  assert.equal(models.tests, "sonnet");
-  assert.equal(models.comments, "sonnet");
-  assert.equal(models.types, "sonnet");
-  // Undefined, not a string: `undefined` inherits. correctness and simplify keep
-  // their vendored `model: opus` frontmatter pin; silent-failure follows the
-  // session model.
-  assert.equal(models.correctness, undefined);
-  assert.equal(models["silent-failure"], undefined);
-  assert.equal(models.simplify, undefined);
+// #1349 removed the per-call `model` field entirely (per #1303's gap 3): no
+// `agent()` call may carry `model`/`effort`, so DEFAULT_DIMENSIONS carries
+// only `key`/`prompt`/`agentType` now, and tier lives in each fleet-owned
+// `fleet-review-<key>` definition's own frontmatter instead — see
+// review-core-parity.test.mjs for the parity pin between review-pr.js's
+// namespaced copy and review-core.js's bare one. This replaces the retired
+// "only the recoverable-miss dimensions carry a model downgrade" test, which
+// pinned a field that no longer exists.
+test("every dimension names a distinct fleet-owned agentType and carries no model field", () => {
+  const byKey = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d]));
+  for (const key of ["correctness", "silent-failure", "tests", "comments", "types", "simplify"]) {
+    assert.equal(byKey[key].agentType, `fleet-ctl:fleet-review-${key}`);
+    assert.equal(byKey[key].model, undefined, `${key} still carries a model field`);
+  }
+  assert.equal(new Set(DEFAULT_DIMENSIONS.map((d) => d.agentType)).size, DEFAULT_DIMENSIONS.length);
 });
 
 // The test above pins WHICH dimensions carry the downgrade. This pins the fact
@@ -285,8 +284,9 @@ test("the refuter budget is keyed on severity alone, never on a dimension", () =
   assert.equal(verifiersFor.length, 1);
   for (const d of DEFAULT_DIMENSIONS)
     assert.equal(verifiersFor("critical", d.key), 7, `critical/${d.key}`);
-  // `silent-failure` and `tests` sit on opposite sides of the model downgrade and
-  // still draw the same budget — the whole of why the retired rule did not
+  // `silent-failure` and `tests` are dispatched under different fleet-owned
+  // agent tiers (frontmatter, not a per-call field) and still draw the same
+  // budget — the whole of why the retired rule did not
   // separate them. `suggestion` is the one band that differs, and it is a
   // SEVERITY, not a dimension.
   assert.equal(verifiersFor("important"), verifiersFor("critical"));
@@ -344,8 +344,9 @@ test("an object override missing a required field stops the run and names the fi
     /missing required field\(s\): prompt/,
   );
   // All three REQUIRED fields are checked, not just one. `model` is not among
-  // them — it is dereferenced but optional, and demanding it here would refuse
-  // every dimension that lets its agent's own frontmatter pin decide.
+  // them — #1349 retired it entirely (dispatch tier lives only in the agent
+  // definition's own frontmatter now), and a caller that still sends one is
+  // refused outright — see the dedicated test below, not this one.
   assert.throws(
     () => resolveDimensions([{}], DEFAULT_DIMENSIONS),
     /missing required field\(s\): key, prompt, agentType/,
@@ -359,8 +360,8 @@ test("an object override missing a required field stops the run and names the fi
 // Presence alone let a non-string field (a number, an object, ...) straight
 // through to the specialist dispatch machinery with no throw, contradicting
 // this function's own job of validating the boundary. Mutation-verified: with
-// the `wrongType`/`entry.model` checks in resolveDimensions loosened back to
-// the presence-only `missing` check, this test reds.
+// the `wrongType` check in resolveDimensions loosened back to the
+// presence-only `missing` check, this test reds.
 test("a required field of the wrong type stops the run and names the field and the type it got", () => {
   assert.throws(
     () => resolveDimensions([{ key: 42, prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
@@ -373,14 +374,29 @@ test("a required field of the wrong type stops the run and names the field and t
     () => resolveDimensions([{ key: "x", prompt: {}, agentType: "a" }], DEFAULT_DIMENSIONS),
     /review-pr: args\.dimensions\[0\] field "prompt" must be a string, got object$/,
   );
-  // `model` is optional, but when it IS present it must be a string too — the
-  // same standard applied to the three REQUIRED fields.
+  assert.deepEqual(
+    resolveDimensions([{ key: "x", prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
+    [{ key: "x", prompt: "p", agentType: "a" }],
+  );
+});
+
+// #1349 (per #1303's gap 3): `model` used to be a fourth, optional field on a
+// dimension override, dereferenced at dispatch to override the tier. Now it
+// is refused OUTRIGHT — any value, not just a wrong-typed one — because tier
+// lives only in the fleet-owned agent definition's frontmatter, never per
+// call. A caller-facing knob that silently worked on one harness and not the
+// other is the exact shape #1349 exists to close, so this is loud rather than
+// a silent no-op.
+test("a dimension override carrying a model field is refused outright, regardless of its type", () => {
+  assert.throws(
+    () => resolveDimensions([{ key: "x", prompt: "p", agentType: "a", model: "opus" }], DEFAULT_DIMENSIONS),
+    /review-pr: args\.dimensions\[0\] field "model" is no longer supported/,
+  );
   assert.throws(
     () => resolveDimensions([{ key: "x", prompt: "p", agentType: "a", model: 7 }], DEFAULT_DIMENSIONS),
-    /review-pr: args\.dimensions\[0\] field "model" must be a string, got number$/,
+    /review-pr: args\.dimensions\[0\] field "model" is no longer supported/,
   );
-  // A missing `model` is still fine — absent means the agent's own
-  // frontmatter pin decides, and this check must not demand it.
+  // A missing `model` is still fine — there is nothing left to demand.
   assert.deepEqual(
     resolveDimensions([{ key: "x", prompt: "p", agentType: "a" }], DEFAULT_DIMENSIONS),
     [{ key: "x", prompt: "p", agentType: "a" }],
@@ -465,25 +481,23 @@ test("a repeated key resolves once, and does not throw", () => {
   assert.equal(resolveDimensions(["types", "types", "types"], DEFAULT_DIMENSIONS).length, 1);
 });
 
-// A second entry sharing a key but DIVERGING (different `prompt`/`agentType`/
-// `model`) used to dedupe SILENTLY too, discarding a caller's real attempt to
+// A second entry sharing a key but DIVERGING (different `prompt`/`agentType`)
+// used to dedupe SILENTLY too, discarding a caller's real attempt to
 // override or customize a catalog entry with zero signal — the one silent
 // exception to what this whole function exists to do (#279/#281 turn silent/
 // ambiguous failures into loud, indexed ones). Mutation-verified: comparing
 // only `d.key` in the dedupe loop (the old behaviour) reds this test; the
 // identical-duplicate cases above stay green either way, so this is
-// independent of them, not a replacement.
+// independent of them, not a replacement. `model` used to be a third
+// divergence field here too, before #1349 retired it outright (see the
+// dedicated "refused regardless of its type" test above) — a `model`-only
+// divergence can no longer reach this comparison at all, since the field is
+// refused before resolveDimensions ever gets to dedupe.
 test("a repeated key with different fields throws — a divergent collision is not silently dropped", () => {
   const dup = { key: "correctness", prompt: "other", agentType: "code-reviewer" };
   assert.throws(
     () => resolveDimensions([DEFAULT_DIMENSIONS[0], dup], DEFAULT_DIMENSIONS),
     /review-pr: args\.dimensions\[1\] repeats key "correctness" with different fields$/,
-  );
-  // Diverging only on `model` counts too — not just `prompt`/`agentType`.
-  const sameFieldsDifferentModel = { key: "types", prompt: DEFAULT_DIMENSIONS[4].prompt, agentType: DEFAULT_DIMENSIONS[4].agentType, model: "opus" };
-  assert.throws(
-    () => resolveDimensions([DEFAULT_DIMENSIONS[4], sameFieldsDifferentModel], DEFAULT_DIMENSIONS),
-    /review-pr: args\.dimensions\[1\] repeats key "types" with different fields$/,
   );
 });
 
@@ -496,15 +510,14 @@ test("a non-array override stops the run rather than crashing on .map", () => {
 });
 
 // #278. The header claimed "the three fields the fan-out actually dereferences"
-// and enumerated three; four are dereferenced. Derived from the source rather
-// than hand-listed, because hand-derived count claims about this function have
-// been wrong twice already (#118) — a fifth dereferenced field reds this and
-// forces the prose to be updated with it.
-//
-// The refuted reword is pinned too: `model` absent does NOT mean "inherit", it
-// means the agent's own frontmatter pin decides, which for `correctness` and
-// `simplify` is `opus`. That is the one behaviour the models-sent log exists to
-// deny, and it must not be re-asserted two hundred lines above it.
+// and enumerated three; four were dereferenced, back when `model` was a
+// fourth optional field. #1349 retired `model` entirely, so the
+// dereferenced set is three again — `key`, `prompt`, `agentType` — and this
+// pin now confirms the header says exactly that rather than re-asserting the
+// four-field count #278 corrected. Derived from the source rather than
+// hand-listed, because hand-derived count claims about this function have
+// been wrong before (#118) — a fifth dereferenced field reds this and forces
+// the prose to be updated with it.
 test("the resolveDimensions header states the dereferenced-field situation correctly", () => {
   const m = SOURCE.match(/((?:^\/\/.*\n)+)^function resolveDimensions\(/m);
   assert.ok(m, "resolveDimensions no longer carries a header comment block — update this test");
@@ -517,7 +530,7 @@ test("the resolveDimensions header states the dereferenced-field situation corre
   // OVER-counting one the code no longer does, since the header's mention
   // would keep padding the derived set to match itself.
   const dereferenced = [...new Set([...stripComments(SOURCE).matchAll(/\bd\.([a-zA-Z]+)/g)].map((x) => x[1]))].sort();
-  assert.deepEqual(dereferenced, ["agentType", "key", "model", "prompt"], "the dereferenced field set changed");
+  assert.deepEqual(dereferenced, ["agentType", "key", "prompt"], "the dereferenced field set changed");
   for (const f of dereferenced) {
     assert.match(header, new RegExp("`d\\." + f + "`"), `the header no longer enumerates d.${f}`);
   }
@@ -592,29 +605,34 @@ function reviewDispatchOptions() {
     .join("\n");
 }
 
-test("the review dispatch lets a caller override every dimension's model", () => {
-  assert.match(
+// #1349 (per #1303's gap 3) retired the whole per-call override this test
+// used to pin: `args.specialistModel`/per-dimension `model` are both gone,
+// and no `agent()` call anywhere in review-pr.js may carry a `model` option
+// at all — review-tier-audit.test.mjs is the general-purpose guard for that;
+// this pin is the SPECIFIC regression check that the review dispatch's own
+// options object never grows one back.
+test("the review dispatch never carries a model option — tier lives only in agentType's definition", () => {
+  assert.doesNotMatch(
     reviewDispatchOptions(),
-    /model:\s*specialistModel\s*\|\|\s*d\.model/,
-    "the review dispatch no longer prefers args.specialistModel over the per-dimension model",
+    /\bmodel\s*:/,
+    "the review dispatch carries a `model` option again — #1349 ruled that out entirely",
   );
-  assert.match(
-    SOURCE,
-    /^const specialistModel = A\.specialistModel \|\| null;$/m,
-    "args.specialistModel is no longer read",
+  assert.doesNotMatch(
+    stripComments(SOURCE),
+    /specialistModel/,
+    "args.specialistModel is back in CODE — #1349 retired this per-call override entirely (a comment explaining the removal is fine and expected)",
   );
 });
 
-// The log is the only runtime evidence the model policy took effect, and
-// review-pr.js defers confirming `opts.model` vs agentType frontmatter to a
-// first-run read of it. `frontmatter`, never `inherit`: correctness and simplify
-// are pinned `model: opus` by the vendored agent definitions, so `inherit` named
-// the one behaviour the DEFAULT_DIMENSIONS comment exists to deny.
-test("the models log reports what was sent and does not call a vendored pin 'inherit'", () => {
-  const m = SOURCE.match(/^\s*`models sent \$\{dimensions[\s\S]*?\n/m);
-  assert.ok(m, "the `models sent` log line is gone — nothing then reports the dispatched model tier");
-  assert.match(m[0], /\|\| "frontmatter"/, "an unset model is reported as something other than `frontmatter`");
-  assert.doesNotMatch(m[0], /"inherit"/, "the log calls an unset model `inherit`, which is false for correctness/simplify");
+// The log is the only runtime evidence of WHICH fleet-owned definition each
+// dimension dispatched to — the tier itself is no longer runtime-visible
+// here at all (#1349): it lives in that definition's own frontmatter, read
+// off the definition file or the dispatch transcript, never off this log.
+test("the dispatch log reports the agentType sent for each dimension, not a model tier", () => {
+  const m = SOURCE.match(/^\s*`agents dispatched \$\{dimensions[\s\S]*?\n/m);
+  assert.ok(m, "the `agents dispatched` log line is gone — nothing then reports which definition each dimension used");
+  assert.match(m[0], /d\.agentType/, "the log no longer names the dispatched agentType");
+  assert.doesNotMatch(m[0], /"frontmatter"|"inherit"/, "the log still reasons about a model tier that no agent() call carries anymore");
 });
 
 // `gh pr view --json files` pages at 100 and exits 0, so a truncated list is a

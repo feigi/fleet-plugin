@@ -348,7 +348,7 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
   const steps = Object.fromEntries(
     [...REVIEW_AND_FIX.matchAll(/^(\d)\. (.*)$/gm)].map((m) => [m[1], m[2]]),
   );
-  assert.match(steps["1"] ?? "", /pr-review-toolkit:review-pr/, "step 1 is no longer the review step the prompt skips");
+  assert.match(steps["1"] ?? "", /fleet-review-\*/, "step 1 is no longer the review step the prompt skips");
   assert.match(steps["2"] ?? "", /\*\*apply now\*\*/, "step 2 is no longer the apply/defer split");
   assert.match(steps["3"] ?? "", /commit and push/i, "step 3 is no longer the commit+push step (now gated on a test run first)");
   assert.match(steps["4"] ?? "", /do not hold this wait/, "step 4 is no longer the CI wait the prompt skips");
@@ -512,8 +512,9 @@ test("the fix-applier lead-in relays every finding, on a premise that is true", 
   // Its reason clause shipped FALSE on this branch, in a PR about not shipping
   // false claims. The review specialists' transcripts DO exist on disk —
   // measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one session, 33
-  // of them `pr-review-toolkit:*`. What is true is that a member cannot address
-  // them: `review-pr.js` returns `{pr, head, snapshot, dimensionsRun,
+  // of them the (since-retired, #1349) vendored specialist plugin's agents.
+  // What is true is that a member cannot address them: `review-pr.js` returns
+  // `{pr, head, snapshot, dimensionsRun,
   // dimensionsUnrun, survived, refuted, unverified}` — no transcript path — and the `.meta.json` sidecars
   // carry only agentType/model/spawnDepth, so nothing maps one back to a PR or
   // a dimension. The rule rests on unaddressability, and a member sent hunting
