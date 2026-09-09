@@ -399,8 +399,8 @@ test("a die after a block still emits the accumulated blockers, not a bare exit 
 // The same die-after-block path with `--apply` withheld. Without it nothing in
 // the suite discriminates the receipt's `applied` field from a hardcoded
 // `true`: this path is reached exactly once, and `release` defaults the flag
-// on, so a die printf that ignored `$apply` entirely stayed green across all
-// 98 cases in this file.
+// on, so a die printf that ignored `$apply` entirely stayed green across every
+// case in this file.
 test("the die receipt's applied field is the flag, not a constant (#387)", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
