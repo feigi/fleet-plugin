@@ -1,0 +1,110 @@
+name: Release Label
+
+# pull_request_target runs against the base ref with full GITHUB_TOKEN
+# permissions, which is required so that auto-label-bots can succeed on
+# dependabot-authored PRs (pull_request grants read-only token to dependabot).
+# No PR-head code is checked out in either job, so the usual
+# pull_request_target risks do not apply.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+# Serialise each pull request's label handling against itself (#278). The two
+# jobs read the PR's labels and `auto-label-bots` writes one back, and the
+# trigger list above fires on label churn, so overlapping runs would otherwise
+# have one job counting labels while the other is still adding one.
+#
+# Keyed on the PR number, NOT ${{ github.ref }}: under pull_request_target
+# GitHub sets github.ref to the ref of the BASE branch, so a ref-keyed group
+# would be `refs/heads/main` for every open PR against main at once and put all
+# of them in a single queue. Since a newly queued run cancels the previously
+# pending run in
+# the same group, unrelated PR activity would then cancel this PR's label check
+# and leave it with no verdict until another event retriggered it. The number is
+# also the safe choice over github.head_ref, which is attacker-controlled text.
+#
+# cancel-in-progress is false: both jobs report a problem by exiting non-zero,
+# and a cancelled run emits no verdict at all — cancelling would turn a definite
+# answer about this PR's labels into silence.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-label-bots:
+    if: >
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Add patch label if no release label present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # gh defaults to api.github.com; on a GitHub Enterprise host that
+          # rejects the runner's GITHUB_TOKEN (HTTP 401). Derive GH_HOST from
+          # the runner-provided server URL so gh targets the right API on both
+          # github.com and GHE.
+          export GH_HOST="${GITHUB_SERVER_URL#https://}"
+          # `set -e` does not abort on `VAR=$(cmd)` when cmd fails — split
+          # substitution from assignment and check the exit code explicitly.
+          LABELS=""
+          if ! LABELS=$(gh pr view "$PR" --json labels --jq '.labels[].name'); then
+            echo "::error::gh pr view failed for #$PR"
+            exit 1
+          fi
+          if ! echo "$LABELS" | grep -qE '^(patch|minor|major)$'; then
+            gh pr edit "$PR" --add-label patch
+          fi
+
+  validate-release-label:
+    needs: [auto-label-bots]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Surface auto-label failure for bot PRs
+        if: >
+          needs.auto-label-bots.result == 'failure' &&
+          (github.event.pull_request.user.login == 'dependabot[bot]' ||
+           github.event.pull_request.user.login == 'renovate[bot]')
+        run: |
+          echo "::error::auto-label-bots job failed for bot PR — fix that before this check passes."
+          exit 1
+
+      - name: Validate exactly one release label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # gh must target the enterprise host, not api.github.com (see auto-label-bots).
+          export GH_HOST="${GITHUB_SERVER_URL#https://}"
+          COUNT=""
+          if ! COUNT=$(gh pr view "$PR" --json labels \
+            --jq '[.labels[].name | select(. == "patch" or . == "minor" or . == "major")] | length'); then
+            echo "::error::gh pr view failed for #$PR"
+            exit 1
+          fi
+          if [ -z "$COUNT" ]; then
+            echo "::error::gh pr view returned empty label count for #$PR"
+            exit 1
+          fi
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::PR missing release label. Add exactly one of: patch, minor, major."
+            exit 1
+          fi
+          if [ "$COUNT" -gt 1 ]; then
+            echo "::error::PR has $COUNT release labels. Keep exactly one of: patch, minor, major."
+            exit 1
+          fi
+          echo "Release label OK."
