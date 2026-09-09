@@ -73,11 +73,17 @@ case "$2" in
 esac
 `);
 
+// $SEQ names a global sequence file; $SEQ.<pr>, when it exists, overrides it for
+// that PR with its own file and its own counter. Without that per-PR override no
+// scenario can hold two PRs in DIFFERENT states across more than one tick, which
+// is the shape every multi-PR latch mutation lives in.
 stub("ci-state.mjs", `#!/bin/sh
 pr=$2
-if [ -n "$SEQ" ]; then
-  n=$(cat "$SEQ.n" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$SEQ.n"
-  mode=$(sed -n "\${n}p" "$SEQ")
+seq=$SEQ
+[ -n "$seq" ] && [ -f "$seq.$pr" ] && seq="$seq.$pr"
+if [ -n "$seq" ]; then
+  n=$(cat "$seq.n" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$seq.n"
+  mode=$(sed -n "\${n}p" "$seq")
 else
   mode=$MODE
 fi
@@ -125,6 +131,14 @@ const hasShell = (s) => {
 
 const count = (out, needle) => out.split("\n").filter((l) => l.includes(needle)).length;
 
+// The WATCHER lines in order, as "D42"/"R42" — for the multi-PR cases, where
+// which PR spoke and when both matter and a bare count hides a reordering.
+const events = (out) =>
+  out
+    .split("\n")
+    .filter((l) => l.startsWith("WATCHER"))
+    .map((l) => `${l.includes("DEGRADED") ? "D" : "R"}${l.match(/#(\d+)/)?.[1] ?? "*"}`);
+
 test("a self-named rate-limited payload is an outage, not a reading", () => {
   // ci-state emits {"verdict":"rate-limited"} on stdout and exits non-zero. It
   // is parseable JSON, so a gate testing parseability alone clears the latch,
@@ -157,12 +171,27 @@ test("the payload latch is keyed by PR, not shared across them", () => {
   assert.equal(count(out, "WATCHER RECOVERED"), 0, `a healthy PR cleared another PR's latch:\n${out}`);
 });
 
-test("a blind PR recovers on its own, without touching its healthy sibling", () => {
-  const seq = join(DIR, "seq-recovery");
-  writeFileSync(seq, "empty\nnormal\n");
-  const out = run({ SEQ: seq, PRS: "42" }, 2);
-  assert.equal(count(out, "WATCHER DEGRADED"), 1, out);
-  assert.equal(count(out, "WATCHER RECOVERED"), 1, `a recovered PR must say so once, got:\n${out}`);
+test("one PR recovers without disturbing a sibling that is still blind", () => {
+  // Two PRs, four ticks, blind at different times — the only shape in which the
+  // per-PR latch's bookkeeping is observable at all. #4 is healthy on tick 1 and
+  // blind thereafter; #42 is blind from tick 1 and readable from tick 3. Each
+  // must announce itself exactly once in each direction, and #4's numbering is
+  // deliberately a prefix of #42's so the `case " $blind " in *" $pr "*` space
+  // anchoring is under test too.
+  //
+  // Three latch mutations die here and survive every other case in this file:
+  // wiping `blind` wholesale on any recovery (#4 re-fires on tick 4 -> 3
+  // DEGRADED), overwriting `blind="$pr"` instead of appending (neither PR stays
+  // latched -> 5 DEGRADED, 0 RECOVERED), and dropping the spaces from the latch
+  // test (#4 matches inside "42" and its outage is swallowed -> 1 DEGRADED).
+  const seq = join(DIR, "seq-siblings");
+  writeFileSync(`${seq}.4`, "normal\nempty\nempty\nempty\n");
+  writeFileSync(`${seq}.42`, "empty\nempty\nnormal\nnormal\n");
+  const out = run({ SEQ: seq, PRS: "4 42" }, 4);
+  // The ordered sequence, not four counts: the anchoring mutant only DELAYS #4's
+  // line to the tick #42's latch clears, so it lands on the same two-DEGRADED,
+  // one-RECOVERED totals the real block does and is invisible to counting.
+  assert.deepEqual(events(out), ["D42", "D4", "R42"], `wrong events, or in the wrong order:\n${out}`);
 });
 
 test("pacing lives in one place — a budget outage does not multiply by open PRs", () => {
@@ -176,6 +205,12 @@ test("pacing lives in one place — a budget outage does not multiply by open PR
   // the per-PR pass never runs under a budget outage.
   const payload = run({ MODE: "empty", PRS: "1 2 3 4 5 6 7 8" }, 1);
   assert.equal(count(payload, "SLEEP"), 1, `payload outage: expected one sleep per tick regardless of PR count, got:\n${payload}`);
+  // And once more on the healthy path, which neither case above reaches: both
+  // route around the block's normal-handling line — the budget outage never
+  // enters the per-PR pass, the payload outage `continue`s before it. A sleep
+  // planted on that line is invisible to every other test in this file.
+  const healthy = run({ MODE: "normal", PRS: "1 2 3 4 5 6 7 8" }, 1);
+  assert.equal(count(healthy, "SLEEP"), 1, `healthy path: expected one sleep per tick regardless of PR count, got:\n${healthy}`);
 });
 
 test("a degraded payload tick still reaches the loop's own pacing", () => {

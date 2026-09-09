@@ -1164,7 +1164,7 @@ while :; do                                   # one tick
       fi
       for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
         st=$(~/dev/fleet-plugin/scripts/ci-state.mjs --pr "$pr" 2>/dev/null)
-        if [ -z "$st" ] || ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+        if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
           case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
             echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
             blind="$blind $pr" ;;
@@ -1185,7 +1185,10 @@ done
 
 **One gate, not a gate plus a caveat.** `jq -e '.verdict and .verdict !=
 "rate-limited"'` exits non-zero on unparseable input *and* on a false result, so
-that single test covers empty, garbage AND a self-named quota refusal. Leaving
+that single test covers empty, garbage AND a self-named quota refusal. Empty
+stdin produces no result at all, which `-e` reports as exit 4 (measured), so a
+`[ -z "$st" ] ||` pre-check in front of it is a *second* gate testing what this
+one already tests — the caveat this heading is about. Leaving
 the named verdict to prose instead is how a watcher clears its latch on an
 outage payload and hands it downstream as CI state — the very blindness this
 section exists to remove, one level in. **The `.verdict and` half is load-bearing
