@@ -177,6 +177,27 @@ jobs:
       - name: Validate JSON
         run: .github/scripts/check-tracked.sh '*.json' -n1 jq empty
 
+      # The allow-list checker (#1314, #1347). frontmatter-check.mjs enforces
+      # frontmatter-allowlist.json's three key sets (agents, skills, commands)
+      # in BOTH directions — unknown keys rejected, required keys enforced —
+      # plus a forbidden class for keys that ARE documented on a harness but
+      # silently reroute a member's tier, tree, or dispatch. One
+      # check-tracked.sh call per kind: each glob's own non-vacuity refusal
+      # covers the day one of the three directories goes missing entirely,
+      # the same discipline every other step here already uses.
+      # Three separate single-line `run:` steps, not one `run: |` block — so
+      # each one is its own routed `check-tracked.sh` invocation
+      # `ci-vacuous-green.test.mjs`'s "a routed check's own exit status
+      # still reaches the job" can see and pin against its own no-swallow
+      # regex (a multi-line block hides every invocation inside it from a
+      # line-anchored `run:` collector).
+      - name: Allow-list check — agents
+        run: .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs
+      - name: Allow-list check — skills
+        run: .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs
+      - name: Allow-list check — commands
+        run: .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs
+
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
       # not to expand, SC1003 on an OSC-8 escape, SC2015 on the
@@ -238,3 +259,113 @@ jobs:
         run: |
           shopt -s failglob
           node --test plugin/scripts/*.test.mjs
+
+  # #1314's ruling: a separate job, not a step inside `check` — keeps "the
+  # manifest is bad" distinguishable from "omp/Claude cannot load the tree"
+  # at a glance, and neither shares `check`'s already-tight time budget.
+  # Blocking, every PR, no `paths:` filter (#1314: a path filter silently
+  # stops covering a renamed or newly added component directory).
+  validate-claude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # Pinned, not `@latest` — a Claude Code release would otherwise change
+      # what this job verifies without a commit here (#1314), and #1347's own
+      # routed note measured this exact version's warning wording, which
+      # validate-claude-warning-allowlist.test.mjs pins against the same pin.
+      - name: Install pinned Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.265
+
+      - name: validate-claude
+        run: .github/scripts/validate-claude.sh
+
+  # #1314's ruling, #1293's findings on what "loaded" can mean headlessly.
+  # Registers this checkout as a throwaway `file://` git-subdir catalog
+  # (never the tracked marketplace, never a directory source — ADR 0003) and
+  # asserts commands via substitution, agents and skills by presence in the
+  # installed copy. See .github/scripts/smoke-omp.sh's header for the full
+  # reasoning, including why agents are presence-only here (no API key in
+  # CI, and this job must never reach for a non-configured provider).
+  smoke-omp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # A real local branch, not detached HEAD — the dev catalog's
+          # `file://` git-subdir source clones by BRANCH NAME
+          # (`git clone --branch`), which cannot resolve a bare SHA or the
+          # literal `HEAD` a detached checkout leaves behind (measured).
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      # Pinned via the exact package `omp` resolves to on this box
+      # (`@oh-my-pi/pi-coding-agent`), not `omp`/`omp.sh` — measured: neither
+      # of those npm names is this package (#1319's own collision class).
+      - name: Install pinned omp
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+
+      - name: smoke-omp
+        run: .github/scripts/smoke-omp.sh
+
+  # #1347's second comment (2026-09-09): a permanent npm-availability gate,
+  # added to this ticket's scope by the maintainer after `fleetctl` — picked
+  # unverified — turned out to be a real npm package and
+  # `omp plugin install fleetctl` silently installed IT. See
+  # .github/scripts/npm-name-gate.sh for the full reasoning and its
+  # false-negative caveat (a 404 today is not a guarantee for tomorrow).
+  npm-name-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: npm-name-gate
+        run: .github/scripts/npm-name-gate.sh
+
+  # #1294 hand-off §2, #1339, #1347 — REWORKED per PR #1365's review from an
+  # earlier design that ran the whole test suite from an installed copy
+  # (cannot pass: a git-subdir install carries `plugin/` alone, and ~30 test
+  # files read repo-root paths a plugin-only payload never has). The actual
+  # ruling (#1294): source unit tests plus ONE install-and-smoke job proving
+  # the Install-root/target-repo invariant is exercised — installs on both
+  # harnesses, runs `fleet-provenance`, resolves every `fleet-run <script>`
+  # prose callsite under both harnesses, execs `fleet-run arg.mjs` once per
+  # harness. No test suite runs from an install. See
+  # .github/scripts/install-and-smoke.sh's own header for the full
+  # reasoning and the measured 70/1964-failure reproduction that forced
+  # this rewrite.
+  install-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install pinned omp
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+
+      - name: Install pinned Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.265
+
+      - name: install-and-smoke
+        run: .github/scripts/install-and-smoke.sh

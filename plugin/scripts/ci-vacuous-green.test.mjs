@@ -178,16 +178,26 @@ test("a routed check's own exit status still reaches the job", () => {
     .map((l) => l.trim())
     .filter((l) => l.startsWith("run:") && l.includes("check-tracked.sh"));
 
-  assert.equal(routed.length, 3, "expected three ci.yml steps to route through check-tracked.sh");
+  // 3 original (*.mjs / *.js loop is hand-rolled, not check-tracked.sh /
+  // *.json / *.sh) + 3 for #1347's allow-list checker (agents/skills/
+  // commands), one single-line `run:` step each so each stays visible to
+  // this collector — a multi-line `run: |` block hides every invocation
+  // inside it from a line-anchored `run:` filter, which is exactly what an
+  // earlier draft of #1347 did before this test's own review caught it.
+  assert.equal(routed.length, 6, "expected six ci.yml steps to route through check-tracked.sh");
   for (const line of routed) {
     // Unflattened and anchored at both ends, unlike the assertions above, because
     // what this one pins is what is NOT on the line: ` || true`, `; true`, `&& :`
     // and a trailing pipe all leave every substring those match in place and hand
     // the job exit 0 whatever the guard decided. The `+` also requires a checker
     // to follow the glob, which is the same contract the script now enforces.
+    // The glob itself is `'[^']*\*[^']*'` rather than the original bare
+    // `'\*\.\w+'` — #1347's allow-list checks glob a directory path plus an
+    // extension (`'plugin/agents/*.md'`), not just a bare extension pattern
+    // (`'*.json'`), and both shapes carry the same no-swallow contract.
     assert.match(
       line,
-      /^run: \.github\/scripts\/check-tracked\.sh '\*\.\w+'(?: [\w.-]+)+$/,
+      /^run: \.github\/scripts\/check-tracked\.sh '[^']*\*[^']*'(?: [\w./-]+)+$/,
       `this routed check no longer fails the step on its own status: ${line}`,
     );
   }

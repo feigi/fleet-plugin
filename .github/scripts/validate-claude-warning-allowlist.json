@@ -1,0 +1,4 @@
+{
+  "_comment": "The ONE warning validate-claude.sh tolerates from `claude plugin validate --json`, per #1347's routed note: #1336 dropped plugin.json's `version` field (ADR 0003 — a version marker would reintroduce the update no-op trap), and every Claude Code build warns on its absence. `--strict` cannot be used because of exactly this warning, so this file is the allow-list of one, checked BOTH as the filter validate-claude.sh applies AND, separately, by frontmatter-check-adjacent test coverage that the string still matches the CLI's own wording — a stale string here would silently widen back to accepting nothing, or narrow to accepting a warning the CLI no longer emits.",
+  "missingVersionWarning": "No version specified. Consider adding a version following semver (e.g., \"1.0.0\")"
+}
