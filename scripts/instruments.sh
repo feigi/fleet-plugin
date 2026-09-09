@@ -29,13 +29,14 @@
 #
 # WHAT IS IN THE SET: every tracked file under the plugin's own component
 # directories — `commands/ scripts/ skills/ agents/ workflows/` — contents read
-# from the worktree of the checkout this script itself lives in. Not a written
-# list of instrument names — the ticket named six and the class is larger (the
-# supply scan, the liveness probe, the shared `arg.mjs`/`json.sh`/`net.sh`
-# libraries that a single edit mutates every node instrument through, and the
-# runbooks, which the controller also reads from this same writable tree and
-# which phase 0 already knows can be stale). A list rots on the next commit that
-# adds a script; a directory does not.
+# from the AUDITED repository: the working directory's checkout, or the tree
+# named by `--repo` (see below). Not a written list of instrument names — the
+# ticket named six and the class is larger (the supply scan, the liveness
+# probe, the shared `arg.mjs`/`json.sh`/`net.sh` libraries that a single edit
+# mutates every node instrument through, and the runbooks, which the
+# controller also reads from this same writable tree and which phase 0
+# already knows can be stale). A list rots on the next commit that adds a
+# script; a directory does not.
 #
 # NOT THE WHOLE REPO, deliberately: this repository's root IS the plugin root,
 # but it also carries `docs/`, `.github/` and `.out-of-scope/`. `docs/metrics/`
@@ -75,21 +76,45 @@ NAME=instruments
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 pin=false
-case "${1:-}" in
-  --pin) pin=true ;;
-  "") ;;
-  *) die "usage: instruments.sh [--pin]" ;;
-esac
-[ $# -le 1 ] || die "usage: instruments.sh [--pin]"
+repo=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pin) pin=true; shift ;;
+    --repo)
+      [ $# -ge 2 ] || die "usage: instruments.sh [--pin] [--repo <path>]"
+      repo=$2
+      # An empty value falls through the `[ -n "$repo" ]` branch below and
+      # silently re-derives from cwd — measured (#1350 review): `--repo ""`
+      # pinned the CALLER's cwd repo instead of refusing, exactly the
+      # wrong-tree-write class this ticket exists to close. Refuse here,
+      # before that check ever runs.
+      [ -n "$repo" ] || die "--repo requires a non-empty path"
+      shift 2
+      ;;
+    *) die "usage: instruments.sh [--pin] [--repo <path>]" ;;
+  esac
+done
 
-# The checkout THIS FILE came from, not the caller's working directory. The
-# instruments the controller is about to read are this script's siblings, so the
-# tree to measure is the one it was invoked out of — and the harness resets cwd
-# between calls, so a check keyed on cwd measures whatever tree the last command
-# happened to leave behind.
-here=$(dirname "$0")
-root=$(git -C "$here" rev-parse --show-toplevel) \
-  || die "$here is not inside a git checkout — cannot identify the instrument set"
+# The repository under audit is the WORKING DIRECTORY's checkout, never the
+# checkout this script happens to ship from. Under the install-only dev loop
+# (ADR 0003) this file runs out of a plugin cache — on a real install,
+# `~/.claude/plugins/cache/fleet-plugin/fleet/<version>/scripts/
+# instruments.sh` — and the OLD own-location contract (`git -C "$(dirname
+# "$0")" …`) resolved the audited tree to whatever git checkout happens to
+# CONTAIN that cache path. Measured (#1337): on a real box that is the
+# operator's unrelated personal dotfiles checkout, and `--pin` run that way
+# writes `.fleet/instruments.sha` into it. `--repo <path>` is the explicit
+# override for the one legitimate case that needs a tree other than cwd's:
+# auditing a named worktree from elsewhere. Resolution happens before
+# anything is read or written, so a cwd outside any checkout refuses here,
+# not partway through.
+if [ -n "$repo" ]; then
+  root=$(git -C "$repo" rev-parse --show-toplevel) \
+    || die "$repo is not inside a git checkout — cannot identify the instrument set"
+else
+  root=$(git rev-parse --show-toplevel) \
+    || die "the working directory is not inside a git checkout — cannot identify the instrument set (pass --repo <path> to audit a tree other than cwd's)"
+fi
 
 set='commands scripts skills agents workflows'
 

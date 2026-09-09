@@ -1,5 +1,11 @@
 // Regression gate for instruments.sh, the check that says whether the
-// controller's instrument set changed under a run (#436).
+// controller's instrument set changed under a run (#436), re-contracted to
+// audit the WORKING DIRECTORY's checkout rather than the checkout the script
+// itself lives in (#1337). The install-only dev loop (ADR 0003) means this
+// script normally runs out of a plugin cache; resolving from its own
+// location measured whatever git checkout happens to CONTAIN that cache
+// path, which was the operator's unrelated personal repo, not the plugin's
+// own tree.
 //
 // The defect it guards is not observable from inside the fleet: a member that
 // edits a script in the MAIN checkout — where the controller runs every gate
@@ -11,7 +17,7 @@
 // that it discriminates:
 //
 //   REFUSE — a tracked instrument rewritten, deleted, or newly staged; no
-//            baseline; an unreadable one. All of these stop a gate.
+//            baseline; an unreadable one; a cwd outside any git checkout.
 //   ACCEPT — an ordinary run: nothing touched, an untracked dropping under the
 //            set, a bare `touch`, branch and worktree churn in the shared ref
 //            store, and any change outside the set. #436's third acceptance
@@ -20,9 +26,10 @@
 //            controller learns to ignore, which is the same defect wearing a
 //            different hat.
 //
-// Every case builds a throwaway checkout and runs the script out of it — the
-// script resolves the tree to measure from its OWN location, so a copy inside
-// the fixture measures the fixture and the live checkout is never touched.
+// Every case builds a throwaway checkout and runs the script with its cwd set
+// to it — the script resolves the tree to measure from $PWD (or --repo), so a
+// fixture repo is measured regardless of where the copy of instruments.sh
+// invoked actually lives, and the live checkout is never touched.
 //
 // Zero deps: `node --test scripts/instruments.test.mjs`.
 
@@ -32,8 +39,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   utimesSync,
@@ -89,9 +98,14 @@ function repo(t) {
   return root;
 }
 
-const run = (root, args = []) =>
+// Runs the copy of instruments.sh that lives INSIDE `root`, with cwd set to
+// `root` by default — the audited repo is now derived from cwd, never from
+// where the script itself sits, so the default here is what an ordinary
+// invocation from inside the checkout looks like. `cwd` is overridable for
+// the tests that specifically exercise cwd-vs-script-location divergence.
+const run = (root, args = [], { cwd = root } = {}) =>
   spawnSync(join(root, SET, "scripts", "instruments.sh"), args, {
-    cwd: tmpdir(), // never the repo: the script must find its tree from $0
+    cwd,
     env: ENV,
     encoding: "utf8",
   });
@@ -101,6 +115,27 @@ const pin = (root) => {
   assert.equal(r.status, 0, `--pin failed: ${r.stderr}`);
   return r.stdout.trim();
 };
+
+/** Every directory literally named `.fleet` anywhere under `root`, `.git` never descended. */
+function findFleetDirs(root) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p = join(dir, e.name);
+      if (e.name === ".fleet") found.push(p);
+      else if (e.name !== ".git") walk(p);
+    }
+  };
+  walk(root);
+  return found;
+}
 
 test("--pin then an untouched check is exit 0, and reports the same digest", (t) => {
   const root = repo(t);
@@ -189,7 +224,7 @@ test("an unreadable baseline refuses — unreadable is not unchanged", (t) => {
   assert.equal(run(root).status, 2);
 });
 
-test("outside a git checkout it refuses instead of certifying nothing", (t) => {
+test("cwd outside a git checkout refuses instead of certifying nothing", (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "instruments-bare-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, SET, "scripts"), { recursive: true });
@@ -224,6 +259,35 @@ test("a bad argument refuses rather than falling through to a check", (t) => {
   const r = run(root, ["--pn"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage/);
+});
+
+test("--repo with a missing path argument refuses with usage", (t) => {
+  const root = repo(t);
+  pin(root);
+  const r = run(root, ["--repo"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /usage/);
+});
+
+test("--repo with an empty path or a non-repo directory refuses, and writes nothing", (t) => {
+  const root = repo(t);
+
+  const empty = run(root, ["--pin", "--repo", ""]);
+  assert.equal(empty.status, 2, empty.stderr);
+  assert.match(empty.stderr, /--repo requires a non-empty path/);
+
+  const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "instruments-not-a-repo-")));
+  t.after(() => rmSync(notARepo, { recursive: true, force: true }));
+  const nonRepo = run(root, ["--pin", "--repo", notARepo]);
+  assert.equal(nonRepo.status, 2, nonRepo.stderr);
+  assert.match(nonRepo.stderr, /not inside a git checkout/);
+
+  // Neither refusal writes anything: not into cwd's own repo — the silent
+  // fallback an empty --repo took before this guard existed, measured in
+  // PR #1350 review — and not into the directory named by the bad --repo
+  // path either.
+  assert.deepEqual(findFleetDirs(root), []);
+  assert.deepEqual(findFleetDirs(notARepo), []);
 });
 
 // ---------------------------------------------------------------------------
@@ -286,4 +350,132 @@ test("--pin re-baselines after a deliberate edit — the controller's own toolin
   const second = pin(root);
   assert.notEqual(second, first);
   assert.equal(run(root).status, 0);
+});
+
+// ---------------------------------------------------------------------------
+// CWD CONTRACT (#1337). The audited repository comes from $PWD (or --repo),
+// never from where the invoked copy of instruments.sh happens to live. Every
+// test below places the SCRIPT somewhere other than the repo it must audit,
+// which the tests above never do — proving the resolution is cwd-driven, not
+// merely untested against $0.
+// ---------------------------------------------------------------------------
+
+// A plugin-cache-shaped fixture: instruments.sh nested several directories
+// deep inside a FOREIGN git repository — the shape `~/.claude/plugins/cache/
+// fleet-plugin/fleet/<version>/scripts/instruments.sh` takes when `~/.claude`
+// is itself the operator's personal dotfiles checkout (#1337's own report).
+// Built with `git init` in a fresh temp dir, never the real checkout or
+// `~/.claude`.
+function foreignAncestorCache(t) {
+  const foreign = realpathSync(mkdtempSync(join(tmpdir(), "instruments-foreign-")));
+  t.after(() => rmSync(foreign, { recursive: true, force: true }));
+  git(foreign, "init", "-q", "-b", "main");
+  writeFileSync(join(foreign, "foreign.md"), "the operator's unrelated repo\n");
+  git(foreign, "add", "-A");
+  git(foreign, "commit", "-qm", "foreign root");
+  const cacheDir = join(foreign, "plugins", "cache", "fleet-plugin", "fleet", "0.1.1", "scripts");
+  mkdirSync(cacheDir, { recursive: true });
+  const script = join(cacheDir, "instruments.sh");
+  copyFileSync(SCRIPT, script);
+  return { foreign, script };
+}
+
+test("(1) run from an installed cache nested in a foreign repo, cwd inside a separate repo, audits the cwd repo", (t) => {
+  const cwdRepo = repo(t);
+  const { foreign, script } = foreignAncestorCache(t);
+  const r = spawnSync(script, ["--pin"], { cwd: cwdRepo, env: ENV, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // The baseline path it reports names the cwd repo, not the cache's own tree.
+  assert.match(r.stderr, /pinned/);
+  assert.ok(
+    r.stderr.includes(`over ${cwdRepo} (`),
+    `expected the pin report to name ${cwdRepo}, got: ${r.stderr}`,
+  );
+  assert.ok(existsSync(join(cwdRepo, ".fleet", "instruments.sha")));
+  assert.equal(findFleetDirs(foreign).length, 0, "the foreign ancestor must never gain a .fleet directory");
+});
+
+test("(2) cwd outside any git repository refuses, non-zero, and writes nothing anywhere in the temp tree", (t) => {
+  const { foreign, script } = foreignAncestorCache(t);
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "instruments-outside-")));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  const r = spawnSync(script, ["--pin"], { cwd: outside, env: ENV, encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /not inside a git checkout/);
+  assert.deepEqual(findFleetDirs(outside), []);
+  assert.deepEqual(findFleetDirs(foreign), []);
+});
+
+test("(3) --repo audits the named repository regardless of the working directory", (t) => {
+  const target = repo(t);
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "instruments-elsewhere-")));
+  t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
+  git(elsewhere, "init", "-q", "-b", "main");
+  writeFileSync(join(elsewhere, "x.md"), "a repo that must not be audited\n");
+  git(elsewhere, "add", "-A");
+  git(elsewhere, "commit", "-qm", "elsewhere");
+
+  const r = run(target, ["--pin", "--repo", target], { cwd: elsewhere });
+  assert.equal(r.status, 0, r.stderr);
+  const pinnedDigest = r.stdout.trim();
+  assert.ok(existsSync(join(target, ".fleet", "instruments.sha")));
+  assert.deepEqual(findFleetDirs(elsewhere), []);
+
+  // And the reverse: cwd IS a DIFFERENT repo but --repo points at the
+  // already-pinned target — the flag wins either way, not merely when it
+  // agrees with cwd, and the check reports the target's own digest, not
+  // anything derived from `other`.
+  const other = repo(t);
+  const r2 = run(other, ["--repo", target]);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.equal(r2.stdout.trim(), pinnedDigest);
+  assert.deepEqual(findFleetDirs(other), []);
+});
+
+test("(4) --pin from a directory nested inside a foreign git repo never writes into that ancestor", (t) => {
+  // The foreign repo is the ANCESTOR directory tree, holding BOTH a
+  // plugin-cache-shaped copy of instruments.sh AND, elsewhere under the same
+  // ancestor, a SEPARATE nested git checkout used as cwd — the shape
+  // `~/.claude` takes when it is itself a git repo, the plugin cache sits
+  // under `~/.claude/plugins/cache/...`, and a fleet-plugin checkout is
+  // ALSO nested somewhere under `~/.claude` (e.g. `~/.claude/dev/`). Script
+  // location and cwd deliberately differ here — same discriminating shape as
+  // test (1), but with the audited repo an ANCESTOR-DESCENDANT of the
+  // foreign repo rather than a disjoint tree, which is what "whose ancestor
+  // is a foreign git repo" names. Old own-location resolution would walk up
+  // from the cache script to the foreign root and pin there; this pins that
+  // --pin never does.
+  const foreign = realpathSync(mkdtempSync(join(tmpdir(), "instruments-nest-foreign-")));
+  t.after(() => rmSync(foreign, { recursive: true, force: true }));
+  git(foreign, "init", "-q", "-b", "main");
+  writeFileSync(join(foreign, "foreign.md"), "the ancestor repo\n");
+  git(foreign, "add", "-A");
+  git(foreign, "commit", "-qm", "foreign root");
+
+  const cacheDir = join(foreign, "plugins", "cache", "fleet-plugin", "fleet", "0.1.1", "scripts");
+  mkdirSync(cacheDir, { recursive: true });
+  const script = join(cacheDir, "instruments.sh");
+  copyFileSync(SCRIPT, script);
+
+  const nestedDir = join(foreign, "dev", "fleet-plugin");
+  mkdirSync(nestedDir, { recursive: true });
+  git(nestedDir, "init", "-q", "-b", "main");
+  mkdirSync(join(nestedDir, "scripts"), { recursive: true });
+  writeFileSync(join(nestedDir, "scripts", "ci-state.mjs"), "console.log('green');\n");
+  git(nestedDir, "add", "-A");
+  git(nestedDir, "commit", "-qm", "nested fixture");
+
+  const r = spawnSync(script, ["--pin"], {
+    cwd: nestedDir,
+    env: ENV,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(join(nestedDir, ".fleet", "instruments.sha")));
+  // Only the nested repo's own .fleet exists; the foreign ancestor's own root
+  // never gains one, and no other .fleet appears anywhere under it either —
+  // in particular not one sitting directly in the foreign root, which is
+  // where the old own-location contract would have written it.
+  assert.deepEqual(findFleetDirs(foreign), [join(nestedDir, ".fleet")]);
 });
