@@ -101,9 +101,9 @@ jobs:
       # The two tracked `.js` files need DIFFERENT invocations, not a wider glob:
       #   - an ordinary CommonJS script, which `node --check` accepts as-is.
       #     hooks/statusline.js was the only one and left with the 2026-09-08
-      #     config split, so today the `*)` branch matches nothing — it stays
+      #     config split, so the `*)` branch matches nothing today — it stays
       #     for the next plain .js this repo grows.
-      #   - workflows/*.js (review-pr.js) is a Workflow-harness script: the
+      #   - plugin/workflows/*.js (review-pr.js) is a Workflow-harness script: the
       #     harness reads `export const meta = …` off it without running it,
       #     then wraps the REST of the file's body in an async function it
       #     executes — so the file also has top-level `await`/`return`, legal
@@ -117,11 +117,11 @@ jobs:
       #     uses to catch exactly this, reused here rather than reinvented.
       #     Cited by test NAME, not by line: a refactor that shifts that file
       #     silently re-points a line number at unrelated code, and this
-      #     particular argument isn't pinned by any test — scripts/
+      #     particular argument isn't pinned by any test — plugin/scripts/
       #     ci-comment-rot-prose.test.mjs checks several other claims in this
       #     file, but not this one.
       #     That test pins review-pr.js BY NAME, so for that one file this loop
-      #     is redundant today. The loop is here so workflows/merge-wave.js
+      #     is redundant today. The loop is here so plugin/workflows/merge-wave.js
       #     (docs/specs/2026-07-23-fleet-plugin-design.md, section `## Layout`:
       #     the `~/.claude/workflows/` tree lists `merge-wave.js` as `(stage 2)`)
       #     and successors are covered on arrival without a CI edit.
@@ -130,7 +130,7 @@ jobs:
       #     second top-level export is a file the harness rejects, and `/gm`
       #     would green it.
       #   Naively widening the old glob to `*.js` turns this red: node --check
-      #   parses workflows/*.js as CJS and dies on its first `export`.
+      #   parses plugin/workflows/*.js as CJS and dies on its first `export`.
       #   Next person to touch this glob: this is why it isn't `*.js`.
       - name: Syntax-check .js scripts
         run: |
@@ -148,7 +148,7 @@ jobs:
           fi
           for f in "${files[@]}"; do
             case "$f" in
-              workflows/*)
+              plugin/workflows/*)
                 node -e '
                   const fs = require("fs");
                   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -166,7 +166,7 @@ jobs:
           done
 
       # Exactly two tracked JSON files, both plugin manifests:
-      # .claude-plugin/plugin.json and .claude-plugin/marketplace.json.
+      # plugin/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.
       # `settings.json` used to be the first of them and left with the
       # 2026-09-08 config split. The runtime caches are NOT covered and cannot
       # be — every one of them is gitignored, so `git ls-files` never sees
@@ -219,7 +219,7 @@ jobs:
       # 'the runner's directory expansion ran vendored tests' was a `find` in
       # the emitted runner — see claim-ticket.sh, which says so itself: "this
       # walk, not node, is what keeps vendored tests out". There is no
-      # vendored tree under scripts/ anyway.
+      # vendored tree under plugin/scripts/ anyway.
       # The suite stubs `gh` and sets its own git identity, so it needs no auth
       # and no network.
       # `failglob` because the bare glob is exactly the silent green this repo
@@ -237,4 +237,4 @@ jobs:
           GOJQ_BIN: ${{ runner.temp }}/gojq/gojq
         run: |
           shopt -s failglob
-          node --test scripts/*.test.mjs
+          node --test plugin/scripts/*.test.mjs

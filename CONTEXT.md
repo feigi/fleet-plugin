@@ -100,7 +100,11 @@ _Avoid_: cache dir, plugin dir, install path
 **Resolver**:
 The shipped executable that maps a script name to the Install root and execs it there.
 The single door between prose and code — a callsite naming any other path is a defect.
-Placed once by hand outside the plugin, because it cannot resolve itself.
+Placed once by hand outside the plugin, because it cannot resolve itself. Picks the
+running harness from ambient environment signals, falling back to a byte-identical-`scripts/`
+shortcut and then to a refusal naming both installs; `FLEET_HARNESS=claude` or
+`FLEET_HARNESS=omp` overrides the pick outright when a callsite must be operable
+under a genuine misdetection.
 _Avoid_: shim, wrapper, launcher
 
 **Provenance check**:
