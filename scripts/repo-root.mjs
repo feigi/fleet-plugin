@@ -16,8 +16,18 @@
 // diagnostic that reads like a regression in the tree under test rather than an
 // environment missing a repository.
 //
+// #1339 found the second way "there has to be a `.git`" is not the same
+// question as "there has to be THIS repository": git's discovery walk answers
+// with whatever working tree it finds first, and nothing about that answer
+// says it is fleet-plugin's own tree rather than an ambient repository the
+// caller's directory happens to nest under (an installed plugin copy under
+// `~/.claude/plugins/cache/...` has no `.git` of its own; the walk keeps going
+// and can land on the operator's dotfiles repo). The old guard against that was
+// non-vacuity — an empty tracked-script list is suspicious — and a wrong root
+// that is non-empty sailed straight through it.
+//
 // THE CONDITIONS BELOW MUST NOT MERGE. `repoRoot` answers `null` for exactly
-// one of them:
+// one of them, THROWS for two more, and only ever returns a path for the last:
 //
 //   there is no working tree at    no `.git` at or above the file, and git
 //   or above the file              agrees. The environment fails the file's
@@ -33,22 +43,36 @@
 //                                  inside its own fix. `repoRoot` THROWS here,
 //                                  which is the loud module-load failure the
 //                                  pre-#1149 code produced for these.
-//   the root answers, and the      the wrong repository, or a broken glob or
-//   list of tracked scripts is     path join. That is a real failure and each
-//   empty                          file's own non-vacuity guard must keep
-//                                  catching it. `trackedShellScripts` is
-//                                  therefore free to return an empty array and
-//                                  says nothing about skipping — a skip that
-//                                  also fired on an empty list would turn the
-//                                  nested-under-an-unrelated-repo failure into
-//                                  a silent green, which is the opposite of
-//                                  what this exists for.
+//   the root answers, but its      identity, not non-emptiness (#1339): the
+//   `.claude-plugin/plugin.json`   root's manifest name is compared against
+//   is missing or names a          THIS file's own manifest, read via a path
+//   different plugin               relative to repo-root.mjs itself rather than
+//                                  a literal, because the plugin is mid-rename
+//                                  (#1352) and a literal would go stale the
+//                                  moment that lands. A non-empty answer from a
+//                                  stranger's tree is exactly as wrong as an
+//                                  empty one from this plugin's own — more
+//                                  dangerous, even, since it LOOKS usable.
+//                                  `repoRoot` THROWS here too, naming the
+//                                  rejected path and why.
+//   the root answers, and it IS    a real failure — a broken glob or path join
+//   this plugin's own, but the     inside a tree that genuinely is this
+//   list of tracked scripts is     plugin's own. `trackedShellScripts` is
+//   empty                          therefore free to return an empty array and
+//                                  says nothing about skipping; each caller's
+//                                  own non-vacuity guard is what judges it. The
+//                                  wrong-repository half of this used to live
+//                                  here too, before #1339 moved it up into the
+//                                  identity check above, where it can throw
+//                                  loudly instead of waiting on each caller's
+//                                  guard to notice.
 //
 // Zero deps: `node --test scripts/repo-root.test.mjs`.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // git's message for a discovery walk that reached the top without finding a
 // repository. Measured, git 2.50.1 (Apple Git-155): `fatal: not a git
@@ -69,6 +93,62 @@ import { dirname, join } from "node:path";
 // unmatched message would turn the extraction case from a skip into a throw.
 // Same pin, and same reason, as the `LC_ALL=C` in json.sh.
 const NO_REPOSITORY_ANYWHERE = /not a git repository \(or any /;
+
+/**
+ * This plugin's own `name`, read from the manifest that ships beside this
+ * file — `../.claude-plugin/plugin.json`, relative to repo-root.mjs's own
+ * location, not to `cwd` and not a literal. Relative to `cwd` would ask the
+ * wrong question, since `cwd` is exactly the thing under test. A literal would
+ * go stale the moment #1352 renames the plugin; this does not, because
+ * wherever this file is copied — a checkout, a worktree, an installed plugin
+ * cache — its own manifest travels with it at the same relative path.
+ *
+ * Exported so the regression tests can build a fixture that matches without
+ * duplicating (or hardcoding) the name themselves.
+ */
+export function ownPluginName() {
+  const manifestPath = join(dirname(fileURLToPath(import.meta.url)), "..", ".claude-plugin", "plugin.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (typeof manifest.name !== "string" || manifest.name === "") {
+    throw new Error(
+      `${manifestPath} (this plugin's own manifest) has no usable "name" — repoRoot cannot verify identity against it`,
+    );
+  }
+  return manifest.name;
+}
+
+/**
+ * `root` is a git working tree; this asserts it is THIS plugin's own rather
+ * than an ambient repository the caller's directory happened to nest under
+ * (#1339 — an installed plugin copy has no `.git` of its own, so the walk that
+ * finds one can land on an unrelated repository above it). The check is
+ * identity, not non-emptiness: does `root`'s own `.claude-plugin/plugin.json`
+ * name the same plugin as this file's? Anything else throws, naming the
+ * rejected path and the reason — a caller must never receive a foreign root as
+ * though it were a usable answer.
+ */
+function assertOwnRoot(root) {
+  const name = ownPluginName();
+  const theirManifestPath = join(root, ".claude-plugin", "plugin.json");
+  if (!existsSync(theirManifestPath)) {
+    throw new Error(
+      `${root} is a git working tree, but not this plugin's: no ${theirManifestPath} — `
+      + "refusing to answer about a stranger's tree rather than return a foreign root",
+    );
+  }
+  let theirName;
+  try {
+    theirName = JSON.parse(readFileSync(theirManifestPath, "utf8")).name;
+  } catch (e) {
+    throw new Error(`${theirManifestPath} could not be read as a plugin manifest (${e.message}) — refusing ${root}`);
+  }
+  if (theirName !== name) {
+    throw new Error(
+      `${root} is a git working tree, but its plugin is ${JSON.stringify(theirName)}, not this plugin's `
+      + `${JSON.stringify(name)} — refusing to answer about a stranger's tree rather than return a foreign root`,
+    );
+  }
+}
 
 /**
  * The `.git` at or above `cwd`, or `null` where the walk finds none.
@@ -96,7 +176,8 @@ function dotGitAtOrAbove(cwd) {
 }
 
 /**
- * The ambient git working tree at or above `cwd`, or `null` where there is none.
+ * The ambient git working tree at or above `cwd` — verified to be THIS
+ * plugin's own — or `null` where there is no working tree at all.
  *
  * `null` rather than a throw, because "there is no repository here" is an
  * answer this codebase acts on, not an error to propagate — and at module scope
@@ -105,11 +186,22 @@ function dotGitAtOrAbove(cwd) {
  * the question unanswered rather than answering it "no", and those throw. git's
  * stderr is captured rather than discarded precisely so the two can be told
  * apart, and it travels in the error.
+ *
+ * A working tree that IS found is not returned on the strength of being
+ * found — `assertOwnRoot` checks it is this plugin's own before it ever
+ * reaches a caller (#1339). A non-empty wrong root throws exactly as loudly as
+ * an unanswerable one; the old guard against it lived only in each caller's
+ * non-vacuity check on `trackedShellScripts`, which a non-empty foreign
+ * answer sailed straight through.
  */
 export function repoRoot(cwd) {
   const r = spawnSync("git", ["rev-parse", "--show-toplevel"],
     { cwd, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
-  if (r.status === 0) return r.stdout.trim();
+  if (r.status === 0) {
+    const root = r.stdout.trim();
+    assertOwnRoot(root);
+    return root;
+  }
 
   const dotGit = r.error ? null : dotGitAtOrAbove(cwd);
   if (!r.error && dotGit === null && NO_REPOSITORY_ANYWHERE.test(r.stderr ?? "")) return null;

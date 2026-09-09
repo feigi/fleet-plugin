@@ -1,24 +1,27 @@
-// The two answers repo-root.mjs exists to keep apart, pinned directly rather
-// than through a sub-suite.
+// The answers repo-root.mjs exists to keep apart, pinned directly rather than
+// through a sub-suite.
 //
 // The sweep suites that import it (muted-git-guard-sweep, unattended-git-sweep,
 // worktree-listing-sweep) skip themselves where there is no ambient working
 // tree, and a skip is an ABSENCE of coverage. Nothing inside a skipped file can
-// pin the condition that skipped it — so the pin lives here, where both answers
-// are reachable in one process: `null` where the root lookup cannot answer, a
-// path where it can. Without the second half the guard could fire everywhere
-// and the whole gate would be silently gone (#1149).
+// pin the condition that skipped it — so the pin lives here, where every answer
+// is reachable in one process: `null` where the root lookup cannot answer, a
+// path where it can, and a throw where it finds a repository that is not this
+// plugin's own (#1339). Without the second half the guard could fire
+// everywhere and the whole gate would be silently gone (#1149); without the
+// third, a non-empty wrong root would sail through as though it were a real
+// answer, which is exactly what #1339 measured happening.
 //
 // Zero deps: `node --test scripts/repo-root.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
+import { ownPluginName, repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
@@ -61,6 +64,19 @@ function noRepo(t) {
   return { dir, env: { ...ENV, GIT_CEILING_DIRECTORIES: dirname(dir) } };
 }
 
+/**
+ * Writes `dir/.claude-plugin/plugin.json` naming the same plugin as this
+ * checkout's own — via `ownPluginName()`, not a literal, for the same reason
+ * repo-root.mjs itself reads it that way rather than hardcoding "fleet"
+ * (#1352 is mid-rename). Fixtures that need `repoRoot` to treat them as
+ * legitimately this plugin's own tree call this after `git init`; fixtures
+ * that test the #1339 refusal deliberately omit it.
+ */
+function ownManifestFixture(dir) {
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: ownPluginName() }));
+}
+
 test("repoRoot answers null where there is no ambient working tree", (t) => {
   const { dir, env } = noRepo(t);
   // The fixture first, or the assertion below could pass over a directory that
@@ -95,6 +111,9 @@ test("repoRoot answers the root where there IS one, and skipWithoutRepo then dec
   // The artifact, not the exit status: `git init` under an ambient GIT_DIR
   // returns 0 having created nothing here.
   assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
+  // Since #1339 a bare `git init` is not enough — repoRoot also checks
+  // identity, so the fixture has to look like this plugin's own tree.
+  ownManifestFixture(dir);
 
   const root = repoRoot(dir);
   assert.equal(root, dir);
@@ -111,12 +130,90 @@ test("an empty tracked-script list is NOT a skip — the sweep still runs and it
   const { dir } = noRepo(t);
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
   assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
+  // This plugin's own identity, deliberately untracked — trackedShellScripts
+  // reads `git ls-files`, so a manifest that only exists on disk keeps this
+  // fixture's tracked-script list at zero while still passing the identity
+  // check that gates it.
+  ownManifestFixture(dir);
 
   const root = repoRoot(dir);
   assert.notEqual(root, null);
   assert.deepEqual(trackedShellScripts(root), [], "a repository with no tracked shell scripts lists none");
   assert.equal(skipWithoutRepo(root, "the tests"), false,
-    "an empty match list is the wrong repository or a broken glob, and must reach the caller's guard as a FAILURE");
+    "an empty match list inside this plugin's own tree is a broken glob or path join, "
+    + "and must reach the caller's guard as a FAILURE");
+});
+
+// #1339's exact measured shape: a foreign git repository (the operator's own
+// dotfiles, in the field) with tracked *.sh files, and inside it a directory
+// that looks like an installed plugin's own scripts/ — no .git, no manifest —
+// so the discovery walk that starts there lands on the foreign root. Before
+// the fix, repoRoot returned that root because its only guard was
+// non-vacuity, and the foreign repo's tracked scripts are a non-empty list;
+// the caller's own non-vacuity guard never even got a chance to be wrong,
+// because there was nothing vacuous about the answer.
+//
+// Measured against the pre-fix repoRoot (this file's repo-root.mjs copied to
+// a scratch path before this commit and imported from there — `git stash` is
+// forbidden by this repo's convention): `node prefix-repro.mjs` against that
+// copy printed `BUG REPRODUCED: repoRoot did NOT throw. root =
+// /private/var/.../repo-root-foreign-fhzHMH` and `trackedShellScripts(root) =
+// [ 'hooks/x.sh', 'y.sh' ]` — the assertion below would have failed against
+// it. Against the fixed repoRoot below: PASSES, and the thrown message names
+// the foreign root and the missing manifest.
+test("a foreign git repository with tracked scripts is refused, not returned — #1339", (t) => {
+  const foreignRoot = realpathSync(mkdtempSync(join(tmpdir(), "repo-root-foreign-")));
+  t.after(() => rmSync(foreignRoot, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main", foreignRoot], { env: ENV });
+  const hooksDir = join(foreignRoot, "hooks");
+  mkdirSync(hooksDir);
+  writeFileSync(join(hooksDir, "x.sh"), "#!/bin/sh\n");
+  writeFileSync(join(foreignRoot, "y.sh"), "#!/bin/sh\n");
+  execFileSync("git", ["add", "hooks/x.sh", "y.sh"], { cwd: foreignRoot, env: ENV });
+  execFileSync("git", ["commit", "-q", "-m", "tracked scripts"], { cwd: foreignRoot, env: ENV });
+
+  // The plugin-cache-like nested directory: no .git, no manifest, exactly what
+  // an installed copy looks like when it lands inside an ambient working tree
+  // that is not its own (the shape #1339 measured under `~/.claude`).
+  const nested = join(foreignRoot, "plugins", "cache", "fleet-plugin", "fleet", "0.1.1", "scripts");
+  mkdirSync(nested, { recursive: true });
+
+  assert.deepEqual(
+    execFileSync("git", ["ls-files", "*.sh"], { cwd: foreignRoot, encoding: "utf8" }).trim().split("\n").sort(),
+    ["hooks/x.sh", "y.sh"],
+    "fixture must have exactly the two tracked scripts #1339 measured, or the old guard's non-emptiness isn't exercised",
+  );
+
+  const saved = process.env.GIT_CEILING_DIRECTORIES;
+  t.after(() => {
+    if (saved === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = saved;
+  });
+  process.env.GIT_CEILING_DIRECTORIES = dirname(foreignRoot);
+
+  assert.throws(
+    () => repoRoot(nested),
+    (err) => err instanceof Error && err.message.includes(foreignRoot) && /not this plugin/.test(err.message),
+    "a wrong root that is non-empty must be refused as loudly as an empty one — #1339",
+  );
+});
+
+// The other half of identity: a resolved root that DOES have a manifest, but
+// names a different plugin. Not #1339's measured shape (the operator's
+// dotfiles repo has no `.claude-plugin` at all) but the branch the same check
+// exists to cover — a neighbouring plugin's checkout landed on by the same
+// discovery-walk coincidence.
+test("a git repository belonging to a DIFFERENT plugin is refused, not returned", (t) => {
+  const { dir } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: `${ownPluginName()}-not-this-one` }));
+
+  assert.throws(
+    () => repoRoot(dir),
+    (err) => err instanceof Error && err.message.includes(dir) && /not this plugin's/.test(err.message),
+    "a differently-named plugin's tree must be refused exactly as a manifest-less one is",
+  );
 });
 
 // #1149's own defect class, and the one place it could reappear inside the fix
