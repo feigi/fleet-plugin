@@ -14,6 +14,14 @@
 // by mutation. `markedLine` (prose-pin.mjs) extracts the line by its literal
 // first token (`CLAUDE: `/`OMP: `), never a keyword search over the region.
 //
+// SHARED SENTENCES MUST NOT ASSERT WHAT ONLY ONE HARNESS'S MARKED LINE HOLDS.
+// Review of the first version of this file (#1360) found two shared, unmarked
+// sentences that were false on one harness — the exact defect #1316 forbids —
+// and caught by mutation that the vocabulary pin checked bare words rather
+// than binding each term to its #1316 definition, and that the contract's
+// harness-term guard was unbounded at one end. Fixed here; each fix's own
+// test now asserts the correction directly, not just the shape.
+//
 // MUTATION RECORD (#1299's four-run procedure, actually run on a scratch
 // copy per the established method — copy the tree preserving the path depth
 // `REPO` is computed from into a tmp dir, mutate there with a small Python
@@ -79,29 +87,61 @@ const SKILL = read("skills", "run-team", "SKILL.md");
 // member-lifecycle.md
 // ---------------------------------------------------------------------------
 
-test("contract: dispatch/send/wake/settle/consume are defined once, and SendMessage/hub name only marked lines", () => {
+test("contract: five terms are pinned to their #1316 definitions, and SendMessage/hub name only the marked-line-confinement rule", () => {
   const contract = between(
     LIFECYCLE,
     "## The coordination contract",
     "## Fresh context per member",
     "member-lifecycle.md's coordination contract section",
   );
-  for (const word of ["dispatch", "send", "wake", "settle", "consume"]) {
-    assert.match(contract, phrase(word), `contract section no longer names "${word}"`);
+  // Bound each definition to its term inside one clause — a bare-word pin
+  // (`phrase("dispatch")`) is satisfied by the five definitions permuted onto
+  // the wrong terms, which is an inversion of the vocabulary #1316 fixed and
+  // stays green under a bare-word pin (measured, PR #1360 review).
+  const definitions = [
+    [/\*dispatch\*\s*\(start a member\)/, "dispatch"],
+    [/\*send\*\s*\(message a live one\)/, "send"],
+    [/\*wake\*\s*\(a send that resumes a finished member's transcript\)/, "wake"],
+    [/\*settle\*\s*\(a member's job reaching a terminal outcome\)/, "settle"],
+    [/\*consume\*\s*\(the controller deliberately taking a settled result\)/, "consume"],
+  ];
+  for (const [re, term] of definitions) {
+    assert.match(contract, re, `"${term}" is not pinned to its #1316 definition`);
   }
-  // The contract states the RULE that SendMessage/hub are marked-line-only —
-  // it must not itself use either term outside that one sentence naming them.
-  const bodyBeforeTheRule = contract.slice(0, contract.indexOf("`SendMessage` and `hub` are harness terms"));
-  assert.doesNotMatch(bodyBeforeTheRule, /SendMessage|\bhub\b/, "the contract uses a harness term before stating the rule that confines them to marked lines");
+  assert.match(contract, phrase("the state machine this holds across differs by harness"));
+  assert.doesNotMatch(
+    contract,
+    /not thereby delivered/i,
+    "the contract must not claim settlement withholds delivery — false on omp, where a settled hub jobs/wait snapshot IS the delivery",
+  );
+
+  // The one sentence allowed to name SendMessage/hub is the rule stating they
+  // are marked-line-only; every OTHER sentence in the section must not. Bound
+  // at BOTH ends (assert the anchor exists, excise only its own span) so a
+  // sentence appended AFTER the rule, or the rule's own deletion, both red —
+  // measured on a scratch copy: the prior unbounded-prefix form stayed
+  // 10/10 green under either mutation.
+  const RULE = "`SendMessage` and `hub` are harness terms.";
+  const ruleAt = contract.indexOf(RULE);
+  assert.notEqual(ruleAt, -1, "the marked-line-confinement rule sentence is missing — update this test");
+  const withoutTheRule = contract.slice(0, ruleAt) + contract.slice(ruleAt + RULE.length);
+  assert.doesNotMatch(withoutTheRule, /SendMessage|\bhub\b/, "the contract uses a harness term outside the one sentence confining them to marked lines");
 });
 
-test("Wake pair (Fresh context per member): CLAUDE names SendMessage, OMP names hub send, neither in the other's line", () => {
+test("Wake pair (Fresh context per member): CLAUDE names SendMessage, OMP names hub send, neither in the other's line, and the shared send-allowance is stated once, neutrally", () => {
   const region = between(
     LIFECYCLE,
     "## Fresh context per member",
     "## Grandchildren surface to you",
     "member-lifecycle.md's Fresh-context-per-member section",
   );
+  // The permission to ping a live member (as opposed to waking a finished
+  // one) is a shared allowance, not a per-harness fact — it must be stated
+  // once, neutrally, not duplicated onto only one marked line (measured on
+  // PR #1360's first version: it lived on the CLAUDE line alone, so an omp
+  // reader of the pair was never told pinging a live peer is legitimate).
+  assert.match(region, phrase("Sending is still right for pinging a live member for a report it owes"));
+
   const claude = markedLine(region, "CLAUDE", "Fresh-context-per-member CLAUDE line");
   const omp = markedLine(region, "OMP", "Fresh-context-per-member OMP line");
   assert.match(claude, phrase("`SendMessage` to a finished agent resumes its transcript"));
@@ -110,7 +150,7 @@ test("Wake pair (Fresh context per member): CLAUDE names SendMessage, OMP names 
   assert.doesNotMatch(omp, /SendMessage/, "the OMP wake line must not also carry Claude's send verb");
 });
 
-test("Grandchild-reachability pair: CLAUDE keeps the tail/jq recipe, OMP states the depth cap and the measured reachability answer", () => {
+test("Grandchild-reachability pair: the shared sentence states only routing; reachability and the messaging-channel claim live on the marked lines", () => {
   const region = between(
     LIFECYCLE,
     "A specialist's report routes to *you*",
@@ -119,11 +159,26 @@ test("Grandchild-reachability pair: CLAUDE keeps the tail/jq recipe, OMP states 
   );
   const claude = markedLine(region, "CLAUDE", "Grandchild-reachability CLAUDE line");
   const omp = markedLine(region, "OMP", "Grandchild-reachability OMP line");
-  assert.match(claude, phrase("a grandchild is unreachable by"));
+
+  // The shared prose (everything before the CLAUDE line) must not itself
+  // assert or deny reachability — a shared claim contradicted by its own
+  // marked line is exactly the #1316-forbidden shape ("a shared sentence
+  // stating a hazard would be false on omp ... conditionally true without
+  // saying when"). Measured on PR #1360's first version: the shared sentence
+  // said "no messaging channel to a grandchild it spawned" while the very
+  // next line said the opposite on omp.
+  const sharedSentence = region.slice(0, region.indexOf(claude));
+  assert.doesNotMatch(
+    sharedSentence,
+    /messaging channel|reachable/i,
+    "the shared sentence asserts a reachability claim that belongs on a marked line, not shared prose",
+  );
+
+  assert.match(claude, phrase("a hand-dispatched reviewer has no messaging channel to a grandchild it spawned"));
   assert.match(claude, phrase("tail -1 <output-file> | jq -r"));
   assert.doesNotMatch(claude, /task\.maxRecursionDepth|hub send/i, "the CLAUDE recipe line must not also carry omp's depth-cap vocabulary");
   assert.match(omp, phrase("the tail/jq recipe does not apply"));
-  assert.match(omp, phrase("hub send`-reachable directly by its dotted id"));
+  assert.match(omp, phrase("a `hub send` to a depth-2 helper's full dotted id"));
   assert.doesNotMatch(omp, /`SendMessage`|tail -1/, "the OMP line must not also carry Claude's recipe");
 });
 
@@ -184,10 +239,26 @@ test("Settle/liveness state-machine pair: two different machines, each named, ne
     "Recovery = fresh member",
     "member-lifecycle.md's Settle-and-liveness section",
   );
+  assert.match(region, phrase("a different state machine on each harness"));
+  assert.doesNotMatch(
+    region,
+    /different \*pair\* of axes on each harness|a different pair of axes on each harness/i,
+    "the shared sentence must not claim BOTH harnesses have a pair of axes — only omp does; Claude has one axis, three states (its own marked line, three lines below, says so)",
+  );
+
   const claude = markedLine(region, "CLAUDE", "Settle/liveness CLAUDE line");
   const omp = markedLine(region, "OMP", "Settle/liveness OMP line");
   assert.match(claude, phrase("three states on one axis — killed, idle, truncated"));
-  assert.doesNotMatch(claude, /`hub cancel`|running.\/.failed.\/.cancelled/i, "the CLAUDE state-machine line must not also carry omp's outcome/liveness axes");
+  // Both omp axes named, not just `hub cancel` — the prior alternative
+  // (`running.\/.failed.\/.cancelled`) named a cross-axis string that occurs
+  // nowhere in either file, so the effective guard was `hub cancel` alone and
+  // omp's real outcome/liveness vocabulary could be moved onto the CLAUDE
+  // line and stay green (measured, PR #1360 review).
+  assert.doesNotMatch(
+    claude,
+    /completed.\/.failed.\/.cancelled|running.\/.idle.\/.parked|`hub cancel`/i,
+    "the CLAUDE state-machine line must not also carry omp's outcome/liveness vocabulary",
+  );
   assert.match(omp, phrase("two axes — job outcome"));
   assert.match(omp, /failed.{0,10}job.{0,10}s peer can stay .idle. and resumable/);
   assert.doesNotMatch(omp, /`SendMessage` works on idle or truncated/, "the OMP line must not also carry Claude's triad wording");
@@ -197,19 +268,32 @@ test("Settle/liveness state-machine pair: two different machines, each named, ne
 // run-team/SKILL.md — the three restated passages
 // ---------------------------------------------------------------------------
 
-test("SKILL.md Fresh-context-per-member passage carries the same Wake pair as the reference", () => {
-  const region = between(
+test("SKILL.md's Fresh-context-per-member passage restates the Wake pair identically to the reference copy", () => {
+  // The same rule is stated twice; #1360's review found the copies had
+  // already drifted (SKILL.md's CLAUDE line dropped a clause, and its lead
+  // sentence said "One agent" where the reference said "One member") with
+  // nothing pinning them as equal. Exact-equal, not just each independently
+  // shaped right, is what stops that drift recurring silently.
+  const refRegion = between(
+    LIFECYCLE,
+    "## Fresh context per member",
+    "## Grandchildren surface to you",
+    "member-lifecycle.md's Fresh-context-per-member section",
+  );
+  const refClaude = markedLine(refRegion, "CLAUDE", "reference CLAUDE line");
+  const refOmp = markedLine(refRegion, "OMP", "reference OMP line");
+
+  const skillRegion = between(
     SKILL,
     "**Fresh context per member.**",
     "See references/member-lifecycle.md.",
     "SKILL.md's Fresh-context-per-member passage",
   );
-  const claude = markedLine(region, "CLAUDE", "SKILL.md Fresh-context-per-member CLAUDE line");
-  const omp = markedLine(region, "OMP", "SKILL.md Fresh-context-per-member OMP line");
-  assert.match(claude, phrase("`SendMessage` to a finished agent resumes its transcript"));
-  assert.doesNotMatch(claude, /\bhub send\b/i);
-  assert.match(omp, phrase("`hub send` to an idle peer wakes it into its old transcript"));
-  assert.doesNotMatch(omp, /SendMessage/);
+  const skillClaude = markedLine(skillRegion, "CLAUDE", "SKILL.md CLAUDE line");
+  const skillOmp = markedLine(skillRegion, "OMP", "SKILL.md OMP line");
+
+  assert.equal(skillClaude, refClaude, "SKILL.md's CLAUDE line has drifted from the reference copy — same rule, restated twice, must read identically");
+  assert.equal(skillOmp, refOmp, "SKILL.md's OMP line has drifted from the reference copy");
 });
 
 test("SKILL.md fix-applier prompt's grandchild-recipe blockquote carries the marked pair, gutter stripped", () => {
@@ -226,10 +310,11 @@ test("SKILL.md fix-applier prompt's grandchild-recipe blockquote carries the mar
   assert.match(claude, phrase("tail -1 <output-file> | jq -r"));
   assert.doesNotMatch(claude, /task\.maxRecursionDepth|hub send/i);
   assert.match(omp, phrase("the tail/jq recipe does not apply"));
+  assert.match(omp, phrase("by its full dotted id"));
   assert.doesNotMatch(omp, /`SendMessage`|tail -1/);
 });
 
-test("SKILL.md Failure-handling section carries the Settle/liveness pair and the table row no longer names SendMessage", () => {
+test("SKILL.md Failure-handling section carries the corrected Settle/liveness pair and the table row no longer names SendMessage", () => {
   const tableRegion = between(
     SKILL,
     "## Failure handling",
@@ -244,14 +329,20 @@ test("SKILL.md Failure-handling section carries the Settle/liveness pair and the
 
   const pairRegion = between(
     SKILL,
-    "Settle outcome and liveness are different axes",
+    "Settle outcome and liveness are different facts",
     "Reviewers that went idle on CI recover",
     "SKILL.md's Settle/liveness pair below the Failure-handling table",
   );
+  assert.doesNotMatch(
+    pairRegion,
+    /a different pair of axes on each harness/i,
+    "the shared sentence must not claim both harnesses have a pair of axes — only omp does",
+  );
+
   const claude = markedLine(pairRegion, "CLAUDE", "SKILL.md Settle/liveness CLAUDE line");
   const omp = markedLine(pairRegion, "OMP", "SKILL.md Settle/liveness OMP line");
   assert.match(claude, phrase("idle or truncated still answers"));
-  assert.doesNotMatch(claude, /`hub cancel`/);
+  assert.doesNotMatch(claude, /`hub cancel`|completed.\/.failed.\/.cancelled|running.\/.idle.\/.parked/i);
   assert.match(omp, phrase("hub cancel` leaves a peer hard-aborted"));
   assert.doesNotMatch(omp, /`SendMessage`/);
 });

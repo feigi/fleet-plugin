@@ -19,7 +19,7 @@ Members inherit standing *"Do not call the AgentTool unless the user requested i
 Same on both harnesses, stated once, in the vocabulary #1316 fixed — *dispatch* (start a member), *send* (message a live one), *wake* (a send that resumes a finished member's transcript), *settle* (a member's job reaching a terminal outcome), *consume* (the controller deliberately taking a settled result):
 
 - A refill is a **new** member under a **new** name, never a wake back into the old one — waking a finished member drags its old ticket in.
-- Liveness is not settlement. A member that is not currently executing is not thereby done, and a member that has settled is not thereby delivered — each axis is checked on its own terms, never inferred from the other.
+- Liveness is not settlement. A member that is not currently executing is not thereby done — the state machine this holds across differs by harness (Settle and liveness, below).
 - A settled result is consumed deliberately, never assumed — the discipline holds on both harnesses even where the *hazard* it guards against does not (Grandchildren, below).
 - Every send is reconciled against its receipt; whoever holds the receipt is the only party that can detect a discrepancy (Grandchildren, below).
 
@@ -27,17 +27,17 @@ Same on both harnesses, stated once, in the vocabulary #1316 fixed — *dispatch
 
 ## Fresh context per member
 
-One member, one unit of work, gone. Never re-task a finished member — waking it drags the old ticket back in. Refill = **new** member, **new** name.
+One member, one unit of work, gone. Never re-task a finished member — waking it drags the old ticket back in. Refill = **new** member, **new** name. Sending is still right for pinging a live member for a report it owes, or resuming a truncated reply — never for handing a finished member the next ticket.
 
-CLAUDE: `SendMessage` to a finished agent resumes its transcript and drags the old ticket in. Sending is still right for pinging a member for a report it owes, or resuming a truncated reply — never for handing a finished agent the next ticket.
+CLAUDE: `SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.
 OMP: `hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
 
 ## Grandchildren surface to you, not to the member that spawned them
 
-A specialist's report routes to *you*, the controller — a hand-dispatched reviewer has no messaging channel to a grandchild it spawned.
+A specialist's report routes to *you*, the controller.
 
-CLAUDE: a grandchild is unreachable by `SendMessage` — it returns `had no active task; resumed from transcript` with no report (~15 pinged in one run, 0 retrieved). Retrieve instead: `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` yields the final report, bounded (299 KB transcript → 8 KB last record → 6.6 KB report; never read the whole file).
-OMP: the tail/jq recipe does not apply — a depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`), and the reachability question that leaves open is answered: measured 2026-09-09, a depth-2 helper is `hub send`-reachable directly by its dotted id (`<member>.<helper>`) — delivered, woken, replied; no transcript workaround needed.
+CLAUDE: a hand-dispatched reviewer has no messaging channel to a grandchild it spawned — `SendMessage` to one returns `had no active task; resumed from transcript` with no report (~15 pinged in one run, 0 retrieved). Retrieve instead: `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` yields the final report, bounded (299 KB transcript → 8 KB last record → 6.6 KB report; never read the whole file).
+OMP: the tail/jq recipe does not apply — a depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); measured 2026-09-09 from an actual controller session: a `hub send` to a depth-2 helper's full dotted id (`<member>.<helper>`) delivered, woke it, and got a reply — the controller reaches a member's helper directly, no transcript workaround needed.
 
 Reviewer retrieves first, relay is the backup — duplicate costs nothing, missed report costs a verdict. A completed member's result is consumed deliberately, never assumed silent:
 
@@ -55,7 +55,7 @@ Grandchild surfaces as own task-notification; unrecognized task-id not a member 
 
 ## Settle and liveness: two different state machines
 
-A member's settle outcome and its liveness are different axes — and a different *pair* of axes on each harness, not the same table with two spellings.
+A member's settle outcome and its liveness are different facts — and a different state machine on each harness, not the same table with two spellings.
 
 CLAUDE: three states on one axis — killed, idle, truncated. `SendMessage` works on idle or truncated; does nothing for dead, and a spend limit kills every member at once, so the temptation to re-task peaks exactly when it cannot work.
 OMP: two axes — job outcome (`completed`/`failed`/`cancelled`) crossed with peer liveness (`running`/`idle`/`parked`). `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, `history://` still readable. A **`failed` job's peer can stay `idle` and resumable** — a bucket Claude's triad has no slot for. No distinct truncated state exists on omp.
