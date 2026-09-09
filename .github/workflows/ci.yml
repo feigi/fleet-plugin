@@ -185,12 +185,18 @@ jobs:
       # check-tracked.sh call per kind: each glob's own non-vacuity refusal
       # covers the day one of the three directories goes missing entirely,
       # the same discipline every other step here already uses.
-      - name: Allow-list check — agent/skill/command frontmatter
-        run: |
-          set -euo pipefail
-          .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs
-          .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs
-          .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs
+      # Three separate single-line `run:` steps, not one `run: |` block — so
+      # each one is its own routed `check-tracked.sh` invocation
+      # `ci-vacuous-green.test.mjs`'s "a routed check's own exit status
+      # still reaches the job" can see and pin against its own no-swallow
+      # regex (a multi-line block hides every invocation inside it from a
+      # line-anchored `run:` collector).
+      - name: Allow-list check — agents
+        run: .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs
+      - name: Allow-list check — skills
+        run: .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs
+      - name: Allow-list check — commands
+        run: .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs
 
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
@@ -326,23 +332,21 @@ jobs:
       - name: npm-name-gate
         run: .github/scripts/npm-name-gate.sh
 
-  # #1294 hand-off §2, #1339, #1347. Installs the plugin on BOTH harnesses
-  # for real and runs the suite FROM the installed copy's `scripts/`, so
-  # scripts resolving from the Install root while their target repo is
-  # elsewhere is actually exercised — unit tests run from the checkout alone
-  # never touch that invariant. See .github/scripts/install-and-test.sh's
-  # header for the full reasoning: why HOME is deliberately nested inside
-  # this checkout, why the git-identity sweep suites are excluded by name
-  # rather than left to throw, and why "run from the checkout with
-  # FLEET_INSTALL_ROOT" was not chosen (that override does not exist).
-  # `#1339`'s own fix is what makes this job's green non-vacuous; its
-  # pre-#1339 false pass is demonstrated once in this ticket's PR
-  # description, not re-proven on every run.
-  install-and-test:
+  # #1294 hand-off §2, #1339, #1347 — REWORKED per PR #1365's review from an
+  # earlier design that ran the whole test suite from an installed copy
+  # (cannot pass: a git-subdir install carries `plugin/` alone, and ~30 test
+  # files read repo-root paths a plugin-only payload never has). The actual
+  # ruling (#1294): source unit tests plus ONE install-and-smoke job proving
+  # the Install-root/target-repo invariant is exercised — installs on both
+  # harnesses, runs `fleet-provenance`, resolves every `fleet-run <script>`
+  # prose callsite under both harnesses, execs `fleet-run arg.mjs` once per
+  # harness. No test suite runs from an install. See
+  # .github/scripts/install-and-smoke.sh's own header for the full
+  # reasoning and the measured 70/1964-failure reproduction that forced
+  # this rewrite.
+  install-and-smoke:
     runs-on: ubuntu-latest
-    # Runs the suite TWICE (once per harness) from a genuinely different
-    # cwd each time — double `check`'s own already-generous ceiling.
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
         with:
@@ -363,5 +367,5 @@ jobs:
       - name: Install pinned Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.265
 
-      - name: install-and-test
-        run: .github/scripts/install-and-test.sh
+      - name: install-and-smoke
+        run: .github/scripts/install-and-smoke.sh

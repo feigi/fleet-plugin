@@ -68,19 +68,24 @@ jobs:
           fi
 
           if [ -z "$LATEST" ]; then
-            # Both harnesses' installed plugin caches for this specific plugin
-            # already have "0.1.1" baked in as the version string, regardless
-            # of which release label (patch/minor/major) this first PR
-            # carries. Seeding the very first tag any lower than that
-            # (agent-brain's major/minor/patch -> v1.0.0/v0.1.0/v0.0.1 scheme)
-            # would mint a tag that reads as OLDER than what operators already
-            # have installed, breaking upgrade detection. So the first release
-            # is unconditionally v0.1.1 here, independent of SEGMENT. Ordinary
-            # segment-bump-from-latest-tag logic below resumes automatically
-            # for every release after this one, since LATEST will then be
-            # non-empty.
-            NEXT="v0.1.1"
-            echo "Seeding first release as $NEXT (segment=$SEGMENT, ignored for seed)."
+            # #1314/#1294's hand-off: "Seed v0.1.1 on main BEFORE the first
+            # release, so numbering continues PAST the 0.1.1 already sitting
+            # in both harnesses' caches" — v0.1.1 is a pre-existing tag the
+            # operator mints out of band (see this PR's description for the
+            # exact command), never a value this workflow computes. Reverting
+            # to agent-brain's own zero-tags scheme, unchanged: the FIRST
+            # release this workflow ever mints is v1.0.0/v0.1.0/v0.0.1 by
+            # segment, UNLESS the v0.1.1 seed tag already exists — and once
+            # it does, LATEST is non-empty and this whole branch is
+            # unreachable, so seeding it is what actually makes the first
+            # MINTED release v0.1.2, not equal to the installed 0.1.1.
+            case "$SEGMENT" in
+              major) NEXT="v1.0.0" ;;
+              minor) NEXT="v0.1.0" ;;
+              patch) NEXT="v0.0.1" ;;
+              *) echo "::error::invalid segment '$SEGMENT'"; exit 1 ;;
+            esac
+            echo "Seeding first release as $NEXT (segment=$SEGMENT)."
           else
             VERSION="${LATEST#v}"
             if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

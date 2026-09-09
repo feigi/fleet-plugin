@@ -8,9 +8,12 @@
 // one release label by the time it reaches step 6 — the conditional clause
 // is stale and this ticket flips it to state the gate as required.
 //
-// Kept to line 11 ONLY — #1361 is in flight on this same file at line ~37
-// (the Specialists section); this pin's slice starts and ends inside step
-// 6's own paragraph, nowhere near it.
+// Cited by step NAME, not by line — this repo's own convention
+// (ci.yml: "a refactor that shifts that file silently re-points a line
+// number at unrelated code"): #1361 is in flight on this same file, inside
+// its Specialists section, well below step 6; this pin's slice starts and
+// ends inside step 6's own paragraph and cannot reach that section either
+// way, regardless of which lines either one currently sits on.
 //
 // Mutation-tested by hand, 2026-09-09, against a scratch copy of
 // commands/review-and-fix.md (never the real checkout): (1) reverting
@@ -18,8 +21,8 @@
 // not gate on one" wording reddened this file's presence pin and left the
 // count/label-name pins (already covered by release-label-split-prose.test.mjs)
 // unaffected; (2) deleting the `release-label.yml` citation entirely also
-// reddened it; (3) the unrelated Specialists section at line ~37 was
-// untouched throughout, confirming the slice below cannot see that far.
+// reddened it; (3) the unrelated Specialists section was untouched
+// throughout, confirming the slice below cannot see that far.
 //
 // CEILING: a presence pin over a bounded slice, same shape and same limits
 // as every other prose test here (release-label-split-prose.test.mjs's own
@@ -36,8 +39,9 @@ const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"),
 
 // Bounded to step 6's own paragraph — starts at the step's own opening
 // clause, ends at the `ready-to-merge` label command that closes its first
-// sentence. Never widened past that, so #1361's in-flight Specialists edit
-// at line ~37 is out of this slice's reach in either direction.
+// sentence. Never widened past that, so #1361's in-flight Specialists
+// section is out of this slice's reach in either direction, wherever it
+// currently sits.
 const step6ReleaseLabelClause = () =>
   between(
     REVIEW_AND_FIX,

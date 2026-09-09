@@ -59,6 +59,14 @@ if [ "$ACTUAL" != "$PIN" ]; then
   exit 1
 fi
 
+# Derived, never hardcoded (#1314's own ruling, PR #1365 review finding #3):
+# a rename would stale a literal, and the bare name resolves to a different
+# package entirely (the fleetctl/#1319 collision, from the other direction).
+PLUGIN_NAME="$(jq -r '.name' plugin/.claude-plugin/plugin.json)"
+if [ -z "$PLUGIN_NAME" ] || [ "$PLUGIN_NAME" = "null" ]; then
+  echo "::error::smoke-omp: could not read plugin name from plugin/.claude-plugin/plugin.json"
+  exit 2
+fi
 RUN_ID="smoke-omp-$$-$(date +%s)"
 MKT_NAME="fleet-plugin-$RUN_ID"
 MKT_DIR="$(mktemp -d)"
@@ -75,7 +83,7 @@ REPO_URL="file://$(pwd)"
 # ---- capture prior state, for the exit trap ----
 PRIOR_ENABLED_PROVIDERS="$(omp config get enabledProviders 2>/dev/null || echo '[]')"
 cleanup() {
-  omp plugin uninstall "fleet-ctl@$MKT_NAME" --scope=user >/dev/null 2>&1 || true
+  omp plugin uninstall "$PLUGIN_NAME@$MKT_NAME" --scope=user >/dev/null 2>&1 || true
   omp plugin marketplace remove "$MKT_NAME" >/dev/null 2>&1 || true
   omp config set enabledProviders "$PRIOR_ENABLED_PROVIDERS" >/dev/null 2>&1 || true
   rm -rf "$MKT_DIR" "$PROBE_DIR"
@@ -91,7 +99,7 @@ cat > "$MKT_DIR/.claude-plugin/marketplace.json" <<EOF
   "owner": { "name": "ci" },
   "plugins": [
     {
-      "name": "fleet-ctl",
+      "name": "$PLUGIN_NAME",
       "source": {
         "source": "git-subdir",
         "url": "$REPO_URL",
@@ -107,54 +115,61 @@ EOF
 
 omp config set enabledProviders '["claude-plugins"]' >/dev/null
 omp plugin marketplace add "$MKT_DIR" --scope=user >/dev/null
-omp plugin install "fleet-ctl@$MKT_NAME" --scope=user --force >/dev/null
+omp plugin install "$PLUGIN_NAME@$MKT_NAME" --scope=user --force >/dev/null
 
 fail=0
 
-# A pure-bash watchdog rather than GNU coreutils `timeout` — CI (ubuntu-latest)
-# has `timeout` on PATH, but a macOS dev box without coreutils installed does
-# not, and this must run identically both places without pulling in a new
-# dependency just for the local case. Backgrounds the command, races it
-# against a `sleep`, and SIGTERMs whichever is still alive when the other
-# finishes — the ordinary shape for a portable timeout with no external tool.
-run_with_timeout() {
-  local secs="$1"; shift
-  "$@" &
-  local cmd_pid=$!
-  ( sleep "$secs" && kill -TERM "$cmd_pid" 2>/dev/null ) &
-  local watchdog_pid=$!
-  local status=0
-  wait "$cmd_pid" 2>/dev/null || status=$?
-  kill "$watchdog_pid" 2>/dev/null
-  wait "$watchdog_pid" 2>/dev/null || true
-  return "$status"
-}
+# Bounded on the EVENT it actually wants, not a fixed-window race against a
+# live provider turn. Review finding (PR #1365): the original design
+# (`run_with_timeout 20 omp ...`, parsed only after the whole run finished
+# or was killed) was measured to hit its own 20s SIGTERM on every run,
+# because a present-but-fake API key is enough for omp to actually START a
+# real provider turn (`turn_start` -> assistant `message_start` with
+# `"api":"anthropic-messages"`) before it 401s — so the assertion depended
+# on the USER-turn `message_start` line being fully flushed at the exact
+# kill instant, a coin-flip on runner speed for a blocking job. This reads
+# the JSON stream LINE BY LINE through a real pipe (so `omp`'s own PID is
+# held, not a process-substitution subshell's) and kills `omp` the INSTANT
+# the first user `message_start` line parses — typically well under a
+# second — with a generous 15s safety bound only for the case that line
+# never appears at all (a harness output-shape change, not the ordinary
+# path). An outbound request to the configured provider IS attempted here
+# and does 401 on the fake key; this script never waits for or reads that
+# response.
+PROBE_FIFO="$(mktemp -u)"
+mkfifo "$PROBE_FIFO"
+(
+  cd "$PROBE_DIR" \
+    && ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-omp-smoke-dummy-not-real}" \
+       omp -p "/$PLUGIN_NAME:run-merge-bot" --no-tools --mode json --no-session > "$PROBE_FIFO" 2>&1
+) &
+OMP_PID=$!
+SUBSTITUTED=""
+DEADLINE=$(( $(date +%s) + 15 ))
+while IFS= read -r line; do
+  TYPE="$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null || true)"
+  ROLE="$(printf '%s' "$line" | jq -r '.message.role // empty' 2>/dev/null || true)"
+  if [ "$TYPE" = "message_start" ] && [ "$ROLE" = "user" ]; then
+    SUBSTITUTED="$(printf '%s' "$line" | jq -r '.message.content[0].text // empty' 2>/dev/null || true)"
+    break
+  fi
+  [ "$(date +%s)" -ge "$DEADLINE" ] && break
+done < "$PROBE_FIFO"
+kill "$OMP_PID" 2>/dev/null || true
+wait "$OMP_PID" 2>/dev/null || true
+rm -f "$PROBE_FIFO"
 
-# ---- commands: the --no-tools substitution test ----
-COMMAND_OUT="$(cd "$PROBE_DIR" && ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-omp-smoke-dummy-not-real}" \
-  run_with_timeout 20 omp -p "/fleet-ctl:run-merge-bot" --no-tools --mode json --no-session 2>&1 || true)"
-
-# `jq | head -1` is a SIGPIPE hazard under `pipefail`: `head` exits the
-# instant it has its line, closing the pipe while jq may still be mid-write
-# on a 600KB+ stream, and the resulting SIGPIPE fails the whole assignment
-# under `set -o pipefail` -- measured to abort this script outright. Letting
-# jq run to completion and taking the first line in pure bash avoids the
-# early pipe close entirely.
-ALL_SUBSTITUTED="$(printf '%s\n' "$COMMAND_OUT" \
-  | jq -r 'select(.type=="message_start" and .message.role=="user") | .message.content[0].text' 2>/dev/null || true)"
-SUBSTITUTED="${ALL_SUBSTITUTED%%$'\n'*}"
-if [ -z "$SUBSTITUTED" ] || [ "$SUBSTITUTED" = "/fleet-ctl:run-merge-bot" ]; then
-  echo "::error::smoke-omp: commands: /fleet-ctl:run-merge-bot did not substitute its body into the first user turn"
-  printf '%s\n' "$COMMAND_OUT" | awk 'END{for(i=NR-19>1?NR-19:1;i<=NR;i++)print a[i]}{a[NR]=$0}'
+if [ -z "$SUBSTITUTED" ] || [ "$SUBSTITUTED" = "/$PLUGIN_NAME:run-merge-bot" ]; then
+  echo "::error::smoke-omp: commands: /$PLUGIN_NAME:run-merge-bot did not substitute its body into the first user turn"
   fail=1
 else
-  echo "smoke-omp: commands OK — /fleet-ctl:run-merge-bot substituted $(printf '%s' "$SUBSTITUTED" | wc -c | tr -d ' ') bytes into the first user turn"
+  echo "smoke-omp: commands OK — /$PLUGIN_NAME:run-merge-bot substituted $(printf '%s' "$SUBSTITUTED" | wc -c | tr -d ' ') bytes into the first user turn"
 fi
 
 # ---- agents & skills: presence in the installed copy ----
-INSTALL_PATH="$(omp plugin list --json | jq -r --arg id "fleet-ctl@$MKT_NAME" '.marketplace[] | select(.id==$id) | .entries[0].installPath')"
+INSTALL_PATH="$(omp plugin list --json | jq -r --arg id "$PLUGIN_NAME@$MKT_NAME" '.marketplace[] | select(.id==$id) | .entries[0].installPath')"
 if [ -z "$INSTALL_PATH" ] || [ "$INSTALL_PATH" = "null" ] || [ ! -d "$INSTALL_PATH" ]; then
-  echo "::error::smoke-omp: fleet-ctl@$MKT_NAME has no installPath in omp plugin list, or it does not exist on disk"
+  echo "::error::smoke-omp: $PLUGIN_NAME@$MKT_NAME has no installPath in omp plugin list, or it does not exist on disk"
   fail=1
 else
   AGENT_COUNT=0
