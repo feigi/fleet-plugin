@@ -419,6 +419,40 @@ test("an unrecognised flag is refused, not silently dropped", () => {
   assert.match(r.stderr, /--wat/);
 });
 
+test("#1342: a Claude run and an omp run over separate sessions merge into one TSV carrying both harness values", () => {
+  const claudeDir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
+
+  const ompRoot = mkdtempSync(join(tmpdir(), "mo-omp-"));
+  const ompSessionName = "2026-09-09T03-00-00-000Z_deadbeef-dead-dead-dead-deadbeefdead";
+  const ompSessionDir = join(ompRoot, ompSessionName);
+  mkdirSync(ompSessionDir, { recursive: true });
+  const ompLine = (o) => JSON.stringify(o);
+  writeFileSync(join(ompSessionDir, "Solo.jsonl"), [
+    ompLine({ type: "session", version: 3, id: "s1", timestamp: "2026-09-09T03:00:00.000Z", cwd: "/Users/chris/dev/fleet-plugin" }),
+    ompLine({ type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T03:00:01.000Z", thinkingLevel: "high", configured: null }),
+    ompLine({
+      type: "message", id: "m1", parentId: "t1", timestamp: "2026-09-09T03:00:02.000Z",
+      message: {
+        role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-sonnet-5",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.001 } },
+      },
+    }),
+  ].join("\n") + "\n");
+
+  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const runClaude = spawnSync(process.execPath, [CLI, claudeDir, "--file", out], { encoding: "utf8" });
+  assert.equal(runClaude.status, 0, runClaude.stderr);
+  const runOmp = spawnSync(process.execPath, [CLI, ompSessionDir, "--file", out], { encoding: "utf8" });
+  assert.equal(runOmp.status, 0, runOmp.stderr);
+
+  const rows = parseTsv(readFileSync(out, "utf8"));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(new Set(rows.map((r) => r.harness)), new Set(["claude", "omp"]));
+  const omp = rows.find((r) => r.harness === "omp");
+  assert.equal(omp.session, ompSessionName);
+  assert.equal(omp.agent, "Solo");
+});
+
 test("a run writes rows, and a second run over the same session changes nothing", () => {
   const dir = fixture([["impl-580", assistant("claude-opus-5", "xhigh"), meta()]]);
   const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");

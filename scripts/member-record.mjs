@@ -167,7 +167,64 @@ export function parseMemberName(name) {
 // a hiccup, not a stall); `malformedNonLastLine`/`malformedNonLastLineError`
 // flag the different, real fault of a line that will never complete, for a
 // caller (board.mjs) that wants to warn about it.
-export function foldClaudeTranscript(jsonlText) {
+// omp's envelope always carries a top-level `parentId` key — even a root
+// event writes `parentId: null` rather than omitting it (measured against
+// real `~/.omp/agent/sessions/**/*.jsonl` files). A Claude transcript line
+// never carries that key at all; Claude's own parent reference is spelled
+// `parentUuid`. That makes `parentId`'s presence a safe POSITIVE signature
+// for "this is omp content", the mirror of assertNotClaudeShaped below —
+// and unlike checking for the ABSENCE of Claude's own keys, it never fires
+// on this repo's existing Claude test fixtures, none of which set
+// `sessionId`/`parentUuid`/`parentId` at all (they construct only the
+// fields the fold-back arithmetic reads).
+function assertNotOmpShaped(d, filePath) {
+  if (Object.prototype.hasOwnProperty.call(d, "parentId")) {
+    throw new Error(`member-record: omp-shaped transcript found under the Claude root, refusing to parse it as Claude: ${filePath}`);
+  }
+}
+
+// Folds one Claude subagent transcript into turns. This is the ONE place the
+// message.id fold-back arithmetic lives now — board.mjs's readAgent (which
+// additionally needs the per-block tool stream for cache-write attribution)
+// and this module's own readClaudeMember (which needs only the per-turn
+// totals) both call it, so the two can no longer drift the way they did
+// before this ticket: readAgent tracked cache_read and raw input tokens,
+// readMember did not, and neither tracked the other's torn-line bookkeeping
+// consistently.
+//
+// ONE assistant API turn is written as SEVERAL jsonl lines — one per content
+// block (thinking, text, each tool_use) — and every one of those lines
+// repeats the SAME `message.id` and the SAME `message.usage` object. Summing
+// usage per LINE therefore counts each turn's cache_creation once per block:
+// measured across 2452 real transcripts, +206% (535M counted vs 175M actual),
+// and again across 2,723 flat transcripts, +176.0% on cache_creation and
+// +140.9% on turn count, MODEL-DEPENDENT (opus-5 2.81x, sonnet-5 2.39x)
+// because blocks-per-turn tracks how tool-heavy a turn is. So fold lines back
+// into turns on `message.id` and take each turn's usage exactly once.
+//
+// `output_tokens` is a streaming snapshot, so the LARGEST value across a
+// turn's lines is the final one; summing it also overcounts, by ~1.5%.
+//
+// A line with no `message.id` becomes its own turn — the honest reading when
+// the harness gives nothing to fold on (0 of 127,102 real assistant lines
+// lack one; fixtures only).
+//
+// `model`/`effort` are last-wins: a member whose model or effort changed
+// mid-run finished at the later one, and that is the tier its output
+// reflects.
+//
+// Malformed lines are skipped, not fatal — a transcript being appended to
+// while it is read has a torn LAST line on every tick. `torn` reflects only
+// the final line (resets on the next successful parse, so a mid-file tear is
+// a hiccup, not a stall); `malformedNonLastLine`/`malformedNonLastLineError`
+// flag the different, real fault of a line that will never complete, for a
+// caller (board.mjs) that wants to warn about it.
+//
+// `filePath` defaults to a placeholder: member-outcomes.mjs's readMember()
+// is documented pure — text in, no path — so it has none to give, and the
+// wrong-root check below still runs; it just names nothing concrete if it
+// fires from that path.
+export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
   let model = null, effort = "";
   let firstTs = null, lastTs = null;
   let torn = false, malformedNonLastLine = false, malformedNonLastLineError = null;
@@ -186,6 +243,7 @@ export function foldClaudeTranscript(jsonlText) {
       if (i !== lines.length - 1) { malformedNonLastLine = true; malformedNonLastLineError ??= e.message; }
       continue;
     }
+    assertNotOmpShaped(d, filePath);
     const ts = d.timestamp;
     if (ts) { firstTs ??= ts; lastTs = ts; }
     const m = d.message;
@@ -235,15 +293,23 @@ export function foldClaudeTranscript(jsonlText) {
 // rowsForSession() to count, exactly as it did when this lived in
 // member-outcomes.mjs — it is scrape-quality metadata, not part of the
 // canonical record's field list, and only member-outcomes.mjs reads it.
-export function readClaudeMember(jsonlText, meta) {
-  const folded = foldClaudeTranscript(jsonlText);
+export function readClaudeMember(jsonlText, meta, filePath = "<transcript>") {
+  const folded = foldClaudeTranscript(jsonlText, filePath);
   if (!folded.model) return null;
   const member = String(meta?.name ?? meta?.agentType ?? "");
   const { ticket, pr } = parseMemberName(member);
   return {
     harness: "claude",
     role: classifyRole(meta), member,
-    model: folded.model, thinking: folded.effort,
+    model: folded.model,
+    // Never blank — a Claude member whose transcript carries no `d.effort`
+    // (haiku models, which have no effort control at all) is a genuine hole,
+    // the same class of thing as omp's missing `thinking_level_change`, and
+    // #1302's ruling says a hole must stay visible rather than read as
+    // though nothing were being asked. member-outcomes.mjs's TSV adapter
+    // maps `-` back to "" for its own legacy `effort` column, which already
+    // spells the same "unknown" concept as blank and predates this ticket.
+    thinking: folded.effort || "-",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
     tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
     cost: null,
@@ -263,7 +329,14 @@ export function readClaudeMember(jsonlText, meta) {
 //
 // Every failure is per-member: one unreadable transcript or unparseable meta
 // (including an ABSENT meta.json — the ordinary shape for an unnamed agent
-// carries one regardless) must not cost the other members their rows.
+// carries one regardless) must not cost the other members their rows. The
+// wrong-root shape check (assertNotOmpShaped, inside foldClaudeTranscript)
+// runs even when meta.json is absent or unreadable: an omp file sitting
+// under a Claude `subagents/` dir never carries a `.meta.json` sidecar
+// either, and reading meta FIRST — the previous ordering — let exactly that
+// file vanish into the ordinary "no sidecar" skip below instead of being
+// refused. readClaudeMember() therefore always runs (its throw propagates
+// uncaught); only the DECISION to keep its row waits on meta.
 export function readClaudeSession(subagentsDir) {
   let names;
   try { names = readdirSync(subagentsDir, { recursive: true }); }
@@ -271,13 +344,15 @@ export function readClaudeSession(subagentsDir) {
   const session = basename(dirname(subagentsDir));
   const rows = [];
   for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
-    let jsonl, meta;
-    try {
-      jsonl = readFileSync(join(subagentsDir, f), "utf8");
-      meta = JSON.parse(readFileSync(join(subagentsDir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
-    } catch { continue; }
-    const rec = readClaudeMember(jsonl, meta);
-    if (!rec) continue;
+    const filePath = join(subagentsDir, f);
+    let jsonl;
+    try { jsonl = readFileSync(filePath, "utf8"); }
+    catch { continue; } // one unreadable transcript, not the session
+    let meta, metaOk = true;
+    try { meta = JSON.parse(readFileSync(filePath.replace(/\.jsonl$/, ".meta.json"), "utf8")); }
+    catch { meta = {}; metaOk = false; }
+    const rec = readClaudeMember(jsonl, meta, filePath); // may throw — see comment above
+    if (!metaOk || !rec) continue;
     rows.push({ ...rec, session, agent: f.replace(/\.jsonl$/, "") });
   }
   return rows;
@@ -341,8 +416,10 @@ function assertNotClaudeShaped(d, filePath) {
 //
 // `session_init.task` is carried through as the closest thing omp has to
 // Claude's `meta.description` — there is no dispatch sidecar on this side at
-// all, so classifyRole() below reads it (falling back to the bare agent id)
-// on a best-effort basis; see readOmpMember.
+// all. readOmpMember below only uses it, together with the transcript's own
+// nesting depth, as a REAL classifyRole() signal; it is never matched
+// against the bare agent id, which is a generated word pair and names
+// nothing.
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null;
   let firstTs = null, lastTs = null;
@@ -384,17 +461,30 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // One member record from one omp transcript. `member` is the AgentId (the
 // filename stem, e.g. `InstallVerifySearch`) — omp has no separate display
 // name the way Claude's meta.json does, so `ticket`/`pr` extraction runs
-// against it directly and against `session_init.task` for role; both are
-// best-effort, honestly blank rather than guessed when neither names a
-// fleet-shaped unit of work.
-export function readOmpMember(jsonlText, filePath, agentStem) {
+// against it directly.
+//
+// `role` is NEVER guessed off the bare AgentId — a generated CamelCase word
+// pair names nothing classifyRole can read. Two REAL signals exist instead:
+// `session_init.task` (the dispatch prompt, when present) and `spawnDepth`
+// (the transcript's own nesting depth, supplied by readOmpSession from the
+// walk — a fact about where the file lives, not a guess about what it is).
+// Depth matters on its own: classifyRole checks depth BEFORE any text match,
+// specifically so a nested member whose task happens to read like a
+// reviewer's ("Review PR 1353 correctness") still books as the fan-out
+// specialist it structurally is, not a reviewer. Neither signal present
+// yields `"-"` — the same visible-hole spelling as `thinking`, never a
+// default like "other", which only makes sense where a real dispatch record
+// (Claude's meta.json) backs it.
+export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const folded = foldOmpTranscript(jsonlText, filePath);
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
   const { ticket, pr } = parseMemberName(member);
+  const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string";
+  const role = hasRoleSignal ? classifyRole({ description: folded.task ?? "", spawnDepth }) : "-";
   return {
     harness: "omp",
-    role: classifyRole({ description: folded.task ?? member }),
+    role,
     member,
     model: folded.model,
     thinking: folded.thinking ?? "-",
@@ -410,7 +500,10 @@ export function readOmpMember(jsonlText, filePath, agentStem) {
 // reason as Claude's reader: a member can itself dispatch further members
 // (measured on disk — a research session's `Facts1303/` held seven more
 // `.jsonl` files one level down), and `agent` is the path-relative stem so
-// those nest instead of colliding.
+// those nest instead of colliding. `spawnDepth` is read straight off that
+// path — one `/` per nesting level, the same signal Claude's own reviewer
+// fan-out relies on via `meta.spawnDepth` — and handed to readOmpMember as a
+// real fact about the walk, not a guess about the member.
 //
 // Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
 // wrong-root refusal (assertNotClaudeShaped, inside foldOmpTranscript) must
@@ -429,29 +522,41 @@ export function readOmpSession(sessionDir) {
     try { text = readFileSync(filePath, "utf8"); }
     catch { continue; }
     const agent = f.replace(/\.jsonl$/, "");
-    const rec = readOmpMember(text, filePath, agent); // may throw — see comment above
+    const spawnDepth = (f.match(/[\\/]/g) ?? []).length;
+    const rec = readOmpMember(text, filePath, agent, spawnDepth); // may throw — see comment above
     if (!rec) continue;
     rows.push({ ...rec, session, agent });
   }
   return rows;
 }
 
-// An omp session directory is identified by NAME (`<ISO>_<uuid>`, e.g.
-// `2026-09-08T13-13-27-300Z_01a08126-…`) or, failing that, by holding
-// `.jsonl` files directly — the same shortcut lets a fixture pass a session
-// dir straight in as a root without needing to match the timestamp shape.
-// Recursion stops at the first directory satisfying either test, for the
-// same reason as Claude's: readOmpSession's own recursive walk covers
-// everything beneath it.
+// An omp session directory is identified STRICTLY by name — `<ISO>_<uuid>`,
+// e.g. `2026-09-08T13-13-27-300Z_01a08126-…` — never by holding `.jsonl`
+// files directly. That second test used to be a shortcut, and it fired one
+// level too high on the real tree: `~/.omp/agent/sessions/-dev-fleet-plugin/`
+// holds the project's MAIN-session transcripts as plain files SIBLING to the
+// per-session directories, so `findOmpSessionDirs` recursing from the
+// encoded-cwd dir hit the `.jsonl` test there first, returned the whole
+// project as "one session", stamped every row `session=-dev-fleet-plugin`
+// instead of the `<ISO>_<uuid>` name #1302 rules the row key on, and booked
+// the controller's own top-level transcripts as members. Name-only matching
+// costs nothing a real fixture needs: every fixture in this repo already
+// names its session dir in the real shape.
 const OMP_SESSION_DIR_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+$/i;
 
+// Exposed for callers that already hold one EXPLICIT directory rather than a
+// tree to search — member-outcomes.mjs's CLI, which is handed a session dir
+// directly the way it is already handed a Claude one — so the pattern is
+// defined once.
+export function isOmpSessionDirName(name) {
+  return OMP_SESSION_DIR_RE.test(name);
+}
+
 function findOmpSessionDirs(root) {
+  if (OMP_SESSION_DIR_RE.test(basename(root))) return [root];
   let ents;
   try { ents = readdirSync(root, { withFileTypes: true }); }
   catch { return []; }
-  if (OMP_SESSION_DIR_RE.test(basename(root)) || ents.some((e) => e.isFile() && e.name.endsWith(".jsonl"))) {
-    return [root];
-  }
   const found = [];
   for (const e of ents) if (e.isDirectory()) found.push(...findOmpSessionDirs(join(root, e.name)));
   return found;
@@ -484,12 +589,26 @@ function harnessForRoot(root) {
 // makes it impossible to point a reader at the other's tree, but it cannot
 // make a THIRD tree meaningful, and silently returning no rows for a typo'd
 // path is the same blackout #1302's ruling exists to prevent.
+//
+// A Claude root that resolves to NO `subagents/` directory anywhere gets the
+// same treatment, symmetric with the omp side's content-shape refusal: an
+// omp session directory dropped under `~/.claude/projects/<enc>/` has no
+// `subagents/` child at any depth (it holds `.jsonl` files directly instead),
+// so findClaudeSubagentsDirs legitimately finds none — and a silent empty
+// result here is exactly the blackout this function's own contract refuses
+// everywhere else. The omp side does not need the mirror of THIS check: its
+// wrong-shape refusal already fires from inside foldOmpTranscript on the
+// first line of whatever the misrouted content turns out to be.
 export function readMembers(roots) {
   const rows = [];
   for (const root of [].concat(roots ?? [])) {
     const harness = harnessForRoot(root);
     if (harness === "claude") {
-      for (const dir of findClaudeSubagentsDirs(root)) rows.push(...readClaudeSession(dir));
+      const dirs = findClaudeSubagentsDirs(root);
+      if (dirs.length === 0) {
+        throw new Error(`member-record: no subagents/ directory found anywhere under the Claude root, refusing to silently contribute nothing: ${root}`);
+      }
+      for (const dir of dirs) rows.push(...readClaudeSession(dir));
     } else if (harness === "omp") {
       for (const dir of findOmpSessionDirs(root)) rows.push(...readOmpSession(dir));
     } else {

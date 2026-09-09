@@ -114,7 +114,7 @@ would destroy it.
 
 ```
 session  run_date  role  member  model  effort  ticket  pr
-tokens_cache_create  tokens_out  wall_s  turns  agent
+tokens_cache_create  tokens_out  wall_s  turns  agent  harness
 ```
 
 `agent` is an OPAQUE JOIN KEY: it exists so a re-scrape can replace a row instead
@@ -123,9 +123,12 @@ data. It is a harness path fragment, so a change to how transcripts are stored
 will change it — that is survivable precisely because nothing reads it but the
 merge. Humans and read-outs group on `session`, `role`, `member` and `model`.
 
-It is **appended last on purpose**: every read-out command in this document and in the
-tsv header indexes by position (`$1` session, `$3` role, `$5` model), so a column
-inserted anywhere else would silently re-point all of them.
+`harness` (`claude` or `omp`, #1342) is **appended last on purpose**, after
+`agent`: every read-out command in this document and in the tsv header indexes
+by position (`$1` session, `$3` role, `$5` model), so a column inserted anywhere
+but the end would silently re-point all of them. `agent` no longer holds that
+spot itself, but the rule it was pinned for is unchanged — the newest column is
+always the one appended.
 
 **Every column is derivable from transcripts alone.** That is a hard constraint,
 not a preference: a column the controller must hand-fill cannot survive a

@@ -11,12 +11,13 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 
-import { readClaudeMember, normalizeModel, parseMemberName } from "./member-record.mjs";
+import { readClaudeMember, readOmpSession, isOmpSessionDirName, normalizeModel, parseMemberName } from "./member-record.mjs";
 
 export { normalizeModel, parseMemberName };
 
-// One row from one member's transcript plus its meta. Takes TEXT rather than
-// a path so it stays pure — the file reading lives in rowsForSession().
+// One row from one Claude member's transcript plus its meta. Takes TEXT
+// rather than a path so it stays pure — the file reading lives in
+// rowsForSession().
 //
 // A thin adapter over member-record.mjs's readClaudeMember(): this file's own
 // row shape stays camelCase (`effort`, `tokensCacheCreate`, `tokensOut`,
@@ -28,16 +29,57 @@ export { normalizeModel, parseMemberName };
 // `effort` reads the record's `thinking` field: #1342 keeps the TSV COLUMN
 // named `effort` rather than renaming it, because every awk one-liner in
 // this file's header and in docs/specs indexes columns by position, and a
-// rename buys nothing a comment does not already say.
+// rename buys nothing a comment does not already say. `thinking` is never
+// blank on the record (`-` marks the hole so it stays visible there), but
+// this TSV's own `effort` column predates that convention and already
+// documents blank as ITS spelling of "unknown" (header: "BLANK MEANS
+// UNKNOWN") — so `-` maps back to `""` here, at the boundary, rather than
+// widening the legacy column's vocabulary.
 export function readMember(jsonlText, meta) {
   const rec = readClaudeMember(jsonlText, meta);
   if (!rec) return null;
   return {
     harness: rec.harness, role: rec.role, member: rec.member, model: rec.model,
-    effort: rec.thinking, ticket: rec.ticket, pr: rec.pr,
+    effort: rec.thinking === "-" ? "" : rec.thinking, ticket: rec.ticket, pr: rec.pr,
     tokensCacheCreate: rec.tokens_cache_create, tokensOut: rec.tokens_out,
     wallS: rec.wall_s, turns: rec.turns, torn: rec.torn,
   };
+}
+
+// One row per omp member, via member-record.mjs's readOmpSession(). Kept
+// beside readMember rather than merged into it: the two harnesses hand this
+// file records shaped identically at the member-record.mjs boundary but with
+// different provenance (a meta.json sidecar vs a session_init/thinking_level
+// walk), and rowsForSession dispatches to whichever this file's own
+// convention — camelCase, `effort` not `thinking`, `torn` present — applies
+// to. omp rows are never torn in the sense this file tracks (no fold-back to
+// tear mid-turn); `false` says so plainly rather than leaving the column
+// blank, which would read as "unmeasured".
+//
+// `-` maps to `""` here too, for the same reason as readMember's `effort` —
+// this TSV's blank convention predates the record's `-` one and the two rows
+// share one column.
+function rowsForOmpSession(sessionDir, stats) {
+  let names;
+  try { names = readdirSync(sessionDir, { recursive: true }); }
+  catch { names = []; }
+  const jsonlNames = names.filter((x) => x.endsWith(".jsonl"));
+  let newest = 0;
+  for (const f of jsonlNames) {
+    try { newest = Math.max(newest, statSync(join(sessionDir, f)).mtimeMs); } catch { /* raced away */ }
+  }
+  const recs = readOmpSession(sessionDir); // may throw — a wrong-root refusal, not a per-file fault
+  stats.seen = jsonlNames.length;
+  stats.dropped = jsonlNames.length - recs.length;
+  stats.torn = 0;
+  const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
+  return recs.map((r) => ({
+    session: r.session, run_date,
+    harness: r.harness, role: r.role, member: r.member, model: r.model,
+    effort: r.thinking === "-" ? "" : r.thinking, ticket: r.ticket, pr: r.pr,
+    tokensCacheCreate: r.tokens_cache_create, tokensOut: r.tokens_out,
+    wallS: r.wall_s, turns: r.turns, agent: r.agent, torn: false,
+  }));
 }
 
 // Walks one session's subagents dir. Every failure is per-member: one unreadable
@@ -64,6 +106,10 @@ export function readMember(jsonlText, meta) {
 // run_date comes from the newest transcript's mtime rather than a clock read, so
 // a backfill run in December still dates an August session in August.
 export function rowsForSession(sessionDir, stats = {}) {
+  // Dispatched by NAME, the same structural rule member-record.mjs's own
+  // reader-selection uses, never by content: an omp session directory is
+  // `<ISO>_<uuid>` and holds `.jsonl` files directly, no `subagents/` child.
+  if (isOmpSessionDirName(basename(sessionDir))) return rowsForOmpSession(sessionDir, stats);
   const dir = join(sessionDir, "subagents");
   let names;
   try { names = readdirSync(dir, { recursive: true }); } catch { return []; }
@@ -198,12 +244,19 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const arg = dirs[0].replace(/\/+$/, "");
   const sessionDir = basename(arg) === "subagents" ? dirname(arg) : arg;
   // A wrong guess used to exit 0 having scraped and written nothing, because
-  // rowsForSession() catches the readdir failure and returns []. Probe with the
-  // SAME call it makes: an existsSync test closes only the ENOENT half, and
-  // EACCES (an unreadable dir) and ENOTDIR (a regular FILE named subagents)
-  // both walked straight past it back into the silent exit 0.
-  try { readdirSync(join(sessionDir, "subagents")); }
-  catch (e) { die(`cannot read ${join(sessionDir, "subagents")}: ${e.code ?? e.message}`); }
+  // rowsForSession() catches the readdir failure and returns []. Probe with
+  // the SAME call it makes, per harness: an existsSync test closes only the
+  // ENOENT half, and EACCES (an unreadable dir) and ENOTDIR (a regular FILE
+  // named subagents) both walked straight past it back into the silent
+  // exit 0. omp session dirs have no `subagents/` wrapper — rowsForSession
+  // reads the session dir itself — so the probe reads THAT instead.
+  if (isOmpSessionDirName(basename(sessionDir))) {
+    try { readdirSync(sessionDir); }
+    catch (e) { die(`cannot read ${sessionDir}: ${e.code ?? e.message}`); }
+  } else {
+    try { readdirSync(join(sessionDir, "subagents")); }
+    catch (e) { die(`cannot read ${join(sessionDir, "subagents")}: ${e.code ?? e.message}`); }
+  }
 
   // Header comments are preserved verbatim across the rewrite: they carry the
   // read-out commands and the blank-means-unknown rule, and the rewrite is
