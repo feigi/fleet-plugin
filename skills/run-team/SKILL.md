@@ -508,7 +508,7 @@ is not. Verify here anyway.
 
 ## Phase 2 — dispatch implementers
 
-**Dispatch every implementer as `subagent_type: "fleet:fleet-implementer"`, and still
+**Dispatch every implementer as `subagent_type: "fleet-ctl:fleet-implementer"`, and still
 omit `model` on the Agent call, whatever the class.** The tier now lives in that
 definition's frontmatter (`agents/fleet-implementer.agent.md`), which is what an
 omitted `model` takes first — the session's tier applies only when the definition
@@ -524,7 +524,7 @@ weaker AND more expensive, because pricing falls with each generation.
 
 **One implementer per staged wave goes at the alternate tier — one per phase-0
 staging batch, never one per refill.** Dispatch it exactly as the others but
-with `subagent_type: "fleet:fleet-implementer-alt"`. Pick the ticket
+with `subagent_type: "fleet-ctl:fleet-implementer-alt"`. Pick the ticket
 that is most ordinary — never the hardest, never the one whose ticket the rest
 of the run depends on — and do not tell the member it is a control: a member
 that knows it is being measured is not measuring the same thing.
@@ -1262,7 +1262,7 @@ report recovery, never the exit code alone.
 
 ### Reviewers
 
-**You run the review yourself: `Workflow({name: "fleet:review-pr", args: {pr, branch,
+**You run the review yourself: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch,
 worktree, testCmd, scratch}})`, once per PR. That is the default path.** Only you
 can run it — members have no `Workflow` tool (verified 2026-07-30 for the
 `general-purpose` subagent; tool availability is per-agent-type, so recheck after

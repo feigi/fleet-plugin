@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
-  "name": "fleet",
+  "name": "fleet-ctl",
   "version": "0.1.1",
   "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
   "author": {

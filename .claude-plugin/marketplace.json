@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "fleet",
+      "name": "fleet-ctl",
       "source": "./",
       "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
       "category": "productivity"
