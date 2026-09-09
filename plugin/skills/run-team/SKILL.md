@@ -521,6 +521,15 @@ that the tier it resolves to is now declared and pinned rather than inherited by
 accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
 spend classifier and `member-outcomes.mjs` read it.
 
+**After dispatching the batch, run the tier check — a scripted step, never a
+prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
+compares what each dispatched member's definition declared against what the
+harness actually resolved, and exits 1 naming every mismatched member as
+`member: declared <m>/<l> resolved <m>/<l>`. A non-zero exit **stops the
+wave**: dispatching the next batch on top of an unresolved tier mismatch
+multiplies whatever silently degraded, so fix the definition or the dispatch
+and re-run the check before continuing.
+
 **The declaration names a bare alias (`opus`), never a versioned id.** An alias
 tracks the newest generation; a pinned id rots into a superseded one that is
 weaker AND more expensive, because pricing falls with each generation.
