@@ -781,7 +781,8 @@ test("a stray worktree whose HEAD git could not resolve blocks without claiming 
   assert.doesNotMatch(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
     "fixture: garbage content, like chmod, prints no detached line");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   // Anchored against the exact branch-mismatch phrase, not a shared word: this
@@ -842,7 +843,8 @@ test("the symlink and directory HEAD shapes reach the same arm, `detached` line 
     assert.match(git(r.w, "worktree", "list", "--porcelain"), /^detached$/m,
       `fixture: the ${shape} shape must really print the detached line`);
 
-    const { code, json } = release(r, c);
+    const { code, json, stderr } = release(r, c);
+    assert.ok(json, `no payload: the arm refused instead of blocking, ${shape} — ${stderr}`);
     assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
     assert.match(json.blockers[0], /could not read its HEAD/, shape);
     assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, `the worktree IS on this branch, ${shape}`);
@@ -884,7 +886,7 @@ test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` li
   // below: `artefacts()` runs `worktree list` itself, so an assert that fired
   // here would leave the mode at 000 for the rest of the case.
   const porcelain = git(r.w, "worktree", "list", "--porcelain");
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
   // Guarded, because the restore runs before the first assert and must not
   // become the failure itself: strip this fixture's `chmodSync(head, 0o000)`
   // and the release SUCCEEDS, taking the whole worktree with it, so a bare
@@ -904,6 +906,10 @@ test("the chmod 000 HEAD shape reaches the same arm, and prints no `detached` li
   // why `unresolved_head` can key on that line in neither direction.
   assert.doesNotMatch(porcelain, /^detached$/m, "fixture: and chmod, unlike the symlink and directory shapes, prints no detached line");
 
+  // Below the restore above, never before it: an assert that fired here while
+  // the bit was still off would leave the mode at 000, the hazard that line's
+  // own comment documents.
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.doesNotMatch(json.blockers[0], /is not on fix\/9-release-ticket/, "the worktree IS on this branch — the mode just stopped git reading it");
@@ -1104,7 +1110,8 @@ test("a MOVED worktree with an unresolvable HEAD blocks instead of releasing sil
   // family passes `--apply`, so a regression reaching only the default mode
   // would ship green — and the dry run is the half an operator runs first.
   for (const apply of [false, true]) {
-    const { code, json } = release(r, c, { apply });
+    const { code, json, stderr } = release(r, c, { apply });
+    assert.ok(json, `apply=${apply}: no payload — the arm refused instead of blocking — ${stderr}`);
     assert.equal(json.released, false, `apply=${apply}: a claim git cannot identify is not released`);
     assert.equal(json.applied, apply, `apply=${apply}: the receipt reports the mode it ran in`);
     assert.equal(json.blockers.length, 1, `apply=${apply}: nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
@@ -1223,7 +1230,8 @@ test("a claim whose registry entry git renamed is still found by the directory s
     `${realpathSync(decoy)}/.git`, "fixture: the unsuffixed entry names the decoy, not the claim");
   writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
@@ -1264,7 +1272,8 @@ test("a MOVED entry thief does not displace the claim's own broken worktree (#45
   const c = movedEntryThief(r);
   writeFileSync(join(r.w, ".git", "worktrees", "9-release-ticket1", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
+  const { code, json, stderr } = release(r, c);
+  assert.ok(json, `no payload: the arm refused instead of blocking — ${stderr}`);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/, "the claim's own HEAD is the fault, not a branch mismatch");
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)),
@@ -1337,8 +1346,8 @@ test("the unresolved-HEAD blocker hands over a search for the entry, never a nam
     "fixture: the tail sibling's entry ends with the claim's own gitdir line, which a substring search cannot tell apart",
   );
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
   assert.ok(json.blockers[0].includes(realpathSync(c.wt)), `the blocker names this claim's own worktree: ${json.blockers[0]}`);
@@ -1373,8 +1382,8 @@ test("the entry search survives a `$` in the worktree path (#455)", (t) => {
   const c = claim(r.w, 9, "release$ticket");
   writeFileSync(join(r.w, ".git", "worktrees", "9-release$ticket", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
 
@@ -1404,8 +1413,8 @@ test("the entry search treats a regex metacharacter in the path as a character (
   git(r.w, "worktree", "add", "-q", join(r.w, ".worktrees", "9-axb"), "-b", "sib/9", "origin/main");
   writeFileSync(join(r.w, ".git", "worktrees", "9-a.b", "HEAD"), "garbage\n");
 
-  const { code, json } = release(r, c);
-  assert.equal(code, 1);
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.match(json.blockers[0], /could not read its HEAD/);
 
