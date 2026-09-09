@@ -157,11 +157,15 @@ _Avoid_: return value, retrieve
 
 **Marked line**:
 A one-line, per-harness statement of a dispatch instruction, adjacent to its
-partner and pinned as its own slice — never a section. The marker is the line's first
-token, `CLAUDE: ` or `OMP: ` (uppercase, colon, space), so a pin addresses
-exactly one line by `^\s*(CLAUDE|OMP): ` — the shape that keeps a two-dialect
-rule from becoming the fat slice that let 22 of 33 mutations survive. Neither
-token occurs anywhere else in the prose tree (verified 2026-09-09).
+partner and pinned as its own slice — never a section. The marker is the
+line's first token once any markdown blockquote gutter is stripped,
+`CLAUDE: ` or `OMP: ` (uppercase, colon, space), so a pin addresses exactly
+one line by `^\s*(?:>+\s*)?(CLAUDE|OMP): ` — the shape that keeps a
+two-dialect rule from becoming the fat slice that let 22 of 33 mutations
+survive. A pair embedded inside a quoted dispatch prompt (a `>` blockquote)
+is still two adjacent Marked lines; the gutter is a rendering artifact, not
+part of the marker. Neither token occurs anywhere else in the prose tree
+(verified 2026-09-09).
 _Avoid_: dialect card, shell
 
 **Pair**:

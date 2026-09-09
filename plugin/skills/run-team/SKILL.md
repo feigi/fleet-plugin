@@ -77,11 +77,16 @@ member passing a `name` fails with `teammates cannot spawn teammates`, so
 specialists are dispatched **unnamed**. Say so in a fallback reviewer's prompt, or
 it silently downgrades to a solo review. See references/member-lifecycle.md.
 
-**Fresh context per member.** One agent, one unit of work, gone. Never
+**Fresh context per member.** One member, one unit of work, gone. Never
 `subagent_type: "fork"` (inherits your whole conversation). Never re-task a
-finished agent — `SendMessage` resumes its transcript and drags the old ticket in.
-Refill = **new** agent, **new** name. `SendMessage` is still right for pinging a
-member for a report it owes, or resuming a truncated reply.
+finished member — waking it drags the old ticket back in. Refill = **new**
+member, **new** name. Sending is still right for pinging a live member for a
+report it owes, or resuming a truncated reply — never for handing a finished
+member the next ticket.
+
+CLAUDE: `SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.
+OMP: `hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
+
 See references/member-lifecycle.md.
 
 **You read your instruments out of a tree every member can write to — re-check
@@ -1555,16 +1560,11 @@ nothing leaves it no gate at all.
 > relay that never comes strands the finding. Its transcript is at the output file
 > named in your spawn result, and its report is the last record:
 >
-> ```
-> tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'
-> ```
+> CLAUDE: retrieve via `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` — never read the whole file, it is the full JSONL transcript and will overflow your context. Pinging is not retrieval and never becomes one: `SendMessage` to a finished subagent returns `had no active task; resumed from transcript` without the report (~15 pinged in one run, 0 retrieved).
+> OMP: the tail/jq recipe does not apply — a depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); reach it directly instead, by its full dotted id (`<member>.<helper>`), via `hub send` — delivered, woken, no transcript workaround needed.
 >
-> **Never read the whole file** — it is the full JSONL transcript and will
-> overflow your context. **Pinging is not retrieval and never becomes one:**
-> `SendMessage` to a finished subagent returns `had no active task; resumed from
-> transcript` without the report (~15 pinged in one run, 0 retrieved). If the file
-> yields nothing, ask the controller by name. Only when neither works is the
-> finding **unchecked** — defer and file it, and say so in the body. This is
+> If retrieval comes back empty, ask the controller by name. Only when neither
+> works is the finding **unchecked** — defer and file it, and say so in the body. This is
 > `review-and-fix.md`'s **Specialists** rule; it reaches you here because the
 > steps that point at it are the ones you skip.
 >
@@ -2458,16 +2458,21 @@ only if it changes what they do *now*.
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot finds the head moved after `ready-to-merge` was applied | `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
-| Member silent or truncated | `SendMessage` to ping or resume — same unit of work |
+| Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | New member, new name, prompt carries inherited state |
 
 A red PR never silently becomes `ready-to-merge`.
 
-**A killed member cannot be resumed** — `SendMessage` does nothing for dead, and a
-spend limit kills every member at once. Recovery is a fresh agent, fresh name
-(`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`) whose prompt states what it inherits;
-reviewers that went idle on CI recover as a **finisher, not a re-review** once
+Settle outcome and liveness are different facts — and a different state
+machine on each harness, not the same table with two spellings. Recovery is a
+fresh member, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`)
+whose prompt states what it inherits.
+
+CLAUDE: idle or truncated still answers `SendMessage`; a killed member answers nothing, and a spend limit kills every member at once.
+OMP: `hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally — a bucket Claude's triad has no slot for.
+
+Reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
 
 Audit every worktree before dispatching replacements with
