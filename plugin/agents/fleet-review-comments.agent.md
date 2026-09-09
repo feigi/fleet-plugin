@@ -7,7 +7,8 @@ thinking-level: medium
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `comment-analyzer`
-     agent (cached under ~/.claude/plugins/cache/claude-plugins-official/, marketplace plugin now fully replaced),
+     agent
+     (marketplace plugin `pr-review-toolkit`, agent file `comment-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      `model: sonnet` matches review-pr.js's PREVIOUS per-call override for
      this dimension (the vendor's own frontmatter was `model: inherit`). -->
@@ -37,3 +38,5 @@ tree belongs at severity `suggestion`, never `critical` or `important`.
 
 Return your findings through the structured output contract you were given —
 never as prose.
+
+Report only; never edit, commit or push.

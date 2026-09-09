@@ -71,6 +71,25 @@ test("agentCallOptionBlocks finds every options object and stops at its own clos
   assert.match(blocks[1], /label: "b"/);
 });
 
+// Matches `model`/`effort` as an object key in every shape JS allows: bare
+// (`model:`), quoted (`"model":`/`'model':`), and computed
+// (`[modelKey]:`/`["model"]:`/`['effort']:`). Review finding on #1349's PR
+// (#1361): the original bare-only regex (`\bmodel\s*:`) does not match
+// `"model":` at all — the closing quote sits between the word and the
+// colon — so a mutation as small as quoting the key would have shipped
+// silently past this guard. The computed form is included for the same
+// reason a bracket-indexed key is still a real property: `{ [x]: y }` sets
+// whatever string `x` evaluates to, and `x` being the literal `"model"` (or
+// a variable spelled `modelKey`/`modelOverride`/… — the bracket's CONTENTS,
+// not just a literal) is the shape a reviewer next time might reach for to
+// route around a bare-word check.
+function hasTierKey(block, name) {
+  const bare = new RegExp(`\\b${name}\\s*:`);
+  const quoted = new RegExp(`["']${name}["']\\s*:`);
+  const computed = new RegExp(`\\[[^\\]]*${name}[^\\]]*\\]\\s*:`, "i");
+  return bare.test(block) || quoted.test(block) || computed.test(block);
+}
+
 // Mutation-tested: this must RED the moment a `model`/`effort` key is
 // reintroduced anywhere in an audited file's `agent(` call, and must NOT red
 // on a comment mentioning either word (review-pr.js's own removal comments
@@ -81,31 +100,42 @@ for (const [name, source] of Object.entries(FILES)) {
     const blocks = agentCallOptionBlocks(code);
     assert.ok(blocks.length > 0, `${name}: no agent( call found at all — update this test if the file's shape changed`);
     for (const block of blocks) {
-      assert.doesNotMatch(block, /\bmodel\s*:/, `${name}: an agent() call carries \`model\` — #1349 forbids this entirely`);
-      assert.doesNotMatch(block, /\beffort\s*:/, `${name}: an agent() call carries \`effort\` — #1349 forbids this entirely`);
+      assert.ok(!hasTierKey(block, "model"), `${name}: an agent() call carries \`model\` — #1349 forbids this entirely`);
+      assert.ok(!hasTierKey(block, "effort"), `${name}: an agent() call carries \`effort\` — #1349 forbids this entirely`);
     }
   });
 }
 
-// The mutation check, run directly against a synthetic mutant rather than
+// The mutation check, run directly against synthetic mutants rather than
 // against the real files (which must stay clean): confirms the checker
-// itself actually catches the shape it claims to.
-test("the checker reds on a synthetic mutation that reintroduces model/effort", () => {
-  const mutant = 'const snap = await agent(prompt, { label: "snapshot", model: "haiku", schema: S });';
-  const blocks = agentCallOptionBlocks(stripComments(mutant));
-  assert.equal(blocks.length, 1);
-  assert.match(blocks[0], /\bmodel\s*:/);
-  const mutant2 = 'const v = await agent(prompt, { label: "verify", effort: "low", schema: S });';
-  const blocks2 = agentCallOptionBlocks(stripComments(mutant2));
-  assert.match(blocks2[0], /\beffort\s*:/);
+// itself actually catches every key SHAPE it claims to, not only the bare
+// one.
+test("the checker reds on a synthetic mutation that reintroduces model/effort, bare, quoted, or computed", () => {
+  const bareModel = agentCallOptionBlocks(stripComments('agent(prompt, { label: "snapshot", model: "haiku", schema: S });'))[0];
+  assert.ok(hasTierKey(bareModel, "model"));
+
+  const quotedModel = agentCallOptionBlocks(stripComments('agent(prompt, { label: "snapshot", "model": "haiku", schema: S });'))[0];
+  assert.ok(hasTierKey(quotedModel, "model"), "a quoted \"model\": key was not caught");
+
+  const computedModel = agentCallOptionBlocks(stripComments('agent(prompt, { label: "snapshot", [modelKey]: "haiku", schema: S });'))[0];
+  assert.ok(hasTierKey(computedModel, "model"), "a computed [modelKey]: key was not caught");
+
+  const bareEffort = agentCallOptionBlocks(stripComments('agent(prompt, { label: "verify", effort: "low", schema: S });'))[0];
+  assert.ok(hasTierKey(bareEffort, "effort"));
+
+  const quotedEffort = agentCallOptionBlocks(stripComments("agent(prompt, { label: \"verify\", 'effort': \"low\", schema: S });"))[0];
+  assert.ok(hasTierKey(quotedEffort, "effort"), "a quoted 'effort': key was not caught");
 });
 
 // The counterpart to the mutation check: a call carrying `agentType`/`agent`
 // (the legitimate dispatch lever) must NOT be flagged — a checker that reds
-// on everything is not a check.
+// on everything is not a check. `agentType` itself contains the substring
+// "Type", not "model"/"effort", so the broadened regexes must not fire on it
+// either — tested explicitly since a careless `\b${name}` widening could.
 test("the checker does not false-positive on a legitimate agentType/agent dispatch", () => {
-  const clean = 'const r = await agent(prompt, { label: "review:x", agentType: "fleet-ctl:fleet-review-correctness", schema: S });';
-  const blocks = agentCallOptionBlocks(stripComments(clean));
-  assert.doesNotMatch(blocks[0], /\bmodel\s*:/);
-  assert.doesNotMatch(blocks[0], /\beffort\s*:/);
+  const clean = agentCallOptionBlocks(stripComments(
+    'agent(prompt, { label: "review:x", agentType: "fleet-ctl:fleet-review-correctness", schema: S });',
+  ))[0];
+  assert.ok(!hasTierKey(clean, "model"));
+  assert.ok(!hasTierKey(clean, "effort"));
 });

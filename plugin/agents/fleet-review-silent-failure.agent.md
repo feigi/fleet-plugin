@@ -7,7 +7,8 @@ thinking-level: high
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `silent-failure-hunter`
-     agent (cached under ~/.claude/plugins/cache/claude-plugins-official/, marketplace plugin now fully replaced),
+     agent
+     (marketplace plugin `pr-review-toolkit`, agent file `silent-failure-hunter.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      The vendor's frontmatter was `model: inherit` with no per-call override
      either, so it ran at whatever the session inherited — a value this port
@@ -46,3 +47,5 @@ you did not execute belongs at severity `suggestion`, never `critical` or
 
 Return your findings through the structured output contract you were given —
 never as prose.
+
+Report only; never edit, commit or push.

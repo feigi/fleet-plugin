@@ -7,7 +7,8 @@ thinking-level: high
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `code-simplifier`
-     agent (cached under ~/.claude/plugins/cache/claude-plugins-official/, marketplace plugin now fully replaced),
+     agent
+     (marketplace plugin `pr-review-toolkit`, agent file `code-simplifier.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      `model: opus` matches that agent's own frontmatter pin. Unlike the
      vendor original (which edits code directly), this dispatch is
@@ -43,3 +44,5 @@ cleaner.
 
 Return your findings through the structured output contract you were given —
 never as prose, and never as an applied edit.
+
+Report only; never edit, commit or push.

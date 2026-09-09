@@ -7,7 +7,7 @@ thinking-level: high
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `code-reviewer` agent
-     (~/.claude/plugins/cache/claude-plugins-official/<pr-review marketplace plugin, now removed>/agents/code-reviewer.md),
+     (marketplace plugin `pr-review-toolkit`, agent file `code-reviewer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      `model: opus` matches that agent's own frontmatter pin. Adapted, not
      copied verbatim: the vendor's freeform "Output Format"/confidence-score
@@ -41,3 +41,5 @@ Return your findings through the structured output contract you were given —
 never as prose. `severity: critical` is reserved for defects that would ship
 a real bug; `important` for issues a careful reviewer should still block on;
 `suggestion` for everything you did not execute.
+
+Report only; never edit, commit or push.

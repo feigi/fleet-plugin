@@ -7,7 +7,8 @@ thinking-level: medium
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `pr-test-analyzer`
-     agent (cached under ~/.claude/plugins/cache/claude-plugins-official/, marketplace plugin now fully replaced),
+     agent
+     (marketplace plugin `pr-review-toolkit`, agent file `pr-test-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      `model: sonnet` matches review-pr.js's PREVIOUS per-call override for
      this dimension (the vendor's own frontmatter was `model: inherit` with
@@ -43,3 +44,5 @@ scope for every negative claim.
 
 Return your findings through the structured output contract you were given —
 never as prose.
+
+Report only; never edit, commit or push.

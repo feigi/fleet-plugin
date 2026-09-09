@@ -2,7 +2,7 @@
 // ruling on #1296). The controller loads THIS file (never review-core.js or
 // review-pr.js directly) through the Resolver, from an `eval` cell:
 //
-//   const path = (await Bun.$`~/.fleet/bin/fleet-run --path scripts/review-eval.mjs`.text()).trim();
+//   const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
 //   const { runReviewOnOmp } = await import(path);
 //   const result = await runReviewOnOmp({ pr, branch, worktree, testCmd, scratch });
 //

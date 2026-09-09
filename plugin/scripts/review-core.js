@@ -40,9 +40,14 @@
 // (review-pr-snapshot-path.test.mjs's "the head compare in usableDiff and
 // snapshotMissing are the same expression"), now applied at file scope
 // instead of expression scope. review-core-parity.test.mjs is the pin: it
-// extracts each shared declaration from both files and asserts the text is
-// identical modulo the one thing that is ALLOWED to differ — the `agentType`
-// string on each `DEFAULT_DIMENSIONS` entry, bare here
+// runs each shared declaration from BOTH copies through the same fixtures
+// (review-core.js's imported normally; review-pr.js's lifted out of its
+// source text, the technique every other review-pr.js test file already
+// uses) and asserts identical OUTPUT — behavior parity, not text identity,
+// since review-core.js deliberately drops review-pr.js's historical
+// rationale comments (see this file's own "Pure functions" section header).
+// The one thing ALLOWED to differ in VALUE, not merely in comment, is the
+// `agentType` string on each `DEFAULT_DIMENSIONS` entry, bare here
 // (`fleet-review-<key>`, already omp's native agent-lookup form) versus
 // namespaced in review-pr.js (`fleet-ctl:fleet-review-<key>`, the Task
 // tool's `<plugin>:<agent>` convention). Both spellings live in the same

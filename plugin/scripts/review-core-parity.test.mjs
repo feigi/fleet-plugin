@@ -32,6 +32,27 @@ test("usableDiff agrees on both sides", () => {
   for (const f of fixtures) assert.equal(core.usableDiff(f), prFn(f), JSON.stringify(f));
 });
 
+test("readRules agrees on both sides", () => {
+  const prFn = lift(CODE, "readRules", "diffPath, stats, snap");
+  const snap = { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", prHead: "abc123def" };
+  const fixtures = [
+    // A usable diff — the "read it first" branch.
+    ["/s/pr7/run-ab/pr.diff", null, snap],
+    // No diff, but a real file list.
+    [null, { paths: [{ path: "a.js", loc: 5 }, { path: "b.js", loc: 3 }] }, { ...snap, diffPath: undefined }],
+    // A truncated file list.
+    [null, { paths: [{ path: "a.js", loc: 5 }], truncated: 100 }, { ...snap, diffPath: undefined }],
+    // Rejected + skew (diffPath dropped, but the snapshot still reported one that mismatched head).
+    [null, null, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", head: "zzzzzz" }],
+    // Rejected + empty (diffLines falsy).
+    [null, null, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0 }],
+    // Nothing at all — no diff, no file list.
+    [null, null, { ...snap, diffPath: undefined }],
+  ];
+  for (const [diffPath, stats, s] of fixtures)
+    assert.equal(core.readRules(diffPath, stats, s), prFn(diffPath, stats, s), JSON.stringify({ diffPath, stats, s }));
+});
+
 test("resolveTestCmd agrees on both sides", () => {
   const prFn = lift(CODE, "resolveTestCmd", "explicit, snap");
   assert.equal(core.resolveTestCmd("node --test", null), prFn("node --test", null));
