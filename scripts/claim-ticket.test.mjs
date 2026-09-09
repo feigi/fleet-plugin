@@ -435,19 +435,22 @@ test("runner: a relative argument through the shared ancestor is refused from ou
 // and an ordinary directory out there is refused as vendored. That is the
 // "opposite error" the guard's comment names, reached from its false-refusal
 // side rather than its false-green one.
-// The ancestor is built symlinked rather than borrowed from `$TMPDIR` — macOS
-// resolves `/var/folders/…` to `/private/var/…` and would supply one for free,
-// Linux would not — and the absolute row names the outside tree THROUGH the
-// link, sharing no literal prefix with `$root`: what clears that row is the
-// walk, not any text the caller happened to write.
+// One row per guard arm, no absolute spelling of either, and that is measured
+// rather than an omission. Directory: `$resolved` comes from `pwd -P`, which
+// erases the spelling, so an absolute argument reaches the case with
+// `$root`/`$resolved`/`$shared` byte-identical to the relative row's and can
+// differ only in the spelling term `${arg##/*}` — which the test directly above
+// already pins as its control leg, and which the unreadable-directory test below
+// pins again through a symlinked ancestor. Measured over nine mutations of this
+// guard: none reds an absolute row here while leaving the relative row and those
+// two green. File: an absolute `$arg` carrying a `node_modules` segment is
+// exempted from the file arm's resolved check by design (#401), so that row
+// would pin nothing here either.
 // The file arm runs the same walk under `$fshared` (#424), so the file row here
 // holds that anchor with the same fixture; the vendored legs it must keep
 // refusing are the two tests above, which this one deliberately does not repeat.
 test("runner: a resolution outside the worktree is judged from the divergence, not the runner's own root", () => {
-  const real = mkdtempSync(join(tmpdir(), "anc-"));
-  const spelled = `${real}-link`;
-  symlinkSync(real, spelled);
-  const ancestor = join(spelled, "node_modules");
+  const ancestor = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
   mkdirSync(ancestor, { recursive: true });
   const a = apply(SUITE, SCRIPT, ancestor);
   // A sibling of the repo, so the argument diverges ABOVE the worktree while
@@ -458,10 +461,7 @@ test("runner: a resolution outside the worktree is judged from the divergence, n
   writeFileSync(join(outside, "o.test.mjs"), PASSES);
   symlinkSync(outside, join(a.wt, "outlink"));
   symlinkSync(join(outside, "o.test.mjs"), join(a.wt, "outlink.test.mjs"));
-  // No absolute FILE spelling: an absolute `$arg` carrying a `node_modules`
-  // segment is exempted from the file arm's resolved check by design (#401), so
-  // that row would pin nothing here.
-  for (const arg of ["outlink", outside, "outlink.test.mjs"]) {
+  for (const arg of ["outlink", "outlink.test.mjs"]) {
     const r = a.run(arg);
     assert.equal(r.status, 0, `${arg}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m, arg);
