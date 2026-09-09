@@ -39,7 +39,7 @@ The five `wayfinder:*` labels are mandated by `/wayfinder`'s own `SKILL.md` (`:2
 `:65`, `:113`) and were created here 2026-09-08. See `docs/agents/issue-tracker.md`
 "Wayfinding operations". A wayfinder ticket is a **decision** ticket worked one per
 session by `/wayfinder`, never an implementation ticket — but the thing keeping it
-out of a fleet wave is not its triage role. `scripts/candidates.mjs`'s `EXCLUDE`
+out of a fleet wave is not its triage role. `plugin/scripts/candidates.mjs`'s `EXCLUDE`
 negates all five `wayfinder:*` labels as their own clauses, unconditionally, so a
 wayfinder ticket never enters a candidate scan whatever role it carries. A
 `ready-for-agent` wayfinder ticket is therefore documentation of readiness, not a
@@ -48,12 +48,12 @@ is. Selection for these runs through the map's frontier query instead — see
 `docs/agents/issue-tracker.md` "Wayfinding operations".
 
 That exclusion is `candidates.mjs`'s alone. The cockpit's pool query
-(`scripts/board.mjs`, `gh issue list --label ready-for-agent`) carries no
+(`plugin/scripts/board.mjs`, `gh issue list --label ready-for-agent`) carries no
 `wayfinder:*` exclusion, so such a ticket still shows as a pool card while never
 being dispatchable. Measured 2026-09-09, both directions:
 
 ```
-node scripts/candidates.mjs --require-label ready-for-agent      # no wayfinder issue
+node plugin/scripts/candidates.mjs --require-label ready-for-agent      # no wayfinder issue
 gh issue list --label ready-for-agent --state open --json number,labels \
   --jq '.[] | select([.labels[].name] | any(startswith("wayfinder:")))'
 ```
@@ -63,7 +63,7 @@ but that cannot be actioned in this repo right now — usually because the fix l
 outside it (`skills/*` is gitignored bar `caveman-compress` and `fleet`, and
 `~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
 criteria are an open blocker's output. It is the fleet's "real, decided, but out of
-reach" marker, which is why `scripts/candidates.mjs` excludes it too: an agent
+reach" marker, which is why `plugin/scripts/candidates.mjs` excludes it too: an agent
 dispatched at one would find nothing it is allowed to edit.
 
 Two properties hold across the whole `onhold` population. Re-run the query rather

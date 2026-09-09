@@ -37,8 +37,8 @@ issue=${issue%%-*}
 case $issue in ''|*[!0-9]*|0?*) issue=0 ;; esac
 
 gen=$here/.agent-test.sh
-if ! materialize=$(cd "$here" && ./scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
-  printf 'agent-test: could not materialize the runner from scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
+if ! materialize=$(cd "$here" && ./plugin/scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
+  printf 'agent-test: could not materialize the runner from plugin/scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
   exit 1
 fi
 exec "$gen" "$@"

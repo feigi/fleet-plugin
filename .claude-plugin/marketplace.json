@@ -9,7 +9,12 @@
   "plugins": [
     {
       "name": "fleet-ctl",
-      "source": "./",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/feigi/fleet-plugin.git",
+        "path": "plugin",
+        "ref": "main"
+      },
       "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
       "category": "productivity"
     }

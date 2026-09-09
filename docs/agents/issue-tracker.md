@@ -47,7 +47,7 @@ looks arbitrary.
 
 Write one deliberate `Closes #N` and give every other issue mention a word in
 front of it. That is how `next-ticket` has fleet implementers open PRs
-(`skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
+(`plugin/skills/next-ticket/SKILL.md` step 7): narrative and `Closes #N`
 go into one `--body`, so the single keyword there is the deliberate one, and
 their PRs are the model.
 
@@ -105,7 +105,7 @@ and a label you invent beyond these five will do the same. Add any new one with
 
 These labels are **not** triage roles; `docs/agents/triage-labels.md` governs those
 five separately. A `wayfinder:*` issue belongs to a different pipeline and must stay
-out of the fleet's candidate scan — see `scripts/candidates.mjs`'s `EXCLUDE`.
+out of the fleet's candidate scan — see `plugin/scripts/candidates.mjs`'s `EXCLUDE`.
 
 - **Map**: a single issue holding the Notes / Decisions-so-far / Fog body. `gh issue create --label "wayfinder:map"`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue, carrying its `wayfinder:<type>` label. Create it in one call: `gh issue create --parent <map> --label "wayfinder:<type>" --title ... --body-file ...` (verified on gh 2.100.0; `--parent` takes a number or a URL). `gh api --method POST repos/<owner>/<repo>/issues/<map>/sub_issues -F sub_issue_id=<child-db-id>` is the fallback for linking an issue that already exists — note it wants the child's numeric **database id**, not its `#number`. Where sub-issues aren't enabled at all, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Record the type in the child body as well as the label, so a body read alone still names it. Once claimed, the ticket is assigned to the driving dev.
