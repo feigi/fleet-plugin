@@ -98,11 +98,12 @@ const FILES = [
     stale: [/prove-merge\.sh:173/],
     live: ["prove-merge.sh has"],
   },
-  {
-    path: ["workflows", "review-pr.js"],
-    stale: [/code-reviewer\.md:21/],
-    live: ["Review Scope"],
-  },
+  // #1349 retired this entry outright rather than leaving it to rot: the
+  // vendored `code-reviewer.md` this citation pointed at (via its "Review
+  // Scope" section) no longer exists anywhere in this port — the fork ruled
+  // on #1303 drops the whole `pr-review-toolkit` dependency, so there is no
+  // construct left to name here. Removed with the ticket that obsoleted it,
+  // not left as a stale form for a future sweep to catch.
   {
     path: ["skills", "run-team", "SKILL.md"],
     stale: [/board\.mjs:153/],

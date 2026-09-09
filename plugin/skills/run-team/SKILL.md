@@ -1303,18 +1303,23 @@ report recovery, never the exit code alone.
 
 ### Reviewers
 
-**You run the review yourself: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch,
-worktree, testCmd, scratch}})`, once per PR. That is the default path.** Only you
-can run it — members have no `Workflow` tool (verified 2026-07-30 for the
-`general-purpose` subagent; tool availability is per-agent-type, so recheck after
-a harness change rather than treating it as permanent) — and it is the only path
-on which `selectDimensions` sizes the fan-out to the diff and the verify budget
-follows severity. Hand-dispatched, neither executes at all: sizing falls back to a
-reviewer's own judgement and nothing budgets the adversarial pass. It cuts one
-immutable snapshot, verifies every critical/important finding adversarially, and
-has `agent()` return **into the script**, so no report can go undelivered and you
-relay nothing — the delivery failure that cost one fleet five reports on one PR
-and four on another.
+**You run the review yourself, once per PR. That is the default path.**
+
+CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.
+OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path scripts/review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.
+
+Only you can run it — members have no `Workflow` tool on Claude and no reason
+to run `eval` themselves on omp (verified 2026-07-30 for the
+`general-purpose` subagent on Claude; tool availability is per-agent-type, so
+recheck after a harness change rather than treating it as permanent) — and it
+is the only path on which `selectDimensions` sizes the fan-out to the diff
+and the verify budget follows severity. Hand-dispatched, neither executes at
+all: sizing falls back to a reviewer's own judgement and nothing budgets the
+adversarial pass. It cuts one immutable snapshot, verifies every
+critical/important finding adversarially, and has `agent()` return **into
+the script**, so no report can go undelivered and you relay nothing — the
+delivery failure that cost one fleet five reports on one PR and four on
+another.
 
 **Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
 `diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*

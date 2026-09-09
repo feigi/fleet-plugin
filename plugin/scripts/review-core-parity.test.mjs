@@ -1,0 +1,212 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
+import { lift } from "./lift.mjs";
+import * as core from "./review-core.js";
+
+// The pin for the shape #1349 chose (review-core.js's own header explains
+// WHY): review-core.js is the canonical, tested source of every host-
+// independent declaration; workflows/review-pr.js keeps a text-identical
+// COPY of every pure function's CODE (comments may legitimately differ —
+// review-core.js does not repeat review-pr.js's historical rationale prose,
+// to avoid a second copy of PROSE disconnecting the way a second copy of
+// CODE already does in this repo). Behavior parity is what actually matters,
+// so every function below is run through the SAME fixtures on both sides —
+// the review-pr.js copy lifted out of its source text (the Workflow sandbox
+// forbids `import`, so this is the same technique every other review-pr.js
+// test file uses), review-core.js's copy imported normally.
+const REPO = join(import.meta.dirname, "..");
+const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const CODE = stripComments(SOURCE);
+
+test("usableDiff agrees on both sides", () => {
+  const prFn = lift(CODE, "usableDiff", "snap");
+  const fixtures = [
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", prHead: "abc123def" },
+    { runRoot: "/s/pr7/run-ab", diffPath: undefined, diffLines: 12, head: "abc123" },
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0, head: "abc123" },
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 5, head: "abc123", prHead: "zzzzzz" },
+  ];
+  for (const f of fixtures) assert.equal(core.usableDiff(f), prFn(f), JSON.stringify(f));
+});
+
+test("resolveTestCmd agrees on both sides", () => {
+  const prFn = lift(CODE, "resolveTestCmd", "explicit, snap");
+  assert.equal(core.resolveTestCmd("node --test", null), prFn("node --test", null));
+  assert.equal(core.resolveTestCmd(undefined, { testCmd: "npm test" }), prFn(undefined, { testCmd: "npm test" }));
+  assert.throws(() => core.resolveTestCmd(undefined, null));
+  assert.throws(() => prFn(undefined, null));
+});
+
+test("decodeArgs agrees on both sides", () => {
+  const prFn = lift(CODE, "decodeArgs", "a");
+  assert.deepEqual(core.decodeArgs('{"pr":7}'), prFn('{"pr":7}'));
+  assert.deepEqual(core.decodeArgs({ pr: 7 }), prFn({ pr: 7 }));
+  assert.deepEqual(core.decodeArgs(undefined), prFn(undefined));
+});
+
+test("snapshotMissing agrees on both sides", () => {
+  const prFn = lift(CODE, "snapshotMissing", "snap, runRootPrefix");
+  const PREFIX = "/scr/pr7/run-";
+  const ROOT = `${PREFIX}ab12cd34`;
+  const SNAP = `${ROOT}/snapshot-abc123`;
+  const fixtures = [
+    null,
+    { path: SNAP, head: "abc", runRoot: ROOT, pathVerified: true },
+    { path: SNAP, head: "abc", runRoot: ROOT, pathVerified: false },
+    { head: "abc", runRoot: ROOT, pathVerified: true },
+    { path: SNAP, runRoot: ROOT, pathVerified: true },
+    { path: SNAP, head: "abc", runRoot: "/somewhere/else", pathVerified: true },
+  ];
+  for (const f of fixtures) assert.equal(core.snapshotMissing(f, PREFIX), prFn(f, PREFIX), JSON.stringify(f));
+});
+
+test("unrunReason/unrunEntries/unrunCrashed agree on both sides", () => {
+  const seam = [
+    "unrunReason(review)",
+    "unrunEntries(review, dimension)",
+    "unrunCrashed(reviewed, dimensions)",
+  ];
+  const src = seam.map((sig) => {
+    const name = sig.slice(0, sig.indexOf("("));
+    const params = sig.slice(sig.indexOf("(") + 1, -1);
+    return `function ${name}(${params}) {\n${
+      CODE.match(new RegExp(`^function ${name}\\(${params.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\) \\{([\\s\\S]*?)^\\}$`, "m"))[1]
+    }}`;
+  }).join("\n");
+  const { unrunReason: prUnrunReason, unrunEntries: prUnrunEntries, unrunCrashed: prUnrunCrashed } = new Function(
+    `${src}\nreturn { unrunReason, unrunEntries, unrunCrashed };`,
+  )();
+
+  const reviews = [
+    null,
+    { test_run: null },
+    { test_run: { command: "node --test", tests: 0 } },
+    { test_run: { command: "node --test", tests: 10, pass: 10, fail: 0 }, findings: [] },
+    { test_run: { command: "node --test", tests: 10, pass: 3, fail: 0 }, findings: [] },
+    { test_run: { command: "node --test", tests: 10, pass: 0, fail: 2 }, findings: [] },
+  ];
+  for (const r of reviews) {
+    assert.equal(core.unrunReason(r), prUnrunReason(r), JSON.stringify(r));
+    assert.deepEqual(core.unrunEntries(r, "correctness"), prUnrunEntries(r, "correctness"));
+  }
+  const reviewed = [{ findings: [] }, null, { test_run: { command: "x", tests: 0 } }];
+  const dims = [{ key: "a" }, { key: "b" }, { key: "c" }];
+  assert.deepEqual(core.unrunCrashed(reviewed, dims), prUnrunCrashed(reviewed, dims));
+});
+
+test("verdictFor agrees on both sides", () => {
+  const prFn = lift(CODE, "verdictFor", "dispatched, votes");
+  const fixtures = [
+    [0, []],
+    [2, []],
+    [2, [{ refuted: true }, { refuted: true }]],
+    [2, [{ refuted: true }, { refuted: false }]],
+    [2, [{ refuted: false }, { refuted: false }]],
+  ];
+  for (const [dispatched, votes] of fixtures)
+    assert.deepEqual(core.verdictFor(dispatched, votes), prFn(dispatched, votes), JSON.stringify({ dispatched, votes }));
+});
+
+test("selectDimensions agrees on both sides", () => {
+  const prAll = new Function(
+    `${CODE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m)[0]}\nreturn DEFAULT_DIMENSIONS;`,
+  )();
+  const prSizeTierProfiles = CODE.match(/^const SIZE_TIER_PROFILES = new Set\(\[[^\]]*\]\);$/m)[0];
+  const prSizeTierDims = CODE.match(/^const SIZE_TIER_DIMS = new Set\(\[[^\]]*\]\);$/m)[0];
+  const fnSrc = CODE.match(/^function selectDimensions\(all, stats\) \{[\s\S]*?^\}$/m)[0];
+  const prFn = new Function(`${prSizeTierProfiles}\n${prSizeTierDims}\n${fnSrc}\nreturn selectDimensions;`)();
+
+  const statsFixtures = [
+    null,
+    { profile: "production" },
+    { profile: "production", hasTests: false },
+    { profile: "production", hasSrc: false },
+    { profile: "single-file" },
+    { profile: "single-file", hasTests: true },
+    { profile: "small", hasTests: true },
+    { docsOnly: true },
+    { truncated: 5 },
+  ];
+  for (const stats of statsFixtures) {
+    const coreKeys = core.selectDimensions(core.DEFAULT_DIMENSIONS, stats).map((d) => d.key);
+    const prKeys = prFn(prAll, stats).map((d) => d.key);
+    assert.deepEqual(coreKeys, prKeys, JSON.stringify(stats));
+  }
+});
+
+test("resolveDimensions agrees on both sides", () => {
+  const prAll = new Function(
+    `${CODE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m)[0]}\nreturn DEFAULT_DIMENSIONS;`,
+  )();
+  const prFn = lift(CODE, "resolveDimensions", "override, all");
+  const overrides = [undefined, null, ["correctness", "comments"], [{ key: "x", prompt: "p", agentType: "a" }]];
+  for (const o of overrides) {
+    const coreResult = core.resolveDimensions(o, core.DEFAULT_DIMENSIONS)?.map((d) => d.key) ?? null;
+    const prResult = prFn(o, prAll)?.map((d) => d.key) ?? null;
+    assert.deepEqual(coreResult, prResult, JSON.stringify(o));
+  }
+  // Both refuse a `model` field identically.
+  assert.throws(() => core.resolveDimensions([{ key: "x", prompt: "p", agentType: "a", model: "opus" }], core.DEFAULT_DIMENSIONS));
+  assert.throws(() => prFn([{ key: "x", prompt: "p", agentType: "a", model: "opus" }], prAll));
+});
+
+// The DEFAULT_DIMENSIONS arrays: same keys, same prompts, same length — and
+// the ONE allowed difference between the two copies (see review-core.js's own
+// header) is the `agentType` string, namespaced on the Claude side.
+test("DEFAULT_DIMENSIONS agrees on key/prompt and differs from review-pr.js's copy ONLY by the fleet-ctl: namespace", () => {
+  const prAll = new Function(
+    `${CODE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m)[0]}\nreturn DEFAULT_DIMENSIONS;`,
+  )();
+  assert.equal(core.DEFAULT_DIMENSIONS.length, prAll.length);
+  for (let i = 0; i < prAll.length; i++) {
+    assert.equal(core.DEFAULT_DIMENSIONS[i].key, prAll[i].key);
+    assert.equal(core.DEFAULT_DIMENSIONS[i].prompt, prAll[i].prompt);
+    assert.equal(prAll[i].agentType, `fleet-ctl:${core.DEFAULT_DIMENSIONS[i].agentType}`);
+    assert.equal(prAll[i].model, undefined);
+    assert.equal(core.DEFAULT_DIMENSIONS[i].model, undefined);
+  }
+});
+
+// The snapshot and verifier dispatches: review-pr.js's `agentType` literal is
+// the SAME namespacing rule applied to the two agentType strings
+// review-core.js's `runReview` hardcodes (not part of DEFAULT_DIMENSIONS).
+test("the snapshot and verifier dispatches follow the same fleet-ctl: namespacing rule", () => {
+  assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-snapshot"/);
+  assert.match(readFileSync(join(REPO, "scripts", "review-core.js"), "utf8"), /agentType:\s*"fleet-review-snapshot"/);
+  assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-verifier"/);
+  assert.match(readFileSync(join(REPO, "scripts", "review-core.js"), "utf8"), /agentType:\s*"fleet-review-verifier"/);
+});
+
+// FINDINGS_SCHEMA/VERDICT_SCHEMA: structurally identical (comments aside).
+test("FINDINGS_SCHEMA and VERDICT_SCHEMA are structurally identical between the two copies", () => {
+  const prFindings = new Function(`${CODE.match(/^const FINDINGS_SCHEMA = \{[\s\S]*?^\};$/m)[0]}\nreturn FINDINGS_SCHEMA;`)();
+  const prVerdict = new Function(`${CODE.match(/^const VERDICT_SCHEMA = \{[\s\S]*?^\};$/m)[0]}\nreturn VERDICT_SCHEMA;`)();
+  assert.deepEqual(core.FINDINGS_SCHEMA, prFindings);
+  assert.deepEqual(core.VERDICT_SCHEMA, prVerdict);
+});
+
+// `resumeFor` is the ONE declared exception (review-core.js's own header
+// comment says so) — pin that the two Claude-branch messages AGREE on every
+// word except the resume verb itself, rather than pinning them identical.
+test("resumeFor's claude branch matches review-pr.js's own message, up to the resume verb", () => {
+  const prFn = lift(CODE, "resumeFor", "unverified");
+  const unverified = [{ refutersDispatched: 2 }];
+  const prResult = prFn(unverified);
+  const coreResult = core.resumeFor(unverified, "claude");
+  assert.deepEqual(coreResult.crashed, prResult.crashed);
+  const prClaim = prResult.resume.split("Resume before deferring them: ")[0];
+  const coreClaim = coreResult.resume.split("Resume before deferring them: ")[0];
+  assert.equal(coreClaim, prClaim, "the shared claim clause diverged between the two copies");
+  assert.match(prResult.resume, /resumeFromRunId/);
+  assert.match(coreResult.resume, /resumeFromRunId/);
+});
+
+test("resumeFor's omp branch reports re-run, never resumeFromRunId", () => {
+  const unverified = [{ refutersDispatched: 2 }];
+  const result = core.resumeFor(unverified, "omp");
+  assert.match(result.resume, /re-run/);
+  assert.doesNotMatch(result.resume, /resumeFromRunId/);
+});
