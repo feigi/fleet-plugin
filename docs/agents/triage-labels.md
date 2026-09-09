@@ -38,22 +38,46 @@ replacement for one.
 The five `wayfinder:*` labels are mandated by `/wayfinder`'s own `SKILL.md` (`:21`,
 `:65`, `:113`) and were created here 2026-09-08. See `docs/agents/issue-tracker.md`
 "Wayfinding operations". A wayfinder ticket is a **decision** ticket worked one per
-session by `/wayfinder`, never an implementation ticket, so it must never carry
-`ready-for-agent` — that label is the fleet's dispatch queue.
+session by `/wayfinder`, never an implementation ticket — but the thing keeping it
+out of a fleet wave is not its triage role. `scripts/candidates.mjs`'s `EXCLUDE`
+negates all five `wayfinder:*` labels as their own clauses, unconditionally, so a
+wayfinder ticket never enters a candidate scan whatever role it carries. A
+`ready-for-agent` wayfinder ticket is therefore documentation of readiness, not a
+dispatch trigger; do not strip the role off one to make it safe, because it already
+is. Selection for these runs through the map's frontier query instead — see
+`docs/agents/issue-tracker.md` "Wayfinding operations".
 
-`onhold` is **not** a spare label. Measured 2026-09-08: five issues carry it — #49,
-#50, #51, #52, #78 — and every one of them carries `ready-for-agent` alongside it.
-It marks a ticket that triage has fully specified but that cannot be actioned in
-this repo right now, in each of those cases because the fix lives outside it
-(`skills/*` is gitignored bar `caveman-compress` and `fleet`, and `~/.agents/skills/`
-is not in this repo at all). It is the fleet's "real, decided, but out of reach"
-marker, which is why `scripts/candidates.mjs` excludes it: an agent dispatched at
-one would find nothing it is allowed to edit.
+That exclusion is `candidates.mjs`'s alone. The cockpit's pool query
+(`scripts/board.mjs`, `gh issue list --label ready-for-agent`) carries no
+`wayfinder:*` exclusion, so such a ticket still shows as a pool card while never
+being dispatchable. Measured 2026-09-09, both directions:
 
-Read `onhold` on its own as incomplete — pair it with the triage role beside it.
+```
+node scripts/candidates.mjs --require-label ready-for-agent      # no wayfinder issue
+gh issue list --label ready-for-agent --state open --json number,labels \
+  --jq '.[] | select([.labels[].name] | any(startswith("wayfinder:")))'
+```
 
-It is **also**, temporarily, the stopgap keeping wayfinder issues out of
-`next-ticket`'s fallback scan. That is a co-opt of a label with a real meaning and
-those issues carry no `ready-for-agent`, so the pairing rule above does not hold for
-them. Issue #1306 replaces it with a proper `wayfinder:*` exclusion and strips
-`onhold` from them.
+`onhold` is **not** a spare label. It marks a ticket that triage has fully specified
+but that cannot be actioned in this repo right now — usually because the fix lives
+outside it (`skills/*` is gitignored bar `caveman-compress` and `fleet`, and
+`~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
+criteria are an open blocker's output. It is the fleet's "real, decided, but out of
+reach" marker, which is why `scripts/candidates.mjs` excludes it too: an agent
+dispatched at one would find nothing it is allowed to edit.
+
+Two properties hold across the whole `onhold` population. Re-run the query rather
+than trusting a roster written here — the population moves:
+
+```
+gh issue list --search label:onhold --state all --json number,labels
+```
+
+- Every issue it returns also carries `ready-for-agent`. So read `onhold` on its own
+  as incomplete — pair it with the triage role beside it.
+- No `wayfinder:*` issue is among them. `onhold` used to double as the stopgap
+  keeping wayfinder issues out of `next-ticket`'s fallback scan; issue #1306 (closed
+  2026-09-08) replaced that co-opt with the direct `wayfinder:*` exclusion now in
+  `EXCLUDE`, and stripped `onhold` from those issues.
+
+Both held on 2026-09-09.
