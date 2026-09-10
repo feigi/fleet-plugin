@@ -902,24 +902,49 @@ for arg do
         # shell ubuntu-latest's \`#!/bin/sh\` actually runs), \`cd\`'s
         # failure message is identical for both causes — "can't cd to sub"
         # whether \$fparent is unsearchable or does not exist at all — so
-        # parsing it could not have told them apart. \`stat\` on \$fparent
-        # needs a search bit on ITS OWN parent, not on itself, so
-        # \`[ -d \$fparent ]\` still answers true when \$fparent exists but
-        # cannot be entered; \`-x\` then asks the one question
-        # \`[ -e \$arg ]\` above could not get past.
-        # Bounded to \$fparent existing at all: a path whose PARENT is
-        # simply missing (\`nosuchdir/x.test.mjs\`) is the ordinary typo
-        # this arm already reports correctly and must keep reporting —
-        # \`-x\` on a nonexistent \$fparent is false too, so the \`[ -d ]\`
-        # term is what keeps that input on the typo side rather than the
-        # unanswerable one.
+        # parsing it could not have told them apart. \`stat\` on a directory
+        # needs a search bit on ITS OWN parent, not on itself, so \`[ -d ]\`
+        # still answers true for a directory that exists but cannot be
+        # entered; \`-x\` then asks the one question \`[ -e \$arg ]\` above
+        # could not get past.
+        # Checking \$fparent alone is not enough: an unsearchable GRANDparent
+        # or higher ancestor (\`t/u/a.test.mjs\` with \`t\`, not \`u\`, chmod'd
+        # 0600) leaves \`[ -d \$fparent ]\` itself false — resolving \`t/u\`
+        # needs search on \`t\`, which is exactly the bit missing — so the
+        # single-level check fell through to the same "does not exist"
+        # misreport this whole guard exists to fix, one level further up.
+        # The loop below walks from \$fparent toward the root, stopping at
+        # the first ancestor that STATS at all (\`[ -d \$p ]\` true, which
+        # needs search only on THAT ancestor's own parent) and reporting
+        # unsearchable only if that one lacks \`-x\`. An ancestor closer to
+        # the root than the block cannot be reached by the walk, but it
+        # does not need to be: the first one the walk DOES reach is the one
+        # blocking resolution of everything below it.
+        # Bounded the same way the single-level check was: a chain that
+        # never resolves any existing directory (\`nosuchdir/x.test.mjs\`,
+        # walked up to a bare relative name with nothing left to check) is
+        # the ordinary typo this arm already reported correctly, not a
+        # permission fault — \`faultparent\` stays empty and the loop ends
+        # having found nothing to blame.
         *)
           case "\$arg" in
             */*) fparent=\${arg%/*} ;;
             *) fparent=. ;;
           esac
-          if [ -d "\$fparent" ] && [ ! -x "\$fparent" ]; then
-            printf 'agent-test: cannot read %s — %s is not searchable, refusing rather than reporting it missing\n' "\$arg" "\$fparent" >&2
+          faultparent=
+          p=\$fparent
+          while [ -n "\$p" ]; do
+            if [ -d "\$p" ]; then
+              [ -x "\$p" ] || faultparent=\$p
+              break
+            fi
+            case "\$p" in
+              */*) p=\${p%/*} ;;
+              *) p= ;;
+            esac
+          done
+          if [ -n "\$faultparent" ]; then
+            printf 'agent-test: cannot read %s — %s is not searchable, refusing rather than reporting it missing\n' "\$arg" "\$faultparent" >&2
           else
             printf 'agent-test: %s does not exist\n' "\$arg" >&2
           fi

@@ -589,6 +589,18 @@ test("runner: a dash-named directory refuses naming the parsing hazard, not unre
 // parser (pinned above); once find actually descends, a permission denied
 // down there is what `cannot read every path under` is for, and this pins
 // that the parsing fix did not also swallow real unreadability.
+// The wrapper text alone (`cannot read every path under -locked`) does not
+// discriminate: it is byte-identical whether find died on the dash before
+// reading anything, or genuinely hit this fixture's chmod 0 `sub`. find's
+// OWN stderr is never redirected by the runner, so it reaches this test
+// alongside the wrapper — measured, the two causes leave distinct text
+// there: `find: .../sub: Permission denied` for the real fault this test
+// means to pin, versus `find: illegal option -- i` (BSD) / `find: unknown
+// predicate '...'` (GNU) for the argument-parsing failure this PR's `./`
+// routing prevents. Asserting on find's message too, and ruling out the
+// parsing signature, is what makes this test fail if the `./` routing
+// this PR adds is reverted — checked directly: reverting it leaves this
+// test green under the wrapper-only assertion alone.
 test("runner: an unreadable dash-named directory still reports the real read fault", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads every directory");
   const a = apply(SUITE);
@@ -601,6 +613,9 @@ test("runner: an unreadable dash-named directory still reports the real read fau
     assert.notEqual(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stderr, /cannot read every path under -locked/);
     assert.doesNotMatch(r.stderr, /holds tests, but node reads/);
+    assert.match(r.stderr, /Permission denied/, `find must have actually descended into -locked rather than dying on its dash: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /illegal option|unknown predicate/i,
+      `find's own argument-parsing failure text must not be present, or this is the parsing hazard, not the read fault: ${r.stderr}`);
   } finally {
     chmodSync(join(locked, "sub"), 0o755);
   }
@@ -825,6 +840,29 @@ test("runner: a file behind an unsearchable parent refuses naming the permission
     assert.match(asDir.stderr, /cannot read every path under locked/);
   } finally {
     chmodSync(locked, 0o755);
+  }
+});
+
+// The fix above checks $fparent alone, which is the immediate parent —
+// an unsearchable GRANDparent leaves `[ -d $fparent ]` itself false
+// (resolving `t/u` needs search on `t`, the bit actually missing), so a
+// single-level check falls through to "does not exist" one level further
+// up than the fixture above pins. This walks the fixture one directory
+// deeper: `t` (not `u`) is chmod'd 0600, so `t/u` can never be
+// resolved at all, and the ancestor actually blocking it — `t`, not
+// `t/u` — is what the message must name.
+test("runner: a file behind an unsearchable grandparent refuses naming that ancestor, not a typo", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const a = apply({ ...SUITE, "t/u/a.test.mjs": PASSES });
+  const tdir = join(a.wt, "t");
+  chmodSync(tdir, 0o600);
+  try {
+    const r = a.run("t/u/a.test.mjs");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read t\/u\/a\.test\.mjs — t is not searchable/);
+    assert.doesNotMatch(r.stderr, /does not exist/);
+  } finally {
+    chmodSync(tdir, 0o755);
   }
 });
 
