@@ -132,6 +132,12 @@ blockers=""
 # string stays byte-identical to the blocked checkpoint's rather than growing a
 # second blockers slot only this one caller uses.
 #
+# release-ticket.test.mjs's "block() then die() compose a receipt that still
+# parses as JSON, blockers in order (#1080)" pins this by name: two `block()`
+# calls, then a `die()` splice, composed for real rather than reasoned about
+# by hand the way PR #983 did. Mutation-verified both directions — `block`
+# dropping its comma, or appending two instead of one — reds that test.
+#
 # The `||` arm is the receipt's only voice. `|| die` is what `block` and `halt`
 # use and is unavailable here — it would recurse — so a bare `&&` chain left BOTH
 # its failures mute: a failed `jstr`, and a failed write. The second is the worse
