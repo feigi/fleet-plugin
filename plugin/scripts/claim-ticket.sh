@@ -680,7 +680,46 @@ for arg do
       -*) findarg="./\$arg/" ;;
       *) findarg="\$arg/" ;;
     esac
-    found=\$(find "\$findarg" -name node_modules -prune -o -type f -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
+    # GNU find (ubuntu-latest CI) answers \`-type f\` straight from the
+    # dirent's own \`d_type\` field when the filesystem provides one (ext4
+    # does) — no \`stat\`/\`lstat\` at all — and \`-print\` only ever needs the
+    # name, so the pair together can name a file behind a directory that is
+    # READABLE but not SEARCHABLE (chmod 600: \`r\` present, \`x\` missing)
+    # without ever touching it. BSD find (macOS's /usr/bin/find) carries no
+    # such shortcut and always stats, so the identical fixture that finds
+    # here in one process EACCESes there, and the divergence reaches all
+    # the way to node: the \$arg this runner handed it looked found, and
+    # node then fails to actually open it, misreporting the runner's own
+    # permission fault as node's "Could not find". Measured directly:
+    # inside an ubuntu:latest container, as a non-root user, \`find
+    # locked/ -type f -print\` on a \`chmod 600 locked\` directory prints
+    # \`locked/a.test.mjs\` and exits 0 — strace shows find never calls
+    # \`stat\`/\`lstat\` on that path at all, only \`getdents64\` on \`locked\`
+    # itself, which the missing search bit does not gate.
+    # \`-perm\` cannot be answered from a dirent — it needs the file's real
+    # mode bits, which only \`stat\` carries — so adding it to the SAME
+    # \`-type f\` test forces the very stat the shortcut above was skipping,
+    # surfacing the same EACCES BSD find already hits (measured, same
+    # container) and reaching the existing \`||\` below exactly as BSD's own
+    # failure does. \`-400\` ("owner-read set"), not GNU's \`/444\`
+    # ("any of owner/group/other read"): measured directly on this
+    # machine, this BSD find rejects \`/444\` outright ("illegal mode
+    # string") — the GNU any-bits spelling is not the portable one here,
+    # \`-N\` ("these bits, at minimum") is. Owner-read is what every fixture
+    # and every real worktree in this repo actually has: files this runner
+    # discovers are created and chmod'd by the one user running it, never
+    # handed over from another owner, so the narrower bit costs nothing a
+    # real invocation would ever hit.
+    # A second, distinct \`find\` invocation was tried here first, auditing
+    # \`-type d ! -perm -u+x\` on its own — it works standalone, but this
+    # arm's own stub-based tests (e.g. "an invalid UTF-8 byte in a
+    # discovered path does not drop it") replace \`find\` on \$PATH with a
+    # single canned script answering whatever it is asked, and a SECOND
+    # invocation gets the identical canned output as the first, corrupting
+    # a check that was never meant to see it. One call, on the existing
+    # \`-type f\` term, is what stays inside every fixture's contract that
+    # this runner calls \`find\` exactly once per directory argument.
+    found=\$(find "\$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
     # Byte semantics for the two tools that read find's output, because a
     # filename is bytes and neither tool is told which. Measured on macOS with
     # a name holding \377, under en_US.UTF-8: \`grep\` drops that line silently
