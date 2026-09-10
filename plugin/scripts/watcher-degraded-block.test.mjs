@@ -108,12 +108,16 @@ echo "SLEEP $1"
 const TICK_LOOP = "while :; do";
 assert.ok(BLOCK.includes(TICK_LOOP), `the block no longer opens with '${TICK_LOOP}'; the harness caps the run on that line — update this test`);
 
-function run(env, ticks, shell = "sh") {
+function run(env, ticks, shell = "sh", { strict = false } = {}) {
   const harness = BLOCK
     .replace("~/.fleet/bin/fleet-run ci-state.mjs", "ci-state.mjs")
     .replace(TICK_LOOP, `tick=0\nwhile tick=$((tick+1)); [ "$tick" -le ${ticks} ]; do`);
   const path = join(DIR, "harness.sh");
-  writeFileSync(path, harness);
+  // #1334: `strict` prefixes `set -eu` onto the harness so a regression to an
+  // unseeded latch (unbound under -u) or an unguarded `st=$(...)` (killed
+  // under -e by ci-state.mjs's ordinary non-zero not-green exit) fails LOUD
+  // here instead of shipping silent again.
+  writeFileSync(path, strict ? `set -eu\n${harness}` : harness);
   return execFileSync(shell, [path], {
     encoding: "utf8",
     env: { ...process.env, ...env, PATH: `${BIN}:${process.env.PATH}` },
@@ -232,6 +236,23 @@ test("a non-numeric budget read is an outage, not a budget", () => {
 test("an ordinary not-green PR never trips the outage path", () => {
   const out = run({ MODE: "normal", PRS: "7" }, 3);
   assert.equal(count(out, "WATCHER"), 0, `not-green is a frequent, ordinary state that exits non-zero:\n${out}`);
+});
+
+test("#1334: the block survives set -eu on tick 1, on every probe path", () => {
+  // budget_out/list_out/blind were read before ever being assigned — unbound
+  // under set -u — and `st=$(ci-state.mjs ...)` was an unguarded assignment
+  // from a command that exits non-zero on the ordinary not-green state,
+  // killing the shell under set -e before the block's own payload-gate logic
+  // ever ran. Both reintroduced the exact silence #784 exists to remove, and
+  // neither is visible to any test above since none of them run under -eu.
+  const healthy = run({ MODE: "normal", PRS: "7" }, 2, "sh", { strict: true });
+  assert.equal(count(healthy, "SLEEP"), 2, `set -eu: an ordinary not-green payload died before tick 2:\n${healthy}`);
+  const budget = run({ RL: "5", PRS: "7" }, 2, "sh", { strict: true });
+  assert.equal(count(budget, "SLEEP"), 2, `set -eu: a budget outage died before tick 2:\n${budget}`);
+  const list = run({ LISTMODE: "err", PRS: "7" }, 2, "sh", { strict: true });
+  assert.equal(count(list, "SLEEP"), 2, `set -eu: an open-PR list outage died before tick 2:\n${list}`);
+  const payload = run({ MODE: "empty", PRS: "7" }, 2, "sh", { strict: true });
+  assert.equal(count(payload, "SLEEP"), 2, `set -eu: an unparseable payload died before tick 2:\n${payload}`);
 });
 
 test("a payload with no verdict at all is an outage, not a reading", () => {
