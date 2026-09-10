@@ -618,8 +618,19 @@ emit(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join(";
 // pretty view already went to stderr. On the quiet hot path drop `jobs` and
 // `missing` too — `reasons` already states every failing/absent job, so they
 // are pure duplication in the two longest-lived contexts that poll this.
+//
+// no-ci drops them unconditionally, quiet or not — never folded into the
+// `!quiet` check above, which is about duplication, not about what was read.
+// `jobs`/`missing` stay at their `let jobs = []`/`let missing = []`
+// initialisers on this path (the no-ci branch never reaches the run-binding
+// arm that assigns them), so shipping them read as "checked, nothing
+// missing" to a caller gating on `missing.length` when no workflow was ever
+// read to check against. `emitRateLimited()` above already answers the same
+// "nothing was read" question by omitting `jobs`/`missing` rather than
+// emitting them empty; this is the no-ci arm agreeing with it, one
+// convention for both places in this file that never bind a run.
 const payload = { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
-if (!quiet) Object.assign(payload, { jobs, missing });
+if (!quiet && !noCi) Object.assign(payload, { jobs, missing });
 emit(1, `${JSON.stringify(payload)}\n`);
 
 // Exit vocabulary unchanged: 0 only when the gate is satisfied, 1 when it is

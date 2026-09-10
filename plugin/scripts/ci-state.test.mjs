@@ -802,6 +802,41 @@ test("the outage payload reports no CI state it could not observe", () => {
   }
 });
 
+// #927: `jobs`/`missing` used to ship as `[]` on the no-ci arm too — module
+// scope initialises `let jobs = []`/`let missing = []` and the no-ci branch
+// never reaches the run-binding code that reassigns them, so every no-ci
+// payload carried them empty. An empty `missing` is a READING — "nothing is
+// missing" — and no-ci never took a reading: there was no workflow file to
+// derive an expected-job set from, let alone a run to check it against.
+// `emitRateLimited()` above already answers the identical "nothing was read"
+// question by omitting `jobs`/`missing` rather than shipping them empty —
+// covered by "the outage payload reports no CI state it could not observe"
+// above, which this test does not duplicate — and this pins that the no-ci
+// arm now answers it the same way.
+test("a payload for a question never asked — no-ci — omits `jobs`/`missing` rather than shipping them empty", () => {
+  const noCi = run([]);
+  assert.equal(noCi.status, 1, noCi.stdout + noCi.stderr);
+  assert.equal(noCi.payload.verdict, "no-ci");
+
+  for (const field of ["jobs", "missing"]) {
+    assert.ok(
+      !(field in noCi.payload),
+      `no-ci never binds a run, so \`${field}\` must be absent, not an empty array — and the payload reads ${JSON.stringify(noCi.payload)}`,
+    );
+  }
+});
+
+// The declared-away flip only moves the exit code (#111) — it must not start
+// shipping `jobs`/`missing` back in, since `--declare-no-ci` still never binds
+// a run for this script to read either field from.
+test("no CI + --declare-no-ci: `jobs`/`missing` stay absent — the flag changes the gate, not what was read", () => {
+  const r = run(["--declare-no-ci"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  for (const field of ["jobs", "missing"]) {
+    assert.ok(!(field in r.payload), `\`${field}\` must stay absent under --declare-no-ci too — got ${JSON.stringify(r.payload)}`);
+  }
+});
+
 // #890: the same one-line/one-terminator contract the verdict payload is held to
 // below, at the other call site that writes a payload to stdout. emit() appends
 // no newline of its own, so each site supplies its own: supplying none runs this
