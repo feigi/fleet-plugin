@@ -1,5 +1,5 @@
 // Regression gate for release-ticket.sh, which deletes a claim's worktree and
-// branch. Zero deps: `node --test scripts/release-ticket.test.mjs`.
+// branch. Zero deps: `node --test plugin/scripts/release-ticket.test.mjs`.
 //
 // It is guarded by four preconditions and every one of them is the only thing
 // standing between a member's work and a delete, so each has a case here that

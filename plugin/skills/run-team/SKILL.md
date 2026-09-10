@@ -1497,7 +1497,7 @@ site's reason rather than copying a shared one.
 
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
-repo `node --test scripts/*.test.mjs`. Pass the same string to the
+repo `node --test plugin/scripts/*.test.mjs`. Pass the same string to the
 workflow, to the fix-applier, and to the finisher — whose duty-2 mutation gate
 runs it too — so every gate runs one command. Omit it from the
 workflow args and `review-pr.js` now DERIVES it from the repo under review

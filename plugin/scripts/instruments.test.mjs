@@ -31,7 +31,7 @@
 // fixture repo is measured regardless of where the copy of instruments.sh
 // invoked actually lives, and the live checkout is never touched.
 //
-// Zero deps: `node --test scripts/instruments.test.mjs`.
+// Zero deps: `node --test plugin/scripts/instruments.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

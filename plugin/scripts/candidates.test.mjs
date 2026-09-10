@@ -1348,7 +1348,7 @@ const SPEC_COCKPIT_DESIGN = fileURLToPath(
 // `TypeError` that names a file and a line but never names `OPTIONS` as the
 // thing to look at. Measured on this tree by appending an unguarded
 // module-scope `.match(...)[0]` to this file and one-lining `OPTIONS`:
-// `node --test scripts/candidates.test.mjs` then reports one
+// `node --test plugin/scripts/candidates.test.mjs` then reports one
 // synthetic test, zero passes, and that TypeError.
 //
 // Reformatting `OPTIONS` — one-lining it, wrapping it in `Object.freeze`,

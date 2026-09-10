@@ -1,5 +1,5 @@
 // Regression gate for reap.sh, the merge probe that authorizes deleting a
-// [gone] branch. Zero deps: `node --test scripts/reap.test.mjs`.
+// [gone] branch. Zero deps: `node --test plugin/scripts/reap.test.mjs`.
 //
 // The load-bearing case is the failed-probe one: a `git cherry` that dies
 // (issue #264) must KEEP the branch, never reap it. `cmd | grep -q` takes

@@ -1,6 +1,6 @@
 // Regression gate for json.sh, the JSON-escaping library every fleet script
 // that emits a payload now sources. Zero deps:
-// `node --test scripts/json.test.mjs`.
+// `node --test plugin/scripts/json.test.mjs`.
 //
 // The library exists because the same ~40 lines were copy-pasted into
 // inflight.sh, release-ticket.sh and no-undo-audit.sh, and every fix to the

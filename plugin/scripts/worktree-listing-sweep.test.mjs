@@ -25,7 +25,7 @@
 //                 into worktree.sh is a separate change with its own risk, and
 //                 this gate would notice if someone did fold it.
 //
-// Zero deps: `node --test scripts/worktree-listing-sweep.test.mjs`.
+// Zero deps: `node --test plugin/scripts/worktree-listing-sweep.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

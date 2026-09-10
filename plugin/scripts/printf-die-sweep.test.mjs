@@ -24,7 +24,7 @@
 //     regression risk — `printf "$msg\n"` would eat it; `printf '%s\n' "$msg"`
 //     does not).
 //
-// Zero deps: `node --test scripts/printf-die-sweep.test.mjs`.
+// Zero deps: `node --test plugin/scripts/printf-die-sweep.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

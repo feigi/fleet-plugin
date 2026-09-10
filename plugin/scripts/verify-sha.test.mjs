@@ -1,6 +1,6 @@
 // Regression gate for verify-sha.sh, the check that says whether a member's
 // reported SHA is really on the branch it claims. Zero deps:
-// `node --test scripts/verify-sha.test.mjs`.
+// `node --test plugin/scripts/verify-sha.test.mjs`.
 //
 // A shell script that reasons about git history can only be tested against real
 // git history, so the cases below that reason about history build a throwaway

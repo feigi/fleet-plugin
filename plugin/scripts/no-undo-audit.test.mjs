@@ -1,5 +1,5 @@
 // Regression gate for no-undo-audit.sh, all three of its outcomes. Zero deps:
-// `node --test scripts/no-undo-audit.test.mjs`.
+// `node --test plugin/scripts/no-undo-audit.test.mjs`.
 //
 // The audit answers one question — is this worktree safe to rebase — and the
 // only thing that makes it refuse is uncommitted work in the worktree. It used

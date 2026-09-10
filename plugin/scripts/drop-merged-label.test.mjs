@@ -4,7 +4,7 @@
 // adds the label, release-ticket.sh drops it on a bail, this drops it on a
 // merge.
 //
-// Zero deps: `node --test scripts/drop-merged-label.test.mjs`.
+// Zero deps: `node --test plugin/scripts/drop-merged-label.test.mjs`.
 // No git repo needed — the script never touches git, only `gh`, so `gh` is the
 // only thing stubbed, on PATH.
 //

@@ -390,7 +390,7 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // `never conclude inside one run.**` with `never conclude inside one run —
   // advisory, at your discretion, skip when time is short.**` in
   // run-team/SKILL.md — the start anchor survives — then run
-  // `node --test scripts/*.test.mjs`: the suite stays green and
+  // `node --test plugin/scripts/*.test.mjs`: the suite stays green and
   // the deleted pin's message appears nowhere in the output. Quote that whole
   // span, not the `one run.**` tail: the tail is not unique in that SKILL, and
   // its other hit is the `**Why not decide inside one run.**` heading that

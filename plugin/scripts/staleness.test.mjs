@@ -1,6 +1,6 @@
 // Regression gate for staleness.mjs, the phase-0 probe that decides whether a
 // shortlisted ticket is still live. Zero deps:
-// `node --test scripts/staleness.test.mjs`.
+// `node --test plugin/scripts/staleness.test.mjs`.
 //
 // A script that reasons about git history can only be tested against real git
 // history, so every case below builds a throwaway bare origin plus a clone in

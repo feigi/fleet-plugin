@@ -34,7 +34,7 @@
 // exists to report, where a fix landed on the one call a ticket named and every
 // call beside it stayed broken.
 //
-// Zero deps: `node --test scripts/unattended-git-sweep.test.mjs`.
+// Zero deps: `node --test plugin/scripts/unattended-git-sweep.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

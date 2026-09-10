@@ -96,7 +96,7 @@
 // uncaught throw at module load, which node could only report as one synthetic
 // failing test at line 1 of this file.
 //
-// Zero deps: `node --test scripts/muted-git-guard-sweep.test.mjs`.
+// Zero deps: `node --test plugin/scripts/muted-git-guard-sweep.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

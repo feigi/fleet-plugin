@@ -89,7 +89,7 @@
 //                                  loudly instead of waiting on each caller's
 //                                  guard to notice.
 //
-// Zero deps: `node --test scripts/repo-root.test.mjs`.
+// Zero deps: `node --test plugin/scripts/repo-root.test.mjs`.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
