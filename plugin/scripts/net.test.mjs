@@ -202,7 +202,11 @@ test("the budget is what spares the slow fetch, not the absence of a watchdog", 
   assert.equal(r.stdout, "", "no payload: nothing was answered");
   assert.doesNotMatch(r.stderr, /(Terminated|Killed):/,
     "and the shell's own notice for the job it reaped stays OFF the caller's stderr, above the caller's own reason — "
-    + "without the `2>/dev/null` on net.sh's `wait` this line reads `Terminated: 15  GIT_TERMINAL_PROMPT=0 …` under "
-    + "bash-as-sh and a bare `Killed: 9` under the dash CI runs, both measured. Capitalised, so the script's own "
-    + "`and was killed` is not what this matches");
+    + "without the `2>/dev/null` on net.sh's `wait` it leaks instead. The regex takes EITHER signal because "
+    + "net_kill_tree sends TERM then KILL with no pause, so which one reaps the job is a race, not something "
+    + "either shell decides — the shell only fixes the FORM: bash-as-sh names the job (the long form), dash's "
+    + "notice is bare. Measured for #1042 by replaying net_git's own mechanism against a plain `sleep`: on "
+    + "this machine, `/bin/sh` (bash 3.2.57) and `/bin/dash` both gave TERM, every run — a quiet-system "
+    + "sample, not a signal either shell is owed, which is why this regex accepts both rather than pinning "
+    + "one. Capitalised, so the script's own `and was killed` is not what this matches");
 });

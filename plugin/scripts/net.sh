@@ -331,9 +331,18 @@ net_git() {
   # That is the SLEEPER, and it is the whole of what `( )` buys. The git job is
   # a separate notice on a separate path: it is reaped by an explicit `wait`,
   # which announces a signalled child from INSIDE the subshell, onto the same
-  # stderr. Measured on the watchdog-killed path, with the subshell and without
-  # it alike, bash-as-sh printed `Terminated: 15  GIT_TERMINAL_PROMPT=0 …` and
-  # dash a bare `Terminated: 15`, above the caller's own reason — and a caller
+  # stderr, on the watchdog-killed path, with the subshell and without it alike.
+  #
+  # WHICH signal that notice names is not the shell's call: net_kill_tree above
+  # sends TERM then KILL with no pause, so whichever one reaps the job first is
+  # a race, not a property either shell owns. What the shell DOES fix is the
+  # FORM — bash-as-sh names the job (the long form); dash's notice is bare, just
+  # `<signal>: <n>`. Measured for #1042 by replaying net_git's own mechanism
+  # against a plain `sleep`: on this machine, `/bin/sh` (bash 3.2.57) and
+  # `/bin/dash` both gave TERM, every run — a quiet-system sample, not a signal
+  # either shell is owed, which is why a caller has to accept either.
+  #
+  # Either way the notice lands above the caller's own reason, and a caller
   # that CAPTURES stdout got it too, so there was never a path where nothing
   # printed it. The `2>/dev/null` on the `wait` below is what covers that one.
   (
