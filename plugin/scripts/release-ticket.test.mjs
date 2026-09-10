@@ -3293,7 +3293,9 @@ test("a sibling worktree REMOVE between the registry count and git's listing is 
   // entry git silently dropped because it could not read it. The recount is
   // what tells a worktree that is merely gone (a real removal landed in the
   // window) from one that is unreadable (a real, standing corruption) —
-  // the case right below this one pins that the second kind still refuses.
+  // "an entry git cannot read INSIDE is unknown too, not just an unreadable
+  // entry" above pins that the second kind still refuses even after the
+  // recount.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const sibling = claim(r.w, 77, "other-claim");
@@ -3304,6 +3306,8 @@ test("a sibling worktree REMOVE between the registry count and git's listing is 
 
   const { code, json, stderr } = release(r, c);
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(sibling.wt), false,
+    "the shim's mutation actually removed the sibling -- otherwise no real race was exercised");
   assert.equal(code, 0, `a concurrent remove must not abort a releasable claim: ${stderr}`);
   assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed it");
   assert.equal(json.released, true);
