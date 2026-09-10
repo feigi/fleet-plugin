@@ -492,6 +492,17 @@ const RC_FAILED_LINE =
 const UNREACHED_LINE =
   "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read";
 const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
+/**
+ * `stashLine`'s sibling: every matching line, not just the first. `.find()`
+ * above answers "what is the first sentence", and nothing built on it can
+ * therefore see a SECOND stash-entry line appear — so a future edit that
+ * breaks the if/elif/elif/else below into independent `if`s, letting two
+ * arms fire for one state, would go unnoticed. The design rule for that
+ * chain is one sentence per state — each `elif` branch names its own state
+ * and prints exactly one line for it (no-undo-audit.sh:424-431, 490-505);
+ * the length-1 assertions below are what actually enforces it. #1210.
+ */
+const stashLines = (r) => r.stderr.split("\n").filter((l) => l.includes("stash entries (repo-global"));
 
 // `$wt` is caller-supplied and reaches the operator through a step header.
 // Under `#!/bin/sh` an `echo` operand expands escapes, so a worktree whose
@@ -709,6 +720,7 @@ test("a corrupted stash ref passes git's own diagnostic through to the operator"
     `${UNKNOWN_LINE} — fatal: bad object refs/stash`,
     "git named the fault; the audit must append it to the generic line, ` — ` and all, not substitute for it and not run it together",
   );
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // #376: the fourth `show-ref` state, and the only one that used to print a
@@ -738,6 +750,7 @@ test("a deleted refs/stash with an intact reflog reports unknown, not zero", (t)
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
   assert.equal(r.json.stash, null, "two recoverable stash commits are still named in the reflog — `0` is not a claim the audit can make");
   assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // The reflog path has to come from the repo's REAL gitdir. `$wt` is routinely a
@@ -761,6 +774,7 @@ test("the orphaned-reflog probe resolves against the shared gitdir, not $wt/.git
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null, "the reflog is one directory up, and the probe has to follow git there");
   assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // Every other fixture in this file spawns the script with `cwd === $wt`, which
@@ -781,6 +795,7 @@ test("the orphaned-reflog probe resolves from a cwd that is not $wt", (t) => {
   assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null, "the reflog is under $wt — resolved against the caller's cwd instead, it reads as absent and reports the `0` #376 removes");
   assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // #570: the reflog path is resolved lazily, and resolving it needs search
@@ -827,6 +842,7 @@ for (const [why, prepare] of [
     assert.equal(r.jsonError, null, `payload must parse — this used to be zero bytes; got ${r.jsonError?.message}\n${r.stdout}`);
     assert.equal(r.json.stash, null, "the probe could not look, so a number is not a claim it can make");
     assert.equal(stashLine(r), UNREACHED_LINE);
+    assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — the ticket's own measured mutation (elif -> fi/if) doubles this state, #1210");
     // The other half of the ruling: this state must not borrow the sentence
     // that asserts what the reflog CONTAINS.
     assert.notEqual(stashLine(r), ORPHAN_LINE);
@@ -868,6 +884,7 @@ test("a healthy stash under an unsearchable reflog directory keeps the sentence 
   assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.stash, null);
   assert.equal(stashLine(r), UNKNOWN_LINE, "this state never reaches #570's probe — its line must not move");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // The other half of #376, and the more expensive one to get wrong. This script
@@ -902,6 +919,7 @@ for (const [why, prepare] of [
     assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
     assert.equal(r.json.stash, 0, "nothing is recoverable here — reporting `unknown` would be a worse bug than the one #376 fixes");
     assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 0");
+    assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
   });
 }
 
@@ -948,6 +966,7 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
   assert.equal(r.json.stash, 2, "known-wrong: the true count is 3, and this pins the undercount printing as exact rather than `unknown`");
   assert.doesNotMatch(r.stderr, /unknown/, "the cross-check misses this state, which is the whole ceiling");
   assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // #482: one shape of that ceiling, and the one that is not a ceiling any more.
@@ -987,6 +1006,7 @@ test("a corrupt loose object behind a non-tip stash entry reports unknown, not t
   assert.equal(r.json.stash, null, "a list call that failed is not a count — the payload must say unknown, never the short number");
   assert.equal(stashLine(r).slice(0, RC_FAILED_LINE.length), RC_FAILED_LINE, "the operator-facing line must name THIS cause, not just say unknown — the other two say the list came back empty, which this state is not");
   assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault outright; the audit must pass it through rather than guess");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
@@ -1027,6 +1047,7 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
     /\/no\\clue\/objects/,
     "`echo` expands the `\\c` and truncates the line there — the path must arrive verbatim",
   );
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
   const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
   assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
 });
@@ -1073,6 +1094,7 @@ test("the states `stash list` is silent about print the unknown line unchanged",
     const r = audit(c);
     assert.equal(r.json.stash, null, `${path.join("/")}: fixture must reach the unknown branch`);
     assert.equal(stashLine(r), UNKNOWN_LINE, `${path.join("/")}: git said nothing, so nothing may be appended`);
+    assert.equal(stashLines(r).length, 1, `${path.join("/")}: exactly one stash-entry line — a broken elif chain would let a second one through, #1210`);
     // Reflog only. The `stash list` this branch captures is silent in both
     // states, but git as a whole is not: in the `refs/stash` case the
     // `show-ref` cross-check above prints `fatal: git show-ref: bad ref
