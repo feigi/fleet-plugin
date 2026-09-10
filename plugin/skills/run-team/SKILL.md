@@ -2367,13 +2367,24 @@ failures arrive as *wrong findings*, not errors:
   member happens to be running it. Measured: an implementer chasing its own
   stalled run issued `pkill -f "claim-ticket.test.mjs"` and killed a
   `node --test claim-ticket.test.mjs inflight.test.mjs` that was not its own. The
-  victim sees a `cancelled`/exit-144 it cannot attribute, on a run it did not
-  abort — and a killed **baseline** compared against a clean mutant is a wrong
-  measurement that reads exactly like a real result. Ports are derived per issue
-  precisely so collisions are impossible; the process table has no such
-  partition. Members report a stalled run to the controller instead of
-  pattern-killing it, and the controller re-checks any measurement taken in the
-  window.
+  victim's output carries no summary block at all — no `tests`/`pass`/`fail`/
+  `cancelled` counts — or the process exits `rc=137`: SIGKILL means the harness
+  never lived long enough to report, so `cancelled` is the wrong thing to
+  search for, it only appears once a run survives to write one. Check instead
+  that the summary block is present and its count matches what you expected to
+  run: a kill can turn a green into a red or a short count, but it cannot
+  fabricate a complete block whose counts sum, so a full `pass N / fail 0 /
+  cancelled 0` at the expected N is kill-proof by construction — scrutinize
+  reds and short counts from inside the incident window first, and a killed
+  **baseline** compared against a clean mutant is a wrong measurement that
+  reads exactly like a real result. Ports are derived per issue precisely so
+  collisions are impossible, but the process table has no such partition and
+  no pattern narrows it either — every member runs the identical
+  `node --test scripts/*.test.mjs` from the same checkout, so nothing in the
+  command line isolates one member's run; clearing only your own leftover
+  process needs its PID, not a pattern. Members report a stalled run to the
+  controller instead of pattern-killing it, and the controller re-checks any
+  measurement taken in the window.
 
   **Do not guess the victim — the blast radius is the machine, not the wave.**
   In that incident the controller reasoned from dispatch scope to "almost
