@@ -655,7 +655,71 @@ for arg do
     case "/\${arg##/*}/ /\${resolved#"\$shared"}/" in
       */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "\$arg" >&2; exit 1 ;;
     esac
-    found=\$(find "\$arg/" -name node_modules -prune -o -type f -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
+    # BSD find (macOS's /usr/bin/find) and GNU find (ubuntu-latest CI's)
+    # both read a leading \`-\` in \$arg as the start of an option cluster,
+    # trailing slash and all, and neither is rescued by a POSIX \`--\`:
+    # measured directly on this machine and inside an ubuntu:latest
+    # container, \`find "-dir/" ...\` and \`find -- "-dir/" ...\` both die
+    # before reading a single path — "illegal option -- i" (BSD) /
+    # "unknown predicate \`-dir/'" (GNU), rc 1 either way — for a directory
+    # that holds tests and is otherwise perfectly readable. That refusal
+    # used to fall into the \`||\` below and report it as an unreadable
+    # subtree, which is not what happened: find never got far enough to
+    # try reading anything.
+    # \`./\$arg/\` is not a workaround for that refusal, it is a spelling
+    # that never triggers it — measured the same two ways, \`find
+    # "./-dir/" ...\` runs clean (rc 0) on both finds, and still follows a
+    # dash-led SYMLINK argument exactly as the trailing slash already does
+    # for every other spelling (measured against a symlink named
+    # \`-slink\`). So a dash-led \$arg is routed through \`./\` before it
+    # ever reaches find, and the \`||\` below is left with only its own
+    # job: whatever non-zero status find returns from here on is a genuine
+    # read fault, not its argument parser losing a fight with the caller's
+    # spelling.
+    case "\$arg" in
+      -*) findarg="./\$arg/" ;;
+      *) findarg="\$arg/" ;;
+    esac
+    # GNU find (ubuntu-latest CI) answers \`-type f\` straight from the
+    # dirent's own \`d_type\` field when the filesystem provides one (ext4
+    # does) — no \`stat\`/\`lstat\` at all — and \`-print\` only ever needs the
+    # name, so the pair together can name a file behind a directory that is
+    # READABLE but not SEARCHABLE (chmod 600: \`r\` present, \`x\` missing)
+    # without ever touching it. BSD find (macOS's /usr/bin/find) carries no
+    # such shortcut and always stats, so the identical fixture that finds
+    # here in one process EACCESes there, and the divergence reaches all
+    # the way to node: the \$arg this runner handed it looked found, and
+    # node then fails to actually open it, misreporting the runner's own
+    # permission fault as node's "Could not find". Measured directly:
+    # inside an ubuntu:latest container, as a non-root user, \`find
+    # locked/ -type f -print\` on a \`chmod 600 locked\` directory prints
+    # \`locked/a.test.mjs\` and exits 0 — strace shows find never calls
+    # \`stat\`/\`lstat\` on that path at all, only \`getdents64\` on \`locked\`
+    # itself, which the missing search bit does not gate.
+    # \`-perm\` cannot be answered from a dirent — it needs the file's real
+    # mode bits, which only \`stat\` carries — so adding it to the SAME
+    # \`-type f\` test forces the very stat the shortcut above was skipping,
+    # surfacing the same EACCES BSD find already hits (measured, same
+    # container) and reaching the existing \`||\` below exactly as BSD's own
+    # failure does. \`-400\` ("owner-read set"), not GNU's \`/444\`
+    # ("any of owner/group/other read"): measured directly on this
+    # machine, this BSD find rejects \`/444\` outright ("illegal mode
+    # string") — the GNU any-bits spelling is not the portable one here,
+    # \`-N\` ("these bits, at minimum") is. Owner-read is what every fixture
+    # and every real worktree in this repo actually has: files this runner
+    # discovers are created and chmod'd by the one user running it, never
+    # handed over from another owner, so the narrower bit costs nothing a
+    # real invocation would ever hit.
+    # A second, distinct \`find\` invocation was tried here first, auditing
+    # \`-type d ! -perm -u+x\` on its own — it works standalone, but this
+    # arm's own stub-based tests (e.g. "an invalid UTF-8 byte in a
+    # discovered path does not drop it") replace \`find\` on \$PATH with a
+    # single canned script answering whatever it is asked, and a SECOND
+    # invocation gets the identical canned output as the first, corrupting
+    # a check that was never meant to see it. One call, on the existing
+    # \`-type f\` term, is what stays inside every fixture's contract that
+    # this runner calls \`find\` exactly once per directory argument.
+    found=\$(find "\$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "\$arg" >&2; exit 1; }
     # Byte semantics for the two tools that read find's output, because a
     # filename is bytes and neither tool is told which. Measured on macOS with
     # a name holding \377, under en_US.UTF-8: \`grep\` drops that line silently
@@ -680,6 +744,29 @@ for arg do
     # match, so under -e the shell would abort here and the refusal below would
     # never print. Read a status you care about explicitly, as find does above.
     [ -n "\$files" ] || { printf 'agent-test: no test files under %s\n' "\$arg" >&2; exit 1; }
+    # Even where find now succeeds, node's own \`--test\` CLI still cannot
+    # take what it just found: measured directly (node v26.8.1 here; CI's
+    # .nvmrc pins v26.5.0), a relative file spec that starts with \`-\`
+    # AFTER node's own internal normalisation is read as an unrecognised
+    # option, not a path — true of every file find just printed under a
+    # dash-led \$arg, whether or not it carries the \`./\` this arm routed
+    # it through: node strips that prefix before making the judgment, so
+    # \`node --test ./-dir/a.test.mjs\` still dies "bad option:
+    # -dir/a.test.mjs", the same as the unprefixed form. Only an absolute
+    # spelling escapes it, and rewriting every file this arm hands to node
+    # into one is a far larger change than this bug — it would touch what
+    # EVERY invocation passes through, not just a dash-led one.
+    # So refuse rather than \`exec\`. Letting it through trades one
+    # misdiagnosis for a worse one: node's own "bad option" prints as a
+    # FAILING TEST — exit 1, a summary that reads like a suite ran and one
+    # of its tests broke — for an argument this runner never got node to
+    # attempt. Gated on \$files being non-empty (checked above): an empty
+    # or genuinely unreadable dash-led directory keeps reporting that,
+    # unchanged, since this hazard only exists for files this arm would
+    # otherwise actually hand to node.
+    case "\$arg" in
+      -*) printf 'agent-test: %s holds tests, but node reads a relative dash-led path as an option, not a file — refusing rather than letting it run as a false failure\n' "\$arg" >&2; exit 1 ;;
+    esac
     set -- "\$@" \$files
   else
     # find only ever sees what a directory argument expanded to; a bare file
@@ -838,12 +925,70 @@ for arg do
         # to check. That is this guard's honest ceiling, not a gap in it.
         # An *existing* path is not part of it: it never reaches here.
         *[*?[]*) ;;
-        # A path that does not exist and holds no metacharacter is a typo.
-        # Alone it is loud already (node's own \`Could not find\`, exit 1) —
-        # this is for the mixed case, where node drops it and runs the rest,
-        # and the runner would otherwise report a pass for a suite that
-        # never ran.
-        *) printf 'agent-test: %s does not exist\n' "\$arg" >&2; exit 1 ;;
+        # [ -e ] above cannot tell "not there" from "could not look": stat()
+        # answers the same false whether \$arg is genuinely absent or a
+        # directory earlier in its path lacks the search bit needed to
+        # resolve the rest — POSIX gives EACCES and ENOENT no separate
+        # channel through \`[ -e ]\`, and the builtin keeps nothing past
+        # that bare result. The directory branch above already answers the
+        # identical fixture correctly one level up: \`agent-test t\` on a
+        # \`t\` chmod'd 0600 names find's own Permission denied rather than
+        # calling the suite missing; this file arm used to fall straight
+        # through to the typo case below on the same fixture, naming a
+        # permission fault as a spelling mistake.
+        # \`[ -x \$fparent ]\` is what separates them, not \`cd\`'s own text:
+        # measured inside an ubuntu:latest container running dash (the
+        # shell ubuntu-latest's \`#!/bin/sh\` actually runs), \`cd\`'s
+        # failure message is identical for both causes — "can't cd to sub"
+        # whether \$fparent is unsearchable or does not exist at all — so
+        # parsing it could not have told them apart. \`stat\` on a directory
+        # needs a search bit on ITS OWN parent, not on itself, so \`[ -d ]\`
+        # still answers true for a directory that exists but cannot be
+        # entered; \`-x\` then asks the one question \`[ -e \$arg ]\` above
+        # could not get past.
+        # Checking \$fparent alone is not enough: an unsearchable GRANDparent
+        # or higher ancestor (\`t/u/a.test.mjs\` with \`t\`, not \`u\`, chmod'd
+        # 0600) leaves \`[ -d \$fparent ]\` itself false — resolving \`t/u\`
+        # needs search on \`t\`, which is exactly the bit missing — so the
+        # single-level check fell through to the same "does not exist"
+        # misreport this whole guard exists to fix, one level further up.
+        # The loop below walks from \$fparent toward the root, stopping at
+        # the first ancestor that STATS at all (\`[ -d \$p ]\` true, which
+        # needs search only on THAT ancestor's own parent) and reporting
+        # unsearchable only if that one lacks \`-x\`. An ancestor closer to
+        # the root than the block cannot be reached by the walk, but it
+        # does not need to be: the first one the walk DOES reach is the one
+        # blocking resolution of everything below it.
+        # Bounded the same way the single-level check was: a chain that
+        # never resolves any existing directory (\`nosuchdir/x.test.mjs\`,
+        # walked up to a bare relative name with nothing left to check) is
+        # the ordinary typo this arm already reported correctly, not a
+        # permission fault — \`faultparent\` stays empty and the loop ends
+        # having found nothing to blame.
+        *)
+          case "\$arg" in
+            */*) fparent=\${arg%/*} ;;
+            *) fparent=. ;;
+          esac
+          faultparent=
+          p=\$fparent
+          while [ -n "\$p" ]; do
+            if [ -d "\$p" ]; then
+              [ -x "\$p" ] || faultparent=\$p
+              break
+            fi
+            case "\$p" in
+              */*) p=\${p%/*} ;;
+              *) p= ;;
+            esac
+          done
+          if [ -n "\$faultparent" ]; then
+            printf 'agent-test: cannot read %s — %s is not searchable, refusing rather than reporting it missing\n' "\$arg" "\$faultparent" >&2
+          else
+            printf 'agent-test: %s does not exist\n' "\$arg" >&2
+          fi
+          exit 1
+          ;;
       esac
     fi
     set -- "\$@" "\$arg"
