@@ -1,13 +1,15 @@
 // #1378. Documentation and test-file headers across this repo cited the test
 // suite as living at `scripts/<file>` — a path that does not exist. The real
 // suite root is `plugin/scripts/`. 32 tracked files carried the stale form
-// before this ticket corrected every one: 28 test-file header comments citing
-// themselves, one prose citation in `references/reaping.md`, and the
-// load-bearing pair in `commands/review-and-fix.md` and
-// `skills/run-team/SKILL.md` that hand the command to a dispatched agent as
-// an instruction, not a comment. This file is what keeps the stale form from
-// creeping back in one file at a time, the way it crept in 32 times before
-// anyone swept for it.
+// before this ticket corrected every one: 27 test-file header comments
+// citing themselves, 2 comments in non-test source files (`repo-root.mjs`
+// citing its sibling `repo-root.test.mjs`, `strip-comments.mjs` inside an
+// example string) rather than a test file citing itself, one prose citation
+// in `references/reaping.md`, and the load-bearing pair in
+// `commands/review-and-fix.md` and `skills/run-team/SKILL.md` that hand the
+// command to a dispatched agent as an instruction, not a comment. This file
+// is what keeps the stale form from creeping back in one file at a time,
+// the way it crept in 32 times before anyone swept for it.
 //
 // A DIFFERENT citation class from #516's own sweep
 // (citation-sweep-prose.test.mjs, `path.ext:NNN` line numbers) and does not
