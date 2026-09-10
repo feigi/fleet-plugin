@@ -833,14 +833,63 @@ test("CLI: --ledger followed by another flag is rejected, not read as the string
 
 // #463 fallout, and the one ordering nothing else pins: `--ledger` is read
 // above stray() and always was, so none of the cases above reaches the new
-// guard at all. `--prev` is read inside the `build` branch, where stray() also
-// sits — with the read left below it, this invocation refused with `unexpected
-// argument '9000'`, naming --port's innocent value instead of the flag
-// actually given wrong (measured). Moving the read back below stray() is what
-// this reds on.
+// guard at all. `--prev` is read once, ahead of BOTH branches' stray() calls
+// (hoisted by #1092 — see main()) — with the read moved back below either
+// stray() call, this invocation refuses with `unexpected argument '9000'`,
+// naming --port's innocent value instead of the flag actually given wrong
+// (measured). Moving the read back below stray() is what this reds on.
 test("CLI: trailing --prev names --prev, not the innocent value of the flag behind it", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--prev", "--port", "9000"], { encoding: "utf8" });
   assert.equal(r.status, 2);
+  assert.match(r.stderr, /--prev needs a value/);
+});
+
+// #1092: unlike the case above, `--prev` was not merely ORDERED wrong on one
+// subcommand — it was never read on `serve` at all. serve()'s own signature
+// (`{ ledgerFile, port, interval, open }`) carries no `prev` parameter, and
+// main()'s `serve` branch called only `stray()`, so a trailing `--prev` on
+// `serve` never reached ANY guard: measured, pre-fix, `serve --prev` and
+// `serve --prev=x` both fell straight through to gather()'s first `gh` call
+// (a real network attempt, not a refusal), and `serve --prev --port 9000`
+// refused with `unexpected argument '9000'` once stray() got to it — naming
+// --port's innocent value rather than the flag actually given wrong, the
+// exact harm the build-side pin above exists for. Hoisting `arg("prev")`
+// above the dispatch (next to argPort()/has("open")) closes all three: every
+// case below now dies inside main(), before `serve()` is ever called, so
+// none of these needs board-cli.test.mjs's gh-stub/PATH rig — same as the
+// build-side cases above and the --port/--open hoist cases below.
+test("CLI: serve refuses a trailing --prev (no value), same message as build", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "serve", "--prev"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--prev needs a value/);
+});
+
+test("CLI: serve refuses --prev=x, the same shape --ledger=path is refused", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "serve", "--prev=x"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--prev needs a space-separated value, not --prev=/);
+});
+
+test("CLI: serve refuses --prev --port 9000, naming --prev not --port's innocent value", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "serve", "--prev", "--port", "9000"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--prev needs a value/);
+});
+
+// #1092: the --prev-before-argPort() ordering pinned above (`serve --prev
+// --port 9000`) only exercises --prev going wrong while --port's value is
+// well-formed — it never exercises BOTH flags malformed at once, which is
+// the actual case the hoist comment above `arg("prev")` in main() claims to
+// handle ("a caller who gets BOTH flags wrong at once ... still hears about
+// --prev specifically"). With `arg("prev")` read before argPort() in the
+// hoist (as it is), a trailing --port immediately followed by a trailing
+// --prev — neither given a value — refuses on --prev, since --prev's read
+// runs first and sweep() never reaches --port's dangling flag. Swap the
+// hoist order (argPort() ahead of `arg("prev")`) and this reds: the error
+// names --port instead (measured).
+test("CLI: build refuses --port --prev with both flags trailing, naming --prev not --port", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", "--prev"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /--prev needs a value/);
 });
 
