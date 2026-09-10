@@ -2,8 +2,9 @@
 // landed. Zero deps: `node --test scripts/prove-merge.test.mjs`.
 //
 // A shell script that reasons about git history can only be tested against real
-// git history, so every case below builds a throwaway origin+clone in a temp dir
-// and runs the script for real.
+// git history, so the cases below that reason about history build a throwaway
+// origin+clone in a temp dir and run the script for real; a case that reasons
+// about the script's source text directly does not.
 //
 // The load-bearing case is `un-rebased head that merged cleanly still proves
 // false` — that attack is the whole reason the script exists, and relaxing the

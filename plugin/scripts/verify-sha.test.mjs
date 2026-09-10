@@ -3,8 +3,9 @@
 // `node --test scripts/verify-sha.test.mjs`.
 //
 // A shell script that reasons about git history can only be tested against real
-// git history, so every case below builds a throwaway origin+clone in a temp dir
-// and runs the script for real.
+// git history, so the cases below that reason about history build a throwaway
+// origin+clone in a temp dir and run the script for real; a case that fails
+// before the script reaches git does not.
 //
 // The load-bearing case is `a merge-base that fails rather than answers is exit
 // 2, never reachable:false` (#266). Every non-zero status used to collapse into
