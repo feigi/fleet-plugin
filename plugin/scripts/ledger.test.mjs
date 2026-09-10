@@ -821,8 +821,9 @@ test("a --file that exists but does not parse as a ledger is not reported as rea
 });
 
 // The human-readable half of the same gap (#817): the test above pins that
-// stderr must NOT claim absence for these three shapes, but until now it
-// pinned only silence past that — no line at all told an operator watching a
+// stderr must NOT claim absence for two of these three shapes (`notALedger`
+// and `mangled` — the empty-file case is new here), but until now it pinned
+// only silence past that — no line at all told an operator watching a
 // terminal that their `--file` opened something that did not parse. `ok`
 // already answers false for all three; this checks the second, differently
 // worded line that says so out loud and names the path.

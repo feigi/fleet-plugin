@@ -395,7 +395,7 @@ function runCheck() {
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
     );
-  } else if (!ledgerParsed) {
+  } else if (!ledger.ok) {
     // #817: the existence probe above is silent once `file` exists, so a
     // `--file` landing on a real-but-wrong path — a typo'd neighbour, a
     // corrupted "## Filed" header, a 0-byte file — got the SAME silence as a
