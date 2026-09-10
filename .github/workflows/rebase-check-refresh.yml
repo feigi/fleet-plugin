@@ -7,10 +7,10 @@
 # moves, so the PR goes red with the actionable log line instead.
 #
 # Only PRs actually BEHIND their base are re-run: `POST
-# /actions/jobs/{id}/rerun` flips `rebase-check` itself back to in-progress, so
-# re-running unconditionally would take an already-green one back to pending and
-# block the merge it was meant to unblock. Gating on `behind_by > 0` avoids that;
-# PRs that are up to date are never touched.
+# /actions/jobs/{id}/rerun` flips `rebase-check` itself back to in-progress.
+# Gating on `behind_by > 0` avoids re-running (and re-churning check state /
+# burning Actions minutes) on every PR regardless of whether it's stale — PRs
+# that are up to date are never touched.
 name: Refresh rebase-check
 
 on:
