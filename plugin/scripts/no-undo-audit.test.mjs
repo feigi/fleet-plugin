@@ -498,8 +498,9 @@ const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entr
  * therefore see a SECOND stash-entry line appear — so a future edit that
  * breaks the if/elif/elif/else below into independent `if`s, letting two
  * arms fire for one state, would go unnoticed. The design rule for that
- * chain is one sentence per state (see the script's own comment ahead of
- * it); the length-1 assertions below are what actually enforces it. #1210.
+ * chain is one sentence per state — each `elif` branch names its own state
+ * and prints exactly one line for it (no-undo-audit.sh:424-431, 490-505);
+ * the length-1 assertions below are what actually enforces it. #1210.
  */
 const stashLines = (r) => r.stderr.split("\n").filter((l) => l.includes("stash entries (repo-global"));
 
