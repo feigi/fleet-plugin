@@ -1490,6 +1490,15 @@ nothing leaves it no gate at all.
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
+> **Every factual claim your diff restates needs a settling command run
+> against the tree first** — the issue body is a lead, never a citation.
+> **No positional references** (`the closing/second/last X`); name the thing
+> semantically. **Never write a COUNT or a tally into prose; state the
+> property instead** — unless it is a past-tense record of a measurement you
+> performed, which stays as written; a present-tense claim about a live
+> property must be restated as a property (`every other test in the file`),
+> true at any count.
+>
 > **Apply `survived` findings. A finding in `unverified` whose refuters ran and
 > crashed always defers** — and which of the two it is, you read off
 > `refutersDispatched`, never off severity and never off an empty vote list:
@@ -1877,7 +1886,10 @@ name-based one. Neither ticket asked for either sentence.
 Two of the rules above are what caught both, so give them to every implementer
 regardless of class: **every factual claim the diff restates needs a settling
 command first**, and **no positional references**. A third earns its place here
-— **never write a COUNT or a tally into prose; state the property instead.** A
+— **never write a COUNT or a tally into prose; state the property instead** —
+unless it is a past-tense record of a measurement you performed, which stays
+as written; a present-tense claim about a live property must be restated as a
+property (`every other test in the file`), true at any count. A
 count is false the moment the next commit lands, and #768 falsified two of them
 (`the only other chmodSync(..., 0o644)`, already off by one before it; `fails 75
 of the 85 cases`, measured 81 of 91) in a file whose own header records having
