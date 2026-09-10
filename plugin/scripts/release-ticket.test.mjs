@@ -416,6 +416,50 @@ test("the die receipt's applied field is the flag, not a constant (#387)", (t) =
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// #1080: the trailing-comma contract `block` and `die` depend on in OPPOSITE
+// directions was stated only in the comment above `die` (`$blockers already
+// ends in a trailing comma`) and verified correct exactly once, by hand, on
+// PR #983 — nothing executable drove the composition. Two real `block()`
+// calls (the main-checkout guard, then the ahead guard) land the accumulator
+// at two entries with the trailing comma `block` always appends; a `git
+// cherry` failure then reaches `die`, which splices a third entry onto that
+// comma exactly as the blocked checkpoint's `${blockers%,}` assumes it is
+// there to strip. If either half of the contract slips — `block` stops
+// appending the comma, or appends two — the splice produces invalid JSON and
+// this red the moment the payload is parsed, not merely on some field's value.
+test("block() then die() compose a receipt that still parses as JSON, blockers in order (#1080)", (t) => {
+  const r = repo(t);
+  const branch = "fix/9-release-ticket";
+  git(r.w, "checkout", "-q", "-b", branch, "origin/main");
+  commit(r.w, "work checked out in the main checkout", "work\n");
+  gitShim(r, `case "$1 $2" in "cherry refs/remotes/origin/main") echo 'cherry shim failure' >&2; exit 1 ;; esac`);
+
+  const res = spawnSync("sh", [SCRIPT, "9", "release-ticket", "fix", "--apply"], {
+    cwd: r.w,
+    env: r.env(),
+    encoding: "utf8",
+  });
+
+  assert.equal(res.status, 2, "die, not the blocked checkpoint's exit 1 — this is the splice, not the strip");
+  let json;
+  assert.doesNotThrow(() => {
+    json = JSON.parse(res.stdout);
+  }, `the receipt must parse as JSON — a missing or doubled comma in block() breaks exactly this: ${res.stdout}`);
+  assert.equal(json.released, false);
+  // Contents and order only, never the payload byte-for-byte — the other
+  // fields (worktree, label, branch) are pinned by the main-checkout and
+  // #387 cases above and would only rot a second pin here.
+  assert.equal(json.blockers.length, 3, `two block() calls plus die's own splice: ${json.blockers}`);
+  assert.match(json.blockers[0], /checked out in the main checkout/, "block()'s first call, first in the array");
+  assert.match(json.blockers[1], /^1 commit\(s\) ahead of origin\/main$/, "block()'s second call, second in the array");
+  assert.equal(
+    json.blockers[2],
+    `git cherry failed on ${branch} against origin/main, so whether it carries unique commits is unknown`,
+    "die()'s own entry, spliced onto block()'s trailing comma, last",
+  );
+  assert.deepEqual(r.calls(), [], "die fires before gh is ever asked anything");
+});
+
 // A receipt printf that cannot WRITE is a second failure mode, separate from
 // #387's: `set -e` used to kill `die` on it before the function reached its own
 // `printf … >&2`, so the die reason vanished and the script exited 1 — a code
