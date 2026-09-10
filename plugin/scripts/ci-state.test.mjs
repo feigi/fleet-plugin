@@ -809,26 +809,20 @@ test("the outage payload reports no CI state it could not observe", () => {
 // missing" — and no-ci never took a reading: there was no workflow file to
 // derive an expected-job set from, let alone a run to check it against.
 // `emitRateLimited()` above already answers the identical "nothing was read"
-// question by omitting `jobs`/`missing` rather than shipping them empty; this
-// pins that the no-ci arm now answers it the same way, and ties the two arms
-// together on one field list so a future edit to either one alone reds here
-// instead of leaving them silently disagreeing again.
-test("a payload for a question never asked — no-ci or rate-limited — omits `jobs`/`missing` rather than shipping them empty", () => {
+// question by omitting `jobs`/`missing` rather than shipping them empty —
+// covered by "the outage payload reports no CI state it could not observe"
+// above, which this test does not duplicate — and this pins that the no-ci
+// arm now answers it the same way.
+test("a payload for a question never asked — no-ci — omits `jobs`/`missing` rather than shipping them empty", () => {
   const noCi = run([]);
   assert.equal(noCi.status, 1, noCi.stdout + noCi.stderr);
   assert.equal(noCi.payload.verdict, "no-ci");
 
-  const limited = ghFailure(RATE_LIMIT_STDERR);
-  assert.equal(limited.status, 2, limited.stdout + limited.stderr);
-  assert.equal(limited.payload.verdict, "rate-limited");
-
-  for (const [label, payload] of [["no-ci", noCi.payload], ["rate-limited", limited.payload]]) {
-    for (const field of ["jobs", "missing"]) {
-      assert.ok(
-        !(field in payload),
-        `${label} never binds a run, so \`${field}\` must be absent, not an empty array — and the payload reads ${JSON.stringify(payload)}`,
-      );
-    }
+  for (const field of ["jobs", "missing"]) {
+    assert.ok(
+      !(field in noCi.payload),
+      `no-ci never binds a run, so \`${field}\` must be absent, not an empty array — and the payload reads ${JSON.stringify(noCi.payload)}`,
+    );
   }
 });
 
