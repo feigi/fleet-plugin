@@ -729,16 +729,16 @@ occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 # reached. So this stays a boolean predicate in the `locked`/`unresolved_head`
 # shape — a non-final AND-OR element (`… && return 0`), never a bare pipeline
 # whose status a later line reads — but the "could not run" case is carried out
-# through `$ro_probe_err` instead of `die`, for `release_outcome` to route to
+# through `$wt_why` instead of `die`, for `release_outcome` to route to
 # Indeterminate exactly as it already does for a listing git could not
-# produce, one arm up. 0 registered, 1 genuinely not registered ($ro_probe_err
-# stays empty), anything else could not be told apart from "not registered" by
-# rc alone ($ro_probe_err is set to say so).
+# produce, one arm up. 0 registered, 1 genuinely not registered (`$wt_why`
+# stays empty, already cleared by the caller before this runs), anything else
+# could not be told apart from "not registered" by rc alone (`$wt_why` is set
+# to say so, straight into the field the caller already reserves for it).
 ro_registered() {
-  ro_probe_err=
   printf '%s\n' "$now" |
     P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}' && return 0
-  [ $? = 1 ] || ro_probe_err="could not tell whether $1 is still registered for #$issue"
+  [ $? = 1 ] || wt_why="could not tell whether $1 is still registered for #$issue"
   return 1
 }
 
@@ -797,12 +797,11 @@ release_outcome() {
     wt_why=$(printf '%s' "$ro_err" | tr '\n' ' ')
   elif ro_registered "$1"; then
     if occupied "$1"; then wt_outcome=Unreleased; else wt_outcome=Indeterminate; fi
-  elif [ -n "$ro_probe_err" ]; then
+  elif [ -n "$wt_why" ]; then
     # awk could not run at all (rc >= 2), which is a different fact from
     # "ran fine and found nothing" — the latter alone means Deregistered is on
     # the table below. #798
     wt_outcome=Indeterminate
-    wt_why=$ro_probe_err
   elif occupied "$1"; then
     wt_outcome=Deregistered
   elif gone "$1"; then

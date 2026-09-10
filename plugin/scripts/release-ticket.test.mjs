@@ -2218,8 +2218,11 @@ test("a registration probe that could not run asserts Indeterminate, never a fal
   //
   // The symlink-swap fixture from the Deregistered case above is the only
   // route that reaches this arm at all: a healthy `git worktree remove` never
-  // calls `release_outcome`, and a dirty refusal (the case ABOVE the
-  // Deregistered one) never clears the registration for this arm to probe.
+  // calls `release_outcome`, and a dirty refusal that DOES reach it with the
+  // registration still intact — the "none"/GIT_FAIL:"worktree remove"
+  // sub-case of "the halt headline names what landed" further up — measures
+  // Unreleased there, not this arm; nothing else short of the symlink swap
+  // clears the registration for this arm to probe.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const wt = release(r, c, { apply: false }).json.worktree;
