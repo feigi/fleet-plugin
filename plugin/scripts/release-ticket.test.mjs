@@ -1921,7 +1921,7 @@ test("the script carries no escape hatch", () => {
   // still reads the raw source line, so the one authorized call must be
   // written exactly as it is written today.
   const norm = (l) => l.replace(/['"]/g, "").replace(/\s+/g, " ");
-  const CALL_RE = /\bgit branch (?:-[A-Za-z]*[dDf]|--delete|--force)\b/;
+  const CALL_RE = /\bgit branch (?:-[A-Za-z]*[dDf][A-Za-z]*|--delete|--force)\b/;
   const forceDeletes = src
     .split("\n")
     .map((l) => ({ raw: l, n: norm(l) }))
