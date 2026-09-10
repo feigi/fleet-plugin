@@ -945,6 +945,65 @@ test("runner: a vendored file argument refuses under an inherited CDPATH", () =>
   assert.match(r.stderr, /is under node_modules — node discards it silently/);
 });
 
+// The file-branch counterpart of the no-search-bit case pinned above for the
+// directory branch: `arg` here is a FILE, so `[ -d $arg ]` never runs at
+// all — this guard reads $argdir, the file's own parent, and it is $argdir
+// that loses its search bit. Before the fix, `cd`'s failure on $argdir was
+// discarded outright (`2>/dev/null`, nothing read from the pipeline), the
+// vendored `case` fell through unrefused, `[ -e $arg ]` downstream read
+// false because the parent could not be traversed, and the typo arm far
+// below reported a permission fault as `does not exist` — measured directly
+// against the unfixed shim. Root can read anything, so it cannot see this.
+test("runner: a vendored file behind an unreadable directory names the permission fault, not a typo", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  chmodSync(vendor, 0o000);
+  try {
+    const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read node_modules\/pkg — check its permissions/);
+    assert.doesNotMatch(r.stderr, /does not exist/);
+    assert.doesNotMatch(r.stderr, /is under node_modules — node discards it silently/);
+  } finally {
+    chmodSync(vendor, 0o755);
+  }
+});
+
+// #1006's own warning about its remedy sketch: `[ -d $argdir ]` reads false
+// not only when $argdir is missing, but also whenever $argdir's OWN PARENT
+// is unreadable — so the guard above must not fire the permission message on
+// a fixture it cannot actually back up. Here `node_modules` (the file's
+// GRANDparent) loses its search bit, not `pkg` (the immediate parent): the
+// guard can no longer even confirm `pkg` exists, so it has to stay silent
+// and let the argument fall through exactly as an unmeasured path already
+// did, rather than assert a fault it cannot name. Measured directly: `-d`
+// reads false here where it read true in the row above, on the same
+// $argdir. The downstream message this falls through to belongs to the
+// general typo arm (#960/PR #1387), not this guard, and is deliberately
+// left unpinned here — its exact wording is that ticket's to change; this
+// row only pins that THIS guard neither over-fires nor claims the wrong
+// verdict. Root can read anything, so it cannot see this.
+test("runner: a vendored file whose ancestor is unreadable does not claim a permission fault it cannot confirm", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply(SUITE);
+  const vendor = join(a.wt, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  const modules = join(a.wt, "node_modules");
+  chmodSync(modules, 0o000);
+  try {
+    const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stderr, /cannot read node_modules\/pkg — check its permissions/);
+    assert.doesNotMatch(r.stderr, /is under node_modules — node discards it silently/);
+  } finally {
+    chmodSync(modules, 0o755);
+  }
+});
+
 // #401: nothing above pins the RESOLUTION MODE this guard uses, only its
 // spelling coverage. `cd`/`pwd` without `-P` is logical — it never resolves a
 // symlinked path component — and that is deliberate: it is the same textual
