@@ -815,7 +815,32 @@ for arg do
       /*) ;;
       */node_modules/*|node_modules/*)
         case "\$arg" in */*) argdir="\${arg%/*}" ;; *) argdir="." ;; esac
-        case "\$(CDPATH= cd -- "\$argdir" 2>/dev/null && pwd)/" in
+        # \`cd\`'s own status used to be discarded outright (\`2>/dev/null\`,
+        # nothing read from the pipeline afterwards), so an \$argdir that
+        # EXISTS but has lost its own search bit (\`chmod 000\`) failed \`cd\`
+        # exactly as a typo'd one does, fell through this \`case\` unrefused,
+        # and reached the \`does not exist\` arm far below — a permission
+        # fault reported as a spelling mistake. Reading \`cd\`'s status
+        # rather than only its output is what the directory branch's own
+        # \$resolved fallback above already does for the identical fault one
+        # arm over; this gives the file arm the same treatment. (#1006)
+        # \`[ -d \$argdir ]\` is what keeps this from reporting a permission
+        # fault it cannot actually back up, and the two fixtures that decide
+        # it are not one and the same — measured, not assumed. \`stat\` on a
+        # directory needs search only on ITS OWN PARENT, so \`chmod 000\` on
+        # \$argdir itself still leaves \`-d\` true while \`cd\` fails: the
+        # shape this guard exists for. \`chmod 000\` on \$argdir's PARENT
+        # instead leaves \`-d\` false too, since resolving \$argdir at all now
+        # needs the very search bit that was removed — so the term does not
+        # fire there, and an argument this guard genuinely cannot vouch for
+        # keeps falling through to whatever the missing-path arms below
+        # already do with it, unchanged.
+        argpwd=\$(CDPATH= cd -- "\$argdir" 2>/dev/null && pwd)
+        if [ -z "\$argpwd" ] && [ -d "\$argdir" ]; then
+          printf 'agent-test: cannot read %s — check its permissions\n' "\$argdir" >&2
+          exit 1
+        fi
+        case "\$argpwd/" in
           "\$PWD"/node_modules/*)
             printf 'agent-test: %s is under node_modules — node discards it silently, not a test failure\n' "\$arg" >&2
             exit 1
