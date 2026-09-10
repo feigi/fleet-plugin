@@ -1899,27 +1899,34 @@ test("the script carries no escape hatch", () => {
   // separator and require the wrapper at the head of what remains — the
   // dry-run plan's own `[ … ] && echo` mention still lands there.
   //
-  // Match on a NORMALIZED line, not the source text. Three evasions of this
-  // one detector have now shipped past it, and the third was pure spelling:
+  // Match on a NORMALIZED line, not the source text. Four evasions of this
+  // one detector have now shipped past it. The third was pure spelling:
   // `git branch "-D" "$x"` is the same command the shell runs and `/\bgit
   // branch -D\b/` does not see it at all, so the line was never even
   // collected (measured: a real unguarded second delete, count still 1).
-  // Enumerating spellings is what lost the last three rounds, so strip what
-  // the shell strips instead — quote characters and runs of whitespace —
-  // and match once against the result. That covers `'-D'`, `-"D"` and
-  // `git  branch   -D` in the same stroke. `|` joins `;`/`&&`/`||` in the
-  // separator set for the same reason: a delete reached through a pipe was
-  // excused by a wrapper that heads a different command.
+  // The fourth, filed as #1333, was a different spelling of the same flag:
+  // `git branch -fd "$x"` (and `-df`, `-Df`) deletes exactly like `-D` but
+  // matches neither the exact `-D\b` collector nor the separate `--force`
+  // check, because a combined short-flag cluster is neither one (measured:
+  // an unguarded `-fd` delete left this file green). Enumerating spellings
+  // is what lost all four rounds, so strip what the shell strips — quote
+  // characters and runs of whitespace — and match a short-flag CLUSTER
+  // carrying `d`, `D`, or `f` in any position, not one exact flag string.
+  // That covers `'-D'`, `-"D"`, `git  branch   -D`, `-fd`, `-df` and `-Df`
+  // in the same stroke. `|` joins `;`/`&&`/`||` in the separator set for the
+  // same reason: a delete reached through a pipe was excused by a wrapper
+  // that heads a different command.
   //
   // Normalization is for FINDING the call; the audited-form assertion below
   // still reads the raw source line, so the one authorized call must be
   // written exactly as it is written today.
   const norm = (l) => l.replace(/['"]/g, "").replace(/\s+/g, " ");
+  const CALL_RE = /\bgit branch (?:-[A-Za-z]*[dDf]|--delete|--force)\b/;
   const forceDeletes = src
     .split("\n")
     .map((l) => ({ raw: l, n: norm(l) }))
-    .filter(({ n }) => /\bgit branch -D\b/.test(n))
-    .filter(({ n }) => !/^\s*(echo|printf|halt|die|block)\b/.test(n.slice(0, n.indexOf("git branch -D")).split(/&&|[;|]/).pop()));
+    .filter(({ n }) => CALL_RE.test(n))
+    .filter(({ n }) => !/^\s*(echo|printf|halt|die|block)\b/.test(n.slice(0, n.match(CALL_RE).index).split(/&&|[;|]/).pop()));
   assert.equal(forceDeletes.length, 1, "exactly one authorized force-delete");
   assert.match(forceDeletes[0].raw, /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
   assert.doesNotMatch(src.replace(/['"]/g, "").replace(/[^\S\n]+/g, " "), /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
@@ -2079,9 +2086,12 @@ test("a local ref shadowing `origin/main` cannot make the commit guards vacuous"
   // unpushed commit destroyed. `-d` refused it ("not fully merged"), so this is
   // the one class #760's swap reopened.
   //
-  // A tag, not a local branch: `refs/heads/origin/main` is ALSO ahead of
-  // refs/remotes in the order, but git refuses to create a branch under a name
-  // whose first component is a remote's. The tag is the reachable shape.
+  // A tag, not a local branch, only because it's the cheapest way to plant a
+  // colliding ref in the fixture — a same-named local branch would shadow it
+  // identically, one rank higher even: `git branch origin/main` succeeds
+  // (creates refs/heads/origin/main alongside refs/remotes/origin/main), and
+  // refs/heads/<name> (gitrevisions rule 4) already outranks
+  // refs/remotes/<name> (rule 5), same as refs/tags/<name> (rule 3) does.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   commit(c.wt, "work that exists nowhere else", "work\n");
