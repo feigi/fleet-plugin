@@ -820,6 +820,36 @@ test("a --file that exists but does not parse as a ledger is not reported as rea
   assert.equal(required.json.ledger.ok, false, "and the field still reports the parse, under --require-file too");
 });
 
+// The human-readable half of the same gap (#817): the test above pins that
+// stderr must NOT claim absence for these three shapes, but until now it
+// pinned only silence past that — no line at all told an operator watching a
+// terminal that their `--file` opened something that did not parse. `ok`
+// already answers false for all three; this checks the second, differently
+// worded line that says so out loud and names the path.
+test("--file pointing at an existing-but-unparseable file now warns on stderr, worded apart from the absent-file case (#817)", () => {
+  const notALedger = run(UNFILED_SUBJECT, { ledgerBody: "not a ledger at all\n" });
+  const mangled = run("Non-zero column audit 11 rows", { ledgerBody: ledgerText([FILED_114]).replace("## Filed", "##Filed") });
+  // 0 bytes: `ledgerBody` bypasses ledgerText()'s always-structured output
+  // (`??` only falls back on null/undefined, not on ""), so this is the one
+  // fixture ledgerText() itself cannot produce.
+  const empty = run(UNFILED_SUBJECT, { ledgerBody: "" });
+
+  for (const r of [notALedger, mangled, empty]) {
+    assert.equal(r.json.ledger.ok, false, "unchanged by this ticket — the machine-readable half already reported these as unread (#231)");
+    assert.match(r.stderr, /WARNING/, "the human-readable half must now say something went wrong too");
+    assert.match(r.stderr, /ledger\.md/, "the warning must name the path it opened");
+    assert.doesNotMatch(r.stderr, /ledger file not found/, "the file exists — reusing the absent-file wording would be a fresh false claim on this half");
+  }
+
+  // The control: a real, parseable ledger must not trip the new line. Widening
+  // the condition past "did not parse" — firing on every check regardless of
+  // shape — would be a fresh false claim in the other direction, on a file
+  // that parsed fine.
+  const valid = run(UNFILED_SUBJECT, { filed: [] });
+  assert.equal(valid.json.ledger.ok, true);
+  assert.doesNotMatch(valid.stderr, /does not look like a ledger/, "a real, parseable ledger must not trip the new warning");
+});
+
 test("gh failing degrades to the ledger-only answer and never reads as a bare safe-to-file", () => {
   const r = run("candidates.mjs row states the opposite of its code", { filed: [], ghFails: true });
   assert.equal(r.status, 0, "offline must not block filing — it degrades, per the ledger-only answer");
