@@ -15,7 +15,13 @@
 // inside the fix-applier's own prompt slice either; the two files that pin
 // this text (`immutable-body-claim-prose.test.mjs`,
 // `cross-repo-citation-prose.test.mjs`) both scope to the IMPLEMENTER'S copy,
-// which sits under `### Reviewers` before the fix-applier prompt even opens.
+// which sits under the same `### Reviewers` heading, further down it, after
+// the fix-applier prompt's own close (`grep -n '### Reviewers\|You are
+// ALREADY in worktree\|Put the standing CI facts\|Two of the rules above are
+// what caught both\|Fallback: hand-dispatched' skills/run-team/SKILL.md`
+// against this tree: `### Reviewers` opens at :1304, the fix-applier prompt
+// runs :1483-:1642, the implementer's copy opens at :1886, and
+// `#### Fallback` closes the section at :1937).
 //
 // SHAPE, matching the convention every file beside this one uses. Each rule
 // gets its own ordered-span assertion, gaps sized to the punctuation that
@@ -23,8 +29,8 @@
 // deletion of the connecting clause reds without a loose `.{0,N}?` papering
 // over it. A positive regex over the whole fix-applier prompt — 1200+ chars —
 // would be satisfied by the SAME wording surviving in the implementer's copy
-// further up the section; these slices are bounded to the fix-applier
-// prompt specifically (`section()` below, mirroring
+// further down the section; these slices are bounded to the fix-applier
+// prompt specifically (`reviewersSection()` below, mirroring
 // `review-path-default.test.mjs`'s `fixApplierPrompt()`, duplicated rather
 // than imported for the reason `implementer-model-tier.test.mjs` gives for
 // its own copy: two files, seven lines, nothing detects drift between them).
