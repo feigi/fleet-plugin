@@ -703,23 +703,25 @@ async function main() {
   has("open");
 
   // #1076: same fail-open shape as --port/--open above (#468) — this closes
-  // the two flags PR #1090 (#468) left standing. `argInterval()`'s read sat
-  // inside serve() alone, and the --spend-since read sat inside gather()
-  // (now `argSpendSince()`, extracted above for exactly this reason); both
+  // the two flags PR #1090 (#468) left standing. `argInterval()`'s read had
+  // two call sites — inside serve() directly, and embedded in gather()'s
+  // return (`interval ?? argInterval() ?? 15`), which build's dispatch below
+  // reaches too — and the --spend-since read sat inside gather() (now
+  // `argSpendSince()`, extracted above for exactly this reason); all three
   // sat below every stray() call on every path that reaches them. A trailing
   // `--interval`/`--spend-since` ahead of a stray positional therefore
   // refused under stray()'s generic wording, naming the next token instead
   // of the flag actually given wrong — measured, `serve --interval --open x`
-  // said `unexpected argument 'x'` before this hoist, `build --spend-since
-  // --open x` likewise. Same fix, same place: call both here, once, ahead of
-  // the build/serve dispatch and ahead of both branches' own stray() call,
-  // exactly where argPort()/has("open") already sit — build discards both
-  // return values, same as it already discards argPort()'s. serve() below
-  // still calls its own argInterval() (via `interval ?? argInterval() ??
-  // 15`) and gather() still calls its own argSpendSince() — re-evaluating a
-  // pure read of argv costs nothing, and keeps both validating their own
-  // argv for a caller that skips main(), same reasoning #468 gives for
-  // argPort()/has("open").
+  // said `unexpected argument 'x'` before this hoist, and `build --interval
+  // --open x` / `build --spend-since --open x` likewise. Same fix, same
+  // place: call both here, once, ahead of the build/serve dispatch and
+  // ahead of both branches' own stray() call, exactly where
+  // argPort()/has("open") already sit — build discards both return values,
+  // same as it already discards argPort()'s. serve() below still calls its
+  // own argInterval() (via `interval ?? argInterval() ?? 15`) and gather()
+  // still calls its own argSpendSince() — re-evaluating a pure read of argv
+  // costs nothing, and keeps both validating their own argv for a caller
+  // that skips main(), same reasoning #468 gives for argPort()/has("open").
   argInterval();
   argSpendSince();
 

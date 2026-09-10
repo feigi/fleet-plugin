@@ -4,8 +4,9 @@
 // process-boundary tests already there. Before #1076, gather() reached the
 // --spend-since guard only AFTER its gh reads, so even the malformed-value
 // cases below needed a stub `gh` on PATH and a fake HOME holding a
-// transcript, where the --ledger/--port cases died before any gh call and
-// needed neither. #1076 hoisted the same read (now argSpendSince()) into
+// transcript, where the --ledger/--port cases (in board.test.mjs) died
+// before any gh call and needed neither.
+// #1076 hoisted the same read (now argSpendSince()) into
 // main(), ahead of the build/serve dispatch and ahead of gh reads too — but
 // the rig stays: the success-path cases below (a valid value reaching the
 // payload, the #807/#363 pipe-race cases) still run gather() to completion
