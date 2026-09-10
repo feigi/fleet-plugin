@@ -556,6 +556,56 @@ test("runner: a directory it cannot fully read refuses instead of running a part
   }
 });
 
+// #960 case 1: `find "-dir/" ...` — the old spelling — is read by both BSD
+// find (macOS) and GNU find (Linux CI) as the start of an option cluster,
+// trailing slash and all, and dies before reading a single path: measured
+// directly, "illegal option -- i" (BSD) / "unknown predicate `-dir/'"
+// (GNU), neither rescued by a POSIX `--`. The runner used to report that as
+// `cannot read every path under -dir`, blaming the subtree's readability
+// for what was find's own argument parser losing to the caller's spelling.
+// `-dir` is written into the worktree directly rather than through
+// `repo()`: a leading-dash directory NAME is a shell/CLI-argument concern,
+// not something a git commit needs to reproduce.
+// Node's own `--test` CLI turns out to share the same parser confusion one
+// layer down — measured, a relative file spec that starts with `-` after
+// node's own normalisation is read as a bad option too, `./`-prefixed or
+// not — so this fixture cannot be made to actually run without rewriting
+// every file this arm hands to node into an absolute path, a much larger
+// change than this bug. The runner refuses instead, naming ITS cause
+// rather than reporting a suite that never got to node as unreadable.
+test("runner: a dash-named directory refuses naming the parsing hazard, not unreadability", () => {
+  const a = apply(SUITE);
+  mkdirSync(join(a.wt, "-dir"), { recursive: true });
+  writeFileSync(join(a.wt, "-dir", "z.test.mjs"), PASSES);
+  const r = a.run("-dir");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /holds tests, but node reads a relative dash-led path as an option/);
+  assert.doesNotMatch(r.stderr, /cannot read every path under/);
+});
+
+// The other half of the same fixture: a dash-named directory that is
+// GENUINELY unreadable must still report that real fault, not the parsing
+// refusal's message. `./` only routes the argument around find's OWN
+// parser (pinned above); once find actually descends, a permission denied
+// down there is what `cannot read every path under` is for, and this pins
+// that the parsing fix did not also swallow real unreadability.
+test("runner: an unreadable dash-named directory still reports the real read fault", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+  const a = apply(SUITE);
+  const locked = join(a.wt, "-locked");
+  mkdirSync(join(locked, "sub"), { recursive: true });
+  writeFileSync(join(locked, "sub", "z.test.mjs"), PASSES);
+  chmodSync(join(locked, "sub"), 0o000);
+  try {
+    const r = a.run("-locked");
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot read every path under -locked/);
+    assert.doesNotMatch(r.stderr, /holds tests, but node reads/);
+  } finally {
+    chmodSync(join(locked, "sub"), 0o755);
+  }
+});
+
 // Node's own discovery excludes `node_modules`; `find` does not, so a vendored
 // test ran and the suite's result hung on third-party code passing. The live
 // shape is a *real* nested `node_modules` — an install that did not hoist, or
@@ -746,6 +796,48 @@ test("runner: a typo'd path alone still refuses", () => {
   const r = apply(SUITE).run("t/typo.test.mjs");
   assert.notEqual(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stderr, /t\/typo\.test\.mjs does not exist/);
+});
+
+// #960 case 2: `[ -e "$arg" ]` cannot tell "not there" from "could not
+// look" — stat() answers the same false whether $arg is genuinely absent
+// or a directory in its path lacks the search bit needed to resolve the
+// rest. A file behind an unsearchable parent used to fall straight through
+// to the typo arm above and get called missing, though it is right there.
+// The directory arm already gets the IDENTICAL fixture right (see "a
+// directory it cannot fully read refuses instead of running a partial
+// suite" above): both arms are run here on one `locked` directory to pin
+// the asymmetry the ticket names directly — same cause, and now the same
+// kind of answer from both, not just the directory arm's.
+// Root can search anything, so it cannot see this.
+test("runner: a file behind an unsearchable parent refuses naming the permission fault, not a typo", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const a = apply({ ...SUITE, "locked/a.test.mjs": PASSES });
+  const locked = join(a.wt, "locked");
+  chmodSync(locked, 0o600);
+  try {
+    const asFile = a.run("locked/a.test.mjs");
+    assert.notEqual(asFile.status, 0, asFile.stdout + asFile.stderr);
+    assert.match(asFile.stderr, /cannot read locked\/a\.test\.mjs — locked is not searchable/);
+    assert.doesNotMatch(asFile.stderr, /does not exist/);
+
+    const asDir = a.run("locked");
+    assert.notEqual(asDir.status, 0, asDir.stdout + asDir.stderr);
+    assert.match(asDir.stderr, /cannot read every path under locked/);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
+});
+
+// The bound on the fix above: a PARENT that is simply missing
+// (`nosuchdir/x.test.mjs`) is the ordinary typo this arm already reported
+// correctly, and the permission-fault check must not swallow it — `-x` on
+// a nonexistent parent is false too, so without the `-d` term this input
+// would misreport as a permission fault it does not have.
+test("runner: a typo'd path with a missing parent still says it does not exist", () => {
+  const r = apply(SUITE).run("nosuchdir/x.test.mjs");
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /nosuchdir\/x\.test\.mjs does not exist/);
+  assert.doesNotMatch(r.stderr, /cannot read/);
 });
 
 // #125's surviving case, per the issue's "Agent Brief": a vendored *file*
