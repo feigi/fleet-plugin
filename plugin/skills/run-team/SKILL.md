@@ -2362,18 +2362,49 @@ vs specific finding with paths → paths win.
 failures arrive as *wrong findings*, not errors:
 
 - **A pattern kill reaches siblings — say so in the dispatch prompt.** `pkill -f
-  <pattern>` matches on the whole command line, and every member runs the same
-  suite from the same checkout, so a pattern naming a test file matches whichever
-  member happens to be running it. Measured: an implementer chasing its own
-  stalled run issued `pkill -f "claim-ticket.test.mjs"` and killed a
-  `node --test claim-ticket.test.mjs inflight.test.mjs` that was not its own. The
-  victim sees a `cancelled`/exit-144 it cannot attribute, on a run it did not
-  abort — and a killed **baseline** compared against a clean mutant is a wrong
-  measurement that reads exactly like a real result. Ports are derived per issue
-  precisely so collisions are impossible; the process table has no such
-  partition. Members report a stalled run to the controller instead of
-  pattern-killing it, and the controller re-checks any measurement taken in the
-  window.
+  <pattern>` matches on the whole command line, machine-wide. Members hold
+  separate worktrees, but the process table is not partitioned by them and a
+  test file's name is identical in every one, so a pattern naming a test file
+  matches whichever member happens to be running it. Measured: an implementer
+  chasing its own stalled run issued `pkill -f "claim-ticket.test.mjs"` and
+  killed a `node --test claim-ticket.test.mjs inflight.test.mjs` that was not
+  its own.
+
+  **What the victim's output looks like depends on the signal — and one of the
+  cases is a clean green.** Each measured on node v26.8.1/darwin against a
+  purpose-spawned fixture killed by its own PID. `pkill -f` **defaults to
+  SIGTERM**, and a SIGTERMed runner prints `Interrupted while running:` followed
+  by a *complete* summary block with `cancelled` non-zero, exiting `rc=1` — so
+  `cancelled` is exactly the thing to search for in the default case. `pkill -9
+  -f` leaves no summary block at all and the shell reports `rc=137`: SIGKILL
+  means the harness never lived long enough to report. A kill landing on one of
+  node's per-file **child** test processes leaves a complete block with `fail`
+  non-zero and `cancelled 0` at `rc=1`, indistinguishable from an ordinary test
+  failure. And a kill landing on a process a **test itself spawns** leaves a
+  complete `pass N / fail 0 / cancelled 0` at the expected N over a corrupted
+  run: `spawnSync` reports a SIGKILLed child as `status null`, and a test
+  asserting only that the process it spawned exited non-zero —
+  `assert.notEqual(r.status, 0)`, a form used across this suite, in files that
+  spawn the shell scripts they cover — passes vacuously on `null`.
+
+  So **a complete summary block proves the runner survived, not that the run was
+  uncontaminated.** Scrutinize reds, short counts *and* greens from inside the
+  incident window; a killed **baseline** compared against a clean mutant is a
+  wrong measurement that reads exactly like a real result.
+
+  **The command line is no partition either — not reliably.** Ports are derived
+  per issue precisely so collisions are impossible; argv isolates a run only
+  sometimes. Measured with `ps -Ao pid,ppid,args -ww` (without `-ww` macOS `ps`
+  truncates, and the truncation reads as an absence): an invocation carrying an
+  **absolute** path puts a member-unique string in argv, while one carrying
+  repo-relative filenames is byte-identical across members. Which of the two you
+  get is not yours to choose — members are briefed on `./agent-test
+  <file-or-dir>` over the suite under `plugin/scripts/`, and that runner `exec`s
+  node with the file list its caller's shell already expanded, never a literal
+  glob. Clearing your own leftover process needs its PID, not a pattern.
+
+  Members report a stalled run to the controller instead of pattern-killing it,
+  and the controller re-checks any measurement taken in the window.
 
   **Do not guess the victim — the blast radius is the machine, not the wave.**
   In that incident the controller reasoned from dispatch scope to "almost
