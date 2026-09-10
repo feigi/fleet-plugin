@@ -395,6 +395,18 @@ function runCheck() {
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
     );
+  } else if (!ledger.ok) {
+    // #817: the existence probe above is silent once `file` exists, so a
+    // `--file` landing on a real-but-wrong path — a typo'd neighbour, a
+    // corrupted "## Filed" header, a 0-byte file — got the SAME silence as a
+    // clean read. `ledger.ok` (above) already tells the machine-readable half
+    // apart; this is that same "opened it, it did not parse" fact stated on
+    // stderr, in wording that does not borrow "file not found" — the file
+    // demonstrably exists, so claiming otherwise would be a fresh version of
+    // the defect #231 removed from the JSON half.
+    console.error(
+      `${NAME}: WARNING — ${file} exists but does not look like a ledger (no "${FILED}" header found). Every check will read "safe to file" until it is fixed.`,
+    );
   }
   refuseStrayInTail(rest);
   const subject = rest.join(" ");
