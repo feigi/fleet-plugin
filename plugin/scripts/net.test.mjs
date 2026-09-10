@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,42 +44,39 @@ const SCRIPT = join(import.meta.dirname, "net.sh");
 // and an awk not named above is untested rather than covered.
 //
 // The function is lifted out of net.sh by its own braces rather than
-// re-typed, so this cannot drift into testing a copy. `ps` is shadowed on PATH
-// the way inflight.test.mjs's own fork-failure cases shadow theirs; `kill` has
-// to be a shell FUNCTION instead, because it is a builtin and a file on PATH is
-// never consulted. The `-9` escalation is dropped on the floor — the set is
-// what is under test, and it is the same set both signals go to.
-const killTreeOn = (t, table, root) => {
-  const dir = mkdtempSync(join(tmpdir(), "net-killtree-"));
-  t.after(() => execFileSync("rm", ["-rf", dir]));
-  const bin = join(dir, "bin");
-  mkdirSync(bin);
-  writeFileSync(join(bin, "ps"), `#!/bin/sh\ncat '${join(dir, "table")}'\n`);
-  chmodSync(join(bin, "ps"), 0o755);
-  writeFileSync(join(dir, "table"), table);
-
+// re-typed, so this cannot drift into testing a copy. `kill` has to be a
+// shell FUNCTION because it is a builtin and a file on PATH is never
+// consulted; `ps` is not a builtin, but it is shadowed the same way here
+// rather than written to PATH as a stub executable. A freshly written
+// executable's FIRST execution pays an OS scan cost that has nothing to do
+// with net_kill_tree — measured 1.1-2.1s idle, sometimes 10s+ — and this
+// helper used to pay it five times per test run against a 10s per-spawn
+// timeout, which is what made the test load-sensitive (#1099). A shell
+// function has none of that cost and takes precedence over PATH the same
+// way. The `-9` escalation is dropped on the floor — the set is what is
+// under test, and it is the same set both signals go to.
+const killTreeOn = (table, root) => {
   const body = readFileSync(SCRIPT, "utf8").match(/^net_kill_tree\(\) \{\n[\s\S]*?^\}$/m);
   assert.ok(body, "net_kill_tree() is no longer a top-level function in net.sh — update this test");
-  writeFileSync(join(dir, "fn.sh"), body[0]);
 
   const r = spawnSync("sh", ["-c",
-    `kill() { [ "$1" = -9 ] || printf '%s\\n' "$*"; }\n. '${join(dir, "fn.sh")}'\nnet_kill_tree ${root}`],
-    { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 10_000 });
+    `kill() { [ "$1" = -9 ] || printf '%s\\n' "$*"; }\nps() { printf '%s' '${table}'; }\n${body[0]}\nnet_kill_tree ${root}`],
+    { encoding: "utf8", timeout: 10_000 });
   assert.equal(r.status, 0, `net_kill_tree exited non-zero: ${JSON.stringify(r)}`);
   return r.stdout.trim().split(/\s+/).filter(Boolean).sort((a, b) => a - b);
 };
 
-test("net_kill_tree signals the whole subtree, however the snapshot is ordered", (t) => {
-  assert.deepEqual(killTreeOn(t, "100 1\n200 100\n300 200\n400 1\n", 100), ["100", "200", "300"],
+test("net_kill_tree signals the whole subtree, however the snapshot is ordered", () => {
+  assert.deepEqual(killTreeOn("100 1\n200 100\n300 200\n400 1\n", 100), ["100", "200", "300"],
     "a chain two levels deep, parents first");
-  assert.deepEqual(killTreeOn(t, "800 900\n700 800\n600 700\n500 600\n400 1\n", 900),
+  assert.deepEqual(killTreeOn("800 900\n700 800\n600 700\n500 600\n400 1\n", 900),
     ["500", "600", "700", "800", "900"],
     "a chain whose pids DESCEND from root to leaf — the case a single-pass walk gets wrong, and the only case here that reds the collapsed fixpoint");
-  assert.deepEqual(killTreeOn(t, "500 400\n300 100\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
+  assert.deepEqual(killTreeOn("500 400\n300 100\n200 100\n100 1\n400 1\n", 100), ["100", "200", "300"],
     "branching, and an unrelated tree that must not be swept in");
-  assert.deepEqual(killTreeOn(t, "100 1\n200 1\n", 100), ["100"],
+  assert.deepEqual(killTreeOn("100 1\n200 1\n", 100), ["100"],
     "a root with no descendants is still signalled");
-  assert.deepEqual(killTreeOn(t, "200 1\n300 200\n", 999), ["999"],
+  assert.deepEqual(killTreeOn("200 1\n300 200\n", 999), ["999"],
     "a root absent from the snapshot falls back to itself, never to nothing");
 });
 
@@ -173,6 +170,14 @@ function slowRepo(t) {
 
 test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget is not a stopwatch on success", (t) => {
   const { w, head, stub } = slowRepo(t);
+  // Pay the stub's first-exec OS scan cost HERE, outside the region
+  // FLEET_NET_TIMEOUT bounds below — a freshly written executable's first
+  // execution carries that cost regardless of what it does, measured at
+  // ~7s of the 13-14s the bounded call used to take before the stub was
+  // warm (#1099). Same file, same bytes, run once and discarded, so the
+  // bounded call below only ever execs an already-scanned stub. Exit status
+  // is whatever an unfed `git upload-pack` returns and is irrelevant here.
+  spawnSync(stub, [], { env: ENV, input: "", timeout: 10_000 });
   const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
     cwd: w, encoding: "utf8", timeout: 60_000,
     env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
