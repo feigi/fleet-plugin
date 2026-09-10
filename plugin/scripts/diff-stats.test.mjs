@@ -207,6 +207,30 @@ test("CLI: gh returning no files array dies (exit 2) rather than reporting a fab
   assert.match(r.stderr, /gh returned no files array/);
 });
 
+// The one case the guard above still missed: `JSON.parse("null")` succeeds
+// and returns `null`, not an object — so `info.files` threw a TypeError
+// before `!Array.isArray(info.files)` ever ran, crashing at exit 1 with a raw
+// stack trace instead of refusing at the named exit 2 this file's own
+// comment says the guard exists to produce (#1307). The message is worded
+// "no body" rather than reusing "no files array", so a reader chasing a
+// missing key is not sent looking for a key that was never the problem —
+// nothing came back at all.
+test("CLI: gh returning a null body dies (exit 2) naming the missing body, not a TypeError", () => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  const gh = join(bin, "gh");
+  writeFileSync(gh, "#!/bin/sh\necho null\n");
+  chmodSync(gh, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 2, `a null body must refuse, not crash; got ${r.status} ${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload");
+  assert.match(r.stderr, /gh returned no body/);
+  assert.doesNotMatch(r.stderr, /TypeError/, "a null body must not reach the raw TypeError this guard exists to prevent");
+});
+
 test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const gh = join(bin, "gh");
