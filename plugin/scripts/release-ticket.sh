@@ -305,8 +305,18 @@ git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 common=$(git rev-parse --path-format=absolute --git-common-dir) ||
   die "cannot resolve the git common directory"
 wtroot="$common/worktrees"
-registered=0
-if [ -e "$wtroot" ]; then
+
+# A function, not inline, because the count is taken twice: once here, and
+# once more at the recount below if the cross-check disagrees with git's own
+# listing (#694). The body is unchanged from what stood here as plain
+# top-level code before this ticket — mirrors inflight.sh's own
+# count_registry, which the same recount need already lives behind there,
+# adapted for the difference the ticket turns on: that copy returns a status
+# into an accumulate-and-continue probe, this one dies, so the loop itself
+# still just dies on an unreadable registry rather than returning past it.
+count_registry() {
+  registered=0
+  [ -e "$wtroot" ] || return 0
   # The parent needs its own check even so, and this is not redundant with the
   # count: unreadable, the glob below expands to nothing, and zero-on-disk would
   # AGREE with the empty listing git returns for the same reason.
@@ -350,7 +360,8 @@ if [ -e "$wtroot" ]; then
     if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
-fi
+}
+count_registry
 
 # The path is the whole rest of the line, never $2: `worktree list --porcelain`
 # prints it raw, so any checkout living under a directory with a space in it —
@@ -421,6 +432,26 @@ linked=$((listed - 1))
 # sibling agent's `git worktree add` having landed between the two, which in a
 # parallel fleet is routine rather than exotic. Calling that "the listing is
 # incomplete" sends an operator hunting a permissions fault that is not there.
+# Recount before refusing (#694). The registry scan above and git's listing
+# just taken are two reads at two different instants, not one atomic read, and
+# a sibling agent's `git worktree add` or `remove` landing in the gap makes the
+# two counts disagree with nothing actually wrong — measured against this
+# script directly: 3/100 dry-run releases aborted on this cross-check under a
+# throttled churner, 48-66/80 unthrottled, all with zero real faults among them.
+#
+# inflight.sh already recounts here (`count_registry || return 1`, #694) into
+# its own accumulate-and-continue probe; this script's whole contract is `die`
+# on any unmet precondition instead, so the port keeps that shape rather than
+# inheriting the accumulator — one recount, then still die if the disagreement
+# survives it. A mutation landing between the FIRST count and git's listing is
+# already reflected in that listing, so the second count agrees with it;
+# escaping the recount needs a SECOND mutation inside the narrower window the
+# recount itself opens (measured on inflight.sh's own copy: 1.99% -> 0.00% at
+# 2 mutations/s, 56.6% -> 1.29% saturated). A genuinely dropped entry is a
+# standing state, not a moment, so it survives the recount and still refuses —
+# the unreadable-registry and cannot-read-inside cases above are unaffected:
+# `count_registry` dies on those the same way on either call.
+[ "$linked" -eq "$registered" ] || count_registry
 if [ "$linked" -lt "$registered" ]; then
   die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
 elif [ "$linked" -gt "$registered" ]; then
