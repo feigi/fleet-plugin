@@ -44,6 +44,11 @@ const git = (cwd, ...args) =>
 // Absolute path to the real git, for the one test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+// Absolute paths to the real `awk` and `paste`, for the sites this file's own
+// three #789 fixtures shadow on PATH — the same reason REAL_GIT exists above.
+const REAL_AWK = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+const REAL_PASTE = execFileSync("sh", ["-c", "command -v paste"], { encoding: "utf8" }).trim();
+
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
   git(w, "commit", "-q", "--allow-empty", "-m", msg);
@@ -216,6 +221,35 @@ function failOnlyShim(t, match, stderr, code = 1) {
     { mode: 0o755 },
   );
   return bin;
+}
+
+/**
+ * A PATH `<tool>` (awk or paste, for #789's three fault-injection fixtures)
+ * that fails only when `match` — a shell test against its own argv — holds;
+ * every other invocation execs the real one. `realTool` must be the absolute
+ * path `command -v <tool>` resolved, so the fall-through never re-enters this
+ * same shimmed PATH.
+ */
+function toolFailShim(t, tool, realTool, match, stderr, code = 1) {
+  const bin = mkdtempSync(join(tmpdir(), `reap-${tool}-shim-`));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, tool),
+    `#!/bin/sh\n` +
+      `if ${match}; then\n` +
+      `  ${SHIM_FIRED}\n` +
+      stderr.map((l) => `  printf '%s\\n' '${l.replace(/'/g, `'\\''`)}' >&2\n`).join("") +
+      `  exit ${code}\n` +
+      `fi\n` +
+      `exec ${realTool} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+/** Asserts the fault `toolFailShim(t, tool, …)` injects actually reached the script under test. */
+function assertToolShimFired(bin, tool, why) {
+  assert.equal(existsSync(join(bin, `${tool}.fired`)), true, why);
 }
 
 /**
@@ -2482,4 +2516,144 @@ test("a [gone] branch whose worktree is a dangling symlink is kept, never reaped
   assert.match(json.kept.find((k) => k.branch === "feature/dangling").reason, /cannot tell whether worktree/);
   assert.ok(branchExists(w, "feature/dangling"));
   assert.equal(lstatSync(wt).isSymbolicLink(), true, "and the link itself is untouched");
+});
+
+// --- #789: three `awk` substitutions that used to end the run in awk's own
+// voice (or, at the ignored-files site, in a masked one) instead of a
+// `reap:`-prefixed refusal. All three faults are injected by shimming `awk`
+// or `paste` on PATH, distinguished by the ARGUMENT this file's own awk
+// programs carry, never by position — the same discipline IGNORED_PROBE
+// above states the reason for.
+
+test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (#789)", (t) => {
+  // Before this fix, a command substitution used as a `for … in` word list
+  // swallowed the failure completely: the loop ran zero iterations and the
+  // run reported `{"reaped":[],"kept":[]}`, byte-identical to a sweep that
+  // genuinely found nothing to reap.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `case "$1" in *'[gone]'*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable enumeration is a finding, not a script failure");
+  assert.deepEqual(json.reaped, [], "nothing can be reaped from a sweep that never enumerated anything");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "no branch was ever named, so none can be blamed");
+  assert.match(json.kept[0].reason, /^could not enumerate \[gone\] branches/);
+  assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
+  assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("a worktree lookup whose awk stage fails is kept, never treated as having no worktree (#789)", (t) => {
+  // Before this fix this was a bare assignment: an awk that could not finish
+  // scanning `$wt_list` failed the whole substitution, and because it is a
+  // plain `wt=$(...)` command, `set -e` ended the ENTIRE script right there,
+  // on awk's own diagnostic — never reaching `git branch -D` for this branch
+  // at all, let alone any later one in the sweep.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "scratch.txt"), "would be lost if the worktree were removed blind\n");
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `[ "$1" = "-v" ] && case "$3" in *'$2==b'*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable worktree lookup is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^could not scan the worktree listing for feature\/merged/);
+  assert.equal(branchExists(w, "feature/merged"), true, "the branch must survive an unanswerable worktree lookup");
+  assert.equal(existsSync(wt), true, "the worktree and its uncommitted work must survive untouched");
+  assert.equal(
+    readFileSync(join(wt, "scratch.txt"), "utf8"),
+    "would be lost if the worktree were removed blind\n",
+  );
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("an ignored-files scan whose awk stage fails is kept, not silently read as clean (#789)", (t) => {
+  // Before this fix `paste`, not `awk`, was this substitution's last stage,
+  // so an awk that could not finish scanning `$gp_out` was masked completely:
+  // the captured pipeline still succeeded (paste has nothing to fail on) and
+  // the worktree was reaped as though it held no ignored files at all.
+  // Injecting the fault at `awk` alone is only meaningful because the two are
+  // now captured separately — proved by the sibling test below, which shows
+  // the un-restructured pipeline's failure mode still exists at `paste`.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the ignored-files scan is on the critical path");
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `case "$1" in *'/^!! /'*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable ignored-files scan is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^worktree .* ignored-files scan failed/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(existsSync(wt), true, "the worktree must survive untouched");
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("an ignored-files list whose paste stage fails is kept, never silently read as clean (#789)", (t) => {
+  // The other half of the restructure: awk succeeds and reports a real
+  // ignored file, and it is `paste`'s own join that cannot finish. Injecting
+  // this fault at `awk` would prove nothing — the un-restructured pipeline
+  // reported only `paste`'s status, which is exactly the masking #789 filed.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".env\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore .env");
+  git(w, "push", "-q", "origin", "main");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work", join(w, "..", "outside"));
+  writeFileSync(join(wt, ".env"), "SECRET=exists nowhere else\n");
+  assert.equal(git(wt, "status", "--porcelain"), "", "fixture: tracked-clean, so only the ignored-files probe is on the critical path");
+  const bin = toolFailShim(
+    t,
+    "paste",
+    REAL_PASTE,
+    `case "$*" in *'-sd,'*) : ;; *) false ;; esac`,
+    ["paste: cannot allocate memory"],
+    1,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable ignored-files join is a finding, not a script failure");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.match(json.kept[0].reason, /^worktree .* ignored-files list could not be joined/);
+  assert.equal(branchExists(w, "feature/merged"), true);
+  assert.equal(
+    readFileSync(join(wt, ".env"), "utf8"),
+    "SECRET=exists nowhere else\n",
+    "the precious file must survive the run",
+  );
+  assertToolShimFired(bin, "paste", "the paste shim must actually have fired for this fixture");
 });
