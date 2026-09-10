@@ -820,10 +820,12 @@ for arg do
         # EXISTS but has lost its own search bit (\`chmod 000\`) failed \`cd\`
         # exactly as a typo'd one does, fell through this \`case\` unrefused,
         # and reached the \`does not exist\` arm far below — a permission
-        # fault reported as a spelling mistake. Reading \`cd\`'s status
-        # rather than only its output is what the directory branch's own
-        # \$resolved fallback above already does for the identical fault one
-        # arm over; this gives the file arm the same treatment. (#1006)
+        # fault reported as a spelling mistake. The directory branch's own
+        # \$resolved fallback above already reads \`cd\`'s status for the same
+        # fault one arm over, but only to keep a fallback path flowing into
+        # the node_modules match — its own unreadable-\$arg case surfaces
+        # later, off \`find\`'s failure far below, a different mechanism from
+        # this branch's own immediate report. (#1006)
         # \`[ -d \$argdir ]\` is what keeps this from reporting a permission
         # fault it cannot actually back up, and the two fixtures that decide
         # it are not one and the same — measured, not assumed. \`stat\` on a
