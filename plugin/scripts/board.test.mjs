@@ -876,6 +876,23 @@ test("CLI: serve refuses --prev --port 9000, naming --prev not --port's innocent
   assert.match(r.stderr, /--prev needs a value/);
 });
 
+// #1092: the --prev-before-argPort() ordering pinned above (`serve --prev
+// --port 9000`) only exercises --prev going wrong while --port's value is
+// well-formed — it never exercises BOTH flags malformed at once, which is
+// the actual case the hoist comment above `arg("prev")` in main() claims to
+// handle ("a caller who gets BOTH flags wrong at once ... still hears about
+// --prev specifically"). With `arg("prev")` read before argPort() in the
+// hoist (as it is), a trailing --port immediately followed by a trailing
+// --prev — neither given a value — refuses on --prev, since --prev's read
+// runs first and sweep() never reaches --port's dangling flag. Swap the
+// hoist order (argPort() ahead of `arg("prev")`) and this reds: the error
+// names --port instead (measured).
+test("CLI: build refuses --port --prev with both flags trailing, naming --prev not --port", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--port", "--prev"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--prev needs a value/);
+});
+
 test("CLI: --ledger given an empty value dies rather than falling back to the default ledger", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--ledger", ""], { encoding: "utf8" });
   assert.equal(r.status, 2);
