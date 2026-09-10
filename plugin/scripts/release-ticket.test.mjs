@@ -750,6 +750,41 @@ test("a stray worktree with no surviving ancestor below / still names the prune 
   assert.deepEqual(r.calls(), [], "and the label is never touched");
 });
 
+test("a backslash in the argv slug does not make a real stray worktree read as absent (#799)", (t) => {
+  // The stray lookup's needle is `/$issue-$slug`, built from argv rather than
+  // read off disk, and it used to go in through `awk -v d=...`. POSIX awk
+  // processes C-style escapes in a `-v` VALUE, so the two literal bytes `\n`
+  // in <slug> decoded to one newline byte inside the needle while the
+  // porcelain listing kept the two literal bytes verbatim — the length and
+  // suffix comparison then both went wrong, awk still exited 0 having simply
+  // matched nothing, and a real stray worktree read as absent.
+  //
+  // With `stray` empty AND `wt` empty (no branch named `fix/9-back\nslash`
+  // exists to match), the run fell into the orphan probe instead, which
+  // checked a path this stray never occupied and then died misdiagnosing it
+  // as a mistyped <slug> — never naming the stray, never offering its prune
+  // remedy, and refusing for a reason that was not the true one.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  // Not claim-ticket.sh's own route: git rejects a backslash in a refname, so
+  // this needle only ever arrives through release-ticket.sh's own argv, as a
+  // hand-invoked or scripted call naming a directory a normal claim never
+  // would. The registration is retargeted at such a directory here — a real
+  // path git's own porcelain will list, ending in the literal `9-back\nslash`
+  // suffix the retyped needle must match byte for byte.
+  const dest = relocate(r.w, c.wt, join(r.w, ".worktrees", "9-back\\nslash"));
+
+  const { code, json, stderr } = release(r, { args: ["9", "back\\nslash", "fix"] });
+  assert.equal(code, 1, `the suffix key must find the stray and block, not die misdiagnosing a typo: ${stderr}`);
+  assert.ok(json, `no payload: the run refused before ever finding the stray — ${stderr}`);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree prune/, "the remedy must be the one that clears a registration");
+  assert.ok(json.blockers[0].includes(dest), "and it must name the path git listed, byte for byte");
+  assert.doesNotMatch(stderr, /check the <slug> and <type> arguments/,
+    "the old bug misdiagnosed this as a typo instead of finding the stray");
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+});
+
 test("a stray worktree whose HEAD git could not resolve blocks without claiming a branch mismatch", (t) => {
   // A fourth way into the same `else`, distinct from the two above: the
   // worktree is sitting on exactly the claim's branch, present and readable,

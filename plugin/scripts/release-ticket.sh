@@ -483,8 +483,17 @@ main_wt=$(printf '%s\n' "$wt_list" | awk '/^worktree /{print substr($0,10); exit
 # it answers only as a corroborated fallback, below the predicates that
 # corroboration needs — `entry_stray`, after `unresolved_head`. The suffix key
 # here is unchanged, and answers first.
+#
+# Through the ENVIRON, not `-v`, for the reason `locked` gives: `-v` processes
+# escape sequences in its value, so a needle holding a literal backslash arrives
+# mangled and can then never equal what the porcelain printed byte-for-byte.
+# Unlike `locked`'s path, this needle is built from argv rather than read off
+# disk — but argv is not exempt from a backslash either, and awk itself still
+# exits 0 having simply matched nothing: the permissive answer, in a probe whose
+# whole job is to catch a claim whose branch moved (#799). ENVIRON does no such
+# processing.
 stray=$(printf '%s\n' "$wt_list" |
-        awk -v d="/$issue-$slug" '/^worktree /{n++; p=substr($0,10)
+        D="/$issue-$slug" awk '/^worktree /{n++; p=substr($0,10); d=ENVIRON["D"]
           if (n>1 && substr(p, length(p)-length(d)+1) == d) {print p; exit}}') ||
   die "could not scan git's listing for a stray worktree for #$issue"
 
@@ -875,8 +884,9 @@ fi
 # path read off disk, and a `-v` assignment processes escape sequences in it, so
 # a repo under a directory with a backslash in its name would arrive mangled and
 # the comparison would fall to the permissive answer — no match, and back to the
-# silent release this exists to stop. The suffix key stays on `-v`: it is built
-# from argv, which the header's `#243` note already accounts for.
+# silent release this exists to stop. The suffix key above went through ENVIRON
+# too, for the same reason (#799): its needle is built from argv rather than
+# read off disk, but argv is not exempt from a backslash either.
 #
 # Absent entry, unreadable entry, or one pointing somewhere git is not listing:
 # `entry_stray` is empty and the suffix key alone answers, exactly as before.
