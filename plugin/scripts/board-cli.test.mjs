@@ -1,10 +1,15 @@
 // The --spend-since trust boundary, driven through the real CLI.
 //
 // Separate from board.test.mjs because these need a heavier rig than the
-// process-boundary tests already there: gather() reaches the --spend-since
-// guard only AFTER its gh reads, so these need a stub `gh` on PATH and a fake
-// HOME holding a transcript, where the --ledger/--port cases die before any gh
-// call and need neither.
+// process-boundary tests already there. Before #1076, gather() reached the
+// --spend-since guard only AFTER its gh reads, so even the malformed-value
+// cases below needed a stub `gh` on PATH and a fake HOME holding a
+// transcript, where the --ledger/--port cases died before any gh call and
+// needed neither. #1076 hoisted the same read (now argSpendSince()) into
+// main(), ahead of the build/serve dispatch and ahead of gh reads too — but
+// the rig stays: the success-path cases below (a valid value reaching the
+// payload, the #807/#363 pipe-race cases) still run gather() to completion
+// and need the stub either way.
 //
 // gather() reads process.argv directly and die()s with process.exit(2), so it
 // cannot be called in-process the way gatherSpend() is — which is why this

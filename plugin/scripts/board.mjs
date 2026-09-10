@@ -77,6 +77,41 @@ function argInterval() {
   return n;
 }
 
+// Operator input at a trust boundary, so it fails loud. `Number(x) || null`
+// silently turned every bad value into "no filter at all": a typo, or the
+// natural mistake of passing seconds instead of milliseconds, produced a panel
+// that rendered confidently over the WHOLE session while the operator believed
+// it was scoped to one run. That is the same silent-zero failure the comment
+// on gatherSpend describes; an earlier pass removed the `|| null` default but
+// left the footgun, and the guard below is what actually closes it.
+//
+// Gate on PRESENCE, not on the value: `arg()` yields undefined for a trailing
+// `--spend-since`, and `sinceRaw == null` read that as "flag absent", so the
+// guard never fired. And on RANGE, not just finiteness: a seconds-magnitude
+// epoch (~1.7e9) is finite, so the very mistake named above sailed through,
+// counted every agent, and shipped its own bogus value into board.json's
+// `since`. 1e12 ms is 2001-09-09, below any real run; a future boundary
+// matches nothing at all.
+//
+// #1076: pulled out of gather() into its own function, like argPort()/
+// argInterval() above, so main() can call it too (below) ahead of the
+// build/serve dispatch and ahead of both branches' stray() call — before
+// this fix the read sat inline inside gather(), below every stray() call on
+// every path that reaches it, so a trailing `--spend-since` ahead of a stray
+// positional refused under stray()'s generic wording instead of this one.
+// gather() still calls this itself, in the same spot, so nothing about WHEN
+// it validates changes for a caller that skips main() (same reasoning #468
+// gives for argPort()/has("open") staying in serve() too).
+function argSpendSince() {
+  const sinceRaw = arg("spend-since");
+  if (!has("spend-since")) return null;
+  const sinceMs = Number(sinceRaw);
+  if (!Number.isFinite(sinceMs) || sinceMs < 1e12 || sinceMs > Date.now()) {
+    die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
+  }
+  return sinceMs;
+}
+
 // Node's default stdout cap is 1 MiB and execFileSync THROWS (ENOBUFS) past it
 // rather than truncating (#807). Here that throw is indistinguishable from an
 // unreachable tool: the read degrades to the caller's empty default and the
@@ -609,29 +644,11 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
   }
 
-  // Operator input at a trust boundary, so it fails loud. `Number(x) || null`
-  // silently turned every bad value into "no filter at all": a typo, or the
-  // natural mistake of passing seconds instead of milliseconds, produced a panel
-  // that rendered confidently over the WHOLE session while the operator believed
-  // it was scoped to one run. That is the same silent-zero failure the comment
-  // on gatherSpend describes; an earlier pass removed the `|| null` default but
-  // left the footgun, and the guard below is what actually closes it.
-  //
-  // Gate on PRESENCE, not on the value: `arg()` yields undefined for a trailing
-  // `--spend-since`, and `sinceRaw == null` read that as "flag absent", so the
-  // guard never fired. And on RANGE, not just finiteness: a seconds-magnitude
-  // epoch (~1.7e9) is finite, so the very mistake named above sailed through,
-  // counted every agent, and shipped its own bogus value into board.json's
-  // `since`. 1e12 ms is 2001-09-09, below any real run; a future boundary
-  // matches nothing at all.
-  const sinceRaw = arg("spend-since");
-  let sinceMs = null;
-  if (has("spend-since")) {
-    sinceMs = Number(sinceRaw);
-    if (!Number.isFinite(sinceMs) || sinceMs < 1e12 || sinceMs > Date.now()) {
-      die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
-    }
-  }
+  // #1076: guard's own rationale (fail loud, gate on presence and on range,
+  // not just finiteness) now lives at argSpendSince()'s definition above,
+  // alongside argPort()/argInterval() — this call is unchanged in when it
+  // runs, only in where the check itself is written.
+  const sinceMs = argSpendSince();
   const spend = gatherSpend({ sinceMs });
   return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
@@ -684,6 +701,27 @@ async function main() {
   // main() — but serve() is public surface, so the guard stays with it.
   argPort();
   has("open");
+
+  // #1076: same fail-open shape as --port/--open above (#468) — this closes
+  // the two flags PR #1090 (#468) left standing. `argInterval()`'s read sat
+  // inside serve() alone, and the --spend-since read sat inside gather()
+  // (now `argSpendSince()`, extracted above for exactly this reason); both
+  // sat below every stray() call on every path that reaches them. A trailing
+  // `--interval`/`--spend-since` ahead of a stray positional therefore
+  // refused under stray()'s generic wording, naming the next token instead
+  // of the flag actually given wrong — measured, `serve --interval --open x`
+  // said `unexpected argument 'x'` before this hoist, `build --spend-since
+  // --open x` likewise. Same fix, same place: call both here, once, ahead of
+  // the build/serve dispatch and ahead of both branches' own stray() call,
+  // exactly where argPort()/has("open") already sit — build discards both
+  // return values, same as it already discards argPort()'s. serve() below
+  // still calls its own argInterval() (via `interval ?? argInterval() ??
+  // 15`) and gather() still calls its own argSpendSince() — re-evaluating a
+  // pure read of argv costs nothing, and keeps both validating their own
+  // argv for a caller that skips main(), same reasoning #468 gives for
+  // argPort()/has("open").
+  argInterval();
+  argSpendSince();
 
   // #463: sweep() above only refuses a `--`-prefixed token; a bare or
   // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
