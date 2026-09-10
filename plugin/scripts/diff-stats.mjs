@@ -169,6 +169,7 @@ function main() {
   // measurement, exit 0, indistinguishable on stdout from a real empty PR. That
   // is the lie the comment in run() warns about, manufactured at the
   // `computeStats` call this guard protects.
+  if (!info) die("gh returned no body");
   if (!Array.isArray(info.files)) die("gh returned no files array");
   const stats = computeStats(info.files, info.changedFiles);
 
