@@ -2203,6 +2203,45 @@ test("a removal that cleared the registration is a partial release, never `nothi
   assert.equal(json.label, true, "in-progress survives, so the ticket keeps reading as taken");
 });
 
+test("a registration probe that could not run asserts Indeterminate, never a false Deregistered (#798)", (t) => {
+  // `release_outcome`'s own middle arm: is $1 still listed in the FRESH
+  // post-removal listing? Awk answers that through its own exit status alone —
+  // 0 found, 1 not found — so an awk that could not run at all (rc >= 2:
+  // killed, OOM, a broken interpreter) used to land on the same false side as
+  // "ran fine, found nothing" and fall through to
+  // `elif occupied "$1"; then wt_outcome=Deregistered`, asserting the
+  // registration was CLEARED when nothing had established that. `{if (substr`
+  // is this program's own marker and the only awk site in the file carrying it
+  // (`grep -cF`), so every other awk this run makes still answers — the count
+  // and the branch lookup above it, and the lock/HEAD predicates the
+  // preconditions already ran before this point.
+  //
+  // The symlink-swap fixture from the Deregistered case above is the only
+  // route that reaches this arm at all: a healthy `git worktree remove` never
+  // calls `release_outcome`, and a dirty refusal (the case ABOVE the
+  // Deregistered one) never clears the registration for this arm to probe.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const wt = release(r, c, { apply: false }).json.worktree;
+  awkShim(r, "{if (substr");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_SYMLINK: wt } });
+
+  assert.equal(code, 2);
+  assert.doesNotMatch(stderr, /PARTIALLY/, "an unmeasured landing may not assert a partial release");
+  assert.match(stderr, /#9 HALTED mid-release — what landed could not be measured/);
+  assert.ok(
+    stderr.includes(`worktree ${wt} is Indeterminate — what the removal landed could not be measured`),
+    `the detail line must name Indeterminate, not a guessed Deregistered: ${stderr}`,
+  );
+  assert.match(stderr, /could not tell whether .* is still registered for #9/,
+    "and it must name WHY, the same half #551 already guards for the listing-failure arm");
+  assert.equal(json.released, false);
+  assert.match(json.blockers[0], /is Indeterminate/, "and the receipt carries it for a caller without stderr");
+  assert.doesNotMatch(json.blockers[0], /is Deregistered/, "the false answer this case exists to kill");
+  assert.equal(json.label, true, "in-progress survives, so the ticket keeps reading as taken");
+});
+
 test("the run after a Deregistered halt refuses instead of releasing over the directory", (t) => {
   // The knock-on, end to end and through the real route rather than a
   // hand-built registry: run one halts with the registration cleared, and run

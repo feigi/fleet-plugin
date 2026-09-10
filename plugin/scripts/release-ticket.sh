@@ -705,6 +705,43 @@ unresolved_head() {
 # different path and reaches this predicate through the orphan probe.
 occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 
+# The registration PROBE at the heart of the arm below: is $1 still listed in
+# $now, the fresh post-removal listing? #798. `locked` and `unresolved_head`
+# read their own awk's exit status STRAIGHT as the answer — 0 true, 1 false —
+# so an awk that could not run (rc >= 2: killed, OOM, a broken interpreter) and
+# an awk that ran fine and found no match (rc 1, the genuine "not registered")
+# both land on the false side of the same elif, and #798 measured what that
+# fold did here: with nothing left to distinguish them, the run fell through to
+# `elif occupied "$1"; then wt_outcome=Deregistered` and wrote a false
+# Deregistered into the JSON receipt for a registration nothing established was
+# actually cleared.
+#
+# `locked` and `unresolved_head`'s own fix (#454) is not enough copied
+# verbatim: both `die` on an awk that could not run, which is right for a
+# precondition gate — abort before any mutation is attempted — and wrong here.
+# `release_outcome` runs AFTER `git worktree remove` has already run, is called
+# as a bare statement rather than inside a `$( )`, and its caller reads
+# `$wt_outcome` right after the call returns; a `die` here would abort the
+# function with nothing set — worse than the defect it replaces. Nor can the
+# status be captured with a bare pipeline followed by a separate `reg=$?` line:
+# measured, that does not survive this script's `set -eu` either — `set -e`
+# kills the script on the pipeline itself before the assignment is ever
+# reached. So this stays a boolean predicate in the `locked`/`unresolved_head`
+# shape — a non-final AND-OR element (`… && return 0`), never a bare pipeline
+# whose status a later line reads — but the "could not run" case is carried out
+# through `$ro_probe_err` instead of `die`, for `release_outcome` to route to
+# Indeterminate exactly as it already does for a listing git could not
+# produce, one arm up. 0 registered, 1 genuinely not registered ($ro_probe_err
+# stays empty), anything else could not be told apart from "not registered" by
+# rc alone ($ro_probe_err is set to say so).
+ro_registered() {
+  ro_probe_err=
+  printf '%s\n' "$now" |
+    P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}' && return 0
+  [ $? = 1 ] || ro_probe_err="could not tell whether $1 is still registered for #$issue"
+  return 1
+}
+
 # Which release outcome does $1 hold after a `git worktree remove` that refused?
 # Measured, never inferred from the rc — that inference is this file's #208.
 # git drops the registration BEFORE the directory and does not restore it when
@@ -758,9 +795,14 @@ release_outcome() {
     # own prose for why it could not, flattened to one line for the receipt.
     wt_outcome=Indeterminate
     wt_why=$(printf '%s' "$ro_err" | tr '\n' ' ')
-  elif printf '%s\n' "$now" |
-       P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}'; then
+  elif ro_registered "$1"; then
     if occupied "$1"; then wt_outcome=Unreleased; else wt_outcome=Indeterminate; fi
+  elif [ -n "$ro_probe_err" ]; then
+    # awk could not run at all (rc >= 2), which is a different fact from
+    # "ran fine and found nothing" — the latter alone means Deregistered is on
+    # the table below. #798
+    wt_outcome=Indeterminate
+    wt_why=$ro_probe_err
   elif occupied "$1"; then
     wt_outcome=Deregistered
   elif gone "$1"; then
