@@ -892,6 +892,30 @@ test("CLI: build refuses a malformed --port ahead of a stray token, naming --por
   assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
 });
 
+// #1076: same ordering gap as the --prev/--port cases above, for the two
+// flags PR #1090 (#468) left standing — argInterval()'s read had two call
+// sites (serve() directly, and embedded in gather()'s return, which build's
+// dispatch reaches too), and the --spend-since read sat inside gather();
+// all three sat below every stray() call on every path that reaches them.
+// With any of those reads left below the guard, the invocation refused
+// with `unexpected argument 'x'` (measured), naming the value flag's own
+// innocent trailing token instead of the flag actually given wrong — true
+// of build+interval as much as the serve+interval and build+spend-since
+// cases below cover. Hoisting both into main(), the same place and the
+// same way #468 hoisted argPort()/has("open"), is what these two red on
+// if reverted.
+test("CLI: serve refuses a trailing --interval ahead of a stray token, naming --interval not the stray", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "serve", "--interval", "--open", "x"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--interval needs a value/);
+});
+
+test("CLI: build refuses a trailing --spend-since ahead of a stray token, naming --spend-since not the stray", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "build", "--spend-since", "--open", "x"], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--spend-since needs a value/);
+});
+
 // The other two malformed spellings arg.mjs refuses, which the hoist closes on
 // build alongside the three above. Pinned because a NARROWED hoist keeps the
 // three green while dropping these: measured, `if (process.argv.includes(
