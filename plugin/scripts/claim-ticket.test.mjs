@@ -1947,3 +1947,142 @@ test("runner: an unresolvable interpreter in the delegated derivation carries th
   assert.match(r.stderr, /derive-testcmd: node is unusable/, "the delegate's own voice, naming the interpreter");
   assert.doesNotMatch(r.stderr, /could not read origin\/main:package\.json/);
 });
+
+// ---------------------------------------------------------------------------
+// #804 — the argument slot. `claim-ticket.sh` was the last of the four scripts
+// taking `--apply` to carry #250's demotion: the arity check was a lower bound
+// alone and nothing looked at the flag's VALUE.
+//
+// Both halves are pinned, because a guard's false-positive class is not its
+// false-negative class and the refusal tests alone are satisfied by a guard
+// that refuses everything. The accept test is the one that would have caught
+// the regression this shape has produced before — a guard hoisted or widened
+// until the default dry run stopped exiting 0.
+
+// A PATH whose `gh` records that it ran. The direction that actually mutates
+// is only pinned by proving the tracker was never reached: an argument refused
+// AFTER `gh issue edit` still exits 2 and still looks like a refusal from the
+// outside, which is exactly how the trailing-argument case read as one.
+function ghSpy() {
+  const bin = mkdtempSync(join(tmpdir(), "claim-ghspy-"));
+  const marker = join(bin, "ran");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(marker)}\nexit 0\n`, { mode: 0o755 });
+  return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, ran: () => existsSync(marker) };
+}
+
+test("#804: a mistyped --apply is refused, never demoted to a dry run", () => {
+  // The signature that made this invisible: `42 slug fix` and `42 slug fix
+  // --aply` were byte-identical on stdout AND stderr at exit 0. Nothing
+  // anywhere said the flag was not understood, so a caller reading `applied`
+  // saw an honest `false` for a run it believed had applied.
+  //
+  // `--apply=true` and `-n` are here because the `=` spelling and the short
+  // form are what a caller reaches for when the exact-match rule is not
+  // obvious, and both matched nothing before. `apply` unprefixed covers the
+  // dropped dashes, which no `--`-prefix rule would catch, and `extra` covers
+  // a bare positional landing in the slot — within arity, so the bound below
+  // never sees it and only a value check refuses it.
+  for (const arg of ["--aply", "--apply=true", "--APPLY", "-n", "apply", "--", "extra"]) {
+    const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", arg], { cwd: tmpdir(), encoding: "utf8" });
+    assert.equal(r.status, 2, `${arg} must be refused: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /unknown argument/, `${arg} must say the flag was not understood`);
+    assert.equal(r.stdout.trim(), "", `${arg} must not emit a receipt: ${r.stdout}`);
+  }
+
+  // The discriminator, asserted rather than assumed. At this cwd the FLAGLESS
+  // run also exits 2 with empty stdout — it dies on the repository check — so
+  // "exit 2 and no receipt" is a signature the unguarded script already
+  // produced and pins nothing on its own. What has to be true is that the two
+  // runs are now distinguishable, which is the whole of #250.
+  const flagless = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: tmpdir(), encoding: "utf8" });
+  assert.doesNotMatch(flagless.stderr, /unknown argument/, "the slot rule fired on a run that passed no flag at all");
+});
+
+test("#804: a trailing argument is refused on both entry paths, before the tracker is touched", () => {
+  // The worse direction. `--apply extra --whatever` dropped args five and six
+  // without a word and entered APPLY mode, reaching `gh issue edit 42
+  // --add-label in-progress`; the exit 2 it ended on came from that gh call
+  // failing, not from any argument refusal. So the assertion that matters is
+  // that `gh` never ran — not the exit code, which was already 2.
+  //
+  // The last row carries no flag in the trailing slot: the arity bound has to
+  // hold on its own, without the value rule underneath it happening to catch
+  // the same argv. (A bare `extra` in slot FOUR is within arity and is the
+  // value rule's to refuse — it is asserted in the mistyped-flag test above,
+  // not here, so that each row measures the guard it names.)
+  for (const args of [
+    ["42", "slug", "fix", "--apply", "extra"],
+    ["42", "slug", "fix", "--apply", "extra", "--whatever"],
+    ["42", "slug", "fix", "--apply", ""],
+    ["42", "slug", "fix", "", "extra"],
+  ]) {
+    const spy = ghSpy();
+    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: tmpdir(), encoding: "utf8", env: spy.env });
+    assert.equal(r.status, 2, `${args.join(" ")} must be refused: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /usage: claim-ticket\.sh <issue> <slug> <type>/, `${args.join(" ")} must refuse on arity`);
+    assert.equal(r.stdout.trim(), "", `${args.join(" ")} must not emit a receipt: ${r.stdout}`);
+    assert.equal(spy.ran(), false, `${args.join(" ")} reached the tracker before refusing`);
+  }
+
+  // `--write-runner` needs its own bound and cannot borrow the claim path's.
+  // Its positional rewrite collapses argv to exactly four before that check
+  // runs, so a trailing argument arriving HERE is structurally invisible
+  // there — measured on the unguarded script, `--write-runner <dest> 42 EXTRA
+  // --junk` dropped both extras, exited 0 and wrote the runner.
+  const dir = mkdtempSync(join(tmpdir(), "claim-wr-"));
+  for (const args of [
+    ["--write-runner", join(dir, "r1"), "42", "EXTRA"],
+    ["--write-runner", join(dir, "r2"), "42", "EXTRA", "--junk"],
+  ]) {
+    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: tmpdir(), encoding: "utf8" });
+    assert.equal(r.status, 2, `${args.join(" ")} must be refused: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /usage: claim-ticket\.sh --write-runner/, `${args.join(" ")} must refuse on the write-runner arity`);
+  }
+  assert.equal(existsSync(join(dir, "r1")), false, "a refused --write-runner must not have written a runner");
+  assert.equal(existsSync(join(dir, "r2")), false, "a refused --write-runner must not have written a runner");
+});
+
+test("#804: the slot rule accepts every argv it must — the false-positive half", () => {
+  // A rule that refused everything satisfies both tests above. This is the
+  // shape that regressed once already: a guard widened until it refused the
+  // legitimate flags it was never meant to see. The default dry run leads,
+  // because it is the mode with no flag in it — the one a suite whose call
+  // sites all pass `--apply` cannot see at all.
+  const dry = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
+  assert.equal(dry.status, 0, `the default dry run must still exit 0\n${dry.stdout}${dry.stderr}`);
+  assert.match(dry.stdout, /"applied":false/, "and must still emit its receipt");
+
+  // `--apply` still reaches apply mode. Asserted as "the tracker WAS reached",
+  // never as "it exited 0": a flag swallowed by a guard that then fell through
+  // to the dry-run branch also exits 0, which is the fail-open the slot rule
+  // exists to close.
+  const spy = ghSpy();
+  const applied = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: repo({ [TESTS]: "" }), encoding: "utf8", env: spy.env });
+  assert.equal(applied.status, 0, `${applied.stdout}${applied.stderr}`);
+  assert.match(applied.stdout, /"applied":true/, "--apply must still apply");
+  assert.equal(spy.ran(), true, "--apply must still reach the tracker");
+
+  // An explicitly empty fourth argument. `${4:-}` cannot tell it from an
+  // absent one, so it is a dry run — the same reading both already-guarded
+  // siblings give it, and a decision on the record rather than a hole.
+  const empty = spawnSync("sh", [SCRIPT, "42", "slug", "fix", ""], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
+  assert.equal(empty.status, 0, `${empty.stdout}${empty.stderr}`);
+  assert.match(empty.stdout, /"applied":false/, "an empty flag slot reads as absent, as it does in the siblings");
+
+  // Both `--write-runner` arities, since the bound is a RANGE and a test of
+  // one end pins neither. `<issue>` is optional and defaults to 0.
+  const wr = mkdtempSync(join(tmpdir(), "claim-wrok-"));
+  for (const args of [["--write-runner", join(wr, "a")], ["--write-runner", join(wr, "b"), "42"]]) {
+    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
+    assert.equal(r.status, 0, `${args.join(" ")} must be accepted\n${r.stdout}${r.stderr}`);
+  }
+  assert.equal(existsSync(join(wr, "a")), true, "--write-runner <dest> must still write");
+  assert.equal(existsSync(join(wr, "b")), true, "--write-runner <dest> <issue> must still write");
+
+  // The neighbours the slot rule is not allowed to cost. It reads argument
+  // four and no other position, so a <slug> or <type> that merely LOOKS like a
+  // flag is none of its business — and neither is refused anywhere else.
+  const odd = spawnSync("sh", [SCRIPT, "42", "-weird--slug", "fix"], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
+  assert.equal(odd.status, 0, `a flag-shaped slug must still claim\n${odd.stdout}${odd.stderr}`);
+  assert.match(odd.stdout, /"branch":"fix\/42--weird--slug"/, "and must reach the branch name unaltered");
+});

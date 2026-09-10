@@ -48,7 +48,12 @@ wt_lib="$(dirname "$0")/worktree.sh"
 writeonly=false
 dest=
 if [ "${1:-}" = "--write-runner" ]; then
-  [ $# -ge 2 ] || die "usage: claim-ticket.sh --write-runner <dest> [<issue>]"
+  # Bounded at both ends. The rewrite below collapses argv to exactly four
+  # positionals, so the claim path's own arity check cannot see a trailing
+  # argument that arrived on THIS branch — measured: `--write-runner <dest>
+  # <issue> EXTRA --junk` dropped both extras without a word, exited 0 and
+  # wrote the runner. Every caller in this repo passes <dest> and <issue>.
+  [ $# -ge 2 ] && [ $# -le 3 ] || die "usage: claim-ticket.sh --write-runner <dest> [<issue>]"
   writeonly=true
   dest=$2
   [ -n "$dest" ] || die "--write-runner destination must not be empty"
@@ -57,10 +62,21 @@ if [ "${1:-}" = "--write-runner" ]; then
   set -- "${3:-0}" write-runner fix --apply
 fi
 
-[ $# -ge 3 ] || die "usage: claim-ticket.sh <issue> <slug> <type> [--apply]"
+[ $# -ge 3 ] && [ $# -le 4 ] || die "usage: claim-ticket.sh <issue> <slug> <type> [--apply]"
 issue=$1
 slug=$2
 type=$3
+# Exact match, and nothing else tolerated in the slot — the #250 demotion, in
+# the file that still carried it. Measured on the unguarded script: `5 slug fix`
+# and `5 slug fix --aply` were byte-identical on stdout AND stderr at exit 0,
+# so nothing anywhere said the flag was not understood; and the arity check
+# above was a lower bound alone, so `5 slug fix --apply extra --whatever`
+# dropped both extras and reached `gh issue edit --add-label in-progress`,
+# mutating the tracker on an argv the script never agreed to.
+case "${4:-}" in
+  ''|--apply) ;;
+  *) die "unknown argument '$4' — the only option is --apply";;
+esac
 apply=false
 [ "${4:-}" = "--apply" ] && apply=true
 
