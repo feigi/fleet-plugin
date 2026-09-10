@@ -1203,6 +1203,7 @@ PRs**, because the two causes live at different levels — the budget is one
 account, the payload is one PR:
 
 ```sh
+budget_out= list_out= blind=                 # seed the latches: set -u reads each below before tick 1 ever assigns one
 while :; do                                   # one tick
   rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
   case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
@@ -1228,7 +1229,7 @@ while :; do                                   # one tick
         list_out=
       fi
       for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
-        st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null)
+        st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
         if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
           case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
             echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
