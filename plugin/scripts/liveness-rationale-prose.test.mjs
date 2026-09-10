@@ -53,11 +53,13 @@ const ANCHOR = "**Both halves of that command are load-bearing.**";
 // anchor is a failure rather than a wider slice: silently falling back to the
 // whole document is the false green this bound exists to prevent.
 //
-// The shared bound, not a local copy of it (#1372): a copy cannot see the two
-// false greens this one closes — a blank line carrying whitespace, which a
-// literal `\n\n` search runs straight past into the next paragraph, and an
-// anchor occurring more than once, which binds the pin to whichever copy of the
-// anchored block comes first.
+// The shared bound, not a local copy of it (#1372). What it closes that a local
+// copy could not: a blank line carrying whitespace, which a literal `\n\n`
+// search runs straight past into the next paragraph, and an anchor occurring
+// more than once, which binds the pin to whichever copy of the anchored block
+// comes first. What it does NOT close is a blank line deleted outright — the
+// paragraphs then merge and the slice takes both, a hole that predates this
+// bound and is open still (#1377).
 const rule = () =>
   paragraph(readFileSync(join(import.meta.dirname, "..", ...SKILL.split("/")), "utf8"), ANCHOR, SKILL);
 

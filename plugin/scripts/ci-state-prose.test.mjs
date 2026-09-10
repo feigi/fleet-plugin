@@ -35,23 +35,45 @@ const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\.join
 // section marker: without that bound a gutted sentence stays pinned by a fresh
 // paragraph inserted before the marker (measured — both documents, suite green).
 //
-// The shared bound, not a local copy of it (#1372): a copy cannot see the two
-// false greens this one closes — a blank line carrying whitespace, which a
-// literal `\n\n` search runs straight past into the next paragraph, and an
-// anchor occurring more than once, which binds the pin to whichever copy of the
-// anchored block comes first.
+// The shared bound, not a local copy of it (#1372). What it closes that a local
+// copy could not: a blank line carrying whitespace, which a literal `\n\n`
+// search runs straight past into the next paragraph, and an anchor occurring
+// more than once, which binds the pin to whichever copy of the anchored block
+// comes first. What it does NOT close is a blank line deleted outright — the
+// paragraphs then merge and the slice takes both, a hole that predates this
+// bound and is open still (#1377).
 //
-// The local copy this replaced took a SECOND, end-anchor bound and used the
-// paragraph only as a tightener. The paragraph end never fell after that anchor
-// in either document — one of the two anchors OPENS on the blank line the
-// paragraph bound stops at, so they coincide there — which leaves the end anchor
-// bounding nothing it was asked to bound. It is dropped rather than kept as a
-// tripwire on prose these tests do not name.
+// The local copy this replaced took a SECOND bound, the opening of the next
+// paragraph, and used the blank line only as a tightener. In both documents the
+// blank line already falls where that opening begins, so the migrated slices are
+// byte-identical to what the local copy returned. But the local copy also
+// ASSERTED that opening was reachable, and that assert is the one thing that
+// sees the merge — so it is kept, as its own check rather than as a bound.
 const reviewAndFix = () =>
   paragraph(REVIEW_AND_FIX, "Its job-presence check is what catches the case above", "review-and-fix job-presence sentence");
 
 const runMergeBot = () =>
   paragraph(RUN_MERGE_BOT, "That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence");
+
+// The blank line each slice stops at is a bound only while it is there: delete
+// it and the following paragraph merges into the slice, where a copy of the
+// gutted clause satisfies every assertion in this file (measured — either
+// document, whole suite green without this check). `paragraph` cannot tell a
+// merged paragraph from a genuine one, so the opening of the next paragraph is
+// asserted here, with the blank line that separates it included in the literal.
+const NEXT_PARAGRAPH = [
+  ["review-and-fix", REVIEW_AND_FIX, "\n\n**A repo with no workflow files"],
+  ["run-merge-bot", RUN_MERGE_BOT, "\n\n   **Re-query at the moment you merge"],
+];
+
+test("each pinned paragraph is still followed by a blank line and the paragraph that opened after it", () => {
+  for (const [label, doc, opening] of NEXT_PARAGRAPH) {
+    assert.ok(
+      doc.includes(opening),
+      `${label}: ${JSON.stringify(opening)} is gone. If the blank line went, the pinned slice now runs on into that paragraph and a gutted clause reads as pinned; if the paragraph itself moved or was reworded, re-anchor this check`,
+    );
+  }
+});
 
 // Both documents carry both clauses, but each words the aftermath its own way,
 // so the shared cause is one regex and the aftermath is per-document. Pinning

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { between, paragraph, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
+import { anchorAt, between, paragraph, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -176,4 +176,15 @@ test("paragraph throws when its anchor moved, rather than widening to the whole 
 // A document with no blank line at all is one paragraph, not a failure.
 test("paragraph returns the remainder when the rule's block ends the document", () => {
   assert.equal(paragraph("x\n\nTHE RULE ends here.", "THE RULE", "the fixture"), "THE RULE ends here.");
+});
+
+// `anchorAt` returns the offset where the anchor STARTS, not where it ends.
+// `paragraph` slices forward from it, so either offset would look right there;
+// `quiet-payload-prose`'s source site slices BACKWARD from it to take the `//`
+// block above a declaration, and there the two are a whole anchor apart. Written
+// here rather than left to that consumer, per this file's own header: a guard with
+// no dedicated test is a guard nobody is pinning, and a consumer can stop needing
+// the contract it happens to pin today.
+test("anchorAt returns the offset where the anchor starts, not where it ends", () => {
+  assert.equal(anchorAt("pad\n\nTHE RULE says X.", "THE RULE", "the fixture"), 5);
 });
