@@ -46,6 +46,9 @@ const stray = makeStray(die);
 // same as before this fix: the guard checks the flag's SHAPE, not whether
 // this subcommand has a use for it. `ledger`/`prev`/`spend-since`/`interval`
 // were already read on the build path and already refused there.
+// #1092: that last claim held for `ledger`/`spend-since`/`interval`, not for
+// `prev` — `prev` was read on `build` alone, and serve() never read it at
+// all. Hoisted in main() below, next to argPort()/has("open").
 
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
@@ -699,6 +702,23 @@ async function main() {
   // its own argv for a caller that skips main(). Nothing in this repo is such
   // a caller today — every serve() test drives the real CLI, which enters
   // main() — but serve() is public surface, so the guard stays with it.
+  // #1092: unlike --port/--open (never read on `build` before #468) or
+  // --ledger/--spend-since/--interval (already read on `build`, per the
+  // header comment above), --prev was read on exactly one subcommand and it
+  // was the wrong one to skip: `arg("prev")` sat inside the `build` branch
+  // alone, and serve()'s own signature carries no `prev` parameter at all —
+  // so `serve --prev`, `serve --prev=x` and `serve --prev --port 9000` all
+  // fell through with no guard ever firing (measured), the last one blaming
+  // --port's innocent value once stray() reached it instead. Hoisted here
+  // for the same reason #468 hoisted argPort()/has("open") below it — ahead
+  // of the dispatch and both branches' stray() calls — and ahead of argPort()
+  // itself so a caller who gets BOTH flags wrong at once (`--port --prev`,
+  // each trailing with no value) still hears about --prev specifically,
+  // rather than whichever guard happens to run first. The old in-branch read
+  // inside `build` is gone; this is now the only read, and its value reaches
+  // gather() exactly as before — discarded on serve, same as --port/--open
+  // are discarded on build.
+  const prevFile = arg("prev");
   argPort();
   has("open");
 
@@ -732,15 +752,12 @@ async function main() {
   // the usage die below already names as such, and stray() has no business
   // relitigating that with its own generic wording.
   //
-  // Each branch guards itself rather than one call covering both, so the
-  // branch that reads a value flag can read it FIRST — see --prev below.
+  // Each branch guards itself rather than one call covering both: hoisting
+  // stray() above the `cmd` check the way sweep() sits above it would make
+  // `board.mjs junk --bogus` refuse the stray instead of falling through to
+  // the usage die below, which is `cmd`'s wrong-subcommand case to name, not
+  // stray()'s to relitigate.
   if (cmd === "build") {
-    // Above stray(), not below it: measured, with the read below the guard
-    // `board.mjs build --prev --port 9000` refused with `unexpected argument
-    // '9000'`, naming --port's innocent value instead of the flag actually
-    // given wrong. Same ordering arg.mjs documents for the sweep — value
-    // guards first, so the more specific wording wins.
-    const prevFile = arg("prev");
     stray(VALUE_FLAGS, ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
     const model = computeBoard(gather({ ledgerFile, prevFile }));
