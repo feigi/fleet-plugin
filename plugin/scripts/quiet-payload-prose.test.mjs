@@ -102,7 +102,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { phrase } from "./prose-pin.mjs";
+import { anchorAt, paragraph } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -131,18 +131,26 @@ test("the dropped-field list is still readable out of ci-state.mjs", () => {
 // The paragraph carrying the statement, and no more of the file than that. A
 // missing anchor is a failure rather than a wider slice: silently falling back
 // to the whole document is the false green this bound exists to prevent.
-function paragraph(name, anchor) {
+//
+// The shared bound, not a local copy of it (#1372). What it closes that a local
+// copy could not: a blank line carrying whitespace, which a literal `\n\n`
+// search runs straight past into the next paragraph, and an anchor occurring
+// more than once, which binds the pin to whichever copy of the anchored block
+// comes first. What it does NOT close is a blank line deleted outright — the
+// paragraphs then merge and the slice takes both, a hole that predates this
+// bound and is open still (#1377).
+//
+// The source site takes the other bound and so cannot use `paragraph`: in source
+// the anchor is the declaration BELOW the block, and the slice is the run of
+// `//` lines above it — code at both ends, so no edit to the prose it holds can
+// move either bound, where a blank-line bound would run past the end of the
+// comment into that code (the false green measured in #695). It takes the anchor
+// through `anchorAt` all the same, so the uniqueness half is shared rather than
+// copied for the sake of an end bound that differs.
+function siteSlice(name, anchor) {
   const text = read(name);
-  const at = text.search(phrase(anchor));
-  assert.notEqual(at, -1, `${name}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
-  // In source the anchor is the declaration BELOW the block, and the slice is the
-  // run of `//` lines above it: code at both ends, so no edit to the prose it
-  // holds can move either bound. A blank-line bound would run past the end of the
-  // comment into that code, which is the false green measured in #695.
-  if (name.endsWith(".mjs")) return (text.slice(0, at).match(/(?:[ \t]*\/\/[^\n]*\n)+$/) ?? [""])[0];
-  const rest = text.slice(at);
-  const end = rest.indexOf("\n\n");
-  return end === -1 ? rest : rest.slice(0, end);
+  if (!name.endsWith(".mjs")) return paragraph(text, anchor, name);
+  return (text.slice(0, anchorAt(text, anchor, name)).match(/(?:[ \t]*\/\/[^\n]*\n)+$/) ?? [""])[0];
 }
 
 // The `--quiet` sentence, from its `drops` to the end of that sentence. The
@@ -153,7 +161,7 @@ function paragraph(name, anchor) {
 // It is matched and discarded, not captured: a clause starting at `--quiet`
 // would swallow the preamble the bound exists to exclude.
 function dropsClause(name, anchor) {
-  const clause = paragraph(name, anchor).match(/`--quiet`[^.]*?(drops[^.]*)/);
+  const clause = siteSlice(name, anchor).match(/`--quiet`[^.]*?(drops[^.]*)/);
   assert.ok(clause, `${name}: the "${anchor}" paragraph no longer has a \`--quiet\` sentence saying what it drops`);
   return clause[1];
 }
