@@ -215,6 +215,13 @@ At start, and whenever the pool empties.
    `unknown[]` at exit 1, which is taken. Four causes print nothing at all — a
    bad argument, not inside a git repository, no such issue, a verdict that could
    not be written — so never assume exit 2 parses.
+
+   **A free verdict is not evidence that nobody is editing the ticket's
+   target files.** All three probes ask whether a branch-shaped claim
+   exists — a PR, a remote head, a local branch, or a worktree — and
+   nothing else; work done directly against the shared checkout, by a
+   human or another agent session, stakes no branch-shaped claim and trips
+   none of them.
 4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
    --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
    answers both questions. Record the ticket's real brief — the `## Agent
