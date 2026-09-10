@@ -882,6 +882,23 @@ number, worktree abs path, branch, and each of these verbatim:
 > you stop for any reason, uncommitted work is invisible to the controller and
 > effectively unrecoverable.
 
+> **Never `git stash` or `git stash pop` to shelve your own progress — take a
+> WIP commit instead: `git commit -m wip`, then amend it or
+> `git reset --soft HEAD^` once you have something real to commit.** The
+> stash stack is repo-global, not per-worktree or per-session — the same
+> `refs/stash` is shared by every worktree, the main checkout, and every
+> concurrent member. A bare pop takes whichever entry is on top, from any
+> worktree, and it is **silent** about it — rc 0, no error — exactly when the
+> tree receiving it is clean on the affected paths, which is the moment you
+> would assume it is safe; it refuses loudly only when that tree is already
+> dirty on them. A bare `git stash` (push) does **not** reach into a sibling
+> worktree's uncommitted work — that half is unfounded, it acts on your own
+> tree only — so the hazard is entirely on the pop side: yours can take a
+> sibling's entry, or a sibling's pop can take yours. Nothing partitions the
+> stack the way the scratch root below is partitioned — one `refs/stash` per
+> repository, with no per-member address for it — so this prohibition is the
+> whole of the protection, not a stopgap standing in for one.
+
 > **Every scratch file, fixture or mutation copy you create goes under
 > `<scratch>/impl-<N>/`, never into the scratch root by itself.** The scratchpad
 > root your own system prompt names is injected unprompted into every dispatched
@@ -1621,6 +1638,18 @@ nothing leaves it no gate at all.
 > file aside and copy it back. Better still, mutate a copy under
 > `<scratch>/pr<N>/mutate/` and leave the worktree untouched — that is what
 > refuters are already required to do, and it has no blast radius at all.
+>
+> **Never `git stash` or `git stash pop` here either — a WIP commit is the
+> substitute, not a second scratch mechanism: `git commit -m wip`, then
+> restore or amend once you're back to real work.** The stash stack is
+> repo-global too, not per-worktree or per-session — the same `refs/stash`
+> every concurrent member and the main checkout share, not partitioned the
+> way `<scratch>/pr<N>/mutate/` above is. A bare pop takes whichever entry is
+> on top, from any worktree, silently — rc 0, no error — when the tree
+> receiving it is clean on the affected paths, and refuses only when that
+> tree is already dirty there. A bare `git stash` (push) does not reach into
+> a sibling's tree, so that half is not the risk — the pop is. Nothing
+> partitions the stack; this prohibition is the whole of the protection.
 >
 > **Report LAST, and only once nothing can still change.** A report you have
 > sent **pins that SHA** for the controller, which dispatches a finisher against
