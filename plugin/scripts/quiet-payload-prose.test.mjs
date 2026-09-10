@@ -111,20 +111,24 @@ const CI_STATE_PATH = "scripts/ci-state.mjs";
 const SKILL = "skills/run-team/SKILL.md";
 const REVIEW_AND_FIX = "commands/review-and-fix.md";
 
-// The one assignment `--quiet` gates the payload on. Its absence is a failure
-// rather than an empty field list: an empty list would pass every site
-// vacuously. Measured (#695): rewrite that assignment and the guard below is the
-// one red while all four sites go green on zero assertions — so the guard is
-// where a broken derivation is diagnosed, and the sites are left saying nothing
-// rather than each repeating it.
+// The one assignment `--quiet` gates the payload on — now also gated on
+// `!noCi` (#927: the no-ci arm never binds a run, so it drops `jobs`/`missing`
+// unconditionally, the same way `emitRateLimited()` already does; `--quiet`'s
+// own effect, which is what this file pins, is unchanged by that addition).
+// The derivation's absence is a failure rather than an empty field list: an
+// empty list would pass every site vacuously. Measured (#695): rewrite that
+// assignment and the guard below is the one red while all four sites go green
+// on zero assertions — so the guard is where a broken derivation is
+// diagnosed, and the sites are left saying nothing rather than each
+// repeating it.
 const CI_STATE = read(CI_STATE_PATH);
-const FIELDS = ((CI_STATE.match(/if \(!quiet\) Object\.assign\(payload, \{([^}]*)\}\)/) ?? [])[1] ?? "")
+const FIELDS = ((CI_STATE.match(/if \(!quiet && !noCi\) Object\.assign\(payload, \{([^}]*)\}\)/) ?? [])[1] ?? "")
   .split(",").map((f) => f.trim()).filter(Boolean);
 
 test("the dropped-field list is still readable out of ci-state.mjs", () => {
   assert.ok(
     FIELDS.length,
-    "ci-state.mjs no longer gates payload fields through `if (!quiet) Object.assign(payload, { ... })` — re-derive FIELDS here from whatever replaced it, never hard-code the list",
+    "ci-state.mjs no longer gates payload fields through `if (!quiet && !noCi) Object.assign(payload, { ... })` — re-derive FIELDS here from whatever replaced it, never hard-code the list",
   );
 });
 
