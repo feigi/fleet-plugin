@@ -169,7 +169,21 @@ fi
 # "no baseline" and prescribing `--pin` would walk a controller from "the check
 # could not look" to "certified clean" in one step, discarding evidence it
 # never read — the exact anti-pattern run-team/SKILL.md forbids. (#1058)
-[ -e "$base" ] && [ ! -r "$base" ] \
+basedir="$(dirname "$base")"
+
+# A directory that exists but cannot be searched (missing +x) hides
+# everything under it from stat(2) — `[ -e "$base" ]` below reads FALSE for
+# every file underneath, so without this check the run falls through to the
+# "no baseline" message one level up: the exact mislabel this refusal exists
+# to prevent, just moved from the file to its containing directory. (#1058)
+[ -d "$basedir" ] && [ ! -x "$basedir" ] \
+  && die "$basedir exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
+
+# `-L` catches a dangling symlink: the link entry is present but its target
+# is gone, so `-e` (which dereferences) reads FALSE and the run would
+# otherwise fall through to the same "no baseline" message for a baseline
+# that is very much present, just broken. (#1058)
+{ [ -e "$base" ] || [ -L "$base" ]; } && [ ! -r "$base" ] \
   && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
 [ -r "$base" ] || die "no baseline at $base — run instruments.sh --pin once at run start"
 want=$(cat "$base") || die "cannot read $base"
