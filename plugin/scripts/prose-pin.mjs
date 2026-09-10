@@ -35,27 +35,36 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.repla
 // markdownlint config, no CI check — and every paragraph pinned so far is
 // indented list content, which is exactly where an editor produces that shape.
 //
-// The anchor must match EXACTLY ONCE, mirroring `markedLine`'s own count
-// assert for the same reason: a search takes the FIRST match silently, so an
-// un-gutter'd restatement of the anchored block ABOVE the real one — the
-// shape this repo's prose already uses where a phase quotes a member prompt
-// back at itself — binds the pin to the copy while the real rule is gutted.
-// A blockquoted copy is harmless (`\s+` cannot span the `>` gutter); a plain
-// one is not.
+// The anchor must match EXACTLY ONCE — see `anchorAt`, which holds that half.
 //
-// Extracted here rather than copied a fifth time: `ci-state-prose`,
-// `liveness-rationale-prose`, `quiet-payload-prose` and
-// `staleness-qualifier-prose` each hand-rolled this same search-to-blank-line
-// slicer locally. Those four are already-merged, mutation-tested deliverables
-// of their own tickets, so migrating them is deliberately left out of #823 —
-// this export exists so the next pin does not become a fifth copy.
+// The single definition of a paragraph bound in this directory. It was
+// extracted (#823) while pins elsewhere still hand-rolled this same
+// search-to-blank-line slicer locally, every copy carrying both false greens
+// above by construction; #1372 migrated them onto it. A pin needing this bound
+// imports it — a local copy is the defect, not a style choice.
 export function paragraph(text, anchor, what) {
+  const rest = text.slice(anchorAt(text, anchor, what));
+  const end = rest.search(/\n[ \t]*\n/);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+// The offset of an anchor that must occur EXACTLY ONCE, mirroring `markedLine`'s
+// own count assert for the same reason: a search takes the FIRST match silently,
+// so an un-gutter'd restatement of the anchored block ABOVE the real one — the
+// shape this repo's prose already uses where a phase quotes a member prompt back
+// at itself — binds the pin to the copy while the real rule is gutted. A
+// blockquoted copy is harmless (`\s+` cannot span the `>` gutter); a plain one is
+// not. A missing anchor throws rather than widening, for `paragraph`'s reason.
+//
+// Split out of `paragraph` rather than left inside it because a slice whose END
+// bound is not a blank line needs the same guarantee and must not copy it: the
+// source site in `quiet-payload-prose.test.mjs` anchors on a declaration and
+// takes the `//` comment block ABOVE it, bounded by code at both ends.
+export function anchorAt(text, anchor, what) {
   const hits = [...text.matchAll(new RegExp(phrase(anchor).source, "g"))];
   assert.notEqual(hits.length, 0, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
   assert.equal(hits.length, 1, `${what}: slice anchor "${anchor}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`);
-  const rest = text.slice(hits[0].index);
-  const end = rest.search(/\n[ \t]*\n/);
-  return end === -1 ? rest : rest.slice(0, end);
+  return hits[0].index;
 }
 
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines

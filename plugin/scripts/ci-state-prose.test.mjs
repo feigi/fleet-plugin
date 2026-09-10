@@ -15,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { paragraph } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
@@ -33,31 +34,24 @@ const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\.join
 // outright. So each slice stops at the end of its own PARAGRAPH, not at the next
 // section marker: without that bound a gutted sentence stays pinned by a fresh
 // paragraph inserted before the marker (measured — both documents, suite green).
-function sentence(source, startAnchor, endAnchor, label) {
-  const at = source.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${label}: start anchor '${startAnchor}' moved — update this test`);
-  const rest = source.slice(at + startAnchor.length);
-  const end = rest.indexOf(endAnchor);
-  assert.notEqual(end, -1, `${label}: end anchor '${endAnchor}' moved — update this test`);
-  const para = rest.indexOf("\n\n");
-  return startAnchor + rest.slice(0, para !== -1 && para < end ? para : end);
-}
-
+//
+// The shared bound, not a local copy of it (#1372): a copy cannot see the two
+// false greens this one closes — a blank line carrying whitespace, which a
+// literal `\n\n` search runs straight past into the next paragraph, and an
+// anchor occurring more than once, which binds the pin to whichever copy of the
+// anchored block comes first.
+//
+// The local copy this replaced took a SECOND, end-anchor bound and used the
+// paragraph only as a tightener. The paragraph end never fell after that anchor
+// in either document — one of the two anchors OPENS on the blank line the
+// paragraph bound stops at, so they coincide there — which leaves the end anchor
+// bounding nothing it was asked to bound. It is dropped rather than kept as a
+// tripwire on prose these tests do not name.
 const reviewAndFix = () =>
-  sentence(
-    REVIEW_AND_FIX,
-    "Its job-presence check is what catches the case above",
-    "\n\n**A repo with no workflow files",
-    "review-and-fix job-presence sentence",
-  );
+  paragraph(REVIEW_AND_FIX, "Its job-presence check is what catches the case above", "review-and-fix job-presence sentence");
 
 const runMergeBot = () =>
-  sentence(
-    RUN_MERGE_BOT,
-    "That presence requirement is what catches the case above",
-    "**Re-query at the moment you merge",
-    "run-merge-bot presence-requirement sentence",
-  );
+  paragraph(RUN_MERGE_BOT, "That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence");
 
 // Both documents carry both clauses, but each words the aftermath its own way,
 // so the shared cause is one regex and the aftermath is per-document. Pinning

@@ -44,7 +44,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { phrase } from "./prose-pin.mjs";
+import { paragraph, phrase } from "./prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
 const ANCHOR = "**Both halves of that command are load-bearing.**";
@@ -52,14 +52,14 @@ const ANCHOR = "**Both halves of that command are load-bearing.**";
 // The paragraph carrying the rule, and no more of the file than that. A missing
 // anchor is a failure rather than a wider slice: silently falling back to the
 // whole document is the false green this bound exists to prevent.
-function rule() {
-  const text = readFileSync(join(import.meta.dirname, "..", ...SKILL.split("/")), "utf8");
-  const at = text.search(phrase(ANCHOR));
-  assert.notEqual(at, -1, `${SKILL}: slice anchor "${ANCHOR}" moved — re-anchor this test, never widen it to the whole file`);
-  const rest = text.slice(at);
-  const end = rest.indexOf("\n\n");
-  return end === -1 ? rest : rest.slice(0, end);
-}
+//
+// The shared bound, not a local copy of it (#1372): a copy cannot see the two
+// false greens this one closes — a blank line carrying whitespace, which a
+// literal `\n\n` search runs straight past into the next paragraph, and an
+// anchor occurring more than once, which binds the pin to whichever copy of the
+// anchored block comes first.
+const rule = () =>
+  paragraph(readFileSync(join(import.meta.dirname, "..", ...SKILL.split("/")), "utf8"), ANCHOR, SKILL);
 
 const OLD_HALF = "the prescribed **old**-string search names a *wrong* commit at exit 0";
 const NEW_HALF = "the **new**-string search the paragraph above forbids that prints nothing at exit 0";

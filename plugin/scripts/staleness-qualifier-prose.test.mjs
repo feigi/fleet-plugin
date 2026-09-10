@@ -83,7 +83,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { phrase } from "./prose-pin.mjs";
+import { paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -91,14 +91,13 @@ const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
 // The paragraph carrying the rule, and no more of the file than that. A missing
 // anchor is a failure rather than a wider slice: silently falling back to the
 // whole document is the false green this bound exists to prevent.
-function rule(name, anchor) {
-  const text = read(name);
-  const at = text.search(phrase(anchor));
-  assert.notEqual(at, -1, `${name}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
-  const rest = text.slice(at);
-  const end = rest.indexOf("\n\n");
-  return end === -1 ? rest : rest.slice(0, end);
-}
+//
+// The shared bound, not a local copy of it (#1372): a copy cannot see the two
+// false greens this one closes — a blank line carrying whitespace, which a
+// literal `\n\n` search runs straight past into the next paragraph, and an
+// anchor occurring more than once, which binds the pin to whichever copy of the
+// anchored block comes first.
+const rule = (name, anchor) => paragraph(read(name), anchor, name);
 
 const CLAUSE =
   "a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer";
