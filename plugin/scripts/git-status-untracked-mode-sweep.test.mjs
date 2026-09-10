@@ -20,7 +20,7 @@
 // (tracked files only) has already refused — a report, not a gate, so the
 // silenced mode cannot hide the thing being reported.
 //
-// Zero deps: `node --test scripts/git-status-untracked-mode-sweep.test.mjs`.
+// Zero deps: `node --test plugin/scripts/git-status-untracked-mode-sweep.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

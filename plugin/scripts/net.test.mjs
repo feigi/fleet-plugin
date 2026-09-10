@@ -1,5 +1,5 @@
 // Regression gate for net.sh, the fleet's bounded, prompt-suppressed git
-// transport: `node --test scripts/net.test.mjs`.
+// transport: `node --test plugin/scripts/net.test.mjs`.
 //
 // The mechanism's END-TO-END cases live in inflight.test.mjs, against probe 2 —
 // the accept-then-silent listener, the slow-but-working transport that must NOT

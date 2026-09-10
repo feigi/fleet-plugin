@@ -8,7 +8,7 @@
 // the branch before any work was done in them. These tests are the consequence
 // coverage that gap needed.
 //
-// Zero deps: `node --test scripts/claim-lifecycle.test.mjs`.
+// Zero deps: `node --test plugin/scripts/claim-lifecycle.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

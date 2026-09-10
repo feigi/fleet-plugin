@@ -1,6 +1,6 @@
 // Regression gate for worktree-audit.sh, the read-only report run before
 // dispatching a replacement for a killed member. Zero deps:
-// `node --test scripts/worktree-audit.test.mjs`.
+// `node --test plugin/scripts/worktree-audit.test.mjs`.
 //
 // Three states, never two: present-and-readable (real counts), established
 // absent (zero counts — a measurement), unknown (null counts, readable:false).

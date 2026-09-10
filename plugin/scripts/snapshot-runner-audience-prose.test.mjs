@@ -65,7 +65,7 @@ for (const [name, text, from, to] of slices) {
 // pin would stay satisfied by the other occurrence with this bullet deleted.
 test("review-and-fix.md still hands specialists the command both guards point at", () => {
   const bullet = between(REVIEW_AND_FIX, "Give specialists a stack-free test command", "\n- **", "review-and-fix.md");
-  assert.match(bullet, phrase("node --test scripts/*.test.mjs"));
+  assert.match(bullet, phrase("node --test plugin/scripts/*.test.mjs"));
 });
 
 // The same contradiction in the other voice: a test file whose comment tells the

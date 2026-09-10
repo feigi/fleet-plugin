@@ -1,6 +1,6 @@
 // Regression gate for `gone()`, the established-absent predicate the fleet's
 // worktree scripts share. Zero deps:
-// `node --test scripts/gone-walk.test.mjs`.
+// `node --test plugin/scripts/gone-walk.test.mjs`.
 //
 // #725 moved it out of the three byte-identical copies into worktree.sh, so
 // this file now pins ONE definition and the sourcing that reaches it.

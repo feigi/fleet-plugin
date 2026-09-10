@@ -1,5 +1,5 @@
 // Regression gate for prove-merge.sh, the proof that says which head actually
-// landed. Zero deps: `node --test scripts/prove-merge.test.mjs`.
+// landed. Zero deps: `node --test plugin/scripts/prove-merge.test.mjs`.
 //
 // A shell script that reasons about git history can only be tested against real
 // git history, so the cases below that reason about history build a throwaway

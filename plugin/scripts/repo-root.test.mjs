@@ -22,7 +22,7 @@
 // `selfContainedFixture` builds the simple case; the #1339-precise tests
 // build the installed-cache shape by hand.
 //
-// Zero deps: `node --test scripts/repo-root.test.mjs`.
+// Zero deps: `node --test plugin/scripts/repo-root.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -1,5 +1,5 @@
 // Regression gate for the diff-sizing classifier and profile ladder that scale a
-// review's fan-out. Zero deps: `node --test scripts/diff-stats.test.mjs`.
+// review's fan-out. Zero deps: `node --test plugin/scripts/diff-stats.test.mjs`.
 // Locks the load-bearing behaviours a "simplification" could silently break —
 // especially that code under docs/ or .github/ keeps `src`, and that a mixed
 // docs+src PR is NOT docsOnly (so it keeps the fuller review).

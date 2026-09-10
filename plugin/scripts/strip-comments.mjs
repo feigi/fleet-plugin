@@ -17,7 +17,7 @@
 // `additionalProperties: false` (#142 review, measured).
 //
 // Line-based on purpose. A regex stripper (`/\*[\s\S]*?\*\//`) would open a
-// comment at `"node --test scripts/*.test.mjs"` — a glob inside a
+// comment at `"node --test plugin/scripts/*.test.mjs"` — a glob inside a
 // string literal — and swallow real code up to the next `*/`. Blank lines
 // rather than deleted ones, so offsets stay line-aligned with the file.
 //

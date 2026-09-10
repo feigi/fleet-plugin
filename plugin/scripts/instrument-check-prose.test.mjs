@@ -20,7 +20,7 @@
 // instruments.test.mjs owns the script's behaviour. Read each assertion as "not
 // vacuous to REWORDING", never as "this rule cannot be subverted".
 //
-// Zero deps: `node --test scripts/instrument-check-prose.test.mjs`.
+// Zero deps: `node --test plugin/scripts/instrument-check-prose.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

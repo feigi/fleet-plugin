@@ -63,7 +63,7 @@ So nothing in the run cleans it up. Next run, phase 0's probe 3 sees the worktre
 
 **Which remedy depends on whether that directory still exists.** The registration outlives it: `worktree list --porcelain` keeps the entry, annotated `prunable`, after an `rm -rf`, so the blocker named a hand-release nobody could perform and every later run repeated it. When the directory is established gone the blocker names `git worktree prune` instead — that clears the entry and the next run releases (verified, git 2.50.1). Still a blocker, never a release: the worktree is not on the claim's branch, so releasing would delete a different ref and then reach the prune every `--apply` ends with, unanchoring a detached HEAD's commits as a side effect. Absence is established by walking up to the nearest ancestor that exists and requiring it to be searchable — the same predicate the dirty check uses, because `-e` is false both for a directory that is gone and for one inside a prefix we may not search, and pruning the second unregisters a worktree still holding uncommitted work.
 
-Check: `node --test scripts/release-ticket.test.mjs` — real throwaway repos, no mocked git history, one case per precondition proving it blocks on its own.
+Check: `node --test plugin/scripts/release-ticket.test.mjs` — real throwaway repos, no mocked git history, one case per precondition proving it blocks on its own.
 
 ## Never reap a branch a live member is on
 

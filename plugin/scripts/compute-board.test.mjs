@@ -1,5 +1,5 @@
 // Regression gate for the pure board core. Zero deps:
-//   node --test scripts/compute-board.test.mjs
+//   node --test plugin/scripts/compute-board.test.mjs
 // Locks stage-derivation and the red-vs-stale distinction — the only tricky
 // logic — against a "simplification" silently breaking it.
 import { test } from "node:test";
