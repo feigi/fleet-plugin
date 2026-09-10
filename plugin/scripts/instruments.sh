@@ -162,6 +162,15 @@ fi
 
 # No baseline is not "nothing has changed" — it is a run that never pinned, and
 # the check has nothing to compare against. Refusing is the whole contract.
+#
+# EXISTS-but-unreadable is a different state than ABSENT, and it needs a
+# different message: `--pin` never compares against the existing baseline, it
+# just overwrites it with whatever the tree looks like now. Labeling this case
+# "no baseline" and prescribing `--pin` would walk a controller from "the check
+# could not look" to "certified clean" in one step, discarding evidence it
+# never read — the exact anti-pattern run-team/SKILL.md forbids. (#1058)
+[ -e "$base" ] && [ ! -r "$base" ] \
+  && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
 [ -r "$base" ] || die "no baseline at $base — run instruments.sh --pin once at run start"
 want=$(cat "$base") || die "cannot read $base"
 [ -n "$want" ] || die "$base is empty — re-pin, do not guess"

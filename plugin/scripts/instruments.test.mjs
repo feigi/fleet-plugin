@@ -209,19 +209,22 @@ test("an empty baseline refuses rather than matching an empty digest", (t) => {
   assert.match(r.stderr, /empty/);
 });
 
-test("an unreadable baseline refuses — unreadable is not unchanged", (t) => {
+test("an unreadable baseline refuses with its own message, not the no-baseline one", (t) => {
   if (process.geteuid?.() === 0) return t.skip("root reads a mode-000 file regardless");
   const root = repo(t);
   pin(root);
   // No mode restored afterwards: `repo`'s own cleanup unlinks it, which needs
   // write on the directory and nothing at all on the file.
   chmodSync(join(root, ".fleet", "instruments.sha"), 0o000);
-  // Status only, deliberately. The script reaches this through `[ -r "$base" ]`,
-  // which cannot tell absent from unreadable, so the stderr calls this one "no
-  // baseline" and prescribes `--pin` — the wrong label, filed separately.
-  // Asserting that text would pin the mislabel as the contract; asserting the
-  // refusal pins the half that is right.
-  assert.equal(run(root).status, 2);
+  const r = run(root);
+  assert.equal(r.status, 2);
+  // Distinct from "no baseline …" and explicit that `--pin` is the wrong
+  // remedy here: `--pin` never compares, it overwrites, so re-pinning over an
+  // unreadable-but-present baseline would discard evidence instead of
+  // explaining the refusal. (#1058)
+  assert.match(r.stderr, /exists but is unreadable/);
+  assert.match(r.stderr, /do NOT --pin over it/);
+  assert.doesNotMatch(r.stderr, /no baseline at/);
 });
 
 test("cwd outside a git checkout refuses instead of certifying nothing", (t) => {
