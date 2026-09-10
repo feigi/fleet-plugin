@@ -370,6 +370,22 @@ test("`skipped` is not `passed`: a skipped job is not-green, exit 1", () => {
   assert.match(r.payload.reasons.join("; "), /job check is skipped, not success/);
 });
 
+// The fifth reasons.push site in this arm — the one the "one negative case
+// each" comment above missed (#930). It fires before notGreen's override even
+// applies: matching.length === 0 short-circuits past the run-view read
+// entirely, so this needs the run LIST overridden, not the run VIEW —
+// notGreen only overrides the latter and cannot reach this branch at all.
+test("no run in the list matches the PR head at all: not-green, exit 1 — the unbound-PR case", () => {
+  const [current] = JSON.parse(RUN_LIST);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([{ ...current, headSha: "0000000" }]),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /no CI run whose headSha equals the PR head abc123def/);
+});
+
 // --- #169: a flag given with no value must die, never read as absent -------
 // `base`/`workflow`/`workflow-file` all read via `arg(name) || default`, so a
 // trailing flag previously fell straight through to the DEFAULT — the caller
