@@ -11,10 +11,18 @@ if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; 
 Be precise about what is duplicated, because a reader grepping the wrong term
 will conclude this record is wrong: the **conditional** is the shared thing. The
 enclosing `count_registry()` *function* exists only in `inflight.sh`; in
-`release-ticket.sh` the same loop sits inline under an `if … fi`. That
-function-versus-inline difference is itself a still-open divergence, tracked by
-#694. The justifying comments above the two copies are near-copies but not
-identical either — each names the consequence for its own script.
+`release-ticket.sh` the same loop sits inline under an `if … fi`.
+
+That shape difference is a **consequence** of a divergence, not the divergence
+itself. What #694 tracks is the missing **recount**: `inflight.sh` takes the
+count twice, and its own comment gives that as the reason a function exists at
+all — *"A function because the count is taken twice — see the recount below."*
+`release-ticket.sh` has no recount, so it needs no function. Close #694 and the
+shapes converge on their own. (As of this writing #694 is open and in flight —
+re-check before relying on the inline form.)
+
+The justifying comments above the two copies are near-copies but not identical
+either — each names the consequence for its own script.
 
 Proposals to extract this conditional into a named predicate function —
 `is_droppable_stray "$entry"` — so the invariant is "independently
