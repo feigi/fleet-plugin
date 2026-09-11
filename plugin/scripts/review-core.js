@@ -501,16 +501,21 @@ the wc -l count. Do not judge whether the diff is usable, and do not withhold
 one field because another failed: report what you got and let the caller
 decide.
 
-Then derive this repository's own test command:
+Then derive this repository's own test command — FLEET_HARNESS is set
+explicitly because this machine carries both harnesses' registries for this
+plugin, which makes fleet-run's own ambiguity detection refuse without it
+(measured 2026-09-11, PR #1409's first review pass: derive-testcmd.sh died
+with "both registries carry ... refusing to guess" and the review reported
+testCmdError instead of a usable testCmd):
 
-    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
+    FLEET_HARNESS=${harness} ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\`.
 
 Then size the diff:
 
-    ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
+    FLEET_HARNESS=${harness} ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
 
 Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value and \`path\` = the SNAPSHOT_DEST
 value, both copied verbatim — do not reconstruct either. Report the HEAD sha,
