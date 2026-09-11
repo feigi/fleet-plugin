@@ -766,6 +766,25 @@ main the same way the run carries any other controller-authored change; leaving 
 regenerated 5,000-row corpus uncommitted in the checkout is how it gets discarded by
 the next `git checkout` with nothing to show it ever ran.
 
+**Commit both to `chore/run-artifacts-<date>` and open a PR — at end of run, and
+that branch name is the convention rather than a suggestion.** Phase 0's
+fast-forward step calls this the previous run's close-out PR and says the rules
+THIS run needs arrive in it, so the next controller goes looking for it by shape;
+a name of your own invention still merges and still cannot be found. Suffix a
+letter when the date already has one (`chore/run-artifacts-2026-08-23b`).
+
+**Data rows and rule-doc prose never share a PR — one branch each, and when the
+rules here compete this is the one to keep.** The two halves have opposite cost
+profiles, and bundling makes the cheap-to-strand half gate the expensive one.
+Stranding a data row loses it: the tier guard re-derives its floor from the
+undercount and re-fires, the same stale-file failure Phase 0's fast-forward step
+exists to catch, and `member-outcomes.tsv` is regenerated from harness
+transcripts this repo does not own, so re-running the scrape later is worth only
+what the harness still holds. Stranding a rule change costs the status quo, which
+is where it already was. So `chore/run-artifacts-<date>` carries the two
+`docs/metrics/` files and nothing else, and prose that wants review goes on its
+own branch with its own PR.
+
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
 shell reorder are not comparable units. Finding-counts are not comparable either:
@@ -2366,6 +2385,16 @@ A starved implementer queue never stalls the review or merge side.
 - The merge bot only touches PRs whose implementer reported done. Rebasing a
   worktree someone is working in destroys uncommitted work.
 - `ready-to-merge` is added by a reviewer only — never an implementer, never you.
+  **The run's own artifact PR is exempt, and it is exempt because this invariant
+  does not reach it:** what the line forbids is a fleet member signing off its own
+  ticket work, which presupposes an issue, an implementer, a `review-pr` run and a
+  finisher, and the data-only close-out PR you author has none of them. Label and
+  merge that one yourself instead of re-deriving a blocker from this line and
+  stranding the rows behind it. The exemption belongs to the run that authors the
+  PR and does not outlive it: one still open when the run ends is a PR a prior run
+  left open, which phase 0 folds into the next run's review queue as ticket work —
+  and a chore PR is not exempt from being wrong, only from waiting on a reviewer
+  no phase of this run will ever dispatch against it.
 - **Every member acts through the maintainer's `gh` credentials, so no write is
   attributable.** Any invariant about *who* did something is unenforceable after
   the fact: when a label moves unexpectedly, ask members directly, rule out
