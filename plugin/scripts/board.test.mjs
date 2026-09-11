@@ -756,6 +756,38 @@ test("a torn line and an unreadable read on the SAME transcript each get their o
   assert.match(errs[0], /skipping agent-x\.jsonl/, "the skip gate's line, not the torn-line gate's");
 });
 
+// The mutant every shape above survives: `turnById.clear()` in the per-line
+// catch, the plausible "reset state after a bad line" edit. Every tear above is
+// on a ONE-LINE turn, where clearing a map that is about to be re-keyed anyway
+// costs nothing, and a tear on the FIRST line of a multi-line turn is no better
+// — `turnById` is still empty there, so it has zero discriminating power.
+// Only a MIDDLE tear leaves a live entry for the clear to drop, which re-bills
+// the turn on its next surviving line (measured: 2500, not 1500).
+//
+// Measured across the 636 tests that reach foldClaudeTranscript: the bare
+// clear also reds member-outcomes' "a torn final line is skipped, not fatal",
+// but only through `turns: turnById.size` — a COUNT, on a torn-LAST-line
+// fixture, which says nothing about spend. Keep that count honest (a
+// `turnCount++` at turn creation, the repair anyone makes when it reds) and
+// this is the only test in all 636 still standing.
+//
+// Deliberately does NOT assert `output`: a tear is not free, and the torn
+// line's `tool_use` blocks and its `output_tokens` snapshot are exactly what it
+// costs — only cache_creation / cache_read / maxCtx repeat on every line of a
+// turn and so survive it (see the rawFixture comment above). Nor does it pin
+// the warning's WORDING: a reword leaves it green, by measurement.
+test("a turn spanning several lines: a tear on a MIDDLE line does not re-bill the turn", () => {
+  const [a, , c] = TURN.map((l) => JSON.stringify(l));
+  const dir = rawFixture([a, TORN, c, oneLineTurn("msg_c", 500)].join("\n") + "\n");
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+  assert.equal(s.totals.cacheWrite, 1500);
+  assert.equal(s.totals.cacheRead, 50);
+  assert.equal(s.totals.maxCtx, 1052);
+  assert.equal(s.skipped, 0);
+});
+
 // The keyless caller. Every other gate keys on a PR or a path, so nothing else
 // in the suite drives warnOnce's empty key, and the folded-in spend-dir gate
 // would be collapsed untested. The failure it reports is the session directory
