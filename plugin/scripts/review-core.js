@@ -449,6 +449,13 @@ export async function runReview(host, args) {
   const { agent, phase, log } = host;
   const pipeline = host.pipeline ?? defaultPipeline;
   const parallel = host.parallel ?? defaultParallel;
+  // Always "omp" in practice: review-eval.mjs's own harness:"omp" call is the
+  // only caller (its header comment), and this code cannot run at all unless
+  // the omp registry resolved review-eval.mjs's own path in the first place
+  // (fleet-run's Resolver, `fleet-run --path review-eval.mjs`) — so the
+  // FLEET_HARNESS=${harness} prefix below can never name an absent registry.
+  // A future second omp-side caller passing a different harness value would
+  // need this reasoning re-checked, not assumed.
   const harness = host.harness ?? "omp";
 
   const A = decodeArgs(args);
