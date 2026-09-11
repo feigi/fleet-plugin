@@ -2354,11 +2354,16 @@ exec ${real} "$@"
 // with `conflicts_rewritten_json`, `at_risk_json` with
 // `at_risk_rewritten_json` — is assigned by one `&&` chain, so the failing
 // `jarr` short-circuits the second and leaves that name unset; with the guard
-// advisory the payload `printf` reads it and `set -u` aborts instead. bash
-// exits 1 saying `<name>: unbound variable`, which the status assertions do
-// catch; dash exits 2 saying `<name>: parameter not set` — the very status a
-// firing guard returns, under the same message the downgrade still prints.
-// This file spawns a bare `sh` and `.github/workflows/ci.yml`'s `check` job
+// advisory the payload `printf` reads it and `set -u` aborts instead. Measured
+// on this box: bash exits 0, not 1 — `no-undo-audit.sh:538`'s `trap 'rm -f
+// "$mt_out" "$ps_out"' EXIT`, armed before either guard, resets the abort
+// status on its way out, so `<name>: unbound variable` still reaches stderr
+// but the caller gets back the same 0 a genuinely healthy run reports — a
+// false SAFE, and worse than the exit 1 this comment used to claim. dash is
+// unaffected by the trap and still exits 2 saying `<name>: parameter not
+// set` — the very status a firing guard returns, under the same message the
+// downgrade still prints. This file spawns a bare `sh` and
+// `.github/workflows/ci.yml`'s `check` job
 // runs on `ubuntu-latest`, where that name is dash. Measured with the at-risk
 // guard downgraded: every case in this file stayed green under dash and the
 // guard was pinned on a Mac alone.

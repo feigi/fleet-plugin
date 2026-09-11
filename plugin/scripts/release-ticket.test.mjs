@@ -604,6 +604,10 @@ exec ${realSed} "$@"
 // produces. Measured, downgrading its `|| die` to a message-preserving warning
 // left this whole file green.
 //
+// `halt()`'s own `jstr` escape, release-ticket.sh:651, is the same class of
+// defect on the halt/blocker path — seen, not missed: ticket #896 scoped it
+// out as a different code path, not exercised by this file's matrix.
+//
 // The downgrade does not emit a malformed receipt. `branch_j`, `branch_rw`,
 // `wt_j` and `wt_rw` are assigned by one `&&` chain, so the first `jstr` that
 // fails short-circuits the rest and leaves those names unset; with the guard
