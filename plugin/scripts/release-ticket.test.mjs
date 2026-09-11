@@ -597,6 +597,105 @@ exec ${realSed} "$@"
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 
+// --- #896: the same library, the OTHER `jstr` chain — the four receipt fields
+// escaped once at the top, ahead of every precondition and every mutation. The
+// case above pins `block()`'s guard; nothing pinned this one, and every case
+// in this file that reaches the receipt asserts what a WORKING escaper
+// produces. Measured, downgrading its `|| die` to a message-preserving warning
+// left this whole file green.
+//
+// `halt()`'s own `jstr` escape, release-ticket.sh:651, is the same class of
+// defect on the halt/blocker path — seen, not missed: ticket #896 scoped it
+// out as a different code path, not exercised by this file's matrix.
+//
+// The downgrade does not emit a malformed receipt. `branch_j`, `branch_rw`,
+// `wt_j` and `wt_rw` are assigned by one `&&` chain, so the first `jstr` that
+// fails short-circuits the rest and leaves those names unset; with the guard
+// advisory the run continues through the precondition scan and through the
+// mutations, and `set -u` aborts the shell only when the final receipt
+// `printf` reads one of them.
+//
+// That is what makes the downgrade worse here than a lost receipt. Exit 1 out
+// of THIS script is a verdict — `#<n> NOT released — nothing was touched` —
+// and it is what a bash-family `sh` aborts with, AFTER the worktree, the
+// branch and the label have all been released. The guard's whole placement is
+// that it fires before the first mutation, which is what the artefact
+// assertion below measures.
+//
+// Which abort it is, though, is the shell's to choose and not this script's,
+// and dash's lands on 2 — the very status a firing guard returns, under the
+// same message a message-preserving downgrade still prints. `release` spawns a
+// bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
+// `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
+// therefore pins this guard on a developer's Mac and waves the mutant through
+// on the runner that gates the merge, and a wording assertion pins nothing in
+// either shell. `branch_rw` is what discriminates instead — both shells name
+// it, and it reaches stderr only from that nounset abort.
+//
+// Selected on CONTENT for the reason the case above is, in the other
+// direction: `branch_j` is the FIRST `jstr` a clean run reaches, so a marker
+// carried by the claim's own slug fails exactly this chain and nothing later.
+const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+
+/** A dir holding a `sed` shim with the given body, prepended to PATH. */
+function sedShim(t, body) {
+  const bin = mkdtempSync(join(tmpdir(), "release-ticket-sed-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return bin;
+}
+
+test("a receipt field that cannot be escaped is exit 2, never the `nothing was touched` verdict", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "esc-boom");
+  const bin = sedShim(t, `case " $* " in
+  *:a*)
+    in=$(cat)
+    case "$in" in *esc-boom*) echo "sed: outage" >&2; exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${REAL_SED} "$@" ;;
+esac
+exec ${REAL_SED} "$@"`);
+
+  const res = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
+
+  // Whether this fixture measured the guard at all is settled before its
+  // verdict is read: an assertion that fails masks every one after it, and
+  // "the shim broke something else" and "the guard is not fatal" are not
+  // interchangeable diagnoses.
+  assert.match(res.stderr, /sed: outage/, "the escaper ran and failed, which is the failure under test");
+  assert.match(res.stderr, /could not escape the receipt fields for #9/,
+    "and it is the receipt chain that failed, not `block()`'s guard or a precondition");
+
+  assert.equal(res.code, 2,
+    "a receipt that could not be escaped is `the question could not be answered`. Exit 1 is this script's `NOT released — nothing was touched`, which a run that never reached a precondition may not claim.");
+  assert.equal(res.out, "", "no receipt: a payload whose fields were never escaped is not a record of anything");
+  assert.doesNotMatch(res.stderr, /branch_rw/,
+    "the guard must stop the script, not warn and leave the receipt `printf` reading names the `&&` chain never assigned. The NAME, never the wording: bash says `branch_rw: unbound variable` at exit 1 and dash `branch_rw: parameter not set` at exit 2, so the exit-2 assertion above passes on the mutant under the shell CI actually runs, and the guard's own message survives a downgrade that preserves it.");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true },
+    "and the guard fires ahead of the first mutation — warned instead of fatal, this run releases all three and then aborts with no receipt at all");
+});
+
+test("a shadowed `sed` that works releases normally — the guard refuses only a real outage", (t) => {
+  // The false-positive half, and the control the case above needs: shadowing
+  // `sed` on PATH is not by itself fatal to this script. Same fixture and the
+  // same shadowed name, a passthrough body — so the exit 2 up there is the
+  // escaper failing, not the shim's mere presence. Without this, that case
+  // could be measuring a PATH it broke wholesale and still read green.
+  const r = repo(t);
+  const c = claim(r.w, 9, "esc-boom");
+  const bin = sedShim(t, `exec ${REAL_SED} "$@"`);
+
+  const { code, json } = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
+
+  assert.equal(code, 0);
+  assert.equal(json.released, true, "a working escaper must not change the verdict");
+  assert.equal(json.branch, "fix/9-esc-boom", "and the escaped fields carry the real values, not the empty slots a failed chain leaves");
+  // The tail only: git reports the worktree through its realpath, and macOS
+  // resolves the fixture's `/var` tmpdir to `/private/var`.
+  assert.match(json.worktree, /\/\.worktrees\/9-esc-boom$/, "and the second escaped pair carries the worktree path");
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
 test("a pushed branch blocks on its own", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
