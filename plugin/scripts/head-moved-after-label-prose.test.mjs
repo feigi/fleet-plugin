@@ -45,6 +45,18 @@ test("the head re-derivation is stated as a requirement, not left to bot discret
   assert.match(labelledHead(), phrase("re-deriving the head is a requirement here, not bot discretion"));
 });
 
+test("the labelled head slice stops before the gate-proof section, not at the stale Per-PR sequence heading", () => {
+  // #966: reverting the end anchor to the old `## Per-PR sequence` heading
+  // silently re-widens this slice across the whole gate-proof section in
+  // between, and every other test in this file would still pass — a token
+  // unique to that section is the only thing that reds a stale anchor.
+  assert.doesNotMatch(
+    labelledHead(),
+    /gate-proof/,
+    "labelledHead()'s end anchor has drifted back to a heading after the gate-proof section, widening this slice across it",
+  );
+});
+
 test("the labelled head names why no upstream guard covers this window", () => {
   // Without the reason this reads as a redundant fourth check and gets deleted
   // as one. The two facts it rests on: the label does not move with the branch,

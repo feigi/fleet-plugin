@@ -630,6 +630,60 @@ test("the real ci-state reading is kept out of the fixture directory, under the 
   );
 });
 
+// #966 follow-up: the prose above only ever proved a fixture existed
+// somewhere in the document; the executable skeleton drives the actual gate
+// and had no assertion of its own. Pinning it directly against mutation:
+// flipping `mkdir` to `mkdir -p`, deleting the count-check lines, re-keying
+// the namespace to wave-only, or deleting the whole bash block must each
+// red at least one test below.
+test("the skeleton claims its namespace with a plain, non-clobbering mkdir", () => {
+  const s = gateProof();
+  assert.match(s, phrase('mkdir "$d" 2>/dev/null && break'), "the skeleton no longer claims the leaf with a plain, fail-closed mkdir");
+  assert.doesNotMatch(s, /mkdir -p "\$d"/, "the leaf mkdir now silently succeeds on a directory someone else already owns");
+});
+
+test("the skeleton retries the documented gate-proof-2 fallback and re-points $d at the namespace it actually claimed", () => {
+  const s = gateProof();
+  assert.match(s, phrase('for n in "" -2; do'), "the skeleton no longer retries the documented gate-proof-2 fallback on a collision");
+  assert.match(s, phrase('d="$base/gate-proof$n"'), "$d is no longer re-pointed at whichever namespace the retry loop actually claimed");
+  assert.match(s, phrase('[ -n "$d" ] || exit 1'), "an occupied primary and fallback no longer abort the skeleton instead of reading the wrong directory");
+});
+
+test("the skeleton's base path is keyed on both the PR and this pass's wave", () => {
+  assert.match(
+    gateProof(),
+    phrase("base=<scratch>/pr<N>/merge-bot-<wave#>"),
+    "the skeleton's base path no longer matches the documented per-PR, per-wave namespace",
+  );
+});
+
+test("the skeleton's wrote counter increments on a real line, not only inside a comment", () => {
+  assert.match(
+    gateProof(),
+    /^wrote=\$\(\(wrote\+1\)\)$/m,
+    "wrote is only incremented inside a comment, so a literal copy of the skeleton leaves it at 0 forever",
+  );
+});
+
+test("the skeleton floors the driven count at 5 and refuses on a name mismatch, not just a count mismatch", () => {
+  const s = gateProof();
+  assert.match(
+    s,
+    phrase('[ "$wrote" -eq 5 ] || { echo "PROOF VOID: $wrote shapes driven, need 5"; exit 1; }'),
+    "the skeleton no longer floors the driven count at exactly 5 shapes, or the floor no longer exits non-zero",
+  );
+  assert.match(
+    s,
+    phrase('got=$(ls -1 "$d" | sort | tr'),
+    "the skeleton no longer compares the written fixture names, only their count",
+  );
+  assert.match(
+    s,
+    phrase('[ "$got" = "$names " ] || { echo "PROOF VOID: wrote {$got}, expected {$names }"; exit 1; }'),
+    "a name mismatch no longer exits non-zero, so a subset of the 5 named shapes would pass silently",
+  );
+});
+
 // Cross-file, and the only half the controller can act on: the runbook above
 // is what the BOT reads, so nothing in it reaches a controller reading a
 // finished report. Sliced to the gate cluster's tail — `scratch`, `shared`

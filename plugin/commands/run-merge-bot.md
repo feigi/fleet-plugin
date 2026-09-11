@@ -82,12 +82,21 @@ A gate reading a SUBSET of the fields passes the first two vacuously instead of 
 **Then close the loop before you report: the set of shapes you drove must be exactly the set you wrote — same count, same names — and a mismatch refuses the proof rather than folding the extra in.** One `ls` does it, and it is not defence in depth for its own sake: the names are systematic by design, so a mistyped namespace or a reused PR number reproduces the collision exactly, and nothing else in this system would catch it — your own report would still say the gate was proven. Refuse even when the intruder is block-shaped and appears to strengthen the proof: a shape you did not write is a shape you did not measure, and being measured is the whole of what the proof claims.
 
 ```bash
-d=<scratch>/pr<N>/merge-bot-<wave#>/gate-proof
-mkdir -p "$(dirname "$d")" && mkdir "$d" || exit 1    # refused -> not your namespace
+base=<scratch>/pr<N>/merge-bot-<wave#>
+mkdir -p "$base"
+for n in "" -2; do
+  d="$base/gate-proof$n"
+  mkdir "$d" 2>/dev/null && break    # refused -> occupied, try the next namespace
+  d=""
+done
+[ -n "$d" ] || exit 1    # both refused -> not your namespace
 wrote=0
-# per shape: write it into "$d", drive it through the gate, confirm it blocks, wrote=$((wrote+1))
-n=$(ls -1 "$d" | wc -l)
-[ "$n" -eq "$wrote" ] || echo "PROOF VOID: $n payloads present, $wrote written"
+# per shape: write it into "$d" as one of empty, green-behind, in-progress, rate-limited, zero-byte; drive it through the gate; confirm it blocks
+wrote=$((wrote+1))
+names="empty green-behind in-progress rate-limited zero-byte"
+[ "$wrote" -eq 5 ] || { echo "PROOF VOID: $wrote shapes driven, need 5"; exit 1; }
+got=$(ls -1 "$d" | sort | tr '\n' ' ')
+[ "$got" = "$names " ] || { echo "PROOF VOID: wrote {$got}, expected {$names }"; exit 1; }
 ```
 
 Real readings are not fixtures: keep the `ci-state` payload you actually gate on one level up, at `<scratch>/pr<N>/merge-bot-<wave#>/ci.json`, so a synthetic shape can never be read back as a live reading and the count above stays exact. This is not `run-team/SKILL.md`'s finding rule (`<scratch>/pr<N>/<finding>/`) restated — gate fixtures have no finding id, which is exactly why that rule never reached them; this is the same two-level shape keyed on what a merge bot does have.
