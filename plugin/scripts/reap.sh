@@ -285,8 +285,49 @@ gp_why() {
 # branch with no upstream leaves $2 empty rather than matching. The tracking
 # forms that DO carry a space, `[ahead 1]` and its siblings, split so that $2
 # holds `[ahead` — not `[gone]` either way. #634
-for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
-           awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); do
+# A command substitution inside a `for ... in` word list discards its own
+# exit status entirely, in every shell measured here (bash, dash, macOS
+# /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,
+# runs zero iterations, and never reaches `set -e` — regardless of how the
+# pipeline failed. This script has `set -eu` but no `pipefail`, so a plain
+# `git … | awk …` pipeline reports only its LAST stage's status: a
+# `git for-each-ref` that dies still leaves awk scanning empty input, and
+# awk finishes that scan at rc 0 — the identical exit this loop sees on a
+# genuinely branchless repo. awk is not immune either, and this file's
+# header already documents an awk that cannot finish a scan (the #614/#790
+# multibyte trigger). Either failure, unguarded, reads as a clean sweep
+# that never looked: no branches matched because none was ever seen,
+# indistinguishable from none being reapable.
+#
+# Split into git_probe's own two-capture shape — already this file's answer
+# to the identical git-then-awk pipeline the ignored-files scan below runs
+# (`git_probe`, then a separate `awk` over `$gp_out`) — so each stage's
+# status is read on its own rather than folded into the pipeline's last
+# exit code. Captured into a variable and guarded, rather than looped over
+# directly, so the failure gets a voice. `keep ""`, not `die`: mirrors the
+# branchless sweep's own enumeration guard below (`if ! wt_listing`), for
+# the same reason — dying here would also abort the second sweep and the
+# final `worktree prune`, neither of which this enumeration failing has
+# anything to do with, over a failure this ticket rates mild. #789
+if ! git_probe for-each-ref --format='%(refname) %(upstream:track)' refs/heads; then
+  keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
+  gone_branches=""
+else
+  # git_probe captures git's stderr into $gp_err instead of leaving it on the
+  # real fd — the whole reason it exists (#625) — and every OTHER call site in
+  # this file reads $gp_err back out through a targeted check (gp_cut_short,
+  # gp_why) before falling through. This call site's success path does
+  # neither: an rc-0 `for-each-ref` that still WARNS (PR #1413 review) used to
+  # reach the operator's stderr directly, back when this was a plain
+  # `git … | awk …` pipeline with git's stderr inherited, and now reaches no
+  # one unless forwarded here explicitly.
+  [ -z "$gp_err" ] || printf '%s' "$gp_err" >&2
+  if ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
+    keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
+    gone_branches=""
+  fi
+fi
+for b in $gone_branches; do
 
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
@@ -354,9 +395,26 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
   # the awk matches nothing, `$wt` is empty, and the branch is reaped as before.
   # Without it the helper's status would reach `set -e` and end the sweep, which
   # is the control-flow change the paragraph above declines to make.
+  #
+  # A genuine awk failure is a DIFFERENT fault from that swallow, and is guarded
+  # below rather than left to it: it fires only when `wt_listing` itself
+  # succeeded — a real, non-empty `$wt_list` — and awk could not finish scanning
+  # it (the #614/#790 multibyte trigger this file's header documents), never
+  # when the listing failed and left `$wt_list` empty, which reaches this same
+  # assignment as awk matching nothing at rc 0, exactly as the paragraph above
+  # describes. Left bare, that failure aborted the whole script on awk's own
+  # diagnostic, with no `reap:`-prefixed line for a caller to grep stderr for —
+  # the same shape #243 fixed in release-ticket.sh's own copy of this lookup.
+  # `keep`, not `die`: nothing has mutated $b yet, and dying here would also
+  # discard whatever earlier iterations of this loop already reaped — the same
+  # reason the branchless sweep below keeps rather than dies on its own copy of
+  # this pipe. #789
   wt_listing || :
-  wt=$(printf '%s\n' "$wt_list" |
-       awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}')
+  if ! wt=$(printf '%s\n' "$wt_list" |
+            awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}'); then
+    keep "$b" "could not scan the worktree listing for $b — treating it as unresolved rather than guessing it has none"
+    continue
+  fi
 
   # A newline in that path used to end the porcelain record before
   # `substr($0,10)` could read past it, so `$wt` was a prefix of the real path —
@@ -536,8 +594,27 @@ for b in $(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
             keep "$b" "worktree $wt status --ignored warned, listing may be incomplete$(gp_why)"
             continue
           fi
-          ignored=$(printf '%s\n' "$gp_out" | awk '/^!! /{sub(/^!! /,""); print}' | paste -sd, -)
-          if [ -n "$ignored" ]; then
+          # `paste`, not `awk`, used to be this substitution's last stage, so
+          # the substitution reported PASTE's status only — an awk that could
+          # not finish scanning `$gp_out` (the #614/#790 trigger) failed
+          # silently AND invisibly: unlike the bare assignments above, nothing
+          # here even reads as "empty means none", because the captured
+          # pipeline still succeeds — paste has nothing of its own to fail on
+          # an empty or partial input. Restructured into two captures so each
+          # fallible stage's own status survives, the rule json.sh states for
+          # `jstr`'s `sed | tr` ("EVERY FALLIBLE STAGE'S STATUS IS READ") and
+          # the shape release-ticket.sh's own worktree lookups already take.
+          # `keep`, not `die`, for the reason the worktree lookup above gives:
+          # this is per-branch and nothing has mutated $b yet. #789
+          if ! ignored_lines=$(printf '%s\n' "$gp_out" | awk '/^!! /{sub(/^!! /,""); print}'); then
+            keep "$b" "worktree $wt ignored-files scan failed — treating it as unresolved rather than guessing it has none"
+            continue
+          fi
+          if [ -n "$ignored_lines" ]; then
+            if ! ignored=$(printf '%s\n' "$ignored_lines" | paste -sd, -); then
+              keep "$b" "worktree $wt ignored-files list could not be joined"
+              continue
+            fi
             keep "$b" "ignored files present in $wt: $ignored"
             continue
           fi
