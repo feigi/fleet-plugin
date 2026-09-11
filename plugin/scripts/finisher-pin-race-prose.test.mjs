@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between } from "./prose-pin.mjs";
 
 // #144. The finisher is dispatched pinned to a SHA the reviewer already left
 // behind: the reviewer composes a verdict once it has enough, then keeps
@@ -25,13 +26,10 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 const FALLBACK_START = "#### Fallback: hand-dispatched reviewer member";
 const FALLBACK_END = "### Merge bot";
 
-function fallbackSection() {
-  const at = RUN_TEAM.indexOf(FALLBACK_START);
-  assert.notEqual(at, -1, `fallback section header ('${FALLBACK_START}') moved — update this test`);
-  const end = RUN_TEAM.indexOf(FALLBACK_END, at);
-  assert.notEqual(end, -1, `the next section header ('${FALLBACK_END}') moved — update this test`);
-  return RUN_TEAM.slice(at, end);
-}
+// #753: proven output-identical to `between()` on the real SKILL.md text —
+// FALLBACK_END never occurs inside FALLBACK_START's own text, so searching
+// from `at` instead of `at + FALLBACK_START.length` never changes the match.
+const fallbackSection = () => between(RUN_TEAM, FALLBACK_START, FALLBACK_END, "run-team fallback section");
 
 const CAUSE_BLOCK_START = "instead of asking anyone:";
 const CAUSE_BLOCK_END = "Gate on the `check` job";

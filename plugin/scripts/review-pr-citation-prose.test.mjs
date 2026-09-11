@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between } from "./prose-pin.mjs";
 
 // #317. `workflows/review-pr.js` cited `review-and-fix.md` by LINE, twice, and
 // both citations rotted: `:49` (for "keys or dimension objects", by then at
@@ -25,13 +26,11 @@ const PROSE = SOURCE.replace(/^[ \t]*\/\/ ?/gm, "").replace(/\s+/g, " ");
 // Both bounds hard-asserted: a moved header must red loudly here rather than
 // silently widening the slice to the rest of the file, where an incidental
 // mention would satisfy every assertion below.
-function specialists() {
-  const at = REVIEW_AND_FIX.indexOf("## Specialists");
-  assert.notEqual(at, -1, "review-and-fix.md no longer has a `## Specialists` header — both citations name it");
-  const end = REVIEW_AND_FIX.indexOf("\n## Judging findings", at);
-  assert.notEqual(end, -1, "the `## Judging findings` header moved — the Specialists slice is unbounded");
-  return REVIEW_AND_FIX.slice(at, end);
-}
+// #753: proven output-identical to `between()` on the real review-and-fix.md
+// text — "\n## Judging findings" never occurs inside "## Specialists" itself,
+// so searching from `at` instead of `at + "## Specialists".length` never
+// changes the match.
+const specialists = () => between(REVIEW_AND_FIX, "## Specialists", "\n## Judging findings", "review-and-fix Specialists section");
 
 test("review-pr.js cites review-and-fix.md by section, never by line", () => {
   assert.doesNotMatch(

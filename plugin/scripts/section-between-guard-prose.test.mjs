@@ -21,8 +21,8 @@
 // statements happen to close over an outer name instead of taking it as an
 // argument. The shape below no longer cares which.
 //
-// Three near-misses in this same directory are NOT twins, and must not
-// match, because each changes what the function DOES relative to `between()`
+// Two near-misses in this same directory are NOT twins, and must not match,
+// because each changes what the function DOES relative to `between()`
 // (measured against this file's own detector, not asserted):
 //
 //   dispatch-block-pins-prose.test.mjs's `region()` and
@@ -38,18 +38,23 @@
 //   slice. Its own caller needs the flattening; a shared `between()` does not
 //   do it and could not without changing every other caller's output too.
 //
-//   finisher-pin-race-prose.test.mjs's `fallbackSection()` searches for its
-//   end anchor from `at` — the START match's own position — never adding
-//   `+ FALLBACK_START.length`. `between()` always searches from AFTER the
-//   start anchor; a call whose end anchor could legally sit inside the start
-//   anchor's own text is a different, narrower contract, not a copy.
-//
 //   cross-repo-citation-prose.test.mjs's `slice(text, startAnchor,
 //   endAnchor, what, { endsFile })` threads an `if (end === -1 && endsFile)
 //   return text.slice(at);` branch between the second `indexOf` and the
 //   second `assert.notEqual` — the five statements are no longer adjacent,
 //   and the function does something (`endsFile`'s EOF tolerance) `between()`
 //   cannot.
+//
+// finisher-pin-race-prose.test.mjs's `fallbackSection()` and
+// review-pr-citation-prose.test.mjs's `specialists()` looked like two more —
+// a search from `at` instead of `at + start.length`, and a literal-anchor
+// call this detector cannot even see, respectively — but a before/after
+// byte comparison against their real inputs (RUN_TEAM / REVIEW_AND_FIX)
+// proved both output-identical to `between()`: neither pair's end anchor
+// ever occurs inside its own start anchor's text, so the narrower contract
+// `fallbackSection()`'s own header once claimed never actually diverges.
+// Both are now `import { between }` call sites like every other consumer,
+// not documented exceptions.
 //
 // THE FLOOR: an empty or near-empty directory listing (a broken glob, or
 // this file moved to the wrong place) would make the main assertion below
@@ -60,6 +65,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
 
 const DIR = import.meta.dirname;
 const SELF = "section-between-guard-prose.test.mjs";
@@ -75,14 +81,24 @@ const PROSE_PIN = "prose-pin.mjs";
 // arrow, with every identifier free to vary (matched by backreference, not
 // by name) and free to be either a parameter or a closed-over outer
 // constant — `between`, `section`, and any future reintroduction's own
-// choice of names and scoping all satisfy it identically. The exact offset
-// (`AT + FROM.length`) and the bare slice return are what the three
-// near-misses above fail on, deliberately.
-const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let)\s+\w+\s*=\s*\(([^)]*)\)\s*=>)\s*\{\s*const\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);\s*const\s+(\w+)\s*=\s*\4\.indexOf\((\w+),\s*\3\s*\+\s*\5\.length\);\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);\s*return\s+\4\.slice\(\3,\s*\6\);\s*\}/g;
+// choice of names and scoping all satisfy it identically. `const` and `let`
+// are both accepted for the two inner declarations for the same reason:
+// nothing about the shape depends on which keyword binds `at` and `end`.
+// The exact offset (`AT + FROM.length`) and the bare slice return are what
+// the two near-misses above fail on, deliberately.
+//
+// Comments are stripped before matching (`strip-comments.mjs`, the same
+// helper candidates.test.mjs and the review-pr-*.test.mjs pins already
+// share): this repo's own style routinely puts a `//` line between two of
+// the five statements (cross-repo-citation-prose.test.mjs,
+// no-ci-gate-prose.test.mjs), and the `\s*` separators above do not span a
+// real comment's text — measured directly, an un-stripped scan misses a
+// reintroduced twin written that way.
+const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let)\s+\w+\s*=\s*\(([^)]*)\)\s*=>)\s*\{\s*(?:const|let)\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);\s*(?:const|let)\s+(\w+)\s*=\s*\4\.indexOf\((\w+),\s*\3\s*\+\s*\5\.length\);\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);\s*return\s+\4\.slice\(\3,\s*\6\);\s*\}/g;
 
 /** Every `between()`-shaped definition in `text`, wherever it lives. */
 function twinDefinitions(text) {
-  return [...text.matchAll(TWIN_SHAPE)].map((m) => ({ src: m[4], from: m[5], to: m[7] }));
+  return [...stripComments(text).matchAll(TWIN_SHAPE)].map((m) => ({ src: m[4], from: m[5], to: m[7] }));
 }
 
 const SCRIPTS = readdirSync(DIR).filter((f) => f.endsWith(".mjs") && f !== SELF && f !== PROSE_PIN);
@@ -132,12 +148,29 @@ const clone = (text, from, to, what) => {
   return text.slice(at, end);
 };`;
   assert.deepEqual(twinDefinitions(arrowForm), [{ src: "text", from: "from", to: "to" }]);
+
+  // A `//` comment between two of the five statements, and `let` instead of
+  // `const` for both inner declarations — this repo's own style
+  // (cross-repo-citation-prose.test.mjs, no-ci-gate-prose.test.mjs) and a
+  // measured miss: an earlier revision of TWIN_SHAPE matched none of this
+  // against the unstripped source.
+  const commented = `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from);
+  // explain why this search runs first
+  assert.notEqual(at, -1, what);
+  let end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+}`;
+  assert.deepEqual(twinDefinitions(commented), [{ src: "text", from: "from", to: "to" }]);
 });
 
-test("the shape detector does not fire on the three measured near-misses", () => {
-  // Each changes one thing between() does not: stripped start anchor,
-  // flattened return, or a missing offset. See the header for which file
-  // each is modeled on.
+test("the shape detector does not fire on the two measured near-misses", () => {
+  // Each changes one thing between() does not: stripped start anchor, or a
+  // flattened return. See the header for which file each is modeled on.
+  // (fallbackSection()'s once-claimed missing-offset divergence was found
+  // NOT genuine — see the header — so it is no longer modeled here.)
   const strippedStart = `
 function region() {
   const at = RUN_TEAM.indexOf(START);
@@ -157,16 +190,6 @@ function between(start, end) {
   return flat(RUN_TEAM.slice(at, to));
 }`;
   assert.deepEqual(twinDefinitions(flattenedReturn), []);
-
-  const missingOffset = `
-function fallbackSection() {
-  const at = RUN_TEAM.indexOf(FALLBACK_START);
-  assert.notEqual(at, -1, "x");
-  const end = RUN_TEAM.indexOf(FALLBACK_END, at);
-  assert.notEqual(end, -1, "y");
-  return RUN_TEAM.slice(at, end);
-}`;
-  assert.deepEqual(twinDefinitions(missingOffset), []);
 });
 
 test("no file outside prose-pin.mjs defines a second between()-shaped slicer", () => {
