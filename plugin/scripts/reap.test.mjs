@@ -489,6 +489,40 @@ test("a failing `git worktree prune` still prints the payload and refuses on 2, 
   assert.match(stderr, /git worktree prune/, "the refusal must name the command that failed");
 });
 
+// The other half of #992, and the one the cwd refusal below cannot cover: a
+// prune that fails for a reason nobody here caused still has to say what git
+// said. `die "git worktree prune failed"` named the step and dropped git's
+// stdout and stderr on the floor — the class #578 catalogues at this script's
+// other sites — so an operator read a step name, and in the deleted-cwd case
+// git's own `fatal: Unable to read current working directory` reached the
+// terminal on a line of its own with nothing tying the two together.
+//
+// Its own two-line shim rather than `pruneShim`: the realism argument is that
+// helper's (a repo-level fault that really does exit non-zero), and the second
+// line is what pins the `tr '\n' ' '` fold every other reason in this script
+// applies — a message that kept its newline would split one refusal across two
+// stderr lines and read as two failures.
+test("a failing `git worktree prune` refusal carries git's own message, folded to one line (#992)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const bin = failOnlyShim(t, `[ "$1" = worktree ] && [ "$2" = prune ]`, [
+    "error: could not lock config file .git/config: Permission denied",
+    "fatal: unable to prune worktrees: permission denied",
+  ]);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 2, "a genuinely failing prune must still refuse");
+  assert.deepEqual(json.reaped, ["feature/merged"], "the payload still precedes the prune (#265)");
+  assertShimFired(bin, "the fixture must actually reach the prune", /worktree prune/);
+  assert.match(
+    stderr,
+    /reap: git worktree prune failed: error: could not lock config file \.git\/config: Permission denied fatal: unable to prune worktrees: permission denied/,
+    `the refusal must quote git, not just name the step: ${stderr}`,
+  );
+});
+
 // Accept-side control for the fix above: a run where nothing fails must be
 // completely unchanged — same payload shape, exit 0, and the prune must
 // still actually run (not just get skipped to dodge the -e trap).
@@ -2407,15 +2441,97 @@ test("a bare repo in the registry is not diagnosed as an unresolvable HEAD (#381
   git(bare, "worktree", "add", "-q", "--detach", wt, "main");
   assert.match(git(wt, "worktree", "list", "--porcelain"), /^bare$/m, "fixture: the registry must carry a bare entry");
 
-  // Run from the bare root, not from `wt`: `--apply` removes `wt`, and a script
-  // that deleted its own cwd dies in the `worktree prune` at the foot of the
-  // file. That is a separate, pre-existing defect (filed) — not this test's
-  // subject, and not something to reproduce inside it.
+  // Run from the bare root, not from `wt`: `--apply` removes `wt`, and from
+  // inside it this sweep now refuses that removal as the working directory the
+  // run itself was started in (#992) — a different subject, and one that would
+  // leave this fixture's removal unasserted.
   const { code, json } = runReap(bare, ["--apply"], { BASE_REF: "main" });
 
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], `the bare root is not a finding: ${JSON.stringify(json.kept)}`);
   assert.deepEqual(json.worktreesRemoved, [wt], "and the detached worktree beside it is still swept");
+});
+
+// #992. `--apply` removes worktrees, and the fleet's `.worktrees/` home is
+// exactly where a member stands when it runs this — so the worktree the script
+// is running FROM was itself eligible for removal. Removing it deletes the
+// script's own cwd, and every git call after that dies with
+// `fatal: Unable to read current working directory`: measured (git 2.50.1,
+// Apple Git-155) as `REMOVED worktree …` followed by a failed
+// `git worktree prune` at exit 2, from a run whose every removal SUCCEEDED.
+//
+// Refusing that one directory, rather than chdir-ing somewhere durable before
+// the prune: the prune is the LAST call that needs a cwd, not the only one —
+// the removals of the worktrees enumerated after this one, and the branch
+// sweep's own `git branch -D`, need one too, and a chdir at the foot of the
+// file leaves all of those still broken. Both fixtures below therefore carry a
+// SECOND subject the run must still act on, so a blanket stand-down cannot
+// pass them.
+test("the branchless sweep refuses the worktree the run is standing in, and still exits 0 (#992)", (t) => {
+  const w = repo(t);
+  const here = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const other = detachedMergedWorktree(w, "docs/80-other", "more work that landed");
+
+  const { code, json, stderr } = runReap(here, ["--apply"]);
+
+  assert.equal(code, 0, `every removal succeeded, so the run must exit 0: ${stderr}`);
+  assert.equal(existsSync(here), true, "the directory this run was started in must survive");
+  assert.deepEqual(json.worktreesRemoved, [other], "the refusal covers one directory, not the sweep");
+  assert.equal(existsSync(other), false, "and the worktree beside it is still removed");
+  assert.equal(json.kept.length, 1, `exactly one finding: ${JSON.stringify(json.kept)}`);
+  assert.equal(json.kept[0].branch, null, "this sweep has no branch to name");
+  assert.equal(
+    json.kept[0].reason,
+    `worktree ${here} holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it`,
+  );
+  assert.ok(stderr.includes("KEEP"), "silently walking past it is the defect, not the fix");
+  assert.doesNotMatch(stderr, /Unable to read current working directory/, "the defect's own signature");
+  assert.doesNotMatch(stderr, /prune failed/, "housekeeping that can run must not report a failure");
+});
+
+// The same subject on the other sweep, and the shape the refuting vote in the
+// PR review measured against the pre-#381 script: a branch-carrying merged
+// `[gone]` worktree, which the branch sweep removes on its own. Here the branch
+// is checked out in that worktree, so keeping the directory keeps the branch
+// with it — the same pairing the main-checkout decline already states, and the
+// reason `git branch -D` would refuse it anyway.
+test("the branch sweep refuses the worktree the run is standing in, and keeps its branch with it (#992)", (t) => {
+  const w = repo(t);
+  const here = mergedGoneBranchWithWorktree(w, "feature/here", "work that landed");
+  mergedGoneBranch(w, "feature/elsewhere", "also landed");
+
+  const { code, json, stderr } = runReap(here, ["--apply"]);
+
+  assert.equal(code, 0, `every removal succeeded, so the run must exit 0: ${stderr}`);
+  assert.equal(existsSync(here), true, "the directory this run was started in must survive");
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.deepEqual(json.reaped, ["feature/elsewhere"], "the rest of the sweep still runs");
+  assert.equal(branchExists(w, "feature/here"), true, "the branch checked out in that worktree is kept with it");
+  assert.equal(json.kept.length, 1, `exactly one finding: ${JSON.stringify(json.kept)}`);
+  assert.equal(json.kept[0].branch, "feature/here", "this sweep has a branch to name, and kept it");
+  assert.match(json.kept[0].reason, /holds the working directory this run was started in/);
+  assert.doesNotMatch(stderr, /Unable to read current working directory/, "the defect's own signature");
+  assert.doesNotMatch(stderr, /prune failed/, "housekeeping that can run must not report a failure");
+});
+
+// The dry run has to predict the refusal, for the reason #82 records for the
+// main-checkout decline: a `would remove worktree` line the following
+// `--apply` refuses is a promise this script cannot keep, and the two modes
+// disagreeing about a fixed structural fact is the defect that guard exists to
+// stop. Deterministic here in a way #391's refusals are not — the cwd is known
+// before anything is removed, so unlike git's own decline it CAN be predicted.
+test("the dry run predicts that refusal instead of promising a removal (#992)", (t) => {
+  const w = repo(t);
+  const here = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+  const { code, json, stderr } = runReap(here, []);
+
+  assert.equal(code, 0);
+  assert.equal(json.applied, false);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1, `exactly one finding: ${JSON.stringify(json.kept)}`);
+  assert.match(json.kept[0].reason, /holds the working directory this run was started in/);
+  assert.doesNotMatch(stderr, /would remove worktree/, "a dry run must not promise a removal --apply refuses (#82)");
 });
 
 test("the design spec's script-surface row carries the two declines only this sweep emits (#381)", (t) => {
@@ -2469,6 +2585,29 @@ test("the design spec's script-surface row carries the in-progress decline this 
   );
   // The payload shape a reader parses against, stated where the reasons are.
   assert.ok(row.includes("worktreesRemoved[]"), `the row must state the key this sweep writes.\nrow: ${row}`);
+});
+
+// Same derivation as the pins above, for the one decline in this script that
+// is not about its subject at all: it names where the run was INVOKED from,
+// and its remedy is to invoke it somewhere else. A reader who knows every
+// worktree guard above still cannot infer that a removable worktree survives a
+// run started inside it, so the row has to say so. #992
+test("the design spec's script-surface row carries the standing-in-it decline both sweeps emit (#992)", (t) => {
+  const w = repo(t);
+  const here = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+  const { json } = runReap(here, ["--apply"]);
+
+  // Up to the path only: the path is the caller's to vary, the label is what a
+  // document can carry.
+  const label = /(holds the working directory this run was started in)/.exec(json.kept[0]?.reason ?? "");
+  assert.ok(label, `fixture must reach the standing-in-it decline: ${json.kept[0]?.reason}`);
+
+  const row = specRow();
+  assert.ok(
+    row.includes(label[1]),
+    `the spec row must quote this decline verbatim, and does not carry "${label[1]}".\nrow: ${row}`,
+  );
 });
 
 test("a [gone] branch whose worktree path holds a newline is kept, never reaped (#551)", (t) => {
