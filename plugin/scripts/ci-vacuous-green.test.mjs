@@ -206,6 +206,20 @@ test("a routed check's own exit status still reaches the job", () => {
   assert.ok(!/continue-on-error:\s*true/.test(src), "a step that cannot fail the job cannot check anything either");
 });
 
+// The `#`-comment-stripped read both gojq pins below share. A commented-out
+// line still CONTAINS the literal an assertion looks for, so against the raw
+// file a live command and a dead one read identically — and commenting out the
+// wiring is exactly the mutation that hands the engine gates back their skip.
+// Both comment forms, because killing only whole-line ones leaves the trailing
+// form as the same hole. One definition rather than a copy per pin: a local
+// copy of a pin's own bound is how the second pin ships without it, which is
+// the call `prose-pin.mjs` makes about `paragraph` for the same reason.
+const ciWithoutComments = () =>
+  readFileSync(CI_YML, "utf8")
+    .split("\n")
+    .map((l) => l.replace(/(^|\s)#.*$/, ""))
+    .join("\n");
+
 // --- the Tests step provisions the engine its gates need -----------------------
 // #337. A different shape of the same vacuous green, and the reason this pin
 // lives here rather than beside the gate it protects: candidates.test.mjs gates
@@ -222,16 +236,7 @@ test("a routed check's own exit status still reaches the job", () => {
 // findGojq() throws on a GOJQ_BIN that is not gojq rather than falling back to
 // a skip.
 test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
-  // Strip `#` comments before matching. A commented-out line still CONTAINS the
-  // literal every assertion below looks for, so against the raw file they cannot
-  // tell a live command from a dead one — and the mutation that matters here,
-  // commenting out the wiring, is exactly the one that hands the engine gates
-  // back their skip. Both comment forms, because killing only whole-line ones
-  // leaves the trailing form as the same hole.
-  const ciRaw = readFileSync(CI_YML, "utf8")
-    .split("\n")
-    .map((l) => l.replace(/(^|\s)#.*$/, ""))
-    .join("\n");
+  const ciRaw = ciWithoutComments();
   const ci = flat(ciRaw);
 
   assert.ok(
@@ -262,5 +267,94 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   assert.ok(
     phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
     "the Tests step no longer names the binary, so a failed provision skips quietly instead of failing the job",
+  );
+});
+
+// --- the version ci.yml installs is the version the instructions name -------
+// #956. The pinned gojq version is written in five tracked places and exactly
+// one of them runs: ci.yml's install step. The pin above lifts it verbatim,
+// and three local-reproduction instructions under `candidates.*` restate it —
+// the SKIP_WITHOUT_GOJQ message a developer reads when the engine gates
+// decline to run, plus two comments quoting the same `go install` line.
+// Nothing asserted they agree. A bump to ci.yml reds the pin above, so THAT
+// copy gets updated; the instructions do not red, and a developer following
+// them installs an engine CI does not run while the gate reports green. That
+// is the drift #947's pin exists to refuse, one step removed — a floating
+// engine changes what the gate MEASURES with no commit saying so.
+//
+// Direction is the whole design. ci.yml is the source of truth because it is
+// the only site with an effect, so the version is READ from it — a literal
+// here would be a fifth copy, and it would agree with itself while every
+// instruction went stale. The pin above keeps its verbatim lift deliberately:
+// that assertion says "a bump is a deliberate edit in this repo", which an
+// assertion derived from the file it reads cannot say. Two different claims
+// about one literal, and this one needs the other to stay hardcoded.
+//
+// `candidates.*` are read RAW — the opposite of the ci.yml read above —
+// because two of the three instructions ARE comments. That is the form a
+// local reproduction takes, and stripping them would leave this test reading
+// nothing. The escape that forces the strip above does not exist here: that
+// pin proves a command is LIVE, where this one proves every occurrence
+// AGREES, and commenting one out cannot buy a false green because the
+// occurrence still has to name the same version.
+const CANDIDATES = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
+const CANDIDATES_TEST = fileURLToPath(new URL("./candidates.test.mjs", import.meta.url));
+
+// Every `go install …/gojq@<version>` ref in `src`, in order. A fresh regex per
+// call, never a shared `/g` literal: `lastIndex` persists on those between
+// call sites, and a pin whose result depends on which site ran first is not a
+// pin. The capture stops at the first character a version cannot contain, so
+// the backtick closing a comment's code span is not swallowed into it — `\S+`
+// there would compare a trailing "`)" against ci.yml's bare version and red on
+// a clean tree. The `v` is required: `@latest` then matches nothing and is
+// reported as an absent ref, which is louder than capturing "latest" and
+// letting it agree with another "latest" somewhere else.
+const installRefs = (src) => [...src.matchAll(/gojq\/cmd\/gojq@(v[\w.+-]+)/g)].map((m) => m[1]);
+
+test("candidates.*'s gojq install instructions name the version ci.yml installs", () => {
+  // Guarded, and inside the test body rather than at module scope. An
+  // unguarded `.match(…)[0]` throws where it stands on a ci.yml this suite only
+  // READS, and at module scope that throw takes every test in this file with
+  // it — a zero-behaviour reformat must cost one red assertion, not a whole
+  // file. candidates.test.mjs already carries two module-scope collapse paths,
+  // which is the reason not to author a third anywhere in this area.
+  const pinned = installRefs(ciWithoutComments());
+  assert.equal(
+    pinned.length,
+    1,
+    `.github/workflows/ci.yml must name exactly one pinned gojq install ref for the instructions to agree with — found ${pinned.length}: ${pinned.join(", ") || "none, so the Install gojq step is gone, commented out, or floating on @latest"}`,
+  );
+  const want = pinned[0];
+
+  for (const [name, path] of [
+    ["plugin/scripts/candidates.mjs", CANDIDATES],
+    ["plugin/scripts/candidates.test.mjs", CANDIDATES_TEST],
+  ]) {
+    for (const got of installRefs(readFileSync(path, "utf8"))) {
+      assert.equal(
+        got,
+        want,
+        `${name} tells a developer to install gojq ${got}, but .github/workflows/ci.yml installs ${want} — unskipping the engine gates locally would measure a different engine than CI runs; bump both or neither`,
+      );
+    }
+  }
+
+  // The loop pins agreement, not presence, so alone it is satisfied by a
+  // `candidates.*` with every instruction deleted. This is the one instruction
+  // that may not go missing: it is live code, it is what a developer actually
+  // reads when the gates skip, and it is the site #956 names. Sliced to its own
+  // declaration rather than matched file-wide, so neither comment can stand in
+  // for it. Presence is deliberately NOT asserted for those two — whether
+  // `candidates.mjs`'s comment should carry a version at all is an open
+  // question on #956, and a presence pin here would settle it by force.
+  const skip = between(
+    readFileSync(CANDIDATES_TEST, "utf8"),
+    "const SKIP_WITHOUT_GOJQ",
+    "\n",
+    "plugin/scripts/candidates.test.mjs",
+  );
+  assert.ok(
+    installRefs(skip).includes(want),
+    `plugin/scripts/candidates.test.mjs's SKIP_WITHOUT_GOJQ message no longer tells a developer to install gojq ${want}, the version .github/workflows/ci.yml installs — the skip message now names no version at all, or names it in a form this assertion cannot read`,
   );
 });
