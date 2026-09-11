@@ -28,8 +28,12 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // Bounded at both ends. Unbounded to EOF, `ready-to-merge`, `head` and
 // `finisher` each occur freely through the per-PR sequence and the watcher
 // loop, so every assertion below would survive deletion of the section itself.
+// The end anchor is the NEXT heading, which #966 moved: a gate-proof section
+// now sits between this one and `## Per-PR sequence`, and leaving the old
+// anchor in place would silently widen this slice across it — the fat slice
+// this bound exists to deny, not a cosmetic difference.
 const labelledHead = () =>
-  between(DOC, "## The labelled head", "## Per-PR sequence", "run-merge-bot.md");
+  between(DOC, "## The labelled head", "## Prove the gate blocks", "run-merge-bot.md");
 
 // Step 3 is where the merge-instant re-check already lives (label, review
 // decision), so the head leg has to be IN it — not in a later paragraph a

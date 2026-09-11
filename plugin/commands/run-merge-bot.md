@@ -63,6 +63,35 @@ A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-m
 
 What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
 
+## Prove the gate blocks, in a directory you own
+
+Build the CI gate step 3 uses. **A gate nobody has seen refuse is a gate you are guessing about** — so prove it can go red before you trust a green: drive a synthetic `ci-state` payload of each shape below through the gate you actually run, and confirm each one blocks.
+
+- `{"verdict":"rate-limited"}`, with every field it never got to observe absent.
+- `{}` — the same absence, with nothing naming its cause.
+- A zero-byte file.
+- `verdict: "green"` with `behind` greater than 0. The behind-count is context for the caller, not part of `ci-state`'s own verdict, so nothing but your gate refuses it.
+- A run still in progress: `status` not `completed`, no conclusion yet.
+
+A gate reading a SUBSET of the fields passes the first two vacuously instead of refusing them — absence is not self-blocking in `jq`, so `.prHead == .runHeadSha` is `null == null` on both — and exits 4 on the third, having compared nothing at all. `run-team/SKILL.md`'s **Merge bot** section is where the rate-limited and empty-payload cases were measured; the last two shapes are why the gate reads `behind` and `status` at all. A shape that does not block is a finding: fix the gate and drive the whole set again, never just that shape.
+
+**Every fixture you write goes under `<scratch>/pr<N>/merge-bot-<wave#>/gate-proof/`, never into the scratch root by itself, and you create that leaf with plain `mkdir`, never `mkdir -p`.** `pr<N>` is the PR you are about to gate, so the proof is bound to the merge it licenses instead of being driven once for the pass; `merge-bot-<wave#>` is your own name, because a later wave can reach the same PR. The scratchpad root your own system prompt names is injected into every dispatched member and is shared with every sibling in the session; nothing partitions it but this rule. The fixture names do not partition it either — `05-green-with-skipped-job` is the name every wave's bot reaches for, by design, so a collision here is systematic rather than unlucky. Measured 2026-08-28 (#966): merge-bot-5, proving its gate, found payloads in the root it had not written, authored ~40 minutes earlier by a sibling working a different PR and identifiable by a different `prHead`. Nothing merged wrongly that time, and the failure it was one filename away from is silent: a sibling's GREEN fixture sitting under the name your loop expects to BLOCK makes that shape pass through, and you report the gate proven falsifiable with every shape blocked while the one that mattered was never measured — every merge in the wave then resting on a proof that did not happen. No wave number, because no controller dispatched you? You are the only bot in the session: `merge-bot-1`.
+
+`mkdir` is the verification at claim time, not a formality. It exits 1 with `File exists` on a path that already exists, so a directory you did not create refuses you at the moment you claim it, while `mkdir -p` exits 0 and hands you its contents silently. Occupied means a pass already ran under your name — take `gate-proof-2` and say in your report which directory you used, rather than writing into theirs.
+
+**Then close the loop before you report: the set of shapes you drove must be exactly the set you wrote — same count, same names — and a mismatch refuses the proof rather than folding the extra in.** One `ls` does it, and it is not defence in depth for its own sake: the names are systematic by design, so a mistyped namespace or a reused PR number reproduces the collision exactly, and nothing else in this system would catch it — your own report would still say the gate was proven. Refuse even when the intruder is block-shaped and appears to strengthen the proof: a shape you did not write is a shape you did not measure, and being measured is the whole of what the proof claims.
+
+```bash
+d=<scratch>/pr<N>/merge-bot-<wave#>/gate-proof
+mkdir -p "$(dirname "$d")" && mkdir "$d" || exit 1    # refused -> not your namespace
+wrote=0
+# per shape: write it into "$d", drive it through the gate, confirm it blocks, wrote=$((wrote+1))
+n=$(ls -1 "$d" | wc -l)
+[ "$n" -eq "$wrote" ] || echo "PROOF VOID: $n payloads present, $wrote written"
+```
+
+Real readings are not fixtures: keep the `ci-state` payload you actually gate on one level up, at `<scratch>/pr<N>/merge-bot-<wave#>/ci.json`, so a synthetic shape can never be read back as a live reading and the count above stays exact. This is not `run-team/SKILL.md`'s finding rule (`<scratch>/pr<N>/<finding>/`) restated — gate fixtures have no finding id, which is exactly why that rule never reached them; this is the same two-level shape keyed on what a merge bot does have.
+
 ## Per-PR sequence
 
 For each labeled PR clearing the hold rule, lowest first:
