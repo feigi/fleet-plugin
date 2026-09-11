@@ -1,7 +1,8 @@
 # Stray-Skip Predicate Extraction
 
-`count_registry()` in `plugin/scripts/inflight.sh` decides whether a worktree
-registry entry is a droppable operator stray with one conditional:
+`count_registry()` decides whether a worktree registry entry is a droppable
+operator stray with one conditional. It exists **twice, byte-identically** — in
+`plugin/scripts/inflight.sh` and `plugin/scripts/release-ticket.sh`:
 
 ```sh
 if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
@@ -9,7 +10,7 @@ if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; 
 
 Proposals to extract this into a named predicate function — `is_droppable_stray
 "$entry"` — so the invariant is "independently re-verifiable as a unit" are
-refused. The check stays inline in the loop.
+refused. The check stays inline in both loops.
 
 ## Why this is out of scope
 
@@ -37,6 +38,28 @@ assertion count — the message names the wrong answer (`exit 0` meaning free) a
 the test title names the ticket. A reader who breaks this line is told what they
 broke and which defect it is. "Silently, with nothing flagging why" is the one
 thing that cannot happen here.
+
+**Extraction in one copy reopens a divergence that was deliberately closed.**
+This is the strongest argument against the request and the issue does not
+mention it. The two copies of this check are byte-identical on purpose, and
+converging them was the *point* of the change that introduced the current form.
+`inflight.sh`'s own comment records it:
+
+> That copy's skip reading only `ls`'s output, not its exit STATUS, was the last
+> divergence — this change closes it (#697): both copies' skip now reads the exit
+> status.
+
+The same comment tracks the drift history in detail: three of four items landed
+in one copy first and were ported to the other by #395, with the recount still
+open against it under #694. So these two functions have a documented record of
+diverging and being re-converged item by item.
+
+A predicate extracted into one script therefore does not merely refactor — it
+re-splits a pair whose byte-identity is the invariant. Any serious version of
+this request has to land in **both** scripts simultaneously, or into a shared
+module that does not exist and that neither script currently sources for this.
+That is a materially larger change than the one filed, and it is proposed for
+zero behaviour change against a hazard the tests already catch.
 
 **The cheaper answer the KB prescribes already shipped.**
 [blockers-accessor-extraction.md](blockers-accessor-extraction.md) refuses the
@@ -88,6 +111,14 @@ than re-derived. Note also that the test self-skips as root (`EUID0`,
 there, but a future move to a root container would silently remove the guard this
 refusal depends on, and that would reopen it too. An argument from readability
 alone has been made and answered.
+
+**A proposal against either copy lands here.** This record covers the check in
+both `plugin/scripts/inflight.sh` and `plugin/scripts/release-ticket.sh`; a
+request phrased against one script is the same request. A proposal that extracts
+into a **shared module sourced by both**, keeping them byte-identical by
+construction rather than by convention, is the one form not answered above — it
+addresses the divergence argument instead of ignoring it, and would deserve a
+fresh ruling rather than a pointer here.
 
 ## Prior requests
 

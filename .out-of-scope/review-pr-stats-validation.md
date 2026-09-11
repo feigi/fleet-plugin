@@ -20,9 +20,19 @@ stats.profile === "tests-only" && stats.hasConfig === true
 … (d.key === "tests" && stats.hasTests === true)
 ```
 
-A malformed, half-parsed, or hostile `stats` therefore produces **more** review, not
-less, and two `throw`s backstop an empty dimension set. The safe direction is the
+A **malformed or absent** `stats` therefore produces **more** review, not less,
+and two `throw`s backstop an empty dimension set. The safe direction is the
 default, which is the property validation would be bought to guarantee.
+
+Note the precise bound, because overstating it weakens the record: this does
+**not** make the function immune to a *well-formed* wrong value. A `stats` that
+spells a real `profile` — `"tests-only"`, or a size-tier name — and sets
+`hasConfig`/`hasTests`/`docsOnly` to literal `true` will narrow, because it is
+indistinguishable from a correct answer. The `=== true` guards defend against
+malformed and missing input, not against a plausible lie. **That strengthens the
+refusal rather than weakening it:** schema validation would not catch a
+well-formed lie either, so the validation being requested does not close the one
+gap that remains open.
 
 This is deliberate and already documented in the source, immediately above the
 relevant block: *"a cross-check would let missing input narrow coverage — the
