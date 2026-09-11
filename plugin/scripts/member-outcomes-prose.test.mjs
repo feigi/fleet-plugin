@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between as section } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -10,15 +11,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // the work. The end anchor is the paragraph immediately after the insertion
 // point (not the next "## " heading, which is 174 lines away and would satisfy
 // this pin on prose it never touches).
-function section(start, end) {
-  const a = RUN_TEAM.indexOf(start);
-  assert.notEqual(a, -1, `anchor moved: ${start}`);
-  const b = RUN_TEAM.indexOf(end, a + start.length);
-  assert.notEqual(b, -1, `anchor moved: ${end}`);
-  return RUN_TEAM.slice(a, b);
-}
-
-const SLICE = () => section("Append one row", "**Why not decide inside one run.**");
+const SLICE = () => section(RUN_TEAM, "Append one row", "**Why not decide inside one run.**", "member-outcomes ruling step");
 
 // Everything the instruction needs in order to RUN. Matching only the filename
 // was mutation-proven vacuous: the pin stayed green both when the command was
