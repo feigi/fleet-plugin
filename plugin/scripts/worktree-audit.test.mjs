@@ -724,10 +724,13 @@ test("a positional argument is refused, not silently discarded (#525)", (t) => {
 
 // --- #884/#894: the escape guard's FATALITY, not the message it carries.
 //
-// `wt_j=$(jstr "$wt") && short_j=$(jstr "$short") || die` is the guard
-// verify-sha.sh carries too, and #884 pinned only that copy. Downgrade this one
-// to a warning that does not exit and the script walks into the `printf` below
-// it, emitting an entry whose escaping it never performed — a confident-looking
+// `wt_j=$(jstr "$wt") && short_j=$(jstr "$short") || die` is this script's
+// guard; verify-sha.sh's own guard (`branch_j=$(jstr "$branch") &&
+// sha_j=$(jstr "$sha") && tip_j=$(jstr "$tip") || die`) shares only the
+// jstr/&&/`|| die` structure, not this exact code, and #884 pinned only this
+// copy. Downgrade this one to a warning that does not exit and the script
+// walks into the `printf` below it, emitting an entry whose escaping it
+// never performed — a confident-looking
 // but wrong JSON array, on the report a fleet controller reads to decide
 // whether a replacement member would redo work or destroy it.
 //
