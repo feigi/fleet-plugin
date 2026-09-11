@@ -3235,6 +3235,181 @@ fi`,
     "the opposite direction's cause must not be reported for this one");
 });
 
+/**
+ * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
+ * listing — after this script's own initial registry count has already run,
+ * and before git's own read of the same registry — then hands off to the real
+ * binary. Mirrors inflight.test.mjs's own `registryRaceShim` (#694): shimmed
+ * rather than slept, because this is the same window inflight.sh measured at
+ * ~10ms, and a test that tries to hit it with a sleep is a flake generator.
+ *
+ * The sentinel keeps it to one shot — release-ticket.sh's own delete calls
+ * shell out to git too, and a mutation that kept firing would never let the
+ * run converge. Returned so a case can assert it actually fired: a shim that
+ * silently stopped matching would turn the case into a test of nothing.
+ */
+function registryRaceShim(r, mutation) {
+  const fired = join(r.w, "..", "bin", "race-fired");
+  gitShim(r, `case "$*" in
+  "worktree list --porcelain -z")
+    if [ ! -e '${fired}' ]; then
+      : > '${fired}'
+      ${mutation}
+    fi ;;
+esac`);
+  return fired;
+}
+
+/**
+ * Like `registryRaceShim` above, but for the recount's OWN window rather than
+ * the original count/listing gap: `before` runs ahead of the real
+ * `worktree list --porcelain -z` call, exactly as `registryRaceShim`'s
+ * mutation does, and `after` runs once that call has returned but before
+ * anything downstream re-scans the registry — the gap #1408's review found
+ * the recount itself opens when only `registered`, not `linked`, is
+ * re-taken. One shot, gated the same way: release-ticket.sh's own delete
+ * calls shell out to git too, and a shim that kept firing would never let
+ * the run converge.
+ */
+function twoMutationShim(r, before, after) {
+  const fired = join(r.w, "..", "bin", "two-mutation-fired");
+  gitShim(r, `case "$*" in
+  "worktree list --porcelain -z")
+    if [ ! -e '${fired}' ]; then
+      : > '${fired}'
+      ${before}
+      '${REAL_GIT}' "$@"
+      rc=$?
+      ${after}
+      exit $rc
+    fi ;;
+esac`);
+  return fired;
+}
+
+test("a sibling worktree ADD between the registry count and git's listing is absorbed, not a die (#694)", (t) => {
+  // The registry count above and git's own listing taken for `wt_listing` are
+  // two reads at two instants, not one atomic read. A sibling agent's
+  // `git worktree add` landing in that gap makes the counts disagree with
+  // nothing actually wrong — see the recount comment in release-ticket.sh for
+  // the measured rate. Before this ticket that disagreement was fatal on the
+  // first read; the recount is what tells this moment from a real drop.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  // A path outside the checkout, mirroring inflight.test.mjs's own fixture: a
+  // sibling worktree landing anywhere is the race, not one landing in a
+  // particular directory.
+  const sibling = join(r.w, "..", "sibling-work");
+  const fired = registryRaceShim(
+    r,
+    `'${REAL_GIT}' worktree add -q --detach '${sibling}' HEAD >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(code, 0, `a concurrent add must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed it");
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.equal(existsSync(sibling), true, "the sibling the race added is untouched — the release names one claim");
+});
+
+test("a sibling worktree REMOVE between the registry count and git's listing is absorbed, not a die (#694)", (t) => {
+  // The other direction, and the one that looks like the real fault: git
+  // lists FEWER worktrees than the registry count, exactly the shape of an
+  // entry git silently dropped because it could not read it. The recount is
+  // what tells a worktree that is merely gone (a real removal landed in the
+  // window) from one that is unreadable (a real, standing corruption) —
+  // "an entry git cannot read INSIDE is unknown too, not just an unreadable
+  // entry" above pins that the second kind still refuses even after the
+  // recount.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const sibling = claim(r.w, 77, "other-claim");
+  const fired = registryRaceShim(
+    r,
+    `'${REAL_GIT}' worktree remove --force '${sibling.wt}' >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(sibling.wt), false,
+    "the shim's mutation actually removed the sibling -- otherwise no real race was exercised");
+  assert.equal(code, 0, `a concurrent remove must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed it");
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a SECOND mutation inside the recount's own window still names the correct direction, add then add (#1408)", (t) => {
+  // The review that caught this: refreshing only `registered` on recount
+  // leaves `linked` pinned to the FIRST `wt_listing` call. A second sibling
+  // `git worktree add` landing after that call returns but before the
+  // (then registered-only) recount re-scanned the registry inflated
+  // `registered` alone, flipping which branch fired below and reporting
+  // "the listing is incomplete" — a fault message — for what is really two
+  // ordinary concurrent adds. Fixed: the recount re-takes `linked` too, so
+  // both counts settle on the same, now-consistent state and neither
+  // branch fires at all.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const siblingA = join(r.w, "..", "sibling-a");
+  const siblingB = join(r.w, "..", "sibling-b");
+  const fired = twoMutationShim(
+    r,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingA}' HEAD >/dev/null 2>&1`,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(fired), "the shim fired: both mutations really landed");
+  assert.equal(existsSync(siblingA), true, "fixture: the first add really landed before git's listing");
+  assert.equal(existsSync(siblingB), true, "fixture: the second add really landed inside the recount's window");
+  assert.equal(code, 0, `two concurrent adds must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "the wrong direction must never be reported for two benign adds");
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed both");
+  assert.equal(json.released, true);
+});
+
+test("a SECOND mutation inside the recount's own window still names the correct direction, remove then add (#1408)", (t) => {
+  // Same window, the opposite-looking mutation first: a pre-existing sibling
+  // REMOVED before git's own listing runs, then a different sibling ADDED
+  // after it returns. Order does not matter to the fix — whichever mutation
+  // lands where, the recount's fresh `linked` and fresh `registered`
+  // describe the same settled instant and agree.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const pre = claim(r.w, 77, "other-claim");
+  const siblingB = join(r.w, "..", "sibling-b");
+  const fired = twoMutationShim(
+    r,
+    `'${REAL_GIT}' worktree remove --force '${pre.wt}' >/dev/null 2>&1`,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(fired), "the shim fired: both mutations really landed");
+  assert.equal(existsSync(pre.wt), false, "fixture: the remove really landed before git's listing");
+  assert.equal(existsSync(siblingB), true, "fixture: the add really landed inside the recount's window");
+  assert.equal(code, 0, `a remove and an add straddling the recount must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "the wrong direction must never be reported when both mutations are benign");
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed both");
+  assert.equal(json.released, true);
+});
+
+// Known gap, not closed here: the two tests above cover a benign race ALONE —
+// two mutations, neither a real fault. A standing corruption (an unreadable
+// registry entry, say) landing ALONGSIDE a concurrent benign race in the same
+// recount window is not exercised by any case in this file. #1408's review
+// flagged it as pre-existing (the single-mutation cases above already predate
+// this ticket) rather than introduced by the fix above, so it is noted here
+// rather than covered: a combined fixture would need a standing-corruption
+// setup (see "an entry git cannot read INSIDE is unknown too" above) driven
+// through `twoMutationShim` at the same time, and nothing today asserts that
+// combination still refuses for the right reason.
+
 test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", (t) => {
   // The counter is a stage like any other. It used to be
   // `grep -c '^worktree ' || true`, and that `|| true` was not optional:

@@ -587,10 +587,18 @@ fi
 # than a second invented convention — but the two copies have since diverged
 # and this comment no longer claims they match. Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
-# direction split — were ported to that copy by #395; the recount below is the
-# one still open against it (#694). That copy's skip reading only `ls`'s output,
-# not its exit STATUS, was the last divergence — this change closes it (#697):
-# both copies' skip now reads the exit status.
+# direction split — were ported to that copy by #395; the recount was the last
+# of the four, ported by #694. That copy's skip reading only `ls`'s output,
+# not its exit STATUS, was a further divergence — #697 closed it: both
+# copies' skip now reads the exit status.
+#
+# Porting the recount did not converge the two copies on it, though: this
+# script's recount below still only re-takes `registered` (`count_registry`
+# alone), while release-ticket.sh's copy of the SAME recount (#1408) re-takes
+# `registered` AND `linked` together, because re-taking `registered` alone
+# leaves `linked` pinned to the first listing and can misname a benign
+# concurrent-worktree race as a fault. That is the one open divergence left
+# here — tracked as #1421, not fixed by this change.
 #
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
