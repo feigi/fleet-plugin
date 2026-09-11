@@ -48,7 +48,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const REAPING = readFileSync(
@@ -57,12 +57,6 @@ const REAPING = readFileSync(
 );
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const SCRIPT = readFileSync(join(REPO, "scripts", "release-ticket.sh"), "utf8");
-
-// A shell comment block wraps at `#`, so a pinned phrase can break across lines
-// with the comment gutter, not whitespace, at the break — `\s+` does not span a
-// `#`. Strip the gutter and rejoin with a single space, exactly the inter-word
-// space a wrap point replaces.
-const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
 
 const releaseSection = () =>
   between(

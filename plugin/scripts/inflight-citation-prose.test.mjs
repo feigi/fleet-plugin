@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 // #800. Probe 3's comment borrows its rule from release-ticket.sh's
 // worktree-registry read and cited that check by LINE. The line it named had
@@ -28,12 +28,6 @@ import { between, phrase } from "./prose-pin.mjs";
 // sentence appended after one, carving out an exception, does not. Reflow stays
 // green by design — the words are pinned, not their layout.
 const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
-
-// A shell comment block wraps at `#`, so a pinned phrase can break across lines
-// with the comment gutter, not whitespace, at the break — `\s+` does not span a
-// `#`. Strip the gutter and rejoin with a single space, exactly the inter-word
-// space a wrap point replaces.
-const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
 
 // Bounded at both ends, by the probe's own heading and by the function the
 // comment documents. inflight.sh names release-ticket.sh in other comments, on
