@@ -41,7 +41,7 @@ const ENV = {
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
-// Absolute path to the real git, for the one test that shadows `git` on PATH.
+// Absolute path to the real git, for any test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
 // Absolute paths to the real `awk` and `paste`, for the sites this file's own
