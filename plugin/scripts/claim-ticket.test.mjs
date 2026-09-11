@@ -1326,6 +1326,48 @@ test("runner: an argv of flags alone refuses instead of reaching node's own disc
   assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
 });
 
+// #961. The corpus above is spelled entirely with arguments that do not
+// exist, so it pins one row of the classification and leaves the rule that
+// produces it unpinned: a dash-led argument is an operand where it EXISTS,
+// and a flag otherwise. Both rows below are dash-led, and they answer
+// oppositely — which is what makes the rule, rather than the shape, the
+// thing being pinned. Measured on a runner built from this emitter.
+//
+// `-dash.test.mjs` exists, so it is an operand. The runner never gets it to
+// run — node reads a relative dash-led spec as an option and dies in ITS own
+// voice, the same ceiling the dash-named directory test above already
+// carries one level up (measured on node v26.8.1 and on the v26.5.0 the
+// `.nvmrc` pins; `./`-prefixing does not escape it, node strips that
+// prefix first). Which refusal a caller sees is the whole of what the
+// classification buys here, and it is exactly what discriminates: classify
+// this argument as a flag instead and the runner refuses in its own voice,
+// at exit 1, before node is reached. The positive `node:` match is
+// load-bearing beside the negative — a nonzero exit with nothing on stderr
+// satisfies the negative on its own.
+//
+// `-t/*.test.mjs` does not exist and holds a glob metacharacter, so it
+// reaches the arm order where dash-ness is read BEFORE glob-ness: a flag,
+// not a glob, contributing no operand. Read it the other way round — "a
+// glob is a glob whatever it starts with" — and this argv reaches node,
+// which drops the unmatched pattern silently and exits 0 having run
+// nothing: the vacuous pass the guard exists to refuse, one argv shape past
+// the corpus above. The dash-led file is written straight into the worktree
+// rather than through `repo()`, for the reason the dash-named directory
+// test above gives.
+test("runner: a dash-led argument counts as an operand only where it exists", () => {
+  const a = apply(SUITE);
+  writeFileSync(join(a.wt, "-dash.test.mjs"), PASSES);
+
+  const exists = a.run("-dash.test.mjs");
+  assert.notEqual(exists.status, 0, exists.stdout + exists.stderr);
+  assert.doesNotMatch(exists.stderr, /agent-test: no test file or directory/, exists.stdout + exists.stderr);
+  assert.match(exists.stderr, /node: bad option/, exists.stdout + exists.stderr);
+
+  const missing = a.run("-t/*.test.mjs");
+  assert.notEqual(missing.status, 0, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /agent-test: no test file or directory/, missing.stdout + missing.stderr);
+});
+
 // The deliberately preserved escape hatch: `set -f` above stops the *shell*
 // from touching this, so a literal `*` reaches the runner exactly as the
 // glob-detection guard requires — spawnSync never invokes a shell, so this

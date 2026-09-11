@@ -508,20 +508,30 @@ for arg do
   # directory expands, an existing file passes through escaped, a quoted glob is
   # node's to expand whether or not it matches anything, and a typo is refused
   # outright. A flag is the one shape that can name nothing at all.
-  # The \`[ -e ]\` term is what keeps this classification in step with the
-  # branch that consumes the argument below, which settles \`-d\` and then
-  # \`-e\` before it reads anything as a flag — that branch is where existence
-  # genuinely comes first; here the \`-*\` shape has to match before the term is
-  # reached at all.
-  # Agreement is the whole of what it buys, never a working invocation: a
-  # dash-spelled path is refused either way, and the term settles only WHICH
-  # refusal a caller sees. Measured on a runner built from this emitter, with a
-  # file named \`-dash.spec.mjs\` present and named as the sole argument: with
-  # the term, node reads it as an option and exits 9 with \`node: bad option\`;
-  # without it, the argument classifies as a flag and the refusal below exits 1
-  # in this runner's own voice.
-  case "\$arg" in -*) [ -e "\$arg" ] && operand=1 ;; *) operand=1 ;; esac
+  # \$operand is recorded by the dispatch itself rather than derived a second
+  # time ahead of it (#961). The branch below already settles \`-d\`, then
+  # \`-e\`, then the argument's shape — the same three questions a standalone
+  # classification had to ask again, in another shape, with nothing but a
+  # comment keeping the two answers in agreement. Each arm that names
+  # something to run says so; the flag arm names nothing and stays silent.
+  # Existence, not spelling, is what settles a dash-led argument, and the arm
+  # ORDER is what carries that: an existing dash-named path reaches \`-d\` or
+  # \`-e\` before anything can read it as a flag, while a dash-led glob that
+  # does not exist meets \`-*\` ahead of the glob arm and stays a flag.
+  # Agreement is the whole of what this buys, never a working invocation: a
+  # dash-spelled path is refused either way, and the classification settles
+  # only WHICH refusal a caller sees. Measured on a runner built from this
+  # emitter, with a file named \`-dash.test.mjs\` present and named as the sole
+  # argument: as an operand, node reads it as an option and exits 9 with
+  # \`node: bad option\`; as a flag, the refusal below exits 1 in this runner's
+  # own voice. Both rows are pinned in claim-ticket.test.mjs.
+  # The arms that refuse an argument outright — every vendored spelling, the
+  # unreadable directory, the typo — used to run after the classification and
+  # now run before any arm records one. Nothing observable rides on that,
+  # because each of the nine exits inside this loop is \`exit 1\`: an argument
+  # they refuse leaves the process there, and \$operand is never read again.
   if [ -d "\$arg" ]; then
+    operand=1
     # Zero matches must refuse. Appending nothing does not run nothing — it
     # leaves argv empty, and bare \`node --test\` then discovers the whole
     # worktree: a green for a suite nobody asked for. Shrugging instead, when
@@ -922,6 +932,7 @@ for arg do
         ;;
     esac
     if [ -e "\$arg" ]; then
+      operand=1
       # An existing path is a path, whatever characters it holds. Node globs
       # its own argv, where a literal \`[\` is a bracket expression that cannot
       # match itself — so the file matches nothing, node drops it, and mixed
@@ -951,7 +962,7 @@ for arg do
         # does not report what it ran and this runner cannot expand the glob
         # to check. That is this guard's honest ceiling, not a gap in it.
         # An *existing* path is not part of it: it never reaches here.
-        *[*?[]*) ;;
+        *[*?[]*) operand=1 ;;
         # [ -e ] above cannot tell "not there" from "could not look": stat()
         # answers the same false whether \$arg is genuinely absent or a
         # directory earlier in its path lacks the search bit needed to
