@@ -56,6 +56,9 @@ const git = (cwd, ...args) =>
 // Absolute path to the real git, for the one test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+// Absolute path to the real sed, for the two cases that shadow `sed` on PATH.
+const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
   git(w, "commit", "-q", "--allow-empty", "-m", msg);
@@ -808,4 +811,108 @@ test("a missing json.sh is exit 2, never the exit 1 that means `not proved`", (t
     "a missing library is `the question could not be answered`. Exit 1 would report a genuinely good merge as unproved and the bot would refuse it.");
   assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming a gate that never ran");
   assert.equal(r.stdout, "", "no payload: nothing was proved either way");
+});
+
+// --- #896: that guard's FATALITY, which neither case above reaches. Both of
+// them assert what a WORKING escaper produces, so nothing here runs the
+// `|| die` covering the escaper itself failing — measured, downgrading it to a
+// message-preserving warning left this whole file green.
+//
+// The downgrade does not emit a malformed payload. `second_j`, `first_j` and
+// `path_j` are assigned by one `&&` chain, so the first `jstr` that fails
+// short-circuits the rest and leaves those names unset; with the guard advisory
+// the payload `printf` reads one and `set -u` aborts the shell instead.
+//
+// Exit 1 out of THIS script is a verdict — "the proof is a no", the answer the
+// merge bot reads as a reason to refuse. The fixture below is a merge that
+// genuinely proves TRUE, every gate already answered `true` on stderr before
+// the escaping runs, so under a bash-family `sh` the downgrade is a false
+// DISPROOF: a good merge refused over a `sed` that was not on PATH.
+//
+// Which abort it is, though, is the shell's to choose and not this script's,
+// and dash's lands on 2 — the very status a firing guard returns. This file
+// spawns a bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
+// `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
+// therefore pins this guard on a developer's Mac and waves the mutant through
+// on the runner that gates the merge, and a wording assertion pins whichever
+// shell uses that wording. `first_j` is what discriminates instead — both
+// shells name it, and it reaches stderr only from that nounset abort: no
+// healthy run, no genuine `proved=false` and no firing of this guard puts it
+// there.
+//
+// `jstr` escapes through a `sed`/`tr` pipeline and this script calls `sed`
+// nowhere else, so shadowing `sed` breaks the escaper and nothing ahead of it.
+// The `proved=` trace is echoed only once every gate has answered, so it proves
+// the run cleared them all, and the shim's own line proves the escaper is what
+// failed; between them no other failure can produce this signature. That trace
+// is pinned verbatim by "a healthy run stays quiet", so it cannot be reworded
+// out from under this assertion unseen, and no assertion here names a `die`
+// message — rewording any of them, this guard's own included, leaves the pin
+// standing.
+
+/** A dir holding a `sed` shim with the given body, prepended to PATH. */
+function sedShim(t, body) {
+  const bin = mkdtempSync(join(tmpdir(), "prove-merge-sed-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return `${bin}:${ENV.PATH ?? process.env.PATH}`;
+}
+
+/** The fixture both cases below share: a merge that really does prove true. */
+function provenMerge(t) {
+  const w = repo(t);
+  commit(w, "main moves on before the branch is cut");
+  git(w, "push", "-q", "origin", "main");
+  const mainTip = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const head = commit(w, "feature work");
+  const merge = mergeNoFf(w, head, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+  return { w, head, merge, mainTip };
+}
+
+test("an escaper that cannot run is exit 2, never the exit 1 that means `not proved`", (t) => {
+  const { w, head, merge } = provenMerge(t);
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, PATH: sedShim(t, 'echo "sed: outage" >&2\nexit 1') },
+    encoding: "utf8",
+  });
+
+  // Whether this fixture measured the guard at all is settled before its
+  // verdict is read: an assertion that fails masks every one after it, and
+  // "the shim broke something else" and "the guard is not fatal" are not
+  // interchangeable diagnoses.
+  assert.match(r.stderr, /sed: outage/, "the escaper ran and failed, which is the failure under test");
+  assert.match(r.stderr, /proved=true \(path=no-rebase\)/,
+    "every gate answered — this is the guard after them, not an earlier one the shim happened to break");
+
+  assert.equal(r.status, 2,
+    "a proof that could not be escaped is `the question could not be answered`. Exit 1 would report a merge that passed every gate as unproved, and the merge bot refuses on that answer.");
+  assert.equal(r.stdout, "", "no proof may be printed for a payload that was never escaped");
+  assert.doesNotMatch(r.stderr, /first_j/,
+    "the guard must stop the script, not warn and leave the payload `printf` reading names the `&&` chain never assigned. The NAME, never the wording: bash says `first_j: unbound variable` at exit 1 and dash `first_j: parameter not set` at exit 2, so the exit-2 assertion above and any wording match each pass on the mutant under the shell CI actually runs.");
+});
+
+test("a shadowed `sed` that works still proves the merge — the guard refuses only a real outage", (t) => {
+  // The false-positive half, and the control the case above needs: shadowing
+  // `sed` on PATH is not by itself fatal to this script. Same fixture and the
+  // same shadowed name, a passthrough body — so the exit 2 up there is the
+  // escaper failing, not the shim's mere presence. Without this, that case
+  // could be measuring a PATH it broke wholesale and still read green.
+  const { w, head, merge, mainTip } = provenMerge(t);
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, PATH: sedShim(t, `exec "${REAL_SED}" "$@"`) },
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0, "the merge IS proved — a working escaper must not change the verdict");
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.proved, true);
+  assert.equal(json.secondParent, head, "and the escaped fields carry the real shas, not the empty slots a failed chain leaves");
+  assert.equal(json.firstParent, mainTip);
+  assert.equal(json.proofPath, "no-rebase");
 });

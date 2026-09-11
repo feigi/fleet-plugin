@@ -2026,6 +2026,97 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
 });
 
+// --- #896: that guard's FATALITY, which none of the three payload cases above
+// reaches. Each asserts what a WORKING escaper produces, so nothing here runs
+// the `|| die` covering the escaper itself failing — measured, downgrading it
+// to a message-preserving warning left this whole file green.
+//
+// The downgrade does not emit a malformed payload. `issue_branch`, `issue_wt`,
+// `issue_install` and `issue_runner` are assigned by one `&&` chain, so the
+// first `jstr` that fails short-circuits the rest and leaves those names unset;
+// with the guard advisory the receipt `printf` reads one and `set -u` aborts
+// the shell instead.
+//
+// This script is the exception among the four that carry this guard: it uses
+// exit 2 for EVERY refusal and defines no exit 1 at all, so the 1 a bash-family
+// `sh` aborts with is a code its caller has no reading for — not a refusal it
+// can retry, not a claim it can record. The receipt is the claim's only
+// machine-readable record, and it is the last thing this script emits.
+//
+// Which abort it is, though, is the shell's to choose and not this script's,
+// and dash's lands on 2 — the very status a firing guard returns, under the
+// same message a message-preserving downgrade still prints. This file spawns a
+// bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
+// `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
+// therefore pins this guard on a developer's Mac and waves the mutant through
+// on the runner that gates the merge, and a wording assertion pins nothing in
+// either shell. `issue_wt` is what discriminates instead — both shells name it,
+// and it reaches stderr only from that nounset abort.
+//
+// The shim is selected on CONTENT rather than argv. Only the slug reaches
+// `jstr` here, `$install` is this script's own `npm ci` literal, and a `sed`
+// that failed unconditionally could not say which stage it broke.
+
+const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+
+/** A dir holding a `sed` shim with the given body, prepended to PATH. */
+function sedShim(body) {
+  const bin = mkdtempSync(join(tmpdir(), "claim-sed-shim-"));
+  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return `${bin}:${process.env.PATH}`;
+}
+
+// `:a` appears in `jstr`'s rule list and in no other `sed` this script reaches.
+const FAILS_ON_SLUG = `case " $* " in
+  *:a*)
+    in=$(cat)
+    case "$in" in *esc-boom*) echo "sed: outage" >&2; exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${REAL_SED} "$@" ;;
+esac
+exec ${REAL_SED} "$@"`;
+
+test("an escaper that cannot run is exit 2 — this script has no other failure code", () => {
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "esc-boom", "fix"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: sedShim(FAILS_ON_SLUG) },
+  });
+
+  // Whether this fixture measured the guard at all is settled before its
+  // verdict is read: an assertion that fails masks every one after it, and
+  // "the shim broke something else" and "the guard is not fatal" are not
+  // interchangeable diagnoses.
+  assert.match(r.stderr, /sed: outage/, "the escaper ran and failed, which is the failure under test");
+  assert.match(r.stderr, /DRY RUN — nothing created/,
+    "the whole plan was settled — this is the guard after it, not an earlier one the shim happened to break");
+
+  assert.equal(r.status, 2,
+    "a receipt that could not be escaped is a refusal, and 2 is the only refusal this script defines. Exit 1 is a code its caller has no reading for.");
+  assert.equal(r.stdout, "", "no receipt: an unescaped payload is not a record of a claim");
+  assert.doesNotMatch(r.stderr, /issue_wt/,
+    "the guard must stop the script, not warn and leave the receipt `printf` reading names the `&&` chain never assigned. The NAME, never the wording: bash says `issue_wt: unbound variable` at exit 1 and dash `issue_wt: parameter not set` at exit 2, so the exit-2 assertion above passes on the mutant under the shell CI actually runs, and the guard's own message survives a downgrade that preserves it.");
+});
+
+test("a shadowed `sed` that works claims normally — the guard refuses only a real outage", () => {
+  // The false-positive half, and the control the case above needs: shadowing
+  // `sed` on PATH is not by itself fatal to this script. Same fixture and the
+  // same shadowed name, a passthrough body — so the exit 2 up there is the
+  // escaper failing, not the shim's mere presence. Without this, that case
+  // could be measuring a PATH it broke wholesale and still read green.
+  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+
+  const r = spawnSync("sh", [SCRIPT, "42", "esc-boom", "fix"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: sedShim(`exec ${REAL_SED} "$@"`) },
+  });
+
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(
+    r.stdout,
+    '{"issue":42,"branch":"fix/42-esc-boom","worktree":".worktrees/42-esc-boom","install":"npm ci","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-esc-boom/agent-test","applied":false}\n',
+    "byte-identical to the receipt this script emits with no shim in the way",
+  );
+});
+
 // #1141: the interpreter this script reads the manifest with is resolved by
 // NAME, so a `PATH` that cannot resolve it makes the shell emit `node:
 // command not found` — into the `2>&1` capture, where it was reported as

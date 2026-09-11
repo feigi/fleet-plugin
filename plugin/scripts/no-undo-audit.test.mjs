@@ -2345,6 +2345,33 @@ exec ${real} "$@"
   return `${bin}:${process.env.PATH}`;
 }
 
+// --- #896: the two `|| die`s the three cases below exist for, and the
+// fatality all three read off the exit CODE — which is the shell's choice and
+// not this script's.
+//
+// Downgrade either guard to a message-preserving warning and the two `sed`
+// cases emit no payload at all to catch it by. Each pair — `conflicts_json`
+// with `conflicts_rewritten_json`, `at_risk_json` with
+// `at_risk_rewritten_json` — is assigned by one `&&` chain, so the failing
+// `jarr` short-circuits the second and leaves that name unset; with the guard
+// advisory the payload `printf` reads it and `set -u` aborts instead. bash
+// exits 1 saying `<name>: unbound variable`, which the status assertions do
+// catch; dash exits 2 saying `<name>: parameter not set` — the very status a
+// firing guard returns, under the same message the downgrade still prints.
+// This file spawns a bare `sh` and `.github/workflows/ci.yml`'s `check` job
+// runs on `ubuntu-latest`, where that name is dash. Measured with the at-risk
+// guard downgraded: every case in this file stayed green under dash and the
+// guard was pinned on a Mac alone.
+//
+// The unset NAME is common to both shells and is printed by neither a healthy
+// run nor a firing guard, so that is what discriminates. The `tr` case needs
+// no such assertion and is given none: `jarr` succeeds there and
+// `jarr_rewritten`'s capture is still ASSIGNED, empty, so nothing is unset.
+// Downgraded, that run exits 0 with a payload that PARSES — one conflicting
+// path beside `"conflictsRewritten":[]`, a flag list silently emptied
+// (measured, both shells) — which its status and stdout assertions already
+// refuse.
+
 test("a jarr that cannot escape the conflicts is exit 2 with a cause, never the refusal that means dirty", (t) => {
   const c = bareConflictRepo(t, "boom-conflict.txt");
   const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "boom-conflict" }) });
@@ -2354,6 +2381,8 @@ test("a jarr that cannot escape the conflicts is exit 2 with a cause, never the 
   assert.match(r.stderr, /could not escape the conflicting paths/,
     "and it names which stage failed rather than exiting silently");
   assert.equal(r.stdout, "", "no payload: an unescaped conflicts list is not an answer");
+  assert.doesNotMatch(r.stderr, /conflicts_rewritten_json/,
+    "the guard must stop the script, not warn and leave the payload `printf` reading a name the `&&` chain never assigned. The NAME, because bash's wording and status and dash's differ and only the name is common to both.");
 });
 
 test("a jarr that cannot escape the at-risk commits is exit 2 with its own cause", (t) => {
@@ -2374,6 +2403,8 @@ test("a jarr that cannot escape the at-risk commits is exit 2 with its own cause
   assert.match(r.stderr, /could not escape the at-risk commits/,
     "and the cause names the at-risk list, not the conflicts one");
   assert.equal(r.stdout, "", "no payload: a run that cannot say what a resolution would eat has not answered");
+  assert.doesNotMatch(r.stderr, /at_risk_rewritten_json/,
+    "and the guard is fatal, not advisory — the NAME again, for the reason the conflicts case states: the status a downgrade produces here is 2 under the shell CI runs.");
 });
 
 test("a jarr_rewritten that cannot answer is exit 2 too — the `&&` chain covers both operands", (t) => {
@@ -2384,6 +2415,24 @@ test("a jarr_rewritten that cannot answer is exit 2 too — the `&&` chain cover
     "`conflictsRewritten` is what tells the runbook a path is not safe to hand to `git diff` — a run that cannot compute it has not answered");
   assert.match(r.stderr, /could not escape the conflicting paths/);
   assert.equal(r.stdout, "", "no payload: half the pair is not a receipt");
+});
+
+test("a shimmed escaper that works answers the audit in full — the guards refuse only a real outage", (t) => {
+  // The false-positive half, and the control the three cases above need:
+  // shadowing `sed` on PATH is not by itself fatal to this script. The same
+  // fixture and the same shadowed name as the first of them, a marker nothing
+  // in this run carries — so those exit 2s are the escaper failing, not the
+  // shim's mere presence. Without this they could be measuring a PATH they
+  // broke wholesale and still read green. The `tr` shim has its counterpart in
+  // the #431 cases below, which install that shape and get a payload back.
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "no value in this run carries this" }) });
+
+  assert.equal(r.status, 0, "the worktree is clean and every stage rendered — a shim on PATH is not itself a refusal");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["boom-conflict.txt"], "the array the first case could not render, rendered");
+  assert.deepEqual(r.json.conflictsRewritten, [false]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "and the at-risk array the second one could not");
 });
 
 // --- #431: the same broken escaper, one block further down, and the OPPOSITE
