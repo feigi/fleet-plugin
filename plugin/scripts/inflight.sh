@@ -555,13 +555,49 @@ if [ -e "$refsdir" ]; then
   [ -z "$bad" ] ||
     { add_unknown "local" "refs directory $bad could not be read — whether #$n has a local branch is unknown"; return 1; }
 fi
-if ! refs=$(git for-each-ref --format='%(refname:short)' refs/heads); then
+# %(refname) and a strip, never %(refname:short): the short form is
+# ambiguity-aware, and where a TAG shares a branch's name it stops shortening
+# and emits `heads/<name>` instead (measured, git 2.50.1 Apple Git-155). That
+# string names no ref — `git branch -D heads/<name>` answers "branch not
+# found" — so the `local branches:` line and the localBranch evidence below
+# both hand an operator a name they cannot paste into a git command.
+# %(refname) is always refs/heads/<name>, so the strip yields the bare name for
+# every branch, ambiguous or not. #634 fixed the same spelling in reap.sh.
+#
+# Here the enumeration fix stands ALONE, and that is a finding about THIS
+# script, not a conclusion carried over from that one. What made the fix unsafe
+# by itself in reap.sh is that it goes on to consume the enumerated name AS A
+# REV (`git cherry "$base" "$b"`), and git resolves an ambiguous rev by
+# preferring refs/tags/ over refs/heads/ — so restoring the bare name made the
+# merge probe answer about the TAG and authorized -D on an unmerged branch
+# (measured, PR #914, which qualifies that one site `refs/heads/$b` for exactly
+# this reason). Every site consuming this value here was enumerated and
+# classified instead:
+#
+#   the awk below                      string match, on the name as reported
+#   `[ -n "$local_b" ]`, twice         emptiness only
+#   `[ -z "$local_b" ]`                emptiness only
+#   the `local branches:` echo         print
+#   `add_evidence localBranch`         print, through jstr
+#
+# Not one hands the value to git, and this script's other git calls — `rev-parse
+# --git-dir`, `rev-parse --git-common-dir`, `ls-remote --heads origin`,
+# `worktree list --porcelain -z` — take no ref argument built from it. Nor is
+# there a `refs/heads/$b` key to rebuild the way reap.sh's worktree lookup has:
+# probe 3's worktree half matches the LISTING's own paths by basename, never a
+# name from this enumeration. `$local_b` is a comma-joined list besides, so it
+# could not be a rev even by accident. Nothing to qualify. #915
+if ! refs=$(git for-each-ref --format='%(refname)' refs/heads); then
   add_unknown "local" "git for-each-ref failed, so whether #$n has a local branch is unknown"
   return 1
 fi
-# One awk, for the reason probe 2's filter is one: a short refname is the whole
-# line, so the match is on $0.
+# One awk, for the reason probe 2's filter is one: a refname is the whole line,
+# so the strip and the match are both on $0. Stripping BEFORE the match keeps
+# the matched string and the reported string the same one — the two orders
+# select identically anyway, since the prefix carries no digit for an all-digit
+# `n` to match and supplies a `/` exactly where `^` would otherwise apply.
 local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
+  { sub(/^refs\/heads\//, "") }
   $0 ~ "(^|[/-])" n "([-/]|$)" { out = out sep $0; sep = "," }
   END { printf "%s", out }') ||
   { add_unknown "local" "could not filter the local branches for #$n"; return 1; }
