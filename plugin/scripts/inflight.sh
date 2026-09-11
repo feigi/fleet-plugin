@@ -587,8 +587,8 @@ fi
 # than a second invented convention — but the two copies have since diverged
 # and this comment no longer claims they match. Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
-# direction split — were ported to that copy by #395; the recount below is the
-# one still open against it (#694). That copy's skip reading only `ls`'s output,
+# direction split — were ported to that copy by #395; the recount was the last
+# of the four, ported by #694. That copy's skip reading only `ls`'s output,
 # not its exit STATUS, was the last divergence — this change closes it (#697):
 # both copies' skip now reads the exit status.
 #
