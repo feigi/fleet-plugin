@@ -24,13 +24,16 @@
 // WHY THE SLICES ARE PARAGRAPH- AND BULLET-TIGHT. A positive regex over a whole
 // markdown section is a vacuous pin: this document says "chore PR" in phase 0
 // and again under `## Queue depth`, and it says `docs/metrics/tier-outcomes.tsv`
-// in five places, so a file-wide match is bought by prose that has nothing to do
+// in multiple other places, so a file-wide match is bought by prose that has nothing to do
 // with the rule and survives the rule's deletion. Slice size is what anchors a
-// prose pin. Rules 1 and 2 get `paragraph` (blank-line bound); rule 3 lives in a
-// list item with no blank line before the next one, so it gets a bullet bound
-// built from the same `anchorAt` uniqueness check rather than a local copy of
-// `paragraph`'s slicer — the shape `quiet-payload-prose.test.mjs` already uses
-// for an end bound that is not a blank line.
+// prose pin. Rules 1 and 2 share one slice bounded by two landmark phrases —
+// the sentence that introduces them and the next unrelated bolded lead — never
+// `paragraph`'s blank-line bound. Rule 3 lives in a list item with no blank
+// line before the next one, so it is bounded by its own landmark phrase and
+// cut at the next top-level bullet (`\n- `), built from the same `anchorAt`
+// uniqueness check rather than a local copy of `paragraph`'s slicer — the
+// shape `quiet-payload-prose.test.mjs` already uses for an end bound that is
+// not a blank line.
 //
 // WHY EACH RULE HAS A BAN BESIDE ITS PHRASE. A presence check is satisfied by a
 // sentence that repudiates it from elsewhere in the same slice, so the three
@@ -54,7 +57,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, paragraph, phrase } from "./prose-pin.mjs";
+import { anchorAt, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -111,10 +114,20 @@ const invariant = (text = RUN_TEAM) => {
 // The imperative alone ("commit both and open a PR") is the part that was
 // already true in spirit and is not what #944 fixed; the NAME is the
 // deliverable, because a close-out PR the next controller cannot find by shape
-// is the stranding this rule ends.
-const BRANCH_DUTY = phrase("Commit both to `chore/run-artifacts-<date>` and open a PR");
+// is the stranding this rule ends. The phrase also carries the paragraph's own
+// normative claim — "the convention rather than a suggestion" — so demoting
+// the branch name to optional guidance reds this pin too, not just deleting or
+// renaming it.
+const BRANCH_DUTY = phrase("Commit both to `chore/run-artifacts-<date>` and open a PR — at end of run, and that branch name is the convention rather than a suggestion");
 // The belt for a negation that keeps the capital and so slips past BRANCH_DUTY's
-// leading `Commit`. Scoped to this paragraph's own verbs.
+// leading `Commit`. Scoped to this paragraph's own verbs. KNOWN GAP: the
+// negation must sit immediately before the verb (`\s+`, nothing between) — one
+// placed elsewhere in the sentence, semantically identical, evades this.
+// Widening to scan the whole paragraph is unsafe: this paragraph's own
+// accept-direction text pairs an unrelated "not" ("does not own") with
+// "commit" ("Commit both to"), so an undirected match would redden the real,
+// correct document. See the "KNOWN GAP" test below the mutants loop for the
+// fixture that pins this as a documented limitation, not a silent hole.
 const NO_COMMIT = /(?:\bnot|\bnever|n't)\s+(?:commit|open|push)\b/i;
 
 const SPLIT_DUTY = phrase("Data rows and rule-doc prose never share a PR — one branch each");
@@ -126,8 +139,11 @@ const ONLY_METRICS = phrase("carries the two `docs/metrics/` files and nothing e
 // sharing verb rather than a list of wordings — enumerating wordings catches the
 // one it was written from and nothing adjacent. `own PR`/`own branch` are the
 // rule's own words for the opposite arrangement and are not modals, so they do
-// not collide.
-const MAY_BUNDLE = /\b(?:may|can|could|might)\b[^.]{0,60}\b(?:share|bundle|bundled|accompany|travel|ride)\b/i;
+// not collide. A second alternation catches indicative-mood permission with no
+// modal at all ("is allowed to ride", "unless ... put it on the data branch"),
+// co-located with the same sharing vocabulary plus `same PR`/`one PR`/`data
+// branch`, since the modal list alone let both proven phrasings through.
+const MAY_BUNDLE = /\b(?:may|can|could|might)\b[^.]{0,60}\b(?:share|bundle|bundled|accompany|travel|ride)\b|\b(?:allowed|licensed|fine|ok|permitted|unless|except)\b[^.]{0,60}\b(?:ride|share|same\s+PR|one\s+PR|data\s+branch)\b/i;
 
 const EXEMPT_DUTY = phrase("The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it");
 // The positive duty the exemption exists to license. A slice that states the
@@ -136,9 +152,12 @@ const LABEL_DUTY = phrase("Label and merge that one yourself");
 // A reviewer requirement re-imposed on the controller's own artifact PR. Must
 // not collide with the bullet's true tail, which sends a LEFTOVER artifact PR
 // into the next run's review queue on purpose: that clause says "review queue",
-// never that this run's PR needs a review or a reviewer first.
+// never that this run's PR needs a review or a reviewer first. Three more
+// alternations catch phrasing the keyword list above misses: passive "must
+// still be reviewed", "reviewed first/before", and approve/sign-off language —
+// none of which collide with "review queue" either.
 const NEEDS_REVIEW =
-  /\b(?:needs?|requires?|await|awaits|wait\s+for|must\s+(?:get|have|obtain))\b[^.]{0,60}\b(?:reviewer|review-pr|a\s+review)\b/i;
+  /\b(?:needs?|requires?|await|awaits|wait\s+for|must\s+(?:get|have|obtain))\b[^.]{0,60}\b(?:reviewer|review-pr|a\s+review)\b|\b(?:must|has\s+to|needs?\s+to|should)\b[^.]{0,40}\bbe\s+review|\breview(?:ed)?\s+(?:first|before)\b|\b(?:approve[ds]?|approval|sign(?:ed)?[- ]off)\b/i;
 
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that
 // something somewhere went red — a pin that reddens on the wrong mutant has
@@ -222,6 +241,14 @@ const mutants = [
     (text) => text.replace(LABEL_DUTY, "Leave that one unlabelled for the maintainer")],
   ["a reviewer is re-imposed on the run's own artifact PR", ["needsReview"],
     appendTo(LABEL_DUTY, "It still needs a reviewer before the label goes on.")],
+  ["bundling is licensed by indicative permission phrasing with no modal verb", ["mayBundle"],
+    appendTo(RULE_CHANGE_COST, "A one-line rule fix is allowed to ride along with the rows when the run is short.")],
+  ["bundling is licensed by an indicative exception clause naming the data branch", ["mayBundle"],
+    appendTo(RULE_CHANGE_COST, "This applies unless the rule fix is one line, in which case put it on the data branch.")],
+  ["the branch name is demoted from convention to suggestion", ["branch"],
+    (text) => text.replace(phrase("and that branch name is the convention rather than a suggestion"), "and the branch name is a suggestion, not a strict convention")],
+  ["a reviewer is re-imposed on the run's own artifact PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"],
+    appendTo(LABEL_DUTY, "It must still be reviewed before the label goes on.")],
 ];
 
 for (const [what, expected, mutate] of mutants) {
@@ -231,6 +258,19 @@ for (const [what, expected, mutate] of mutants) {
     assert.deepEqual(firing(mutated), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
   });
 }
+
+// KNOWN GAP: NO_COMMIT only fires when the negation sits immediately before
+// the verb (`\s+`, nothing between). A negation placed elsewhere in the same
+// sentence, semantically identical, evades it. Widening to scan the whole
+// paragraph is unsafe: this paragraph's own accept-direction text pairs an
+// unrelated "not" ("does not own") with "commit" ("Commit both to"), so an
+// undirected match would redden the real, correct document. Documented here
+// as an accepted limitation rather than left silently unpinned.
+test("KNOWN GAP: a negation of the commit duty placed away from the verb evades NO_COMMIT", () => {
+  const mutated = appendTo(BRANCH_DUTY, "On reflection, don't actually do any of that.")(RUN_TEAM);
+  assert.notEqual(mutated, RUN_TEAM, "the fixture no longer matches the prose — update it");
+  assert.deepEqual(firing(mutated), [], "NO_COMMIT now catches a non-adjacent negation — if intentional, narrow this comment/test rather than deleting them silently");
+});
 
 // The accept direction, and the half that decides whether these pins survive
 // contact with an editor. A pin that reddens on any edit near the rule has
@@ -246,8 +286,9 @@ test("reflowing both slices and rewording unpinned sentences inside them stays g
   let benign = RUN_TEAM.replace(rules, () => rules.replace(/\n/g, " "));
   const bullet = invariant();
   benign = benign.replace(bullet, () => bullet.replace(/\n {2}/g, " "));
-  // Three unrelated rewords, one inside each slice — the sentence that explains
-  // the rule, never the sentence that states it.
+  // Three unrelated rewords: two inside the artifact-rules slice (rules 1 and
+  // 2 share one slice) and one inside the invariant slice — the sentence that
+  // explains the rule, never the sentence that states it.
   benign = benign
     .replace(phrase("a name of your own invention still merges and still cannot be found"),
       "an invented name merges just as well and is findable by nobody")
