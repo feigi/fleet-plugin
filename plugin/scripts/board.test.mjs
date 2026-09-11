@@ -764,12 +764,14 @@ test("a torn line and an unreadable read on the SAME transcript each get their o
 // Only a MIDDLE tear leaves a live entry for the clear to drop, which re-bills
 // the turn on its next surviving line (measured: 2500, not 1500).
 //
-// Measured across the 636 tests that reach foldClaudeTranscript: the bare
-// clear also reds member-outcomes' "a torn final line is skipped, not fatal",
-// but only through `turns: turnById.size` — a COUNT, on a torn-LAST-line
-// fixture, which says nothing about spend. Keep that count honest (a
-// `turnCount++` at turn creation, the repair anyone makes when it reds) and
-// this is the only test in all 636 still standing.
+// Measured across the tests that exercise foldClaudeTranscript across
+// board.test.mjs, member-outcomes.test.mjs, member-record.test.mjs and
+// tier-check.test.mjs: the bare clear also reds member-outcomes' "a torn
+// final line is skipped, not fatal", but only through `turns: turnById.size`
+// — a COUNT, on a torn-LAST-line fixture, which says nothing about spend.
+// Keep that count honest (a `turnCount++` at turn creation, the repair
+// anyone makes when it reds) and this is the only one of those tests still
+// standing.
 //
 // Deliberately does NOT assert `output`: a tear is not free, and the torn
 // line's `tool_use` blocks and its `output_tokens` snapshot are exactly what it
