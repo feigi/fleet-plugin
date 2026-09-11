@@ -289,20 +289,30 @@ gp_why() {
 # exit status entirely, in every shell measured here (bash, dash, macOS
 # /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,
 # runs zero iterations, and never reaches `set -e` — regardless of how the
-# pipeline failed. awk is this pipeline's last stage, and this file's header
-# already documents an awk that cannot finish a scan (the #614/#790 multibyte
-# trigger). Left unguarded, that failure read as a clean sweep that never
-# looked: no branches matched because none was ever seen, indistinguishable
-# from none being reapable.
+# pipeline failed. This script has `set -eu` but no `pipefail`, so a plain
+# `git … | awk …` pipeline reports only its LAST stage's status: a
+# `git for-each-ref` that dies still leaves awk scanning empty input, and
+# awk finishes that scan at rc 0 — the identical exit this loop sees on a
+# genuinely branchless repo. awk is not immune either, and this file's
+# header already documents an awk that cannot finish a scan (the #614/#790
+# multibyte trigger). Either failure, unguarded, reads as a clean sweep
+# that never looked: no branches matched because none was ever seen,
+# indistinguishable from none being reapable.
 #
-# Captured into a variable and guarded, rather than looped over directly, so
-# the failure gets a voice. `keep ""`, not `die`: mirrors the branchless
-# sweep's own enumeration guard below (`if ! wt_listing`), for the same
-# reason — dying here would also abort the second sweep and the final
-# `worktree prune`, neither of which this enumeration failing has anything to
-# do with, over a failure this ticket rates mild. #789
-if ! gone_branches=$(git for-each-ref --format='%(refname) %(upstream:track)' refs/heads |
-                      awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
+# Split into git_probe's own two-capture shape — already this file's answer
+# to the identical git-then-awk pipeline the ignored-files scan below runs
+# (`git_probe`, then a separate `awk` over `$gp_out`) — so each stage's
+# status is read on its own rather than folded into the pipeline's last
+# exit code. Captured into a variable and guarded, rather than looped over
+# directly, so the failure gets a voice. `keep ""`, not `die`: mirrors the
+# branchless sweep's own enumeration guard below (`if ! wt_listing`), for
+# the same reason — dying here would also abort the second sweep and the
+# final `worktree prune`, neither of which this enumeration failing has
+# anything to do with, over a failure this ticket rates mild. #789
+if ! git_probe for-each-ref --format='%(refname) %(upstream:track)' refs/heads; then
+  keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
+  gone_branches=""
+elif ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
   keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
   gone_branches=""
 fi

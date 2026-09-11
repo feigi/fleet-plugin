@@ -45,7 +45,7 @@ const git = (cwd, ...args) =>
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
 // Absolute paths to the real `awk` and `paste`, for the sites this file's own
-// three #789 fixtures shadow on PATH — the same reason REAL_GIT exists above.
+// four #789 fixtures shadow on PATH — the same reason REAL_GIT exists above.
 const REAL_AWK = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 const REAL_PASTE = execFileSync("sh", ["-c", "command -v paste"], { encoding: "utf8" }).trim();
 
@@ -194,37 +194,23 @@ const SHIM_FIRED = `printf '%s\\n' "$*" >> "$0.fired"`;
 /**
  * Asserts the fault `failOnlyShim` injects actually reached the script under
  * test — and, with `expect`, that it reached THIS call's own argv rather than
- * a same-named git call elsewhere in the run.
+ * a same-named git call elsewhere in the run. Delegates to
+ * `assertToolShimFired`, fixed to the `git` tool.
  */
 function assertShimFired(bin, why, expect) {
-  const path = join(bin, "git.fired");
-  assert.equal(existsSync(path), true, why);
-  if (expect) assert.match(readFileSync(path, "utf8"), expect, why);
-}
-
-/** A PATH `git` that fails only the subcommand `match` names; everything else is real. */
-function failOnlyShim(t, match, stderr, code = 1) {
-  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\n` +
-      `if ${match}; then\n` +
-      `  ${SHIM_FIRED}\n` +
-      // Shell-quoted, not `JSON.stringify`: that escapes for JSON, but the
-      // splice lands in shell, where a `$` in a fixture line would expand
-      // instead of reaching git's stderr as data.
-      stderr.map((l) => `  printf '%s\\n' '${l.replace(/'/g, `'\\''`)}' >&2\n`).join("") +
-      `  exit ${code}\n` +
-      `fi\n` +
-      `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
-  );
-  return bin;
+  return assertToolShimFired(bin, "git", why, expect);
 }
 
 /**
- * A PATH `<tool>` (awk or paste, for #789's three fault-injection fixtures)
+ * A PATH `git` that fails only the subcommand `match` names; everything else
+ * is real. A `toolFailShim` fixed to the `git` tool and `REAL_GIT`.
+ */
+function failOnlyShim(t, match, stderr, code = 1) {
+  return toolFailShim(t, "git", REAL_GIT, match, stderr, code);
+}
+
+/**
+ * A PATH `<tool>` (awk or paste, for #789's four fault-injection fixtures)
  * that fails only when `match` — a shell test against its own argv — holds;
  * every other invocation execs the real one. `realTool` must be the absolute
  * path `command -v <tool>` resolved, so the fall-through never re-enters this
@@ -238,6 +224,9 @@ function toolFailShim(t, tool, realTool, match, stderr, code = 1) {
     `#!/bin/sh\n` +
       `if ${match}; then\n` +
       `  ${SHIM_FIRED}\n` +
+      // Shell-quoted, not `JSON.stringify`: that escapes for JSON, but the
+      // splice lands in shell, where a `$` in a fixture line would expand
+      // instead of reaching git's stderr as data.
       stderr.map((l) => `  printf '%s\\n' '${l.replace(/'/g, `'\\''`)}' >&2\n`).join("") +
       `  exit ${code}\n` +
       `fi\n` +
@@ -247,9 +236,15 @@ function toolFailShim(t, tool, realTool, match, stderr, code = 1) {
   return bin;
 }
 
-/** Asserts the fault `toolFailShim(t, tool, …)` injects actually reached the script under test. */
-function assertToolShimFired(bin, tool, why) {
-  assert.equal(existsSync(join(bin, `${tool}.fired`)), true, why);
+/**
+ * Asserts the fault `toolFailShim(t, tool, …)` injects actually reached the
+ * script under test, and — with `expect` — that it reached THIS call's own
+ * argv rather than a same-named call elsewhere in the run.
+ */
+function assertToolShimFired(bin, tool, why, expect) {
+  const path = join(bin, `${tool}.fired`);
+  assert.equal(existsSync(path), true, why);
+  if (expect) assert.match(readFileSync(path, "utf8"), expect, why);
 }
 
 /**
@@ -2551,6 +2546,37 @@ test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (
   assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
   assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
   assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#1413)", (t) => {
+  // The awk-only guard above catches awk's own failure, but the pipeline has
+  // a first stage too: `git for-each-ref | awk …`, under `set -eu` with no
+  // `pipefail`. Before this fix only awk's exit status reached the `if !`,
+  // so a `git for-each-ref` that died still left awk scanning EMPTY input —
+  // and awk finishes that scan at rc 0, the identical exit a genuinely
+  // branchless repo produces. The run reported `{"reaped":[],"kept":[]}`,
+  // silently indistinguishable from a clean sweep. Shimming `git` itself,
+  // not `awk`, is what proves the git-side status is now read on its own.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = for-each-ref ]`,
+    ["fatal: for-each-ref: unable to read refs (simulated)"],
+    129,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable enumeration is a finding, not a script failure");
+  assert.deepEqual(json.reaped, [], "nothing can be reaped from a sweep whose git stage never ran");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "no branch was ever named, so none can be blamed");
+  assert.match(json.kept[0].reason, /^could not enumerate \[gone\] branches/);
+  assert.match(json.kept[0].reason, /for-each-ref: unable to read refs/, "git's own diagnosis must reach the reason, not just a label");
+  assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
+  assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
+  assertShimFired(bin, "the git shim must actually have fired for this fixture", /^for-each-ref\b/);
 });
 
 test("a worktree lookup whose awk stage fails is kept, never treated as having no worktree (#789)", (t) => {
