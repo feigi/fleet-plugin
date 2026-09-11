@@ -1657,10 +1657,7 @@ test("a ref that is not valid UTF-8 leaves an answerable ticket answerable", (t)
 // only a genuine stall proves that. It carries its own spawnSync timeout as a
 // backstop so a regression here reddens loudly instead of hanging the suite.
 test("probe 2: a transport that connects and then never answers still terminates, exit 2", async (t) => {
-  const server = createServer(); // accept, hold open, send nothing back
-  t.after(() => new Promise((res) => server.close(res)));
-  await new Promise((res) => server.listen(0, "127.0.0.1", res));
-  const port = server.address().port;
+  const port = await silentListener(t);
 
   const { repo, env } = fixture(t, 8, { origin: "none" });
   git(repo, env, "remote", "add", "origin", `ssh://git@127.0.0.1:${port}/x/y.git`);
