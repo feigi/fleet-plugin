@@ -503,10 +503,53 @@ test("a receipt that cannot be written still leaves the die reason and exit 2 (#
 // exists — and the receipt printf aborted on `issue: unbound variable`, losing
 // the very diagnostic the die is there to print. Any non-empty value does it:
 // `[ -n ]` tests non-emptiness, not JSON validity, so `[]` is as fatal as
-// `[x]`. The pin is on the PROSE and not on the exit code, because the code the
-// defect produced is platform-asymmetric — bash-as-/bin/sh gave 1, dash gave 2 —
-// and a code pin measured on one of them says nothing about CI running the
-// other.
+// `[x]`.
+//
+// Two things are deliberately NOT pinned here, and the reasons differ:
+//
+// The EXIT CODE, because the code this defect produced is platform-asymmetric —
+// bash-as-/bin/sh gives 1, dash gives 2, zsh gives 1 — so a code pin measured on
+// one of them says nothing about CI running another. (The sibling
+// write-failure test above does pin its code, correctly: there the code IS the
+// defect. The two choices differ because the failures differ; do not unify them.)
+//
+// The WORDING, because it is not a discriminator at all (#991). This assertion
+// used to be `/unbound variable|parameter not set/` — an alternation of the two
+// shells the fix was measured against, which a third shell wording a nounset
+// abort a third way slips silently. What every shell does agree on is the NAME
+// of the variable it refused to expand, so the pin keys on `issue` and the
+// alternation is gone. Measured on this file's own fixture, guard removed:
+//
+//   /bin/sh   bash 3.2.57  exit 1  `…/release-ticket.sh: line 156: issue: unbound variable`
+//   /bin/dash              exit 2  `…/release-ticket.sh: 156: issue: parameter not set`
+//   /bin/zsh  zsh 5.9      exit 1  `die:3: issue: parameter not set`
+//   /bin/ksh  ksh 93u+     exit 1  `…/release-ticket.sh: line 156: issue: parameter not set`
+//   bash 5.3.15 (brew)     exit 1  `…/release-ticket.sh: line 156: issue: unbound variable`
+//
+// Five shells, three position formats, two wordings, two exit codes — and one
+// thing in common, the name. zsh makes the point twice over: it words the abort
+// dash's way while exiting bash's, and its position prefix is the FUNCTION name
+// rather than a script path and line, so a pin anchored on `line \d+` or on the
+// script's own name would have missed it too. Note also that the wording does
+// not track the shell family — ksh 93u+ says `parameter not set` where bash
+// says `unbound variable` — which is precisely why enumerating wordings is a
+// treadmill and the name is the only invariant.
+//
+// Anchored on the abort's SHAPE rather than matched as a bare substring,
+// because unlike the `branch_rw`/`sha_j` siblings — machine-made names that
+// appear nowhere else — `issue` is a word this script says on healthy paths:
+// the usage diagnostic the positive assertion above requires literally reads
+// `<issue>`, so a bare `/issue/` would red every run forever. Shells report a
+// nounset abort as `<position>: <name>: <message>`, so the pin demands `issue`
+// as its own colon-delimited field followed by a message — `(?:^|:)` tolerates
+// zsh's prefix and a prefix-less abort alike, and the trailing `\s+\S` requires
+// the message to exist. Verified non-firing against the usage line (with and
+// without its angle brackets), `count_linked`'s `for #$issue: $wt_err` die, the
+// `no JSON receipt for #%s` arm, and a `{"issue":9,…}` receipt leaked to stderr
+// by bash 3.2 — and firing on all five aborts above plus an invented sixth
+// wording (`issue: is unset and no default given`) that the old alternation let
+// through.
+const NOUNSET_ABORT_ON_ISSUE = /(?:^|:)\s*issue:\s+\S/m;
 for (const inherited of ["[]", "[x]", '"x",']) {
   test(`an inherited blockers=${inherited} does not silence an early die (#387)`, () => {
     const res = spawnSync("sh", [SCRIPT], {
@@ -514,7 +557,13 @@ for (const inherited of ["[]", "[x]", '"x",']) {
       encoding: "utf8",
     });
     assert.match(res.stderr, /release-ticket: usage: release-ticket\.sh/, "the usage diagnostic still prints");
-    assert.doesNotMatch(res.stderr, /unbound variable|parameter not set/, "and the die is not itself killed by set -u");
+    assert.doesNotMatch(
+      res.stderr,
+      NOUNSET_ABORT_ON_ISSUE,
+      // The NAME, never the wording: five shells word this abort two ways on two
+      // exit codes, and all five name `issue`. See the header above.
+      `and the die is not itself killed by set -u: ${JSON.stringify(res.stderr)}`,
+    );
     assert.equal(res.stdout, "", "no half-written receipt: this die has nothing accumulated to report");
   });
 }
