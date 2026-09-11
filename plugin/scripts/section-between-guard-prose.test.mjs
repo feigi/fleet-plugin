@@ -2,13 +2,14 @@
 // `between(text, from, to, what)`, duplicated byte-for-byte in
 // implementer-model-tier.test.mjs and review-path-default.test.mjs, and with
 // `RUN_TEAM` closed over instead of taken as an argument in
-// fleet-tick-prose.test.mjs and within-run-pair-prose.test.mjs. All four
-// survived #751's own extraction because every sweep of that PR searched for
-// the NAME `between` — this one searches for the SHAPE instead: `indexOf` ->
-// `assert.notEqual(_, -1)` -> `indexOf(_, at + from.length)` ->
-// `assert.notEqual(_, -1)` -> `return src.slice(at, end)`, the five
-// statements `between()`'s body is built from, independent of what the
-// function, its parameters, or its captured variables are called.
+// fleet-tick-prose.test.mjs, within-run-pair-prose.test.mjs, and
+// member-outcomes-prose.test.mjs. All five survived #751's own extraction
+// because every sweep of that PR searched for the NAME `between` — this one
+// searches for the SHAPE instead: `indexOf` -> `assert.notEqual(_, -1)` ->
+// `indexOf(_, at + from.length)` -> `assert.notEqual(_, -1)` -> `return
+// src.slice(at, end)`, the five statements `between()`'s body is built from,
+// independent of what the function, its parameters, or its captured
+// variables are called.
 //
 // NOT scoped to a reusable (parameterized) definition — an earlier revision
 // of this file was, on the theory that a closure over a module-level
@@ -77,24 +78,35 @@ const PROSE_PIN = "prose-pin.mjs";
 //   const END = SRC.indexOf(TO, AT + FROM.length);
 //   assert.notEqual(END, -1, ...);
 //   return SRC.slice(AT, END);
-// captured over both a `function name(...)` declaration and a `(...) => {`
-// arrow, with every identifier free to vary (matched by backreference, not
-// by name) and free to be either a parameter or a closed-over outer
-// constant — `between`, `section`, and any future reintroduction's own
-// choice of names and scoping all satisfy it identically. `const` and `let`
-// are both accepted for the two inner declarations for the same reason:
-// nothing about the shape depends on which keyword binds `at` and `end`.
+// captured over a `function name(...)` declaration, a `(...) => {` arrow
+// bound with `const`, `let`, or `var`, or a bare method-shorthand
+// `name(...) {` (the name position excludes the JS control-flow keywords —
+// `if`/`for`/`while`/`switch`/`catch`/`do`/`with`/`else` — so an ordinary
+// control-flow block is never mistaken for a twin), with every identifier
+// free to vary (matched by backreference, not by name) and free to be
+// either a parameter or a closed-over outer constant — `between`,
+// `section`, and any future reintroduction's own choice of names and
+// scoping all satisfy it identically. `const`, `let`, and `var` are all
+// accepted for the two inner declarations for the same reason: nothing
+// about the shape depends on which keyword binds `at` and `end`.
 // The exact offset (`AT + FROM.length`) and the bare slice return are what
 // the two near-misses above fail on, deliberately.
 //
 // Comments are stripped before matching (`strip-comments.mjs`, the same
 // helper candidates.test.mjs and the review-pr-*.test.mjs pins already
 // share): this repo's own style routinely puts a `//` line between two of
-// the five statements (cross-repo-citation-prose.test.mjs,
-// no-ci-gate-prose.test.mjs), and the `\s*` separators above do not span a
-// real comment's text — measured directly, an un-stripped scan misses a
-// reintroduced twin written that way.
-const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let)\s+\w+\s*=\s*\(([^)]*)\)\s*=>)\s*\{\s*(?:const|let)\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);\s*(?:const|let)\s+(\w+)\s*=\s*\4\.indexOf\((\w+),\s*\3\s*\+\s*\5\.length\);\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);\s*return\s+\4\.slice\(\3,\s*\6\);\s*\}/g;
+// the five statements (cross-repo-citation-prose.test.mjs), and the `\s*`
+// separators above do not span a real comment's text — measured directly,
+// an un-stripped scan misses a reintroduced twin written that way.
+//
+// SCOPE, and not reopened after this round: the shape above is matched
+// under function, const/let/var arrow, and method-shorthand declarations
+// and no others — generator functions, computed method names, decorators,
+// and any spelling past those are deliberately unattempted, because a
+// regex-based structural guard cannot enumerate every JS declaration syntax
+// and only needs to outlast the spellings a reintroduction has actually
+// taken, not every one it could someday take.
+const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*=>|\b(?!function\b|if\b|for\b|while\b|switch\b|catch\b|do\b|with\b|else\b)\w+\s*\((?:[^)]*)\))\s*\{\s*(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);\s*(?:const|let|var)\s+(\w+)\s*=\s*\4\.indexOf\((\w+),\s*\3\s*\+\s*\5\.length\);\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);\s*return\s+\4\.slice\(\3,\s*\6\);\s*\}/g;
 
 /** Every `between()`-shaped definition in `text`, wherever it lives. */
 function twinDefinitions(text) {
@@ -123,9 +135,10 @@ function section(source, startAnchor, endAnchor, label) {
 }`;
   assert.deepEqual(twinDefinitions(parameterized), [{ src: "source", from: "startAnchor", to: "endAnchor" }]);
 
-  // Positive control, closure form (fleet-tick-prose.test.mjs and
-  // within-run-pair-prose.test.mjs's own removed shape) — the source text is
-  // a free variable, not a parameter, and must fire exactly as readily.
+  // Positive control, closure form (fleet-tick-prose.test.mjs,
+  // within-run-pair-prose.test.mjs, and member-outcomes-prose.test.mjs's own
+  // removed shape) — the source text is a free variable, not a parameter,
+  // and must fire exactly as readily.
   const closure = `
 const RUN_TEAM = "…";
 function section(startAnchor, endAnchor, label) {
@@ -151,9 +164,9 @@ const clone = (text, from, to, what) => {
 
   // A `//` comment between two of the five statements, and `let` instead of
   // `const` for both inner declarations — this repo's own style
-  // (cross-repo-citation-prose.test.mjs, no-ci-gate-prose.test.mjs) and a
-  // measured miss: an earlier revision of TWIN_SHAPE matched none of this
-  // against the unstripped source.
+  // (cross-repo-citation-prose.test.mjs) and a measured miss: an earlier
+  // revision of TWIN_SHAPE matched none of this against the unstripped
+  // source.
   const commented = `
 function twin(text, from, to, what) {
   let at = text.indexOf(from);
@@ -164,6 +177,37 @@ function twin(text, from, to, what) {
   return text.slice(at, end);
 }`;
   assert.deepEqual(twinDefinitions(commented), [{ src: "text", from: "from", to: "to" }]);
+
+  // Positive control, method-shorthand form — no real removed twin took
+  // this shape, but a bare `name(...) { ... }` inside an object literal or
+  // class must fire exactly as readily as a `function` declaration or an
+  // arrow, and must not be confused with an ordinary control-flow block
+  // (see the "does not fire" test below for that half of the guard).
+  const methodShorthand = `
+const helper = {
+  grab(text, from, to, what) {
+    const at = text.indexOf(from);
+    assert.notEqual(at, -1, what);
+    const end = text.indexOf(to, at + from.length);
+    assert.notEqual(end, -1, what);
+    return text.slice(at, end);
+  },
+};`;
+  assert.deepEqual(twinDefinitions(methodShorthand), [{ src: "text", from: "from", to: "to" }]);
+
+  // Positive control, `var`-declared form — both the arrow-style
+  // declaration and the two inner offset variables must fire when bound
+  // with `var` instead of `const`/`let`, the same reasoning carried one
+  // keyword further.
+  const varForm = `
+var twin = (text, from, to, what) => {
+  var at = text.indexOf(from);
+  assert.notEqual(at, -1, what);
+  var end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+};`;
+  assert.deepEqual(twinDefinitions(varForm), [{ src: "text", from: "from", to: "to" }]);
 });
 
 test("the shape detector does not fire on the two measured near-misses", () => {
@@ -190,6 +234,20 @@ function between(start, end) {
   return flat(RUN_TEAM.slice(at, to));
 }`;
   assert.deepEqual(twinDefinitions(flattenedReturn), []);
+
+  // A control-flow block shaped exactly like the five statements must not
+  // be mistaken for a method-shorthand twin — the third TWIN_SHAPE
+  // alternative excludes JS keywords from the name position for exactly
+  // this reason.
+  const ifBlock = `
+if (x) {
+  const at = RUN_TEAM.indexOf(x);
+  assert.notEqual(at, -1, "x");
+  const end = RUN_TEAM.indexOf(y, at + x.length);
+  assert.notEqual(end, -1, "y");
+  return RUN_TEAM.slice(at, end);
+}`;
+  assert.deepEqual(twinDefinitions(ifBlock), []);
 });
 
 test("no file outside prose-pin.mjs defines a second between()-shaped slicer", () => {
