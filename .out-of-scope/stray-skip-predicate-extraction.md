@@ -1,16 +1,24 @@
 # Stray-Skip Predicate Extraction
 
-`count_registry()` decides whether a worktree registry entry is a droppable
-operator stray with one conditional. It exists **twice, byte-identically** — in
+A worktree registry entry is classified as a droppable operator stray by one
+conditional. **That conditional exists twice, byte-identically**, in
 `plugin/scripts/inflight.sh` and `plugin/scripts/release-ticket.sh`:
 
 ```sh
 if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
 ```
 
-Proposals to extract this into a named predicate function — `is_droppable_stray
-"$entry"` — so the invariant is "independently re-verifiable as a unit" are
-refused. The check stays inline in both loops.
+Be precise about what is duplicated, because a reader grepping the wrong term
+will conclude this record is wrong: the **conditional** is the shared thing. The
+enclosing `count_registry()` *function* exists only in `inflight.sh`; in
+`release-ticket.sh` the same loop sits inline under an `if … fi`. That
+function-versus-inline difference is itself a still-open divergence, tracked by
+#694. The justifying comments above the two copies are near-copies but not
+identical either — each names the consequence for its own script.
+
+Proposals to extract this conditional into a named predicate function —
+`is_droppable_stray "$entry"` — so the invariant is "independently
+re-verifiable as a unit" are refused. The check stays inline in both loops.
 
 ## Why this is out of scope
 
@@ -51,7 +59,7 @@ converging them was the *point* of the change that introduced the current form.
 
 The same comment tracks the drift history in detail: three of four items landed
 in one copy first and were ported to the other by #395, with the recount still
-open against it under #694. So these two functions have a documented record of
+open against it under #694. So these two copies have a documented record of
 diverging and being re-converged item by item.
 
 A predicate extracted into one script therefore does not merely refactor — it
