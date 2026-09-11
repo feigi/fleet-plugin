@@ -1298,10 +1298,15 @@ test("runner: a node --test flag reaches node instead of being read as a path", 
 // pass-through arm as a flag, and is no more a path than one.
 //
 // `-v` is in the list because a corpus spelled entirely with double dashes
-// cannot tell the classification pattern `-*` from `--*`: narrow it to `--*`
-// and every double-dash entry here is still refused exactly as before, while a
-// lone `-v` classifies as an operand, reaches node, and exits 0 having printed
-// its version and run nothing — the vacuous pass again, one argv shape over.
+// cannot tell the classification pattern `-*` from `--*`. That classification
+// now lives in the dispatch's own arm order (the flag-detection arm, `-*) ;;`):
+// narrow it to `--*` and every double-dash entry here is still refused
+// exactly as before, while a lone `-v` no longer matches that arm and falls
+// through to the default/typo arm instead, refused there as `-v does not
+// exist` (exit 1) rather than reaching node. The row still discriminates the
+// mutation — it pins the refusal's wording now, not a vacuous exit 0 — but
+// the exit-0-after-printing-its-version failure mode this paragraph used to
+// describe no longer applies to this code shape.
 // Measured in both directions against that one-token mutation.
 //
 // Both directions, because a suite that only feeds a new refusal invalid input
