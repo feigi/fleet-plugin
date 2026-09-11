@@ -10,16 +10,16 @@ if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; 
 
 Be precise about what is duplicated, because a reader grepping the wrong term
 will conclude this record is wrong: the **conditional** is the shared thing. The
-enclosing `count_registry()` *function* exists only in `inflight.sh`; in
-`release-ticket.sh` the same loop sits inline under an `if … fi`.
+enclosing `count_registry()` *function* now exists in **both** scripts.
+`release-ticket.sh` gained its own copy when #694 landed, for the same reason
+`inflight.sh`'s own comment already gave — *"A function because the count is
+taken twice — see the recount below."* Before #694, `release-ticket.sh` had no
+recount and the same loop sat inline under an `if … fi`; needing no function
+was a **consequence** of that divergence, not the divergence itself.
 
-That shape difference is a **consequence** of a divergence, not the divergence
-itself. What #694 tracks is the missing **recount**: `inflight.sh` takes the
-count twice, and its own comment gives that as the reason a function exists at
-all — *"A function because the count is taken twice — see the recount below."*
-`release-ticket.sh` has no recount, so it needs no function. Close #694 and the
-shapes converge on their own. (As of this writing #694 is open and in flight —
-re-check before relying on the inline form.)
+Closing #694 made the shapes converge on their own, exactly as this record
+predicted: both scripts now count the registry from a named `count_registry()`,
+called once up front and again on recount.
 
 The justifying comments above the two copies are near-copies but not identical
 either — each names the consequence for its own script.

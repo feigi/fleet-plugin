@@ -360,6 +360,7 @@ count_registry() {
     if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
+  return 0
 }
 count_registry
 
@@ -376,54 +377,61 @@ count_registry
 # under git's own diagnostic, with no line carrying the `release-ticket:` prefix
 # a caller greps stderr for — the very reason every lookup OVER this listing is
 # already guarded that way.
-wt_listing || die "could not read the worktree list for #$issue: $wt_err"
-
-# The main worktree is always listed first and has no registry entry of its own,
-# hence the -1.
 #
-# awk, not `grep -c … || true`. `grep -c` exits 1 on zero matches — legitimate,
-# and `set -e` would read it as fatal — so a `|| true` has to absorb it, and
-# that same `|| true` absorbs a grep that could not RUN AT ALL just as happily.
-# The count is then the empty string, `$((listed - 1))` is -1 (measured), and
-# the mismatch report below blames `git worktree list` for a count no listing
-# can produce — sending the operator after git when the fault was a fork
-# failure. awk needs no such case separated out: the program contains no `exit`,
-# so it returns 0 whether or not anything matched, and every non-zero status is
-# a real failure. This script already removed exactly this shape elsewhere.
-#
-# What this count does NOT cover, stated because it reads as though it might: a
-# path with a newline in it never moved this number. The orphaned continuation
-# line the plain porcelain produced did not begin `worktree `, so `listed - 1`
-# still equalled `registered` and the cross-check AGREED with a read that had
-# truncated the path. Re-measured on a real linked worktree added at
-# `…/wt/fix-33<LF>slug`, git 2.50.1 (Apple Git-155):
-#
-#   git worktree add -b fix/33-slug "../wt/$(printf 'fix-33\nslug')"
-#   git worktree list --porcelain | awk '/^worktree /{n++} END{print n+0}'
-#   ls .git/worktrees | wc -l
-#
-# `listed - 1` equals `registered` while the same listing's `substr($0,10)` hands
-# back `…/wt/fix-33`, a path `[ -d ]` says is not there. The blindness is the
-# point, not the arithmetic: the orphan line adds no `worktree ` line, so no
-# count over this listing can see the truncation. It is a count of records against
-# registry entries and catches an entry git DROPPED; the path inside a record it
-# does keep is `nl_path`'s to refuse, below. Under `-z` the count is now right by
-# construction — one `worktree ` line per record, whatever the path holds. #551
-listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
-  die "could not count the worktrees git listed for #$issue"
-# The `|| die` above closes only the route where awk could not RUN. An empty but
-# SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
-# cannot fire, and the mismatch report below blames `git worktree list` for the
-# very count the guard above exists to keep out of an operator's face. One
-# comparison closes it for every branch below at once. `-ge 1`, not `-gt 1`:
-# `listed=1` is the main checkout alone, `linked=0`, the ordinary repo with no
-# linked worktree at all — a guard that refused that would refuse most releases
-# in this repo. Real `git worktree list --porcelain` always prints the main
-# worktree, so reaching this needs a broken or shimmed git; the refusal
-# direction was already right, only the number was nonsense. #699
-[ "$listed" -ge 1 ] ||
-  die "git listed no worktrees at all for #$issue — not even the main checkout, so the listing cannot be trusted"
-linked=$((listed - 1))
+# A function, not inline, because the recount below (#694) needs this whole
+# pair — git's own read and the count derived from it — re-taken TOGETHER, not
+# just re-assigned in isolation. `linked` and `wt_list`/`wt_err` are this
+# function's OUTPUT, exactly as `registered` is `count_registry`'s.
+count_linked() {
+  wt_listing || die "could not read the worktree list for #$issue: $wt_err"
+  # The main worktree is always listed first and has no registry entry of its own,
+  # hence the -1.
+  #
+  # awk, not `grep -c … || true`. `grep -c` exits 1 on zero matches — legitimate,
+  # and `set -e` would read it as fatal — so a `|| true` has to absorb it, and
+  # that same `|| true` absorbs a grep that could not RUN AT ALL just as happily.
+  # The count is then the empty string, `$((listed - 1))` is -1 (measured), and
+  # the mismatch report below blames `git worktree list` for a count no listing
+  # can produce — sending the operator after git when the fault was a fork
+  # failure. awk needs no such case separated out: the program contains no `exit`,
+  # so it returns 0 whether or not anything matched, and every non-zero status is
+  # a real failure. This script already removed exactly this shape elsewhere.
+  #
+  # What this count does NOT cover, stated because it reads as though it might: a
+  # path with a newline in it never moved this number. The orphaned continuation
+  # line the plain porcelain produced did not begin `worktree `, so `listed - 1`
+  # still equalled `registered` and the cross-check AGREED with a read that had
+  # truncated the path. Re-measured on a real linked worktree added at
+  # `…/wt/fix-33<LF>slug`, git 2.50.1 (Apple Git-155):
+  #
+  #   git worktree add -b fix/33-slug "../wt/$(printf 'fix-33\nslug')"
+  #   git worktree list --porcelain | awk '/^worktree /{n++} END{print n+0}'
+  #   ls .git/worktrees | wc -l
+  #
+  # `listed - 1` equals `registered` while the same listing's `substr($0,10)` hands
+  # back `…/wt/fix-33`, a path `[ -d ]` says is not there. The blindness is the
+  # point, not the arithmetic: the orphan line adds no `worktree ` line, so no
+  # count over this listing can see the truncation. It is a count of records against
+  # registry entries and catches an entry git DROPPED; the path inside a record it
+  # does keep is `nl_path`'s to refuse, below. Under `-z` the count is now right by
+  # construction — one `worktree ` line per record, whatever the path holds. #551
+  listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
+    die "could not count the worktrees git listed for #$issue"
+  # The `|| die` above closes only the route where awk could not RUN. An empty but
+  # SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
+  # cannot fire, and the mismatch report below blames `git worktree list` for the
+  # very count the guard above exists to keep out of an operator's face. One
+  # comparison closes it for every branch below at once. `-ge 1`, not `-gt 1`:
+  # `listed=1` is the main checkout alone, `linked=0`, the ordinary repo with no
+  # linked worktree at all — a guard that refused that would refuse most releases
+  # in this repo. Real `git worktree list --porcelain` always prints the main
+  # worktree, so reaching this needs a broken or shimmed git; the refusal
+  # direction was already right, only the number was nonsense. #699
+  [ "$listed" -ge 1 ] ||
+    die "git listed no worktrees at all for #$issue — not even the main checkout, so the listing cannot be trusted"
+  linked=$((listed - 1))
+}
+count_linked
 # Name the direction actually observed. The two disagreements have opposite
 # causes and send the reader to opposite places, so one message cannot serve
 # both: FEWER listed than registered is git silently dropping an entry it could
@@ -442,16 +450,31 @@ linked=$((listed - 1))
 # inflight.sh already recounts here (`count_registry || return 1`, #694) into
 # its own accumulate-and-continue probe; this script's whole contract is `die`
 # on any unmet precondition instead, so the port keeps that shape rather than
-# inheriting the accumulator — one recount, then still die if the disagreement
-# survives it. A mutation landing between the FIRST count and git's listing is
-# already reflected in that listing, so the second count agrees with it;
-# escaping the recount needs a SECOND mutation inside the narrower window the
-# recount itself opens (measured on inflight.sh's own copy: 1.99% -> 0.00% at
-# 2 mutations/s, 56.6% -> 1.29% saturated). A genuinely dropped entry is a
-# standing state, not a moment, so it survives the recount and still refuses —
-# the unreadable-registry and cannot-read-inside cases above are unaffected:
-# `count_registry` dies on those the same way on either call.
-[ "$linked" -eq "$registered" ] || count_registry
+# inheriting the accumulator. But this copy recounts BOTH `registered` and
+# `linked`, where inflight.sh's still recounts only `registered` — a deliberate
+# divergence, not an incomplete port. Re-taking `registered` alone leaves
+# `linked` pinned to the FIRST `wt_listing` call: a second sibling mutation
+# landing after that call returns but before the lone recount re-scans the
+# registry inflates `registered` without touching `linked`, which can flip
+# which branch fires below and name the wrong cause — reporting "the listing
+# is incomplete" (implying a fault) for what is, underneath, the same benign
+# race the elif below already names correctly. Verified against this script
+# directly with a shim landing a second mutation in exactly that window.
+#
+# A mutation landing between the FIRST count and git's listing is already
+# reflected in that listing, so the second count agrees with it — that is the
+# invariant the ORIGINAL pair above relies on. Recounting `registered` and
+# `linked` together, in the same order (`count_registry` first, `count_linked`
+# second, mirroring lines 364-434 above), gives the RECOUNT pair that same
+# invariant: escaping it needs a mutation inside the narrower window these two
+# calls open between themselves, not the whole span back to the first
+# `wt_listing` (measured on inflight.sh's registered-only copy, the same shape
+# of window: 1.99% -> 0.00% at 2 mutations/s, 56.6% -> 1.29% saturated). A
+# genuinely dropped entry is a standing state, not a moment, so it survives
+# the recount and still refuses — the unreadable-registry and
+# cannot-read-inside cases above are unaffected: `count_registry` and
+# `count_linked` die on those the same way on either call.
+[ "$linked" -eq "$registered" ] || { count_registry; count_linked; }
 if [ "$linked" -lt "$registered" ]; then
   die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
 elif [ "$linked" -gt "$registered" ]; then
