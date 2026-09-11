@@ -1057,6 +1057,46 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
   assert.equal(JSON.parse(r.stdout).taken, false);
 });
 
+// --- probe 3, the branch half's SPELLING (#915).
+//
+// `%(refname:short)` is ambiguity-aware: where a TAG shares a branch's name it
+// stops shortening and emits `heads/<name>` instead (measured here, git 2.50.1
+// Apple Git-155). Detection survives that, which is what makes this a
+// diagnostic defect rather than #634's destructive one — the filter regex
+// `(^|[/-])n([-/]|$)` matches the prefixed form just as well, so the hit is
+// still recorded and the verdict is still `taken`. What it costs is the two
+// places the value is REPORTED: an operator pasting the stderr name into a git
+// command gets `branch 'heads/…' not found`, and `evidence.localBranch` hands
+// the same unusable string to a machine consumer. Both sites are asserted
+// because they are two separate statements reading one variable — probe 3's
+// `echo` and the `add_evidence localBranch` at the foot of the script — and a
+// fix could reach one without the other.
+//
+// The suite had no ambiguous name anywhere before this, so the old spelling
+// passed it whole.
+test("probe 3: a local branch sharing a tag's name is reported under its bare name", (t) => {
+  const { repo, env } = fixture(t, 915, {});
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+  git(repo, env, "branch", "fix/915-ambig");
+  // The name collision IS the fixture. Without the tag, `%(refname:short)`
+  // already yields the bare name and this case cannot tell the spellings apart.
+  git(repo, env, "tag", "fix/915-ambig", "main");
+
+  const r = spawnSync("sh", [SCRIPT, "915"], { cwd: repo, env, encoding: "utf8" });
+  const json = JSON.parse(r.stdout);
+
+  // Detection first: the ticket's own central claim is that the probe already
+  // reaches the right verdict, so a strip that broke the match would be a
+  // regression this case has to catch rather than absorb.
+  assert.equal(r.status, 1, `the ticket is still taken: ${r.stderr}`);
+  assert.deepEqual(json.hits, ["local"], "the branch half still records its hit");
+
+  assert.match(r.stderr, /local branches: fix\/915-ambig$/m,
+    "the operator is named a branch git can act on, not `heads/fix/915-ambig`");
+  assert.equal(json.evidence.localBranch, "fix/915-ambig",
+    "and the payload carries the same bare name");
+});
+
 // --- the evidence payload as JSON.
 //
 // Every probe copies a name somebody else chose straight into a JSON string
