@@ -556,7 +556,15 @@ for (const inherited of ["[]", "[x]", '"x",']) {
       env: { ...process.env, blockers: inherited },
       encoding: "utf8",
     });
-    assert.match(res.stderr, /release-ticket: usage: release-ticket\.sh/, "the usage diagnostic still prints");
+    // Ordered first: this mutation (deleting the script's own `blockers=""`
+    // override) never reaches the usage printf at all — the receipt branch's
+    // `"$issue"` reference aborts the shell under `set -u` before `die` falls
+    // through to its unconditional `printf '%s: %s\n' "$NAME" "$1" >&2`. A
+    // `node:test` body stops at its first failing assertion, so the check
+    // that actually discriminates this regression must run before the one
+    // that doesn't: the usage-diagnostic match below passes on both the
+    // healthy run and a run mutated some OTHER way that still reaches the
+    // printf, but on THIS mutation it is the NOUNSET check that fires.
     assert.doesNotMatch(
       res.stderr,
       NOUNSET_ABORT_ON_ISSUE,
@@ -564,6 +572,7 @@ for (const inherited of ["[]", "[x]", '"x",']) {
       // exit codes, and all five name `issue`. See the header above.
       `and the die is not itself killed by set -u: ${JSON.stringify(res.stderr)}`,
     );
+    assert.match(res.stderr, /release-ticket: usage: release-ticket\.sh/, "the usage diagnostic still prints");
     assert.equal(res.stdout, "", "no half-written receipt: this die has nothing accumulated to report");
   });
 }
