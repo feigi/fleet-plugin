@@ -271,16 +271,28 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
 });
 
 // --- the version ci.yml installs is the version the instructions name -------
-// #956. The pinned gojq version is written in five tracked places and exactly
-// one of them runs: ci.yml's install step. The pin above lifts it verbatim,
-// and three local-reproduction instructions under `candidates.*` restate it —
-// the SKIP_WITHOUT_GOJQ message a developer reads when the engine gates
-// decline to run, plus two comments quoting the same `go install` line.
-// Nothing asserted they agree. A bump to ci.yml reds the pin above, so THAT
-// copy gets updated; the instructions do not red, and a developer following
-// them installs an engine CI does not run while the gate reports green. That
-// is the drift #947's pin exists to refuse, one step removed — a floating
-// engine changes what the gate MEASURES with no commit saying so.
+// #956. The pinned gojq version literal appears in seven places tracked by
+// this repo, not five — five of them are what this check requires to agree,
+// and the other two are deliberately outside that agreement (see below).
+// Exactly one of the five that agree runs: ci.yml's install step. The pin
+// above lifts it verbatim, and three local-reproduction instructions under
+// `candidates.*` restate it — the SKIP_WITHOUT_GOJQ message a developer reads
+// when the engine gates decline to run, plus two comments quoting the same
+// `go install` line. Nothing asserted they agree. A bump to ci.yml reds the
+// pin above, so THAT copy gets updated; the instructions do not red, and a
+// developer following them installs an engine CI does not run while the gate
+// reports green. That is the drift #947's pin exists to refuse, one step
+// removed — a floating engine changes what the gate MEASURES with no commit
+// saying so.
+//
+// The other two literal sites: candidates.test.mjs's "gojq 0.12.19 (rev: …)"
+// line illustrates the `--version` output format next to jq's own version
+// string (`jq-1.7.1-apple`, itself unpinned anywhere) — an example of SHAPE,
+// not an install instruction naming a VALUE, so forcing it to track the pin
+// would make a format illustration assert something it never claimed.
+// `.out-of-scope/gojq-parity-harness.md` records which gojq version a past
+// parity run measured against — a historical record, not a live instruction
+// — and is out of scope for #956. Neither is asserted here.
 //
 // Direction is the whole design. ci.yml is the source of truth because it is
 // the only site with an effect, so the version is READ from it — a literal
@@ -303,13 +315,20 @@ const CANDIDATES_TEST = fileURLToPath(new URL("./candidates.test.mjs", import.me
 // Every `go install …/gojq@<version>` ref in `src`, in order. A fresh regex per
 // call, never a shared `/g` literal: `lastIndex` persists on those between
 // call sites, and a pin whose result depends on which site ran first is not a
-// pin. The capture stops at the first character a version cannot contain, so
-// the backtick closing a comment's code span is not swallowed into it — `\S+`
-// there would compare a trailing "`)" against ci.yml's bare version and red on
-// a clean tree. The `v` is required: `@latest` then matches nothing and is
-// reported as an absent ref, which is louder than capturing "latest" and
-// letting it agree with another "latest" somewhere else.
-const installRefs = (src) => [...src.matchAll(/gojq\/cmd\/gojq@(v[\w.+-]+)/g)].map((m) => m[1]);
+// pin. The capture is lazy and stops at the first character a version token
+// cannot contain — backtick, quote, closing paren, or whitespace — so the
+// backtick closing a comment's code span is not swallowed into it the way an
+// unbounded `\S+` would, comparing a trailing "`)" against ci.yml's bare
+// version and redding a clean tree. `cmd/` and `gojq@` may have whitespace
+// between them: a hard-wrapped comment (see `unwrapComments` below) rejoins
+// across the gutter with an inserted space rather than a raw concatenation,
+// which would otherwise glue unrelated words together elsewhere in the file.
+// The version token itself is unanchored — `v` is not required — so `@latest`
+// captures "latest" instead of matching nothing: a candidates.* site with no
+// separate count assertion would otherwise let `@latest` produce zero matches
+// and pass silently, the exact silent hole `.equal(got, want, …)` below now
+// closes by having a token to disagree with.
+const installRefs = (src) => [...src.matchAll(/gojq\/cmd\/\s*gojq@(\S+?)(?=[\s`)"']|$)/g)].map((m) => m[1]);
 
 test("candidates.*'s gojq install instructions name the version ci.yml installs", () => {
   // Guarded, and inside the test body rather than at module scope. An
@@ -326,11 +345,22 @@ test("candidates.*'s gojq install instructions name the version ci.yml installs"
   );
   const want = pinned[0];
 
+  // Comment-wrapped, so a hard rewrap across the `//` gutter cannot drop a
+  // `gojq/cmd/gojq@<version>` ref out of this check by breaking it across
+  // two lines, the way `ciWithoutComments()` above already guards against a
+  // `#`-wrapped ci.yml line. Rejoins with a space, the same shape
+  // `prose-pin.mjs`'s `phrase()` uses for a hard-wrapped sentence — collapse
+  // the newline plus the next line's `// ` gutter to one space — and
+  // `installRefs`'s own `\s*` between `cmd/` and `gojq@` absorbs the space
+  // this can insert mid-URL, so a wrap landing inside the path still reads
+  // as one token.
+  const unwrapComments = (src) => src.replace(/\n[ \t]*\/\/ ?/g, " ");
+
   for (const [name, path] of [
     ["plugin/scripts/candidates.mjs", CANDIDATES],
     ["plugin/scripts/candidates.test.mjs", CANDIDATES_TEST],
   ]) {
-    for (const got of installRefs(readFileSync(path, "utf8"))) {
+    for (const got of installRefs(unwrapComments(readFileSync(path, "utf8")))) {
       assert.equal(
         got,
         want,
