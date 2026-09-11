@@ -1298,10 +1298,15 @@ test("runner: a node --test flag reaches node instead of being read as a path", 
 // pass-through arm as a flag, and is no more a path than one.
 //
 // `-v` is in the list because a corpus spelled entirely with double dashes
-// cannot tell the classification pattern `-*` from `--*`: narrow it to `--*`
-// and every double-dash entry here is still refused exactly as before, while a
-// lone `-v` classifies as an operand, reaches node, and exits 0 having printed
-// its version and run nothing — the vacuous pass again, one argv shape over.
+// cannot tell the classification pattern `-*` from `--*`. That classification
+// now lives in the dispatch's own arm order (the flag-detection arm, `-*) ;;`):
+// narrow it to `--*` and every double-dash entry here is still refused
+// exactly as before, while a lone `-v` no longer matches that arm and falls
+// through to the default/typo arm instead, refused there as `-v does not
+// exist` (exit 1) rather than reaching node. The row still discriminates the
+// mutation — it pins the refusal's wording now, not a vacuous exit 0 — but
+// the exit-0-after-printing-its-version failure mode this paragraph used to
+// describe no longer applies to this code shape.
 // Measured in both directions against that one-token mutation.
 //
 // Both directions, because a suite that only feeds a new refusal invalid input
@@ -1324,6 +1329,48 @@ test("runner: an argv of flags alone refuses instead of reaching node's own disc
   const ok = a.run("--test-concurrency=1", "t/a.spec.mjs");
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
+});
+
+// #961. The corpus above is spelled entirely with arguments that do not
+// exist, so it pins one row of the classification and leaves the rule that
+// produces it unpinned: a dash-led argument is an operand where it EXISTS,
+// and a flag otherwise. Both rows below are dash-led, and they answer
+// oppositely — which is what makes the rule, rather than the shape, the
+// thing being pinned. Measured on a runner built from this emitter.
+//
+// `-dash.test.mjs` exists, so it is an operand. The runner never gets it to
+// run — node reads a relative dash-led spec as an option and dies in ITS own
+// voice, the same ceiling the dash-named directory test above already
+// carries one level up (measured on node v26.8.1 and on the v26.5.0 the
+// `.nvmrc` pins; `./`-prefixing does not escape it, node strips that
+// prefix first). Which refusal a caller sees is the whole of what the
+// classification buys here, and it is exactly what discriminates: classify
+// this argument as a flag instead and the runner refuses in its own voice,
+// at exit 1, before node is reached. The positive `node:` match is
+// load-bearing beside the negative — a nonzero exit with nothing on stderr
+// satisfies the negative on its own.
+//
+// `-t/*.test.mjs` does not exist and holds a glob metacharacter, so it
+// reaches the arm order where dash-ness is read BEFORE glob-ness: a flag,
+// not a glob, contributing no operand. Read it the other way round — "a
+// glob is a glob whatever it starts with" — and this argv reaches node,
+// which drops the unmatched pattern silently and exits 0 having run
+// nothing: the vacuous pass the guard exists to refuse, one argv shape past
+// the corpus above. The dash-led file is written straight into the worktree
+// rather than through `repo()`, for the reason the dash-named directory
+// test above gives.
+test("runner: a dash-led argument counts as an operand only where it exists", () => {
+  const a = apply(SUITE);
+  writeFileSync(join(a.wt, "-dash.test.mjs"), PASSES);
+
+  const exists = a.run("-dash.test.mjs");
+  assert.notEqual(exists.status, 0, exists.stdout + exists.stderr);
+  assert.doesNotMatch(exists.stderr, /agent-test: no test file or directory/, exists.stdout + exists.stderr);
+  assert.match(exists.stderr, /node: bad option/, exists.stdout + exists.stderr);
+
+  const missing = a.run("-t/*.test.mjs");
+  assert.notEqual(missing.status, 0, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /agent-test: no test file or directory/, missing.stdout + missing.stderr);
 });
 
 // The deliberately preserved escape hatch: `set -f` above stops the *shell*
