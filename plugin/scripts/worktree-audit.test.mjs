@@ -722,6 +722,136 @@ test("a positional argument is refused, not silently discarded (#525)", (t) => {
   assert.match(r.stderr, /^worktree-audit: takes no arguments; audits every worktree$/m);
 });
 
+// --- #884/#894: the escape guard's FATALITY, not the message it carries.
+//
+// `wt_j=$(jstr "$wt") && short_j=$(jstr "$short") || die` is this script's
+// guard; verify-sha.sh's own guard (`branch_j=$(jstr "$branch") &&
+// sha_j=$(jstr "$sha") && tip_j=$(jstr "$tip") || die`) shares only the
+// jstr/&&/`|| die` structure, not this exact code, and #884 pinned only this
+// copy. Downgrade this one to a warning that does not exit and the script
+// walks into the `printf` below it, emitting an entry whose escaping it
+// never performed — a confident-looking
+// but wrong JSON array, on the report a fleet controller reads to decide
+// whether a replacement member would redo work or destroy it.
+//
+// Neither an exit-code nor a wording match can pin that. `die` here is 2, and
+// this script defines no exit 1 at all (json.sh's header records why for all
+// eight callers): a bare 1 out of it is a code its caller has no reading for.
+// Which abort the mutant takes is the SHELL's choice, not this script's —
+// measured with the guard downgraded to a non-exiting `printf … >&2`: /bin/sh
+// (macOS bash 3.2) aborts at 1 with `short_j: unbound variable`, /bin/dash at 2
+// with `short_j: parameter not set`. That 2 is the very status a firing guard
+// returns, and CI's `check` job runs on ubuntu-latest, where `sh` IS dash — so
+// an exit-code assertion pins this guard on a developer's Mac and waves the
+// mutant through on the runner that gates the merge, while a wording match pins
+// whichever shell uses that wording. The variable NAME is what discriminates:
+// both shells name it first and word the rest however they like.
+//
+// `short_j` and not `wt_j`: the `&&` short-circuits, so a first capture that
+// fails leaves `wt_j` set-and-empty and `short_j` never assigned at all.
+//
+// `jstr` escapes through a `sed`/`tr` pipeline, so shadowing `sed` reaches the
+// escaper and nothing else this run touches: the script itself runs no `sed`
+// (its `LC_ALL=C` note inventories that), `wt_listing` reads git's listing
+// through `tr`, and `jesc` is awk. The `branch=` status trace the loop prints
+// for each entry, just before it escapes that entry, stands in for the progress
+// marker this guard would otherwise lack — it proves the run reached the
+// escaping rather than an earlier step the shim happened to break, and
+// printf-die-sweep.test.mjs pins that trace, so it cannot be reworded out from
+// under the assertion below unseen. No assertion here names a `die` message:
+// rewording any of them, this guard's own included, leaves the pin standing.
+
+// Resolved out here, where PATH is still the real one, and quoted at the exec:
+// a `sed` under a path with a space word-splits otherwise, and the passthrough
+// shim would then break the escaper it exists to leave working.
+const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
+
+/** A dir holding a `sed` shim with the given body, prepended to PATH. */
+function sedShim(t, body) {
+  const bin = mkdtempSync(join(tmpdir(), "worktree-audit-sed-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return `${bin}:${ENV.PATH ?? process.env.PATH}`;
+}
+
+test("an escaper that cannot run stops the audit, never an entry it failed to escape", (t) => {
+  // `repo(t)` alone, no `addWorktree`: git lists the main checkout with its own
+  // `branch` line, so the first iteration already reaches the guard.
+  const w = repo(t);
+
+  const r = spawnSync("sh", [SCRIPT], {
+    cwd: w,
+    env: { ...ENV, PATH: sedShim(t, 'echo "sed: outage" >&2\nexit 1') },
+    encoding: "utf8",
+  });
+
+  // Whether this fixture measured the guard at all is settled before its
+  // verdict is read: an assertion that fails masks every one after it, and
+  // "the shim broke something else" and "the guard is not fatal" are not
+  // interchangeable diagnoses.
+  assert.match(r.stderr, /sed: outage/, "the escaper ran and failed, which is the failure under test");
+  assert.ok(
+    r.stderr.includes(`${w}  branch=main`),
+    `the per-entry status trace printed, so the run reached the escaping — that is what failed here, not an earlier step the shim broke; got ${JSON.stringify(r.stderr)}`,
+  );
+  // And that the name it pins is still the one the shell would print: a rename
+  // leaves the `doesNotMatch` below matching nothing and passing over a
+  // downgraded guard forever, which is the one way this pin can rot silently.
+  // `short_j` appears nowhere else in the script, comments included.
+  assert.match(
+    readFileSync(SCRIPT, "utf8"),
+    /short_j/,
+    "worktree-audit.sh no longer names `short_j` — re-derive the second capture's name from its escape guard and update the assertion below, which now pins nothing",
+  );
+
+  // The pin itself goes first, ahead of the two contract assertions below it:
+  // measured on the mutant, /bin/sh's abort status is 1, so an exit-code
+  // assertion placed above this one reds on a developer's Mac with a diagnosis
+  // about a bare 1 — and masks the real one — while on dash it passes and
+  // leaves this the only assertion that can fire at all.
+  assert.doesNotMatch(
+    r.stderr,
+    /short_j/,
+    "the guard must stop the script itself, not warn and leave the `printf` below it reading a name the short-circuited `&&` never assigned. The NAME, never the wording or the status: /bin/sh says `short_j: unbound variable` at exit 1, dash `short_j: parameter not set` at exit 2 — the same 2 a firing guard returns, under the shell CI actually runs.",
+  );
+
+  assert.equal(
+    r.stdout,
+    "[",
+    "the opening bracket is already out and that is all a caller may see: a truncated array fails its parse, where an entry carrying escaping that never ran reads as a clean, confident answer. This is what catches the downgrade that defaults the name instead of leaving it unset, which the assertion above cannot see.",
+  );
+  assert.equal(
+    r.status,
+    2,
+    `an entry that could not be escaped is "the question could not be answered", never the bare 1 this script's caller has no reading for; stdout: ${r.stdout}`,
+  );
+});
+
+test("a shadowed `sed` that works still escapes the entry — only a real outage refuses", (t) => {
+  // The accept half, and the control the case above needs: shadowing `sed` on
+  // PATH is not by itself fatal here, so the refusal up there is the escaper
+  // failing rather than the shim's mere presence. A path holding a `"` and a
+  // `\` rather than an ordinary one, so the sed rules the shim now fronts have
+  // something to do — `jstr` returns before it forks at all on an empty value,
+  // and an ordinary path exercises no rule.
+  const w = repo(t);
+  const wt = join(w, '.worktrees/od"d\\path');
+  git(w, "worktree", "add", "-q", wt, "-b", "fix/894-shim", "origin/main");
+
+  const r = spawnSync("sh", [SCRIPT], {
+    cwd: w,
+    env: { ...ENV, PATH: sedShim(t, `exec "${REAL_SED}" "$@"`) },
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0, `a working escaper must not change the answer; stderr: ${r.stderr}`);
+  assert.deepEqual(
+    entryFor(JSON.parse(r.stdout), wt),
+    { worktree: wt, branch: "fix/894-shim", ahead: 0, dirty: 0, dirtyFiles: [], readable: true },
+    "both escape rules ran through the shim to the entry the unshimmed run emits — the refusal above is an outage, not a shadowed name",
+  );
+});
+
 // `.` is a POSIX special builtin, so failing to open its operand aborts a
 // non-interactive shell before any `||` on the line can run. This script's
 // contract is exit 0 or exit 2; a missing library must reach the 2.
