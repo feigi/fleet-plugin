@@ -471,9 +471,15 @@ count_linked
 # `wt_listing` (measured on inflight.sh's registered-only copy, the same shape
 # of window: 1.99% -> 0.00% at 2 mutations/s, 56.6% -> 1.29% saturated). A
 # genuinely dropped entry is a standing state, not a moment, so it survives
-# the recount and still refuses — the unreadable-registry and
-# cannot-read-inside cases above are unaffected: `count_registry` and
-# `count_linked` die on those the same way on either call.
+# the recount and still refuses. The unreadable-registry case above is
+# unaffected: `count_registry`'s own `[ -r ] && [ -x ]` guard on $wtroot dies
+# the same way on either call, before the recount is ever reached. The
+# cannot-read-inside case is NOT unaffected the same way — an entry inside
+# $wtroot that `ls -A` cannot read is counted as registered rather than
+# dying (above), so a stale one survives the recount too, but what fires on
+# it is the mismatch below, not `count_registry` itself: a different guard,
+# a different exit code, under "the listing is incomplete" — a cause that
+# is not actually what happened.
 [ "$linked" -eq "$registered" ] || { count_registry; count_linked; }
 if [ "$linked" -lt "$registered" ]; then
   die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
