@@ -115,6 +115,25 @@ for (const [claim, re] of [
   });
 }
 
+// Both the parse check right below and the K_SRC/VIEW_SRC lifts further down
+// each read board.html's inline script via a single (non-global) match, so
+// both assume the page carries exactly one <script> block: a second block —
+// decoy or real, placed before OR after the renderer's own — is silently
+// invisible to whichever occurrence that match happens to land on, and the
+// duplicate-declaration guards above only ever catch a second `k`/`spendView`
+// specifically, not every way a second block could misdirect these reads.
+// Named as its own test and placed before both reads: asserting this inline,
+// mixed into either read as a bare top-level statement, would throw during
+// module load on failure and drop this whole file's test count to zero
+// instead of reporting a named failure.
+test("board.html carries exactly one <script> block", () => {
+  const blocks = [...HTML.matchAll(/<script>\n[\s\S]*?\n<\/script>/g)];
+  assert.equal(blocks.length, 1,
+    "board.html's parse check and its K_SRC/VIEW_SRC lifts below all assume exactly one " +
+    "<script> block — if a second is genuinely wanted, those reads need to become " +
+    "block-scoped rather than whole-file, and this assertion updated to match");
+});
+
 test("board.html's inline script parses", () => {
   // An extraction is a restructure of this file's script; a broken one would not
   // fail any other test in the suite, it would blank the page at runtime.
