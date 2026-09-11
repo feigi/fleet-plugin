@@ -10,17 +10,18 @@
 // reads as `HEAD..HEAD`: `git rev-list --merges --count "..HEAD"` prints `0` and
 // exits 0. The broken probe returned the "no merge commits" answer, silently, at
 // success, which is precisely the benign misreading the note exists to deny.
-// `7b48720` (`Closes #881`) corrected it to the angle-bracket placeholder form
+// `7b48720`, landed in the same PR #881 as the bug it fixes, corrected it to
+// the angle-bracket placeholder form
 // this file pins; that commit also edited
 // `staleness-qualifier-prose.test.mjs`, but added no assertion on the command.
 //
-// WHY A PIN AND NOT A COMMENT: nothing pinned the corrected form. Measured on a
-// scratch copy of the pre-pin tree (this file deleted) with the `$BASE` range
-// reinstated, against every test file carrying a code-level — non-comment —
-// `run-team/` reference, which is what selects the files that can read the
-// document at all: 52 files, 547 tests, 547 passing. The corrected form had no
-// guard, so a dedup pass, a reword, or a "let's make this copy-pasteable" edit
-// could restore the silent-zero probe with the suite green.
+// WHY A PIN AND NOT A COMMENT: nothing pinned the corrected form. Measured:
+// with this file's own test removed from the suite and the `$BASE` range
+// reinstated in `SKILL.md`, the full suite
+// (`node --test plugin/scripts/*.test.mjs`) still passes at 2202/2202 —
+// nothing else in the suite catches the regression. The corrected form had
+// no guard, so a dedup pass, a reword, or a "let's make this copy-pasteable"
+// edit could restore the silent-zero probe with the suite green.
 //
 // ONE EXACT SPAN, NOT TWO REGEXES. Both halves of the command are load-bearing
 // and they fail in OPPOSITE directions:
@@ -39,12 +40,16 @@
 // re-argued here; this asserts only that the corrected text is still the text.
 //
 // SLICE SIZE IS THE PIN, as in `staleness-qualifier-prose.test.mjs`. The note
-// sits inside the fix-applier's blockquoted prompt, and `run-merge-bot.md` and
-// `ci.yml` both carry their own `git rev-list --merges` lines, so a copy of this
-// command left anywhere in the document would satisfy a file-wide match with the
-// live one gutted. Measured: with the command replaced by the `$BASE` form
-// in place AND a correct copy appended elsewhere in the document, this still
-// reds — the pass cannot be bought from outside the note.
+// sits inside the fix-applier's blockquoted prompt, and this same document
+// carries a near-miss at SKILL.md:149 — `git fetch origin && git rev-list
+// --count main..origin/main`, same command family, no `--merges` — so a copy
+// of this command left anywhere in the document would satisfy a file-wide
+// match with the live one gutted. Measured: with the command replaced by the
+// `$BASE` form in place AND a correct copy appended elsewhere in the
+// document, in a genuinely separate paragraph with its `>` separator intact,
+// this still reds. What it does NOT close is that separator deleted outright
+// — the paragraphs then merge and the slice takes both, a hole that predates
+// this bound and is open still (#1377).
 //
 // `stripQuoteGutter` before `paragraph`, which is what makes the shared
 // paragraph bound reach into a blockquote at all: the `>`-only lines that fence
