@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between as section } from "./prose-pin.mjs";
 
 // #864's finding is that tier is entangled with calendar date and therefore
 // with prompt evolution — 8 of 9 sonnet rows in one week, 23 of 24 opus rows in
@@ -12,27 +13,14 @@ import { join } from "node:path";
 // This is the one part of the change that costs something on every run, so it
 // is also the part a compression pass is likeliest to quietly drop. These pins
 // are what notices.
-//
-// `section()` is duplicated from implementer-model-tier.test.mjs rather than
-// shared — the repo already keeps two copies of these seven lines and nothing
-// detects drift between them. A third module would be the first abstraction
-// nobody asked for.
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-
-function section(startAnchor, endAnchor, label) {
-  const at = RUN_TEAM.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${label}: '${startAnchor}' moved — update this test`);
-  const end = RUN_TEAM.indexOf(endAnchor, at + startAnchor.length);
-  assert.notEqual(end, -1, `${label}: '${endAnchor}' moved — update this test`);
-  return RUN_TEAM.slice(at, end);
-}
 
 // Paragraph-tight, and deliberately NARROWER than the dispatch slice in
 // implementer-model-tier.test.mjs: widened to the phase, the tier-guard
 // paragraphs below would satisfy half of these pins on their own.
 const dispatch = () =>
-  section("**Dispatch every implementer", "**`class=routine`", "run-team phase 2 dispatch rule");
+  section(RUN_TEAM, "**Dispatch every implementer", "**`class=routine`", "run-team phase 2 dispatch rule");
 
 test("phase 2 dispatches exactly one alternate-tier implementer per wave", () => {
   const slice = dispatch();
@@ -151,7 +139,7 @@ test("phase 2 binds the rate to phase-0 staging and excludes refills", () => {
 // The difficulty caveat lives in the counter-evidence section, past this file's
 // dispatch slice, so it needs its own anchor pair.
 const counterEvidence = () =>
-  section("within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence");
+  section(RUN_TEAM, "within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence");
 
 test("the orthogonality claim is scoped — date only, not difficulty", () => {
   // The claim itself is literally true and narrowly scoped, so this is not a

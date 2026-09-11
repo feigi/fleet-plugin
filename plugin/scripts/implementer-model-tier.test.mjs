@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between as section } from "./prose-pin.mjs";
 
 // Implementers dispatch at the SESSION's tier, whatever the ticket class. The
 // `class=routine` → `sonnet` binding was reverted 2026-08-16 when the phase-2
@@ -32,19 +33,8 @@ import { join } from "node:path";
 // phase 0 — delete step 4's `**correction-ticket discipline**` sentence and the
 // pin on that phrase below stays green regardless, on step 6's "which tickets
 // carry the correction-ticket discipline" alone.
-//
-// `section()` is duplicated from review-path-default.test.mjs rather than
-// shared — two files, seven lines. Nothing detects drift between the copies.
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-
-function section(source, startAnchor, endAnchor, label) {
-  const at = source.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${label}: '${startAnchor}' moved — update this test`);
-  const end = source.indexOf(endAnchor, at + startAnchor.length);
-  assert.notEqual(end, -1, `${label}: '${endAnchor}' moved — update this test`);
-  return source.slice(at, end);
-}
 
 // These three slices are paragraph-tight. A failure here means the text was
 // deleted OR relocated — check the rest of the file before assuming deletion.
