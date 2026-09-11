@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between as section } from "./prose-pin.mjs";
 // The board's real parser, imported rather than re-described: the doc example
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
@@ -40,14 +41,6 @@ const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"),
 // it. An unbounded slice is worst of all — it runs to EOF, where the red-flag
 // list restates `relay` and `reconcile`, enough to keep the fallback assertions
 // below green with the fallback section deleted outright.
-function section(source, startAnchor, endAnchor, label) {
-  const at = source.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${label}: '${startAnchor}' moved — update this test`);
-  const end = source.indexOf(endAnchor, at + startAnchor.length);
-  assert.notEqual(end, -1, `${label}: '${endAnchor}' moved — update this test`);
-  return source.slice(at, end);
-}
-
 // Keys at an object literal's OWN depth, whatever the line layout. A per-line
 // regex (`/^ {2}(\w+)[,:]/gm`) read one field per line and so could not see a
 // field added on a line it SHARES with an existing one — measured in #667: the

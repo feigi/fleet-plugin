@@ -31,8 +31,8 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 const START = "and each of these verbatim:";
 const END = "Each rule in the enumerate-and-declare block";
 
-// Inlined rather than importing a `section()` helper: two other test files carry
-// their own copy and neither exports it, and this file needs exactly one slice.
+// Inlined rather than importing a `section()` helper: other test files carry
+// their own copy and none export it, and this file needs exactly one slice.
 function memberBlocks() {
   const at = RUN_TEAM.indexOf(START);
   assert.notEqual(at, -1, `phase 2's verbatim-blocks intro ('${START}') moved — update this test`);
