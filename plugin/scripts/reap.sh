@@ -312,9 +312,20 @@ gp_why() {
 if ! git_probe for-each-ref --format='%(refname) %(upstream:track)' refs/heads; then
   keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
   gone_branches=""
-elif ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
-  keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
-  gone_branches=""
+else
+  # git_probe captures git's stderr into $gp_err instead of leaving it on the
+  # real fd — the whole reason it exists (#625) — and every OTHER call site in
+  # this file reads $gp_err back out through a targeted check (gp_cut_short,
+  # gp_why) before falling through. This call site's success path does
+  # neither: an rc-0 `for-each-ref` that still WARNS (PR #1413 review) used to
+  # reach the operator's stderr directly, back when this was a plain
+  # `git … | awk …` pipeline with git's stderr inherited, and now reaches no
+  # one unless forwarded here explicitly.
+  [ -z "$gp_err" ] || printf '%s' "$gp_err" >&2
+  if ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
+    keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
+    gone_branches=""
+  fi
 fi
 for b in $gone_branches; do
 

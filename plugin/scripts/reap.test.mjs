@@ -2515,10 +2515,15 @@ test("a [gone] branch whose worktree is a dangling symlink is kept, never reaped
 
 // --- #789: three `awk` substitutions that used to end the run in awk's own
 // voice (or, at the ignored-files site, in a masked one) instead of a
-// `reap:`-prefixed refusal. All three faults are injected by shimming `awk`
-// or `paste` on PATH, distinguished by the ARGUMENT this file's own awk
-// programs carry, never by position — the same discipline IGNORED_PROBE
-// above states the reason for.
+// `reap:`-prefixed refusal, plus the git stage in front of the first of them.
+// Four of the six tests below inject those `awk`/`paste` faults by shimming
+// `awk` or `paste` on PATH, distinguished by the ARGUMENT this file's own awk
+// programs carry, never by position — the same discipline IGNORED_PROBE above
+// states the reason for. The other two shim `git` itself instead, at the
+// enumeration's own git_probe call: one proves that stage's failure is now
+// read on its own rather than masked by awk finishing an empty scan at rc 0,
+// the other proves an rc-0 warning that stage still captures is forwarded to
+// the operator rather than dropped.
 
 test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (#789)", (t) => {
   // Before this fix, a command substitution used as a `for … in` word list
@@ -2548,7 +2553,7 @@ test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (
   assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
 });
 
-test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#1413)", (t) => {
+test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#789)", (t) => {
   // The awk-only guard above catches awk's own failure, but the pipeline has
   // a first stage too: `git for-each-ref | awk …`, under `set -eu` with no
   // `pipefail`. Before this fix only awk's exit status reached the `if !`,
@@ -2577,6 +2582,43 @@ test("a `git for-each-ref` that dies is kept, never read as a clean no-op that j
   assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
   assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
   assertShimFired(bin, "the git shim must actually have fired for this fixture", /^for-each-ref\b/);
+});
+
+test("git_probe's captured stderr on a successful `for-each-ref` still reaches the operator (#789)", (t) => {
+  // git_probe (above) captures git's stderr into $gp_err instead of leaving
+  // it on the real fd — #625, the whole reason it exists — and every OTHER
+  // git_probe call site in reap.sh reads $gp_err back out through a targeted
+  // check (gp_cut_short, gp_why) before falling through. This enumeration's
+  // SUCCESS path did neither until this fix (PR #1413 review): an rc-0
+  // `for-each-ref` that still warns used to reach the operator directly,
+  // back when this was a plain `git … | awk …` pipeline with git's stderr
+  // inherited, and reached no one once captured through git_probe unguarded.
+  // Shimmed to warn but still exec the real git afterward, so the sweep
+  // completes exactly as it would unshimmed — only the warning's presence on
+  // stderr is under test here.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = for-each-ref ]; then\n` +
+      `  echo "warning: unable to access '/some/broken/config': Permission denied" >&2\n` +
+      `fi\n` +
+      `exec ${REAL_GIT} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.equal(json.reaped.length, 1, "a genuinely gone branch is still reaped — the warning does not fail the enumeration");
+  assert.match(
+    stderr,
+    /warning: unable to access '\/some\/broken\/config': Permission denied/,
+    "git's own rc-0 warning must still reach the operator, not be silently captured and dropped by git_probe",
+  );
 });
 
 test("a worktree lookup whose awk stage fails is kept, never treated as having no worktree (#789)", (t) => {
