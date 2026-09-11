@@ -266,14 +266,14 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
   {
     file: join("commands", "review-and-fix.md"),
     claude: '`Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})` is the fleet\'s **default** review path on this harness.',
-    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet\'s **default** review path on this harness.',
+    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet\'s **default** review path on this harness.',
     issue: 1362,
     why: "Review-path-default pair (#1361): omp line's Resolver invocation recipe has no Claude-side counterpart clause",
   },
   {
     file: join("skills", "run-team", "SKILL.md"),
     claude: '`Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.',
-    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.',
+    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.',
     issue: 1362,
     why: "Review-path-default pair (#1361), restated in SKILL.md",
   },
