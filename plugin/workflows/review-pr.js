@@ -828,9 +828,12 @@ failed: report what you got and let the caller decide.
 
 Then derive this repository's own test command — reusing the SAME inference
 claim-ticket.sh runs at claim time, refusal included, so nothing here
-reinvents it:
+reinvents it. FLEET_HARNESS=claude is explicit because a box carrying both
+harnesses' registries for this plugin makes fleet-run's own ambiguity
+detection refuse without it (same defect measured on the omp side, PR
+#1409's first review pass — see review-core.js's copy of this prompt):
 
-    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
+    FLEET_HARNESS=claude ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\` — never invent a
@@ -838,7 +841,7 @@ command of your own when it refuses.
 
 Then size the diff:
 
-    ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
+    FLEET_HARNESS=claude ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
 
 Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value the block above printed and
 \`path\` = the SNAPSHOT_DEST value it printed, both copied verbatim. Each ends

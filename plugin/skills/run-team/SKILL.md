@@ -1331,7 +1331,7 @@ report recovery, never the exit code alone.
 **You run the review yourself, once per PR. That is the default path.**
 
 CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.
-OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.
+OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.
 
 Only you can run it — members have no `Workflow` tool on Claude and no reason
 to run `eval` themselves on omp (verified 2026-07-30 for the

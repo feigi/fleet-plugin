@@ -42,7 +42,7 @@ Three claims, none substituting for another: **run-binding** (this green belongs
 **The controller runs the workflow; everything below is the fallback for when it cannot.**
 
 CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})` is the fleet's **default** review path on this harness.
-OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet's **default** review path on this harness.
+OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet's **default** review path on this harness.
 
 `$(~/.fleet/bin/fleet-run --root)/skills/run-team/SKILL.md`'s Reviewers section owns its dispatch on both harnesses. It cuts the snapshot, sizes the fan-out, adversarially verifies every **critical/important** finding, and has `agent()` return **into the script**, so no report can go undelivered, the failure that cost one fleet five reports on one PR and four on another. It does **not** verify the `suggestion` band — that gets 0 refuters by policy, which is why step 2 checks each in-scope one itself before applying it, and files the rest. **You cannot run it** — subagents have no `Workflow` tool on Claude and no reason to run `eval` themselves on omp; this section is the fallback for a member dispatched without either.
 
