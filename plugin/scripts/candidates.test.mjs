@@ -436,7 +436,35 @@ test("a noun-form Dependencies heading arms a section, at any heading depth and 
   assert.deepEqual(rows.map((r) => r.d), [[12, 13], [12], [12], [12]]);
 });
 
-test("the noun form arms only when it is the WHOLE heading — a Dependency-injection section is prose, not a declaration", () => {
+test("a bolded dependency heading arms its section — emphasis is not a different heading", () => {
+  // #1031: the gate admitted no emphasis at all, so `## **Dependencies**` armed
+  // NO section and every ref its bullets declared was dropped — exit 0, nothing
+  // on stderr, the same silent wrong admission #439 was filed for — reached
+  // through the heading gate rather than through the inline label separator
+  // #439 widened. Both emphasis runs are load-bearing: markdown
+  // closes the bold either before the colon (`**Dependencies**:`) or after it
+  // (`**Dependencies:**`), and the run is `*`, `**` or `***` depending on
+  // whether the author wanted italic, bold or both. Substitute the
+  // `\*{0,2}` pair the ticket hypothesised — one leading run, one ahead of the
+  // colon and none after it — and rows 5 and 8 red, on both engines.
+  const { rows } = run([
+    ticket(1, "## **Dependencies**\n\n- #12\n- #13\n"),
+    ticket(2, "## **Blocked by**\n\n- #12\n"),
+    ticket(3, "## **Depends on**\n\n- #9\n"),
+    ticket(4, "## **Requires**\n\n- #8\n"),
+    ticket(5, "## **Dependencies:**\n\n- #12\n"),
+    ticket(6, "## **Dependencies**:\n\n- #12\n"),
+    ticket(7, "## *Dependencies*\n\n- #12\n"),
+    ticket(8, "## ***Dependencies***\n\n- #12\n"),
+    ticket(9, "###### **Dependency**\n\n- #12\n"),
+  ]);
+  assert.deepEqual(
+    rows.map((r) => r.d),
+    [[12, 13], [12], [9], [8], [12], [12], [12], [12], [12]],
+  );
+});
+
+test("the noun form arms only when it is the WHOLE heading — bolded or not, a Dependency-injection section is prose", () => {
   // The verb forms end at `\b` and tolerate trailing text, because a heading
   // opening with `Blocked by` declares one whatever follows it. The noun form
   // cannot afford that: `## Dependency injection` is an ordinary section title
@@ -445,12 +473,22 @@ test("the noun form arms only when it is the WHOLE heading — a Dependency-inje
   // the same over-fire the list-item restriction exists to prevent. Anchoring
   // the noun alternative to end-of-line is what keeps these three closed;
   // widen it to `\b` like its neighbours and this test is what reds.
+  //
+  // The bolded halves are #1031's other side: emphasis tolerance is added
+  // AROUND that anchor, never by relaxing it, so the run of asterisks must not
+  // smuggle in the prefix match the anchor exists to refuse. The runs match
+  // ASTERISKS only, which is what keeps ` injection` outside them — spell
+  // either one as a general wildcard (`.*`) and all six rows arm, silently
+  // inventing #300 as a blocker on every DI section in the queue.
   const { rows } = run([
     ticket(1, "## Dependency injection\n\n- rework the container, see #300\n"),
     ticket(2, "## Dependencies (blocking)\n\n- #300\n"),
     ticket(3, "## Dependency injection:\n\n- see #300\n"),
+    ticket(4, "## **Dependency injection**\n\n- rework the container, see #300\n"),
+    ticket(5, "## **Dependencies (blocking)**\n\n- #300\n"),
+    ticket(6, "## **Dependency injection:**\n\n- see #300\n"),
   ]);
-  assert.deepEqual(rows.map((r) => r.d), [[], [], []]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], [], [], [], []]);
 });
 
 test("#208's own brief text yields both of the open blockers it declared in prose", () => {
@@ -484,7 +522,12 @@ test("the phantom-blocker sweep stays closed against the widened label and headi
   // lines. #439 loosens the label separator and widens the heading gate,
   // neither of which touches that restriction — this pins that they did not,
   // because a regex widened for bold is exactly the change that reopens them.
-  // The noun-form rows carry the same shapes through the newly-armed heading.
+  // The noun-form rows carry the same shapes through the newly-armed heading,
+  // and #1031's bolded rows carry them once more through the emphasis the gate
+  // tolerates next: a section armed by `## **Dependencies**` reads its LIST ITEMS
+  // only, exactly as the unbolded one does, so the prose ref in row 8 and the
+  // fenced one in row 9 stay out of `d`. Widening the gate does not widen what
+  // an armed section then sweeps, and that is the half this re-run pins.
   const { rows } = run([
     ticket(1, "## Blocked by\n\nSee #99 for context\n"),
     ticket(2, "## Blocked by\n\n- #1\n\nSome later text mentioning #42\n"),
@@ -492,8 +535,15 @@ test("the phantom-blocker sweep stays closed against the widened label and headi
     ticket(4, "## Dependencies\n\n- #12 and then\n  more about #999\n"),
     ticket(5, "## Dependencies\n\nSee #99 for context\n"),
     ticket(6, "## Dependencies\n\n- #12\n\n```\ngit log #999\n```\n"),
+    ticket(7, "## **Dependencies**\n\n- #12 and then\n  more about #999\n"),
+    ticket(8, "## **Blocked by**\n\nSee #99 for context\n"),
+    ticket(9, "## **Dependencies**\n\n- #12\n\n```\ngit log #999\n```\n"),
+    ticket(10, "## **Dependencies**\n\n- None — can start immediately\n\nMirror what #300 did.\n"),
   ]);
-  assert.deepEqual(rows.map((r) => r.d), [[], [1], [], [12], [], [12]]);
+  assert.deepEqual(
+    rows.map((r) => r.d),
+    [[], [1], [], [12], [], [12], [12], [], [12], []],
+  );
 });
 
 // The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
@@ -560,6 +610,22 @@ test(
     assert.deepEqual(deps("## Dependencies\n\n- #12\n- #13\n"), [12, 13]);
     assert.deepEqual(deps("## Dependency injection\n\n- see #300\n"), []);
     assert.deepEqual(deps("## Blocked by\n\nSee #99 for context\n"), []);
+    // #1031's widened heading gate, on the engine gh actually applies. The
+    // emphasis runs are plain `\*`, which Oniguruma and RE2 spell alike — so
+    // these rows are expected to AGREE with the system-jq fixtures above, and
+    // exist to confirm that rather than because a divergence was found. The
+    // negative rows matter most here: RE2 has no backtracking, so a `$` anchor
+    // reached through a widened alternation is exactly where the two engines
+    // could have parted, and `## **Dependency injection**` arming under gojq
+    // alone would be invisible to every other test in this file.
+    assert.deepEqual(deps("## **Dependencies**\n\n- #12\n- #13\n"), [12, 13]);
+    assert.deepEqual(deps("## **Blocked by**\n\n- #12\n"), [12]);
+    assert.deepEqual(deps("## **Dependencies:**\n\n- #12\n"), [12]);
+    assert.deepEqual(deps("## ***Dependencies***\n\n- #12\n"), [12]);
+    assert.deepEqual(deps("## **Dependency injection**\n\n- see #300\n"), []);
+    assert.deepEqual(deps("## **Dependency injection:**\n\n- see #300\n"), []);
+    assert.deepEqual(deps("## **Dependencies (blocking)**\n\n- #300\n"), []);
+    assert.deepEqual(deps("## **Dependencies**\n\nSee #99 for context\n"), []);
     // The discriminator, and the only assertion here system jq cannot satisfy:
     // `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a U+00A0
     // between label and ref reduces to [12] under jq and [] under gojq. Without

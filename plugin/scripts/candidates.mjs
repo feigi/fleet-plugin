@@ -145,6 +145,25 @@ const EXCLUDE =
 // arming on it would turn every `#N` in its bullets into a blocker the body
 // never declared (#439 — the noun form is the heading #208's brief used, and
 // the gate named the verbs alone, so that section opened nothing).
+//
+// Either form may carry EMPHASIS, which markdown puts outside the words:
+// `## **Dependencies**` names a dependency exactly as `## Dependencies` does,
+// and read without the `\*` runs it armed no section at all, so every ref its
+// bullets declared was dropped — exit 0, nothing on stderr, #439's silent
+// wrong admission reached through this gate rather than through the inline
+// label separator #439 widened (#1031). The runs are
+// `\**` rather than `\*{0,2}` because `*`, `**` and `***` are all emphasis a
+// heading is written with, and the noun form needs one on EACH side of its
+// optional colon: markdown closes the bold before it (`**Dependencies**:`)
+// or after it (`**Dependencies:**`) depending on where the author put the
+// punctuation, the same both-sides tolerance the inline label separator
+// below carries for the same reason. The end-of-line anchor is untouched —
+// the runs go AROUND it, and they match asterisks ONLY, so
+// `## **Dependency injection**` still arms nothing. Widen either run to a
+// general wildcard and that heading arms, which is the whole distinction the
+// anchor exists to hold; candidates.test.mjs pins both directions, on both
+// engines.
+//
 // `after` is an inline label only, because `## After the migration` is
 // ordinary narrative and arming on it invents a blocker, while a heading that
 // really does declare one (`## After #12 lands`) still resolves through the
@@ -186,7 +205,7 @@ const JQ =
   'def depnums:\n' +
   '  (reduce (split("\\n"))[] as $line (\n' +
   '      {insec: false, nums: []};\n' +
-  '      ($line | test("(?i)^#{1,6}\\\\s+((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies):?\\\\s*$)")) as $bh\n' +
+  '      ($line | test("(?i)^#{1,6}\\\\s+\\\\**((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies)\\\\**:?\\\\**\\\\s*$)")) as $bh\n' +
   '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
   '      | (if $any then $bh else .insec end) as $nextsec\n' +
   '      | ($line | test("^\\\\s*([-*+]|[0-9]+[.)])\\\\s")) as $item\n' +
