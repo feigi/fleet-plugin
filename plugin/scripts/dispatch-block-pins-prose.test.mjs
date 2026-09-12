@@ -108,6 +108,16 @@ const commitBlock = () => block("Commit incrementally", "**Every scratch file", 
 const scratchBlock = () => block("**Every scratch file", "Your ticket names the cases", "phase 2's scratch-discipline block");
 const enumerateBlock = () => block("Your ticket names the cases", "Run `sizing-a-ticket`", "phase 2's enumerate-the-class block");
 
+// The LAST block in the region has no following block to bound it, so it takes
+// the region's own closing anchor instead — same two bounds as every slicer
+// above, one level up. `region()` has already consumed END, which is why this
+// one re-slices from START rather than calling it.
+const sizingBlock = () => {
+  const at = RUN_TEAM.indexOf(START);
+  assert.notEqual(at, -1, `phase 2's verbatim-blocks intro ('${START}') moved — update this test`);
+  return flatten(between(RUN_TEAM.slice(at + START.length), "Run `sizing-a-ticket`", END, "phase 2's sizing-and-PR block"));
+};
+
 test("the worktree block forbids a second worktree and carries the check that settles it", () => {
   const b = worktreeBlock();
   // Prohibition bound to the command that verifies it. Alone, "Do NOT create
@@ -325,6 +335,65 @@ test("the enumerate-the-class block carries all three of its halves, each with i
     b,
     /check the suite can even see the mode you changed.{0,400}?A green suite is evidence only about the paths it exercises/,
     "the suite-visibility rule is no longer bound to what a green suite is evidence of",
+  );
+});
+
+test("the sizing block makes the verdict checkable — signal beside it, and the run dated in the report", () => {
+  // #1070. The controller's whole read of this covariate is one `Sizing:` line,
+  // and a line typed in before `sizing-a-ticket` ever ran is byte-identical to
+  // one the skill produced. Measured on a member that wrote the verdict first
+  // and caught itself afterwards; nothing in the pipeline would have.
+  //
+  // Two halves, pinned as spans rather than as presence, for this file's
+  // standing reason: the instruction to emit a verdict already existed and was
+  // already pinned (tier-outcomes-header.test.mjs), and every mutation that
+  // matters here leaves that instruction intact while gutting what makes it
+  // checkable.
+  const b = sizingBlock();
+
+  // Half one: the verdict bound to the signal it must carry. A pin on
+  // `Sizing: light`/`Sizing: heavy` alone is satisfied by the pre-#1070 wording.
+  assert.match(
+    b,
+    /`Sizing: light` or `Sizing: heavy`, and name the signal it turned on beside it/,
+    "the sizing line no longer has to carry the signal the verdict turned on",
+  );
+  // …and the consequence, which is what a spliced "the verdict alone is fine"
+  // has to contradict rather than merely sit beside.
+  assert.match(
+    b,
+    phrase("A verdict with nothing beside it is indistinguishable from a guess, and is recorded as one"),
+    "a bare verdict no longer costs the member anything, so the signal is advisory",
+  );
+  // The form the signal takes, bound to its reason. Without the reason this
+  // reads as style advice; with it, pasting the skill's output is the named
+  // wrong answer — which is the half that keeps this line alive across a
+  // `sizing-a-ticket` output change.
+  assert.match(
+    b,
+    phrase("never paste the skill's output, because that format will change and this line has to outlive it"),
+    "the signal's form is no longer held independent of the sizing skill's own output layout",
+  );
+
+  // Half two: the report's ordering clause, bound to what it is ordered
+  // AGAINST. "Report when you ran it" alone is satisfied by a member reporting
+  // a wall-clock time nobody can compare the PR against.
+  assert.match(
+    b,
+    phrase("the head SHA, and WHEN you ran `sizing-a-ticket` relative to opening the PR"),
+    "the report no longer has to date the sizing run against the PR being opened",
+  );
+  // The direction, as one span. `before` and `after` are a one-word splice, and
+  // a pin that matched either would pass on the exact defect this ticket is.
+  assert.match(
+    b,
+    phrase('"ran sizing-a-ticket at step 6, before `gh pr create`"'),
+    "the worked example no longer shows the sizing run preceding the PR, so the clause no longer has a direction",
+  );
+  assert.match(
+    b,
+    phrase("an unreported ordering costs the covariate"),
+    "omitting the ordering clause no longer costs the member anything, so the clause is optional in practice",
   );
 });
 

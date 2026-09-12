@@ -52,9 +52,14 @@
 #                          against it.
 # sizing                 = the member's own light/heavy verdict from its phase-2
 #                          `sizing-a-ticket` run, read off the PR body's
-#                          `Sizing:` line. NOT phase 0's — phase 0 shortlists,
-#                          phase 1 claims, and the sizing run happens after both,
-#                          inside the member.
+#                          `Sizing:` line, which names the signal the verdict
+#                          turned on beside it. NOT phase 0's — phase 0
+#                          shortlists, phase 1 claims, and the sizing run
+#                          happens after both, inside the member. BLANK unless
+#                          the member's report dates that run BEFORE the PR was
+#                          opened, and the line carries its signal: a verdict
+#                          typed in early is byte-identical to a measured one,
+#                          so an undated one is a claim, not a covariate.
 # profile                = diff-stats.mjs profile for the merged diff, copied
 #                          verbatim from what it prints (empty/docs/tests-only/
 #                          single-file/small/production). `docs`, never

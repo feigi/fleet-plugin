@@ -708,11 +708,24 @@ fires on the accumulated file, across runs, not on the run in front of you.
 The row's last four fields are the ticket's difficulty, and they are what lets a
 tier comparison condition on the thing that swamps it. `sizing` is the
 **member's** own `light`/`heavy` verdict from its phase-2 `sizing-a-ticket`
-run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`);
+run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`),
+which names the signal the verdict turned on beside the verdict itself;
 `profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
 diff. **Phase 0 does not size anything** — it shortlists, phase 1 claims, and
 the sizing run happens inside the member after both, which is why the verdict
-has to travel in the PR body rather than being something you already hold. **A value
+has to travel in the PR body rather than being something you already hold.
+
+**A verdict is a measurement only if it post-dates the run that produced it.** A
+`Sizing:` line typed in before the skill ever ran is byte-identical to one the
+skill produced, so the body cannot settle this alone and the member's report
+carries the second source: when it ran `sizing-a-ticket` relative to opening the
+PR (#1070, measured on a member that wrote the line first, caught itself, and
+corrected it). **Record `sizing` only when the report places that run before the
+PR AND the line carries its signal.** Ordering clause missing, verdict authored
+before the run with no corrected value reported, or body and report naming
+different verdicts — leave the field BLANK and say which in `note`. Do not
+re-derive the verdict from the diff to fill the gap: `sizing-a-ticket` weighs
+more than file count, and a substituted proxy reads as measured too. **A value
 not in hand is left BLANK, never estimated** — blank reads as unknown and drops
 the row from a stratified comparison, while a guess reads as measured and
 poisons one. Blank still means the field is WRITTEN and empty: append all
@@ -991,10 +1004,20 @@ number, worktree abs path, branch, and each of these verbatim:
 > unapplied and no exit status for you to react to, so the label goes missing
 > and every later gate still reads the PR as correctly opened. Separate, the
 > label write has its own exit status and fails loudly. **Put your step-6 sizing verdict in the PR
-> body on its own line, `Sizing: light` or `Sizing: heavy`** — the controller
-> records it as a difficulty covariate when it rules your review, and the PR body
-> is the only place it survives your exit. Report the PR number and head SHA to
-> the controller, then exit. Never apply `ready-to-merge`, never merge.
+> body on its own line, `Sizing: light` or `Sizing: heavy`, and name the signal
+> it turned on beside it** — `Sizing: heavy — >3 implementation files, arg.mjs
+> plus four consumers`. Your own words, one clause: never paste the skill's
+> output, because that format will change and this line has to outlive it. A
+> verdict with nothing beside it is indistinguishable from a guess, and is
+> recorded as one. The controller reads this line as a difficulty covariate when
+> it rules your review, and the PR body is the only place it survives your exit.
+> **Report to the controller the PR number, the head SHA, and WHEN you ran
+> `sizing-a-ticket` relative to opening the PR** — "ran sizing-a-ticket at step
+> 6, before `gh pr create`" if you kept that order, and say so plainly if you did
+> not, including if the `Sizing:` line was written before the run and corrected
+> after. Nothing in the PR body separates a measured verdict from one typed in
+> early; that clause is the only thing that does, and an unreported ordering
+> costs the covariate. Then exit. Never apply `ready-to-merge`, never merge.
 
 Each rule in the enumerate-and-declare block is load-bearing, for a different
 reason.
