@@ -35,6 +35,11 @@ export { normalizeModel, parseMemberName };
 // documents blank as ITS spelling of "unknown" (header: "BLANK MEANS
 // UNKNOWN") — so `-` maps back to `""` here, at the boundary, rather than
 // widening the legacy column's vocabulary.
+//
+// `subagentType` is the record's `subagent_type` unchanged — `""` stays
+// `""` here, because unlike `effort` it does NOT mean unknown: it means the
+// dispatch named no agent definition, which is the reading the pair query
+// in this file's header depends on.
 export function readMember(jsonlText, meta) {
   const rec = readClaudeMember(jsonlText, meta);
   if (!rec) return null;
@@ -43,6 +48,7 @@ export function readMember(jsonlText, meta) {
     effort: rec.thinking === "-" ? "" : rec.thinking, ticket: rec.ticket, pr: rec.pr,
     tokensCacheCreate: rec.tokens_cache_create, tokensOut: rec.tokens_out,
     wallS: rec.wall_s, turns: rec.turns, torn: rec.torn,
+    subagentType: rec.subagent_type,
   };
 }
 
@@ -79,6 +85,7 @@ function rowsForOmpSession(sessionDir, stats) {
     effort: r.thinking === "-" ? "" : r.thinking, ticket: r.ticket, pr: r.pr,
     tokensCacheCreate: r.tokens_cache_create, tokensOut: r.tokens_out,
     wallS: r.wall_s, turns: r.turns, agent: r.agent, torn: false,
+    subagentType: r.subagent_type,
   }));
 }
 
@@ -146,15 +153,21 @@ export function rowsForSession(sessionDir, stats = {}) {
   return rows.map((r) => ({ session, run_date, ...r }));
 }
 
+// APPENDED TO, never inserted into: every read-out in the file's header and
+// in docs/specs indexes by position, so a column added anywhere but the end
+// silently repoints every `$n` a reader already wrote down. `subagent_type`
+// (#1066) is therefore last, after `harness`.
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
+  "subagent_type",
 ];
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
 // each, so a rename cannot silently drop a column.
 const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
+  subagent_type: "subagentType",
 };
 const field = (c) => FIELD[c] ?? c;
 // Keyed on the transcript's path-relative stem, not the member name: `member`

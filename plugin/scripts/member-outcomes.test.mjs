@@ -299,19 +299,48 @@ test("role comes from classifyRole and is not invented here", () => {
   assert.equal(byMember["general-purpose"], "specialist");
 });
 
+test("`subagent_type` is what the DISPATCH named, and blank when it named nothing", () => {
+  // The whole of #1066: a deliberate alternate-tier pair is identifiable only
+  // from the dispatch record, and the sidecar carrying it is already open when
+  // the row is built — so the column is derived, survives a regeneration, and
+  // mislabels no historical row.
+  //
+  // Mutation this must survive: reading `meta.agentType` instead. That is the
+  // member's own NAME for a named dispatch (`impl-582`), so every row would
+  // carry a value, the untyped category would vanish, and `impl-582` would
+  // read as an agent definition that does not exist.
+  const dir = fixture([
+    ["impl-580", assistant("claude-opus-5", "xhigh"), meta({ customAgentType: "fleet-implementer" })],
+    ["impl-581", assistant("claude-sonnet-5", "xhigh"),
+      meta({ agentType: "impl-581", name: "impl-581", customAgentType: "fleet-implementer-alt" })],
+    ["impl-582", assistant("claude-opus-5", "xhigh"), meta({ agentType: "impl-582", name: "impl-582" })],
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(rowsForSession(dir).map((r) => [r.member, r.subagentType])),
+    { "impl-580": "fleet-implementer", "impl-581": "fleet-implementer-alt", "impl-582": "" },
+  );
+});
+
 test("a row whose cell count is wrong is REFUSED, never padded", () => {
-  // Padding put "" in the LAST column, `agent` — a key rowsForSession can never
-  // produce, so mergeRows could never replace it. Three measured routes there,
-  // all exit 0: a torn last line became a permanent phantom that re-scraping
-  // could not heal, git conflict markers became three data rows, and adding one
-  // column ahead of `agent` collapsed 2,702 rows to 156.
+  // Padding put "" in the LAST column — `agent` when this was written,
+  // `subagent_type` now — a key rowsForSession can never produce, so mergeRows
+  // could never replace it. Three measured routes there, all exit 0: a torn
+  // last line became a permanent phantom that re-scraping could not heal, git
+  // conflict markers became three data rows, and adding one column ahead of
+  // `agent` collapsed 2,702 rows to 156.
+  //
+  // The 14-field spelling is the PREVIOUS schema, still on every branch cut
+  // before #1066: it must be refused rather than padded with a blank
+  // `subagent_type`, which would read as "this member was dispatched untyped"
+  // for rows that were nothing of the kind. Regenerating is the migration.
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 14/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 15/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
+  assert.throws(() => parseTsv(formatTsv([row()]).trim().split("\t").slice(0, 14).join("\t")), /14 fields, expected 15/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /15 fields/);
+  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /16 fields/);
 });
 
 const row = (o = {}) => ({
@@ -321,7 +350,8 @@ const row = (o = {}) => ({
   // Default agent tracks the default/overridden member, so fixtures that vary
   // only `member` still get distinct transcript ids, and fixtures that share
   // the default member (untouched) still key as the SAME agent.
-  agent: `agent-a${o.member ?? "impl-580"}`, harness: "claude", ...o,
+  agent: `agent-a${o.member ?? "impl-580"}`, harness: "claude",
+  subagentType: "fleet-implementer", ...o,
 });
 
 test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {
@@ -433,6 +463,10 @@ test("#1342: a Claude run and an omp run over separate sessions merge into one T
   writeFileSync(join(ompSessionDir, "Solo.jsonl"), [
     ompLine({ type: "session", version: 3, id: "s1", timestamp: "2026-09-09T03:00:00.000Z", cwd: "/Users/chris/dev/fleet-plugin" }),
     ompLine({ type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T03:00:01.000Z", thinkingLevel: "high", configured: null }),
+    // omp's spelling of the dispatch record. Without it this side of the
+    // corpus reaches #1066's pair query blank, so an omp-era pair is
+    // uncountable however deliberately it was dispatched.
+    ompLine({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T03:00:01.500Z", task: "Implement ticket 580", agent: "fleet-implementer-alt" }),
     ompLine({
       type: "message", id: "m1", parentId: "t1", timestamp: "2026-09-09T03:00:02.000Z",
       message: {
@@ -454,6 +488,12 @@ test("#1342: a Claude run and an omp run over separate sessions merge into one T
   const omp = rows.find((r) => r.harness === "omp");
   assert.equal(omp.session, ompSessionName);
   assert.equal(omp.agent, "Solo");
+  // #1066: the deliberate-pair column travels the omp path too, out of
+  // `session_init.agent`. It reaches the FILE, not just the record — the
+  // adapter in rowsForOmpSession is a separate hop from the Claude one and
+  // dropping it leaves every omp row blank while the suite stays green.
+  assert.equal(omp.subagentType, "fleet-implementer-alt");
+  assert.equal(rows.find((r) => r.harness === "claude").subagentType, "");
 });
 
 test("a run writes rows, and a second run over the same session changes nothing", () => {
