@@ -417,3 +417,60 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
   // failures on the same stderr are expected and are not this read.
   assert.doesNotMatch(r.stderr, /ledger\.mjs[^\n]*failed/);
 });
+
+// ── #1093: a fault is not a refusal ──────────────────────────────────────────
+//
+// `main().catch()` used to hand every rejection to die(), the REFUSAL helper,
+// so a bug in this script printed what a typo prints: one `board: <text>` line
+// at exit 2, stack dropped.
+//
+// The fault driven here is the gap gather()'s own comment names and accepts:
+// `tryParse` checks the ledger read is JSON, never that it is the
+// `{rows,filed,ruled}` shape, because ledger.mjs is this repo's own tested
+// producer of it. That read is `execFileSync("node", [ledger.mjs, ...])`, so a
+// `node` earlier on PATH is the entire fixture, and a wrong-typed `rows`
+// reaches compute-board.mjs's `(ledger.rows || []).map` with nothing between
+// the TypeError and main()'s catch.
+//
+// Deliberately NOT the `--prev` route the ticket used to reach the handler: a
+// previous board that parses but carries a wrong-typed `tickets` is a SEPARATE
+// defect (a corrupt prev board is meant to be ignored, not fatal), and a test
+// riding on it would turn green-and-vacuous the day that one is fixed. This
+// route rests on a documented non-guard instead of a broken one.
+function runBoardFaulted() {
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "board-fault-cwd-")));
+  const bin = mkdtempSync(join(tmpdir(), "board-fault-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "gh"), 0o755);
+  // Valid JSON, wrong shape: `rows` is an object where every consumer wants an
+  // array. Answers any argv, which is all gather()'s single `node` read needs.
+  writeFileSync(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);
+  chmodSync(join(bin, "node"), 0o755);
+  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md")], {
+    cwd, encoding: "utf8",
+    env: { ...process.env, HOME: cwd, PATH: `${bin}:${process.env.PATH}` },
+  });
+}
+
+test("build: an internal fault exits 70 with a stack, where a refusal exits 2 with one line", () => {
+  const r = runBoardFaulted();
+  // Exit 0 here means the ledger shape got guarded somewhere and this fixture
+  // no longer reaches the handler at all — pick another reachable fault rather
+  // than deleting the pin.
+  assert.equal(r.status, 70, `expected the fault exit, got ${r.status}: ${r.stderr.slice(-400)}`);
+  assert.match(r.stderr, /internal fault/, "the fault must say it is one, not read as a refusal");
+  // A real stack, not a message: at least one frame naming the file that threw.
+  // This is the assertion the old `die(e.message)` handler cannot satisfy.
+  assert.match(r.stderr, /\n\s+at .*compute-board\.mjs:\d+/, `no stack frame on stderr: ${r.stderr.slice(-400)}`);
+  assert.equal(r.stdout, "", "a fault must not also print a board");
+
+  // The other half of the distinction, measured in the same run rather than
+  // inferred from the refusal cases above: a genuine refusal is still one line
+  // at exit 2 with no stack and no stdout. `--port abc` dies in main() ahead of
+  // every read, so it needs none of the rig above.
+  const refusal = spawnSync(process.execPath, [BOARD, "build", "--port", "abc"], { encoding: "utf8" });
+  assert.equal(refusal.stderr, "\nboard: --port wants an integer 0-65535, got abc\n");
+  assert.equal(refusal.status, 2);
+  assert.equal(refusal.stdout, "");
+  assert.notEqual(refusal.status, r.status, "a fault and a refusal must not share an exit code");
+});

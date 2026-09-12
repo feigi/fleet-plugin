@@ -3,13 +3,13 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend } from "./board.mjs";
+import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText } from "./board.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -1197,4 +1197,53 @@ test("CLI: serve refuses a stray positional the same way build does", () => {
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "junk"]), serveOpts());
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument 'junk'/);
+});
+
+// #1093: the CLI's top-level handler printed `e.message`, which is `undefined`
+// for a rejection that is not an `Error` — so the whole diagnostic was the
+// literal `board: undefined`. Nothing in this file throws a non-Error today,
+// which is why this is the unit half of board-cli.test.mjs's fault case: the
+// text the handler writes has to carry bytes for every value a rejection can
+// arrive as, including the four that render as nothing under a naive
+// `String(e)`/`e.message` read.
+test("faultText renders any rejected value, so no fault prints an empty diagnostic", () => {
+  for (const v of [undefined, null, "", 0, false, { a: 1 }]) {
+    const t = faultText(v);
+    assert.match(t, /\S/, `faultText(${String(v)}) has nothing in it`);
+    assert.notEqual(t, "undefined", "the `board: undefined` diagnostic is exactly what this replaces");
+  }
+  // The rejected value is NAMED, not merely non-empty: a constant string would
+  // satisfy the loop above and tell the reader nothing.
+  assert.match(faultText(undefined), /undefined/);
+  assert.match(faultText({ a: 1 }), /a: 1/);
+  // Why inspect() and not JSON.stringify: a self-referential rejection is a
+  // value like any other, and stringify THROWS on it — inside the fault
+  // handler, which is the one place left that can still report anything.
+  const circular = {};
+  circular.self = circular;
+  assert.match(faultText(circular), /Circular/);
+  // An Error keeps its stack verbatim. That is the whole point of the path:
+  // a message alone is what made a fault indistinguishable from a refusal.
+  const e = new Error("boom");
+  assert.equal(faultText(e), e.stack);
+  assert.match(faultText(e), /\n\s+at /);
+});
+
+// board.mjs had no row in the design spec's script-surface table, so neither of
+// its exit codes was written down anywhere a consumer reads. Derived from the
+// script rather than restated here: the fault code is read out of board.mjs's
+// own declaration, so changing it there and leaving the document behind reddens
+// this — the drift #407 caught the hard way for candidates.mjs's exit 3.
+test("the design spec's board row names both exit codes the script can produce", () => {
+  const declared = readFileSync(SCRIPT, "utf8").match(/^const FAULT_EXIT = (\d+);$/m);
+  assert.ok(declared, "board.mjs no longer declares FAULT_EXIT — update this test");
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `board.mjs` |"));
+  assert.ok(row, "the design spec's script-surface table has no `board.mjs` row");
+  for (const code of ["2", declared[1]]) {
+    assert.match(row, new RegExp(`exit ${code}\\b`, "i"), `the board row does not name exit ${code}`);
+  }
 });
