@@ -166,8 +166,8 @@ function run(cmd, args) {
 // `(parsed) => string | null` — a reason the payload isn't what the caller
 // is about to read, or null when it's fine — checked here so each call site
 // declares what it expects instead of hand-rolling its own, the way the two
-// siblings do: candidates.mjs's `!Array.isArray(rows)` and its {n,t,l,d,spec}
-// row check, ledger.mjs's "gh returned JSON that is not an issue list". Named
+// siblings do: candidates.mjs's `!Array.isArray(rows)` and its per-row field
+// check, ledger.mjs's "gh returned JSON that is not an issue list". Named
 // rather than cited by line, since both files move. Parity with them is
 // partial on purpose: those check the discriminating field of every row, the
 // row-level checks here refuse on object-ness alone — see the next comment.
