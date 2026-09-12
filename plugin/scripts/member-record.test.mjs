@@ -41,6 +41,25 @@ test("readClaudeMember: thinking is `-`, never blank, when the transcript carrie
   assert.equal(rec.thinking, "-");
 });
 
+test("readClaudeMember: subagent_type is the sidecar's customAgentType, blank when the dispatch named none", () => {
+  // #1066: the deliberate alternate-tier pair is identifiable ONLY from what
+  // the dispatch named, and `-` is the wrong spelling for its absence — an
+  // untyped Task call is a closed category (5,997 of 6,136 sidecars measured
+  // 2026-09-12, none of them typed before 2026-08-28), not a hole a re-scrape
+  // could fill.
+  //
+  // Mutation this must survive: falling back to `meta.agentType`, which is the
+  // member's own NAME (`impl-580`) and would fill every row with a definition
+  // that never existed.
+  const line = JSON.stringify({
+    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-08-25T07:14:12.147Z",
+    message: { id: "m1", model: "claude-sonnet-5", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
+  });
+  const base = { name: "impl-580", agentType: "impl-580", spawnDepth: 0 };
+  assert.equal(readClaudeMember(line, { ...base, customAgentType: "fleet-implementer-alt" }).subagent_type, "fleet-implementer-alt");
+  assert.equal(readClaudeMember(line, base).subagent_type, "");
+});
+
 test("encodeOmpProjectDir: home-relative cwd is `-` + segments joined by `-`, dots preserved", () => {
   // Verified 2026-09-09 against real `~/.omp/agent/sessions/*` directory
   // names on this machine, read out of each transcript's own
@@ -75,7 +94,7 @@ test("encodeOmpProjectDir: non-home cwd is realpath-resolved and double-dash wra
 const evt = (o) => JSON.stringify(o);
 const sessionEvt = (cwd) => evt({ type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd });
 const thinkingEvt = (level) => evt({ type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-08T15:11:49.494Z", thinkingLevel: level, configured: null });
-const sessionInitEvt = (task, resolvedModelIdentity) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task, resolvedModelIdentity });
+const sessionInitEvt = (task, resolvedModelIdentity, agent) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task, resolvedModelIdentity, agent });
 const assistantEvt = (model, usage, ts = "2026-09-08T15:12:00.000Z") => evt({
   type: "message", id: "m1", parentId: "i1", timestamp: ts,
   message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage },
@@ -146,6 +165,26 @@ test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additiv
   const rec = readOmpMember(lines.join("\n"), "/fake/path.jsonl", "Memory1");
   assert.equal(rec.model, "claude-opus-5", "the per-turn model board.mjs/member-outcomes.mjs already key on must stay unchanged");
   assert.equal(rec.resolvedModelIdentity, "anthropic/claude-opus-5");
+});
+
+test("readOmpMember: subagent_type is session_init's `agent`, blank when the transcript carries no session_init", () => {
+  // #1066's omp arm. It cannot ride on `role`: omp books a fleet implementer
+  // as role=other (classifyRole reads the dispatch TASK text, and the fleet's
+  // omp prompt does not name the role), so a pair query filtered on role
+  // silently drops this whole harness — 23 fleet-implementer/-alt members
+  // measured on disk 2026-09-12, every one of them role=other.
+  const withAgent = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
+    sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", "fleet-implementer-alt"),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(withAgent.join("\n"), "/fake/path.jsonl", "Alt1").subagent_type, "fleet-implementer-alt");
+
+  const noInit = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(noInit.join("\n"), "/fake/path.jsonl", "Alt2").subagent_type, "");
 });
 
 test("readOmpMember: cost and tokens sum across turns — one usage object per turn, no fold-back", () => {

@@ -583,11 +583,29 @@ half the fleet on the alternate tier. Phase 0 *does* re-run mid-run whenever the
 pool empties, and each of those stagings is a fresh wave that carries its own
 alternate-tier member.
 
-**Do not label it anywhere.** The pairing is a query over
-`docs/metrics/member-outcomes.tsv` — a `session`+`role` carrying more than one
-distinct `model`. A hand-set column would not survive that file's regeneration,
-and one derived against today's declared tiers would mislabel every historical
-row.
+**Do not label it anywhere — the dispatch record already carries it.** The
+pairing is a query over `docs/metrics/member-outcomes.tsv` (the exact awk sits
+in that file's header): a `session` that ran BOTH implementer definitions at
+DIFFERENT `model`s — one member whose `subagent_type` is
+`fleet-implementer-alt`, another whose is `fleet-implementer`. That column is
+the harness's own record of what each member was dispatched AS (Claude's
+`meta.customAgentType`, omp's `session_init.agent`), scraped like every other
+column, so it survives the file's regeneration and mislabels no historical row
+— a pre-rule session carries no such dispatch to find. A hand-set column would
+fail both of those tests, and one derived against today's declared tiers would
+mislabel every historical row.
+
+**The query counts DELIBERATE pairs, and that is the whole of #1066.** The
+rule this replaces asked only for a `session`+`role` carrying more than one
+distinct `model`, which any session that happened to stage a routine ticket
+beside a correction one satisfies. Measured 2026-09-12 on one corpus: 198
+keys as that query is literally written, 35 sessions across 21 `run_date`s
+once restricted to implementers, against 17 real pairs across 8 — so the gate
+below read itself past its floor on sessions where nothing had been
+controlled. Dispatch alone is not enough either: both arms must actually have
+RUN different models, because a deliberate alt dispatch whose two arms resolve
+to the same model (a `modelRoles` override, measured on omp 2026-09-12)
+controls nothing.
 
 **Why one per wave and not a week of one tier followed by a week of the other:**
 tier would then be confounded with calendar date and therefore with prompt
@@ -847,10 +865,16 @@ pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
 still the maintainer's call and still a change to the dispatch rule — but the
 deliberate control it used to require is no longer something anyone has to
 authorize one ticket at a time: the alternate-tier dispatch above produces one
-per wave by construction. **Do not read the pairs early.** Report the count and
-stop until there are at least ten of them across five or more distinct
-`run_date`s; below that, a pair count is a number, not evidence, and the last
-guard fired with n=1 on the control side.
+per wave by construction. **Do not read the pairs early.** Report the count —
+the DELIBERATE count, from the query in `member-outcomes.tsv`'s header, which
+prints the pair count and its distinct `run_date`s and counts only sessions
+that ran both implementer definitions at different models — and stop until
+there are at least ten of them across five or more distinct `run_date`s; below
+that, a pair count is a number, not evidence, and the last guard fired with
+n=1 on the control side. **Report whichever number that query prints, never a
+number from any other one:** the query it replaces (#1066) counted every
+session whose implementers merely differed, so it cleared this floor by an
+order of magnitude while the controlled comparison did not exist yet.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
 than implementation (Red flags, below), so one extra fix-round costs a wave slot

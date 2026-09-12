@@ -6,15 +6,32 @@
 // exactly one place.
 //
 // The record: harness, session, agent, role, member, model, thinking,
-// tokens_in, tokens_cache_create, tokens_cache_read, tokens_out, cost, wall_s,
-// turns, ticket, pr. `harness` is set by which reader produced the row —
-// structural, decided by which root the transcript lives under, before any
-// byte is parsed. `cost` is omp-real (`usage.cost.total`, summed per member)
-// and null for Claude — no pricing table exists in this repo, and inventing
-// one is not this ticket's business. `thinking` is Claude's `d.effort` /
-// omp's `thinking_level_change.thinkingLevel`, `-` when a harness that could
-// have recorded it did not (never blank, so a hole is visible, per #1302's
-// ruling on `auto`).
+// subagent_type, tokens_in, tokens_cache_create, tokens_cache_read,
+// tokens_out, cost, wall_s, turns, ticket, pr. `harness` is set by which
+// reader produced the row — structural, decided by which root the transcript
+// lives under, before any byte is parsed. `cost` is omp-real
+// (`usage.cost.total`, summed per member) and null for Claude — no pricing
+// table exists in this repo, and inventing one is not this ticket's
+// business. `thinking` is Claude's `d.effort` / omp's
+// `thinking_level_change.thinkingLevel`, `-` when a harness that could have
+// recorded it did not (never blank, so a hole is visible, per #1302's ruling
+// on `auto`).
+//
+// `subagent_type` (#1066) is what the member was DISPATCHED AS — the agent
+// DEFINITION the dispatch named, never the member's own name: Claude's
+// `meta.customAgentType`, omp's `session_init.agent`. It is the only field
+// that separates a deliberate alternate-tier pair from two members whose
+// models merely happened to differ, and both readers already open the file
+// it lives on, so it is derived rather than authored and survives a
+// regeneration. `""` is NOT the `-` hole the fields above use: it means the
+// dispatch named no agent definition, the ordinary shape of an untyped
+// Claude `Task` call (measured 2026-09-12: 5,997 of 6,136 sidecars on disk
+// carry no `customAgentType` key at all, and none of the typed ones predate
+// 2026-08-28, when typed agent definitions came into use). Absence IS the
+// discrimination — a closed category that can never hold a deliberate pair,
+// not a value worth recovering. omp writes the key on every `session_init`
+// (`task` for the default agent), so a blank on that side means the
+// transcript carries no `session_init` line at all.
 //
 // Row identity is `session\0agent`, unchanged from before this ticket — the
 // ledger has no member concept and gains none here (ledger.mjs is untouched).
@@ -310,6 +327,15 @@ export function readClaudeMember(jsonlText, meta, filePath = "<transcript>") {
     // maps `-` back to "" for its own legacy `effort` column, which already
     // spells the same "unknown" concept as blank and predates this ticket.
     thinking: folded.effort || "-",
+    // Straight off the sidecar this function is already handed — the
+    // dispatch's own record of which agent definition produced this member
+    // (`fleet-implementer` and `fleet-implementer-alt` are the two the tier
+    // pairing turns on). Never `meta.agentType`: that is the member's NAME
+    // for a named dispatch (`impl-387`) and the built-in type otherwise, so
+    // reading it here would fill the column with something that answers a
+    // different question. Absent key -> "", a fact about the dispatch and
+    // not a hole; see this module's header.
+    subagent_type: typeof meta?.customAgentType === "string" ? meta.customAgentType : "",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
     tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
     cost: null,
@@ -432,8 +458,17 @@ function assertNotClaudeShaped(d, filePath) {
 // member-outcomes.mjs read `model` for cost/spend attribution, where the
 // per-turn value (which can in principle change mid-run) is the fact they
 // want, not the dispatch-time identity.
+//
+// `agent` (#1066) is `session_init`'s dispatch-time record of WHICH AGENT
+// DEFINITION this member is — omp's spelling of Claude's
+// `meta.customAgentType`, and the omp arm of the deliberate-pair column.
+// Measured 2026-09-12 across real `~/.omp/agent/sessions/**`: present on
+// every one of the 1,191 transcripts carrying a `session_init` line
+// (`fleet-implementer` 51, `fleet-implementer-alt` 17, the default `task`
+// 220, plus the review fan-out's own definitions), absent only where the
+// line itself is.
 export function foldOmpTranscript(jsonlText, filePath) {
-  let model = null, thinking = null, task = null, resolvedModelIdentity = null;
+  let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false;
@@ -450,6 +485,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "session_init") {
       if (typeof d.task === "string") task = d.task;
       if (typeof d.resolvedModelIdentity === "string") resolvedModelIdentity = d.resolvedModelIdentity;
+      if (typeof d.agent === "string") agent = d.agent;
     }
     const m = d.message;
     if (d.type === "message" && m?.role === "assistant" && m.usage) {
@@ -465,7 +501,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
   return {
-    model, thinking, task, resolvedModelIdentity,
+    model, thinking, task, resolvedModelIdentity, agent,
     input, cacheWrite, cacheRead, output,
     cost: sawCost ? cost : null,
     turns,
@@ -509,6 +545,11 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
     // `session_init` line at all (never guessed).
     resolvedModelIdentity: folded.resolvedModelIdentity ?? null,
     thinking: folded.thinking ?? "-",
+    // The dispatch record's own agent definition, `""` when the transcript
+    // carries no `session_init` line to read one from — the same column
+    // Claude fills from `meta.customAgentType`, so a deliberate pair reads
+    // identically on either harness.
+    subagent_type: folded.agent ?? "",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
     tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
     cost: folded.cost,
