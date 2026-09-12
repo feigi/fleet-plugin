@@ -1140,11 +1140,18 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
   mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
   writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
   symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
-  // A directory whose name merely ENDS in the word. The spelling term above is
-  // bounded to a path segment, so this reaches the resolved check; unbounded,
-  // `*node_modules/*` claimed the argument for the logical guard, whose own
-  // inner test is anchored at `$PWD/node_modules/` and never fired — the
-  // argument left both guards unjudged and node ran the vendored file.
+  // A directory whose name merely ENDS in the word, spelled both ways — the
+  // merged `case` judges the two on different arms. The relative spelling is
+  // held out of the logical arm by that arm's own segment bound. The absolute
+  // one is held out by the FIRST arm, whose job is the single shape both
+  // guards decline (absolute AND naming a real `node_modules` segment) and
+  // which therefore has to carry the bound too: written as the one glob that
+  // looks equivalent, `/*node_modules/*`, it swallows this spelling into the
+  // skip and node runs the vendored file. Measured — that collapse reds this
+  // row and nothing else in the file, so the relative row alone did not pin
+  // it. Unbounded, `*node_modules/*` claimed the argument for the logical
+  // guard instead, whose own inner test is anchored at `$PWD/node_modules/`
+  // and never fired: the argument left both guards unjudged, same result.
   mkdirSync(join(a.wt, "vendor_node_modules"), { recursive: true });
   symlinkSync(join("..", "node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendor_node_modules", "link.test.mjs"));
   for (const spelling of [
@@ -1155,6 +1162,7 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
     "dirlink/v.test.mjs",
     "extlink.test.mjs",
     "vendor_node_modules/link.test.mjs",
+    join(a.wt, "vendor_node_modules", "link.test.mjs"),
   ]) {
     const r = a.run("t/a.test.mjs", spelling);
     assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);

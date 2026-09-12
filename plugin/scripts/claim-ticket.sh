@@ -829,37 +829,57 @@ for arg do
     # unescaped, and a vendored path with a \`*\` in it skipped the vendored
     # refusal outright.
     #
-    # Vendored, on the argument's own spelling: node excludes an argv entry
-    # when its NORMALIZED relative form starts with \`node_modules/\`, so
-    # \`t/../node_modules/pkg/x.test.mjs\` is excluded too and a literal prefix
-    # match misses it. A deeper segment (\`t/node_modules/pkg/x.test.mjs\`) and
-    # an absolute path are NOT excluded — node runs both, and counts them, so
-    # there is no silent drop to guard and the \`/*\` arm leaves absolute
-    # spellings alone (measured, Node v26.5.0). Resolving the argument's own
-    # directory is what separates those cases; \`cd\`/\`pwd\` without \`-P\` is the
-    # logical form, the same textual resolution node applies. \`..\` only ever
-    # removes segments, so an argument that does not mention \`node_modules\`
-    # cannot normalize into one — the outer pattern keeps the subshell off
-    # every other path. Passing an excluded spelling through would be the
-    # same silent drop as the typo case below, for a different reason.
-    # \`-P\` here is not a hardening opportunity, and the omission is not an
-    # oversight (#401). The ordinary npm/pnpm workspace shape is where the two
-    # resolution modes diverge: \`node_modules/pkg\` is itself a symlink to a
-    # sibling real directory (a hoisted or linked workspace package). Physical
-    # resolution follows \`pkg\` OUT of \`node_modules\`, so the pattern below
-    # stops matching, this guard falls through without refusing, and the
-    # argument reaches node unrefused — where it is excluded anyway, on its
-    # own unresolved spelling, silently, at exit 0. That reintroduces #100's
-    # silent drop, minus the loud refusal this guard exists to give it first.
-    # Bounded to a path SEGMENT, as the resolved check below now is. No verdict
-    # moves here — this arm's own test is already anchored at
-    # \`"\$PWD"/node_modules/*\`, so a directory whose name merely ENDS in the
-    # word (\`vendor_node_modules/\`) reached this arm and fell straight back
-    # out of it. The bound is what keeps the two arms reading disjoint
-    # arguments, which is the property the block below rests on; the verdict it
-    # changes is down there, where the same unbounded pattern was a skip.
+    # One \`case\`, three arms. The two this replaces judged the same \$arg a
+    # hundred lines apart and had to stay disjoint, with nothing but prose in
+    # between saying so; every spelling now lands in exactly one arm by
+    # construction (#1016). Each guard's own comment block moved with its code,
+    # so the \`-P\` defence below still sits above the guard that omits it.
     case "\$arg" in
-      /*) ;;
+      # Absolute AND already naming a \`node_modules\` SEGMENT — the one shape
+      # both guards below decline, so nothing judges it, deliberately. The
+      # logical guard declines every ABSOLUTE spelling: node runs and counts
+      # an absolute vendored path rather than dropping it, so there is no
+      # silent drop to refuse (#401's ruling, measured on Node v26.5.0). The
+      # physical guard declines every SEGMENT-naming spelling, because
+      # re-judging one would overturn that ruling from a second place. This
+      # arm is where the two declinations meet, and it is the merge that makes
+      # it visible: before, the overlap was a gap between two \`case\`s.
+      # Two alternatives because a \`case\` pattern cannot spell a conjunction:
+      # an absolute path carrying the segment either opens with it or reaches
+      # it later. The one-glob spelling (\`/*node_modules/*\`) is not the same
+      # test — it drops the segment bound the other two arms carry, and
+      # \`/x_node_modules/f\` is not vendored and must reach the physical guard.
+      /node_modules/*|/*/node_modules/*) ;;
+      # Vendored, on the argument's own spelling: node excludes an argv entry
+      # when its NORMALIZED relative form starts with \`node_modules/\`, so
+      # \`t/../node_modules/pkg/x.test.mjs\` is excluded too and a literal prefix
+      # match misses it. A deeper segment (\`t/node_modules/pkg/x.test.mjs\`) and
+      # an absolute path are NOT excluded — node runs both, and counts them, so
+      # there is no silent drop to guard and the arm above keeps an absolute
+      # spelling out of this one (measured, Node v26.5.0). Resolving the
+      # argument's own directory is what separates those cases; \`cd\`/\`pwd\`
+      # without \`-P\` is the logical form, the same textual resolution node
+      # applies. \`..\` only ever removes segments, so an argument that does
+      # not mention \`node_modules\` cannot normalize into one — the outer
+      # pattern keeps the subshell off every other path. Passing an excluded
+      # spelling through would be the same silent drop as the typo case below,
+      # for a different reason.
+      # \`-P\` here is not a hardening opportunity, and the omission is not an
+      # oversight (#401). The ordinary npm/pnpm workspace shape is where the two
+      # resolution modes diverge: \`node_modules/pkg\` is itself a symlink to a
+      # sibling real directory (a hoisted or linked workspace package). Physical
+      # resolution follows \`pkg\` OUT of \`node_modules\`, so the pattern below
+      # stops matching, this guard falls through without refusing, and the
+      # argument reaches node unrefused — where it is excluded anyway, on its
+      # own unresolved spelling, silently, at exit 0. That reintroduces #100's
+      # silent drop, minus the loud refusal this guard exists to give it first.
+      # Bounded to a path SEGMENT, as the resolved arm below now is. No verdict
+      # moves here — this arm's own test is already anchored at
+      # \`"\$PWD"/node_modules/*\`, so a directory whose name merely ENDS in the
+      # word (\`vendor_node_modules/\`) reached this arm and fell straight back
+      # out of it. The bound is what keeps the three arms reading disjoint
+      # arguments, which is the property the arm below rests on; the verdict it
+      # changes is down there, where the same unbounded pattern was a skip.
       */node_modules/*|node_modules/*)
         # Unconditional, because the \`*/*\` test this used to make could not
         # lose: both alternatives of the arm above spell a literal \`/\`
@@ -907,64 +927,64 @@ for arg do
             ;;
         esac
         ;;
-    esac
-    # Judged on the argument's RESOLVED path as well (#424) — #186's
-    # directory-branch rule applied to the file arm. A symlink whose own name
-    # carries no \`node_modules\` but whose target is vendored defeats every
-    # term above, and node does not discard it: node RUNS it, so the suite's
-    # result comes to hang on third-party code passing. That is #186's hazard,
-    # not #100's, and it takes #186's remedy rather than another spelling.
-    # Only where the spelling does not already name a \`node_modules\` SEGMENT.
-    # Unbounded, this skip also swallowed a directory whose name merely ENDS in
-    # the word: \`vendor_node_modules/link.test.mjs\` was handed to the guard
-    # above as already-judged, and that guard's own test is anchored and never
-    # fired — so a symlink under such a name to a vendored file was judged by
-    # neither, and node ran it and counted it (measured). Both arms carry the
-    # bound, so they still partition the arguments with nothing in the gap.
-    # The arguments this skip keeps are the guard above's own input — the
-    # deeper-segment and absolute spellings it deliberately lets through
-    # because node runs and counts them included — and re-judging them here
-    # would overturn that ruling from a second place. Disjointness is what lets
-    # this check be physical while the one above stays logical (#401): the two
-    # never see the same argument, so neither can undo the other's resolution
-    # mode.
-    # \`realpath\` rather than \`cd\`+\`pwd -P\`: \`cd\` resolves symlinked
-    # DIRECTORY components, but a symlink whose own target is a FILE is this
-    # ticket's input and \`cd\` never reaches it. It also follows a chain of
-    # them, and reports a cycle as a failure instead of looping.
-    # Asked only of an argument that EXISTS, and that gate is what makes the
-    # answer the same on both platforms: BSD \`realpath\` fails on a
-    # nonexistent final component and GNU's succeeds on it, so one quoted glob
-    # spelled through a symlinked vendored directory was refused on CI and run
-    # green on macOS. Nothing absent can be vendored, so a glob and a typo keep
-    # exactly today's treatment in the arms below — the typo refused as
-    # missing, the glob handed to node unexpanded, this guard's documented
-    # ceiling — which is what those arms depend on, now held by the \`-e\` test
-    # rather than by a resolver that disagrees with itself. Refusing the glob
-    # was never the design: GNU only reached that verdict by reading \`*\` as an
-    # ordinary character, and it charged for it in the same breath by reporting
-    # a typo under a vendored symlink as "not missing".
-    # An argument that DOES exist is still judged before it is read as a glob,
-    # which is the order the block above depends on: a real file whose name
-    # holds a \`*\` still reaches this check, not the glob arm.
-    # What is left is a path that IS there and still will not resolve, or no
-    # \`realpath\` at all. Neither is a question this can answer, and the
-    # unanswered one used to be silent — the guard disarmed whole, the vendored
-    # file ran, the run exited 0, nothing on stderr. Die instead, as
-    # release-ticket.sh's own \`cd\`+\`pwd -P\` does ("none is guaranteed to
-    # exist"); dropping \`2>/dev/null\` puts \`realpath\`'s own reason on
-    # stderr on the way out, where the discarded status never went.
-    # Anchored at the divergence from the runner's own location, as the
-    # directory branch's \$shared walk is: a \`node_modules\` ABOVE the
-    # divergence is an ancestor of the runner too and says nothing about the
-    # argument. Matched absolutely instead, a worktree living under one refused
-    # every file argument as vendored.
-    # \$root is that location, derived once above the loop rather than a second
-    # time here: both branches asked the same \`dirname "\$0"\` question, and two
-    # copies a hundred lines apart are two things to keep in agreement for no
-    # answer either could give differently.
-    case "\$arg" in
-      */node_modules/*|node_modules/*) ;;
+      # Judged on the argument's RESOLVED path as well (#424) — #186's
+      # directory-branch rule applied to the file arm. A symlink whose own name
+      # carries no \`node_modules\` but whose target is vendored defeats every
+      # term above, and node does not discard it: node RUNS it, so the suite's
+      # result comes to hang on third-party code passing. That is #186's hazard,
+      # not #100's, and it takes #186's remedy rather than another spelling.
+      # Reached only where the spelling does not already name a \`node_modules\`
+      # SEGMENT — the two arms above take every spelling that does.
+      # Unbounded, that skip also swallowed a directory whose name merely ENDS in
+      # the word: \`vendor_node_modules/link.test.mjs\` was handed to the guard
+      # above as already-judged, and that guard's own test is anchored and never
+      # fired — so a symlink under such a name to a vendored file was judged by
+      # neither, and node ran it and counted it (measured). Every arm carries the
+      # bound, so they still partition the arguments with nothing in the gap.
+      # The arguments the arms above hold back are the logical guard's own input
+      # — the deeper-segment and absolute spellings it deliberately lets through
+      # because node runs and counts them included — and re-judging them here
+      # would overturn that ruling from a second place. Disjointness is what lets
+      # this check be physical while the one above stays logical (#401): the two
+      # never see the same argument, so neither can undo the other's resolution
+      # mode. As arms of one \`case\` that is structural — an argument matched
+      # above cannot reach here at all — where two separate \`case\`s held it
+      # only for as long as their pattern lists stayed in agreement (#1016).
+      # \`realpath\` rather than \`cd\`+\`pwd -P\`: \`cd\` resolves symlinked
+      # DIRECTORY components, but a symlink whose own target is a FILE is this
+      # ticket's input and \`cd\` never reaches it. It also follows a chain of
+      # them, and reports a cycle as a failure instead of looping.
+      # Asked only of an argument that EXISTS, and that gate is what makes the
+      # answer the same on both platforms: BSD \`realpath\` fails on a
+      # nonexistent final component and GNU's succeeds on it, so one quoted glob
+      # spelled through a symlinked vendored directory was refused on CI and run
+      # green on macOS. Nothing absent can be vendored, so a glob and a typo keep
+      # exactly today's treatment in the arms below — the typo refused as
+      # missing, the glob handed to node unexpanded, this guard's documented
+      # ceiling — which is what those arms depend on, now held by the \`-e\` test
+      # rather than by a resolver that disagrees with itself. Refusing the glob
+      # was never the design: GNU only reached that verdict by reading \`*\` as an
+      # ordinary character, and it charged for it in the same breath by reporting
+      # a typo under a vendored symlink as "not missing".
+      # An argument that DOES exist is still judged before it is read as a glob,
+      # which is the order the block above depends on: a real file whose name
+      # holds a \`*\` still reaches this check, not the glob arm.
+      # What is left is a path that IS there and still will not resolve, or no
+      # \`realpath\` at all. Neither is a question this can answer, and the
+      # unanswered one used to be silent — the guard disarmed whole, the vendored
+      # file ran, the run exited 0, nothing on stderr. Die instead, as
+      # release-ticket.sh's own \`cd\`+\`pwd -P\` does ("none is guaranteed to
+      # exist"); dropping \`2>/dev/null\` puts \`realpath\`'s own reason on
+      # stderr on the way out, where the discarded status never went.
+      # Anchored at the divergence from the runner's own location, as the
+      # directory branch's \$shared walk is: a \`node_modules\` ABOVE the
+      # divergence is an ancestor of the runner too and says nothing about the
+      # argument. Matched absolutely instead, a worktree living under one refused
+      # every file argument as vendored.
+      # \$root is that location, derived once above the loop rather than a second
+      # time here: both branches asked the same \`dirname "\$0"\` question, and two
+      # copies a hundred lines apart are two things to keep in agreement for no
+      # answer either could give differently.
       *)
         if [ -e "\$arg" ]; then
           fresolved=\$(realpath -- "\$arg") || { printf 'agent-test: cannot resolve %s — refusing rather than running it unchecked\n' "\$arg" >&2; exit 1; }
