@@ -71,6 +71,35 @@
 # tempted to skip it.
 set -eu
 
+# Directly below `set -eu`, not below a locale pin: this script has none and is
+# deliberately off locale-pin-prose.test.mjs's PINNED list. The five siblings
+# that DO carry a pin put this line under it instead, because that file's
+# PROLOGUE regex admits only comments, blanks and `set -[eux]+` above the pin.
+# Here the only constraint left is the real one: above the first git call.
+#
+# GIT_WORK_TREE is #1337's defect reached through the environment. The
+# contract that ticket established is that the audited tree is the WORKING
+# DIRECTORY's checkout — and `git rev-parse --show-toplevel` answers with the
+# ambient work tree instead the moment one is set, `--repo` or not. Measured
+# (#1020): standing in a checkout whose instruments have been TAMPERED, with
+# `GIT_WORK_TREE` naming a clean twin that carries its own pinned baseline,
+# this script exits 0 and prints the twin's digest. The gate passes. That is
+# the same wrong-tree write `--repo ""` produced before #1350 refused it, one
+# door further out, and a gate that certifies a tree nobody looked at is
+# worse than no gate.
+#
+# GIT_DIR is unset alongside it and is measured INERT here: `ls-files` names
+# paths and the digest is taken over the FILES ON DISK under `$root`, so
+# pointing the object database elsewhere changes nothing — measured against a
+# clean twin holding the exact pre-tamper content, the tampered digest came
+# back unchanged and the gate still refused. It stays on the line because the
+# pair is one hazard with one remedy, and because "inert today" is a
+# measurement of the current call set: a digest taken from `git show` or
+# `cat-file` rather than from disk would reintroduce the half nothing here
+# can see. ambient-git-vars-prose.test.mjs pins the line itself, which is
+# what keeps that half from being quietly dropped.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=instruments
 # `printf '%s'`, never `echo` (#484): `echo` expands backslash escapes in its
 # operand, and the messages below carry paths that git will happily hand us with

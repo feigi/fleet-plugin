@@ -103,11 +103,14 @@ function repo(t) {
 // `root` by default — the audited repo is now derived from cwd, never from
 // where the script itself sits, so the default here is what an ordinary
 // invocation from inside the checkout looks like. `cwd` is overridable for
-// the tests that specifically exercise cwd-vs-script-location divergence.
-const run = (root, args = [], { cwd = root } = {}) =>
+// the tests that specifically exercise cwd-vs-script-location divergence, and
+// `env` for the one #1020 case that has to put back a variable ENV scrubs —
+// that scrub is what keeps every other case here deterministic, so the opt-in
+// is per-call rather than a hole in ENV.
+const run = (root, args = [], { cwd = root, env = {} } = {}) =>
   spawnSync(join(root, SET, "scripts", "instruments.sh"), args, {
     cwd,
-    env: ENV,
+    env: { ...ENV, ...env },
     encoding: "utf8",
   });
 
@@ -524,4 +527,47 @@ test("(4) --pin from a directory nested inside a foreign git repo never writes i
   // in particular not one sitting directly in the foreign root, which is
   // where the old own-location contract would have written it.
   assert.deepEqual(findFleetDirs(foreign), [join(nestedDir, ".fleet")]);
+});
+
+// --- #1020: the ambient GIT_WORK_TREE that moves the audited tree.
+//
+// One case, not two, and that is a measurement rather than an omission.
+// GIT_DIR is unset by the script alongside GIT_WORK_TREE, but it is INERT
+// here: `ls-files` only names paths, and both the digest and the baseline are
+// read from the FILES ON DISK under `$root`, so pointing the object database
+// elsewhere changes neither. Measured against a clean twin holding the exact
+// pre-tamper content, the tampered digest came back unchanged and the gate
+// still refused. A fixture for that half could only be vacuous — precisely
+// the shape PR #1015 warned about — so the line's GIT_DIR half is pinned as
+// source by ambient-git-vars-prose.test.mjs instead.
+test("(5) an ambient GIT_WORK_TREE cannot certify a tampered tree from a clean twin (#1020)", (t) => {
+  // #1337's defect through the environment. That ticket established that the
+  // audited tree is the WORKING DIRECTORY's checkout; `rev-parse
+  // --show-toplevel` answers with the ambient work tree the moment one is
+  // set, so the digest, the `ls-files` listing and the baseline path all move
+  // together — which is exactly what makes the result LOOK coherent.
+  const here = repo(t);
+  const twin = repo(t);
+
+  // Both trees are byte-identical, so they pin to the same digest. That is
+  // what makes the twin a usable decoy rather than an obvious mismatch, and
+  // asserting it is the fixture's own control: if the two ever diverged, the
+  // poisoned run would fail for a reason that is not the retarget.
+  assert.equal(pin(here), pin(twin),
+    "fixture: the twin must pin to the same digest, or the decoy would be caught by arithmetic rather than by the fix");
+
+  writeFileSync(join(here, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+
+  const control = run(here);
+  assert.equal(control.status, 1, `fixture: the tamper must really be detectable\n${control.stderr}`);
+  assert.match(control.stderr, /instrument set CHANGED/);
+  assert.equal(run(twin).status, 0,
+    "fixture: the twin must be a tree that genuinely WOULD certify, or the poisoned run could not pass for its sake");
+
+  const r = run(here, [], { env: { GIT_WORK_TREE: twin } });
+
+  assert.equal(r.status, 1,
+    `an ambient GIT_WORK_TREE must not let a tampered checkout be certified from a clean one — a gate that passes on a tree nobody looked at is worse than no gate; got ${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /instrument set CHANGED/,
+    "and it must refuse for the real reason rather than tripping over the variable");
 });
