@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase, stripSlashGutter } from "./prose-pin.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
 // IDENTICAL shapes: `findings: []` either way, with the key listed in
@@ -529,5 +529,49 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
     doc,
     /in\s+`dimensionsUnrun`\s+is\s+covered/i,
     "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — the classifier never checked the command that ran",
+  );
+});
+
+// The same claim on the OTHER surface, and the half nothing was watching. The
+// pin above reads run-team/SKILL.md only, so when #535 corrected the doc, the
+// classifier's own comment kept asserting the retracted equivalence — "a key in
+// the first and not the second is the only thing that means covered" — and this
+// suite stayed green on it (#1143). Source is where a reader arrives BEFORE the
+// doc, so it is the copy that gets to mislead first.
+//
+// Reads SOURCE, not CODE — inverting this file's header rule, for that rule's
+// own reason. `stripComments` exists so that no pin can be satisfied by
+// commented-out text; here the comment IS the subject, and CODE has it stripped
+// to nothing, which would make this pin unsatisfiable rather than vacuous.
+//
+// `stripSlashGutter` first, and it buys BOTH halves: the clause wraps
+// mid-sentence at a `// ` that `phrase`'s `\s+` cannot span, and the block's
+// bare `//` separator line becomes a real blank line — which is what lets the
+// SHARED `paragraph` bound apply here instead of a local copy of
+// quiet-payload-prose.test.mjs's comment-block-above slicer, `paragraph`'s own
+// doc-comment being where this repo says a local copy is the defect, not a
+// style choice. Slice and anchor are then the sibling pin's exactly:
+// `anchorAt`'s exactly-once guarantee, and an end bound at the paragraph rather
+// than one running past the block into the `return` below it.
+//
+// The positive pin runs out through `(#535).` for the SKILL.md pin's reason —
+// the likelier regression is an editor softening rather than reverting, and a
+// pin stopping at `ran a suite` reads `ran a suite and is therefore covered` as
+// still present. The exclusion is whole-file and case-insensitive so the
+// retracted wording is caught wherever it comes back, and it targets `only
+// thing that means covered` rather than `covered` alone so the paragraph's own
+// correct denials — which must keep saying the word — stay green.
+test("review-pr.js's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
+  const prose = stripSlashGutter(SOURCE);
+  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-pr.js");
+  assert.match(
+    para,
+    phrase("A key in the first and NOT in the second ran a suite — not that it is covered (#535)."),
+    "review-pr.js's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
+  );
+  assert.doesNotMatch(
+    prose,
+    /only\s+thing\s+that\s+means\s+covered/i,
+    "review-pr.js is back to reading a key's absence from dimensionsUnrun as coverage — `unrunReason` never compares `run.command` against the command the dispatch handed out (#535)",
   );
 });
