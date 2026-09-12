@@ -423,6 +423,53 @@ test("a bolded ref AFTER the first one still joins the run — asterisks interle
   assert.deepEqual(rows.map((r) => r.d), [[12, 13], [12, 13], [12, 13], [5, 6]]);
 });
 
+test("a bold split landing MID-PHRASE misses the label — ACCEPTED LIMITATION, pinned, not desired behavior", () => {
+  // #1033. READ ROWS 1-4 AS A BOUNDARY, NOT AS A SPECIFICATION of what the
+  // scan should do. They are shapes an author could plausibly write and the
+  // scan does NOT read: the separator AROUND the label tolerates asterisks
+  // freely (`**Blocked by:** #12`, `Blocked by **#12**` — the two tests
+  // above), but the label PHRASE itself must still appear as one unbroken
+  // literal, so emphasis closing BETWEEN its two words drops the ref silently
+  // — exit 0, nothing on stderr, the ticket reading as claimable while its
+  // blocker is open. Row 3 shows a colon does not rescue it and row 4 that the
+  // run length does not matter: it is where the seam falls, not the emphasis,
+  // that decides. Measured at 662004f on both engines, agreeing — `/usr/bin/jq`
+  // 1.7.1-apple and `gojq` 0.12.19 both return [] for rows 1-4.
+  //
+  // Widening the alternation to tolerate emphasis INSIDE the phrase was
+  // considered at triage and refused, for two reasons worth keeping here:
+  //   - Nothing produces this shape. to-tickets' templates bold the whole
+  //     label (`**Blocked by:**`) or the whole ref (`Blocked by **#12**`),
+  //     never split the two words — the form is derived from the regex, never
+  //     observed in a real body.
+  //   - A label alternation loosened for bold is the exact class of change
+  //     that reopened the phantom-blocker sweep before; "the phantom-blocker
+  //     sweep stays closed against the widened label and heading gates" below
+  //     is what catches that. Widening spends the expensive half of the trade
+  //     on a shape nobody writes.
+  //
+  // So, to a future widener: this fixture going red is the PROMPT, not a
+  // regression. Before flipping rows 1-4 to expect numbers, re-measure the
+  // phantom-blocker sweep on BOTH engines — system jq (Oniguruma) and gojq
+  // (RE2, the one gh actually applies) — because a loosened label gate is
+  // what reopens that sweep, and the two engines need not agree about it.
+  //
+  // Rows 5-7 are the controls, and are what keeps this from being a vacuous
+  // pin: the seam forms — emphasis closing at the phrase boundary, or absent
+  // altogether — still resolve. Break the scan outright and rows 1-4 stay
+  // green while 5-7 red.
+  const { rows } = run([
+    ticket(1, "**Blocked** by #12\n"),
+    ticket(2, "**Depends** on #5\n"),
+    ticket(3, "**Blocked** by: #12\n"),
+    ticket(4, "*Blocked* by #12\n"),
+    ticket(5, "**Blocked by** #12\n"),
+    ticket(6, "**Depends on** #5\n"),
+    ticket(7, "Blocked by #12\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], [], [], [12], [5], [12]]);
+});
+
 test("a noun-form Dependencies heading arms a section, at any heading depth and with a trailing colon", () => {
   // #439's second, independent miss: the gate named the verb forms only, so
   // the heading #208's brief actually used opened nothing, and the list-item
@@ -643,6 +690,16 @@ test(
     assert.deepEqual(deps("## **Dependency injection:**\n\n- see #300\n"), []);
     assert.deepEqual(deps("## **Dependencies (blocking)**\n\n- #300\n"), []);
     assert.deepEqual(deps("## **Dependencies**\n\nSee #99 for context\n"), []);
+    // #1033's ACCEPTED LIMITATION, carried onto the engine gh applies — see
+    // "a bold split landing MID-PHRASE misses the label" above for the ruling
+    // and for what a widener owes. The [] rows are NOT a spec: they record
+    // that a seam landing mid-phrase is missed, and being here says the gap
+    // is a property of the alternation and not an engine artifact — measured,
+    // both engines agree. The paired seam row is the control, so a scan broken
+    // outright reds this block rather than confirming the limitation.
+    assert.deepEqual(deps("**Blocked** by #12\n"), []);
+    assert.deepEqual(deps("**Depends** on #5\n"), []);
+    assert.deepEqual(deps("**Blocked by** #12\n"), [12]);
     // The discriminator, and the only assertion here system jq cannot satisfy:
     // `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a U+00A0
     // between label and ref reduces to [12] under jq and [] under gojq. Without
