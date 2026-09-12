@@ -76,7 +76,11 @@ worth naming precisely because of its cost: matching only the canonical spelling
 once cost 120 of 283 finisher members their join key to `tier-outcomes.tsv`.
 
 The narrow guard against that — a test asserting the two functions accept the same
-spelling set — is tracked as #1072 and is **not** what this record rejects.
+spelling set, over all four finisher spellings plus a retry suffix, with the PR
+number read out of the name rather than merely required non-empty — shipped in
+`finisher-name-prose.test.mjs` (#1072). It was **not** what this record rejects:
+it pins the agreement the two matchers already keep, without making either read
+from a shared list.
 
 ## Prior requests
 
