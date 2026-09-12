@@ -67,6 +67,21 @@ net_budget() {
   printf '%s' "$net_budget_v"
 }
 
+# net_fetch_budget — print the budget (seconds) a fetch call gets. No
+# arguments: the default and the override variable both live here, so the one
+# thing every fetch call site does is ask.
+#
+# 300s, and the number is chosen against the FALSE FAILURE, not against the
+# stall: this fetch moves objects rather than refs, so a cold or large one can
+# legitimately run for minutes, and a bound that turns a working slow link into
+# exit 2 is worse than the hang it replaces — exit 2 is a verdict the controller
+# acts on. Well above any healthy incremental fetch, and still a bound.
+# `FLEET_NET_TIMEOUT` is the shorten-only override the fleet's fetches share;
+# the rule is net_budget's, in net.sh.
+net_fetch_budget() {
+  net_budget 300 "${FLEET_NET_TIMEOUT:-}"
+}
+
 # Kill $1 and everything descended from it. Killing the named process alone is
 # not enough and not a near miss: git hands the transport to a helper, and that
 # helper inherits this script's stderr. Measured against the accept-then-silent

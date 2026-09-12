@@ -93,14 +93,7 @@ merge=$3
 base=${BASE_REF:-origin/main}
 
 echo "\$ git fetch --quiet origin" >&2
-# 300s, and the number is chosen against the FALSE FAILURE, not against the
-# stall: this fetch moves objects rather than refs, so a cold or large one can
-# legitimately run for minutes, and a bound that turns a working slow link into
-# exit 2 is worse than the hang it replaces — exit 2 is a verdict the controller
-# acts on. Well above any healthy incremental fetch, and still a bound.
-# `FLEET_NET_TIMEOUT` is the shorten-only override the fleet's fetches share;
-# the rule is net_budget's, in net.sh.
-fetch_budget=$(net_budget 300 "${FLEET_NET_TIMEOUT:-}")
+fetch_budget=$(net_fetch_budget)
 fetch_rc=0
 net_git "" "$fetch_budget" fetch --quiet origin || fetch_rc=$?
 if [ "$fetch_rc" -ne 0 ]; then
