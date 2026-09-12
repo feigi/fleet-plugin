@@ -401,6 +401,174 @@ test("a same-named tag on a merged commit must not authorize reaping an UNMERGED
   assert.equal(git(w, "rev-parse", "refs/heads/feature/unmerged"), sha, "the commit itself is untouched");
 });
 
+// #924, the BASE side of the same family, and the third member of it: #634
+// established that in this script the enumeration fix and the rev-consumption
+// fix are separate, PR #914 qualified the BRANCH side (`refs/heads/$b`), and
+// the base side reached `git cherry` exactly as BASE_REF spelled it. The
+// fixture move below is one `git tag origin/main <rev>` — a tag carrying the
+// full remote-tracking SPELLING of the default base, which git's own
+// disambiguation order (refs/tags/<name> before refs/remotes/<name>) then
+// prefers when the shorthand is resolved as a rev.
+//
+// Both halves of that move are load-bearing, and for a different reason than
+// the #634 pair above. There a tag at ANY merged commit triggers it; here the
+// tag has to actually CONTAIN the branch's commits, because a tag named
+// `origin/main` at an unrelated commit yields `+` lines and correctly keeps —
+// which is exactly what makes the control below a control rather than a second
+// copy of the same case.
+//
+// Real content, never `commit()`'s empty commits, is NOT required here and
+// deliberately not used: `unmergedGoneBranch` leaves `main` where it was, so
+// the upstream-only set is empty and there is no patch-id for an empty commit
+// to collide with. A fixture that advances `main` by an empty commit instead
+// reads `-` (already upstream) under BOTH spellings and pins nothing — measured
+// while building this, and the reason the control tags an EXISTING commit
+// rather than making a new one.
+test("a local tag named `origin/main` must not authorize reaping an unmerged [gone] branch (#924)", (t) => {
+  const w = repo(t);
+  const sha = unmergedGoneBranch(w, "feature/solo", "sole copy, nowhere else");
+  git(w, "tag", "origin/main", "refs/heads/feature/solo");
+  // `--quiet` for the reason the ticket recorded: it suppresses git's own
+  // `warning: refname 'origin/main' is ambiguous.`, which is the one signal
+  // this whole class produced and the reason a run was silent. Here it keeps
+  // the fixture's own probe from printing it into the suite's output.
+  assert.equal(
+    git(w, "rev-parse", "--verify", "--quiet", "origin/main"),
+    sha,
+    "fixture: the shorthand must resolve to the TAG, i.e. the branch's own tip",
+  );
+  assert.notEqual(
+    git(w, "rev-parse", "--verify", "refs/remotes/origin/main"),
+    sha,
+    "fixture: and the real base must be a different commit, or the shadowing changes no answer",
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json.reaped,
+    [],
+    "the merge probe must measure against refs/remotes/origin/main, never a tag that spells it",
+  );
+  assert.deepEqual(json.kept, [{ branch: "feature/solo", reason: "unmerged commits" }]);
+  assert.match(stderr, /KEEP feature\/solo — unmerged commits/);
+  assert.equal(branchExists(w, "feature/solo"), true, "the branch — and its only copy of the commit — must survive");
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/solo"), sha, "the commit itself is untouched");
+});
+
+test("that same tag, not covering the branch's commits, still reaps a genuinely merged one (#924)", (t) => {
+  // The control, and the direction a fix that simply keeps everything fails:
+  // the tag is present and still outranks the remote-tracking ref, but it sits
+  // at the commit `main` was on before the branch existed, so the branch's work
+  // is not in it. Measured against the pre-fix script this fixture is a false
+  // KEEP — `git cherry <that old commit> refs/heads/feature/merged` prints `+`
+  // for a branch that is fully merged — so the qualification is what restores
+  // the reap, not just what blocks one.
+  const w = repo(t);
+  const before = git(w, "rev-parse", "main");
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  git(w, "tag", "origin/main", before);
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(stderr, /KEEP/);
+  assert.equal(branchExists(w, "feature/merged"), false, "a shadowing tag must not strand a genuinely merged branch either");
+  assert.equal(git(w, "rev-parse", "refs/tags/origin/main"), before, "reaping a branch must leave the tag alone");
+});
+
+test("a local tag named `origin/main` must not authorize REMOVING a detached worktree's only copy (#924)", (t) => {
+  // The second measurement site, and the one where the misread costs the FILES:
+  // this sweep removes directories. A fix applied to the branch sweep alone
+  // leaves it blind — the same split #730 pinned for the status probe — so it
+  // is pinned separately here.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const sole = commit(wt, "sole copy, nowhere else");
+  git(w, "tag", "origin/main", sole);
+
+  const { code, json } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [], "the probe must not read the worktree's own tip as the base");
+  assert.equal(existsSync(wt), true);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, `worktree ${wt} holds commits that exist nowhere else`);
+  assert.equal(git(wt, "rev-parse", "HEAD"), sole, "the commit is still reachable from the worktree");
+});
+
+test("a BASE_REF that only resolves as a TAG is refused, never measured against (#924)", (t) => {
+  // The guard site, and the fail-closed half of the same edit. `rev-parse
+  // --verify` used to ask about the shorthand, which a tag answers at exit 0 —
+  // so a BASE_REF with no remote-tracking ref behind it at all passed the guard
+  // and every sweep then measured against the tag. Measured on the pre-fix
+  // script: `REAPED feature/solo` at exit 0, the branch's sole commit gone.
+  // Asking about the qualified spelling turns that into a refusal naming the
+  // spelling the caller passed.
+  const w = repo(t);
+  const sha = unmergedGoneBranch(w, "feature/solo", "sole copy, nowhere else");
+  git(w, "tag", "origin/gone-upstream", "refs/heads/feature/solo");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { BASE_REF: "origin/gone-upstream" });
+
+  assert.equal(code, 2);
+  assert.equal(json, null, "a refusal emits no payload");
+  assert.match(stderr, /^reap: origin\/gone-upstream does not resolve$/m,
+    "the message names what the caller passed, not the qualified spelling it cannot act on");
+  assert.equal(branchExists(w, "feature/solo"), true, "and nothing is deleted on the way out");
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/solo"), sha);
+});
+
+test("BASE_REF must be a remote-tracking ref (#924)", (t) => {
+  // The accept-list this script had none of, and the precondition that makes
+  // the qualification above sound: with the input restricted to the one
+  // namespace that can answer "has this landed upstream", prefixing
+  // `refs/remotes/` is always correct. Unrestricted, `refs/heads/main` was
+  // taken at face value — a local main never fast-forwarded strands every
+  // merged branch, and `refs/heads/<a branch in the sweep>` reads that branch's
+  // own commits as upstream and authorizes `-D` on them.
+  const w = repo(t);
+  unmergedGoneBranch(w, "feature/solo", "sole copy, nowhere else");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { BASE_REF: "refs/heads/main" });
+
+  assert.equal(code, 2);
+  assert.equal(json, null, "a refusal emits no payload");
+  assert.match(stderr, /^reap: BASE_REF must be a remote-tracking ref, got 'refs\/heads\/main'$/m);
+  assert.equal(branchExists(w, "feature/solo"), true, "a refused invocation reads nothing and deletes nothing");
+
+  // Fourth pin on the design spec's script-surface row, same reason as the
+  // three others: the row states this script's exit-2 contract in prose, and a
+  // reader trusting it draws safety conclusions about a script settings.json's
+  // autoMode allowlist lets run unattended. Taken from the real refusal rather
+  // than typed here — a hand-copied phrase drifts.
+  const label = /^reap: (.+?), got '/m.exec(stderr);
+  assert.ok(label, `fixture must reach the accept-list refusal: ${stderr}`);
+  const row = specRow();
+  assert.ok(
+    row.includes(label[1]),
+    `the spec row must state this refusal, and does not carry "${label[1]}".\nrow: ${row}`,
+  );
+});
+
+test("an already-qualified BASE_REF is measured with as given, never prefixed twice (#924)", (t) => {
+  // The `refs/remotes/*` arm of the qualification. Dropping it — prefixing
+  // unconditionally — builds `refs/remotes/refs/remotes/origin/main`, which
+  // resolves to nothing, so the accepted spelling this very accept-list admits
+  // would refuse at the guard below it.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { BASE_REF: "refs/remotes/origin/main" });
+
+  assert.equal(code, 0, `the qualified spelling must resolve: ${stderr}`);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+  assert.deepEqual(json.kept, []);
+});
+
 test("a git cherry that dies is KEPT, never reaped — an unanswerable probe authorizes nothing (#264)", (t) => {
   const w = repo(t);
   const sha = unmergedGoneBranch(w, "feature/onlyhere", "sole copy, nowhere else");
@@ -2493,7 +2661,14 @@ test("a bare repo in the registry is not diagnosed as an unresolvable HEAD (#381
   // inside it this sweep now refuses that removal as the working directory the
   // run itself was started in (#992) — a different subject, and one that would
   // leave this fixture's removal unasserted.
-  const { code, json } = runReap(bare, ["--apply"], { BASE_REF: "main" });
+  //
+  // No `BASE_REF` override: this arm passed `main` before #924's accept-list,
+  // which refuses a local branch. The fetch above populates
+  // `refs/remotes/origin/main` in the bare repo too — the comment on the
+  // `remote add` says as much — so the default base is what this fixture always
+  // had available, and the subject here is the registry's bare entry, not the
+  // base.
+  const { code, json } = runReap(bare, ["--apply"]);
 
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], `the bare root is not a finding: ${JSON.stringify(json.kept)}`);
