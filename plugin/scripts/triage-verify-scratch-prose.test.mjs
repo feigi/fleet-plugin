@@ -17,10 +17,9 @@
 // `~/.agents/skills/triage/SKILL.md` — outside this repo, outside any git
 // repo, vendored from `mattpocock/skills` and pinned by hash in
 // `~/.agents/.skill-lock.json` (installed 2026-04-30, updated 2026-08-11), so
-// an edit there is unversioned here and is reverted by the next skill update.
-// `docs/specs/2026-07-30-fleet-trust-the-label-design.md` already declined
-// editing a personal skill for that reason. `docs/agents/issue-tracker.md` is
-// the wrong home for the opposite reason, recorded in
+// an edit there is unversioned here and is reverted by the next skill
+// update — reason enough on its own, no precedent needed. `docs/agents/issue-tracker.md`
+// is the wrong home for the opposite reason, recorded in
 // `issue-tracker-prose.test.mjs`'s own header: nothing routes a reader there,
 // it is a catch-up copy. Root `CLAUDE.md` is auto-loaded into every session in
 // this repo, so the rule is in the reader's context at the moment the step
