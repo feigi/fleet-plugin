@@ -104,8 +104,12 @@ function relocate(w, wt, dest) {
   return dest;
 }
 
-function runAudit(cwd) {
-  const r = spawnSync("sh", [SCRIPT], { cwd, env: ENV, encoding: "utf8" });
+// `env` overrides ENV's scrub for the two #1020 cases below and nothing else:
+// ENV deletes GIT_DIR and GIT_WORK_TREE for every fixture in this file, so a
+// suite run under a poisoned environment cannot go vacuous, and the only way
+// to exercise the path that scrub makes unreachable is to opt one case back in.
+function runAudit(cwd, { env = {} } = {}) {
+  const r = spawnSync("sh", [SCRIPT], { cwd, env: { ...ENV, ...env }, encoding: "utf8" });
   return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
 }
 
@@ -868,4 +872,95 @@ test("a missing json.sh is exit 2, with no half-written array", (t) => {
   assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the base ref");
   assert.equal(r.stdout, "",
     "and not even the opening `[` — the guard fires before the array is started, so no caller can see a truncated one");
+});
+
+// --- #1020: the ambient git variables, one fixture each.
+//
+// Deliberately NOT one fixture setting both. PR #1015 measured the cost of
+// that shortcut on release-ticket.sh: a case overriding only one of the pair
+// leaves the other half of `unset GIT_DIR GIT_WORK_TREE` unpinned and green,
+// and the two halves break this script in two different directions anyway —
+// GIT_DIR swaps the repository, GIT_WORK_TREE swaps the tree the dirty check
+// answers about. One detector cannot see both.
+
+test("an ambient GIT_WORK_TREE does not report a dirty worktree as clean (#1020)", (t) => {
+  // The silent-failure half. GIT_WORK_TREE outranks `-C`, so the loop's
+  // `git -C "$wt" status --porcelain -uall` reads the ambient tree's status
+  // against $wt's index and answers EMPTY at rc 0 — a false clean on a
+  // worktree that genuinely holds uncommitted work.
+  //
+  // `.gitignore` naming `.worktrees/` is not decoration: it is the fleet's own
+  // layout, and it is what makes the leaked answer an EMPTY one rather than a
+  // noisy `?? .worktrees/`. Without it the poisoned status still reports
+  // SOMETHING and the false clean never forms, so the fixture would pass
+  // pre-fix while pinning nothing.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".worktrees/\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore worktrees");
+  git(w, "push", "-q", "origin", "main");
+  const wt = addWorktree(w, "fix/1020-x");
+  writeFileSync(join(wt, "scratch.txt"), "uncommitted\n");
+
+  // The fixture's own positive control, in both directions — the same standard
+  // the #730 case above holds itself to. Without the first, a git that stopped
+  // honouring GIT_WORK_TREE would leave this green while measuring nothing;
+  // without the second, the case could be passing because the worktree was
+  // never dirty.
+  assert.equal(
+    git(wt, "status", "--porcelain"),
+    "?? scratch.txt",
+    "fixture: the worktree must really be dirty, or this case measures nothing",
+  );
+  assert.equal(
+    execFileSync("git", ["-C", wt, "status", "--porcelain"], {
+      cwd: w, env: { ...ENV, GIT_WORK_TREE: w }, encoding: "utf8",
+    }),
+    "",
+    "fixture: the ambient GIT_WORK_TREE must really silence that answer, or the leak this pins no longer exists",
+  );
+
+  const { code, json, stderr } = runAudit(w, { env: { GIT_WORK_TREE: w } });
+
+  assert.equal(code, 0, stderr);
+  // `readable: true` alongside the count, for #730's reason: a fix that turned
+  // the poisoned answer into an UNKNOWN would also stop reporting 0, and
+  // unknown is a different — and here wrong — verdict about a worktree git can
+  // answer for perfectly well once the variable is out of the way.
+  assert.deepEqual(
+    entryFor(json, wt),
+    { worktree: wt, branch: "fix/1020-x", ahead: 0, dirty: 1, dirtyFiles: ["scratch.txt"], readable: true },
+    "an ambient GIT_WORK_TREE must not make a dirty worktree report as clean — this report is what decides REDO vs DESTROY",
+  );
+});
+
+test("an ambient GIT_DIR does not audit a different repository (#1020)", (t) => {
+  // The correctness half, and it cannot use the dirty check as its detector:
+  // GIT_DIR does not misdirect the `git -C "$wt"` calls at all. What it
+  // retargets is every BARE git call above the loop — `rev-parse --git-dir`,
+  // `rev-parse --verify "$base"`, and the `worktree list` behind `wt_listing`
+  // — so the audit is assembled from the other repository's registry and never
+  // mentions this one. Measured pre-fix: rc 0, a well-formed array, nothing on
+  // stderr.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/1020-here");
+  const other = repo(t, "other");
+  const otherWt = addWorktree(other, "fix/1020-there");
+
+  const { code, json, stderr } = runAudit(w, { env: { GIT_DIR: join(other, ".git") } });
+
+  assert.equal(code, 0, stderr);
+  // Both directions asserted, and either alone would already go red pre-fix.
+  // The pair is what says the answer is about the WRONG REPOSITORY rather than
+  // merely incomplete: a truncated listing loses `wt`, a retargeted one gains
+  // `otherWt`, and only the second distinguishes them.
+  assert.ok(
+    json.some((e) => e.worktree === wt),
+    `the audit must describe this checkout's own worktrees: ${JSON.stringify(json)}`,
+  );
+  assert.deepEqual(
+    json.filter((e) => e.worktree === otherWt),
+    [],
+    `an ambient GIT_DIR must not make the audit answer for another checkout: ${JSON.stringify(json)}`,
+  );
 });

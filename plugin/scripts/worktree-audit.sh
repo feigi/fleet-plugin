@@ -46,6 +46,35 @@ set -eu
 # would otherwise leave every test in this suite green.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour. Same
+# placement, same reason, as release-ticket.sh's copy.
+#
+# Both halves are measured on THIS script (#1020), and they break it in two
+# different directions — which is why the line names both rather than the one
+# that happened to be found first.
+#
+# GIT_DIR: every git call above the per-worktree loop is bare — `rev-parse
+# --git-dir`, `rev-parse --verify "$base"`, and the `worktree list` behind
+# `wt_listing` — so an ambient one retargets the whole listing. Measured:
+# standing in clone A with `GIT_DIR` naming clone B's `.git`, this script
+# emits a full, confident array describing B's worktrees, at rc 0, with
+# nothing on stderr to say the question was not the one asked. The fleet
+# controller reads this report to decide whether a replacement member would
+# REDO work or DESTROY it, and an answer about another checkout is the worst
+# possible input to that decision.
+#
+# GIT_WORK_TREE: it outranks `-C`, so the `git -C "$wt" status --porcelain
+# -uall` in the loop stops answering about `$wt`. Measured, on the fleet's own
+# layout (`.worktrees/` gitignored, so the parent really is clean): a worktree
+# holding an uncommitted file comes back `dirty: 0, dirtyFiles: [],
+# readable: true` — a false CLEAN, at rc 0, indistinguishable from a worktree
+# that genuinely holds nothing. Same shape as #730's `showUntrackedFiles=no`
+# silence, reached through the environment instead of the config.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=worktree-audit
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
