@@ -539,6 +539,27 @@ operand=
 # between iterations, \`\$0\` is never reassigned, and \`CDPATH=\` pins the one
 # lookup an inherited CDPATH could otherwise answer differently per argument.
 root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
+# The deepest ancestor of \$root that also contains \$1, left in \$shared. Both
+# vendored guards judge an argument from that point down, because a
+# \`node_modules\` segment ABOVE it is an ancestor of the runner itself and says
+# nothing about the argument — and both walked the identical loop to find it.
+# It takes an ALREADY-RESOLVED path and resolves nothing itself, which is the
+# whole of what makes it shareable. The two callers deliberately resolve
+# differently — the directory branch \`cd\`+\`pwd -P\` (#186), the file branch
+# \`realpath\` (#424), one logical guard away from each other by #401's
+# ruling — and a helper that picked either mode for both would reinstate the
+# defect #424 closed. Pass the resolution in; never derive it here.
+# \$shared is a global because POSIX \`sh\` has no \`local\`, and it is rewritten
+# on every call — read it in the same breath, as both callers do. The \`|
+# "\$shared"\` alternative is the equality case: an argument resolving TO the
+# ancestor, not under it, must still terminate the walk there.
+diverge() {
+  shared=\$root
+  while [ -n "\$shared" ]; do
+    case "\$1" in "\$shared"/* | "\$shared") break ;; esac
+    shared=\${shared%/*}
+  done
+}
 for arg do
   shift
   # Judged on the argument's shape, not on what that shape resolves to: a
@@ -694,11 +715,7 @@ for arg do
       [ -z "\$parent" ] || resolved=\${parent%/}/\$(basename -- "\$arg")
       [ -n "\$resolved" ] || resolved=\$arg
     fi
-    shared=\$root
-    while [ -n "\$shared" ]; do
-      case "\$resolved" in "\$shared"/* | "\$shared") break ;; esac
-      shared=\${shared%/*}
-    done
+    diverge "\$resolved"
     case "/\${arg##/*}/ /\${resolved#"\$shared"}/" in
       */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "\$arg" >&2; exit 1 ;;
     esac
@@ -977,23 +994,20 @@ for arg do
       # exist"); dropping \`2>/dev/null\` puts \`realpath\`'s own reason on
       # stderr on the way out, where the discarded status never went.
       # Anchored at the divergence from the runner's own location, as the
-      # directory branch's \$shared walk is: a \`node_modules\` ABOVE the
-      # divergence is an ancestor of the runner too and says nothing about the
-      # argument. Matched absolutely instead, a worktree living under one refused
+      # directory branch is: a \`node_modules\` ABOVE the divergence is an
+      # ancestor of the runner too and says nothing about the argument.
+      # Matched absolutely instead, a worktree living under one refused
       # every file argument as vendored.
-      # \$root is that location, derived once above the loop rather than a second
-      # time here: both branches asked the same \`dirname "\$0"\` question, and two
-      # copies a hundred lines apart are two things to keep in agreement for no
-      # answer either could give differently.
+      # \$root is that location, derived once above the loop rather than a
+      # second time here, and \`diverge\` is the walk down from it — the same
+      # one the directory branch runs, over a resolution this branch derived
+      # its own way. What is shared is the anchor and the walk, never the
+      # resolution mode: that stays disjoint (#401, #424).
       *)
         if [ -e "\$arg" ]; then
           fresolved=\$(realpath -- "\$arg") || { printf 'agent-test: cannot resolve %s — refusing rather than running it unchecked\n' "\$arg" >&2; exit 1; }
-          fshared=\$root
-          while [ -n "\$fshared" ]; do
-            case "\$fresolved" in "\$fshared"/* | "\$fshared") break ;; esac
-            fshared=\${fshared%/*}
-          done
-          case "\${fresolved#"\$fshared"}" in
+          diverge "\$fresolved"
+          case "\${fresolved#"\$shared"}" in
             */node_modules/*)
               printf 'agent-test: %s resolves to %s, inside node_modules — excluded from the run, not missing\n' "\$arg" "\$fresolved" >&2
               exit 1

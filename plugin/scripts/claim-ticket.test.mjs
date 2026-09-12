@@ -402,6 +402,22 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
   const r = a.run("vendlink");
   assert.notEqual(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stderr, /is under node_modules — excluded from the run/);
+  // A DIRECTORY argument and a FILE argument in one argv, diverging from the
+  // runner at different depths. Both arms share one `diverge` walk writing one
+  // global `$shared` (POSIX sh has no `local`), so the file arm's verdict must
+  // not inherit the directory's: `t` diverges at the worktree, `outlink`
+  // resolves two levels above it, and reusing the deeper answer strips nothing
+  // — leaving the ANCESTRY's own `node_modules` inside the string the file arm
+  // scans, so the worktree refuses a file that is not vendored at all.
+  // Every other row here passes one argument, where `$shared` is empty before
+  // the call and dropping the call outright still reds. This row is the only
+  // one that catches reusing a STALE value: `[ -n "$shared" ] || diverge …`,
+  // the plausible optimization, left the whole file green before it existed
+  // (measured) and reds here now.
+  symlinkSync(join("..", "..", "root.test.mjs"), join(a.wt, "outlink.test.mjs"));
+  const mixed = a.run("t", "outlink.test.mjs");
+  assert.equal(mixed.status, 0, mixed.stdout + mixed.stderr);
+  assert.match(mixed.stdout, /(?:ℹ|#) pass 4(?!\d)/);
 });
 
 // The spelling term's own reason to exist, and the only input in this repo that
