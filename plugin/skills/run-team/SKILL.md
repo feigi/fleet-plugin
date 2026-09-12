@@ -2132,6 +2132,14 @@ and it passes vacuously — absence is not self-blocking in `jq`, so
 refusal clears on its own, so the response is to re-probe shortly — not to block
 the PR, and not to send it back for work it does not need.
 
+**Ask which directory it proved the gate in, too.** The scratch root the harness
+injects is one directory shared by every member you dispatch, so a proof driven in
+the root itself can absorb a sibling's fixtures and still report every shape
+blocked — measured 2026-08-28 (#966), a bot found payloads for a different PR
+already sitting where it was about to write. `run-merge-bot.md` carries the per-PR
+namespace and the count check that refuses one; what you own is the bot that cannot
+name its directory, the same way you own the one that cannot name its fields.
+
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
 and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
 the loop so handled PRs do not re-fire.
