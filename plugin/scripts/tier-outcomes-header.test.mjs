@@ -44,6 +44,13 @@ const COLUMNS = [
   "files",
 ];
 
+// The ruling step, and no more of SKILL.md than that — the same reason
+// `prose-pin.mjs`'s own slicers give: a positive regex over the whole file is
+// satisfiable from outside the paragraph it guards, and this file is 2700 lines
+// of prose about exactly these words. One definition, because three hand-rolled
+// copies of one slice is how two of them end up bounded differently.
+const rulingStep = () => between(RUN_TEAM, "**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step");
+
 test("the header's column line names every column, in order", () => {
   // Drift here is silent and total: the header's own awk one-liners and every
   // recount in SKILL.md index by position, so a column inserted anywhere but
@@ -142,11 +149,7 @@ test("SKILL.md's ruling step names all four covariates and says a missing one st
   // The columns are useless unless the ruling step tells the controller to fill
   // them, and worse than useless if it does not say what to do without a value:
   // a guessed covariate looks measured.
-  const at = RUN_TEAM.indexOf("**Guard: accumulate per PR");
-  assert.notEqual(at, -1, "'**Guard: accumulate per PR' moved — update this test");
-  const end = RUN_TEAM.indexOf("**Then record the run's member facts", at);
-  assert.notEqual(end, -1, "'**Then record the run's member facts' moved — update this test");
-  const slice = RUN_TEAM.slice(at, end);
+  const slice = rulingStep();
 
   for (const col of ["sizing", "profile", "loc", "files"]) {
     assert.match(slice, new RegExp("`" + col + "`"), `the ruling step never names \`${col}\``);
@@ -209,9 +212,7 @@ test("the sizing verdict has a stated collection channel, and it is not phase 0"
   // hand is left BLANK, never estimated", that made the covariate correct-to-omit
   // on every row forever: documented as the thing a tier comparison must condition
   // on, and uncollectable.
-  const at = RUN_TEAM.indexOf("**Guard: accumulate per PR");
-  const end = RUN_TEAM.indexOf("**Then record the run's member facts", at);
-  const slice = RUN_TEAM.slice(at, end);
+  const slice = rulingStep();
   // Negative pinned on the ATTRIBUTION, not on one phrasing of it: the first
   // draft of this test forbade the literal `sizing` is phase 0's and stayed
   // green under a reworded restatement of the same error.
@@ -242,5 +243,50 @@ test("the dispatch brief tells the member to emit the Sizing line the ruling ste
     RUN_TEAM,
     /`Sizing: light` or `Sizing: heavy`/,
     "the dispatch brief no longer tells the member to put its sizing verdict in the PR body",
+  );
+});
+
+test("the ruling step refuses to record a sizing verdict it cannot date", () => {
+  // #1070. The channel pinned above says WHERE the verdict is read from; it says
+  // nothing about whether the line was produced by the run it claims. A
+  // `Sizing:` line typed in before `sizing-a-ticket` ever ran is byte-identical
+  // to one the skill produced, so the body is not a second source for itself —
+  // measured on a member that wrote the verdict first and caught itself
+  // afterwards, which is the only reason anyone knows this can happen.
+  const slice = rulingStep();
+
+  // The rule as ONE span, both conditions joined. Split into two presence
+  // checks, a controller holding a signalled-but-undated verdict satisfies the
+  // half it is looking at and records it, which is the whole defect.
+  assert.match(
+    slice,
+    phrase("Record `sizing` only when the report places that run before the PR AND the line carries its signal"),
+    "recording `sizing` is no longer conditioned on the report's ordering together with the line's signal",
+  );
+  // The else-branch, bound to the action it demands. A rule with no stated
+  // failure action is read as advice, and the adjacent BLANK rule is about a
+  // value not in hand — an undated verdict IS in hand, which is what makes it
+  // dangerous.
+  assert.match(
+    slice,
+    phrase("leave the field BLANK and say which in `note`"),
+    "the ruling step no longer says what to do when the verdict cannot be dated",
+  );
+  // The three failure cases, as the one sentence that enumerates them: a
+  // controller told only about a missing clause still records the case where
+  // the member reported writing the line early.
+  assert.match(
+    slice,
+    phrase("Ordering clause missing, verdict authored before the run with no corrected value reported, or body and report naming different verdicts"),
+    "the ruling step no longer enumerates which failures blank the covariate",
+  );
+  // The rejected alternative, kept explicit: deriving the verdict from the diff
+  // was ruled premature on #1070, and a controller staring at a blank column
+  // with `diff-stats.mjs` output already in hand is exactly who would reach for
+  // it — producing a value that reads as measured, which is the defect again.
+  assert.match(
+    slice,
+    phrase("Do not re-derive the verdict from the diff to fill the gap"),
+    "the ruling step no longer forbids substituting a diff-derived proxy for the member's verdict",
   );
 });
