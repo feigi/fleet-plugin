@@ -11,13 +11,14 @@
 // populate or omit `spend`, never change a ticket's stage.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
+import { inspect } from "node:util";
 
 const NAME = "board";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -848,9 +849,57 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   await new Promise(() => {}); // run until signalled
 }
 
+// #1093: an internal FAULT is not a refusal, and until this they were one
+// line. Every guard in this file refuses through die(), which writes its own
+// line and calls process.exit(2) itself (arg.mjs) rather than throwing, so
+// nothing a caller can type unwinds as far as the catch below. Re-checked
+// against the tree rather than taken from the ticket: the file's only `throw`
+// is readAgent's sidecar-shape guard, caught by the try that raises it, so the
+// whole population reaching this handler is this script breaking. Handing that
+// to die() printed a bug under the wording and the exit code a typo gets — one
+// `board: <text>` line, exit 2, no stack — and an operator could not tell the
+// two apart.
+//
+// So the entry point gets its own path and its own code, and die() is left
+// exactly as the other nine scripts have it. 70 is sysexits.h's EX_SOFTWARE,
+// "an internal software error has been detected", and it spends nothing the
+// fleet's exit vocabulary already means: 0 is the answer, 1 is a verdict (this
+// script has none to give), 2 is every refusal here, 3 is candidates.mjs's
+// minted verdict, and 126+ is the band a shell mints for itself. Stated in the
+// script-surface table of docs/specs/2026-07-23-fleet-plugin-design.md, which
+// board.mjs had no row in at all before this.
+const FAULT_EXIT = 70;
+
+// The diagnostic, and it can never come back empty. Read off `stack` rather
+// than `instanceof Error`: the stack is what a fault owes the operator, and
+// asking for it directly needs no error TYPE — the hierarchy #1093 rules out.
+// A thrown non-Error has no stack and used to arrive as `e.message ===
+// undefined`, so the CLI printed the literal `board: undefined`; inspect()
+// renders every value there is — `undefined`, `null`, `""`, a circular object
+// — as something with bytes in it.
+export function faultText(e) {
+  return typeof e?.stack === "string" && e.stack !== "" ? e.stack : `non-Error rejection: ${inspect(e)}`;
+}
+
+// writeSync and the leading newline for die()'s own reasons (arg.mjs): tryRun
+// re-emits gh's stderr through this process's async stream, so a stack queued
+// behind it on a pipe is what process.exit() discards. The empty catch is
+// die()'s too — the message can be lost, the exit code cannot. A sibling
+// script that wants a fault path adopts this shape rather than spelling a
+// second one; it is deliberately not in arg.mjs, which exists to hold the
+// helpers that already had copies to collapse.
+function fault(e) {
+  try {
+    writeSync(2, `\n${NAME}: internal fault (exit ${FAULT_EXIT}) — a bug in ${NAME}.mjs, not in what you typed\n${faultText(e)}\n`);
+  } catch {
+    // Message may be lost; the exit code below must not be.
+  }
+  process.exit(FAULT_EXIT);
+}
+
 // Only run main() as a CLI, never when imported by a test. realpathSync resolves
 // both sides (relative argv, symlinks) so the equality is reliable regardless of
 // how node was invoked.
 const isCLI = process.argv[1] &&
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-if (isCLI) main().catch((e) => die(e.message));
+if (isCLI) main().catch(fault);
