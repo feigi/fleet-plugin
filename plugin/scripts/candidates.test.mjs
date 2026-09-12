@@ -610,6 +610,64 @@ test("the phantom-blocker sweep stays closed against the widened label and headi
   );
 });
 
+// #1032. The per-candidate row prints `deps:` only when `d` is non-empty, so a
+// heading that named a dependency the gate refused printed EXACTLY the row of a
+// ticket that declared none — and the refusal is by design (`## Dependencies
+// (blocking)`, two tests above), so that shape declared blockers into a void
+// with nothing said. The new line is the signal, and matching on its wording is
+// the point rather than an accident: #1032's central constraint is that it reads
+// as "declared, not parsed" and never as a fault, because the near-miss is
+// legitimate usage and a fault-worded diagnostic false-alarms on every ticket
+// using it.
+const MISS = /not parsed as a dependency section/;
+const missLines = (stderr) => stderr.split("\n").filter((l) => MISS.test(l));
+
+test("a dependency heading that armed no section is named on stderr, and an armed one is not (#1032)", () => {
+  const { status, stdout, stderr, rows } = run([
+    // The near-miss the gate refuses on purpose: fires.
+    ticket(1, "## Dependencies (blocking)\n\n- #300\n"),
+    // No dependency heading at all — a `#N` in ordinary prose is not one: silent.
+    ticket(2, "## Notes\n\n- see #300 for context\n"),
+    // Armed correctly, refs collected: silent. The signal is about the
+    // near-miss, not about every heading that mentions the concept.
+    ticket(3, "## Dependencies\n\n- #12\n"),
+    // The deliberate over-fire. Detection is LOOSER than the gate because the
+    // headings worth naming are the ones the gate rejected — tighten it to the
+    // gate and nothing is ever reported, which is what the neutral wording
+    // below pays for.
+    ticket(4, "## Dependency injection\n\n- rework the container, see #300\n"),
+    // One line per CANDIDATE, not per heading.
+    ticket(5, "## Dependencies (blocking)\n\n- #300\n\n## Dependency injection\n\n- see #42\n"),
+  ]);
+  const lines = missLines(stderr);
+  assert.deepEqual(lines.map((l) => l.match(/#(\d+)/)[1]), ["1", "4", "5"], stderr);
+  assert.ok(lines[0].includes("'## Dependencies (blocking)'"), lines[0]);
+  assert.ok(lines[1].includes("'## Dependency injection'"), lines[1]);
+  assert.ok(
+    lines[2].includes("'## Dependencies (blocking)'") && lines[2].includes("'## Dependency injection'"),
+    lines[2],
+  );
+  // Points at the heading, and reads as a fact about the scan rather than a
+  // fault in the ticket. Both halves of that are load-bearing: a line worded
+  // as an error is the false alarm #1032 refuses, and a line that names no
+  // heading leaves the reader to guess which one the scan skipped.
+  assert.ok(lines[0].includes("check the heading"), lines[0]);
+  assert.doesNotMatch(lines[0], /error|fail|invalid|malformed|broken|warning|must /i);
+  // The row format is untouched: #1 still prints no `deps:` — the empty list is
+  // still an empty list — and #3 still prints its refs the same way.
+  assert.match(stderr, /^ {4}#1 \[ready-for-agent\] ticket 1$/m);
+  assert.match(stderr, /^ {4}#3 \[ready-for-agent\] ticket 3 {2}deps:12$/m);
+  // Exit status and payload unchanged. The heading text reaches this process as
+  // a jq field (the body never does), so the assertion that matters is that the
+  // field is stripped before stdout: phase 0 and fleet-tick's supply() read the
+  // same four keys they read before — `spec` is the reduction's other
+  // stderr-only field, and `dropSpecs` has already destructured that one out.
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.d), [[], [], [12], [], []]);
+  for (const r of rows) assert.deepEqual(Object.keys(r).sort(), ["d", "l", "n", "t"]);
+  assert.doesNotMatch(stdout, /dh/);
+});
+
 // The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
 // applies `--jq` with its embedded gojq (RE2) — a different engine, and every
 // other test in this file accepts that gap rather than closing it. This one
@@ -712,6 +770,34 @@ test(
     // inherits the same split: [12] under Oniguruma, [] under RE2. Keep the
     // `\u00a0` escape here too — a literal NBSP does not survive being copied.
     assert.deepEqual(deps("Blocked by:\u00a0**#12**\n"), []);
+  },
+);
+
+// #1032's diagnostic, on the engine that actually runs it. The test above
+// exercises `depmiss` under system jq only, and a `def` gojq parses differently
+// would red the dependency-forms test next door (it asserts exit 0) — but a
+// `test` RE2 merely reads differently would not: the diagnostic would go dead
+// in production, green here, which is exactly the silent degrade the two
+// gated tests either side of this one exist to refuse. The near-miss row and
+// the armed row together, so a `depmiss` that answered [] and one that
+// answered every heading are both caught.
+test(
+  "the near-miss diagnostic fires under gojq too — the engine gh actually applies (#1032)",
+  SKIP_WITHOUT_GOJQ,
+  () => {
+    const { status, stderr } = run(
+      [
+        ticket(1, "## Dependencies (blocking)\n\n- #300\n"),
+        ticket(2, "## Dependencies\n\n- #12\n"),
+      ],
+      undefined,
+      null,
+      { JQ_BIN: GOJQ },
+    );
+    assert.equal(status, 0, stderr);
+    const lines = missLines(stderr);
+    assert.deepEqual(lines.map((l) => l.match(/#(\d+)/)[1]), ["1"], stderr);
+    assert.ok(lines[0].includes("'## Dependencies (blocking)'"), lines[0]);
   },
 );
 
@@ -1081,7 +1167,7 @@ test("gh output that is empty refuses — the reduction emits an array for every
   assert.match(stderr, /^candidates: .*--jq/m);
 });
 
-test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,spec}", () => {
+test("gh rows that were never reduced refuse — raw issues are not {n,t,l,d,dh,spec}", () => {
   // What a gh that ignored `--jq` actually returns: the unreduced `--json`
   // payload. An array, so an array check alone passes it through.
   const { status, stderr } = run(
