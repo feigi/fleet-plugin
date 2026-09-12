@@ -824,7 +824,18 @@ for arg do
     case "\$arg" in
       /*) ;;
       */node_modules/*|node_modules/*)
-        case "\$arg" in */*) argdir="\${arg%/*}" ;; *) argdir="." ;; esac
+        # Unconditional, because the \`*/*\` test this used to make could not
+        # lose: both alternatives of the arm above spell a literal \`/\`
+        # (\`*/node_modules/*\` and \`node_modules/*\`), and a glob only matches
+        # a string carrying every literal character in its pattern — so an
+        # argument without a \`/\` never reaches here and the \`argdir="."\`
+        # fallback was unreachable. Dropped rather than kept as cover (#1005).
+        # The \`CDPATH= \` on the \`cd\` below is NOT part of that collapse and
+        # must survive any further one: a bare \`cd\` lets an inherited CDPATH
+        # resolve \$argdir into a same-named decoy, so the vendored match
+        # misses, the guard falls through, and node drops the file silently at
+        # exit 0 (41d7743, #401) — its own suite row pins that.
+        argdir="\${arg%/*}"
         # \`cd\`'s own status used to be discarded outright (\`2>/dev/null\`,
         # nothing read from the pipeline afterwards), so an \$argdir that
         # EXISTS but has lost its own search bit (\`chmod 000\`) failed \`cd\`
