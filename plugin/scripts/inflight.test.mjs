@@ -1642,13 +1642,15 @@ test("probe 3: a git common directory that could not be resolved is unknown, nev
 test("probe 3: a refs-subdirectory walk that could not run is unknown, never free", (t) => {
   const { repo, env, bin } = fixture(t, 77, {});
 
-  // `head`, not `find`, and that is the guard's design rather than this case's
-  // convenience. The script runs `set -eu` with no `pipefail`, so
-  // `bad=$(find … | head -1)` carries HEAD's status; find's is deliberately
-  // unread, because find exits 1 on the very permission-denied descent that IS
-  // this walk's detection. So head is the only stage here whose failure means
-  // the walk could not run, and a shim on `find` could not redden this guard
-  // however hard it tried.
+  // `head`, not `find`. The script runs `set -eu` with no `pipefail`, so
+  // `bad=$(find … | head -1)` carries HEAD's status alone; find's is
+  // deliberately unread, because find exits 1 on the very permission-denied
+  // descent that IS this walk's detection. This case pins head's own
+  // exit-code failure — the one failure the guard actually observes. It does
+  // NOT cover a `find` that cannot run at all (crashed, missing, `exit 127`):
+  // head then reads an empty pipe and exits 0 on its own, so `$bad` comes back
+  // empty and the guard reads that as "no unreadable subdirectory" instead —
+  // a different, narrower gap this case does not pin (tracked separately).
   //
   // Selected by the first argument for the reason the git shims are, and
   // `head -1` is the only `head` the script runs.
