@@ -26,7 +26,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -42,8 +42,22 @@ const RULE = () =>
     "run-team instrument rule",
   );
 
-const PIN_STEP = () =>
-  between(RUN_TEAM, "**Pin the instruments,", "**Launch the cockpit.**", "run-team phase 0 pin");
+// The END bound is THIS paragraph's own blank line, via `paragraph()`. It was a
+// literal `between()` end anchor on the heading of the NEXT, unrelated phase-0
+// step, which made an unrelated rename of that neighbour red this pin with a
+// bare "no longer contains" that reads as an instrument-check regression and is
+// not one — reproduced at `fa65476` as a negative control the suite should NOT
+// have caught, and fixed here (#1062 records the exact wording; naming it again
+// here would only be a second copy free to drift). A blank line is the bound
+// that belongs to the pinned content and the one a rewrap cannot move, and
+// `anchorAt` additionally refuses a start anchor occurring more than once — so
+// this slice is tighter than what it replaces, still bounded at BOTH ends (an
+// unbounded end would let an unrelated later copy satisfy the assertions, the
+// worse failure), and no prose was added to give it something to anchor on.
+// `paragraph()` is this directory's single definition of that bound (#823,
+// #1372): a hand-rolled end anchor on neighbouring text is the defect it
+// removes, not a style choice.
+const PIN_STEP = () => paragraph(RUN_TEAM, "**Pin the instruments,", "run-team phase 0 pin");
 
 // The gate list is one bullet, and this slice is bounded to it. Read out of the
 // whole RULE slice, `phrase("reap")` is satisfied by the unrelated `reap.sh`
