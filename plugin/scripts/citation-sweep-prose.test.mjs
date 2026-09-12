@@ -95,8 +95,16 @@ const FILES = [
   },
   {
     path: ["scripts", "run-merge-bot-prose.test.mjs"],
-    stale: [/prove-merge\.sh:173/],
-    live: ["prove-merge.sh has"],
+    // #1136. The line number on this citation rotted repeatedly — #1136
+    // measured `:107`, #516 swept `:173`, and the check itself now sits at a
+    // third place again — so the stale form is banned generally here rather
+    // than one drifted value at a time.
+    stale: [/prove-merge\.sh:\d+/],
+    // The live needle is the CONSTRUCT, verbatim from that check. The die
+    // message the check emits would be a vacuous needle: this file asserts
+    // that string independently of the citation, so the pin would still pass
+    // after the citation was deleted outright.
+    live: ['[ "$parents" -ge 2 ]'],
   },
   // #1349 retired this entry outright rather than leaving it to rot: the
   // vendored `code-reviewer.md` this citation pointed at (via its "Review
