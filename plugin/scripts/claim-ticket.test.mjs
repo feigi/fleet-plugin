@@ -402,6 +402,42 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
   const r = a.run("vendlink");
   assert.notEqual(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stderr, /is under node_modules — excluded from the run/);
+  // A DIRECTORY argument and a FILE argument in one argv, diverging from the
+  // runner at different depths. Both arms share one `diverge` walk writing one
+  // global `$shared` (POSIX sh has no `local`), so the file arm's verdict must
+  // not inherit the directory's: `t` diverges at the worktree, `outlink`
+  // resolves two levels above it, and reusing the deeper answer strips nothing
+  // — leaving the ANCESTRY's own `node_modules` inside the string the file arm
+  // scans, so the worktree refuses a file that is not vendored at all.
+  // Every other row here passes one argument, where `$shared` is empty before
+  // the call and dropping the call outright still reds. This row is the only
+  // one that catches reusing a STALE value: `[ -n "$shared" ] || diverge …`,
+  // the plausible optimization, left the whole file green before it existed
+  // (measured) and reds here now.
+  symlinkSync(join("..", "..", "root.test.mjs"), join(a.wt, "outlink.test.mjs"));
+  const mixed = a.run("t", "outlink.test.mjs");
+  assert.equal(mixed.status, 0, mixed.stdout + mixed.stderr);
+  assert.match(mixed.stdout, /(?:ℹ|#) pass 4(?!\d)/);
+  // The MIRROR order: a FILE argument first, then a DIRECTORY argument that
+  // diverges ABOVE the worktree, still under this ancestor's own
+  // `node_modules` — the shape the "resolution outside the worktree" test
+  // below proves correct when the directory arm's own `diverge` call runs.
+  // `t/a.test.mjs` diverges no further than the worktree, so the file arm
+  // leaves `$shared` sitting at `$root` itself; if the DIRECTORY arm's own
+  // `diverge` call were skipped in favour of that stale, narrower value,
+  // stripping it from the directory's resolution would strip nothing —
+  // leaving the ancestor's own `node_modules` in the string the directory arm
+  // scans, refusing an ordinary directory outside the worktree that is not
+  // vendored at all. Every row above passes a single argument in this order;
+  // this is the only one that catches the DIRECTORY arm reusing a stale
+  // value left behind by a FILE argument run first.
+  const outside2 = join(mkdtempSync(join(under, "out2-")), "lib");
+  mkdirSync(outside2, { recursive: true });
+  writeFileSync(join(outside2, "o2.test.mjs"), PASSES);
+  symlinkSync(outside2, join(a.wt, "outlink2"));
+  const mixed2 = a.run("t/a.test.mjs", "outlink2");
+  assert.equal(mixed2.status, 0, mixed2.stdout + mixed2.stderr);
+  assert.match(mixed2.stdout, /(?:ℹ|#) pass 2(?!\d)/);
 });
 
 // The spelling term's own reason to exist, and the only input in this repo that
@@ -455,9 +491,10 @@ test("runner: a relative argument through the shared ancestor is refused from ou
 // two green. File: an absolute `$arg` carrying a `node_modules` segment is
 // exempted from the file arm's resolved check by design (#401), so that row
 // would pin nothing here either.
-// The file arm runs the same walk under `$fshared` (#424), so the file row here
-// holds that anchor with the same fixture; the vendored legs it must keep
-// refusing are the two tests above, which this one deliberately does not repeat.
+// The file arm runs the same walk via `diverge`, writing the shared `$shared`
+// (#424), so the file row here holds that anchor with the same fixture; the
+// vendored legs it must keep refusing are the two tests above, which this one
+// deliberately does not repeat.
 test("runner: a resolution outside the worktree is judged from the divergence, not the runner's own root", () => {
   const ancestor = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
   mkdirSync(ancestor, { recursive: true });
@@ -481,8 +518,9 @@ test("runner: a resolution outside the worktree is judged from the divergence, n
 // runner's own location, so the two are no longer the same anchor and a
 // subdirectory invocation exercises a different path than a root one. Measured:
 // anchoring the argument at `$root` instead (`cd -- "$root/$arg"`, a one-token
-// slip now that claim-ticket.sh's `root=` assignment sits directly above its
-// `resolved=` one) is green on every OTHER test in this file while reporting
+// slip on the argument alone — claim-ticket.sh's `root=` assignment and its
+// `resolved=` one now sit 171 lines apart, not side by side) is green on
+// every OTHER test in this file while reporting
 // the vendored test as a pass from one directory down.
 // Second leg stops the fix degenerating into "refuse everything named from a
 // subdirectory"; the stderr assert is load-bearing, since status alone cannot
@@ -1140,11 +1178,18 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
   mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
   writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
   symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
-  // A directory whose name merely ENDS in the word. The spelling term above is
-  // bounded to a path segment, so this reaches the resolved check; unbounded,
-  // `*node_modules/*` claimed the argument for the logical guard, whose own
-  // inner test is anchored at `$PWD/node_modules/` and never fired — the
-  // argument left both guards unjudged and node ran the vendored file.
+  // A directory whose name merely ENDS in the word, spelled both ways — the
+  // merged `case` judges the two on different arms. The relative spelling is
+  // held out of the logical arm by that arm's own segment bound. The absolute
+  // one is held out by the FIRST arm, whose job is the single shape both
+  // guards decline (absolute AND naming a real `node_modules` segment) and
+  // which therefore has to carry the bound too: written as the one glob that
+  // looks equivalent, `/*node_modules/*`, it swallows this spelling into the
+  // skip and node runs the vendored file. Measured — that collapse reds this
+  // row and nothing else in the file, so the relative row alone did not pin
+  // it. Unbounded, `*node_modules/*` claimed the argument for the logical
+  // guard instead, whose own inner test is anchored at `$PWD/node_modules/`
+  // and never fired: the argument left both guards unjudged, same result.
   mkdirSync(join(a.wt, "vendor_node_modules"), { recursive: true });
   symlinkSync(join("..", "node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendor_node_modules", "link.test.mjs"));
   for (const spelling of [
@@ -1155,6 +1200,7 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
     "dirlink/v.test.mjs",
     "extlink.test.mjs",
     "vendor_node_modules/link.test.mjs",
+    join(a.wt, "vendor_node_modules", "link.test.mjs"),
   ]) {
     const r = a.run("t/a.test.mjs", spelling);
     assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
