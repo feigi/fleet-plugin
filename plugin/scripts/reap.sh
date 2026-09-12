@@ -133,12 +133,42 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # worktree ever again.
 #
 # Empty is a legitimate answer, not a failure worth dying on: `--show-toplevel`
-# exits 128 where cwd is in no working tree (a bare repo root, or inside `.git`),
-# and neither is a path either sweep can remove — the branch sweep binds `$wt`
-# only from a `branch` line a bare root never prints, and the enumeration below
-# skips a bare entry outright. `|| self_wt=` keeps that status off `set -e`, and
-# the `[ -n ]` at each site keeps an empty value from matching an empty `$wt`.
-self_wt=$(git rev-parse --show-toplevel 2>/dev/null) || self_wt=
+# exits 128 with one of two known messages where cwd is in no working tree (a
+# bare repo root, or inside `.git`) — "not a git repository" or "this
+# operation must be run in a work tree" (measured, git 2.50.1, Apple
+# Git-155) — and neither is a path either sweep can remove: the branch sweep
+# binds `$wt` only from a `branch` line a bare root never prints, and the
+# enumeration below skips a bare entry outright.
+#
+# Any OTHER failure of this probe is NOT that answer and must not be folded
+# into it. Doing so silently disables both cwd-delete guards below (#1441) —
+# every removal proceeds as though this run were standing in no worktree at
+# all, reproducing #992's own defect signature. Fail closed instead: die,
+# naming the probe that broke, so an operator chasing a downstream failure (a
+# prune refusal, a `git branch -D` dying on
+# "Unable to read current working directory") lands on the real cause here
+# rather than the symptom.
+#
+# The success path keeps `2>/dev/null`, never `2>&1`: folding stderr in would
+# glue the #985 stray-gitconfig warning onto the path on a plain SUCCESS too.
+# Stderr is only re-captured, on a second call, once the first has already
+# failed — the classification never touches the value the guards compare
+# against. `self_wt_rc=…` (not `|| self_wt=`) keeps the check off `set -e`.
+self_wt_rc=0
+self_wt=$(git rev-parse --show-toplevel 2>/dev/null) || self_wt_rc=$?
+if [ "$self_wt_rc" -ne 0 ]; then
+  self_wt_err=$(git rev-parse --show-toplevel 2>&1 >/dev/null) || true
+  case "$self_wt_err" in
+  *"not a git repository"* | *"this operation must be run in a work tree"*)
+    self_wt=
+    ;;
+  *)
+    die "cannot tell whether this run is standing in a worktree slated for removal — 'git rev-parse --show-toplevel' failed with an unrecognised error (${self_wt_err:-exit $self_wt_rc}) instead of one of the two known 'not in a worktree' messages; refusing to reap with the cwd-delete guard unverified"
+    ;;
+  esac
+fi
+# The `[ -n ]` at each guard site keeps an empty value from matching an empty
+# `$wt`.
 
 echo "\$ git fetch --prune origin" >&2
 fetch_budget=$(net_fetch_budget)
@@ -670,9 +700,23 @@ for b in $gone_branches; do
     # `continue`, so the branch is kept with its worktree — the pairing the
     # main-checkout reason already states, and `git branch -D` would refuse a
     # branch checked out in a surviving worktree anyway. #992
-    if [ -n "$self_wt" ] && [ "$wt" = "$self_wt" ]; then
-      keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
-      continue
+    #
+    # Path-BOUNDARY match, not exact equality: a worktree nested inside `$wt`
+    # (a real, documented shape — SKILL.md names a member committing from a
+    # nested worktree) has `$wt` as an ancestor on disk, so removing `$wt`
+    # removes the nested one's files too — taking any uncommitted work in it
+    # along, the exact #992 signature one path further out — even though
+    # `$wt` itself never equals `$self_wt` in that shape. Trailing slashes on
+    # both sides of the match keep a sibling like `$wt2` from matching `$wt`;
+    # quoting `$wt` on the pattern side keeps any glob metacharacter in the
+    # path literal. (#1441)
+    if [ -n "$self_wt" ]; then
+      case "$self_wt/" in
+        "$wt"/*)
+          keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+          continue
+          ;;
+      esac
     fi
 
     # Reached with $wt either present-readable-clean or established absent —
@@ -1001,9 +1045,18 @@ else
     # After the ownership bound above, deliberately: a worktree this sweep would
     # never remove needs no word about where the script is standing, and the
     # bound's own reason is the one true of it. #992
-    if [ -n "$self_wt" ] && [ "$wt" = "$self_wt" ]; then
-      keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
-      continue
+    #
+    # Path-boundary match, not exact equality — same reasoning as the branch
+    # sweep's copy of this guard: a worktree nested inside `$wt` is removed
+    # along with it even though `$wt` never equals `$self_wt` in that shape.
+    # (#1441)
+    if [ -n "$self_wt" ]; then
+      case "$self_wt/" in
+        "$wt"/*)
+          keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+          continue
+          ;;
+      esac
     fi
 
     if [ "$apply" = true ]; then

@@ -2610,6 +2610,101 @@ test("the design spec's script-surface row carries the standing-in-it decline bo
   );
 });
 
+// #1441 (finding 1). `self_wt` used to fold EVERY failure of this probe into
+// the same empty-string case as a genuine "not in a worktree" answer, via
+// `|| self_wt=`. That silently disabled both cwd-delete guards above whenever
+// the probe failed for any reason other than the two documented ones. This
+// shim fails ONLY `rev-parse --show-toplevel` — every other git call,
+// including `rev-parse --git-dir` at the top of the script, is real — with a
+// message that is neither known "not in a worktree" answer, reproducing the
+// exact defect #992 fixed: run from a worktree slated for removal, `--apply`
+// used to remove it.
+test("an unrecognised git rev-parse --show-toplevel failure fails the whole run closed, rather than disabling the cwd-delete guard (#1441)", (t) => {
+  const w = repo(t);
+  const here = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]`,
+    ["fatal: unable to read current working directory: No such file or directory"],
+    128,
+  );
+
+  const { code, json, stderr } = runReap(here, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the probe never reached the script under test");
+  assert.equal(code, 2, "an unrecognised probe failure must refuse loudly, not fall through to a silent pass");
+  assert.equal(json, null, "a run that dies before the sweep must not also print a payload claiming one ran");
+  assert.equal(existsSync(here), true, "the worktree this run is standing in must survive an unverified cwd guard");
+  assert.match(stderr, /rev-parse --show-toplevel/, "the message must name the probe that broke, not just a downstream symptom");
+});
+
+// #1441 (finding 2). Both cwd-delete guards compared `$wt` to `$self_wt` by
+// EXACT equality, so they missed the ANCESTOR case: cwd nested inside a
+// worktree slated for removal (SKILL.md:2407 — "a member can commit in a
+// nested worktree" — is the same real shape). `--apply` used to remove the
+// outer worktree, deleting the cwd, taking the nested worktree's uncommitted
+// file with it. `.gitignore` excludes the nested path so the outer worktree's
+// own dirty check (line 649/1004 above) does not see it — mirroring the
+// fleet's real layout, where a linked worktree's home is itself gitignored by
+// the enclosing checkout.
+function ignoreNestedWorktrees(w) {
+  writeFileSync(join(w, ".gitignore"), "nested/\n");
+  git(w, "add", ".gitignore");
+  git(w, "commit", "-q", "-m", "ignore nested worktrees");
+}
+
+test("the branch sweep keeps the outer worktree when cwd is a worktree NESTED inside it, not only when cwd equals it exactly (#1441)", (t) => {
+  const w = repo(t);
+  ignoreNestedWorktrees(w);
+  const outer = mergedGoneBranchWithWorktree(w, "feature/outer", "work that landed");
+  const inner = join(outer, "nested");
+  git(w, "worktree", "add", "-q", "--detach", inner, "main");
+  writeFileSync(join(inner, "wip.txt"), "work that exists nowhere else\n");
+
+  const { code, json, stderr } = runReap(inner, ["--apply"]);
+
+  assert.equal(code, 0, `every removal must still succeed: ${stderr}`);
+  assert.equal(existsSync(outer), true, "the ancestor worktree holding cwd must survive, not only an exact-path match");
+  assert.equal(existsSync(inner), true, "and the nested worktree, and its uncommitted file, along with it");
+  assert.equal(readFileSync(join(inner, "wip.txt"), "utf8"), "work that exists nowhere else\n");
+  assert.equal(branchExists(w, "feature/outer"), true, "the branch checked out in the surviving outer worktree is kept with it");
+  assert.deepEqual(json.worktreesRemoved, [], "the ancestor guard must stop this removal before it starts");
+  // Two independent findings, not one: the ancestor guard keeps `outer`
+  // (this test's subject), and `inner` is separately kept by its OWN dirty
+  // check — it holds the uncommitted `wip.txt` this fixture put there. That
+  // second finding is orthogonal to the fix under test: it would fire even
+  // with cwd elsewhere, and does not by itself stop `outer`'s removal from
+  // deleting `inner` right along with it — only the ancestor guard does.
+  const outerFinding = json.kept.find((k) => k.reason.startsWith(`worktree ${outer} `));
+  assert.ok(outerFinding, `the outer worktree must be its own reported finding: ${JSON.stringify(json.kept)}`);
+  assert.equal(outerFinding.branch, "feature/outer");
+  assert.match(outerFinding.reason, /holds the working directory this run was started in/);
+});
+
+test("the branchless sweep keeps the outer worktree when cwd is a worktree NESTED inside it, not only when cwd equals it exactly (#1441)", (t) => {
+  const w = repo(t);
+  ignoreNestedWorktrees(w);
+  const outer = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const inner = join(outer, "nested");
+  git(w, "worktree", "add", "-q", "--detach", inner, "main");
+  writeFileSync(join(inner, "wip.txt"), "work that exists nowhere else\n");
+
+  const { code, json, stderr } = runReap(inner, ["--apply"]);
+
+  assert.equal(code, 0, `every removal must still succeed: ${stderr}`);
+  assert.equal(existsSync(outer), true, "the ancestor worktree holding cwd must survive, not only an exact-path match");
+  assert.equal(existsSync(inner), true, "and the nested worktree, and its uncommitted file, along with it");
+  assert.equal(readFileSync(join(inner, "wip.txt"), "utf8"), "work that exists nowhere else\n");
+  assert.deepEqual(json.worktreesRemoved, [], "the ancestor guard must stop this removal before it starts");
+  // See the branch sweep's copy of this test for why two findings, not one:
+  // `inner`'s own dirty check keeps it independently of the ancestor guard,
+  // which is what protects `outer` — the actual subject here.
+  const outerFinding = json.kept.find((k) => k.reason.startsWith(`worktree ${outer} `));
+  assert.ok(outerFinding, `the outer worktree must be its own reported finding: ${JSON.stringify(json.kept)}`);
+  assert.equal(outerFinding.branch, null, "this sweep has no branch to name");
+  assert.match(outerFinding.reason, /holds the working directory this run was started in/);
+});
+
 test("a [gone] branch whose worktree path holds a newline is kept, never reaped (#551)", (t) => {
   // The branch sweep matched on the `branch` line, so the MATCH was never
   // affected — only the path it reported and acted on, which the plain
