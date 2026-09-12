@@ -1,5 +1,5 @@
-// The finisher's member name is a convention two documents state and one
-// module reads. Nothing pinned it: adding it to run-team's naming list moved no
+// The finisher's member name is a convention two documents state and two
+// modules read. Nothing pinned it: adding it to run-team's naming list moved no
 // test, which is why the convention could be read by `classifyRole` while being
 // written down nowhere (#326).
 //
@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { classifyRole } from "./compute-spend.mjs";
+import { parseMemberName } from "./member-outcomes.mjs";
 import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
@@ -87,21 +88,46 @@ test("every name compute-spend calls stable-because-run-team-fixes-it is one run
   }
 });
 
-test("classifyRole still accepts every finisher spelling the record contains", () => {
-  // The other half. Documenting one canonical name must not narrow what the
-  // classifier accepts: all five of these were really dispatched and are in
-  // docs/metrics/member-outcomes.tsv, and a member that stops classifying as a
-  // finisher books as "other" and moves the spend headline for a run already
-  // recorded. The descriptions deliberately carry no finisher word — the
-  // agentType has to carry the match, or this passes for the wrong reason. The
-  // last is a retry suffix: the same member's second attempt, not a different
-  // name, and the record carries it under that exact agentType. It is the only
-  // one of the five that reds when the match is anchored to a trailing number.
-  for (const type of ["finisher-pr-945", "finish-pr-751", "finisher-933", "finish-315", "finisher-pr-958-b"]) {
-    assert.equal(
-      classifyRole({ spawnDepth: 0, agentType: type, description: "Apply reviewer findings" }),
-      "finisher",
-      `\`${type}\` is a spelling the record contains and must stay classifiable`,
-    );
-  }
+test("classifyRole and parseMemberName accept the same finisher spellings", () => {
+  // The other half, and the half that fails silently. Documenting one canonical
+  // name must not narrow what either module accepts — and the two answer
+  // different questions, so a narrowing of one alone does not show up in the
+  // other's output. `classifyRole` decides the role the spend headline counts;
+  // `parseMemberName` decides which PR the name books, which is the join key
+  // into tier-outcomes.tsv. Narrow the parser alone and every member still
+  // classifies as a finisher, the headline stays right, and only the row
+  // linkage disappears — the failure that once cost 120 of 283 finisher members
+  // their join key. #969 pinned the classifier against all five of these and
+  // never imported the parser, so that narrowing passed the whole suite (#1072).
+  //
+  // All five agentTypes below are in docs/metrics/member-outcomes.tsv verbatim,
+  // each booked to exactly the PR number its own name carries. The descriptions
+  // deliberately carry no finisher word — the name has to carry the match, or
+  // this passes for the wrong reason. The last is a retry suffix: the same
+  // member's second attempt, not a different name. It is the only one of the
+  // five that reds when the classifier anchors to a trailing number, and the
+  // only one that reds when the parser stops stripping that suffix.
+  //
+  // `merge-bot-<n>` is deliberately absent: its number is a WAVE index, and the
+  // parser refusing to book it as a PR is correct disagreement, not drift. It is
+  // pinned where it belongs, in member-outcomes.test.mjs.
+  const NAMES = ["finisher-pr-945", "finish-pr-751", "finisher-933", "finish-315", "finisher-pr-958-b"];
+
+  // Compared as ONE table rather than asserted inside the loop: the first
+  // disagreement would otherwise mask the rest, and a failure that names one
+  // broken spelling when four broke reads as a smaller defect than it is.
+  const got = NAMES.map((type) => {
+    const { ticket, pr } = parseMemberName(type);
+    const role = classifyRole({ spawnDepth: 0, agentType: type, description: "Apply reviewer findings" });
+    return `${type}: role=${role} ticket=${JSON.stringify(ticket)} pr=${JSON.stringify(pr)}`;
+  });
+  // The expected PR is READ OUT OF the name, never restated beside it. "pr is
+  // non-empty" is satisfied by a parser that books some other row's number, and
+  // a restated column drifts into agreeing with whatever the parser now returns.
+  const want = NAMES.map((type) => `${type}: role=finisher ticket="" pr=${JSON.stringify(/(\d+)/.exec(type)[1])}`);
+  assert.deepEqual(
+    got,
+    want,
+    "classifyRole and parseMemberName no longer accept the same finisher spellings — a spelling only one of them still recognises either moves the spend headline for a run already recorded, or silently drops that member's join key into tier-outcomes.tsv",
+  );
 });
