@@ -890,6 +890,12 @@ if ! wt_listing; then
 # goes unmentioned — this ticket's own defect, committed inside its fix. The
 # swallow the branch sweep above leaves deliberately is a different trade: there
 # an empty answer still reaps the branch, here it silently reaps nothing.
+#
+# Pinned since #993, at the same arm the paragraph above admits to: reap.test.mjs
+# shims a failing `awk` onto PATH, selected by this program's own `/^bare$/`
+# rule, over a repo holding one detached worktree, and requires the decline
+# below with an EMPTY removal list. Swallow this status and that fixture's
+# sweep goes silently empty — measured, the test reds on `kept.length` 0.
 elif ! detached=$(printf '%s\n' "$wt_list" |
        awk '/^worktree /{if (p != "" && !skip) print h" "p; p=substr($0,10); h=""; skip=0; next}
             /^HEAD /{h=$2}
