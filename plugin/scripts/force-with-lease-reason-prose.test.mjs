@@ -151,9 +151,34 @@ test("step 7 routes a denied re-push to stop-and-report, never to a plain force"
   // the whole note, not one half, since either half could carry it. The
   // lookahead is load-bearing rather than cautious: `\b` sits between `force`
   // and `-with`, so the step's own documented command matches without it.
+  //
+  // #1446. `--force` is not the only spelling of "more force": `git push -f`
+  // (or `-f` bundled into another short option, e.g. `-uf`) and a raw
+  // force-push refspec (`git push origin +HEAD`) retry with exactly the same
+  // effect and neither named `--force` at all — measured 4/4 green against
+  // the un-widened regex above, i.e. the ban did not cover the class of retry
+  // the prose exists to forbid, only one spelling of it. Widened to three
+  // alternatives sharing one `git push` anchor, skipping up to three
+  // intervening tokens (remote/refspec/other flags) before the one that must
+  // carry the force: `--force` (long, as before), a short option whose letters
+  // include `f` and are not preceded by a hyphen or word character (excludes
+  // matching inside `--force[-with-lease]`, where the second `f` is preceded
+  // by the first dash, and inside a hyphenated English word, where it is
+  // preceded by a letter), or a bare `+<ref>` force-push refspec. Measured
+  // against the real note: still 4/4 green (baseline unchanged); against
+  // "`git push -f`" and "`git push origin +HEAD`" appended the same way as the
+  // `--force` mutation above: both now red on this assertion alone, matching
+  // the `--force` case exactly.
+  //
+  // Deliberately still uncaught: prose that licenses "more force" without
+  // naming a `git push` command at all (e.g. "retry with more force" or "force
+  // it through"). That is a semantic ban, not a lexical one — no regex over
+  // command text can catch prose that never spells the command — and is out
+  // of scope for this pin the same way the un-widened version never attempted
+  // it either.
   assert.doesNotMatch(
     note(),
-    /git push\s+--force(?!-with-lease)/,
-    "step 7's lease note now names a bare `git push --force` — a denial has no forcing route around it, and this is the command a member reaches for when the page implies there is",
+    /git push(?:\s+[\w./:-]+){0,3}\s+(?:--force(?!-with-lease)\b|(?<![-\w])-\w*f\w*\b|\+[\w./:-]+)/,
+    "step 7's lease note now names a bare `git push --force`, a short `-f` retry, or a `+<ref>` force-push refspec — a denial has no forcing route around it, and these are the commands a member reaches for when the page implies there is",
   );
 });
