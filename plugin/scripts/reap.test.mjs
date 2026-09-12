@@ -2959,3 +2959,92 @@ test("an ignored-files list whose paste stage fails is kept, never silently read
   );
   assertToolShimFired(bin, "paste", "the paste shim must actually have fired for this fixture");
 });
+
+// --- #1020: the ambient git variables, one fixture each.
+//
+// Deliberately NOT one fixture setting both. PR #1015 measured the cost of
+// that shortcut on release-ticket.sh: a case overriding only one of the pair
+// leaves the other half of `unset GIT_DIR GIT_WORK_TREE` unpinned and green.
+// Here the two halves are not even the same severity — GIT_WORK_TREE costs a
+// `kept` reason, GIT_DIR moves the deletions into another repository — so one
+// detector could not speak for both even if it caught both.
+
+test("an ambient GIT_WORK_TREE does not make a dirty worktree reapable (#1020)", (t) => {
+  // The silent-failure half. GIT_WORK_TREE outranks `-C`, so the worktree
+  // sweep's `git -C "$wt" status --porcelain` reads the ambient tree against
+  // $wt's index and answers EMPTY at rc 0 — the same false clean #730's
+  // `showUntrackedFiles=no` produced, reached through the environment.
+  //
+  // Blast radius is bounded and that bound is deliberate, not luck: the
+  // downstream `git worktree remove` runs without `--force`, so it refuses on
+  // the real dirt and nothing is lost. What IS lost is the `kept` reason the
+  // operator acts on, and a DRY RUN — where no `worktree remove` ever runs to
+  // refuse — promising a removal that `--apply` cannot deliver. So this case
+  // asserts the verdict, which is the part that actually breaks.
+  //
+  // `.gitignore` naming `.worktrees/` is load-bearing, not scenery: it is the
+  // fleet's own layout, and it is what makes the leaked answer an EMPTY one
+  // rather than a noisy `?? .worktrees/`. Committed before the worktree
+  // branches off main, so $wt's index carries it too — otherwise the poisoned
+  // status reports `?? .gitignore`, no false clean forms, and this fixture
+  // would pass pre-fix while pinning nothing.
+  const w = repo(t);
+  writeFileSync(join(w, ".gitignore"), ".worktrees/\n");
+  git(w, "add", ".gitignore");
+  commit(w, "ignore worktrees");
+  git(w, "push", "-q", "origin", "main");
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  writeFileSync(join(wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  // The fixture's own positive control, both directions. Without the first, a
+  // case where the worktree was never dirty passes while measuring nothing;
+  // without the second, a git that stopped honouring GIT_WORK_TREE leaves this
+  // green over a leak that no longer exists.
+  assert.equal(git(wt, "status", "--porcelain"), "?? scratch.txt",
+    "fixture: the worktree must really be dirty, or this case measures nothing");
+  assert.equal(
+    execFileSync("git", ["-C", wt, "status", "--porcelain"], {
+      cwd: w, env: { ...ENV, GIT_WORK_TREE: w }, encoding: "utf8",
+    }),
+    "",
+    "fixture: the ambient GIT_WORK_TREE must really silence that answer, or the leak this pins no longer exists",
+  );
+
+  const { code, json, stderr } = runReap(w, [], { GIT_WORK_TREE: w });
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.worktreesRemoved, [],
+    "a dry run must not promise to remove a worktree `--apply` would be refused on");
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1, `expected exactly the dirty-worktree keep: ${JSON.stringify(json.kept)}`);
+  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.equal(json.kept[0].reason, `dirty worktree ${wt}`,
+    "an ambient GIT_WORK_TREE must not turn the dirty-worktree keep into a reap");
+});
+
+test("an ambient GIT_DIR does not move the deletions into another repository (#1020)", (t) => {
+  // The correctness half, and the destructive one. Not one git call in either
+  // sweep carries a `-C`, so an ambient GIT_DIR does not merely misreport —
+  // `git worktree remove` and `git branch -D` both land over there. Measured
+  // pre-fix: rc 0, a receipt naming the other repository's worktree and
+  // branch, and this checkout's own [gone] branch never looked at.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/here", "work here");
+  const other = repo(t, "other");
+  const otherWt = mergedGoneBranchWithWorktree(other, "feature/there", "work there");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], { GIT_DIR: join(other, ".git") });
+
+  assert.equal(code, 0, stderr);
+  // Three assertions, three distinct failures, and no two are redundant: the
+  // first says the run did its own job, the second and third say it did not do
+  // it somewhere else. A merely truncated sweep reds only the first; a
+  // retargeted one reds all three.
+  assert.deepEqual(json.reaped, ["feature/here"],
+    "an ambient GIT_DIR must not stop this checkout's own [gone] branch being reaped");
+  assert.equal(branchExists(other, "feature/there"), true,
+    "an ambient GIT_DIR must not reach into another repository's branches");
+  assert.equal(existsSync(otherWt), true,
+    "and must not remove another repository's worktree");
+  assert.equal(existsSync(wt), false, "this checkout's own worktree is the one that was due for removal");
+});

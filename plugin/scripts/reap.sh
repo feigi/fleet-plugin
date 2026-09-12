@@ -48,6 +48,33 @@ set -eu
 # would otherwise leave every test in this suite green.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour. Same
+# placement, same reason, as release-ticket.sh's copy.
+#
+# This is the script the class costs the most, and both halves are measured on
+# it (#1020).
+#
+# GIT_DIR: nothing in the sweeps carries a `-C`. An ambient one therefore does
+# not merely misreport — it MOVES THE DELETIONS. Measured, `--apply` run from
+# clone A with `GIT_DIR` naming clone B's `.git`: B's worktree was removed and
+# B's branch deleted, at rc 0, with a receipt naming them, while A's own
+# [gone] branch and its dirty worktree were never looked at. A destructive
+# command aimed at a repository the operator did not name.
+#
+# GIT_WORK_TREE: it outranks `-C`, so the dirty probe `git -C "$wt" status
+# --porcelain` stops answering about `$wt`. Measured, on the fleet's own
+# layout (`.worktrees/` gitignored, so the parent really is clean): a worktree
+# holding uncommitted work is reported reapable — `would remove worktree`,
+# `would reap` — where the unpoisoned run keeps it with reason `dirty
+# worktree`. `git worktree remove` without `--force` still refuses on the real
+# dirt downstream, so this stops short of data loss; what it costs is the
+# `kept` reason an operator acts on, and a dry run that promises a removal the
+# apply cannot perform.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=reap
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
