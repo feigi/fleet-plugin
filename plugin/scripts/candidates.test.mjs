@@ -531,6 +531,23 @@ test("the phantom-blocker sweep stays closed against the widened label and headi
   const { rows } = run([
     ticket(1, "## Blocked by\n\nSee #99 for context\n"),
     ticket(2, "## Blocked by\n\n- #1\n\nSome later text mentioning #42\n"),
+    // Row 3 is kept to pin an ACCEPTANCE CRITERION, not to discriminate a
+    // mutant — #439's own criteria name this shape verbatim among the four the
+    // phantom-blocker sweep must keep closed: "a fenced code block containing
+    // `fixes #77` → `[]`". It is the executable record that that criterion
+    // holds, and that is the whole job it is here for. Under the mutant this
+    // test's NAME invokes — `$nextsec and $item` → `$nextsec`, dropping #331's
+    // list-item restriction — every other row in this table moves and row 3
+    // does not: no heading arms a section here, so that restriction is never
+    // reached. Both facts measured. Do not delete it on the second one; it has
+    // already been re-filed on exactly that reading once (#1034).
+    // Row 6 is the SIBLING that covers the fenced case with real discriminating
+    // power — a fence inside an armed `## Dependencies` section, which answers
+    // `[12, 999]` under that same mutant (row 9 is its bolded twin). The two
+    // are not duplicates and neither subsumes the other: row 6 discriminates
+    // the mutant, row 3 records the criterion — and row 3 is in fact the only
+    // row here that moves when the inline verb alternation is widened to admit
+    // `fixes`, where it answers `[77]` and every other row holds still.
     ticket(3, "```\nfixes #77\n```\n"),
     ticket(4, "## Dependencies\n\n- #12 and then\n  more about #999\n"),
     ticket(5, "## Dependencies\n\nSee #99 for context\n"),
