@@ -1972,6 +1972,54 @@ test("a detached worktree whose HEAD is merged is removed, not walked past (#381
   assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
 });
 
+test("a branchless sweep whose awk cannot read the listing declines, never sweeps silently (#993)", (t) => {
+  // The enumeration's OTHER half. `git worktree list` dying is pinned by the
+  // #391 test above ("cannot enumerate worktrees"); the awk that parses what it
+  // printed was not, and the script's own comment at that arm calls it "this
+  // ticket's own defect, committed inside its fix" — an awk that cannot run
+  // leaves `$detached` empty, which is byte-identical to a repo holding no
+  // branchless worktree at all. That is the silence #381 exists to end,
+  // reachable by a route no test held. The fixture above is this one's control:
+  // same repo, same detached worktree, and with a working awk it is REMOVED, so
+  // the decline here is the awk's doing and not a fixture that was never
+  // sweepable.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+  // Selected on the `/^bare$/` rule, which no other awk program in this script
+  // carries — CONTENT, never argv position, the discipline IGNORED_PROBE states
+  // the reason for. `/^worktree /` and `substr($0,10)` would not do: the branch
+  // sweep's own worktree lookup carries both, so a match on either shims two
+  // call sites at once and this arm stops being what answered. The shim reaches
+  // the script under test only — `withShim` puts it on the PATH `runReap`
+  // passes, while this file's fixtures run `git` at its own absolute path
+  // through `ENV`.
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `case "$1" in *'/^bare$/'*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "a listing that could not be parsed is a finding, not a script failure");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "no worktree was ever named, so none can be blamed");
+  assert.equal(
+    json.kept[0].reason,
+    "could not read the worktrees git listed — a branchless one would go unreported",
+  );
+  // The decline must be the WHOLE of the sweep: a removal alongside it would
+  // mean the script acted on a listing it had just said it could not read.
+  assert.deepEqual(json.worktreesRemoved, [], "a decline is not grounds for a partial sweep");
+  assert.equal(existsSync(wt), true, "the worktree the control above removes must survive here");
+  assert.match(stderr, /KEEP \(no branch\) — could not read the worktrees git listed/);
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
 test("a DIRTY detached worktree is kept with a reason, never removed (#381)", (t) => {
   const w = repo(t);
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
