@@ -439,12 +439,14 @@ test("a noun-form Dependencies heading arms a section, at any heading depth and 
 test("a bolded dependency heading arms its section — emphasis is not a different heading", () => {
   // #1031: the gate admitted no emphasis at all, so `## **Dependencies**` armed
   // NO section and every ref its bullets declared was dropped — exit 0, nothing
-  // on stderr, the same silent wrong admission #439 was filed for, one line
-  // above the line #439 fixed. Both emphasis runs are load-bearing: markdown
+  // on stderr, the same silent wrong admission #439 was filed for — reached
+  // through the heading gate rather than through the inline label separator
+  // #439 widened. Both emphasis runs are load-bearing: markdown
   // closes the bold either before the colon (`**Dependencies**:`) or after it
   // (`**Dependencies:**`), and the run is `*`, `**` or `***` depending on
-  // whether the author wanted italic, bold or both. Narrow either run to the
-  // `\*{0,2}` the ticket hypothesised and rows 5 and 8 red.
+  // whether the author wanted italic, bold or both. Substitute the
+  // `\*{0,2}` pair the ticket hypothesised — one leading run, one ahead of the
+  // colon and none after it — and rows 5 and 8 red, on both engines.
   const { rows } = run([
     ticket(1, "## **Dependencies**\n\n- #12\n- #13\n"),
     ticket(2, "## **Blocked by**\n\n- #12\n"),

@@ -150,7 +150,8 @@ const EXCLUDE =
 // `## **Dependencies**` names a dependency exactly as `## Dependencies` does,
 // and read without the `\*` runs it armed no section at all, so every ref its
 // bullets declared was dropped — exit 0, nothing on stderr, #439's silent
-// wrong admission one line above the line #439 fixed (#1031). The runs are
+// wrong admission reached through this gate rather than through the inline
+// label separator #439 widened (#1031). The runs are
 // `\**` rather than `\*{0,2}` because `*`, `**` and `***` are all emphasis a
 // heading is written with, and the noun form needs one on EACH side of its
 // optional colon: markdown closes the bold before it (`**Dependencies**:`)
