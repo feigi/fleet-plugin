@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
@@ -257,21 +257,15 @@ test("step 1 defines the probe's clean answer by the absence of `+`, not by sile
 });
 
 // The other half of (b), and the one that costs real work if it rots: the new
-// wording must NOT license skipping the STOP where the hazard is real. On the
-// fallback the bot rebases locally and then verifies that local head, so an
-// unpushed commit corrupts what you verify — the STOP's own wording for that
-// hazard is *your rebase would carry into the merge*, and that sentence is
-// what this pins. (The merge itself still takes the remote head there too;
-// the fallback "never needs to reach the remote" and step 4 merges "the
-// pre-rebase head, since nothing here was pushed".) Pinned positively — the
-// verdict and its rationale, both inside the bullet that carries them —
-// rather than by forbidding a word, which would red on an unrelated correct
-// edit.
+// wording must NOT license skipping the STOP where the hazard is real. The
+// verdict and the identifier are pinned here, inside the block that carries
+// them; the RATIONALE gets its own tighter slice below, because the two rot
+// independently — #1038 corrected a false reason while the verdict stayed
+// right, and a pin holding both in one span cannot tell those apart.
 //
-// Sliced to the fallback, not to step 1: the citation of that same rationale
-// in the server-side paragraph satisfies a bare step1() match all by itself,
-// so a step1()-wide assertion stayed green with the rationale deleted from the
-// bullet (measured by mutation, 2026-08-29).
+// Sliced to the fallback, not to step 1: the server-side paragraph discusses
+// this same STOP, so a step1()-wide assertion stayed green with the bullet
+// gutted (measured by mutation, 2026-08-29).
 function fallbackBlock() {
   const start = "**Fallback (server-side rebase unavailable).**";
   const at = DOC.indexOf(start);
@@ -284,10 +278,121 @@ function fallbackBlock() {
 
 test("the fallback's diverged-worktree STOP survives the primary path's `+` answer", () => {
   assert.match(fallbackBlock(), /\*\*Worktree ahead\*\* → STOP, report `worktree-diverged-#<pr>`/);
+});
+
+// The same false mechanism stated a third time, in the sentence that sends the
+// bot to compare the two heads at all — "the rebase would carry an unreviewed
+// local commit into the merge". Pinned positively in its own paragraph.
+const headCheck = () =>
+  paragraph(DOC, "**Confirm the worktree head", "run-merge-bot.md's fallback head check");
+
+test("the fallback's head check states the mismatch as a corrupted verification, not a push into the merge", () => {
+  assert.match(
+    headCheck(),
+    phrase("the rebase would fold an unreviewed local commit into the tree you verify, while the merge takes the remote head without it"),
+  );
+});
+
+// #1038's AC-4 is a property of the whole block, not of the two sentences that
+// carried the false claim: no sentence in the fallback may say a local commit
+// reaches the remote. The three positive pins cover the spans it was written
+// in; this sweeps the rest, which is what catches a restore that lands in a
+// paragraph nobody pinned. The negative runs with the property that MAKES it
+// true on the same slice — the rebase is verification-only — because a bare
+// `doesNotMatch` also passes on a slice that no longer says anything at all.
+test("no sentence in the fallback claims the local rebase can carry a commit into the merge", () => {
   assert.match(
     fallbackBlock(),
-    /leaves an unpushed, unreviewed commit that a clean-tree audit passes and your rebase would carry into the merge/,
+    phrase("Rebase locally, for verification only — this rebase never needs to reach the remote"),
   );
+  assert.doesNotMatch(fallbackBlock(), /carry[\s\S]{0,60}into the merge/);
+});
+
+// #1038. The STOP's verdict was right and its stated REASON was false: it
+// justified halting because an unpushed commit is one "your rebase would
+// carry into the merge", and the fallback contains no `git push`, no
+// `--force` and no `--force-with-lease` at all. A refuter ran the documented
+// sequence in a fixture: the unpushed commit appeared in neither the merge
+// commit's ancestry nor its tree, while a control that pushed the rebased
+// head did land it. The real hazard is the silent one — the fallback verifies
+// the LOCAL rebased head, so a commit only the worktree holds moves the
+// verified tree off the reviewed head and every green is measured against a
+// tree no merge will take.
+//
+// Why the reason is load-bearing and not decoration: a bot that reasons from
+// the old sentence, then observes that the fallback never pushes, can
+// correctly conclude the stated hazard does not apply and proceed — the wrong
+// action, reached from the page's own text. So the premise, the polarity
+// clause and the wrong-tree clause are each pinned positively here, and the
+// old reason's SHAPE is swept for one test above, over the whole fallback:
+// a restore that replaces the corrected sentences reds these pins, while one
+// that leaves both wordings standing — the two-sites-disagreeing shape this
+// ticket exists to end — reds the sweep alone.
+//
+// Sliced to the arm itself, not to the whole fallback: `worktree-diverged`,
+// the remote head and what gets verified all recur through the block's later
+// paragraphs, and the sibling `Worktree behind` arm is the end bound, so a
+// rationale lifted out of the bullet into prose below it reds here.
+//
+// MUTATION RECORD — #1038, scratch-copy method (`cp -R plugin/` to a tmp dir,
+// mutate the copy, `node --test` the copy, read counts, discard; one mutant
+// per copy, so the real checkout is never the subject). 16 semantic mutants,
+// 8 controls, run against this file's 44 tests. Every mutant reds, and every
+// red is a true positive:
+//
+// Red exactly one pin, the right one — the STOP rationale deleted; its
+// polarity flipped to "can enter the merge"; the wrong-tree clause deleted;
+// the rationale lifted out of the bullet into a paragraph below the arms (the
+// slice bound); the fix-agent premise deleted; the verdict and identifier
+// dropped (reds the verdict test alone, not the rationale one); the head
+// check's verification clause softened to "the heads differ"; the old reason
+// re-added BESIDE the corrected one at either site (reds the sweep alone);
+// and each of the server-side paragraph's two corrected clauses deleted.
+// Restoring the old reason by REPLACEMENT at either site reds two — that
+// site's positive pin and the sweep — as does deleting the verification-only
+// property, which reds the sweep and step 1's own fallback test.
+//
+// Controls all stayed 44/44 green: the STOP arm rewrapped at 80 columns, the
+// premise at 60, the head check and the server-side paragraph at 70, the
+// three unpinned sentences reworded (the silent-failure tail, the `+`-report
+// tail, the head-check heading), and the sibling `Worktree behind` arm
+// reworded — the pins refuse drift, not layout, and they do not reach the
+// arm the ticket put out of scope.
+const stopArm = () =>
+  between(DOC, "- **Worktree ahead**", "- **Worktree behind", "run-merge-bot.md's fallback arms");
+
+test("the STOP halts on verification against the wrong tree, not on a commit carried into the merge", () => {
+  // the premise the old assertion carried on its true half: WHAT produces the
+  // divergence. Retained here, or correcting the reason would quietly drop it.
+  assert.match(stopArm(), phrase("leaves an unpushed, unreviewed commit that a clean-tree audit passes"));
+  assert.match(
+    stopArm(),
+    phrase("Nothing on this path pushes, so that commit cannot enter the merge — what it corrupts is the verification"),
+  );
+  assert.match(
+    stopArm(),
+    phrase("both the `origin/main...HEAD` diff and the suite run against a tree that is not the reviewed head"),
+  );
+});
+
+// The second site, and the reason a one-sentence fix would have been worse
+// than the defect: the server-side paragraph did not merely omit the
+// correction, it LAUNDERED the false reason — it told the reader that "your
+// rebase would carry into the merge" names a hazard belonging to the fallback
+// "where it still applies". Fix the STOP alone and that sentence stays on the
+// page insisting the wrong reason is right, one paragraph above the bullet
+// that now disagrees with it. Pinned inside the paragraph that carries the
+// cross-reference, so the two sites cannot drift apart again in silence.
+const plusOutcome = () =>
+  paragraph(DOC, "**Neither result halts this path", "run-merge-bot.md's `+` outcome paragraph");
+
+test("the server-side paragraph routes no carry-into-the-merge rationale to the fallback", () => {
+  assert.match(plusOutcome(), phrase("neither path can carry a local commit to the remote, because neither pushes"));
+  assert.match(
+    plusOutcome(),
+    phrase("so a commit only the worktree holds makes the verified tree something other than the reviewed head"),
+  );
+  assert.doesNotMatch(plusOutcome(), /carry[\s\S]{0,60}into the merge/);
 });
 
 // #447 AC-3, and the reason this pin reaches across files: run-team's failure
