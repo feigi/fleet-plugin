@@ -76,6 +76,35 @@ set -eu
 # measure — but no new site needs one.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour. Same
+# placement, same reason, as release-ticket.sh's copy.
+#
+# GIT_DIR is the half with teeth here. Probe 3's git calls are all bare —
+# `rev-parse --git-common-dir`, `for-each-ref`, `worktree list` — so an
+# ambient one asks the WRONG repository whether this ticket is taken.
+# Measured, standing in a checkout that holds both the branch and the
+# worktree for #501, with `GIT_DIR` naming a second clone that holds neither:
+# `no local branch or worktree for #501`, and with probes 1 and 2 silent the
+# verdict is `taken: false` on a ticket already claimed. That is the
+# double-claim phase 0 runs this script to prevent, and inflight.test.mjs's
+# own fixture builder already deletes both variables for exactly this reason
+# — a defence that protected the SUITE while leaving every real caller
+# exposed.
+#
+# GIT_WORK_TREE is unset alongside it and is measured INERT here, three
+# targets tried (the checkout root, a second clone, a plain directory): no
+# call in any probe touches a work tree — `for-each-ref` and `ls-remote` read
+# refs, `worktree list` and `--git-common-dir` read the admin directory — so
+# there is no behaviour for it to change and no behavioural fixture can pin
+# it. It stays on the line because the pair is one hazard with one remedy,
+# and because "inert today" is a measurement of the current call set, not a
+# property of the script. ambient-git-vars-prose.test.mjs pins the line
+# itself, which is what keeps that half from being quietly dropped.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=inflight
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 

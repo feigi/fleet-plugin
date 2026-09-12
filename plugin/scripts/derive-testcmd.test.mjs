@@ -353,3 +353,36 @@ test("a resolvable interpreter on the shimmed PATH still derives both entrypoint
   assert.equal(fromFiles.status, 0, fromFiles.stderr);
   assert.equal(fromFiles.stdout.trim(), "node --test");
 });
+
+// --- #1020: the ambient GIT_DIR that outranks `-C "$repo"`.
+//
+// One case, not two, and that is a measurement rather than an omission.
+// GIT_WORK_TREE is unset by the script alongside GIT_DIR, but it is INERT
+// here: all three calls are object-database reads (`rev-parse --git-dir`,
+// `ls-tree`, `show`) and none consults a work tree, so every target produces
+// byte-identical output. A fixture for that half could only be vacuous —
+// precisely the shape PR #1015 warned about — so the line's GIT_WORK_TREE
+// half is pinned as source by ambient-git-vars-prose.test.mjs instead.
+test("an ambient GIT_DIR does not derive another repository's entrypoint (#1020)", () => {
+  // The two repos must disagree on the ANSWER, not merely on their contents:
+  // one declares `scripts.test` and derives `npm test --`, the other declares
+  // none and falls back to `node --test`. Two fixtures that happened to agree
+  // would leave a retargeted run emitting the right string for the wrong
+  // reason, and this case green over the live defect.
+  const here = repo({ "package.json": pkg({ scripts: { test: "vitest" } }), "t.test.mjs": PASSES });
+  const elsewhere = repo({ "package.json": pkg({ name: "other" }), "t.test.mjs": PASSES });
+
+  // The fixture's own positive control, both halves: each repo really does
+  // derive what this case assumes it derives.
+  assert.equal(derive(here).out, "npm test --", "fixture: this repo must derive from its manifest");
+  assert.equal(derive(elsewhere).out, "node --test", "fixture: the other repo must derive differently");
+
+  const r = spawnSync("sh", [SCRIPT, here, "HEAD"], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_DIR: join(elsewhere, ".git") },
+  });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "npm test --",
+    "an ambient GIT_DIR must not answer for another repository — both consumers act on this string, and claim-ticket.sh bakes it into the runner it materialises");
+});

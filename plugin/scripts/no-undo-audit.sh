@@ -54,6 +54,34 @@ set -eu
 # sequence is >= \200.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour. Same
+# placement, same reason, as release-ticket.sh's copy.
+#
+# The `--show-prefix` gate below is the guard against exactly this class —
+# "can git operate here" is not "is this the tree it answers about" — and the
+# environment walks straight past it. Both halves measured (#1020).
+#
+# GIT_WORK_TREE outranks `-C`, so `git -C "$wt" rev-parse --show-prefix`
+# answers about the AMBIENT tree. When that tree is not an ancestor of the
+# cwd, git returns an EMPTY prefix — which is the exact value the gate reads
+# as "$wt IS the root" — and the `status --porcelain -uall` below then
+# compares $wt's index against the ambient tree's files. Measured, with the
+# ambient tree holding a copy of the branch's tracked content: a worktree
+# carrying an uncommitted file comes back `clean: true` at rc 0, and the
+# rebase this script gates is authorised over work that exists nowhere else.
+# That is verbatim the failure the gate's own comment describes, reached
+# through a door the gate cannot close.
+#
+# GIT_DIR reaches the linkage check instead: `$wt`'s healthy `.git` is
+# compared against the ambient repository's worktree and blamed for the
+# mismatch. Measured: exit 2 naming `$wt`'s `.git` as the fault, on a
+# worktree whose linkage is perfect — a rebase blocked, and the operator sent
+# to repair a file that was never broken.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=no-undo-audit
 # `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
 # caller-supplied path, and this is the one place they all route through.

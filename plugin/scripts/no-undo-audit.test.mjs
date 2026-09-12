@@ -2532,3 +2532,80 @@ test("both docs rule out reading a null worktree as an absent one", () => {
       `${rel} must rule out the false-reassurance reading by name: a null path is not an absent worktree, and an operator who reads it as one skips the proof step believing there was nothing to prove`);
   }
 });
+
+// --- #1020: the ambient git variables, one fixture each.
+//
+// The `--show-prefix` gate is this script's answer to "can git operate here is
+// not is this the tree it answers about", and both variables walk past it —
+// but through different doors and to different outcomes, so one fixture
+// cannot speak for both. PR #1015 measured the cost of trying: a case
+// overriding only one of the pair leaves the other half of
+// `unset GIT_DIR GIT_WORK_TREE` unpinned and green.
+
+test("an ambient GIT_WORK_TREE does not report a dirty worktree as clean (#1020)", (t) => {
+  // The silent-failure half, and the one that clears an irreversible rebase.
+  //
+  // GIT_WORK_TREE outranks `-C`, so `git -C "$wt" rev-parse --show-prefix`
+  // answers about the ambient tree. The cwd is not under that tree, so git
+  // returns an EMPTY prefix — the exact value the gate reads as "$wt IS the
+  // root" — and the status below then compares $wt's index against the
+  // ambient tree's files.
+  //
+  // The ambient tree holds a COPY of the branch's tracked content, which is
+  // what makes the leaked answer an empty one. A bare empty directory would
+  // report every tracked file deleted, the audit would refuse, and the case
+  // would pin the false-refusal cousin instead of the false clean — the
+  // strictly less dangerous direction, and the one this script exists to rule
+  // out by name ("clean for a tree nothing looked at").
+  const c = repo(t);
+  const twin = join(c.w, "..", "twin");
+  mkdirSync(twin);
+  for (const f of ["f.txt", "g.txt"]) copyFileSync(join(c.w, f), join(twin, f));
+  writeFileSync(join(c.w, "precious.txt"), "work that exists nowhere else\n");
+
+  // The fixture's own positive control, both directions: without the first the
+  // worktree might never have been dirty, without the second the leak may have
+  // stopped existing and this case would pin nothing either way.
+  assert.equal(git(c.w, "status", "--porcelain"), "?? precious.txt",
+    "fixture: the worktree must really be dirty, or this case measures nothing");
+  assert.equal(
+    execFileSync("git", ["-C", c.w, "status", "--porcelain"], {
+      cwd: c.w, env: { ...ENV, GIT_WORK_TREE: twin }, encoding: "utf8",
+    }),
+    "",
+    "fixture: the ambient GIT_WORK_TREE must really silence that answer, or the leak this pins no longer exists",
+  );
+
+  const r = audit(c, { ...ENV, GIT_WORK_TREE: twin });
+
+  // Exit code first, with stderr as the message, for the reason
+  // release-ticket.test.mjs's own #427 pair records: reaching for a payload
+  // field first turns a refusing run into a null-deref that names nothing,
+  // where this order carries the script's own words.
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.json.clean, false,
+    "an ambient GIT_WORK_TREE must not clear a rebase over uncommitted work — `clean: true` here is the exact failure the --show-prefix gate exists to prevent, reached through a door that gate cannot close");
+  assert.match(r.stderr, /REFUSED — commit the worktree before rebasing/);
+  assert.equal(readFileSync(join(c.w, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("an ambient GIT_DIR does not blame a healthy .git for another repository (#1020)", (t) => {
+  // The false-refusal half, and it cannot use the dirty check as its detector:
+  // GIT_DIR is caught EARLIER, by the linkage check, which compares $wt's
+  // `.git` against the repository git resolved and finds the ambient one
+  // instead. Measured pre-fix: exit 2 naming $wt's own `.git` as the fault, on
+  // a worktree whose linkage is perfect — a safe rebase blocked, and the
+  // operator sent to repair a file that was never broken.
+  const c = repo(t);
+  const other = join(c.w, "..", "other");
+  execFileSync("git", ["clone", "-q", join(c.w, "..", "origin.git"), other], { env: ENV });
+
+  const r = audit(c, { ...ENV, GIT_DIR: join(other, ".git") });
+
+  // Exit code first, stderr as the message: pre-fix the script dies before it
+  // prints any payload, so `r.json.clean` first is a TypeError naming nothing.
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.clean, true, "a clean worktree must still audit clean with an unrelated GIT_DIR ambient");
+  assert.equal(r.json.worktree, c.w,
+    "and the payload must describe the worktree the caller named, not the one the environment did");
+});

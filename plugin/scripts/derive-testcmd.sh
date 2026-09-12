@@ -64,6 +64,35 @@ set -eu
 # would otherwise leave every test in this suite green.
 export LC_ALL=C
 
+# Below the locale pin, not above it with `set -eu`: `unset` touches no
+# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
+# and refuses on principle rather than on this line's own behaviour. Same
+# placement, same reason, as release-ticket.sh's copy.
+#
+# GIT_DIR outranks the `-C "$repo"` on all three calls below, so an ambient
+# one answers about the WRONG repository while still being handed `$repo`.
+# Measured: asked for a checkout whose `package.json` declares `scripts.test`,
+# with `GIT_DIR` naming a clone whose manifest does not, this script emits
+# `node --test` at rc 0 — the other repository's entrypoint, reported as this
+# one's, with no cue anywhere that the question asked was not the question
+# answered. Both consumers act on that string: claim-ticket.sh bakes it into
+# the runner it materialises, and review-pr.js's snapshot agent runs it
+# against the repo under review. A silently wrong entrypoint passes
+# vacuously, which is the one outcome the refusal at the foot of this file
+# exists to rule out.
+#
+# GIT_WORK_TREE is unset alongside it and is measured INERT here: every call
+# is an object-database read — `rev-parse --git-dir`, `ls-tree`, `show` —
+# and none of the three consults a work tree, so no target changes the
+# output. It stays on the line because the pair is one hazard with one
+# remedy, and because "inert today" is a measurement of the current call set,
+# not a property of the script: the first `git -C "$repo" status` or
+# `diff --quiet` added below would reintroduce the half nothing here can see.
+# ambient-git-vars-prose.test.mjs pins the line itself, which is what keeps
+# that half from being quietly dropped.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 

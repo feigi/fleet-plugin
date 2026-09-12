@@ -2595,3 +2595,55 @@ test("the euid-0 guard does not fire on a normal run, and the modes it guards re
   chmodSync(join(dir, "f"), 0o000);
   assert.throws(read, { code: "EACCES" }, "an 0o000 FILE must deny its own read");
 });
+
+// --- #1020: the ambient GIT_DIR probe 3 cannot see past.
+//
+// One case, not two, and that is a measurement rather than an omission.
+// GIT_WORK_TREE is unset by the script alongside GIT_DIR, but it is INERT
+// here: probe 3's calls read refs (`for-each-ref`, `ls-remote`) and the admin
+// directory (`worktree list`, `--git-common-dir`), never a work tree, so
+// three targets — the checkout root, a second clone, a plain directory — all
+// produce byte-identical output. A fixture for that half could only be
+// vacuous, which is precisely the shape PR #1015 warned about; the line's
+// GIT_WORK_TREE half is pinned as source by ambient-git-vars-prose.test.mjs
+// instead.
+//
+// `fixture()` deletes both variables for every case in this file, and has
+// since long before this ticket — a defence that protected the SUITE while
+// every real caller stayed exposed. This case opts back in, deliberately, to
+// reach the path that scrub makes unreachable.
+test("an ambient GIT_DIR does not ask another repository whether the ticket is taken (#1020)", (t) => {
+  // Probe 3 alone answers here — no linked PR, no remote branch — so the
+  // verdict IS probe 3's answer and a retarget flips `taken` outright. The
+  // control for this shape is the pair of worktree cases above, which assert
+  // the same `hits: ["local"]` without any ambient variable.
+  const here = fixture(t, 77, { detachedWorktreeUnder: "nospace" });
+  const elsewhere = fixture(t, 77, {});
+
+  // The fixture's own positive control: if the other repository happened to
+  // carry a worktree for #77 too, looking in the wrong place would give the
+  // right answer and this case would pass while pinning nothing.
+  assert.doesNotMatch(
+    execFileSync("git", ["-C", elsewhere.repo, "worktree", "list"], { encoding: "utf8" }),
+    /77/,
+    "fixture: the other repository must hold nothing for #77",
+  );
+
+  const r = spawnSync("sh", [SCRIPT, "77"], {
+    cwd: here.repo,
+    env: { ...here.env, GIT_DIR: join(elsewhere.repo, ".git") },
+    encoding: "utf8",
+  });
+  const json = r.stdout.trim() ? JSON.parse(r.stdout) : null;
+
+  // Exit code first, with the payload as the message: pre-fix this run exits 0
+  // with a `taken: false` receipt, so leading with a `json.hits` assertion
+  // would report the absence of an array element rather than the verdict that
+  // is actually wrong.
+  assert.equal(r.status, 1,
+    `an ambient GIT_DIR must not make a claimed ticket read as free — that is the double-claim phase 0 runs this probe to prevent; got ${r.stdout}${r.stderr}`);
+  assert.equal(json.taken, true);
+  assert.deepEqual(json.hits, ["local"]);
+  assert.match(json.evidence.worktree, /nospace\/fix-77-slug$/,
+    "and the evidence must name this checkout's worktree, not the environment's repository");
+});
