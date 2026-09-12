@@ -3271,3 +3271,177 @@ test("an ambient GIT_DIR does not move the deletions into another repository (#1
     "and must not remove another repository's worktree");
   assert.equal(existsSync(wt), false, "this checkout's own worktree is the one that was due for removal");
 });
+
+// --- #1108: the exit-2 cause census.
+//
+// The five pins above each ask "does the row mention THIS cause?", every one of
+// them taking its label off a real refusal. None asked "does the row mention
+// EVERY cause?", so a PR that gave a script a new refusal left the row's
+// `exit 2 only` list asserting an enumeration the script had outgrown with the
+// suite green — measured twice in one wave (#1104/#525, #1105/#482). On `main`
+// this row was silent about three refusals reap.sh reaches: the
+// worktree-readers library guard, any of the three libraries failing to load,
+// and the #1441 cwd-delete-guard probe refusing to proceed unverified.
+//
+// Two pins, closing opposite directions:
+//
+//   TOO NARROW — the script grows a refusal the row does not carry. `CAUSES`
+//   binds every `die` site to the phrase that represents it, and the census
+//   test asserts that binding is EXACTLY the set of sites the script has. Add
+//   a `die` and it reds on an unbound site; delete one and it reds on a
+//   binding whose cause the script can no longer produce. The set is derived
+//   from the script, so the binding cannot rot silently the way the row did.
+//
+//   TOO BROAD — the row grows a cause no `die` produces. The census cannot see
+//   that; a phrase added to the cell binds to nothing and no assert notices.
+//   `EXIT2_ENUMERATION` is the pin that does: the whole closed list, byte for
+//   byte, in the `UNKNOWN_LINE`/`ORPHAN_LINE` verbatim-constant discipline
+//   no-undo-audit.test.mjs already uses on this same table.
+//
+// The span pin's cost is deliberate, and it was #1108's ruling: it reds on
+// EVERY edit to the enumeration, a legitimate rewording included. A structural
+// assertion loose enough to survive rewording cannot red on a rewrite that
+// quietly drops a real cause, which is the defect that was measured twice.
+//
+// Scoped to this script's own suite beside the five pins above rather than
+// lifted into one shared table over every row: `.out-of-scope/cli-guard-test-
+// consolidation.md` refuses that consolidation for the CLI-guard pins, and its
+// reason holds unchanged here — a file no single script's suite runs recreates
+// the blind spot these pins exist to close.
+
+/** The `Non-zero when` cell of this script's row, and no more of the row. */
+const exit2Cell = () => specRow().split("|")[4];
+
+/**
+ * The row's exit-2 enumeration, verbatim: from `exit 2 only` to the end of the
+ * sentence that closes the list. Everything after it in the cell states the
+ * exit-0 findings — the kept-branch reasons the pins above read — so the span
+ * stops where the closed list does. The slice is the size of the claim.
+ */
+const EXIT2_ENUMERATION =
+  "exit 2 only — more than one argument, an unrecognised argument (#250), not a repository, `json.sh`, `net.sh` or `worktree.sh` missing, unreadable or failed to load (all three guards sit above the fetch, so nothing is deleted first), `git rev-parse --show-toplevel` failed with an error that is neither of the two known “not in a worktree” answers, so the cwd-delete guard could not be verified (#1441), the fetch failed or did not finish inside its budget and was killed (#347), `BASE_REF must be a remote-tracking ref` — the accept-list this script had none of, and the precondition that makes qualifying the base to its `refs/remotes/` spelling sound rather than a guess (#924) — the qualified `${BASE_REF:-origin/main}` does not resolve, which is also how a base that resolves only as a local TAG named `origin/main` refuses here instead of answering the merge probe with the wrong commit (#924), or, under `--apply`, `git worktree prune` failed, quoting git's own captured message (#992) — that last one prints the record before the prune runs, so it says the branches were reaped and the housekeeping failed, never that nothing happened.";
+
+/**
+ * The clause that collapses this script's six library refusals into one cause.
+ * Named because six bindings below share it and a phrase typed six times
+ * drifts five ways.
+ */
+const LIBRARY_CLAUSE = "`json.sh`, `net.sh` or `worktree.sh` missing, unreadable or failed to load";
+
+/**
+ * Every `die` site in reap.sh, bound to the phrase in the row that represents
+ * it.
+ *
+ * The KEY is the message as the script spells it, interpolations and all.
+ * `die` is this script's only exit-2 path — `dieSites` asserts that of the
+ * definition itself — so the message set IS the cause set, and keying on it is
+ * what makes this derived rather than a third hand-written copy of the
+ * contract sitting beside the script and the row.
+ *
+ * Sites share a phrase where the ROW collapses them, which is the row's
+ * editorial call and not a looseness here: a reader who meets any of the six
+ * library refusals, or either fetch refusal, does the same thing about it. The
+ * phrases are the short load-bearing labels; their exact wording is
+ * `EXIT2_ENUMERATION`'s job.
+ */
+const CAUSES = new Map([
+  ["cannot read $json_lib — refusing to reap without the JSON escaping helpers", LIBRARY_CLAUSE],
+  ["$json_lib failed to load", LIBRARY_CLAUSE],
+  ["cannot read $net_lib — refusing to reap without the bounded git transport", LIBRARY_CLAUSE],
+  ["$net_lib failed to load", LIBRARY_CLAUSE],
+  ["cannot read $wt_lib — refusing to reap without the worktree readers", LIBRARY_CLAUSE],
+  ["$wt_lib failed to load", LIBRARY_CLAUSE],
+  ["usage: reap.sh [--apply]", "more than one argument"],
+  ["unrecognised argument '$1' — usage: reap.sh [--apply]", "an unrecognised argument (#250)"],
+  ["BASE_REF must be a remote-tracking ref, got '$base'", "`BASE_REF must be a remote-tracking ref`"],
+  ["not inside a git repository", "not a repository"],
+  [
+    "cannot tell whether this run is standing in a worktree slated for removal — 'git rev-parse --show-toplevel' failed with an unrecognised error (${self_wt_err:-exit $self_wt_rc}) instead of one of the two known 'not in a worktree' messages; refusing to reap with the cwd-delete guard unverified",
+    "so the cwd-delete guard could not be verified (#1441)",
+  ],
+  ["git fetch did not finish within ${fetch_budget}s and was killed — refusing to reap on stale refs", "the fetch failed or did not finish inside its budget and was killed (#347)"],
+  ["fetch failed — refusing to reap on stale refs", "the fetch failed or did not finish inside its budget and was killed (#347)"],
+  ["$base does not resolve", "the qualified `${BASE_REF:-origin/main}` does not resolve"],
+  ["git worktree prune failed: $(printf '%s' \"$prune_err\" | tr '\\n' ' ')", "`git worktree prune` failed"],
+]);
+
+/**
+ * The message of every `die` call in the script, read off the script.
+ *
+ * Comment lines are dropped: prose quoting a `die "…"` is not a call site, and
+ * minting a cause out of one would red this suite over a comment. Greedy to
+ * the last quote on the line, so the `prune` message's own nested `"$…"`
+ * substitution arrives whole rather than truncated at its first inner quote.
+ */
+function dieSites() {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.match(
+    src,
+    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2; exit 2; \}$/m,
+    "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
+  );
+  const sites = src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => [...l.matchAll(/(?:^|[;&|(\s])die "(.*)"/g)].map((m) => m[1]));
+  assert.ok(sites.length > 1, `the scan found ${sites.length} die sites, so its spelling has drifted off the script`);
+  assert.equal(new Set(sites).size, sites.length, `two die sites share a message, so one of them cannot be bound: ${sites.join(" / ")}`);
+  return sites;
+}
+
+test("the design spec's row represents every exit-2 cause this script can reach, and none it cannot (#1108)", () => {
+  // Both directions in one equality: an unbound site is a cause the row may be
+  // silent about, and a binding with no site is a cause the row claims while
+  // the script can no longer produce it.
+  assert.deepEqual([...dieSites()].sort(), [...CAUSES.keys()].sort());
+
+  const cell = exit2Cell();
+  for (const phrase of new Set(CAUSES.values())) {
+    assert.equal(
+      cell.split(phrase).length - 1,
+      1,
+      `the \`Non-zero when\` cell must carry "${phrase}" exactly once.\ncell: ${cell}`,
+    );
+  }
+});
+
+test("the design spec's row states this script's exit-2 causes as a closed list, byte for byte (#1108)", () => {
+  // A prefix, not a search: a cause smuggled in ahead of the list would sit
+  // outside an `includes`, and this cell opens on the list.
+  assert.equal(exit2Cell().trim().slice(0, EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
+});
+
+// The worktree-readers guard had no fixture at all before #1108, which is how
+// its absence from the row survived: the missing-json.sh case above reaches the
+// json guard, which fires first, so a lone copy of this script can never reach
+// this one. json.sh and net.sh travel with the copy; worktree.sh does not.
+test("a missing worktree.sh is exit 2, and the design spec's row names the library it blames (#1108)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "chore/landed", "work that landed");
+  const lone = mkdtempSync(join(tmpdir(), "reap-nowtlib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "reap.sh"));
+  for (const lib of ["json.sh", "net.sh"]) {
+    copyFileSync(fileURLToPath(new URL(`./${lib}`, import.meta.url)), join(lone, lib));
+  }
+
+  const r = spawnSync("sh", [join(lone, "reap.sh"), "--apply"], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2, `a missing library is a refusal — this script has no exit 1 to be confused with: ${r.stderr}`);
+  assert.equal(r.stdout, "", "no payload: nothing happened");
+  assert.match(r.stderr, /refusing to reap without the worktree readers/,
+    "the fixture must reach the worktree-readers guard rather than either guard above it");
+  assert.ok(branchExists(w, "chore/landed"),
+    "and the branch is still there — this guard sits above the fetch, so it is a clean refusal");
+
+  // The library NAME off the real refusal, never typed here: the path around it
+  // is the machine's to vary and no document can carry it. Pre-#1108 this row
+  // named json.sh and net.sh alone, so this assert is what demonstrates the
+  // omission by running the script rather than by reading it.
+  const blamed = /^reap: cannot read \S*\/([^/ ]+) —/m.exec(r.stderr);
+  assert.ok(blamed, `the refusal must name the library it could not read: ${r.stderr}`);
+  assert.ok(
+    exit2Cell().includes(`\`${blamed[1]}\``),
+    `the spec row must name the library this refusal blames, and does not carry \`${blamed[1]}\`.\ncell: ${exit2Cell()}`,
+  );
+});
