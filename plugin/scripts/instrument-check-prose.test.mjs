@@ -123,6 +123,41 @@ test("phase 0 step 0 pins the set, and only after the fast-forward", () => {
   between(RUN_TEAM, "git merge --ff-only origin/main", "**Pin the instruments,", "run-team phase 0 ordering");
 });
 
+test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fact", () => {
+  // #1061. This sentence states what happens in the order the instruction
+  // above it forbids, so its MOOD is the whole content. Unmarked ("Pinning
+  // ahead of the fast-forward pins the superseded text and certifies it for
+  // the rest of the run.") it parses as a declarative describing what the
+  // instruction achieves, and the reader — usually an agent — is then told by
+  // the runbook to do the one thing the instruction exists to prevent.
+  //
+  // Scoped to the SENTENCE, never the step slice: over the paragraph the
+  // marker below is satisfied by a modal a later edit adds to any other
+  // clause in it. Anchored on the COST and not on the opening word, because
+  // the marker can be a modal ("Pinning before … WOULD instead pin") or a
+  // conditional ("IF you pin before …") and only the second keeps "Pinning"
+  // as the subject — a start anchor on that word makes every conditional
+  // rewording an anchor red. The leading `[^.]*` walks back no further than
+  // the previous period, and newlines are inside the class, so a rewrap
+  // moves neither bound; the count is `anchorAt`'s exactly-once guarantee,
+  // held inline because this bound needs the sentence's END too and one
+  // caller does not earn a second slicer in prose-pin.mjs. The window is the
+  // sentence only while no `filename.ext` sits inside it before the cost —
+  // one there starts the slice after its period and can strip the marker.
+  const hits = PIN_STEP().match(/[^.]*superseded\s+text[^.]*\./g) ?? [];
+  assert.equal(hits.length, 1, `run-team phase 0 pin: the sentence naming what pinning in the wrong order costs occurs ${hits.length} times — re-anchor this test, never widen it to the paragraph`);
+  const [wrongOrder] = hits;
+  // The marker, and the mutant this assertion exists to kill: restore the
+  // declarative above, which keeps every token pinned anywhere in this file
+  // and flips only the mood — RED here and nowhere else. Deleting the
+  // sentence reds on the count above instead, which measures vocabulary
+  // removal and proves less.
+  assert.match(wrongOrder, /\bwould\b|\bif\b/i, "the wrong-order sentence lost its counterfactual marker — it now reads as a statement of what pinning DOES, which is the failure it is describing");
+  // And it still says whose order is wrong. A marked sentence that no longer
+  // names the fast-forward it is contrasting with pins mood over nothing.
+  assert.match(wrongOrder, phrase("fast-forward"), "the wrong-order sentence stopped naming the fast-forward it is the counterfactual of");
+});
+
 test("the mid-run tooling fix re-pins — the one legitimate writer to the set", () => {
   const fix = TOOLING_FIX();
   assert.match(fix, phrase("Re-pin first"));
