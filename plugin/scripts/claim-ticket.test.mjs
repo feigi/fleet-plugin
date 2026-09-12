@@ -929,6 +929,12 @@ test("runner: a vendored file argument refuses however it is spelled", () => {
 // Mutation-tested both ways: dropping `CDPATH= ` from the file branch's `cd`
 // reds this row alone, and adding `-P` to it — the mutation the #401 row
 // below pins — leaves this one green.
+// Re-measured after #1005 collapsed that branch's unreachable `argdir` arm,
+// because the collapse is exactly the edit that could drop the `CDPATH= `
+// silently: stripping it from the collapsed line still reds this row and only
+// it (17/18 of the vendored rows green), and forcing `argdir` back to the
+// removed arm's `.` value reds five rows including this one — so the pin
+// discriminates the guard's behaviour, not the shape it is written in.
 test("runner: a vendored file argument refuses under an inherited CDPATH", () => {
   const a = apply(SUITE);
   const vendor = join(a.wt, "node_modules", "plain");
