@@ -201,11 +201,52 @@ const EXCLUDE =
 // are the only thing letting the gojq test tell the two engines apart. The
 // widened separator keeps `\s` rather than spelling an ASCII class, so it
 // inherits that split rather than pre-empting #383, which owns the question.
+//
+// `depmiss` is the diagnostic half (#1032), and it is deliberately LOOSER
+// than the gate: any heading MENTIONING the concept that the gate did not
+// arm. The gate's own pattern is named `armed` and both halves call it, so
+// "did not arm" is the exact complement of what opened the section rather
+// than a second approximation of it that could drift out of step. An empty
+// `d` has two causes stderr could not tell apart — a ticket that declared no
+// blocker, and a heading that declared one the gate refused — and the second
+// is reachable BY DESIGN, since the noun form arms only as a whole heading:
+// `## Dependencies (blocking)` collects nothing and printed the same row as a
+// ticket with no dependencies at all. Matching the gate here would report
+// nothing, because the headings worth naming are exactly the ones it
+// rejected.
+//
+// So it over-fires by construction, `## Dependency injection` included, and
+// THAT is why the stderr line it feeds is worded "not parsed, check the
+// heading" and never as a fault: a DI section is not a mistake, and a
+// diagnostic that calls it one false-alarms on every code-repo ticket
+// carrying one — a line people learn to ignore is worse than no line.
+// `after` stays out of the pattern for the same reason it arms no section
+// above: `## After the migration` is narrative, so naming it would be noise
+// with no near-miss behind it.
+//
+// A separate pass over the body rather than a third field on `depnums`'
+// reducer, which is the pinned one and not worth reshaping for a diagnostic;
+// the body is already walked twice and a third walk is nothing against the
+// query it rides on. The trim is `rtrimstr("\r")` — literal, not `\s+$` —
+// because the only whitespace that would disturb the line this prints is the
+// CR of a CRLF body (what GitHub's web textarea writes), and a regex there
+// would buy cosmetics at the price of one more engine-divergent `\s`
+// position (#383). `dh` never reaches stdout: the payload is stripped of it
+// at the `JSON.stringify` below, because this is a stderr signal and #1032
+// rules a payload field out of scope.
 const JQ =
+  'def armed: test("(?i)^#{1,6}\\\\s+\\\\**((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies)\\\\**:?\\\\**\\\\s*$)");\n' +
+  '\n' +
+  'def depmiss:\n' +
+  '  [ split("\\n")[]\n' +
+  '    | select(test("(?i)^#{1,6}\\\\s.*(dependenc|blocked by|depends on|requires)") and (armed | not))\n' +
+  '    | rtrimstr("\\r")\n' +
+  '  ];\n' +
+  '\n' +
   'def depnums:\n' +
   '  (reduce (split("\\n"))[] as $line (\n' +
   '      {insec: false, nums: []};\n' +
-  '      ($line | test("(?i)^#{1,6}\\\\s+\\\\**((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies)\\\\**:?\\\\**\\\\s*$)")) as $bh\n' +
+  '      ($line | armed) as $bh\n' +
   '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
   '      | (if $any then $bh else .insec end) as $nextsec\n' +
   '      | ($line | test("^\\\\s*([-*+]|[0-9]+[.)])\\\\s")) as $item\n' +
@@ -227,7 +268,8 @@ const JQ =
   '\n' +
   '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
   ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories\\\\s*$")),\n' +
-  ' d:((.body//"")|depnums)}]\n';
+  ' d:((.body//"")|depnums),\n' +
+  ' dh:((.body//"")|depmiss)}]\n';
 
 function query(label) {
   // The label is a VALUE in GitHub's query language, not part of its syntax,
@@ -315,6 +357,7 @@ function query(label) {
       typeof r.t !== "string" ||
       !Array.isArray(r.l) ||
       !Array.isArray(r.d) ||
+      !Array.isArray(r.dh) ||
       typeof r.spec !== "boolean",
   );
   // The row is named, never dumped: an unreduced payload carries every issue
@@ -322,7 +365,7 @@ function query(label) {
   // Says what is wrong, not why: this also fires when the reduction ran fine
   // and the upstream field types were not what it assumed, so it cannot claim
   // the reduction did not apply the way the two checks above can.
-  if (bad !== -1) die(`gh output row ${bad} is not {n,t,l,d,spec} — not the shape the --jq reduction produces`);
+  if (bad !== -1) die(`gh output row ${bad} is not {n,t,l,d,dh,spec} — not the shape the --jq reduction produces`);
   return rows;
 }
 
@@ -453,12 +496,43 @@ rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
+  // #1032. A SECOND line, never a field on the row above: that row's format is
+  // what phase 0 reads and it stays byte-identical, `deps:` suppressed on an
+  // empty list and all. Indented under the row it belongs to, and repeating
+  // `#N` so a reader who greps the wording still gets the candidate with it.
+  //
+  // Says what was seen and what was not done with it, and points at the
+  // heading. No "error", no "invalid", no imperative to fix anything: the
+  // shape that most often reaches here — a noun-form heading carrying
+  // qualifying text — is legitimate usage the gate refuses on purpose (see
+  // `depmiss` above), so a fault-worded line would false-alarm every ticket
+  // that writes one. What the caller does with it is a judgement call this
+  // has no standing to make: `d` may be empty because the heading was prose
+  // all along, or because a real blocker was declared under a heading the
+  // scan does not read, and only the body says which.
+  if (r.dh.length) {
+    console.error(
+      `      #${r.n} heading mentions dependencies, not parsed as a dependency section` +
+        ` — refs under it are not in deps, check the heading: ${r.dh.map((h) => `'${h}'`).join(", ")}`,
+    );
+  }
 }
 
 // Compact: the pretty per-candidate view already went to stderr above; this
 // payload is parsed by a machine, and indenting up to `--limit` issues is pure
 // token cost in the controller's context.
-console.log(JSON.stringify(rows));
+//
+// `dh` is dropped here rather than never collected: the heading text exists
+// only inside gh's process, where the reduction runs, so the only way to it is
+// a field on the row — and #1032 rules a payload field out of scope, the
+// stderr signal being the whole of what it asks for. Here, and not in
+// `dropSpecs`' destructure where the row's other stderr-only field (`spec`)
+// leaves the payload: that runs BEFORE the per-candidate lines above, which
+// are what `dh` is for. A replacer, not a rebuilt array: it drops the key
+// without copying up to `--limit` rows to do it. Add a field to the
+// reduction that stdout SHOULD carry and it needs naming here, or it
+// silently never ships.
+console.log(JSON.stringify(rows, (k, v) => (k === "dh" ? undefined : v)));
 
 // Exit 1 for a successful query with no survivors, exit 3 when those zero
 // survivors are the filter's doing rather than the query's — see the
