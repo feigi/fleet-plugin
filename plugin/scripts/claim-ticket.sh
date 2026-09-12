@@ -10,6 +10,34 @@
 # Docker build.
 set -eu
 
+# Directly below `set -eu`, not below a locale pin: this script has none, and
+# locale-pin-prose.test.mjs deliberately leaves it off the PINNED list (whether
+# its generated runner needs one is #600's question). The five siblings that DO
+# carry a pin put this line under it instead, because that file's PROLOGUE
+# regex admits only comments, blanks and `set -[eux]+` above the pin. Here
+# there is no pin to sit under, so the only constraint left is the real one:
+# above the first git call. #1020
+#
+# Both halves are measured on this script, and each defeats a different guard.
+#
+# GIT_DIR: not one git call here carries a `-C` until after `worktree add`, so
+# an ambient one moves the whole claim to another repository. Measured,
+# standing in clone A whose `fix/777-ccc` already exists, with `GIT_DIR`
+# naming clone B's `.git`: the `rev-parse --verify refs/heads/$branch`
+# collision guard looks in B, finds nothing, and the run reports the ticket
+# claimable at rc 0 with a full receipt — the double-claim that guard is the
+# whole defence against. `--apply` then builds the worktree and the branch
+# over there.
+#
+# GIT_WORK_TREE: it outranks `-C`, so the lockfile-mutation check below —
+# `git -C "$wt" status --porcelain -uall package-lock.json …`, the one thing
+# standing between a wrong install command and a lockfile corrupted for
+# everyone — reads the AMBIENT tree against $wt's index. Measured with an
+# install that really does rewrite `package-lock.json` in the fresh worktree:
+# `lockfile clean after install`, rc 0, claim handed out, where the
+# unpoisoned run refuses at exit 2.
+unset GIT_DIR GIT_WORK_TREE
+
 NAME=claim-ticket
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 

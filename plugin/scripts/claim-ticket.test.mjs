@@ -7,6 +7,15 @@ import { join, dirname, relative } from "node:path";
 
 const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 
+// Fixture construction must not inherit the two variables this file's own
+// #1020 cases set deliberately at the bottom. Under an ambient GIT_DIR the
+// `git init` in `repo()` exits 0 and creates NOTHING in `dir` — it re-inits
+// whatever GIT_DIR names — so every fixture in this file would be built
+// against the wrong repository while the suite stayed green (ledger.test.mjs
+// records the same trap). The two cases that need these variables pass them
+// explicitly to the SCRIPT, never to the builder.
+const FIXTURE_ENV = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
+
 // Build a repo whose origin/main holds `files`. `local` is written to the
 // working tree afterwards WITHOUT committing — that is how a checkout diverges
 // from the ref the worktree is actually built from.
@@ -16,7 +25,7 @@ const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 // what the guard has to ignore — and only a fixture built under one can pin it.
 function repo(files, local = {}, parent = tmpdir()) {
   const dir = mkdtempSync(join(parent, "claim-"));
-  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe" });
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
@@ -2418,4 +2427,90 @@ test("#804: the slot rule accepts every argv it must — the false-positive half
   const odd = spawnSync("sh", [SCRIPT, "42", "-weird--slug", "fix"], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
   assert.equal(odd.status, 0, `a flag-shaped slug must still claim\n${odd.stdout}${odd.stderr}`);
   assert.match(odd.stdout, /"branch":"fix\/42--weird--slug"/, "and must reach the branch name unaltered");
+});
+
+// --- #1020: the ambient git variables, one fixture each.
+//
+// Not one case setting both. PR #1015 measured the cost of that shortcut on
+// release-ticket.sh: a fixture overriding only one of the pair leaves the
+// other half of `unset GIT_DIR GIT_WORK_TREE` unpinned and green. Here the
+// two halves do not even defeat the same guard — GIT_DIR walks past the
+// branch-collision check before anything is created, GIT_WORK_TREE walks past
+// the lockfile-mutation check after the install has already run — so one
+// detector could not see both.
+
+test("an ambient GIT_DIR does not look for the claim's branch in another repository (#1020)", () => {
+  // No git call in this script carries a `-C` until after `worktree add`, so
+  // an ambient GIT_DIR moves the whole claim elsewhere. The detector is the
+  // branch-collision guard, because that is the one whose WRONG answer is
+  // the double-claim: two members dispatched onto one ticket, each believing
+  // it holds it.
+  const dir = repo({ [TESTS]: "" });
+  execFileSync("git", ["branch", "fix/42-slug", "HEAD"], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+  const other = repo({ [TESTS]: "" });
+
+  // The fixture's own positive control: without it, a case where the branch
+  // was never created passes while pinning nothing, and a case where BOTH
+  // repos carry the branch passes for the wrong reason.
+  assert.equal(
+    spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: other, env: FIXTURE_ENV }).status,
+    1,
+    "fixture: the other repository must NOT carry the branch, or looking in the wrong place would give the right answer",
+  );
+
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
+    cwd: dir, encoding: "utf8", env: { ...FIXTURE_ENV, GIT_DIR: join(other, ".git") },
+  });
+
+  assert.equal(r.status, 2,
+    `an ambient GIT_DIR must not make an already-claimed ticket look free; got\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /branch fix\/42-slug already exists/,
+    "and it must refuse for the real reason rather than tripping over something else");
+  assert.equal(r.stdout, "", "a refusal emits no receipt — a receipt here is a claim the caller would act on");
+});
+
+test("an ambient GIT_WORK_TREE does not make a mutated lockfile look clean (#1020)", () => {
+  // GIT_WORK_TREE outranks `-C`, so `git -C "$wt" status --porcelain -uall
+  // package-lock.json …` reads the ambient tree against $wt's index. Pointed
+  // at the repo root — where the lockfile is untouched — it answers EMPTY at
+  // rc 0 while the fresh worktree's copy has been rewritten.
+  //
+  // The install really does mutate, through a shimmed `npm` rather than a
+  // hand-edit after the fact: this guard runs immediately after the install
+  // and there is no seam between them to write a file into. The shim IS the
+  // hazard the guard exists for — npm@11 pruning cross-platform optional deps
+  // is the header's own example.
+  const files = {
+    [TESTS]: "",
+    "package.json": pkg({ name: "x", scripts: { test: "true" } }),
+    "package-lock.json": '{"lockfileVersion":3}\n',
+  };
+  const bin = mkdtempSync(join(tmpdir(), "claim-mutating-npm-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(bin, "npm"),
+    '#!/bin/sh\nprintf \'{"lockfileVersion":3,"MUTATED":true}\\n\' > package-lock.json\nexit 0\n',
+    { mode: 0o755 });
+  const env = (extra) => ({ ...FIXTURE_ENV, PATH: `${bin}:${process.env.PATH}`, ...extra });
+
+  // The control, and it is not optional: it proves the shim really mutates and
+  // the guard really fires on it. Without it a shim that silently did nothing
+  // would leave the poisoned run exiting 0 for an innocent reason, and the
+  // assertion below would be measuring the absence of a hazard rather than its
+  // containment.
+  const control = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: repo(files), encoding: "utf8", env: env(),
+  });
+  assert.equal(control.status, 2, `fixture: the unpoisoned run must refuse\n${control.stdout}${control.stderr}`);
+  assert.match(control.stderr, /install mutated the lockfile/);
+
+  const dir = repo(files);
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: env({ GIT_WORK_TREE: dir }),
+  });
+
+  assert.equal(r.status, 2,
+    `an ambient GIT_WORK_TREE must not make the lockfile guard answer about the repo root; got\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /install mutated the lockfile/,
+    "and for the real reason — this guard is the only thing between a wrong install command and a lockfile corrupted for everyone");
+  assert.doesNotMatch(r.stdout, /"applied":true/, "a claim must not be handed out over an unverified lockfile");
 });
