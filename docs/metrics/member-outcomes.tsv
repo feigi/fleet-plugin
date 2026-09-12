@@ -76,11 +76,11 @@
 # implementers, against 17 real pairs across 8. A scheme with three tiers would
 # satisfy it with nothing controlled at all.
 #
-# The model test stays, on TOP of the dispatch test. Measured 2026-09-12: two
-# omp sessions dispatched 11 alt and 12 top implementers that all resolved to
+# The model test stays, on TOP of the dispatch test. Measured 2026-09-12: one
+# omp session dispatched 12 alt and 15 top implementers that all resolved to
 # claude-sonnet-5 anyway (a modelRoles override upstream of the dispatch), so
 # the intent was deliberate and the comparison empty. Counting intent alone
-# reads 19 pairs across 9 run_dates where 17 across 8 is the truth.
+# reads 18 pairs across 9 run_dates where 17 across 8 is the truth.
 #
 # Nothing is labelled; the pairing is a query:
 #   awk -F'\t' '!/^#/ {if ($15 ~ /(^|:)fleet-implementer-alt$/) a[$1 FS $5]; \
