@@ -84,6 +84,11 @@ const REAL_PYTHON3 = execFileSync("/bin/sh", ["-c", "command -v python3"], { enc
 // Same reason, for the one case that shims `git` itself: the shim has to hand
 // off to the real binary, and calling `git` from inside it would find the shim.
 const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+// Same reason once more, for the one case that shims `head`. Probe 3's refs
+// walk is the only `head` in inflight.sh and json.sh both, so the shim needs no
+// program-text key — but it still has to hand off to the real binary, and
+// calling `head` from inside it would find itself.
+const REAL_HEAD = execFileSync("/bin/sh", ["-c", "command -v head"], { encoding: "utf8" }).trim();
 
 /**
  * Writes a `git` shim into `bin`, `body` first, falling through to the real
@@ -1563,6 +1568,137 @@ test("probe 3: a worktree COUNT that could not run is unknown, never a bogus tal
   assert.match(r.stderr, /could not count the worktrees git listed for #77/);
   assert.doesNotMatch(r.stderr, /-1 worktrees/,
     "a counter that could not run never reports a count at all");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+});
+
+// --- probe 3's three remaining value-producing commands (#1019).
+//
+// The cases above pin a filter, a lookup and a counter. Three commands in this
+// probe still had no guard-removal-sensitive pin: the git-common-dir
+// resolution every path in the probe is built from, the `find` walk over the
+// refs subdirectories, and the porcelain worktree listing. Each guard was
+// deleted outright — what an edit that simply forgets one looks like — and this
+// file stayed green at 94/94, all three (measured).
+//
+// #415's hazard, unchanged: the probe runs as `probe_local || :`, which exempts
+// its whole body from `set -e`, so an unguarded failure here is silent rather
+// than loud. A failed `$(…)` assigns the empty string, and empty is exactly
+// what a genuinely free ticket produces. Two of the three then answer FREE
+// outright (measured below) — the wrong direction, since a free verdict puts a
+// second agent on the ticket where a taken one only skips it.
+//
+// Three cases, not one, and the reason is mechanical rather than stylistic:
+// each of these commands ends the probe with `return 1` when it fails, so the
+// earliest one broken is the only one that ever runs. A single case could
+// exercise the first and would carry two assertions that can never fail —
+// a pin on the file's own count of pins, not on the script. They also break
+// three different binaries (`git rev-parse`, `head`, `git worktree`) and assert
+// three different messages, so there is nothing for one case to share.
+//
+// Every selector names its command by the SUBCOMMAND in its first argument,
+// never by an invocation count: this suite's fixtures and cleanup shell out
+// through the same PATH, so a counted shim fires on whichever call happens to
+// be nth. Each shim is written AFTER its fixture is built, so no setup call is
+// in its way, and `fixture`'s teardown shells out to `chmod` and `rm`, not to
+// git. None of the three can pass green over a selector that went stale
+// either — unshimmed, each fixture is a plain free ticket at exit 0, so a key
+// that stops matching reddens on the exit code rather than going quiet.
+
+test("probe 3: a git common directory that could not be resolved is unknown, never free", (t) => {
+  const { repo, env, bin } = fixture(t, 77, {});
+
+  // The subcommand selects and the flag disambiguates, because `rev-parse`
+  // alone names two calls in this script and the other one is the precondition
+  // check at the top (`rev-parse --git-dir`). Breaking that dies "not inside a
+  // git repository" before probe 3 is reached at all — a green for a case that
+  // measured nothing.
+  gitShim(bin, `case "$1" in rev-parse) case "$*" in *--git-common-dir*) exit 1 ;; esac ;; esac`);
+
+  // Measured with the guard deleted: exit 0, `taken:false`, `unknown:[]`, "no
+  // local branch or worktree for #77". `$common` is empty, so `$common/refs/heads`
+  // is `/refs/heads` and `$common/worktrees` is `/worktrees`; neither exists,
+  // both the refs walk and the registry count skip as legitimately absent, and
+  // the probe reports a definite "no" about storage it never located.
+  //
+  // A free ticket rather than one with a hit, unlike the filter cases above.
+  // Those keep a hit present so that exit 2 is a fact about the filter and not
+  // about there being nothing to find; here the same worry is answered by the
+  // verdict itself, since a free ticket exits 0 and only a decline can reach 2.
+  // A hit would also hide the finding: the branch half answers before any of
+  // this matters, so the mutant would report taken and never show the wrong
+  // "free" that is the whole hazard.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr, /cannot resolve the git common directory/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a probe that never located its own storage never reports 'no'");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+});
+
+test("probe 3: a refs-subdirectory walk that could not run is unknown, never free", (t) => {
+  const { repo, env, bin } = fixture(t, 77, {});
+
+  // `head`, not `find`, and that is the guard's design rather than this case's
+  // convenience. The script runs `set -eu` with no `pipefail`, so
+  // `bad=$(find … | head -1)` carries HEAD's status; find's is deliberately
+  // unread, because find exits 1 on the very permission-denied descent that IS
+  // this walk's detection. So head is the only stage here whose failure means
+  // the walk could not run, and a shim on `find` could not redden this guard
+  // however hard it tried.
+  //
+  // Selected by the first argument for the reason the git shims are, and
+  // `head -1` is the only `head` the script runs.
+  writeFileSync(join(bin, "head"), `#!/bin/sh\ncase "$1" in -1) exit 1 ;; esac\nexec '${REAL_HEAD}' "$@"\n`);
+  chmodSync(join(bin, "head"), 0o755);
+
+  // Measured with the guard deleted: exit 0, `taken:false`, `unknown:[]`, "no
+  // local branch or worktree for #77". `$bad` takes the empty string the walk
+  // never produced, the `[ -z "$bad" ]` test below reads that as "no unreadable
+  // subdirectory was found", and the probe reports a definite absence about
+  // refs it never established were readable.
+  //
+  // That `[ -z … ]` test is pinned by the two chmod cases above and cannot
+  // cover this one: there the walk RAN and returned a finding, here it did not
+  // run at all, and the two arrive at the same empty `$bad` from opposite
+  // directions.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr,
+    /could not test the refs directories under \S+\/refs\/heads, so whether #77 has a local branch is unknown/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a walk that could not run never reports 'no'");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+});
+
+test("probe 3: a worktree listing that could not run names its own cause, not a bogus count", (t) => {
+  const { repo, env, bin } = fixture(t, 77, {});
+
+  // `worktree` names the script's only `git worktree` call, so the subcommand
+  // alone is the key here — no flag needed, unlike the rev-parse case above.
+  gitShim(bin, `case "$1" in worktree) exit 1 ;; esac`);
+
+  // The one of the three whose mutant does NOT reach a wrong verdict, and the
+  // assertion is shaped to that. Measured with the guard deleted: still exit 2,
+  // still `unknown:["local"]` — but "git listed no worktrees at all for #77 —
+  // not even the main checkout, so the listing cannot be trusted". That is
+  // #699's `[ "$listed" -ge 1 ]` backstop, counting a listing git never wrote,
+  // and it sends a reader after a repository whose worktrees have vanished when
+  // the fault is a git that could not run or a temp file that could not be
+  // written. So the exit code cannot pin this guard and the message is the
+  // whole of it — hence the explicit refusal of the backstop's wording below,
+  // rather than leaning on a status both paths share.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr,
+    /git worktree list failed, or its output could not be written to \S+, so whether #77 has a worktree is unknown/);
+  assert.doesNotMatch(r.stderr, /listed no worktrees at all/,
+    "the lookup that failed names itself; the downstream count never speaks for it");
   const json = JSON.parse(r.stdout);
   assert.deepEqual(json.hits, []);
   assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
