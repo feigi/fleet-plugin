@@ -533,7 +533,7 @@ operand=
 # Where this runner itself lives, resolved physically. Both vendored guards
 # below judge an argument by where it DIVERGES from here, and each used to
 # derive that for itself from the same \`dirname "\$0"\` — byte-identical
-# commands a hundred lines apart, re-run once per argument.
+# commands 276 lines apart, re-run once per argument.
 # Once, above the loop, is value-identical and not merely cheaper: every \`cd\`
 # in this runner is inside a \`\$( )\` and so cannot move this process's cwd
 # between iterations, \`\$0\` is never reassigned, and \`CDPATH=\` pins the one
