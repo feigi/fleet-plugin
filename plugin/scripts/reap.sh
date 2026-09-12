@@ -128,6 +128,69 @@ if [ $# -eq 1 ]; then
 fi
 
 base=${BASE_REF:-origin/main}
+
+# Only a remote-tracking ref is accepted — the accept-list release-ticket.sh:229
+# carries, and the one this script had none of. Both sweeps below ask a single
+# question, has this work landed upstream, and only a ref the `fetch --prune`
+# above maintains can answer it. Without the list a `BASE_REF=refs/heads/…` was
+# taken at face value in both directions: a local `main` never fast-forwarded
+# reads every merged branch as unmerged (strand everything), and
+# `refs/heads/<a branch this run is about to sweep>` reads that branch's own
+# commits as already upstream — `git cherry` empty, `git branch -D` authorized,
+# and `-D` refuses nothing.
+#
+# It is also what makes the qualification below sound rather than a guess. #924
+# recorded qualifying as unavailable here precisely because BASE_REF might name
+# a tag, a sha or a local branch, leaving no prefix that is always correct;
+# restricting the input first removes that objection instead of working around
+# it. Placed with the argument guards above the fetch, so a rejected invocation
+# reads nothing and deletes nothing.
+case "$base" in
+  origin/*|refs/remotes/*) ;;
+  *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
+esac
+
+# release-ticket.sh's SECOND guard — `*/"$branch") die` — is deliberately not
+# ported, and the reason is structural rather than a judgement about severity.
+# There the claim's own branch is a single known name, and `origin/$branch`
+# passes the accept-list above while making every measurement vacuous, because
+# a stale remote-tracking ref left by a pushed-then-deleted branch resolves
+# with no branch on the remote to hold the commits. This sweep has no one
+# branch to name, and the `fetch --prune` above is what closes the same route:
+# it drops exactly those stale refs, so a `BASE_REF=origin/<branch>` that still
+# resolves afterwards names a ref the remote still has — the commits it reads
+# as upstream really are on the remote, and a branch that is ahead of it still
+# prints `+`. Nothing is lost in either case, which is not true of the tag
+# spelling handled next.
+
+# And then stop MEASURING against a shorthand. `origin/main` is one, and git
+# resolves a shorthand through its own disambiguation order (gitrevisions:
+# refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>, …), in
+# which refs/remotes/origin/main comes LAST — so a local tag literally named
+# `origin/main` outranks the remote-tracking ref, and every measurement against
+# $base then answers about the TAG. Measured on this script (git 2.50.1, Apple
+# Git-155): an unmerged [gone] branch holding a commit that existed nowhere
+# else, plus `git tag origin/main <that branch's own tip>`, printed
+# `REAPED feature/solo` at exit 0 with an empty kept[] — the sole copy of the
+# commit destroyed by a probe that was asked about the tag.
+#
+# Nothing already here could see it. The hijack is spelled as the legitimate
+# DEFAULT, so no accept-list catches it; and `git rev-parse --verify "$base"`
+# exits 0 whichever ref it picked — git's own
+# `warning: refname 'origin/main' is ambiguous.` reaches stderr, where this
+# script reads nothing and an unattended run has no one to read it. #924, the
+# fix pattern proven in release-ticket.sh:264 (#760).
+#
+# refs/remotes/ leaves nothing to disambiguate, and the accept-list above
+# already establishes $base is spelled for that namespace. $base itself is
+# unchanged and stays in every operator-facing line: `origin/main does not
+# resolve` is what a caller can act on, not the qualified spelling. A BASE_REF
+# whose only resolution IS a tag now refuses at the guard below instead of
+# measuring against it, which is the fail-closed half of the same edit.
+case "$base" in
+  refs/remotes/*) base_rev=$base;;
+  *) base_rev="refs/remotes/$base";;
+esac
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
 # The worktree this run is standing in, read once and before anything is
@@ -210,7 +273,13 @@ if [ "$fetch_rc" -ne 0 ]; then
   fi
   die "fetch failed — refusing to reap on stale refs"
 fi
-git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
+# `$base_rev`, never `$base`: the qualified spelling is the one every
+# measurement below uses, so it is the one whose existence has to be
+# established — and asking about it is also what turns a BASE_REF that only
+# resolves as a TAG into a refusal here rather than a merge probe answered by
+# the wrong commit (#924). The message names `$base`, the spelling the caller
+# passed and the only one it can act on.
+git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 [ "$apply" = true ] || echo "$NAME: DRY RUN — nothing will be deleted. Pass --apply to act." >&2
 
 reaped=""
@@ -439,14 +508,19 @@ for b in $gone_branches; do
   # enumeration fix alone turned a branch this script currently KEEPS into
   # `REAPED`, at exit 0, with an empty kept[]. Qualifying changes nothing for an
   # ordinary branch — both spellings name the same commit — and it is the same
-  # key the worktree lookup below already builds. The BRANCH side is the only
-  # side qualified here, and qualifying it does not make the check unfoolable:
-  # `$base` reaches this same `git cherry` exactly as BASE_REF spells it, so a
-  # local tag carrying that spelling outranks the remote-tracking ref and the
-  # probe answers about the TAG — measured, an unmerged [gone] branch REAPED at
-  # exit 0 with an empty kept[]; open as #924. "By nothing else" bounds what
-  # ELSE authorizes -D, not whether this check itself can be wrong. #634
-  if ! cherry=$(git cherry "$base" "refs/heads/$b" 2>&1); then
+  # key the worktree lookup below already builds.
+  #
+  # `$base_rev` is the other side of the same rule, and it was missing until
+  # #924: `$base` reached this `git cherry` exactly as BASE_REF spelled it, so a
+  # local tag named `origin/main` outranked refs/remotes/origin/main and the
+  # probe answered about the TAG while `git branch -D` below deleted the BRANCH
+  # — measured, an unmerged [gone] branch whose commit existed nowhere else
+  # REAPED at exit 0 with an empty kept[]. The qualification is built at the top
+  # of the file, where its own comment records why the accept-list beside it is
+  # what makes prefixing sound. "By nothing else" bounds what ELSE authorizes
+  # -D, not whether this check itself can be wrong — which is why BOTH revs it
+  # consumes are qualified. #634
+  if ! cherry=$(git cherry "$base_rev" "refs/heads/$b" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
   fi
@@ -987,8 +1061,14 @@ else
     # sweep above records: the pipeline would take grep's status and a probe
     # that died would read identically to a clean one. `$head` is a full object
     # id, so no refname can shadow it the way #634 measured for a bare branch
-    # name.
-    if ! cherry=$(git cherry "$base" "$head" 2>&1); then
+    # name — but the BASE side is a shorthand until it is qualified, and this
+    # sweep removes DIRECTORIES, so the #924 shadowing costs the files
+    # themselves here and not only a branch ref: measured, a local tag named
+    # `origin/main` at a detached worktree's own tip made this probe read clean
+    # and `--apply` deleted the worktree holding the only copy of that commit.
+    # `$base_rev` is built at the top of the file; the branch sweep's copy of
+    # this probe carries the same qualification for the same reason.
+    if ! cherry=$(git cherry "$base_rev" "$head" 2>&1); then
       keep "" "cherry probe failed — cannot tell if worktree $wt is merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
       continue
     fi
