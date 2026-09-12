@@ -2514,7 +2514,7 @@ test("an escaper that cannot say whether the worktree path was rewritten reports
 //
 // Two phrases, not one, because either alone is satisfied by a rewrite that
 // loses the point. `there is no worktree` alone passes prose that names the
-// misreading without ruling it out; `could not render the path you passed in`
+// misreading without ruling it out; `could not render the path or branch you passed in`
 // alone passes prose that says what the field IS while leaving the dangerous
 // reading unaddressed. The claim is the pair: this is what `null` means, and
 // that is what it does not.
@@ -2526,7 +2526,7 @@ test("an escaper that cannot say whether the worktree path was rewritten reports
 test("both docs rule out reading a null worktree as an absent one", () => {
   for (const rel of ["../commands/run-merge-bot.md", "../../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
     const doc = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-    assert.ok(doc.includes("could not render the path you passed in"),
+    assert.ok(doc.includes("could not render the path or branch you passed in"),
       `${rel} must say what a null worktree/branch IS — the run could not render the argument the caller supplied — since the field is an echo of argv rather than a finding`);
     assert.ok(doc.includes('"there is no worktree"'),
       `${rel} must rule out the false-reassurance reading by name: a null path is not an absent worktree, and an operator who reads it as one skips the proof step believing there was nothing to prove`);
