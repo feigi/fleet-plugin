@@ -97,7 +97,7 @@ Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
 
-`--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
+`--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits. On a re-push the force is load-bearing: stop and report the denial, never retry with a plain `--force`; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
 
 `Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
