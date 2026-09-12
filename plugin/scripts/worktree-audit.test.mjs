@@ -385,6 +385,17 @@ test("a repo path containing a space does not truncate the worktree it reads", (
   assert.deepEqual(match.dirtyFiles, ["scratch.txt"]);
 });
 
+/** The design spec's script-surface row for this script, as one line. */
+function specRow() {
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `worktree-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a worktree-audit.sh row");
+  return row;
+}
+
 // Sibling pin, same table, same reason: no-undo-audit.test.mjs. The design
 // spec's script-surface row for this script named `commits` — a field that has
 // never existed — and typed `dirty` as an array when it is a count, so a caller
@@ -399,12 +410,7 @@ test("the design spec's script-surface row names every field the payload actuall
   const { json } = runAudit(w);
   const e = entryFor(json, wt);
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `worktree-audit.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a worktree-audit.sh row");
+  const row = specRow();
 
   // Both halves read the Out cell alone, since the rest of the row legitimately
   // names things that are not keys: scanning the whole row let the Script cell's
@@ -962,5 +968,168 @@ test("an ambient GIT_DIR does not audit a different repository (#1020)", (t) => 
     json.filter((e) => e.worktree === otherWt),
     [],
     `an ambient GIT_DIR must not make the audit answer for another checkout: ${JSON.stringify(json)}`,
+  );
+});
+
+// --- #1108: the exit-2 cause census.
+//
+// The design spec's script-surface row states this script's failures as a
+// CLOSED enumeration — `exit 2 only — A, B, C` — and until this block nothing
+// in the repo read that cell. Two PRs in one wave each left a row asserting an
+// enumeration its script had outgrown with the suite green (#1104/#525,
+// #1105/#482), and on `main` this row was silent about three refusals the
+// script reaches: the worktree-readers library guard, either library failing
+// to load, and a worktree listing that could not be read. All three are
+// measured below by running the script, never read off its source.
+//
+// Two pins, closing opposite directions:
+//
+//   TOO NARROW — the script grows a refusal the row does not carry. `CAUSES`
+//   binds every `die` site to the phrase that represents it, and the census
+//   test asserts that binding is EXACTLY the set of sites the script has. Add
+//   a `die` and it reds on an unbound site; delete one and it reds on a
+//   binding whose cause the script can no longer produce. The set is derived
+//   from the script, so the binding cannot rot silently the way the row did —
+//   a reworded message reds too, which is the point: the row is what then has
+//   to be revisited.
+//
+//   TOO BROAD — the row grows a cause no `die` produces. The census cannot see
+//   that; a phrase added to the cell binds to nothing and no assert notices.
+//   `EXIT2_ENUMERATION` is the pin that does: the whole closed list, byte for
+//   byte, in the `UNKNOWN_LINE`/`ORPHAN_LINE` verbatim-constant discipline
+//   no-undo-audit.test.mjs already uses on this same table.
+//
+// The span pin's cost is deliberate, and it was #1108's ruling: it reds on
+// EVERY edit to the enumeration, a legitimate rewording included. A structural
+// assertion loose enough to survive rewording cannot red on a rewrite that
+// quietly drops a real cause, which is the defect that was measured twice.
+//
+// Scoped to this script's own suite beside its siblings rather than lifted
+// into one shared table over every row: `.out-of-scope/cli-guard-test-
+// consolidation.md` refuses that consolidation for the CLI-guard pins, and its
+// reason holds unchanged here — a file no single script's suite runs recreates
+// the blind spot these pins exist to close.
+
+/** The `Non-zero when` cell of this script's row, and no more of the row. */
+const exit2Cell = () => specRow().split("|")[4];
+
+/**
+ * The row's exit-2 enumeration, verbatim: from `exit 2 only` to the end of the
+ * sentence that closes the list. The cell's remaining sentence states the
+ * exit-0 findings and is read by the `Out`-cell test above, so the span stops
+ * where the closed list does — the slice is the size of the claim.
+ */
+const EXIT2_ENUMERATION =
+  "exit 2 only — any argument at all (#525), not a repository, `${BASE_REF:-origin/main}` does not resolve, `json.sh` or `worktree.sh` is missing, unreadable or failed to load (both guards fire above the opening `[`, so nothing is emitted), the `git worktree list` the audit is assembled from could not be read (#551), or an entry could not be escaped (#119) — that one fires inside the emitting loop, so stdout carries the array truncated mid-element and unparseable, which the exit 2 and the named stderr line are what distinguish from a complete answer.";
+
+/**
+ * The clause that collapses this script's four library refusals into one
+ * cause. Named because four bindings below share it and a phrase typed four
+ * times drifts three ways.
+ */
+const LIBRARY_CLAUSE = "`json.sh` or `worktree.sh` is missing, unreadable or failed to load";
+
+/**
+ * Every `die` site in worktree-audit.sh, bound to the phrase in the row that
+ * represents it.
+ *
+ * The KEY is the message as the script spells it, interpolations and all.
+ * `die` is this script's only exit-2 path — `dieSites` asserts that of the
+ * definition itself — so the message set IS the cause set, and keying on it is
+ * what makes this derived rather than a third hand-written copy of the
+ * contract sitting beside the script and the row.
+ *
+ * Sites share a phrase where the ROW collapses them, which is the row's
+ * editorial call and not a looseness here: a reader who meets any of the four
+ * library refusals does the same thing about it. The phrases are the short
+ * load-bearing labels; their exact wording is `EXIT2_ENUMERATION`'s job.
+ */
+const CAUSES = new Map([
+  ["takes no arguments; audits every worktree", "any argument at all (#525)"],
+  ["cannot read $json_lib — refusing to audit without the JSON escaping helpers", LIBRARY_CLAUSE],
+  ["$json_lib failed to load", LIBRARY_CLAUSE],
+  ["cannot read $wt_lib — refusing to audit without the worktree readers", LIBRARY_CLAUSE],
+  ["$wt_lib failed to load", LIBRARY_CLAUSE],
+  ["not inside a git repository", "not a repository"],
+  ["$base does not resolve", "`${BASE_REF:-origin/main}` does not resolve"],
+  ["$wt_err", "the `git worktree list` the audit is assembled from could not be read (#551)"],
+  ["could not escape the entry for $wt", "an entry could not be escaped (#119)"],
+]);
+
+/**
+ * The message of every `die` call in the script, read off the script.
+ *
+ * Comment lines are dropped: prose quoting a `die "…"` is not a call site, and
+ * minting a cause out of one would red this suite over a comment. Greedy to
+ * the last quote on the line, so a message carrying a nested `"$…"`
+ * substitution arrives whole rather than truncated at its first inner quote.
+ */
+function dieSites() {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.match(
+    src,
+    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2; exit 2; \}$/m,
+    "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
+  );
+  const sites = src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => [...l.matchAll(/(?:^|[;&|(\s])die "(.*)"/g)].map((m) => m[1]));
+  assert.ok(sites.length > 1, `the scan found ${sites.length} die sites, so its spelling has drifted off the script`);
+  assert.equal(new Set(sites).size, sites.length, `two die sites share a message, so one of them cannot be bound: ${sites.join(" / ")}`);
+  return sites;
+}
+
+test("the design spec's row represents every exit-2 cause this script can reach, and none it cannot (#1108)", () => {
+  // Both directions in one equality: an unbound site is a cause the row may be
+  // silent about, and a binding with no site is a cause the row claims while
+  // the script can no longer produce it.
+  assert.deepEqual([...dieSites()].sort(), [...CAUSES.keys()].sort());
+
+  const cell = exit2Cell();
+  for (const phrase of new Set(CAUSES.values())) {
+    assert.equal(
+      cell.split(phrase).length - 1,
+      1,
+      `the \`Non-zero when\` cell must carry "${phrase}" exactly once.\ncell: ${cell}`,
+    );
+  }
+});
+
+test("the design spec's row states this script's exit-2 causes as a closed list, byte for byte (#1108)", () => {
+  // A prefix, not a search: a cause smuggled in ahead of the list would sit
+  // outside an `includes`, and this cell opens on the list.
+  assert.equal(exit2Cell().trim().slice(0, EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
+});
+
+// The worktree-readers guard had no fixture at all before #1108, which is how
+// its absence from the row survived: the missing-json.sh case above reaches the
+// json guard, which fires first, so a lone copy of this script can never reach
+// this one. json.sh travels with the copy; worktree.sh does not.
+test("a missing worktree.sh is exit 2, and the design spec's row names the library it blames (#1108)", (t) => {
+  const w = repo(t);
+  addWorktree(w, "fix/1-thing");
+  const lone = mkdtempSync(join(tmpdir(), "worktree-audit-nowtlib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "worktree-audit.sh"));
+  copyFileSync(fileURLToPath(new URL("./json.sh", import.meta.url)), join(lone, "json.sh"));
+
+  const r = spawnSync("sh", [join(lone, "worktree-audit.sh")], { cwd: w, env: ENV, encoding: "utf8" });
+
+  assert.equal(r.status, 2, `a missing library is \`the question could not be answered\`: ${r.stderr}`);
+  assert.equal(r.stdout, "",
+    "and not even the opening `[` — the guard fires before the array is started, so no caller can see a truncated one");
+  assert.match(r.stderr, /refusing to audit without the worktree readers/,
+    "the fixture must reach the worktree-readers guard rather than the json.sh one above it");
+
+  // The library NAME off the real refusal, never typed here: the path around it
+  // is the machine's to vary and no document can carry it. Pre-#1108 this row
+  // named json.sh alone, so this assert is what demonstrates the omission by
+  // running the script rather than by reading it.
+  const blamed = /^worktree-audit: cannot read \S*\/([^/ ]+) —/m.exec(r.stderr);
+  assert.ok(blamed, `the refusal must name the library it could not read: ${r.stderr}`);
+  assert.ok(
+    exit2Cell().includes(`\`${blamed[1]}\``),
+    `the spec row must name the library this refusal blames, and does not carry \`${blamed[1]}\`.\ncell: ${exit2Cell()}`,
   );
 });
