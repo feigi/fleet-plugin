@@ -495,9 +495,11 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 // #908: a controller brief predicted the merge would be "a fast-forward". True
 // of the CONTENT (merge tree == pin tree == 988f29d1, `git diff` empty) and false
 // of the SHAPE — `gh pr merge --merge` wrote two parents. The distinction is not
-// cosmetic: prove-merge.sh has `[ "$parents" -ge 2 ] || die "... not a merge
-// commit"` and die() exits 2, so an actual fast-forward yields no proof and a
-// halt. Pinned so a future member cannot read the doc as permitting one.
+// cosmetic: prove-merge.sh guards the SHAPE with `[ "$parents" -ge 2 ]`, dying
+// at "has no second parent — not a merge commit", and die() exits 2 — so an
+// actual fast-forward yields no proof and a halt. Anchored on those strings
+// rather than a line number, which drifted repeatedly here (#1136). Pinned so
+// a future member cannot read the doc as permitting one.
 test("step 4 says why --merge is load-bearing, not merely which flag to type", () => {
   assert.match(step4(), /\*\*`--merge` \(no-ff\) is load-bearing, not stylistic/);
   assert.match(step4(), /has no second parent — not a merge commit/);
