@@ -160,8 +160,8 @@ At start, and whenever the pool empties.
    them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
    records what the scripts and runbooks in this repo say right now, which is
    what every later gate compares against; the rule above says what its exit
-   codes mean. Pinning ahead of the fast-forward pins the superseded text and
-   certifies it for the rest of the run.
+   codes mean. Pinning before that fast-forward would instead pin the
+   superseded text and certify it for the rest of the run.
 
    **Launch the cockpit.** On the first phase-0 pass only:
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
