@@ -530,6 +530,15 @@ set -f
 # reorders argv, which needs its own measurement, and no briefed workflow
 # passes flags alone. (#352)
 operand=
+# Where this runner itself lives, resolved physically. Both vendored guards
+# below judge an argument by where it DIVERGES from here, and each used to
+# derive that for itself from the same \`dirname "\$0"\` — byte-identical
+# commands a hundred lines apart, re-run once per argument.
+# Once, above the loop, is value-identical and not merely cheaper: every \`cd\`
+# in this runner is inside a \`\$( )\` and so cannot move this process's cwd
+# between iterations, \`\$0\` is never reassigned, and \`CDPATH=\` pins the one
+# lookup an inherited CDPATH could otherwise answer differently per argument.
+root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
 for arg do
   shift
   # Judged on the argument's shape, not on what that shape resolves to: a
@@ -670,15 +679,15 @@ for arg do
     # does name that \`node_modules\` and is refused — measured, and node reads
     # the file branch's arguments the same way. Nothing else in the suite
     # reaches the term, so that input is what pins it.
-    # \`CDPATH=\` on both: an inherited CDPATH resolves a bare relative name
-    # against a same-named directory somewhere else entirely, so the guard
-    # would judge one directory while \`find\` below — which never consults
-    # CDPATH — walks another, and the vendored suite runs green. It also
-    # stops \`cd\` echoing its target into the substitution.
+    # \`CDPATH=\` on each \`cd\` here, and on \$root above: an inherited CDPATH
+    # resolves a bare relative name against a same-named directory somewhere
+    # else entirely, so the guard would judge one directory while \`find\`
+    # below — which never consults CDPATH — walks another, and the vendored
+    # suite runs green. It also stops \`cd\` echoing its target into the
+    # substitution.
     # A symlink to a directory that merely CONTAINS a vendored tree resolves
     # outside \`node_modules\` and passes here untouched; \`-prune\` below
     # still excludes its vendored contents once the walk reaches them.
-    root=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
     resolved=\$(CDPATH= cd -- "\$arg" 2>/dev/null && pwd -P)
     if [ -z "\$resolved" ]; then
       parent=\$(CDPATH= cd -- "\$(dirname -- "\$arg")" 2>/dev/null && pwd -P)
@@ -950,13 +959,16 @@ for arg do
     # divergence is an ancestor of the runner too and says nothing about the
     # argument. Matched absolutely instead, a worktree living under one refused
     # every file argument as vendored.
+    # \$root is that location, derived once above the loop rather than a second
+    # time here: both branches asked the same \`dirname "\$0"\` question, and two
+    # copies a hundred lines apart are two things to keep in agreement for no
+    # answer either could give differently.
     case "\$arg" in
       */node_modules/*|node_modules/*) ;;
       *)
         if [ -e "\$arg" ]; then
-          froot=\$(CDPATH= cd -- "\$(dirname "\$0")" 2>/dev/null && pwd -P)
           fresolved=\$(realpath -- "\$arg") || { printf 'agent-test: cannot resolve %s — refusing rather than running it unchecked\n' "\$arg" >&2; exit 1; }
-          fshared=\$froot
+          fshared=\$root
           while [ -n "\$fshared" ]; do
             case "\$fresolved" in "\$fshared"/* | "\$fshared") break ;; esac
             fshared=\${fshared%/*}
