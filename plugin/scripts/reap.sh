@@ -103,6 +103,73 @@ fi
 base=${BASE_REF:-origin/main}
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
+# The worktree this run is standing in, read once and before anything is
+# deleted. `--apply` removes worktrees, and the fleet's own `.worktrees/` home
+# is exactly where a member stands when it runs this — so the worktree the
+# script is running FROM was itself eligible for removal, and removing it
+# deletes this process's cwd. Everything after that dies with
+# `fatal: Unable to read current working directory`: measured (git 2.50.1,
+# Apple Git-155) as `REMOVED worktree …` followed by a failed
+# `git worktree prune` at exit 2, from a run whose every removal SUCCEEDED, and
+# measured again on the branch sweep as a `git branch -D` that failed for that
+# same reason on a branch whose worktree had just been removed. The two sweeps
+# below refuse this one path and report it as a `kept` finding, which is the
+# remedy an operator can act on — it is one `cd` away. Chdir-ing somewhere
+# durable at the foot of the file would cover the prune only, and the prune is
+# the LAST call that needs a cwd, not the only one. #992
+#
+# `--show-toplevel`, never `pwd`: this script may be invoked from a
+# subdirectory, and that answers the worktree ROOT — the path
+# `git worktree list --porcelain` names. Measured (git 2.50.1, Apple Git-155):
+# both are physical paths, git resolving cwd through symlinks and
+# canonicalising what it records in the registry, so they compare byte for
+# byte, from a subdirectory too.
+#
+# `2>/dev/null` and never `2>&1`, for the reason the in-progress guard below
+# records at its own `rev-parse`: this capture is used as a PATH, not as
+# message text, and a `~/.gitconfig` with a key outside any section makes every
+# git command print `error: key does not contain a section: …` AT EXIT 0 (#985)
+# — folded in, that line would arrive glued in front of the path and match no
+# worktree ever again.
+#
+# Empty is a legitimate answer, not a failure worth dying on: `--show-toplevel`
+# exits 128 with one of two known messages where cwd is in no working tree (a
+# bare repo root, or inside `.git`) — "not a git repository" or "this
+# operation must be run in a work tree" (measured, git 2.50.1, Apple
+# Git-155) — and neither is a path either sweep can remove: the branch sweep
+# binds `$wt` only from a `branch` line a bare root never prints, and the
+# enumeration below skips a bare entry outright.
+#
+# Any OTHER failure of this probe is NOT that answer and must not be folded
+# into it. Doing so silently disables both cwd-delete guards below (#1441) —
+# every removal proceeds as though this run were standing in no worktree at
+# all, reproducing #992's own defect signature. Fail closed instead: die,
+# naming the probe that broke, so an operator chasing a downstream failure (a
+# prune refusal, a `git branch -D` dying on
+# "Unable to read current working directory") lands on the real cause here
+# rather than the symptom.
+#
+# The success path keeps `2>/dev/null`, never `2>&1`: folding stderr in would
+# glue the #985 stray-gitconfig warning onto the path on a plain SUCCESS too.
+# Stderr is only re-captured, on a second call, once the first has already
+# failed — the classification never touches the value the guards compare
+# against. `self_wt_rc=…` (not `|| self_wt=`) keeps the check off `set -e`.
+self_wt_rc=0
+self_wt=$(git rev-parse --show-toplevel 2>/dev/null) || self_wt_rc=$?
+if [ "$self_wt_rc" -ne 0 ]; then
+  self_wt_err=$(git rev-parse --show-toplevel 2>&1 >/dev/null) || true
+  case "$self_wt_err" in
+  *"not a git repository"* | *"this operation must be run in a work tree"*)
+    self_wt=
+    ;;
+  *)
+    die "cannot tell whether this run is standing in a worktree slated for removal — 'git rev-parse --show-toplevel' failed with an unrecognised error (${self_wt_err:-exit $self_wt_rc}) instead of one of the two known 'not in a worktree' messages; refusing to reap with the cwd-delete guard unverified"
+    ;;
+  esac
+fi
+# The `[ -n ]` at each guard site keeps an empty value from matching an empty
+# `$wt`.
+
 echo "\$ git fetch --prune origin" >&2
 fetch_budget=$(net_fetch_budget)
 fetch_rc=0
@@ -618,6 +685,40 @@ for b in $gone_branches; do
       continue
     fi
 
+    # Refused before the removal below, and in the dry run as well as under
+    # `--apply`, for the reason the main-checkout guard above records (#82): a
+    # `would remove worktree` line the next `--apply` refuses is a promise this
+    # script cannot keep. Unlike git's own refusals (#391) this one IS
+    # predictable — the cwd is known before anything is deleted.
+    #
+    # Below the probes rather than above them, so every reason already true of
+    # this worktree keeps its precedence: dirty, unreadable and unmerged all
+    # name something about the worktree itself, while this one names only where
+    # the script happens to stand. It sits here, last, because this is the
+    # guard the removal is refused by.
+    #
+    # `continue`, so the branch is kept with its worktree — the pairing the
+    # main-checkout reason already states, and `git branch -D` would refuse a
+    # branch checked out in a surviving worktree anyway. #992
+    #
+    # Path-BOUNDARY match, not exact equality: a worktree nested inside `$wt`
+    # (a real, documented shape — SKILL.md names a member committing from a
+    # nested worktree) has `$wt` as an ancestor on disk, so removing `$wt`
+    # removes the nested one's files too — taking any uncommitted work in it
+    # along, the exact #992 signature one path further out — even though
+    # `$wt` itself never equals `$self_wt` in that shape. Trailing slashes on
+    # both sides of the match keep a sibling like `$wt2` from matching `$wt`;
+    # quoting `$wt` on the pattern side keeps any glob metacharacter in the
+    # path literal. (#1441)
+    if [ -n "$self_wt" ]; then
+      case "$self_wt/" in
+        "$wt"/*)
+          keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+          continue
+          ;;
+      esac
+    fi
+
     # Reached with $wt either present-readable-clean or established absent —
     # `git worktree remove` accepts a prunable-because-absent entry at rc 0
     # and clears the stale registration outright (verified, git 2.50.1, same
@@ -939,6 +1040,25 @@ else
       continue
     fi
 
+    # The branch sweep's copy of this guard carries the reasoning; the only
+    # difference here is that there is no branch to keep with the directory.
+    # After the ownership bound above, deliberately: a worktree this sweep would
+    # never remove needs no word about where the script is standing, and the
+    # bound's own reason is the one true of it. #992
+    #
+    # Path-boundary match, not exact equality — same reasoning as the branch
+    # sweep's copy of this guard: a worktree nested inside `$wt` is removed
+    # along with it even though `$wt` never equals `$self_wt` in that shape.
+    # (#1441)
+    if [ -n "$self_wt" ]; then
+      case "$self_wt/" in
+        "$wt"/*)
+          keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+          continue
+          ;;
+      esac
+    fi
+
     if [ "$apply" = true ]; then
       # No `--force`, and the same registry re-read the branch sweep documents:
       # a non-zero exit is no proof the removal had no effect, so the reason
@@ -990,6 +1110,18 @@ printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s]}\n' \
 # exists to remove. An `if` with no `else` exits 0 when its condition is false.
 # The prune's own failure reaches `die`, never -e, so it refuses loudly on 2
 # like every other failure this script can name.
+#
+# Captured, and quoted into the refusal the way `cherry probe failed` and
+# `worktree remove refused` above already are: bare, this printed a step name
+# and dropped git's stdout and stderr on the floor, so the operator read
+# `git worktree prune failed` and nothing about what git said (the class #578
+# catalogues at this script's other sites). Folded to one line by the same
+# `tr '\n' ' '` every reason here uses, so one failure stays one line. A
+# non-zero exit from this command now means the housekeeping genuinely failed:
+# the run standing in a worktree it was about to remove is refused above,
+# before any removal, rather than diagnosed here afterwards. #992
 if [ "$apply" = true ]; then
-  git worktree prune || die "git worktree prune failed"
+  if ! prune_err=$(git worktree prune 2>&1); then
+    die "git worktree prune failed: $(printf '%s' "$prune_err" | tr '\n' ' ')"
+  fi
 fi
