@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 // #472: this file's header has never been pinned, while SKILL.md's guard tells
 // the controller that "that file's header carries the column meanings" — so the
@@ -99,6 +100,30 @@ test("the header says blank means unknown and forbids backfilling a guess", () =
     HEADER,
     /`note` IS FREE TEXT AND NOW SITS BEFORE FOUR COLUMNS/,
     "the header no longer warns that a tab in `note` shifts the appended columns",
+  );
+});
+
+test("the header names WHICH diff `minted_false_claim` scores, and settles the caught-before-merge case", () => {
+  // #1029: the definition read "the diff" and a PR has two — as submitted and
+  // as merged. Two rows in one arm scored it opposite ways before the ruling
+  // named the submitted one. Nothing derives this column, so neither half is
+  // enforceable in code, and a scorer left to infer the convention re-derives
+  // the same ambiguity: the caught-before-merge case is the half that decides
+  // most rows, and stating only "as submitted" leaves it inferable.
+  //
+  // Sliced to the definition itself, so a stray "as submitted" elsewhere in the
+  // header cannot buy the pass with this one gutted. `stripHashGutter` because
+  // `\s+` does not span the `#` a wrapped comment line begins with.
+  const def = stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+  assert.match(
+    def,
+    phrase("the diff AS SUBMITTED added a factual claim"),
+    "the header no longer says `minted_false_claim` scores the diff AS SUBMITTED",
+  );
+  assert.match(
+    def,
+    phrase("a claim review caught and the fix pass corrected before merge still counts yes"),
+    "the header no longer settles the caught-before-merge case, the half a scorer would otherwise infer",
   );
 });
 
