@@ -1470,8 +1470,11 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 // fan-out must say so, never read as full coverage. It is not a coverage claim
 // on its own and never was — a specialist can be dispatched and die, or run and
 // never execute the suite — so `dimensionsUnrun` names which of those keys did
-// not cover their ground, and why. A key in the first and not the second is the
-// only thing that means covered.
+// not cover their ground, and why. A key in the first and NOT in the second ran
+// a suite — not that it is covered (#535). `unrunReason` reads `test_run`'s
+// counts and quotes `run.command` into its message; it never compares that
+// command against the one the dispatch handed out, so a specialist that
+// substituted a narrower runner is not classified unrun.
 //
 // The two are siblings rather than one filtered list because they answer
 // different questions. Subtracting the unrun ones from `dimensionsRun` would
