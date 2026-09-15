@@ -1649,11 +1649,19 @@ for (const [what, stub] of [
 ]) {
   test(`a checksum that ${what} refuses before anything is claimed, in both modes`, () => {
     const dir = repo({ [TESTS]: "" });
-    const bin = mkdtempSync(join(tmpdir(), "claim-cksum-"));
+    const bin = mkdtempSync(join(tmpdir(), "claim cksum-"));
     const ghLog = join(bin, "gh.log");
-    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${ghLog}\nexit 0\n`, { mode: 0o755 });
+    // `>> "$GH_LOG"`, not the interpolated path (#880). The path comes from
+    // `mkdtempSync(join(tmpdir(), …))` and so inherits `TMPDIR`; unquoted, a
+    // space in it word-split the redirect, the shell wrote to the path's first
+    // word and `echo` took the rest as an argument, and the log was never
+    // created — which the assertion below reads as "gh was never invoked".
+    // ci-state.test.mjs's GH_STUB form keeps the path out of the script text.
+    // The prefix above now holds a space so this shape is exercised on every
+    // machine, not only one whose TMPDIR has one.
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
     writeFileSync(join(bin, "cksum"), stub, { mode: 0o755 });
-    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog };
 
     const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
 
@@ -1675,6 +1683,15 @@ for (const [what, stub] of [
     assert.equal(d.status, 2, `the dry run refuses too\n${d.stderr}`);
     assert.match(d.stderr, /refusing to claim without a runner template stamp/);
     assert.equal(d.stdout, "", "and predicts no claim it could not make");
+
+    // The must-ACCEPT half for the stub itself, not for the script: the
+    // assertion above is satisfied by a `gh` that cannot record, so without
+    // this the pin cannot tell a refusal from a broken fixture. Runs last so
+    // it cannot perturb either measurement above.
+    assert.equal(spawnSync("sh", ["-c", "gh issue edit 42"], { cwd: dir, encoding: "utf8", env }).status, 0,
+      "fixture: the stub must be the gh on PATH");
+    assert.equal(existsSync(ghLog), true,
+      "the stub cannot record a call it did receive, so the assertion above passes vacuously");
   });
 }
 
@@ -2010,19 +2027,31 @@ test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) 
   // about whether the tracker was mutated at all, which a silent stub cannot
   // answer. Before the fix this file existed — the label landed, and only then
   // did `git worktree add` die on the leading directories it could not create.
-  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  // Same `$GH_LOG` form and deliberately spaced prefix as the checksum test
+  // above (#880): interpolated unquoted, this marker path word-split under a
+  // spaced `TMPDIR` and recorded nothing, turning the assertion below into a
+  // pin that passes hardest exactly when the stub is broken.
+  const bin = mkdtempSync(join(tmpdir(), "claim bin-"));
   const marker = join(bin, "gh-ran");
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${marker}\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker };
 
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    env,
   });
 
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.equal(existsSync(marker), false,
     "the guard must refuse ahead of every mutation — a labelled issue with no worktree is the half-claim this ordering exists to prevent");
+
+  // The must-ACCEPT half, as above: proves the marker's absence came from the
+  // guard refusing and not from a stub that could never have written it.
+  assert.equal(spawnSync("sh", ["-c", "gh issue edit 42"], { cwd: dir, encoding: "utf8", env }).status, 0,
+    "fixture: the stub must be the gh on PATH");
+  assert.equal(existsSync(marker), true,
+    "the stub cannot record a call it did receive, so the assertion above passes vacuously");
 });
 
 // The must-ACCEPT half for `.worktrees` PRESENT — the `.worktrees` ABSENT
@@ -2352,10 +2381,16 @@ test("runner: an unresolvable interpreter in the delegated derivation carries th
 // AFTER `gh issue edit` still exits 2 and still looks like a refusal from the
 // outside, which is exactly how the trailing-argument case read as one.
 function ghSpy() {
-  const bin = mkdtempSync(join(tmpdir(), "claim-ghspy-"));
+  // Spaced prefix and the `$GH_LOG` form, one convention with the two stubs
+  // above (#880). This spy was already safe — it interpolated through
+  // `JSON.stringify`, which emits its own quotes — but a second spelling of
+  // the same job is what lets the unquoted one look normal, and the
+  // `ran() === true` assertion in the accept test below is what holds the env
+  // threading here honest.
+  const bin = mkdtempSync(join(tmpdir(), "claim ghspy-"));
   const marker = join(bin, "ran");
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(marker)}\nexit 0\n`, { mode: 0o755 });
-  return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, ran: () => existsSync(marker) };
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
+  return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker }, ran: () => existsSync(marker) };
 }
 
 test("#804: a mistyped --apply is refused, never demoted to a dry run", () => {
