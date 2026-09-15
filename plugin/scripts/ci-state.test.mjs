@@ -516,39 +516,55 @@ test("--base given a whitespace-only value dies rather than comparing against th
 // guard that checks the array but not its elements is itself a partial
 // guard, and jobs/runs rows are read (`j.name`, `r.headSha`) unguarded.
 
-test("PR info missing headRefOid: exit 2 naming the field, never a silent \"undefined\" verdict later", () => {
-  const r = run([], {
-    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-    prView: JSON.stringify({ headRefName: BRANCH, state: "OPEN", mergeStateStatus: "CLEAN" }),
-  });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /pr view/);
-  assert.match(r.stderr, /headRefOid/);
-  assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
-});
+// Every assertion in this section is about the REFUSAL LINE, not about stderr
+// as a whole: the diagnostic stream echoes each gh command before running it,
+// and that echo carries `pr view`, `run view` and every field name in the
+// `--json` list — `$ gh pr view 42 --json headRefName,headRefOid,state,...`
+// (measured). `assert.match(r.stderr, /headRefName/)` is therefore satisfied
+// by a refusal that names nothing at all, which leaves the exit status as the
+// only load-bearing half of such a case. Asserting on the line itself is what
+// makes the field name — and, for #926, what the line says gh actually SENT —
+// load-bearing.
+const refusal = (r) => r.stderr.split("\n").find((l) => l.includes("not the expected shape")) ?? "";
 
-// Each identifying field is guarded on its type AND on its emptiness, and
-// neither clause is reachable through the other: an empty string satisfies the
-// type check, a number satisfies the emptiness check. The sibling above feeds
-// an ABSENT field, which both clauses refuse at once — so it pins neither.
-// What a lost clause costs is the field flowing on: `branch` becomes the empty
-// string or a number and `gh run list --branch` asks for the wrong branch,
-// while `prHead` becomes a value no run's headSha can equal, which reads as
-// the superseded-SHA case rather than as a reply that could not be trusted.
-for (const [what, field, headRefName, headRefOid] of [
-  ["an empty branch name", "headRefName", "", PR_HEAD],
-  ["a non-string branch name", "headRefName", 42, PR_HEAD],
-  ["an empty head sha", "headRefOid", BRANCH, ""],
-  ["a non-string head sha", "headRefOid", BRANCH, 42],
+// #926. Each of these guards covers three distinct faults — the key absent,
+// the value an empty string, the value not a string — and "missing <field>"
+// asserted absence for all of them: measured, `{"headRefName":""}`,
+// `{"headRefName":42}` and the key omitted printed one identical line, so a
+// reader hunted for a key gh had in fact returned as `""`, `42` or `null`.
+// Each row pins its own fault's rendering AND that the line does not tell
+// another fault's story: a present value is never reported as an absent key,
+// and an absent key never quotes a value nothing sent.
+//
+// The clause-level reachability these rows also carry: an empty string
+// satisfies the type check and a number satisfies the emptiness check, so
+// those rows are what keep each clause from being deletable. The absent rows
+// are refused by both clauses at once and so pin neither — they are here for
+// what the line SAYS, which is this ticket. What a lost clause costs is the
+// field flowing on: `branch` becomes the empty string or a number and
+// `gh run list --branch` asks for the wrong branch, while `prHead` becomes a
+// value no run's headSha can equal, which reads as the superseded-SHA case
+// rather than as a reply that could not be trusted.
+for (const [what, field, prFields, saw, notSaw] of [
+  ["an absent branch name", "headRefName", { headRefOid: PR_HEAD }, /the key is absent/, /got /],
+  ["an empty branch name", "headRefName", { headRefName: "", headRefOid: PR_HEAD }, /got ""/, /absent/],
+  ["a non-string branch name", "headRefName", { headRefName: 42, headRefOid: PR_HEAD }, /got 42/, /absent/],
+  ["a null branch name", "headRefName", { headRefName: null, headRefOid: PR_HEAD }, /got null/, /absent/],
+  ["an absent head sha", "headRefOid", { headRefName: BRANCH }, /the key is absent/, /got /],
+  ["an empty head sha", "headRefOid", { headRefName: BRANCH, headRefOid: "" }, /got ""/, /absent/],
+  ["a non-string head sha", "headRefOid", { headRefName: BRANCH, headRefOid: 42 }, /got 42/, /absent/],
+  ["a null head sha", "headRefOid", { headRefName: BRANCH, headRefOid: null }, /got null/, /absent/],
 ]) {
-  test(`PR info carrying ${what}: exit 2 naming the field, never a verdict built on it`, () => {
+  test(`PR info carrying ${what}: exit 2 naming the field and what gh sent, never a verdict built on it`, () => {
     const r = run([], {
       repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-      prView: JSON.stringify({ headRefName, headRefOid, state: "OPEN", mergeStateStatus: "CLEAN" }),
+      prView: JSON.stringify({ state: "OPEN", mergeStateStatus: "CLEAN", ...prFields }),
     });
     assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.match(r.stderr, /pr view/);
-    assert.match(r.stderr, new RegExp(field));
+    assert.match(refusal(r), new RegExp(field));
+    assert.match(refusal(r), saw);
+    assert.doesNotMatch(refusal(r), notSaw);
     assert.doesNotMatch(r.log, /run list/, "must die before ever asking gh for runs");
   });
 }
@@ -574,18 +590,77 @@ test("run list row is null: exit 2, never the crash reading r.headSha off null",
   assert.match(r.stderr, /run list row 0 is not an object/);
 });
 
-test("run view missing jobs array: exit 2 naming the field, never silently read as zero jobs", () => {
-  // No `jobs` key at all — the shape an error-ish or partial run view takes.
-  // This guard is now the only thing between that and `view.jobs.map(...)`:
-  // drop it and the read throws, and an uncaught throw exits 1 — "could not
-  // be read" rendered as a CI verdict, the whole #269 class.
+// The same #926 split at the run-view guard, whose faults are two rather than
+// three: the `jobs` key absent, and a `jobs` present but not an array.
+// "missing jobs array" asserted the first for both of them (measured), and the
+// second is the shape an error body or a partial run view takes — the value is
+// right there to be quoted. `absent` stays a row of its own because it is the
+// shape this guard was added for: it is the only thing between a missing key
+// and `view.jobs.map(...)`, and an uncaught throw there exits 1 — "could not
+// be read" rendered as a CI verdict, the whole #269 class.
+for (const [what, runFields, saw, notSaw] of [
+  ["absent", {}, /the key is absent/, /got /],
+  ["an error object", { jobs: { error: "rate limited" } }, /got \{"error":"rate limited"\}/, /absent/],
+  ["a string", { jobs: "none" }, /got "none"/, /absent/],
+  ["null", { jobs: null }, /got null/, /absent/],
+]) {
+  test(`run view whose jobs is ${what}: exit 2 naming the field and what gh sent, never read as zero jobs`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD, ...runFields }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(refusal(r), /run view/);
+    assert.match(refusal(r), /jobs/);
+    assert.match(refusal(r), saw);
+    assert.doesNotMatch(refusal(r), notSaw);
+  });
+}
+
+// #926's own new hazard: the value a refusal quotes is gh's, so its length is
+// gh's too — a `jobs` that came back as an error body carries however much
+// text that body had, onto a stderr the fleet's CI monitor polls. So it is
+// cut short, and says that it was: a tail dropped with no marker reads as the
+// whole value, the same class of lie "missing" was. Asserted against whether
+// the value's own unbroken run survives the cut, not against the cap's
+// number, so tuning the cap does not red this — a smaller cap only cuts the
+// run shorter, it does not make it survive.
+test("a refusal quoting an unbounded value is cut short and says that it was", () => {
+  const huge = "x".repeat(400);
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-    runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+    runView: JSON.stringify({ jobs: { error: huge }, attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
   });
   assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /run view/);
-  assert.match(r.stderr, /missing jobs array/);
+  assert.match(refusal(r), /jobs/);
+  assert.match(refusal(r), /\(truncated\)/);
+  assert.doesNotMatch(
+    refusal(r),
+    /x{400}/,
+    `the refusal must not carry the whole value, and it reads ${refusal(r)}`,
+  );
+});
+
+// The direction this guard gets wrong on its own: what it wrongly REFUSES.
+// Every jobs fixture above is malformed by construction, so none of them can
+// show that the legitimate empty reply still reaches a verdict — and an empty
+// `jobs` is legitimate: the guard's whole question is array-ness, a run with
+// no job rows answers it, and the job-presence check below is what has an
+// opinion about how many. A guard tightened from "is an array" onto
+// truthiness or length would refuse it, and refusing a working invocation
+// costs more than any diagnostic above gains. The verdict it must reach is
+// not-green, by that job-presence check rather than by the shape check —
+// which is also where the word "absent" belongs: about a job expected and
+// missing from the run, never about a key gh did send.
+test("run view whose jobs is an empty array is accepted — a verdict, never a shape refusal", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ jobs: [], attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.doesNotMatch(r.stderr, /not the expected shape/);
+  assert.match(r.stderr, /expected jobs absent from the run: check/);
 });
 
 test("a job entry in the run view is null: exit 2, never the crash reading j.name off null", () => {

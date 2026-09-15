@@ -154,6 +154,14 @@ function run(cmd, args) {
   }
 }
 
+// One truncation rule for every raw gh value this script quotes into a
+// refusal: cut at n chars behind a visible marker, shared by the non-JSON
+// die below and by `saw` further down. An unmarked cut reads as the whole
+// value — the length quoted is gh's, not this script's — so a bare
+// `raw.trim().slice(0, n)` here would be exactly the lie `saw`'s own
+// comment (below) declares unacceptable one screen away.
+const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, n)}… (truncated)` : s);
+
 // Every gh read in this file is JSON, and a bare JSON.parse of a child's stdout
 // fails OPEN: gh can exit 0 with a non-JSON body (a proxy's HTML error page is
 // the measured case) and the uncaught SyntaxError exits 1 — which in THIS
@@ -177,7 +185,7 @@ function runJson(cmd, args, shape) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${raw.trim().slice(0, 120)}`);
+    die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${cut(raw.trim())}`);
   }
   const problem = shape?.(parsed);
   if (problem) die(`${cmd} ${args[0]} ${args[1]} returned JSON but not the expected shape — ${problem}`);
@@ -195,6 +203,35 @@ function runJson(cmd, args, shape) {
 // type — checking e.g. that a job's `conclusion` were a string would wrongly
 // refuse a legitimate in-progress job, whose conclusion is `null`.
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// What a shape refusal is FOR is telling a reader what gh actually sent, and
+// "missing <field>" told them the opposite of it. The two `gh pr view` field
+// guards below each cover three faults at once — the key absent, the value an
+// empty string, the value not a string — and the `jobs` guard two of the same
+// kind, and every one of them printed a single identical "missing" line
+// (#926, measured), so a reader went hunting for a key gh had in fact
+// returned as `""`, `42` or `null`. `saw` reports the value instead, and
+// claims absence only when the key really is absent.
+//
+// `Object.hasOwn`, not `key in obj`: `in` answers for the prototype chain
+// too, and throws outright on a non-object (measured: TypeError, "Cannot use
+// 'in' operator"). Every call site refuses a non-object ahead of any field
+// check, so `in` would work there today — but a field guard reordered past
+// that refusal would turn this diagnostic into the very exit-1-as-verdict
+// crash the shape checks exist to prevent (#269), where `hasOwn` just answers
+// `false`.
+//
+// JSON.stringify, not the raw value: it is what makes `""` visible at all and
+// what tells the string `"42"` from the number 42. It always returns a string
+// here — the value came from JSON.parse, and no JSON value stringifies to
+// `undefined`. Cut through the shared `cut()` above — the same visible-
+// marker rule the non-JSON die uses, because the length quoted here is
+// gh's, not this script's, same as there.
+const saw = (obj, key) => {
+  if (!Object.hasOwn(obj, key)) return "the key is absent";
+  const shown = JSON.stringify(obj[key]);
+  return `got ${cut(shown)}`;
+};
 
 const pr = arg("pr");
 if (!pr) {
@@ -282,8 +319,8 @@ const prInfo = runJson(
   ["pr", "view", String(pr), "--json", "headRefName,headRefOid,state,mergeStateStatus"],
   (v) => {
     if (!isObject(v)) return "expected an object";
-    if (typeof v.headRefName !== "string" || !v.headRefName) return "missing headRefName (the branch)";
-    if (typeof v.headRefOid !== "string" || !v.headRefOid) return "missing headRefOid (the head sha)";
+    if (typeof v.headRefName !== "string" || !v.headRefName) return `headRefName (the branch) is not a non-empty string (${saw(v, "headRefName")})`;
+    if (typeof v.headRefOid !== "string" || !v.headRefOid) return `headRefOid (the head sha) is not a non-empty string (${saw(v, "headRefOid")})`;
     return null;
   },
 );
@@ -503,7 +540,7 @@ if (noCi) {
       ["run", "view", String(runId), "--json", "jobs,attempt,status,conclusion,headSha"],
       (v) => {
         if (!isObject(v)) return "expected an object";
-        if (!Array.isArray(v.jobs)) return "missing jobs array";
+        if (!Array.isArray(v.jobs)) return `jobs is not an array (${saw(v, "jobs")})`;
         const bad = v.jobs.findIndex((j) => !isObject(j));
         return bad === -1 ? null : `job entry ${bad} is not an object`;
       },
