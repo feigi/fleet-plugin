@@ -196,6 +196,32 @@ function runJson(cmd, args, shape) {
 // refuse a legitimate in-progress job, whose conclusion is `null`.
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// What a shape refusal is FOR is telling a reader what gh actually sent, and
+// "missing <field>" told them the opposite of it: each field guard below
+// covers three faults at once — the key absent, the value an empty string,
+// the value not a string — and all three printed one identical "missing" line
+// (#926, measured), so a reader went hunting for a key gh had returned as
+// `""`, `42` or `null`. `saw` reports the value instead, and claims absence
+// only when the key really is absent.
+//
+// `Object.hasOwn`, not `key in obj`: `in` answers for the prototype chain too,
+// and throws outright on a non-object. Both call sites refuse a non-object
+// ahead of any field check, so `in` would work there today — but a guard
+// reordered past that refusal would turn this diagnostic into the very
+// exit-1-as-verdict crash the shape checks exist to prevent (#269), and
+// `hasOwn` simply answers `false`.
+//
+// The value can only have come from JSON.parse, so JSON.stringify always
+// returns a string here — no JSON value stringifies to `undefined`. It is what
+// makes `""` and `"42"` distinguishable from `42` and from nothing at all.
+// Capped WITH A VISIBLE MARKER: a `jobs` that came back as gh's own error
+// object is unbounded, and a tail cut off silently reads as the whole value.
+const saw = (obj, key) => {
+  if (!Object.hasOwn(obj, key)) return "the key is absent";
+  const shown = JSON.stringify(obj[key]);
+  return `got ${shown.length > 120 ? `${shown.slice(0, 120)}… (truncated)` : shown}`;
+};
+
 const pr = arg("pr");
 if (!pr) {
   die(
@@ -282,8 +308,8 @@ const prInfo = runJson(
   ["pr", "view", String(pr), "--json", "headRefName,headRefOid,state,mergeStateStatus"],
   (v) => {
     if (!isObject(v)) return "expected an object";
-    if (typeof v.headRefName !== "string" || !v.headRefName) return "missing headRefName (the branch)";
-    if (typeof v.headRefOid !== "string" || !v.headRefOid) return "missing headRefOid (the head sha)";
+    if (typeof v.headRefName !== "string" || !v.headRefName) return `headRefName (the branch) is not a non-empty string (${saw(v, "headRefName")})`;
+    if (typeof v.headRefOid !== "string" || !v.headRefOid) return `headRefOid (the head sha) is not a non-empty string (${saw(v, "headRefOid")})`;
     return null;
   },
 );
