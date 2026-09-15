@@ -110,6 +110,47 @@ const arg = makeArg(die);
 const sweep = makeSweep(die);
 const stray = makeStray(die);
 
+// #932. The one truncation rule for the raw gh value this script quotes into a
+// refusal: clip behind a visible marker, and only when the value was really
+// clipped. Unmarked — `raw.trim().slice(0, 120)`, what the die below used to do
+// — the length quoted is gh's, not this script's, so a 269 KB portal page and a
+// 90-character one render identically and a reader cannot tell a whole
+// diagnostic from a cut one.
+//
+// HEAD, not tail, measured on this site's own payload rather than imported from
+// #638/PR #931's fix for the same unmarked clip in ledger.mjs. Those sites clip
+// STDERR, where warnings lead and the cause lands last; `run()` above passes no
+// `stdio`, so execFileSync forwards the child's stderr and returns stdout ALONE
+// — this clips stdout. Real gh (2.100.0) never puts non-JSON there: a missing
+// PR, bad credentials and an intercepting proxy all report on stderr at exit 1,
+// which run()'s catch takes; a forced TTY, a pager and `GH_DEBUG=api` each left
+// stdout pure JSON; and a payload past execFileSync's 1 MiB maxBuffer throws
+// ENOBUFS rather than returning a mid-JSON cut, so the one shape whose cause
+// would sit at the tail cannot reach `raw`. What remains is an interposer on
+// that stdout — a wrapper, shim or captive portal — and every one of those
+// leads with its own message. Measured on real bytes: github.com's 404 body
+// ends `</div></body></html>`, which every HTML error page on earth shares and
+// which names no cause, while its head carries `<!DOCTYPE html>`; a wrapper
+// that prints a notice and delegates ends in `"changeType":"MODIFIED"}]}`,
+// reading as if gh had answered perfectly and the parser were at fault. Tail
+// here would keep the noise and discard the answer.
+//
+// The marker counts against `n`, so `cut(s).length <= n` for every `n >=
+// MARKER.length` — the only regime the one call site below exercises, since
+// `cut` is module-private and always called with the default `n = 120`. This
+// is the one place it differs from ci-state.mjs's `cut` (#1479), whose marker
+// sits past its `n`: `s.slice(0, n)` there appends the marker unconditionally,
+// measuring 133 characters against ci-state.mjs's own 120-char cap — and this
+// script's stderr is read by review-pr.js's snapshot agent, markdown fed to a
+// model, the context budget run()'s comment above measures in bytes. A cap
+// that the marker can push past is not a cap. `Math.max` because a caller
+// passing an `n` under the marker's own width would otherwise hand `slice` a
+// negative end, which counts from the END of the string — silently inverting
+// the direction this comment just measured, the one failure mode worth a
+// guard on a single-call-site helper.
+const MARKER = "… (truncated)";
+const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, Math.max(0, n - MARKER.length))}${MARKER}` : s);
+
 function run(cmd, args) {
   console.error(`$ ${cmd} ${args.join(" ")}`);
   try {
@@ -162,7 +203,7 @@ function main() {
   try {
     info = JSON.parse(raw);
   } catch {
-    die(`gh pr view ${pr} returned no JSON — ${raw.trim().slice(0, 120)}`);
+    die(`gh pr view ${pr} returned no JSON — ${cut(raw.trim())}`);
   }
   // Same fail-closed rule as run() above, and the one place it was missing: `||
   // []` turned a malformed response into a fully-formed `profile: "empty"`
