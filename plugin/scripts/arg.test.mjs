@@ -247,19 +247,31 @@ const STRAYS = [
 // file is what pins "before any gh call" — assert.doesNotMatch on stderr would
 // pass just as well for a script that queried and stayed quiet about it.
 function stubGhBin() {
-  const dir = mkdtempSync(join(tmpdir(), "arg-sweep-"));
+  // The prefix holds a space on purpose (#880): this path reaches a shell
+  // redirect inside the stub, and an unquoted one word-splits on it and
+  // silently writes no receipt. Baked in here rather than left to the ambient
+  // `TMPDIR` so every machine runs the hazardous shape, not just one whose
+  // TMPDIR happens to contain a space.
+  const dir = mkdtempSync(join(tmpdir(), "arg sweep-"));
   const receipt = join(dir, "gh-was-called");
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> ${receipt}\nexit 1\n`, { mode: 0o755 });
-  return { dir, receipt };
+  // `>> "$GH_LOG"`, not the interpolated path: ci-state.test.mjs's GH_STUB
+  // form, which keeps the path out of the generated script text entirely so
+  // there is no interpolation left to quote wrongly.
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 1\n`, { mode: 0o755 });
+  // The env is built HERE, beside the path it carries. `GH_LOG` is now what
+  // makes the receipt work at all, so handing callers a ready env is what
+  // keeps the two from drifting apart — a caller assembling its own would be
+  // one omission away from reinstating the vacuous pass.
+  return { dir, receipt, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_LOG: receipt } };
 }
 
 for (const { script, argv, stray } of STRAYS) {
   test(`${script}.mjs refuses the unknown flag ${stray} by name, before any query`, () => {
-    const { dir, receipt } = stubGhBin();
+    const { dir, receipt, env } = stubGhBin();
     const r = spawnSync(
       process.execPath,
       [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
-      { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+      { cwd: dir, encoding: "utf8", env },
     );
     assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stderr}`);
     assert.ok(
@@ -272,6 +284,48 @@ for (const { script, argv, stray } of STRAYS) {
     if (existsSync(receipt)) assert.fail(`${script}.mjs reached gh before refusing ${stray}: ${readFileSync(receipt, "utf8")}`);
   });
 }
+
+// ── #880: the receipt is only evidence if the stub can WRITE it ───────────
+//
+// Every assertion in the loop above reads the receipt's NON-EXISTENCE, which
+// is the one direction a BROKEN stub satisfies too. The stub interpolated its
+// path into an unquoted redirect, so under a `TMPDIR` holding a space the
+// shell redirected into the path's FIRST word and handed the remainder to
+// `echo` as an argument: the receipt was never created, and all five rows
+// above passed BECAUSE the stub misfired rather than because the script
+// refused. Measured against the byte-identical template — `gh` ran, exited 1,
+// receipt absent.
+//
+// This is the must-ACCEPT half, and the only test here that would red on that
+// bug: feed the stub the one input it must record, and prove it recorded.
+// Deliberately spaced via `stubGhBin()`'s own prefix rather than the ambient
+// `TMPDIR`, so the quoting stays pinned on a machine whose TMPDIR is clean.
+//
+// It also pins the ENV threading, which is the new failure mode the `$GH_LOG`
+// form introduces in place of the old one: with `GH_LOG` unset the redirect
+// is `>> ""`, which writes no receipt and reds nothing else in this file
+// (measured). A caller that builds its own env and omits the variable
+// reintroduces the vacuous pass in a new spelling, so `stubGhBin()` hands the
+// env back already carrying it and this test fails if that stops being true.
+test("#880: the gh stub records a real call, from a directory whose path holds a space", () => {
+  const { dir, receipt, env } = stubGhBin();
+  assert.match(dir, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
+  assert.equal(existsSync(receipt), false, "fixture: the receipt must not pre-exist, or its presence proves nothing");
+
+  const r = spawnSync("sh", ["-c", "gh pr view 42"], { cwd: dir, encoding: "utf8", env });
+
+  assert.equal(r.status, 1, `fixture: the stub must be the gh on PATH, and it refuses: ${r.stderr}`);
+  assert.equal(
+    existsSync(receipt),
+    true,
+    "the stub swallowed a real `gh` call — every \"before any gh call\" pin above is passing vacuously",
+  );
+  assert.equal(
+    readFileSync(receipt, "utf8"),
+    "pr view 42\n",
+    "and it records the argv, so a call that was reached can be named rather than merely counted",
+  );
+});
 
 // ── #463: a bare or single-dash token nothing reads ──────────────────────
 //
@@ -312,11 +366,11 @@ const STRAY_POSITIONALS = [
 
 for (const { script, argv, stray } of STRAY_POSITIONALS) {
   test(`${script}.mjs refuses the stray positional '${stray}' by name, before any query`, () => {
-    const { dir, receipt } = stubGhBin();
+    const { dir, receipt, env } = stubGhBin();
     const r = spawnSync(
       process.execPath,
       [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
-      { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+      { cwd: dir, encoding: "utf8", env },
     );
     assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stderr}`);
     assert.ok(
