@@ -124,7 +124,7 @@ const MECHANISM = span(
 // defect under bash — so the clause is pinned in its own right, not as a
 // footnote to SAFE_FORM.
 const PORTABILITY = span(
-  "`env $cfg[@]` is not the portable spelling either: measured, bash sets `SETB=1[@]` from it and leaves `BADJ` unset",
+  "`env $cfg[@]` is not the portable spelling either: measured, bash word-splits it into `SETB=1` and `BADJ=1[@]`, so the injection variable is set to a corrupted value, while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0",
 );
 
 // --- AC-1 and AC-2, in the refuter briefs -----------------------------------
@@ -343,7 +343,7 @@ const REJECTS = [
   [
     "the zsh-only-array note is deleted",
     PORTABILITY,
-    (t) => t.replace(phrase("`env $cfg[@]` is not the portable spelling either: measured, bash sets `SETB=1[@]` from it and leaves `BADJ` unset"), ""),
+    (t) => t.replace(phrase("`env $cfg[@]` is not the portable spelling either: measured, bash word-splits it into `SETB=1` and `BADJ=1[@]`, so the injection variable is set to a corrupted value, while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0"), ""),
   ],
   [
     "a sentence is spliced INSIDE the prescription",

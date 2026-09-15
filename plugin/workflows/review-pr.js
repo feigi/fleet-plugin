@@ -1425,9 +1425,10 @@ expanded braced and quoted — \`cfg=(SETB=1 BADJ=1); env "\${cfg[@]}" sh
 ./probe.sh\`; NEVER from an unquoted scalar — \`cfg="SETB=1 BADJ=1"; env $cfg sh
 ./probe.sh\` — which under zsh passes ONE argument, sets a variable literally
 named \`SETB\` to \`1 BADJ=1\`, never sets \`BADJ\` at all, and still exits 0.
-\`env $cfg[@]\` is not the portable spelling either: measured, bash sets
-\`SETB=1[@]\` from it and leaves \`BADJ\` unset, the same silent no-op one shell
-over.
+\`env $cfg[@]\` is not the portable spelling either: measured, bash
+word-splits it into \`SETB=1\` and \`BADJ=1[@]\`, so the injection variable
+is set to a corrupted value, while zsh behaves exactly as with the bare
+\`$cfg\` — \`BADJ\` never set, exit 0.
 
 ${readRules(usableDiff(snap), stats, snap)}
 
