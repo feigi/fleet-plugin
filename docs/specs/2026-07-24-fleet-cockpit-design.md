@@ -176,6 +176,10 @@ source, and it can never move a ticket.
     "attributedPct": 48,    // share of cache-write the tool table explains; never 100
     "skipped": 0,           // transcripts that could not be read this tick
     "metaErrors": 0,        // meta sidecars unreadable/wrong-shaped this tick (#602)
+    "damaged": 0,           // transcript lines unparseable AWAY FROM THE TAIL this
+                            // tick — spend the panel's own numbers are short by.
+                            // A torn LAST line is the tear a live writer has on
+                            // every tick and counts 0 here (#916)
     "since": null           // --spend-since epoch-ms, when the caller scoped the run
   }
 }
