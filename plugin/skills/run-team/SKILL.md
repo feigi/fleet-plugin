@@ -256,9 +256,22 @@ At start, and whenever the pool empties.
    quoted defect is the fact. Old string gone from `git show origin/main:<file>`
    ⇒ the fix landed, and
    `git log -S '<old string>' --oneline origin/main -- <file> | head -1` names
-   the commit that removed it, `git merge-base --is-ancestor <sha> origin/main`
-   proves it is not a pre-rebase orphan, then close citing it. Seconds either
-   way, and the construct half alone is the probe that could not look.
+   the commit that removed it; close citing that commit. Seconds either way,
+   and the construct half alone is the probe that could not look.
+   **No ancestry check on what that walk printed.** `origin/main` is where the
+   walk starts, so every commit it can print is reachable from `origin/main` by
+   construction, and `git merge-base --is-ancestor <sha> origin/main` is true
+   for all of them — true again when the sha *is* `origin/main`. A step that
+   cannot answer no is not evidence, and reads as evidence anyway.
+   **That check belongs one input over — a sha the TICKET quotes**, where it
+   can answer no: a rebase leaves the commit it orphaned a whole object, so
+   `git show` resolves it happily while nothing in `origin/main`'s history
+   reaches it, and a "fixed in `<sha>`" premise built on one describes a tree
+   that no longer exists. Separate its two non-zero answers before citing
+   either — exit 1 is the answer *not reachable*, while exit 128 with `Not a
+   valid object name` is a sha this clone does not have at all, a probe that
+   could not look rather than an orphan (measured: #640's comment cites
+   `35c0845` on a since-deleted branch, and 128 is what it exits here).
 
    **Both halves of that command are load-bearing.** Drop the `origin/main`
    argument and `git log -S` searches `HEAD`, contradicting the rule a paragraph
@@ -276,7 +289,7 @@ At start, and whenever the pool empties.
    Add `--reverse` and you get the *oldest* count-changing commit, which is the
    file's last rename whenever the string predates one — measured on #206's old
    wording, `--reverse` names `4fd2f73` ("move next-ticket and sizing-a-ticket
-   into the plugin"), a refactor that clears the `--is-ancestor` gate exactly as
+   into the plugin"), a refactor that clears an ancestry gate exactly as
    well as the real fix, while newest-first `| head -1` names `0dc39ef`, the
    commit that actually did it.
    (`--follow` fixes the rename half but is mutually destructive with
