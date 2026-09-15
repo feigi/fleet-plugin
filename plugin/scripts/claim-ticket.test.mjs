@@ -1650,6 +1650,7 @@ for (const [what, stub] of [
   test(`a checksum that ${what} refuses before anything is claimed, in both modes`, () => {
     const dir = repo({ [TESTS]: "" });
     const bin = mkdtempSync(join(tmpdir(), "claim cksum-"));
+    assert.match(bin, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
     const ghLog = join(bin, "gh.log");
     // `>> "$GH_LOG"`, not the interpolated path (#880). The path comes from
     // `mkdtempSync(join(tmpdir(), …))` and so inherits `TMPDIR`; unquoted, a
@@ -2032,6 +2033,7 @@ test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) 
   // spaced `TMPDIR` and recorded nothing, turning the assertion below into a
   // pin that passes hardest exactly when the stub is broken.
   const bin = mkdtempSync(join(tmpdir(), "claim bin-"));
+  assert.match(bin, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
   const marker = join(bin, "gh-ran");
   writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker };
@@ -2388,6 +2390,7 @@ function ghSpy() {
   // `ran() === true` assertion in the accept test below is what holds the env
   // threading here honest.
   const bin = mkdtempSync(join(tmpdir(), "claim ghspy-"));
+  assert.match(bin, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
   const marker = join(bin, "ran");
   writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
   return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker }, ran: () => existsSync(marker) };

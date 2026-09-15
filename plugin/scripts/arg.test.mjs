@@ -366,11 +366,11 @@ const STRAY_POSITIONALS = [
 
 for (const { script, argv, stray } of STRAY_POSITIONALS) {
   test(`${script}.mjs refuses the stray positional '${stray}' by name, before any query`, () => {
-    const { dir, receipt } = stubGhBin();
+    const { dir, receipt, env } = stubGhBin();
     const r = spawnSync(
       process.execPath,
       [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
-      { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+      { cwd: dir, encoding: "utf8", env },
     );
     assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stderr}`);
     assert.ok(
