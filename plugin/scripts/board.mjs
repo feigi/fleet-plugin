@@ -357,14 +357,26 @@ function newestTranscriptMs(dir) {
 // the FINAL element of the split and no other, so only that one is skipped in
 // silence. A line anywhere earlier can never be completed by a later append, so
 // it is still malformed on every tick after — a real fault, and one that costs
-// spend rather than nothing, so it warns once per transcript path under the
-// `lines` channel. Warn-once is safe here for a reason the `skips` gate cannot
-// lend: that gate's message carries a COUNT, which is why it needs `skipped`
-// reaching the browser every tick to keep that number live. This message carries
-// none — it says this file's spend may be incomplete — and a second tear in the
-// same file makes that no more true, so there is no number here that can go
-// stale. Two gates, safe for two DIFFERENT reasons; sharing warnOnce collapses
-// how they are written, not why each one is allowed to stay quiet.
+// spend rather than nothing.
+//
+// #916: it costs spend, so stderr was never enough for it. board.html says
+// twice that stderr is not a channel here — the board is launched backgrounded
+// and the operator is watching the page — which is the argument that put
+// `skipped` in the DOM and then `metaErrors` (#602) beside it. So the count
+// comes back as `damaged` and takes that same route, and this warning becomes
+// the SECOND channel rather than the only one. Measured before it did: a
+// mid-file tear billed 1500 where an intact file billed 1800, `skipped` 0,
+// `metaErrors` 0, `error` undefined, and spendView's whole decision identical
+// to the intact run's — and a transcript whose ONLY turn was the torn line
+// hid the panel outright, a destroyed run rendered as an idle one.
+//
+// Warn-once is now safe here for exactly the reason the `skips` gate gives,
+// where before #916 it needed its own: this message carries a COUNT, and a
+// count in a suppressed line can go stale — a second tear on a later tick
+// leaves the printed number one short. What keeps that honest is `damaged`
+// reaching the browser every tick, the same live channel `skipped` relies on.
+// The stderr number is the magnitude at FIRST sighting, deliberately: it tells
+// an operator reading a log how much to care, and the panel owns the live one.
 // Ceiling: a transcript whose writer has already exited has no legitimate torn
 // last line either, but readAgent cannot tell a live writer from a finished one,
 // so that line keeps passing in silence. Strictly better than warning on none.
@@ -426,17 +438,22 @@ function readAgent(file, metaFile) {
   }
 
   const folded = foldClaudeTranscript(readFileSync(file, "utf8"));
-  if (folded.malformedNonLastLine) {
+  const damaged = folded.malformedNonLastLines;
+  if (damaged) {
     // The position check lives in foldClaudeTranscript now: a legitimate torn
     // tail must not reach warnOnce at all, or it consumes this file's one
     // `lines` line and permanently silences the real fault when the tear
-    // later moves.
-    warnOnce("lines", file, `${file} has an unparseable line that is not its last; the turn it belongs to may be missing from the spend panel: ${folded.malformedNonLastLineError}`);
+    // later moves. It must not reach `damaged` either — a note reading "spend
+    // under-reported" on every transcript still being written to is a note
+    // nobody reads by the second tick.
+    // "first parse error", not "the" one: the count can exceed 1 and only the
+    // first cause is carried, so the line says which number it is quoting.
+    warnOnce("lines", file, `${file} has ${damaged} unparseable line${damaged === 1 ? "" : "s"} away from its tail; that much of its spend is missing from the panel (first parse error: ${folded.malformedNonLastLineError})`);
   }
   return {
     meta, cacheWrite: folded.cacheWrite, output: folded.output,
     cacheRead: folded.cacheRead, maxCtx: folded.maxCtx, entries: folded.entries,
-    metaFault,
+    metaFault, damaged,
   };
 }
 
@@ -504,6 +521,15 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // does — via this return and spendView's note — is the channel #325 shipped
     // for the transcript half of this exact fault but not the sidecar half.
     let metaErrors = 0;
+    // #916: the transcript-side sibling of the tally above, and the third
+    // distinct lie this panel can tell. `skipped` means a transcript
+    // contributed NOTHING; `metaErrors` means it contributed under a degraded
+    // role and label; `damaged` means it contributed but part of its spend is
+    // simply gone — the only one of the three that makes the NUMBERS beside it
+    // wrong. Folding it into either of the others would say something false,
+    // so it is its own count, summed over the whole dir per tick exactly as
+    // they are.
+    let damaged = 0;
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
       const file = join(dir, f);
       // One unreadable transcript must not take the whole panel down with it.
@@ -525,6 +551,11 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         // Ordering, not a guard — keep it if this block is edited again.
         const tools = attributeTools(a.entries);
         if (a.metaFault) metaErrors++;
+        // Beside metaErrors deliberately: past the throw-capable work above and
+        // ahead of the push, so the invariant that comment states keeps holding
+        // — a transcript that ends up `skipped` ("contributed nothing") can
+        // never also report damaged lines on top of it.
+        damaged += a.damaged;
         agents.push({
           label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
           role: classifyRole(a.meta),
@@ -550,7 +581,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     // `ok` last, so a future field named `ok` on computeSpend's return cannot
     // silently untag a success (a later spread key always wins over an earlier one).
-    return { ...spend, tools, attributedPct, skipped, metaErrors, since: sinceMs, ok: true };
+    return { ...spend, tools, attributedPct, skipped, metaErrors, damaged, since: sinceMs, ok: true };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
