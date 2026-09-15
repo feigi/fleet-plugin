@@ -35,9 +35,10 @@
 //
 // MUTATION-VERIFIED BOTH WAYS, on a copy of this worktree's file kept outside
 // it (`<scratch>/impl-814/SKILL.md.orig`, restored and sha-256-compared after
-// every run). Five tests here; the three prose pins over this same document
-// that predate it — liveness-rationale, staleness-verdict, staleness-qualifier,
-// 12 tests — stayed green on every mutation, which is the discrimination:
+// every run). Five tests here; three of the 35 pre-existing prose pins over
+// this same document — liveness-rationale, staleness-verdict,
+// staleness-qualifier, 12 tests together — stayed green on every mutation,
+// which is the discrimination:
 //   - the old wording restored whole (`git show origin/main:` before this fix):
 //     5 of 5 red. That wording is green on origin/main's own CI, which is the
 //     measurement that this paragraph was unpinned.
