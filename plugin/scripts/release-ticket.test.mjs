@@ -1192,7 +1192,7 @@ test("a symlink over HEAD that RESOLVES never reaches the unresolved-HEAD arm â€
   assert.equal(json, null, "the linkage probe refuses before any payload is emitted");
   // The distinguishing prefix, not the shared tail: the `.git`-file refusal
   // ends in the same words, so a tail-only match could not tell them apart.
-  assert.match(stderr, /cannot read the git linkage of/);
+  assert.match(stderr, /cannot read the git repository at/);
   assert.doesNotMatch(stderr, /could not read its HEAD/, "HEAD resolved fine â€” this refusal is about the linkage");
   assert.doesNotMatch(stderr, /does not point at|cannot read the status of/,
     "the linkage die must END the run: neither the `does not point at` mismatch guard nor the `cannot read the status of` probe may be reached");

@@ -1316,7 +1316,7 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   if [ -f "$wt/.git" ]; then
     wt_canon=$(cd "$wt" && pwd -P) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
     toplevel=$(git -C "$wt" rev-parse --show-toplevel) ||
-      die "cannot read the git linkage of $wt, so whether it holds uncommitted work is unknown"
+      die "cannot read the git repository at $wt (its .git file or the gitdir it names), so whether it holds uncommitted work is unknown"
     [ "$wt_canon" = "$toplevel" ] ||
       die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
   fi
