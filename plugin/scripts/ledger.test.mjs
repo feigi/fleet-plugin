@@ -330,7 +330,7 @@ test("a subject with no alphanumeric tokens is a usage failure, exit 2", () => {
 // orientation — not because of how their sizes happen to fall.
 // ---------------------------------------------------------------------------
 
-test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the floor measures", () => {
+test("a filed row that is a strict subset of a longer subject is a match — the smaller set is what the subset floor measures", () => {
   // Dropping the ordering — hardcoding the pair as (subject, filed) so the
   // checked subject is always taken as the smaller set — leaves every other
   // fixture in this file green. This fixture is the mirror orientation, where
@@ -381,9 +381,9 @@ test("near-misses are ranked best-first and capped at three", () => {
     "#3 unrelated worktree audit prose",
     "#4 the merge loop exit 2 gap in run-merge-bot.md documentation",
     "#5 loop merge unrelated tangent",
-    // Five rows must score above the floor, or "capped at three" passes on the
-    // filter and never exercises the cap: raising .slice(0, 3) to .slice(0, 10)
-    // then reds nothing.
+    // Five rows must score above zero, or "capped at three" passes on the
+    // filter and never exercises the cap: raising NEAR_SHOWN in ledger.mjs
+    // from 3 to 10 then reds nothing.
     "#6 merge loop tangent",
     "#7 loop exit trivia",
   ];
@@ -1404,7 +1404,7 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   // against another: a branch added to the dispatch without a usage edit left
   // this pin green while the script accepted a subcommand neither the usage line
   // nor the row named (measured). The dispatch is the only thing that decides
-  // what the script actually accepts.
+  // which subcommand names the script actually accepts.
   const real = [...new Set([...readFileSync(SCRIPT, "utf8").matchAll(/cmd === "([^"]+)"/g)].map((m) => m[1]))].sort();
   assert.ok(real.length, "ledger.mjs must still dispatch on `cmd === \"...\"`");
 
