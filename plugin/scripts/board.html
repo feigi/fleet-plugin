@@ -103,6 +103,11 @@ function spendView(sp) {
   // Shared by both the early note-only branch and the funded panel's note
   // below, so a rewording can't update one copy and silently miss the other.
   const metaErrorsPhrase = (n, suffix = "") => `${n} meta sidecar${n === 1 ? "" : "s"} corrupt${suffix}`;
+  // #916's phrase, shared the same way and for the same reason. It names the
+  // LINES, not the files: one transcript can hold several damaged lines, and
+  // "1 transcript damaged" would read as a whole agent lost — which is what
+  // `skipped` means and this does not.
+  const damagedPhrase = (n, suffix = "") => `${n} damaged transcript line${n === 1 ? "" : "s"}${suffix}`;
   if (!sp) return { kind: "hidden" }; // genuinely nothing yet — normal at run start
   // A read failure is a bug the operator has to act on, and it used to look
   // exactly like an idle run. stderr is not a channel here: the board is
@@ -137,8 +142,15 @@ function spendView(sp) {
     // no cache-creation turn flushed yet can still land here with `skipped=0`
     // and `metaErrors>0`: totals.cacheWrite is a sum across agents, so this
     // branch is reachable by metaErrors alone, not just by `skipped`.
+    //
+    // #916 reaches it by a shorter route, and it is the ticket's worst case:
+    // when the damaged line WAS the run's only cache-creation turn there is
+    // nothing left to sum, so cache-write is 0 with both other tallies 0 too.
+    // Measured before `damaged` existed, that run rendered `hidden` — a
+    // destroyed run shown as a run that had not started.
     const bits = [];
     if (sp.skipped) bits.push(`${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped`);
+    if (sp.damaged) bits.push(damagedPhrase(sp.damaged));
     if (sp.metaErrors) bits.push(metaErrorsPhrase(sp.metaErrors));
     return bits.length
       ? { kind: "note", text: `${bits.join("; ")}; no spend recorded yet` }
@@ -147,13 +159,20 @@ function spendView(sp) {
   return {
     kind: "panel",
     lede: `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`,
-    // `skipped` means "contributed nothing"; `metaErrors` means "contributed,
-    // but under a degraded role and label" (#602) — classifyRole read `{}` and
-    // fell back to "other", and gatherSpend fell back to the bare filename. Two
-    // different lies, so two different phrases, both routed through the one
-    // channel that already reaches the browser every tick.
+    // `skipped` means "contributed nothing"; `damaged` means "contributed, but
+    // may be missing the torn line's tool_use blocks and output_tokens
+    // snapshot" (#916) — cache_creation/cache_read/maxCtx repeat on every line
+    // of a turn and survive a mid-turn tear, so the panel's totals are not
+    // necessarily short; `metaErrors` means "contributed,
+    // in full, but under a degraded role and label" (#602) — classifyRole read
+    // `{}` and gatherSpend fell back to the bare filename. Three different
+    // lies, so three different phrases, all routed through the one channel that
+    // already reaches the browser every tick. Listed in that order: most spend
+    // lost first, so the one that most changes how to read the lede is read
+    // first.
     note: [
       sp.skipped ? `${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped` : null,
+      sp.damaged ? damagedPhrase(sp.damaged, " — spend may be incomplete") : null,
       sp.metaErrors ? metaErrorsPhrase(sp.metaErrors, " — role/label degraded") : null,
       "ranked on cache-creation; tool split is attributed, not billed",
     ].filter(Boolean).join("; "),

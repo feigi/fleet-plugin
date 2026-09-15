@@ -181,9 +181,9 @@ export function parseMemberName(name) {
 // Malformed lines are skipped, not fatal — a transcript being appended to
 // while it is read has a torn LAST line on every tick. `torn` reflects only
 // the final line (resets on the next successful parse, so a mid-file tear is
-// a hiccup, not a stall); `malformedNonLastLine`/`malformedNonLastLineError`
-// flag the different, real fault of a line that will never complete, for a
-// caller (board.mjs) that wants to warn about it.
+// a hiccup, not a stall); `malformedNonLastLines`/`malformedNonLastLineError`
+// COUNT the different, real fault of a line that will never complete, for a
+// caller (board.mjs) that surfaces it.
 // omp's envelope always carries a top-level `parentId` key — even a root
 // event writes `parentId: null` rather than omitting it (measured against
 // real `~/.omp/agent/sessions/**/*.jsonl` files). A Claude transcript line
@@ -233,9 +233,17 @@ function assertNotOmpShaped(d, filePath) {
 // Malformed lines are skipped, not fatal — a transcript being appended to
 // while it is read has a torn LAST line on every tick. `torn` reflects only
 // the final line (resets on the next successful parse, so a mid-file tear is
-// a hiccup, not a stall); `malformedNonLastLine`/`malformedNonLastLineError`
-// flag the different, real fault of a line that will never complete, for a
-// caller (board.mjs) that wants to warn about it.
+// a hiccup, not a stall); `malformedNonLastLines` COUNTS the different, real
+// fault of a line that will never complete, and `malformedNonLastLineError`
+// carries the FIRST such parse error as its representative cause.
+//
+// #916: that count was a boolean until the board needed to put the fault on
+// the page rather than only on stderr. A flag was enough for one warning
+// sentence and is not enough for a number the operator reads every tick, and
+// this loop is the only place in the codebase with a per-line view to count
+// from — board.mjs's readAgent stopped having one when the fold-back
+// arithmetic moved here (#1342). Consumers that only ever asked "any?" read a
+// non-zero count exactly as they read `true`.
 //
 // `filePath` defaults to a placeholder: member-outcomes.mjs's readMember()
 // is documented pure — text in, no path — so it has none to give, and the
@@ -244,7 +252,7 @@ function assertNotOmpShaped(d, filePath) {
 export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
   let model = null, effort = "";
   let firstTs = null, lastTs = null;
-  let torn = false, malformedNonLastLine = false, malformedNonLastLineError = null;
+  let torn = false, malformedNonLastLines = 0, malformedNonLastLineError = null;
   const turnById = new Map();
   const entries = [];
   let anon = 0;
@@ -257,7 +265,7 @@ export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
     try { d = JSON.parse(raw); torn = false; }
     catch (e) {
       torn = true;
-      if (i !== lines.length - 1) { malformedNonLastLine = true; malformedNonLastLineError ??= e.message; }
+      if (i !== lines.length - 1) { malformedNonLastLines++; malformedNonLastLineError ??= e.message; }
       continue;
     }
     assertNotOmpShaped(d, filePath);
@@ -297,7 +305,7 @@ export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
   const output = entries.reduce((n, e) => n + (e.output ?? 0), 0);
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
   return {
-    model, effort, torn, malformedNonLastLine, malformedNonLastLineError,
+    model, effort, torn, malformedNonLastLines, malformedNonLastLineError,
     entries, cacheWrite, cacheRead, input, output, maxCtx,
     turns: turnById.size,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,

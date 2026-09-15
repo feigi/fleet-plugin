@@ -176,6 +176,11 @@ source, and it can never move a ticket.
     "attributedPct": 48,    // share of cache-write the tool table explains; never 100
     "skipped": 0,           // transcripts that could not be read this tick
     "metaErrors": 0,        // meta sidecars unreadable/wrong-shaped this tick (#602)
+    "damaged": 0,           // transcript lines unparseable AWAY FROM THE TAIL this
+                            // tick — a torn line may cost its own tool_use blocks
+                            // and output_tokens snapshot, not the whole turn's
+                            // spend. A torn LAST line is the tear a live writer
+                            // has on every tick and counts 0 here (#916)
     "since": null           // --spend-since epoch-ms, when the caller scoped the run
   }
 }
