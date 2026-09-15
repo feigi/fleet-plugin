@@ -255,8 +255,8 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // ---------------------------------------------------------------------------
 // The two acceptance rules at their boundaries (#888). isMatch() accepts on
 // either of two rules — equal token sets at any size, or a subset from at
-// least four tokens — and the equal-set acceptance below the floor and the
-// acceptance at the floor are what pin those rules, each sitting where the
+// least four tokens — and the equal-set acceptance below the subset floor and the
+// acceptance at the subset floor are what pin those rules, each sitting where the
 // other rule cannot account for the outcome. Same-size sets are where the two
 // rules come apart, and the tests above reach that case only through rows
 // built for other purposes.
@@ -267,9 +267,9 @@ test("a three-token overlap is below the subset floor and is not a match", () =>
 // same-size case worth pinning. The empty-subject usage failure dies before
 // isMatch is reached, so it reaches neither rule.
 //
-// A same-size match at or above the floor is deliberately NOT pinned here: it
+// A same-size match at or above the subset floor is deliberately NOT pinned here: it
 // satisfies both rules at once, so no single-rule mutation can red it and it
-// discriminates nothing. An equal set under the floor is an acceptance only
+// discriminates nothing. An equal set under the subset floor is an acceptance only
 // one rule can explain.
 // ---------------------------------------------------------------------------
 
@@ -280,8 +280,8 @@ test("a same-size four-token near-miss differing in one token is not a match (#8
   assert.equal(r.json.match, null);
 });
 
-test("equal token sets match below the subset floor — the floor gates the subset rule alone (#888)", () => {
-  // The floor exists to stop a short generic overlap matching everything, and
+test("equal token sets match below the subset floor — the subset floor gates the subset rule alone (#888)", () => {
+  // The subset floor exists to stop a short generic overlap matching everything, and
   // it is a condition of the SUBSET rule only: equal sets are already as
   // specific as a match gets, so they qualify at any size. Folding the two
   // rules into one guarded expression is the edit that can silently lose
@@ -293,14 +293,14 @@ test("equal token sets match below the subset floor — the floor gates the subs
   assert.match(r.json.match, /^#902 /);
 });
 
-test("a strict subset exactly at the subset floor is a match — the floor is pinned from above (#899)", () => {
-  // The floor is a lower bound, so the refusal beneath it anchors one side
-  // only: raise the floor and matches quietly stop happening. That is the
+test("a strict subset exactly at the subset floor is a match — the subset floor is pinned from above (#899)", () => {
+  // The subset floor is a lower bound, so the refusal beneath it anchors one side
+  // only: raise the subset floor and matches quietly stop happening. That is the
   // direction `check` is deliberately biased toward — a duplicate someone
   // closes rather than a finding silently lost — which is exactly why a
-  // raised floor disturbs nothing else here. Acceptance AT the floor is the
+  // raised subset floor disturbs nothing else here. Acceptance AT the subset floor is the
   // observation that notices, and it has to be a STRICT subset: an equal pair
-  // qualifies under the equal-size rule as well, so the floor would no longer
+  // qualifies under the equal-size rule as well, so the subset floor would no longer
   // be what decides and the mutation would have nothing to move.
   //
   // Plain words, no punctuation, on both sides. The subject's token count is
@@ -338,10 +338,10 @@ test("a filed row that is a strict subset of a longer subject is a match — the
   // too, but none of them reaches a match through it, so the ordering never
   // decides their answer — this is the first fixture where it does.
   //
-  // Sized clear of the floor deliberately. At exactly four tokens a raised
-  // floor reds this too, and it would then be pinning the boundary a
+  // Sized clear of the subset floor deliberately. At exactly four tokens a raised
+  // subset floor reds this too, and it would then be pinning the boundary a
   // neighbouring test already owns rather than the ordering. Clear of the
-  // floor, the ordering moves it — so does disabling the `#NNN` strip, which
+  // subset floor, the ordering moves it — so does disabling the `#NNN` strip, which
   // decides whether the filed row can be a subset at all, not which of the
   // two sets is the smaller one.
   //
@@ -656,7 +656,7 @@ test("tracker rows the scorer rates 0.00 are advisory, not a hit (#388)", () => 
 });
 
 // The measured self-check: a subject whose tracker rows all score 0.00 while a
-// filed row scores well above the floor. Reported `tracker-hit` naming the
+// filed row scores well above the soft-hit floor. Reported `tracker-hit` naming the
 // unrelated rows, with the genuinely adjacent one sitting in `near`.
 const UNREL_HITS = [
   { number: 149, title: "run-merge-bot force-push clobbers a rebased branch", state: "OPEN", url: "https://github.com/feigi/claude-config/issues/149" },
@@ -665,10 +665,10 @@ const UNREL_HITS = [
 const NEAR_231 = "#231 ledger check emits verdict clean when the ledger file was never read";
 const VERDICT_SUBJECT = "ledger check verdict ignores the near-miss rows it prints";
 
-test("a near row above the floor outranks a clean verdict (#388)", () => {
+test("a near row above the soft-hit floor outranks a clean verdict (#388)", () => {
   const r = run(VERDICT_SUBJECT, { filed: [NEAR_231], hits: [] });
   assert.equal(r.json.found, false, "the near row is not a subset match, or the exact path answers before the verdict does");
-  assert.ok(r.json.near[0].score >= 0.2, `the fixture must clear the floor, got ${r.json.near[0].score}`);
+  assert.ok(r.json.near[0].score >= 0.2, `the fixture must clear the soft-hit floor, got ${r.json.near[0].score}`);
   assert.equal(r.json.verdict, "soft-hit", "clean printed above a row naming the right issue is the defect");
   assert.equal(r.status, 0, "a near-miss stays advisory — it never became a stop");
   assert.match(r.stderr, /near-miss/);
@@ -684,9 +684,9 @@ test("score-0 tracker rows and a scoring near row read as one soft hit (#388)", 
 });
 
 test("a genuinely novel subject is still clean at exit 0 — the control (#388)", () => {
-  // A near row BELOW the floor, not an empty ranking: with no scoring row at
-  // all the clean answer holds however the floor moves, and the control pins
-  // nothing. This one scores under the floor and must not promote.
+  // A near row BELOW the soft-hit floor, not an empty ranking: with no scoring row at
+  // all the clean answer holds however the soft-hit floor moves, and the control pins
+  // nothing. This one scores under the soft-hit floor and must not promote.
   const r = run("worktree reap declines a detached checkout it should have released", {
     filed: ["#901 the cockpit board renders a stale checkout of the pool"],
     hits: [],
@@ -694,21 +694,21 @@ test("a genuinely novel subject is still clean at exit 0 — the control (#388)"
   assert.equal(r.json.verdict, "clean", "every check becoming a soft hit is the cost of getting this wrong");
   assert.equal(r.status, 0);
   assert.ok(r.json.near.length === 1 && r.json.near[0].score > 0 && r.json.near[0].score < 0.2,
-    `the fixture must sit below the floor and above zero, got ${JSON.stringify(r.json.near)}`);
+    `the fixture must sit below the soft-hit floor and above zero, got ${JSON.stringify(r.json.near)}`);
 });
 
-test("a near row scoring exactly at the floor is a soft hit (#388)", () => {
-  // The control above sits below the floor and the promoting fixture above it
+test("a near row scoring exactly at the soft-hit floor is a soft hit (#388)", () => {
+  // The control above sits below the soft-hit floor and the promoting fixture above it
   // scores 0.38, so nothing else in this file lands ON 0.2. Without this pair
-  // the floor's VALUE and its INCLUSIVITY are both free: `>=` can become `>`,
+  // the soft-hit floor's VALUE and its INCLUSIVITY are both free: `>=` can become `>`,
   // and 0.2 can be retuned upward, with the suite green either way.
   const r = run("quorum drains under retry backoff", {
     filed: ["#902 quorum vanishes without warning during nightly compaction"],
     hits: [],
   });
   assert.equal(r.json.found, false);
-  assert.equal(r.json.near[0].score, 0.2, `the fixture must sit ON the floor, got ${r.json.near[0].score}`);
-  assert.equal(r.json.verdict, "soft-hit", "the floor is inclusive — the docs promise 'at or above'");
+  assert.equal(r.json.near[0].score, 0.2, `the fixture must sit ON the soft-hit floor, got ${r.json.near[0].score}`);
+  assert.equal(r.json.verdict, "soft-hit", "the soft-hit floor is inclusive — the docs promise 'at or above'");
   assert.equal(r.status, 0);
 });
 
@@ -1396,8 +1396,10 @@ test("a working directory that is not a repository at all still degrades exactly
 // left out, `check` being the entire subject of that same row's
 // `Non-zero when` cell (#48). Derived from the script's own dispatch rather
 // than a hand-written list, for the reason the table proves: a list typed here
-// drifts from the script exactly the way the table did. Both other copies of
-// the list — the row and the usage line — are measured against that dispatch.
+// drifts from the script exactly the way the table did. The three other
+// hand-typed copies of the list — the row, the usage line, and the
+// unknown-subcommand die() message — are all measured against that dispatch
+// below.
 test("the design spec's script-surface row admits exactly the subcommands ledger.mjs accepts", () => {
   // Read off the dispatch, not the usage line. The usage line is itself a
   // hand-typed list, so deriving the "real" set from it compares one doc-string
@@ -1405,7 +1407,8 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   // this pin green while the script accepted a subcommand neither the usage line
   // nor the row named (measured). The dispatch is the only thing that decides
   // which subcommand names the script actually accepts.
-  const real = [...new Set([...readFileSync(SCRIPT, "utf8").matchAll(/cmd === "([^"]+)"/g)].map((m) => m[1]))].sort();
+  const scriptSrc = readFileSync(SCRIPT, "utf8");
+  const real = [...new Set([...scriptSrc.matchAll(/cmd === "([^"]+)"/g)].map((m) => m[1]))].sort();
   assert.ok(real.length, "ledger.mjs must still dispatch on `cmd === \"...\"`");
 
   const spec = readFileSync(
@@ -1424,13 +1427,21 @@ test("the design spec's script-surface row admits exactly the subcommands ledger
   // own neighbouring cell already documents.
   assert.deepEqual(advertised, real, `the In cell and ledger.mjs disagree on the subcommand set`);
 
-  // The usage line is the other hand-typed copy of this list — the one a caller
-  // sees on a bad invocation — so it gets pinned to the same dispatch rather
-  // than being the thing everything else is measured against.
+  // The usage line is another hand-typed copy of this list — the one a caller
+  // sees when no subcommand is given at all — so it gets pinned to the same
+  // dispatch rather than being the thing everything else is measured against.
   const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" }).stderr;
   const alternation = usage.match(/([a-z]+(?:\|[a-z]+)+)/)?.[1];
   assert.ok(alternation, `ledger.mjs's usage line must still name its subcommands; got: ${usage}`);
   assert.deepEqual(alternation.split("|").sort(), real, `the usage line and ledger.mjs's dispatch disagree on the subcommand set`);
+
+  // The unknown-subcommand die() message is the third hand-typed copy of this
+  // list — the one a caller sees for a misspelled subcommand rather than no
+  // subcommand at all — so it gets pinned to the same dispatch too.
+  const dieList = scriptSrc.match(/unknown subcommand '\$\{cmd\}' — expected ([^`]+)`/)?.[1];
+  assert.ok(dieList, "ledger.mjs's unknown-subcommand die() must still name its subcommands");
+  const diePin = dieList.replace(" or ", ", ").split(",").map((x) => x.trim()).filter(Boolean).sort();
+  assert.deepEqual(diePin, real, "the unknown-subcommand die() message and ledger.mjs's dispatch disagree on the subcommand set");
 });
 
 // The Out cell is the other copy of the same claim, and it is the copy that
