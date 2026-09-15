@@ -1558,6 +1558,35 @@ un-idiomatic, and the finding's own grep hit a seventh it omitted) and the state
 cost was understated. Behavior-neutral plus a false rationale is a defer, however
 clean the verdict reads.
 
+**A refutation resting on an injection nothing proved landed is not a refutation
+— it is a cell that never ran.** A mutation test and a finding reproduction are
+both failure injections: break something, read what the child does. When the
+break never reaches the child, the child behaves exactly like its baseline, which
+is what a genuine no-effect mutation looks like and what a correctly refuted
+finding looks like. So a negative result is admitted only together with its
+**positive control** — one run proving the injected difference is observable,
+either the child's output differing with the injection present versus absent or
+the child echoing the injected value back from inside. No control → the cell is
+unrun: re-run it, and never record it as a negative. Measured 2026-08-28 and
+re-measured on this tree, against a `probe.sh` that echoes both variables back:
+
+```sh
+zsh  -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[unset] SETB=[1 BADJ=1]
+bash -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[1]     SETB=[1]
+```
+
+zsh does not word-split an unquoted parameter expansion, so the whole string
+arrives as ONE argument: a variable literally named `SETB` takes the value
+`1 BADJ=1`, the injection variable `BADJ` is never set, and the probe still exits
+0. It bites in both directions, and the reproduction direction is the worse one —
+`fix-pr-983` nearly reported a mutant as behaving identically to its baseline,
+while `fix-pr-1153` nearly retired a real review finding as non-reproducing after
+the same shape handed both trees a single argv word and drew `exit 2` from each,
+which is the signature of a correct refutation with nothing anomalous to notice.
+The fix-applier prompt and every refuter brief carry the rule and the safe
+invocation form; the merge bot's gate-trap list is the wrong seat, because a bot
+reads gates and never injects a fault.
+
 **When YOU extend a finding to sibling sites, the extension needs its own
 per-site measurement — being right about the sites does not make you right about
 the remedy.** A verified finding covers the sites its refuters measured; a
@@ -1638,7 +1667,22 @@ nothing leaves it no gate at all.
 > > empty still enables color, so it is not a control. State your search scope
 > > AND what your pattern would have missed. A grep over one ref does not
 > > support a claim about history; a pattern built from the token a diff removed
-> > does not support a claim that the category is empty. Everything you write — mutants, fixtures,
+> > does not support a claim that the category is empty. A failure injection with
+> > no positive control has produced NO result, never a negative one. Before you
+> > read an injected fault — an env var, an argv word, a mutant — as having had
+> > no effect, prove the injection reached the child: one run whose output
+> > differs with it present versus absent, or the child echoing the injected
+> > value back. Uncontrolled, the cell is unrun — say so in your verdict instead
+> > of reporting a no-effect result. Build such an invocation as an array
+> > expanded braced and quoted —
+> > `cfg=(SETB=1 BADJ=1); env "${cfg[@]}" sh ./probe.sh` — or inline the
+> > assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an
+> > unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh` — which under
+> > zsh passes ONE argument, sets a variable literally named `SETB` to
+> > `1 BADJ=1`, never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not
+> > the portable spelling either: measured, bash sets `SETB=1[@]` from it and
+> > leaves `BADJ` unset, the same silent no-op one shell over. Everything you
+> > write — mutants, fixtures,
 > > scratch repos — goes under `<scratch>/pr<N>/<finding>/` and nowhere else;
 > > the checkout and any worktree are never write targets, though
 > > `git show`/`git archive` at a pinned ref read fine anywhere. Chain the
@@ -1716,6 +1760,22 @@ nothing leaves it no gate at all.
 > whole-file text clears "it and only it goes red" and still reddens on any edit
 > (measured). A green suite says nothing about a new test: one pin this run
 > survived the exact mutation it was named for.
+>
+> **A mutation that never landed is not a green — it is a cell that did not
+> run.** Same rule for any fault you inject to see what breaks: prove the
+> injection reached the child before you read its result — one run whose output
+> differs with the injection present versus absent, or the child echoing the
+> injected value back. Without one, a probe that exits 0 reporting the mutant
+> behaving exactly like its baseline is indistinguishable from a real no-effect
+> result, and a reproduction that never happened reads as a refutation. Build
+> such an invocation as an array expanded braced and quoted —
+> `cfg=(SETB=1 BADJ=1); env "${cfg[@]}" sh ./probe.sh` — or inline the
+> assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an
+> unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh` — which under
+> zsh passes ONE argument, sets a variable literally named `SETB` to `1 BADJ=1`,
+> never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not the portable
+> spelling either: measured, bash sets `SETB=1[@]` from it and leaves `BADJ`
+> unset, the same silent no-op one shell over.
 >
 > **Commit BEFORE you mutate, and restore with `cp`, never a git discard.**
 > `git checkout -- <file>` reverts the whole file, not your mutant — so it also
