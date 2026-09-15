@@ -290,6 +290,7 @@ test("the fix-applier prompt refuses a mutation nothing proved landed, and carri
     "the fix-applier prompt no longer requires the injection be proved to have landed — its mutant-kill rule then reads a no-op mutation as a test that discriminates (#990)",
   );
   assert.match(seat, SAFE_FORM, "the fix-applier prompt lost the safe invocation form — the seat that does the most mutating is the one that most needs it");
+  assert.match(seat, MECHANISM, "the fix-applier prompt dropped the mechanism");
   assert.match(seat, PORTABILITY, "the fix-applier prompt dropped the zsh-only-array note");
 });
 
