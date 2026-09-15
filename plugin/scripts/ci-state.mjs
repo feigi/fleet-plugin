@@ -197,25 +197,28 @@ function runJson(cmd, args, shape) {
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 // What a shape refusal is FOR is telling a reader what gh actually sent, and
-// "missing <field>" told them the opposite of it: each field guard below
-// covers three faults at once — the key absent, the value an empty string,
-// the value not a string — and all three printed one identical "missing" line
-// (#926, measured), so a reader went hunting for a key gh had returned as
-// `""`, `42` or `null`. `saw` reports the value instead, and claims absence
-// only when the key really is absent.
+// "missing <field>" told them the opposite of it. The two `gh pr view` field
+// guards below each cover three faults at once — the key absent, the value an
+// empty string, the value not a string — and the `jobs` guard two of the same
+// kind, and every one of them printed a single identical "missing" line
+// (#926, measured), so a reader went hunting for a key gh had in fact
+// returned as `""`, `42` or `null`. `saw` reports the value instead, and
+// claims absence only when the key really is absent.
 //
-// `Object.hasOwn`, not `key in obj`: `in` answers for the prototype chain too,
-// and throws outright on a non-object. Both call sites refuse a non-object
-// ahead of any field check, so `in` would work there today — but a guard
-// reordered past that refusal would turn this diagnostic into the very
-// exit-1-as-verdict crash the shape checks exist to prevent (#269), and
-// `hasOwn` simply answers `false`.
+// `Object.hasOwn`, not `key in obj`: `in` answers for the prototype chain
+// too, and throws outright on a non-object (measured: TypeError, "Cannot use
+// 'in' operator"). Every call site refuses a non-object ahead of any field
+// check, so `in` would work there today — but a field guard reordered past
+// that refusal would turn this diagnostic into the very exit-1-as-verdict
+// crash the shape checks exist to prevent (#269), where `hasOwn` just answers
+// `false`.
 //
-// The value can only have come from JSON.parse, so JSON.stringify always
-// returns a string here — no JSON value stringifies to `undefined`. It is what
-// makes `""` and `"42"` distinguishable from `42` and from nothing at all.
-// Capped WITH A VISIBLE MARKER: a `jobs` that came back as gh's own error
-// object is unbounded, and a tail cut off silently reads as the whole value.
+// JSON.stringify, not the raw value: it is what makes `""` visible at all and
+// what tells the string `"42"` from the number 42. It always returns a string
+// here — the value came from JSON.parse, and no JSON value stringifies to
+// `undefined`. Capped WITH A VISIBLE MARKER, because the length quoted is
+// gh's, not this script's: a `jobs` that came back as an error body is
+// unbounded, and a tail cut off silently reads as the whole value.
 const saw = (obj, key) => {
   if (!Object.hasOwn(obj, key)) return "the key is absent";
   const shown = JSON.stringify(obj[key]);

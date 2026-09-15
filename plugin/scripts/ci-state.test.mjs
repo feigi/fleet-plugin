@@ -642,13 +642,14 @@ test("a refusal quoting an unbounded value is cut short and says that it was", (
 // The direction this guard gets wrong on its own: what it wrongly REFUSES.
 // Every jobs fixture above is malformed by construction, so none of them can
 // show that the legitimate empty reply still reaches a verdict — and an empty
-// `jobs` is legitimate: a queued run whose jobs have not been created yet
-// sends exactly that. A guard tightened from "is an array" onto truthiness or
-// length would refuse it, and refusing a working invocation costs more than
-// any diagnostic above gains. The verdict it must reach is not-green, by the
-// job-presence check rather than by the shape check — which is also where the
-// word "absent" belongs: about a job expected and not in the run, never about
-// a key gh did send.
+// `jobs` is legitimate: the guard's whole question is array-ness, a run with
+// no job rows answers it, and the job-presence check below is what has an
+// opinion about how many. A guard tightened from "is an array" onto
+// truthiness or length would refuse it, and refusing a working invocation
+// costs more than any diagnostic above gains. The verdict it must reach is
+// not-green, by that job-presence check rather than by the shape check —
+// which is also where the word "absent" belongs: about a job expected and
+// missing from the run, never about a key gh did send.
 test("run view whose jobs is an empty array is accepted — a verdict, never a shape refusal", () => {
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
