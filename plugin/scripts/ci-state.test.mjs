@@ -617,6 +617,49 @@ for (const [what, runFields, saw, notSaw] of [
   });
 }
 
+// #926's own new hazard: the value a refusal quotes is gh's, so its length is
+// gh's too — a `jobs` that came back as an error body carries however much
+// text that body had, onto a stderr the fleet's CI monitor polls. So it is
+// cut short, and says that it was: a tail dropped with no marker reads as the
+// whole value, the same class of lie "missing" was. Asserted against the
+// value's own length rather than against the cap's number, so tuning the cap
+// does not red this.
+test("a refusal quoting an unbounded value is cut short and says that it was", () => {
+  const huge = "x".repeat(400);
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ jobs: { error: huge }, attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(refusal(r), /jobs/);
+  assert.match(refusal(r), /\(truncated\)/);
+  assert.ok(
+    refusal(r).length < huge.length,
+    `the refusal must not carry the whole value, and it reads ${refusal(r)}`,
+  );
+});
+
+// The direction this guard gets wrong on its own: what it wrongly REFUSES.
+// Every jobs fixture above is malformed by construction, so none of them can
+// show that the legitimate empty reply still reaches a verdict — and an empty
+// `jobs` is legitimate: a queued run whose jobs have not been created yet
+// sends exactly that. A guard tightened from "is an array" onto truthiness or
+// length would refuse it, and refusing a working invocation costs more than
+// any diagnostic above gains. The verdict it must reach is not-green, by the
+// job-presence check rather than by the shape check — which is also where the
+// word "absent" belongs: about a job expected and not in the run, never about
+// a key gh did send.
+test("run view whose jobs is an empty array is accepted — a verdict, never a shape refusal", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runView: JSON.stringify({ jobs: [], attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.doesNotMatch(r.stderr, /not the expected shape/);
+  assert.match(r.stderr, /expected jobs absent from the run: check/);
+});
+
 test("a job entry in the run view is null: exit 2, never the crash reading j.name off null", () => {
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
