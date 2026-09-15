@@ -529,7 +529,7 @@ if (noCi) {
       ["run", "view", String(runId), "--json", "jobs,attempt,status,conclusion,headSha"],
       (v) => {
         if (!isObject(v)) return "expected an object";
-        if (!Array.isArray(v.jobs)) return "missing jobs array";
+        if (!Array.isArray(v.jobs)) return `jobs is not an array (${saw(v, "jobs")})`;
         const bad = v.jobs.findIndex((j) => !isObject(j));
         return bad === -1 ? null : `job entry ${bad} is not an object`;
       },

@@ -590,19 +590,32 @@ test("run list row is null: exit 2, never the crash reading r.headSha off null",
   assert.match(r.stderr, /run list row 0 is not an object/);
 });
 
-test("run view missing jobs array: exit 2 naming the field, never silently read as zero jobs", () => {
-  // No `jobs` key at all — the shape an error-ish or partial run view takes.
-  // This guard is now the only thing between that and `view.jobs.map(...)`:
-  // drop it and the read throws, and an uncaught throw exits 1 — "could not
-  // be read" rendered as a CI verdict, the whole #269 class.
-  const r = run([], {
-    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-    runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD }),
+// The same #926 split at the run-view guard, whose faults are two rather than
+// three: the `jobs` key absent, and a `jobs` present but not an array.
+// "missing jobs array" asserted the first for both of them (measured), and the
+// second is the shape an error body or a partial run view takes — the value is
+// right there to be quoted. `absent` stays a row of its own because it is the
+// shape this guard was added for: it is the only thing between a missing key
+// and `view.jobs.map(...)`, and an uncaught throw there exits 1 — "could not
+// be read" rendered as a CI verdict, the whole #269 class.
+for (const [what, runFields, saw, notSaw] of [
+  ["absent", {}, /the key is absent/, /got /],
+  ["an error object", { jobs: { error: "rate limited" } }, /got \{"error":"rate limited"\}/, /absent/],
+  ["a string", { jobs: "none" }, /got "none"/, /absent/],
+  ["null", { jobs: null }, /got null/, /absent/],
+]) {
+  test(`run view whose jobs is ${what}: exit 2 naming the field and what gh sent, never read as zero jobs`, () => {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      runView: JSON.stringify({ attempt: 1, status: "completed", conclusion: "success", headSha: PR_HEAD, ...runFields }),
+    });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(refusal(r), /run view/);
+    assert.match(refusal(r), /jobs/);
+    assert.match(refusal(r), saw);
+    assert.doesNotMatch(refusal(r), notSaw);
   });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /run view/);
-  assert.match(r.stderr, /missing jobs array/);
-});
+}
 
 test("a job entry in the run view is null: exit 2, never the crash reading j.name off null", () => {
   const r = run([], {
