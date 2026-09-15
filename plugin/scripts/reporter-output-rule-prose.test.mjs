@@ -197,6 +197,7 @@ for (const [name, ...p] of [
   ["run-team/SKILL.md", "skills", "run-team", "SKILL.md"],
   ["review-and-fix.md", "commands", "review-and-fix.md"],
   ["review-pr.js", "workflows", "review-pr.js"],
+  ["review-core.js", "scripts", "review-core.js"],
 ]) {
   test(`${name}: the refuter-prompt slice anchor occurs exactly once`, () => {
     assert.equal(

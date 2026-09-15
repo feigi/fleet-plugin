@@ -617,6 +617,22 @@ claim.`,
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
 the test, apply the mutation. Do not reason your way to agreement.
 
+A failure injection with no positive control has produced NO result, never a
+negative one. Before you read an injected fault — an env var, an argv word, a
+mutant — as having had no effect, prove the injection reached the child: one run
+whose output differs with it present versus absent, or the child echoing the
+injected value back. Uncontrolled, the cell is unrun — say so in your verdict
+instead of reporting a no-effect result. Build such an invocation as an array
+expanded braced and quoted — \`cfg=(SETB=1 BADJ=1); env "\${cfg[@]}" sh
+./probe.sh\` — or inline the assignments literally — \`env SETB=1 BADJ=1 sh
+./probe.sh\`; NEVER from an unquoted scalar — \`cfg="SETB=1 BADJ=1"; env $cfg sh
+./probe.sh\` — which under zsh passes ONE argument, sets a variable literally
+named \`SETB\` to \`1 BADJ=1\`, never sets \`BADJ\` at all, and still exits 0.
+\`env $cfg[@]\` is not the portable spelling either: measured, bash
+word-splits it into \`SETB=1\` and \`BADJ=1[@]\`, so the injection variable
+is set to a corrupted value, while zsh behaves exactly as with the bare
+\`$cfg\` — \`BADJ\` never set, exit 0.
+
 ${readRules(usableDiff(snap), stats, snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
