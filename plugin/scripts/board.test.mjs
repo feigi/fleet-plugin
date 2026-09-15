@@ -790,6 +790,95 @@ test("a turn spanning several lines: a tear on a MIDDLE line does not re-bill th
   assert.equal(s.skipped, 0);
 });
 
+// #916: every case above pins the mid-file tear's STDERR line, and stderr is the
+// one channel board.html twice says it does not have — the board is launched
+// backgrounded and the operator is watching the page, which is the argument that
+// put `skipped` in the DOM and then `metaErrors` (#602) beside it. Measured on
+// the tree before this fix, MIDFILE_TEAR: gatherSpend returned
+// totals,roles,top,reviewPct,tools,attributedPct,skipped,metaErrors,since,ok —
+// `skipped` 0, `metaErrors` 0, `error` undefined, no field naming the damage —
+// and spendView's whole decision came back BYTE-FOR-BYTE identical to the
+// intact run's, 1500 cache-write rendered with the same note as 1800. `damaged`
+// is this fault's channel, counted the same way and reaching the browser by the
+// same route.
+test("#916: a damaged mid-file line reaches the MODEL as a count, not stderr alone", () => {
+  const dir = rawFixture(MIDFILE_TEAR);
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.damaged, 1);
+  // Distinct from both neighbouring tallies, which is why it is a third field:
+  // this transcript CONTRIBUTED, so `skipped` (which means "contributed
+  // nothing") may not carry it, and its sidecar is fine, so `metaErrors` may
+  // not either. Folding the count into either one passes without these two.
+  assert.equal(s.skipped, 0);
+  assert.equal(s.metaErrors, 0);
+});
+
+test("#916: several damaged lines in one transcript count as several, not as one", () => {
+  // The shape that separates a count from a flag — a boolean promoted to
+  // `damaged: 1` satisfies every other case in this block. The magnitude is the
+  // reason the field exists rather than a `damaged: true`: the stderr gate fires
+  // once per PATH, so before this the second tear was invisible on that channel
+  // too (measured: two tears in one file, one line, no number anywhere).
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n");
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.damaged, 2);
+});
+
+test("#916: damaged lines sum across transcripts, the way skipped does", () => {
+  // The panel's counts are per-TICK totals over the whole session dir, never
+  // per-file: an assignment instead of a sum reads 2 here (the last file's own
+  // count) and stays green on every single-transcript case above.
+  const dir = rawFixture(MIDFILE_TEAR);
+  writeFileSync(join(dir, "agent-y.jsonl"),
+    [oneLineTurn("msg_d", 100), TORN, TORN, oneLineTurn("msg_e", 200)].join("\n") + "\n");
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.damaged, 3);
+});
+
+test("#916: a torn LAST line counts as no damage — the false-positive half", () => {
+  // Silence on stderr was never the whole contract: the tear every tick
+  // legitimately produces must not inflate the tally either, or every
+  // transcript still being appended to parks a permanent "spend
+  // under-reported" note on the panel and the note stops meaning anything.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  let s;
+  assert.deepEqual(withStderr(() => { s = gatherSpend({ dir }); }), []);
+  assert.equal(s.damaged, 0);
+});
+
+test("#916: a mid-file tear and a torn tail in ONE file count only the mid-file one", () => {
+  // The position boundary, re-drawn now that the answer is a number rather than
+  // a flag: the two tests above hold one tear per file, so each is satisfied by
+  // a count that has dropped the `i !== lines.length - 1` discriminator
+  // entirely — one file carrying BOTH tears is the only shape that reads 2
+  // under that mutation. No trailing newline, so the last TORN is genuinely the
+  // final element of the split.
+  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500), TORN].join("\n"));
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.damaged, 1);
+  assert.equal(s.totals.cacheWrite, 1500);
+});
+
+test("#916: a damaged transcript beside an unreadable one reports both tallies", () => {
+  // Two different faults in one tick, and the panel names them separately. Also
+  // the invariant the increment's PLACEMENT carries: `damaged` is summed beside
+  // `metaErrors`, past the throw-capable work and before the agent is pushed,
+  // so a transcript that ends up `skipped` — "contributed nothing" — can never
+  // also report damaged lines. Incrementing inside the per-file catch, or
+  // hoisting the sum above attributeTools, breaks that and reds here.
+  // Directory-where-a-file-is-expected for EISDIR, as above.
+  const dir = rawFixture(MIDFILE_TEAR);
+  mkdirSync(join(dir, "agent-y.jsonl"));
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.damaged, 1);
+  assert.equal(s.skipped, 1);
+});
+
 // The keyless caller. Every other gate keys on a PR or a path, so nothing else
 // in the suite drives warnOnce's empty key, and the folded-in spend-dir gate
 // would be collapsed untested. The failure it reports is the session directory

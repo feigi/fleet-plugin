@@ -269,6 +269,42 @@ test("#602: a funded run's panel note names a corrupt sidecar distinctly from a 
     "2 transcripts skipped; 3 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
 });
 
+test("#916: a damaged-line count reaches the panel note, distinctly from both siblings", () => {
+  // Third tally, third phrase. `skipped` means the transcript contributed
+  // nothing; `metaErrors` means it contributed under a degraded role and label;
+  // `damaged` means it contributed but part of its spend is simply missing —
+  // the only one of the three that makes the NUMBERS beside it wrong, which is
+  // why its phrase names under-reporting rather than a count of files.
+  assert.equal(spendView(ok({ damaged: 1 })).note,
+    "1 damaged transcript line — spend under-reported; ranked on cache-creation; tool split is attributed, not billed");
+  // All three in one tick, plural wording, in the order the note lists them:
+  // most spend lost first. A phrase spliced into the wrong slot reds here.
+  assert.equal(spendView(ok({ skipped: 1, metaErrors: 2, damaged: 3 })).note,
+    "1 transcript skipped; 3 damaged transcript lines — spend under-reported; 2 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
+});
+
+test("#916: a run whose only turn WAS the damaged line reports the damage, not nothing", () => {
+  // The worst case in the ticket, and the one measured on the tree before this
+  // fix: a transcript holding a single torn line and nothing else returned
+  // `kind: "hidden"` — the panel rendered NOTHING for a run whose entire spend
+  // had been destroyed, a fault presented as an idle run. cacheWrite is 0
+  // because the damaged line was the only cache-creation turn there was, so
+  // `skipped` and `metaErrors` are both 0 and this branch is reachable by
+  // `damaged` alone — the same argument the #602 case above makes for itself.
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 1 }, skipped: 0, metaErrors: 0, damaged: 1 })),
+    { kind: "note", text: "1 damaged transcript line; no spend recorded yet" });
+});
+
+test("#916: a clean empty run with damaged zero is still the one legitimate hide", () => {
+  // The no-false-positive half at the view layer: an unguarded push renders
+  // "0 damaged transcript lines; no spend recorded yet" over a run that has
+  // simply not started, which is the reverse of the conflation this panel
+  // removes. The funded branch's copy of that mutation reds the plain-note test
+  // above; this is the branch that one cannot see.
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 0, damaged: 0 })),
+    { kind: "hidden" });
+});
+
 test("an error with no usable message still renders the error panel (#959)", () => {
   // The case #371 pinned as broken and #959 fixed. gatherSpend's outer catch
   // returns `{ ok: false, error: e.message }`, and `e.message` is "" for an
