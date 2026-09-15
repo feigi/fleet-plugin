@@ -154,6 +154,14 @@ function run(cmd, args) {
   }
 }
 
+// One truncation rule for every raw gh value this script quotes into a
+// refusal: cut at n chars behind a visible marker, shared by the non-JSON
+// die below and by `saw` further down. An unmarked cut reads as the whole
+// value — the length quoted is gh's, not this script's — so a bare
+// `raw.trim().slice(0, n)` here would be exactly the lie `saw`'s own
+// comment (below) declares unacceptable one screen away.
+const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, n)}… (truncated)` : s);
+
 // Every gh read in this file is JSON, and a bare JSON.parse of a child's stdout
 // fails OPEN: gh can exit 0 with a non-JSON body (a proxy's HTML error page is
 // the measured case) and the uncaught SyntaxError exits 1 — which in THIS
@@ -177,7 +185,7 @@ function runJson(cmd, args, shape) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${raw.trim().slice(0, 120)}`);
+    die(`${cmd} ${args[0]} ${args[1]} returned no JSON — ${cut(raw.trim())}`);
   }
   const problem = shape?.(parsed);
   if (problem) die(`${cmd} ${args[0]} ${args[1]} returned JSON but not the expected shape — ${problem}`);
@@ -216,13 +224,13 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 // JSON.stringify, not the raw value: it is what makes `""` visible at all and
 // what tells the string `"42"` from the number 42. It always returns a string
 // here — the value came from JSON.parse, and no JSON value stringifies to
-// `undefined`. Capped WITH A VISIBLE MARKER, because the length quoted is
-// gh's, not this script's: a `jobs` that came back as an error body is
-// unbounded, and a tail cut off silently reads as the whole value.
+// `undefined`. Cut through the shared `cut()` above — the same visible-
+// marker rule the non-JSON die uses, because the length quoted here is
+// gh's, not this script's, same as there.
 const saw = (obj, key) => {
   if (!Object.hasOwn(obj, key)) return "the key is absent";
   const shown = JSON.stringify(obj[key]);
-  return `got ${shown.length > 120 ? `${shown.slice(0, 120)}… (truncated)` : shown}`;
+  return `got ${cut(shown)}`;
 };
 
 const pr = arg("pr");

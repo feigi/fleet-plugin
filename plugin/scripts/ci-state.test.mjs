@@ -621,9 +621,10 @@ for (const [what, runFields, saw, notSaw] of [
 // gh's too — a `jobs` that came back as an error body carries however much
 // text that body had, onto a stderr the fleet's CI monitor polls. So it is
 // cut short, and says that it was: a tail dropped with no marker reads as the
-// whole value, the same class of lie "missing" was. Asserted against the
-// value's own length rather than against the cap's number, so tuning the cap
-// does not red this.
+// whole value, the same class of lie "missing" was. Asserted against whether
+// the value's own unbroken run survives the cut, not against the cap's
+// number, so tuning the cap does not red this — a smaller cap only cuts the
+// run shorter, it does not make it survive.
 test("a refusal quoting an unbounded value is cut short and says that it was", () => {
   const huge = "x".repeat(400);
   const r = run([], {
@@ -633,8 +634,9 @@ test("a refusal quoting an unbounded value is cut short and says that it was", (
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(refusal(r), /jobs/);
   assert.match(refusal(r), /\(truncated\)/);
-  assert.ok(
-    refusal(r).length < huge.length,
+  assert.doesNotMatch(
+    refusal(r),
+    /x{400}/,
     `the refusal must not carry the whole value, and it reads ${refusal(r)}`,
   );
 });
