@@ -444,11 +444,11 @@ function readAgent(file, metaFile) {
     // tail must not reach warnOnce at all, or it consumes this file's one
     // `lines` line and permanently silences the real fault when the tear
     // later moves. It must not reach `damaged` either — a note reading "spend
-    // under-reported" on every transcript still being written to is a note
+    // may be incomplete" on every transcript still being written to is a note
     // nobody reads by the second tick.
     // "first parse error", not "the" one: the count can exceed 1 and only the
     // first cause is carried, so the line says which number it is quoting.
-    warnOnce("lines", file, `${file} has ${damaged} unparseable line${damaged === 1 ? "" : "s"} away from its tail; that much of its spend is missing from the panel (first parse error: ${folded.malformedNonLastLineError})`);
+    warnOnce("lines", file, `${file} has ${damaged} unparseable line${damaged === 1 ? "" : "s"} away from its tail; that much of its spend may be missing from the panel (first parse error: ${folded.malformedNonLastLineError})`);
   }
   return {
     meta, cacheWrite: folded.cacheWrite, output: folded.output,

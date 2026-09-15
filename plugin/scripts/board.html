@@ -160,8 +160,10 @@ function spendView(sp) {
     kind: "panel",
     lede: `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`,
     // `skipped` means "contributed nothing"; `damaged` means "contributed, but
-    // some of its spend is missing" (#916) — the numbers on this very panel are
-    // short by whatever those lines carried; `metaErrors` means "contributed,
+    // may be missing the torn line's tool_use blocks and output_tokens
+    // snapshot" (#916) — cache_creation/cache_read/maxCtx repeat on every line
+    // of a turn and survive a mid-turn tear, so the panel's totals are not
+    // necessarily short; `metaErrors` means "contributed,
     // in full, but under a degraded role and label" (#602) — classifyRole read
     // `{}` and gatherSpend fell back to the bare filename. Three different
     // lies, so three different phrases, all routed through the one channel that
@@ -170,7 +172,7 @@ function spendView(sp) {
     // first.
     note: [
       sp.skipped ? `${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped` : null,
-      sp.damaged ? damagedPhrase(sp.damaged, " — spend under-reported") : null,
+      sp.damaged ? damagedPhrase(sp.damaged, " — spend may be incomplete") : null,
       sp.metaErrors ? metaErrorsPhrase(sp.metaErrors, " — role/label degraded") : null,
       "ranked on cache-creation; tool split is attributed, not billed",
     ].filter(Boolean).join("; "),

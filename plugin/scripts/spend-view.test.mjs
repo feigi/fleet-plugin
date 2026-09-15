@@ -272,15 +272,16 @@ test("#602: a funded run's panel note names a corrupt sidecar distinctly from a 
 test("#916: a damaged-line count reaches the panel note, distinctly from both siblings", () => {
   // Third tally, third phrase. `skipped` means the transcript contributed
   // nothing; `metaErrors` means it contributed under a degraded role and label;
-  // `damaged` means it contributed but part of its spend is simply missing —
-  // the only one of the three that makes the NUMBERS beside it wrong, which is
-  // why its phrase names under-reporting rather than a count of files.
+  // `damaged` means it contributed but the torn line's own tool_use blocks and
+  // output_tokens snapshot may be missing — cache_creation/cache_read/maxCtx
+  // repeat on every line of a turn and survive a mid-turn tear, so the phrase
+  // hedges rather than asserting the numbers beside it are wrong.
   assert.equal(spendView(ok({ damaged: 1 })).note,
-    "1 damaged transcript line — spend under-reported; ranked on cache-creation; tool split is attributed, not billed");
+    "1 damaged transcript line — spend may be incomplete; ranked on cache-creation; tool split is attributed, not billed");
   // All three in one tick, plural wording, in the order the note lists them:
   // most spend lost first. A phrase spliced into the wrong slot reds here.
   assert.equal(spendView(ok({ skipped: 1, metaErrors: 2, damaged: 3 })).note,
-    "1 transcript skipped; 3 damaged transcript lines — spend under-reported; 2 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
+    "1 transcript skipped; 3 damaged transcript lines — spend may be incomplete; 2 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
 });
 
 test("#916: a run whose only turn WAS the damaged line reports the damage, not nothing", () => {

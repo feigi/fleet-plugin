@@ -841,8 +841,8 @@ test("#916: damaged lines sum across transcripts, the way skipped does", () => {
 test("#916: a torn LAST line counts as no damage — the false-positive half", () => {
   // Silence on stderr was never the whole contract: the tear every tick
   // legitimately produces must not inflate the tally either, or every
-  // transcript still being appended to parks a permanent "spend
-  // under-reported" note on the panel and the note stops meaning anything.
+  // transcript still being appended to parks a permanent "spend may be
+  // incomplete" note on the panel and the note stops meaning anything.
   const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
   let s;
   assert.deepEqual(withStderr(() => { s = gatherSpend({ dir }); }), []);
