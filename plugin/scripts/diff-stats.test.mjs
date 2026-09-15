@@ -246,3 +246,131 @@ test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   assert.equal(payload.pr, 5);
   assert.equal(payload.profile, "single-file");
 });
+
+// #932: the non-JSON die above quoted `raw.trim().slice(0, 120)` with NO
+// marker, so a 269 KB portal page and a 90-character one rendered identically —
+// a reader could not tell gh's whole output from this script's clip of it. The
+// length quoted is gh's, not this script's, which is the lie the marker closes.
+// Nothing in this file reached that path at all before these four tests: the
+// guards above cover a missing `files` key and a `null` body, both of which
+// PARSE. A suite that never enters the mode cannot see the defect in it.
+//
+// DIRECTION, measured here rather than inherited (#638/PR #931 fixed the same
+// unmarked clip in ledger.mjs by keeping the TAIL, and copying that here would
+// keep the noise and discard the cause):
+//   - `run()` passes no `stdio`, so execFileSync forwards the child's stderr to
+//     this process's stderr and returns stdout ALONE. `raw` is gh's stdout, not
+//     its stderr — the stream-check below pins exactly that, and it is the whole
+//     of why ledger.mjs's tail rationale (a FATAL line behind seven warnings)
+//     does not transfer.
+//   - Real gh 2.100.0 never puts non-JSON on stdout: a missing PR, bad
+//     credentials and an intercepting proxy all report on stderr at exit 1,
+//     which `run()`'s catch takes, and stdout stays empty. Forcing a TTY, a
+//     pager and `GH_DEBUG=api` each left stdout pure JSON. A payload past
+//     execFileSync's 1 MiB maxBuffer throws ENOBUFS rather than returning a
+//     mid-JSON cut, so the one shape whose cause would sit at the tail cannot
+//     reach `raw` either.
+//   - So this path is only ever reached when something OTHER than gh owns that
+//     stdout — a wrapper, shim or portal interposed on it — and such a producer
+//     leads with its own message. Measured on real bytes: github.com's 404 body
+//     ends `</div>\n  </body>\n</html>`, boilerplate every HTML page on earth
+//     shares, while its first 120 characters carry `<!DOCTYPE html>`; a wrapper
+//     that prints a notice and then delegates ends in `"changeType":"MODIFIED"}]}`,
+//     which reads as gh having answered perfectly and the parser being at fault.
+//     The head carries the cause on both, and the tail actively misleads on one.
+const runWithGhStdout = (body) => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  const payload = join(bin, "payload");
+  writeFileSync(payload, body);
+  // `cat` of a file, not `echo` of an inlined string: the payloads below are
+  // real captured bytes, quotes and all, and must reach stdout unmangled.
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat "${payload}"\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  return r;
+};
+
+// What the refusal actually quoted: everything after the em-dash to the end of
+// that line. `.` excludes `\n`, so a multi-line payload is read to its first
+// newline only — which is why the cap case below uses a single-line payload.
+const quoted = (stderr) => {
+  const m = /returned no JSON — (.*)/.exec(stderr);
+  assert.ok(m, `no non-JSON refusal on stderr: ${stderr}`);
+  return m[1];
+};
+
+// A real intercepting-proxy body: nginx's 502 template, the measured shape of
+// what a corporate portal hands back in place of api.github.com's JSON.
+const PORTAL = '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><center>corp-proxy-7 could not reach api.github.com: upstream refused</center><hr><center>nginx/1.24.0</center></body></html>';
+
+test("CLI: an over-long non-JSON payload is quoted behind a visible truncation marker", () => {
+  const r = runWithGhStdout(PORTAL);
+  assert.equal(r.status, 2, `a non-JSON body must refuse; got ${r.status} ${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload");
+  assert.match(
+    quoted(r.stderr),
+    /… \(truncated\)$/,
+    "a clipped diagnostic must say it was clipped — unmarked, the reader takes this script's 120 characters for the whole of gh's output",
+  );
+});
+
+// The other half of the guard. A marker appended unconditionally would make
+// every complete diagnostic read as a cut one — the same lie inverted, and a
+// suite that only ever feeds this path an over-long payload pins neither half.
+// 88 characters, the measured length of a real portal's 403 body, is a payload
+// it must ACCEPT and quote whole.
+test("CLI: a non-JSON payload that fits is quoted whole, with no marker", () => {
+  const short = '<!DOCTYPE html><html><head><title>403 Forbidden</title></head><body>portal</body></html>';
+  assert.ok(short.length <= 120, "this fixture only tests the accept path while it fits the cap");
+  const r = runWithGhStdout(short);
+  assert.equal(r.status, 2);
+  assert.equal(quoted(r.stderr), short, "a payload that fits must be quoted exactly, not reshaped");
+  assert.doesNotMatch(quoted(r.stderr), /truncated/, "nothing was cut, so nothing may claim it was");
+});
+
+test("CLI: the clip keeps the HEAD of gh's stdout, where this path's cause sits", () => {
+  const q = quoted(runWithGhStdout(PORTAL).stderr);
+  assert.match(q, /^<!DOCTYPE html>/, "the head identifies the payload as an HTML page — the one fact this refusal exists to deliver");
+  assert.match(q, /502 Bad Gateway/, "and carries the proxy's own status line");
+  assert.doesNotMatch(
+    q,
+    /<\/html>/,
+    "keeping the tail here would quote `</body></html>` — boilerplate shared by every HTML error page, naming no cause at all",
+  );
+});
+
+// #931's remedy for the sibling site was measured wrong in exactly this way:
+// `…${raw.slice(-500)}` produces a 501-character payload, so the marker pushed
+// the value past the cap the comment above it argued for. This script's stderr
+// is read by review-pr.js's snapshot agent — markdown fed to a model, the same
+// context budget `run()`'s comment measures in bytes — so the cap is the
+// contract and the marker is part of what it bounds.
+test("CLI: the marker lives inside the 120-char cap, not past it", () => {
+  const q = quoted(runWithGhStdout(PORTAL).stderr);
+  assert.ok(
+    q.length <= 120,
+    `the quoted payload including its marker must fit the 120-char cap; got ${q.length}: ${JSON.stringify(q)}`,
+  );
+});
+
+// The premise the direction above rests on, pinned so it cannot rot silently:
+// `raw` is gh's stdout ALONE. If a future edit added `stdio: ["ignore","pipe","pipe"]`
+// to run() and folded stderr in, the cause would move to the tail and the head
+// clip would start discarding it — the inversion this ticket exists to avoid.
+test("CLI: the quoted payload is gh's stdout alone — stderr never enters it", () => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  writeFileSync(join(bin, "gh"), '#!/bin/sh\necho "STDERR-ONLY-LINE" >&2\necho "<html>not json</html>"\n');
+  chmodSync(join(bin, "gh"), 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 2);
+  assert.equal(quoted(r.stderr), "<html>not json</html>", "the payload is stdout");
+  assert.match(r.stderr, /STDERR-ONLY-LINE/, "the child's stderr is still forwarded — it is not swallowed, just not quoted");
+});
