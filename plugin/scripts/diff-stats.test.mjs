@@ -295,10 +295,12 @@ const runWithGhStdout = (body) => {
 };
 
 // What the refusal actually quoted: everything after the em-dash to the end of
-// that line. `.` excludes `\n`, so a multi-line payload is read to its first
-// newline only — which is why the cap case below uses a single-line payload.
+// stderr. `[\s\S]*` (not `.`, which excludes `\n`) reads a multi-line clip in
+// full — a `.`-based capture stopped at the first newline and would pass a
+// mutant that clips to gh's first line alone, unmarked, whenever that first
+// line is itself under the cap (the exact #932 defect the fixture below pins).
 const quoted = (stderr) => {
-  const m = /returned no JSON — (.*)/.exec(stderr);
+  const m = /returned no JSON — ([\s\S]*)\n$/.exec(stderr);
   assert.ok(m, `no non-JSON refusal on stderr: ${stderr}`);
   return m[1];
 };
@@ -306,6 +308,20 @@ const quoted = (stderr) => {
 // A real intercepting-proxy body: nginx's 502 template, the measured shape of
 // what a corporate portal hands back in place of api.github.com's JSON.
 const PORTAL = '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><center>corp-proxy-7 could not reach api.github.com: upstream refused</center><hr><center>nginx/1.24.0</center></body></html>';
+
+// The opening of a real github.com 404 body (fetched live, trimmed to its
+// first 366 bytes — enough to prove the shape without vendoring the page's
+// full ~269 KB). Every fixture above is single-line — `.split("\n")` and
+// unsplit `s` behave identically on them — so none can distinguish the real
+// `cut()` from a mutant that clips gh's FIRST LINE alone and skips the marker
+// whenever that line is itself under the cap: on `PORTAL` the mutant's first
+// "line" is the whole 274-char string, over the cap either way. This body is
+// genuinely multi-line and its own first line — `<!DOCTYPE html>`, 15
+// characters — is nowhere near 120, so a first-line-only mutant returns it
+// verbatim, dropping the other 351 bytes with no marker at all: the exact
+// #932 defect, at real-page scale a ~269 KB silent drop.
+const GITHUB_404 =
+  '<!DOCTYPE html>\n<html\n  lang="en"\n  \n  data-color-mode="auto" data-light-theme="light" data-dark-theme="dark"\n  data-a11y-animated-images="system" data-a11y-link-underlines="true"\n  \n  >\n\n\n\n\n  <head>\n    <meta charset="utf-8">\n  <link rel="dns-prefetch" href="https://github.githubassets.com">\n  <link rel="dns-prefetch" href="https://avatars.githubusercontent.com">';
 
 test("CLI: an over-long non-JSON payload is quoted behind a visible truncation marker", () => {
   const r = runWithGhStdout(PORTAL);
@@ -343,18 +359,34 @@ test("CLI: the clip keeps the HEAD of gh's stdout, where this path's cause sits"
   );
 });
 
-// #931's remedy for the sibling site was measured wrong in exactly this way:
-// `…${raw.slice(-500)}` produces a 501-character payload, so the marker pushed
-// the value past the cap the comment above it argued for. This script's stderr
-// is read by review-pr.js's snapshot agent — markdown fed to a model, the same
-// context budget `run()`'s comment measures in bytes — so the cap is the
-// contract and the marker is part of what it bounds.
+// ci-state.mjs's sibling `cut` (#1479) makes the opposite choice: its
+// `s.slice(0, n)` appends the marker unconditionally, so a clipped value
+// there measures 133 characters against its own 120-char cap — a cap the
+// marker can push past is not a cap. This script's stderr is read by
+// review-pr.js's snapshot agent — markdown fed to a model, the same context
+// budget `run()`'s comment measures in bytes — so the cap is the contract
+// and the marker is part of what it bounds.
 test("CLI: the marker lives inside the 120-char cap, not past it", () => {
   const q = quoted(runWithGhStdout(PORTAL).stderr);
   assert.ok(
     q.length <= 120,
     `the quoted payload including its marker must fit the 120-char cap; got ${q.length}: ${JSON.stringify(q)}`,
   );
+});
+
+// Every fixture above is single-line, so none can tell the real `cut()` from
+// a mutant that clips gh's first line alone and skips the marker whenever
+// that line is itself under the cap — the exact #932 defect. `GITHUB_404` is
+// genuinely multi-line with a short first line, so it pins both halves: the
+// marker is present, and the whole quote (marker included) still fits 120.
+test("CLI: a multi-line non-JSON payload is still clipped and marked, not just its first line", () => {
+  const q = quoted(runWithGhStdout(GITHUB_404).stderr);
+  assert.match(
+    q,
+    /… \(truncated\)$/,
+    "a first-line-only clip would return `<!DOCTYPE html>` (15 chars) unmarked, silently dropping the other 351 fixture bytes",
+  );
+  assert.ok(q.length <= 120, `the quoted payload including its marker must fit the 120-char cap; got ${q.length}: ${JSON.stringify(q)}`);
 });
 
 // The premise the direction above rests on, pinned so it cannot rot silently:

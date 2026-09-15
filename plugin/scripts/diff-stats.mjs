@@ -135,16 +135,19 @@ const stray = makeStray(die);
 // reading as if gh had answered perfectly and the parser were at fault. Tail
 // here would keep the noise and discard the answer.
 //
-// The marker counts against `n`, so `cut(s).length <= n` for every input. This
+// The marker counts against `n`, so `cut(s).length <= n` for every `n >=
+// MARKER.length` — the only regime the one call site below exercises, since
+// `cut` is module-private and always called with the default `n = 120`. This
 // is the one place it differs from ci-state.mjs's `cut` (#1479), whose marker
-// sits past its `n`: #931's remedy was measured wrong the same way — `…${raw
-// .slice(-500)}` yields 501 characters — and this script's stderr is read by
-// review-pr.js's snapshot agent, markdown fed to a model, the context budget
-// run()'s comment above measures in bytes. A cap that the marker can push past
-// is not a cap. `Math.max` because a caller passing an `n` under the marker's
-// own width would otherwise hand `slice` a negative end, which counts from the
-// END of the string — silently inverting the direction this comment just
-// measured, the one failure mode worth a guard on a single-call-site helper.
+// sits past its `n`: `s.slice(0, n)` there appends the marker unconditionally,
+// measuring 133 characters against ci-state.mjs's own 120-char cap — and this
+// script's stderr is read by review-pr.js's snapshot agent, markdown fed to a
+// model, the context budget run()'s comment above measures in bytes. A cap
+// that the marker can push past is not a cap. `Math.max` because a caller
+// passing an `n` under the marker's own width would otherwise hand `slice` a
+// negative end, which counts from the END of the string — silently inverting
+// the direction this comment just measured, the one failure mode worth a
+// guard on a single-call-site helper.
 const MARKER = "… (truncated)";
 const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, Math.max(0, n - MARKER.length))}${MARKER}` : s);
 
