@@ -48,11 +48,18 @@ import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 // a citation hands a reader. Coupling the prose to the identifier is the gap;
 // re-checking that the guard exists would not touch it.
 //
-// The identifier is pinned LITERALLY here rather than derived from probe 3's
-// own comment, because the positive pin above already fixes the citing side to
-// the literal words: a rename carried consistently through both files reds
-// that pin whatever this one does, so a derivation would buy no freedom and
-// cost a parse.
+// The identifier has exactly one literal spelling in this file: WTROOT,
+// defined below, right after the two file reads it sits beside. Both the
+// citing-side phrase above and the target-side phrase below interpolate it
+// rather than each spelling the word out, so the two pins cannot
+// independently drift the way #870's own reproduction showed they could:
+// rename release-ticket.sh's identifier, then patch only the target-side
+// literal to match, and the suite used to go green while probe 3's comment
+// still named the old one. Renaming WTROOT moves both phrases together, so
+// that edit alone reds the citing-side pin against inflight.sh's untouched
+// prose; editing release-ticket.sh alone without touching WTROOT reds the
+// target-side pin as before. There is no single edit that turns the suite
+// green without also fixing the citation.
 //
 // It lives HERE, with the citation, not in release-ticket.test.mjs. That file
 // owns claims about release-ticket.sh's behaviour; this is a claim about what
@@ -80,6 +87,11 @@ import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 const INFLIGHT = readFileSync(join(import.meta.dirname, "inflight.sh"), "utf8");
 const RELEASE_TICKET = readFileSync(join(import.meta.dirname, "release-ticket.sh"), "utf8");
 
+// The one literal spelling of the identifier the guard below protects,
+// named once so the citing-side and target-side phrases below cannot go out
+// of sync with each other — see the note above the citing-side pin.
+const WTROOT = "$wtroot";
+
 // Bounded at both ends, by the probe's own heading and by the function the
 // comment documents. inflight.sh names release-ticket.sh in other comments, on
 // both sides of this slice; none of them satisfies the positive pin or trips
@@ -93,7 +105,7 @@ const probe3 = () =>
 test("probe 3 names release-ticket.sh's worktree-registry guard by construct (#800)", () => {
   assert.match(
     probe3(),
-    phrase("release-ticket.sh's `-r`/`-x` guard on `$wtroot`"),
+    phrase(`release-ticket.sh's \`-r\`/\`-x\` guard on \`${WTROOT}\``),
     "probe 3 no longer names the check it borrows the establish-absence rule from, so a reader has nothing to follow to it",
   );
 });
@@ -126,7 +138,7 @@ const registryGuard = () =>
 test("release-ticket.sh still spells the guard probe 3 cites the way probe 3 cites it (#870)", () => {
   assert.match(
     registryGuard(),
-    phrase('[ -r "$wtroot" ] && [ -x "$wtroot" ]'),
+    phrase(`[ -r "${WTROOT}" ] && [ -x "${WTROOT}" ]`),
     "release-ticket.sh's count_registry no longer guards `$wtroot` with the `-r`/`-x` pair probe 3's comment names, so inflight.sh now cites a spelling that file does not have — and inflight.sh's own count_registry has an identically-shaped guard on its own `$wtroot`, so a reader who greps the cited words lands on the citing file's copy and reads it as the thing cited",
   );
 });
