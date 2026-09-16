@@ -1,4 +1,4 @@
-// #567: the cross-file sync requirement, EXECUTED.
+// #567 and #878: the cross-file sync requirement, EXECUTED.
 //
 // arg.mjs states the CLI refusal rules; ledger.mjs and member-outcomes.mjs
 // cannot route through arg()/has() — each hand-rolls its own argv reader so it
@@ -10,7 +10,18 @@
 // the same class of defect #563 itself fixed — a requirement documented where
 // nothing executes it. This file is what executes it.
 //
-// THREE tests, because none of them covers another:
+// #878 added a second rule on the same terms — the digits rule isDigits(),
+// whose out-of-reach consumers are fleet-tick.mjs (its own parseArgs),
+// review-core.js (a workflow argument, not argv) and workflows/review-pr.js,
+// which cannot `import` at all (#538) and so is the only file in the tree
+// that holds a real COPY rather than a call. Its wiring pin rides in test 1
+// below, beside #567's; two further tests sit at the bottom of this file —
+// the differential against review-pr.js's lifted copy, and one idea this
+// file did not need before: a DERIVED sweep asserting the rule is spelled
+// nowhere else, because a fourth copy is behaviour-identical and no
+// behavioural test in this repo can see one.
+//
+// THREE tests for #567's two predicates, because none of them covers another:
 //
 //   1. The WIRING pin. A copy re-inlined byte-for-byte behaviour-identically
 //      changes no observable behaviour at all, so no behavioural test in this
@@ -45,13 +56,14 @@
 // `[^}]*` spans newlines — so a reflow or a reorder is free.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
-import { isFlagLike, hasEqualsForm } from "./arg.mjs";
+import { lift } from "./lift.mjs";
+import { isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 
 const src = (name) => stripComments(readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8"));
 
@@ -99,6 +111,44 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
   for (const [name, text] of [["ledger.mjs", ledger], ["member-outcomes.mjs", memberOutcomes]]) {
     assert.doesNotMatch(text, /trim\(\) === ""/, `${name} hand-writes the blank-value rule again instead of calling isFlagLike`);
   }
+
+  // #878's rule, on the same terms. Anchored at the export for the same
+  // reason the two above are, and paired with arg.mjs's OWN consumer —
+  // numArg() — because exporting the rule while arg.mjs kept a second copy of
+  // it is this ticket's defect with the files swapped.
+  assert.match(arg, /^export function isDigits\(value\) \{$/m, "arg.mjs no longer exports isDigits");
+  assert.match(arg, /if \(!isDigits\(raw\)\) die\(`--\$\{name\} needs a number, got \$\{raw\}`\);/, "numArg() restates the digits rule instead of calling isDigits");
+
+  // The two consumers that cannot route through numArg(): fleet-tick.mjs
+  // reads its flags with node:util's parseArgs, and review-core.js takes its
+  // `pr` as a workflow argument rather than from argv. Each keeps its own
+  // wording — "must be a non-negative integer" and "must be a PR number" —
+  // and neither may keep its own spelling of the rule.
+  const fleetTick = src("fleet-tick.mjs");
+  assert.match(fleetTick, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "fleet-tick.mjs no longer imports isDigits from arg.mjs");
+  assert.match(fleetTick, /if \(!isDigits\(String\(raw\)\.trim\(\)\)\) die\(`--\$\{name\} must be a non-negative integer, got '\$\{raw\}'`\);/, "fleet-tick.mjs's integer guard drifted from arg.mjs's rule or lost its own wording");
+
+  const reviewCore = src("review-core.js");
+  assert.match(reviewCore, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "review-core.js no longer imports isDigits from arg.mjs");
+  assert.match(reviewCore, /if \(!isDigits\(pr\)\) throw new Error\(/, "review-core.js's numeric-pr guard drifted from arg.mjs's rule");
+
+  // workflows/review-pr.js holds the one COPY (#538: a Workflow body cannot
+  // import), so what is pinned here is that the copy is CALLED and where.
+  // Position is the only observable: the file runs a top-level `await
+  // pipeline(...)` and cannot be imported, and the snapshot directory is
+  // `mkdir -p`'d inside the snapshot agent's own bash, so "refused before an
+  // agent is dispatched" and "before a directory exists" are one ordering
+  // fact — the same argument select-dimensions.test.mjs makes for #275's
+  // override guard, which this refusal sits directly above.
+  const reviewPr = src("../workflows/review-pr.js");
+  const callAt = reviewPr.indexOf("if (!isDigits(pr)) throw new Error(");
+  const requiredAt = reviewPr.indexOf('if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");');
+  const snapshotAt = reviewPr.indexOf("const snap = await agent(");
+  assert.notEqual(callAt, -1, "review-pr.js no longer calls its isDigits copy on `pr` — the workflow is back to a truthiness check");
+  assert.notEqual(requiredAt, -1, "review-pr.js's required-args throw moved — update this test");
+  assert.notEqual(snapshotAt, -1, "review-pr.js's snapshot dispatch moved — update this test");
+  assert.ok(requiredAt < callAt, "the digits refusal was hoisted above the required-args throw — an absent `pr` is now told about digits instead of being told it is required");
+  assert.ok(callAt < snapshotAt, "the digits refusal moved below the snapshot dispatch — a branch name now buys an agent and a run root before being refused");
 });
 
 // The three readers, run for real over the same values. `arg()` is exercised
@@ -243,4 +293,108 @@ test("the shared rules accept what they must — the false-positive half", () =>
   // The empty value after `=`, which is the spelling most likely to read as
   // "the flag is absent" on both sides.
   assert.equal(hasEqualsForm("file", ["--file="]), true, "hasEqualsForm missed a bare `--file=`");
+});
+
+// ── #878: the digits rule, and the one copy the sandbox forces ────────────
+//
+// BOTH historical spellings, because the drift came back as either one:
+// ci-state.mjs wrote `/^[0-9]+$/` and fleet-tick.mjs's int() wrote `/^\d+$/`,
+// and a sweep that banned only the first stays green while the second is
+// re-inlined (measured — reverting int() to its own regex reds the wiring pin
+// and nothing here).
+//
+// Anchored exactly, so a DIFFERENT rule that happens to use the digit class
+// is not caught: fleet-tick.mjs's `--merge-holds` list is `/^#?\d+(\s*,\s*#?
+// \d+)*$/`, which answers a question about a comma-separated list rather than
+// about one integer, and candidates.mjs's `Number.isInteger(limit) && limit >=
+// 1` is a bounded positive-integer rule over a DEFAULTED value — neither is a
+// copy of this one, and #878 left both where they are.
+//
+// Composed, never written contiguously, so this file's own source cannot
+// satisfy the check it performs — the same reason
+// scripts-path-citation-sweep.test.mjs gives for its stale citation.
+const DIGITS_RULE = new RegExp([
+  ["\\^\\[0-9\\]", "\\+\\$"].join(""),
+  ["\\^\\\\d", "\\+\\$"].join(""),
+].join("|"));
+
+// DERIVED, never a hand list, and the direction is what makes that safe: this
+// asserts an ABSENCE across the tree, so a set discovered by reading the two
+// script directories can only GROW as files arrive. That is the opposite of
+// arg.test.mjs's CONSUMERS/STRAYS matrices, which assert a PRESENCE per file
+// and so must be spelled out — a discovered set there shrinks silently when a
+// caller drops the call. review-pr-reads.test.mjs records the same choice for
+// the same reason.
+//
+// Test files are excluded. A test may legitimately quote the rule to pin it,
+// and a pin is not a fourth implementation of it — the same `grep -v test`
+// scoping every sweep in arg.mjs's header uses.
+const RULE_SITES = () => {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  const dirs = [here, join(here, "..", "workflows")];
+  const sites = [];
+  for (const dir of dirs) {
+    for (const name of readdirSync(dir)) {
+      if (!/\.(mjs|js)$/.test(name) || name.endsWith(".test.mjs")) continue;
+      if (DIGITS_RULE.test(stripComments(readFileSync(join(dir, name), "utf8")))) sites.push(name);
+    }
+  }
+  return sites.sort();
+};
+
+// The ticket's own words: "adding a fourth copy is the drift, not the fix".
+// Before #878 the invariant had three spellings — ci-state.mjs's `/^[0-9]+$/`,
+// fleet-tick.mjs's `/^\d+$/`, and candidates.mjs's Number.isInteger (which
+// stays, being a bounded positive-integer rule over a defaulted value rather
+// than this one) — and the fix is only a fix while the count stays at the two
+// below. A behavioural test cannot see a fourth copy at all: pasted back into
+// diff-stats.mjs it would refuse exactly what numArg() refuses and the whole
+// suite would stay green, which is how three spellings accumulated.
+test("#878: the digits rule is spelled in arg.mjs and in the one file that cannot import it", () => {
+  assert.deepEqual(
+    RULE_SITES(),
+    ["arg.mjs", "review-pr.js"],
+    "a copy of the digits rule appeared outside arg.mjs, or review-pr.js's sandbox copy went missing — arg.mjs's header says which files may hold one and why",
+  );
+});
+
+// The DIFFERENTIAL, which is what the text pins above cannot be: a spelling
+// proves nothing about a verdict, and review-pr.js's copy is reachable by no
+// import at all (#538 — a Workflow script's body compiles inside the harness
+// VM, where `import()` is refused before the specifier resolves). So it is
+// lifted out of the source text and run, the technique every other
+// review-pr.js test file uses, against the real rule over one value list.
+//
+// Both halves in one list on purpose. Every value above this line is input the
+// rule must REFUSE, and a rule that refused everything satisfies all of them —
+// `42`/`"42"`/`"0"` are the must-ACCEPT half, and `42` as a NUMBER is not
+// decoration: review-pr.js's caller is the fleet, which holds a PR number as a
+// number, so a copy that lost RegExp.test's coercion would refuse every real
+// invocation while still refusing every bad one.
+//
+// `null`/`undefined` answer FALSE here, which both call sites depend on: each
+// reads absence first and owes "required" rather than a complaint about
+// digits. A copy "fixed" to accept them would silently merge the two refusals.
+test("#878: review-pr.js's copy of the digits rule reaches the same verdict as arg.mjs's", () => {
+  const prIsDigits = lift(src("../workflows/review-pr.js"), "isDigits", "value");
+  const values = [
+    "abc", "42x", "x42", "", "   ", "4 2", " 42", "42 ", "1e3", "0x2a", "-1", "4.0", "4,2",
+    "42\n", "my-branch", "null", null, undefined, NaN,
+    "42", 42, "0", 0, "007",
+  ];
+  // `JSON.stringify` alone renders NaN and null identically, and the string
+  // "42" and the number 42 nearly so — both distinctions are the point here.
+  const show = (v) => `${JSON.stringify(v)} (${typeof v})`;
+  for (const v of values) {
+    assert.equal(
+      prIsDigits(v),
+      isDigits(v),
+      `review-pr.js's copy and arg.mjs disagree on ${show(v)} — the copies have drifted`,
+    );
+  }
+  // The verdicts themselves, so a pair that drifted TOGETHER still reds.
+  for (const v of ["42", 42, "0", 0, "007"]) assert.equal(isDigits(v), true, `must accept ${show(v)}`);
+  for (const v of ["abc", "42x", "x42", "", " 42", "1e3", "-1", "4.0", "my-branch", null, undefined]) {
+    assert.equal(isDigits(v), false, `must refuse ${show(v)}`);
+  }
 });

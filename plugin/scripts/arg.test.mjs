@@ -327,6 +327,137 @@ test("#880: the gh stub records a real call, from a directory whose path holds a
   );
 });
 
+// ── #878: a required argument that must be a PR number ───────────────────
+//
+// #840 closed this in ci-state.mjs alone. The identical shape stayed live in
+// its siblings, and the class is NOT bounded by the `arg("pr")` spelling —
+// pr-overlap.mjs reads `--a`/`--b`, which is how a sweep for the flag NAME
+// missed it. Measured on the pre-fix tree against a `gh` that ANSWERS, the way
+// a real one does for a branch ref: `diff-stats.mjs --pr abc` reached
+// `gh pr view abc` and printed `{"pr":null,…}` at exit 0, and `pr-overlap.mjs
+// --a abc --b def` printed `{"a":null,"b":null,…}` at exit 0 carrying a real
+// `signal: "files"` verdict. Each payload's only identifying field was built
+// with `Number()`, and `JSON.stringify(NaN)` is `null`.
+//
+// Driven per script, for the reason the matrices above are: numArg()'s own
+// verdicts are covered by shared-refusal.test.mjs, and that unit contract
+// passes just as well with a call site left on plain arg(). What has to hold
+// is that each script REACHES it.
+//
+// The receipt is the load-bearing assertion, not the exit code. Exit 2, an
+// empty stdout and a matching stderr line are each reproducible by a LATER
+// guard: downgrade this one and the script runs on to a gh that fails, whose
+// die() reproduces all three. Only a refusal reached BEFORE the query can show
+// gh was never asked — and reaching gh is half the harm here, since it can
+// answer for the branch the value names.
+//
+// Both anchors per script, separately: a guard that loses `$` still matches
+// "42x" on its digit prefix and one that loses `^` still matches "x42" on its
+// suffix, so neither mutant survives the pair. ci-state.mjs's rows are its
+// own test file's (`a non-numeric --pr refuses before any query`); these are
+// the two scripts #840 left open, plus ci-state.mjs once for the routing.
+const NON_NUMERIC = [
+  { script: "ci-state", argv: ["--pr", "abc"], flag: "--pr" },
+  { script: "diff-stats", argv: ["--pr", "abc"], flag: "--pr" },
+  { script: "diff-stats", argv: ["--pr", "42x"], flag: "--pr" },
+  { script: "diff-stats", argv: ["--pr", "x42"], flag: "--pr" },
+  // The second flag, given a good first one: pr-overlap.mjs refuses each on
+  // its own name rather than dumping the usage line that names both.
+  { script: "pr-overlap", argv: ["--a", "abc", "--b", "6"], flag: "--a" },
+  { script: "pr-overlap", argv: ["--a", "5", "--b", "def"], flag: "--b" },
+  { script: "pr-overlap", argv: ["--a", "5", "--b", "6x"], flag: "--b" },
+  { script: "pr-overlap", argv: ["--a", "x5", "--b", "6"], flag: "--a" },
+];
+
+for (const { script, argv, flag } of NON_NUMERIC) {
+  test(`${script}.mjs refuses a non-numeric ${flag} (${argv.join(" ")}) by name, before any query`, () => {
+    const { dir, receipt, env } = stubGhBin();
+    const r = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
+      { cwd: dir, encoding: "utf8", env },
+    );
+    assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stderr}`);
+    assert.match(
+      r.stderr,
+      new RegExp(`${flag} needs a number`),
+      `${script}.mjs refused without naming ${flag} as the non-numeric one: ${r.stderr}`,
+    );
+    assert.equal(r.stdout.trim(), "", `a refusal ships no payload, and stdout reads ${r.stdout}`);
+    if (existsSync(receipt)) assert.fail(`${script}.mjs reached gh before refusing ${flag}: ${readFileSync(receipt, "utf8")}`);
+  });
+}
+
+// A `gh` that ANSWERS both shapes these two scripts ask for, so the accepting
+// path can be measured rather than inferred from a refusal that did not
+// happen. `$2` is the subcommand (`gh pr view <n> --json …`, `gh pr diff <n>
+// --name-only`), the same positional pr-overlap.test.mjs's own stub keys on.
+function stubGhAnswering() {
+  const dir = mkdtempSync(join(tmpdir(), "arg num-"));
+  const receipt = join(dir, "gh-was-called");
+  writeFileSync(
+    join(dir, "gh"),
+    '#!/bin/sh\necho "$@" >> "$GH_LOG"\ncase "$2" in\n' +
+      "  view) echo '{\"files\":[{\"path\":\"a.ts\",\"additions\":1,\"deletions\":0}],\"changedFiles\":1}' ;;\n" +
+      "  diff) echo src/shared.ts ;;\n" +
+      "  *) exit 1 ;;\n" +
+      "esac\n",
+    { mode: 0o755 },
+  );
+  return { dir, receipt, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_LOG: receipt } };
+}
+
+const runAnswering = (script, argv, env, dir) =>
+  spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
+    { cwd: dir, encoding: "utf8", env },
+  );
+
+// The direction a new guard gets wrong on its own: what it wrongly REFUSES.
+// The matrix above feeds it nothing but invalid input, and a guard tightened
+// past the digits every real caller sends would refuse a working invocation —
+// the outcome #365's own AC calls worse than the bug.
+//
+// `strictEqual`, because the TYPE is the contract #878 settles and this file's
+// `assert` is the loose one. numArg() returns a NUMBER so that no payload site
+// restates `Number(pr)`, and those restatements are exactly where `NaN` became
+// `null`: a payload reading back the string "42" would satisfy a loose check
+// while telling every consumer that keys on a number something else.
+test("#878: a digits value is accepted, and each payload names its PR as a number", () => {
+  const { dir, receipt, env } = stubGhAnswering();
+
+  const stats = runAnswering("diff-stats", ["--pr", "42"], env, dir);
+  assert.equal(stats.status, 0, stats.stdout + stats.stderr);
+  assert.strictEqual(JSON.parse(stats.stdout).pr, 42, `diff-stats.mjs's payload lost its PR number: ${stats.stdout}`);
+
+  const overlap = runAnswering("pr-overlap", ["--a", "5", "--b", "6"], env, dir);
+  assert.equal(overlap.status, 0, overlap.stdout + overlap.stderr);
+  const payload = JSON.parse(overlap.stdout);
+  assert.strictEqual(payload.a, 5, `pr-overlap.mjs's payload lost --a: ${overlap.stdout}`);
+  assert.strictEqual(payload.b, 6, `pr-overlap.mjs's payload lost --b: ${overlap.stdout}`);
+
+  // The stub really answered, so the two exit-0 rows above are the accepting
+  // path and not a script that refused quietly at code 0.
+  assert.match(readFileSync(receipt, "utf8"), /^pr view 42 /m, "diff-stats.mjs never asked gh for PR 42");
+  assert.match(readFileSync(receipt, "utf8"), /^pr diff 5 /m, "pr-overlap.mjs never asked gh for PR 5");
+});
+
+// `--pr 0` is the row the `=== null` absence check exists for, and the one a
+// later "simplification" back to `!pr` silently breaks: numArg() returns a
+// NUMBER, so `!pr` is true for a zero the caller plainly GAVE, and the script
+// would answer it with a usage line claiming --pr is required. gh answers it
+// truthfully instead, as no such PR. Measured through the receipt, since a
+// usage die and a gh refusal both exit 2 and only the query tells them apart.
+test("#878: `--pr 0` reaches gh rather than drawing the usage line for an absent flag", () => {
+  const { dir, receipt, env } = stubGhAnswering();
+  const r = runAnswering("diff-stats", ["--pr", "0"], env, dir);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.strictEqual(JSON.parse(r.stdout).pr, 0, `a zero PR must survive to the payload as 0: ${r.stdout}`);
+  assert.doesNotMatch(r.stderr, /usage:/, `--pr 0 was answered as an absent flag: ${r.stderr}`);
+  assert.match(readFileSync(receipt, "utf8"), /^pr view 0 /m, "diff-stats.mjs never asked gh for PR 0");
+});
+
 // ── #463: a bare or single-dash token nothing reads ──────────────────────
 //
 // The matrix above pins sweep()'s bound: it only ever refuses a

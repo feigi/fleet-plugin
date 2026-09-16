@@ -11,26 +11,39 @@
 
 import { execFileSync } from "node:child_process";
 import { basename, dirname } from "node:path";
-import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, makeNumArg, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "pr-overlap";
 
-// die()/arg() shared with the other fleet scripts — see arg.mjs for the
-// fail-open (#61/#169) and pipe-safety (#176/#328) rationale. `--a`/`--b`
-// given trailing already died via `if (!a || !b)` below — `undefined` is
-// falsy — so this file was never a silent-widening site on its own. But
-// `--a` given `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT
-// caught that way: `a` becomes the string "--b", passes the falsy check, and
-// only failed later as a confusing `gh pr diff --b` error — the shared arg()
-// rejects it here, by name, instead.
+// die()/numArg() shared with the other fleet scripts — see arg.mjs for the
+// fail-open (#61/#169/#878) and pipe-safety (#176/#328) rationale. `--a`/`--b`
+// given trailing already died via the usage guard below — `undefined` is
+// falsy — so this file was never a silent-widening site on its own. But `--a`
+// given `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT caught that
+// way: `a` becomes the string "--b", passes the falsy check, and only failed
+// later as a confusing `gh pr diff --b` error — the shared arg() rejects it
+// here, by name, instead.
+//
+// numArg() rather than arg() because the falsy check missed the other half
+// too, and this file is why #878 could not be swept by grepping for
+// `arg("pr")`: the same fail-open arrives here under `--a`/`--b`. Measured on
+// the pre-fix tree, `--a abc --b def` printed `{"a":null,"b":null,…}` at exit
+// 0 carrying a real `signal: "files"` verdict — `gh pr diff` resolves a
+// non-numeric ref as a BRANCH, so the overlap underneath was genuine and
+// about two PRs nobody named.
 const die = makeDie(NAME);
-const arg = makeArg(die);
+const numArg = makeNumArg(die);
 const sweep = makeSweep(die);
 const stray = makeStray(die);
 
-const a = arg("a");
-const b = arg("b");
-if (!a || !b) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
+// `=== null`, not `!a || !b`: numArg() returns a NUMBER, so `--a 0` — a value
+// the caller did give — would otherwise draw the usage line, where gh answers
+// it truthfully as no such PR. The usage line stays this file's own and names
+// both flags at once, which is exactly why numArg() refuses only the
+// MALFORMED half: an absent `--a` has no per-flag wording to give here.
+const a = numArg("a");
+const b = numArg("b");
+if (a === null || b === null) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
 // #365, and here it is the WEAKER half of the fix: both flags are required,
 // so a misspelling of either (`--aa 5 --b 6`) already fell through to the
 // usage die above — refused, just never named. What was NOT refused is a
@@ -126,4 +139,4 @@ if (signal === "modules") {
   );
 }
 
-console.log(JSON.stringify({ a: Number(a), b: Number(b), files, modules, dirs, signal }));
+console.log(JSON.stringify({ a, b, files, modules, dirs, signal }));

@@ -13,12 +13,13 @@
 
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeSync } from "node:fs";
-import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, makeArg, makeNumArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "ci-state";
 
-// die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
-// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
+// die()/arg()/numArg()/has() shared with the other fleet scripts — see
+// arg.mjs for the fail-open (#61/#169/#364/#878) and pipe-safety
+// (#176/#328/#363) rationale.
 // `base`/`workflow`/`workflow-file` below all fall back with `||`, so a
 // trailing `--base` (nothing after it) used to read as omitted and silently
 // compare against the DEFAULT base — `ci-state.mjs --pr 5 --base` gave a
@@ -27,6 +28,7 @@ const NAME = "ci-state";
 // which is the mode the controller's CI Monitor polls in.
 const die = makeDie(NAME);
 const arg = makeArg(die);
+const numArg = makeNumArg(die);
 const has = makeHas(die);
 const sweep = makeSweep(die);
 const stray = makeStray(die);
@@ -126,7 +128,7 @@ function emit(fd, text) {
 
 function emitRateLimited(query) {
   const payload = {
-    pr: Number(pr),
+    pr,
     verdict: "rate-limited",
     reasons: [`${query} was refused by the GitHub API rate limit — no CI state was read. A quota refusal clears on its own: re-probe rather than reading this as a CI verdict`],
   };
@@ -233,40 +235,38 @@ const saw = (obj, key) => {
   return `got ${cut(shown)}`;
 };
 
-const pr = arg("pr");
-if (!pr) {
+// #840: `pr` was validated for truthiness alone, so `--pr abc` survived to
+// every payload site — each built `pr: Number(pr)`, and `JSON.stringify(NaN)`
+// is `null`. The normal path is the worse of them: an unidentifiable payload
+// at exit 0 with `verdict: "green"`, which is the verdict the fleet gates on.
+// `pr` is that payload's only identifying field, and the fleet polls this
+// script for several PRs at once — so a null there is not a cosmetic gap, it is
+// a report that cannot be attributed to the PR it answered for. Reaching gh at
+// all is the other harm: `gh pr view` resolves a non-numeric ref as a BRANCH,
+// so `--pr abc` could return a genuine verdict for whatever PR that branch
+// belongs to.
+//
+// #878 moved the rule itself into arg.mjs's numArg(), because the identical
+// shape was still live in diff-stats.mjs and pr-overlap.mjs and a fourth
+// spelling of it here is what the fix had to stop. What stays this file's own
+// is the usage line below — absent and malformed are different mistakes, and
+// numArg() refuses only the second.
+//
+// `=== null`, not `!pr`: numArg() returns a NUMBER, so `--pr 0` — a value the
+// caller did give — would otherwise be answered with a usage line claiming
+// `--pr` is required. `gh` answers it truthfully instead, as no such PR.
+// numArg() also no longer needs the placement #840's regex did: that one had
+// to sit below this die because test() coerces `null` to the string "null",
+// and numArg() never tests a value it did not read. It still lands above
+// sweep(), per arg.mjs — where both would refuse, the more specific wording
+// wins — and still before the first gh read.
+const pr = numArg("pr");
+if (pr === null) {
   die(
     "usage: ci-state.mjs --pr <number> [--base main] [--workflow CI] " +
       "[--workflow-file <path>] [--declare-no-ci] [--quiet]",
   );
 }
-// #840: `pr` was validated for truthiness alone, so `--pr abc` survived to
-// every payload site — each builds `pr: Number(pr)`, and `JSON.stringify(NaN)`
-// is `null`. The normal path is the worse of them: an unidentifiable payload
-// at exit 0 with `verdict: "green"`, which is the verdict the fleet gates on.
-// `pr` is that payload's only identifying field, and the fleet polls this
-// script for several PRs at once — so a null there is not a cosmetic gap, it is
-// a report that cannot be attributed to the PR it answered for.
-//
-// Refused here rather than repaired at each payload site: one guard covers
-// every one of them, and it lands before the first gh read rather than
-// after a real query answered for a PR nobody named. Reaching gh at all is
-// the other harm — `gh pr view` resolves a non-numeric ref as a BRANCH, so
-// `--pr abc` could return a genuine verdict for whatever PR that branch
-// belongs to.
-//
-// BELOW the usage die above, never merged into it: absent and malformed are
-// different mistakes, and test() coerces a null argument to the string "null" —
-// merged, an omitted --pr would be answered with a complaint about a number
-// instead of the usage line. ABOVE sweep(), per arg.mjs: where both would
-// refuse, the more specific wording wins.
-//
-// Digits-only forfeits the branch and URL spellings `gh pr view` itself takes,
-// the same trade arg.mjs documents for its `--`-prefixed values. Nothing here
-// passes one: board.mjs sends `String(pr)` off a numeric record, and every
-// documented invocation is `--pr <N>`. A caller wanting one now gets a refusal
-// rather than a wrong answer.
-if (!/^[0-9]+$/.test(pr)) die(`--pr needs a number, got ${pr}`);
 
 const base = arg("base") || "main";
 const workflow = arg("workflow") || "CI";
@@ -666,7 +666,7 @@ emit(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join(";
 // "nothing was read" question by omitting `jobs`/`missing` rather than
 // emitting them empty; this is the no-ci arm agreeing with it, one
 // convention for both places in this file that never bind a run.
-const payload = { pr: Number(pr), branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
+const payload = { pr, branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
 if (!quiet && !noCi) Object.assign(payload, { jobs, missing });
 emit(1, `${JSON.stringify(payload)}\n`);
 
