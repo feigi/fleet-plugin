@@ -18,6 +18,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./prove-merge.sh", import.meta.url));
 
@@ -915,4 +916,73 @@ test("a shadowed `sed` that works still proves the merge — the guard refuses o
   assert.equal(json.secondParent, head, "and the escaped fields carry the real shas, not the empty slots a failed chain leaves");
   assert.equal(json.firstParent, mainTip);
   assert.equal(json.proofPath, "no-rebase");
+});
+
+// #1039. The bounded-fetch pattern's coverage used to stop at the shared
+// helper: net.sh's budget, its stalled-signal arm and its kill-tree walk are
+// each pinned, and unattended-git-sweep.test.mjs pins that this script still
+// sources net.sh and still reaches net_git — but nothing ever ran this
+// script's OWN stalled-versus-failed wrapper. Measured on #1030's head:
+// replacing `${fetch_budget}` in the stalled branch with an unbound variable,
+// so `set -eu` aborts where `die` was meant to render, left this suite at its
+// baseline pass count, byte-identical.
+//
+// One pair, the shape net.test.mjs uses for verify-sha.sh and
+// inflight.test.mjs for probe 2: one real slow transport, a budget above its
+// delay and a budget under it. The WORDING is the assertion target, because
+// this script's `die` gives a killed fetch and a refused one the same exit 2 —
+// the status alone cannot tell them apart, which is the whole reason the
+// branch exists.
+test("a slow but working fetch still proves the merge — the budget is not a stopwatch on success", (t) => {
+  const { w, head, merge, mainTip } = provenMerge(t);
+  // Read back rather than rebuilt: `repo` returns the clone alone, and a
+  // second spelling of the origin path is a fixture that can point the stub at
+  // a repo the clone never used.
+  const origin = git(w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(w, "remote", "set-url", "origin", SSH_URL);
+  warmStub(stub, ENV);
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 0,
+    `a budget above the delay must leave the verdict alone — exit 2 here is an outage invented on a link that worked: ${JSON.stringify(r)}`);
+  const json = JSON.parse(r.stdout);
+  assert.equal(json.proved, true, "the refs really came back, so the proof is the one an unbounded fetch reaches");
+  assert.equal(json.firstParent, mainTip,
+    "and it is established from the history the slow transport actually returned, not from a stale ref");
+  assert.doesNotMatch(r.stderr, /did not finish within/,
+    "and nothing claims a budget elapsed, which is the wording the failure path owns");
+});
+
+test("a fetch killed by its budget refuses to prove a merge on stale refs, in this script's own words", (t) => {
+  const { w, head, merge } = provenMerge(t);
+  const origin = git(w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(w, "remote", "set-url", "origin", SSH_URL);
+
+  const r = spawnSync("sh", [SCRIPT, head, head, merge], {
+    cwd: w,
+    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
+  assert.equal(r.status, 2,
+    "`the question could not be answered`, never the exit 1 that means `not proved` — the merge bot refuses on that answer");
+  assert.match(
+    r.stderr,
+    /prove-merge: git fetch did not finish within 1s and was killed — refusing to prove a merge on stale refs/,
+    "this script's own decline, rendered, with the budget named in it: an unbound variable in that branch aborts under `set -eu` at the same exit 2 and prints none of this",
+  );
+  assert.doesNotMatch(r.stderr, /fetch failed — refusing to prove a merge/,
+    "and not the refused-fetch wording, which names a cause this run never observed");
+  assert.equal(r.stdout, "", "no proof may be printed off refs the script could not refresh");
 });

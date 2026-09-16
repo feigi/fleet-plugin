@@ -15,6 +15,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./reap.sh", import.meta.url));
 
@@ -288,13 +289,27 @@ const IGNORED_PROBE = `[ "$3" = status ] && case " $* " in *" --ignored "*) : ;;
  */
 const STATUS_PROBE = `[ "$3" = status ] && [ "$4" = --porcelain ]`;
 
-function runReap(cwd, args, envOverrides = {}) {
+/**
+ * `timeout` is a wall-clock ceiling for the bounded-fetch pair at the end of
+ * this file and nothing else: those two runs are the only ones whose transport
+ * can hang, and without a ceiling a watchdog that never fired would hang the
+ * suite instead of failing the case. `error` is returned for the same pair — a
+ * run killed by that ceiling has a null status, which would otherwise read as
+ * a verdict rather than as a test that never got an answer.
+ */
+function runReap(cwd, args, envOverrides = {}, timeout = undefined) {
   const r = spawnSync("sh", [SCRIPT, ...args], {
     cwd,
     env: { ...ENV, ...envOverrides },
     encoding: "utf8",
+    timeout,
   });
-  return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
+  return {
+    code: r.status,
+    json: r.stdout.trim() ? JSON.parse(r.stdout) : null,
+    stderr: r.stderr,
+    error: r.error,
+  };
 }
 
 function branchExists(w, name) {
@@ -3444,4 +3459,72 @@ test("a missing worktree.sh is exit 2, and the design spec's row names the libra
     exit2Cell().includes(`\`${blamed[1]}\``),
     `the spec row must name the library this refusal blames, and does not carry \`${blamed[1]}\`.\ncell: ${exit2Cell()}`,
   );
+});
+
+// #1039. The bounded-fetch pattern's coverage used to stop at the shared
+// helper: net.sh's budget, its stalled-signal arm and its kill-tree walk are
+// each pinned, and unattended-git-sweep.test.mjs pins that this script still
+// sources net.sh and still reaches net_git — but nothing ever ran this
+// script's OWN stalled-versus-failed wrapper. Measured on #1030's head:
+// replacing `${fetch_budget}` in the stalled branch with an unbound variable,
+// so `set -eu` aborts where `die` was meant to render, left this suite and
+// unattended-git-sweep.test.mjs at their baseline pass counts, byte-identical.
+//
+// One pair, the shape net.test.mjs uses for verify-sha.sh and
+// inflight.test.mjs for probe 2: one real slow transport, a budget above its
+// delay and a budget under it. The WORDING is the assertion target, because
+// `die` gives a killed fetch and a refused one the same exit 2 — the status
+// alone cannot tell them apart, which is the whole reason the branch exists.
+test("a slow but working fetch still reaps the merged [gone] branch — the budget is not a stopwatch on success", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  // Rewired only now: every push this fixture makes needs `receive-pack`, and
+  // the stub serves `upload-pack` alone.
+  const origin = git(w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(w, "remote", "set-url", "origin", SSH_URL);
+  warmStub(stub, ENV);
+
+  const { code, json, stderr, error } = runReap(
+    w,
+    ["--apply"],
+    { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    60_000,
+  );
+
+  assert.equal(error, undefined, `the run did not come back: ${stderr}`);
+  assert.equal(code, 0, `a budget above the delay must leave the verdict alone: ${stderr}`);
+  assert.deepEqual(json.reaped, ["feature/merged"],
+    "the refs really came back, so the delete is the one an unbounded fetch authorizes");
+  assert.deepEqual(json.kept, []);
+  assert.doesNotMatch(stderr, /did not finish within/,
+    "and nothing claims a budget elapsed, which is the wording the failure path owns");
+});
+
+test("a fetch killed by its budget refuses to reap on stale refs, in this script's own words", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const origin = git(w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(w, "remote", "set-url", "origin", SSH_URL);
+
+  const { code, json, stderr, error } = runReap(
+    w,
+    ["--apply"],
+    { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    60_000,
+  );
+
+  assert.equal(error, undefined, `the run did not come back: ${stderr}`);
+  assert.equal(code, 2, `a refusal — this script has no exit 1 to be confused with: ${stderr}`);
+  assert.match(
+    stderr,
+    /reap: git fetch did not finish within 1s and was killed — refusing to reap on stale refs/,
+    "this script's own decline, rendered, with the budget named in it: an unbound variable in that branch aborts under `set -eu` at the same exit 2 and prints none of this",
+  );
+  assert.doesNotMatch(stderr, /fetch failed — refusing to reap/,
+    "and not the refused-fetch wording, which names a cause this run never observed");
+  assert.equal(json, null, "no payload: nothing was decided");
+  assert.ok(branchExists(w, "feature/merged"),
+    "and the branch a working fetch would have reaped is still there — a refusal that deleted anything would be reaping on exactly the stale refs it declined to trust");
 });
