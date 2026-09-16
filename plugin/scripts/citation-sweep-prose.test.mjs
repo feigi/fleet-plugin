@@ -98,7 +98,12 @@ const FILES = [
     // them unpinned in both directions. Banned generally rather than at the one
     // drifted value, for the reason the run-merge-bot entry below gives: a ban
     // on `:15-25` alone lets `:14-24` straight back in. This file carries no
-    // other `release-ticket.sh:<digit>`, so the general form costs nothing here.
+    // other `release-ticket.sh:<digit>`, so the general form costs nothing
+    // today — and it will refuse one thing tomorrow, the same thing
+    // net-ssh-precedence-prose.test.mjs's negative pin already refuses and
+    // documents: a future sentence in that file recounting what the citation
+    // USED to say. Accepted on the same ground — that history belongs on the
+    // commit, not in a comment a reader could act on.
     path: ["scripts", "reaping-prose.test.mjs"],
     stale: [/release-ticket\.sh:\d/],
     // One needle per SITE — the file header, and the comment inside
@@ -106,7 +111,9 @@ const FILES = [
     // the finding is that the stale form can return to EITHER of them, and a
     // needle satisfied from one site would not notice the other reverting. A
     // bare `release-ticket.sh` would be vacuous outright: that file names the
-    // script in unrelated prose, in a path join and in a test name.
+    // script in unrelated prose, in a path join and in a test name. Needles
+    // this long are the price of that: a copy-edit to either sentence reds
+    // here, which is a citation-shaped change asking to be re-read anyway.
     live: [
       "The script's header (release-ticket.sh) already carried the corrected wording",
       "The header (release-ticket.sh) states the limitation",
