@@ -129,7 +129,7 @@ test("the outbox rule survives, as the last test rather than the only one", () =
   );
   assert.match(
     s,
-    /never dispatch off it while you do/i,
+    phrase("never dispatch off it while you do"),
     "the CI-completes edge lost the outstanding-ruling gate itself, not just its premise",
   );
   assert.match(s, phrase("including any ruling you have withdrawn or reversed"));

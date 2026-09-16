@@ -1148,18 +1148,41 @@ multi-select**, and **a judgement the evidence cannot settle**.
   then run the reconcile (below).
 - **The run ends, or the maintainer says drain** → release every claim that never
   became a PR (below). Nothing else in the loop fires for those.
-- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`); the
-  diff-validating `check` job green with no heavy job (the diff-validating suites,
-  not the `rebase-check` currency gate) in `failure` → dispatch a finisher to
-  label, a `check` **failure** → a fixer. A `check`-green board whose
-  heavy jobs are merely `skipped` (behind-count staleness, the normal wave case)
-  still labels — do NOT gate on `ci-state --quiet` exit 0, which a behind PR never
-  reaches. Fix-appliers push and exit, so a member is rarely still waiting — ping
-  one only if it genuinely is. **This edge fires on the fix-applier's own push, so
-  it is exactly where a ruling you still owe it is outstanding — never dispatch off
-  it while you do.** Empty your outbox to it first — including any ruling you have
-  withdrawn or reversed — then dispatch (below); a final report is not proof it
-  stopped. Then run the reconcile (below).
+- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
+  the bound `<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
+  ticket's ledger row, which outlives your context. That key cannot be
+  reconstructed once the head is superseded, so a controller holding only the
+  colour cannot later tell an edge it has already spent from one that never
+  fired, and that is the distinction the sibling bullet below turns on. The
+  whole key, never the conclusion alone: **a conclusion is not stable** (below),
+  because a rerun rewrites the run in place. The diff-validating `check` job
+  green with no heavy job (the diff-validating suites, not the `rebase-check`
+  currency gate) in `failure` → dispatch a finisher to label, a `check`
+  **failure** → a fixer. A `check`-green board whose heavy jobs are merely
+  `skipped` (behind-count staleness, the normal wave case) still labels — do NOT
+  gate on `ci-state --quiet` exit 0, which a behind PR never reaches.
+  **This edge fires for every CI run the PR produces, and the implementer's own
+  firing comes first for every PR** — `ci.yml` triggers on `pull_request`, so
+  opening the PR at the end of `next-ticket` step 7 starts a run within seconds,
+  while the review workflow returns 20-40 minutes later. That first firing is
+  the ordinary case for every PR, not a rarity, and no review has run at all
+  when it arrives. **Green is therefore not the gate: dispatch a finisher only
+  once the PR's review has returned AND its fix-applier, if one was dispatched,
+  has sent its report — pushed is not reported**, and a push before that report
+  is mid-work on a SHA the member may still move, which its own prompt tells it
+  not to hand over. A push is therefore not an exit, and a report that has not
+  arrived is asked for by name rather than read as one. Neither shape is caught
+  by an empty outbox: on the
+  implementer's firing there is no fix-applier to owe anything to, so the outbox
+  is *vacuously* empty, and on a fix-applier's mid-work push nothing has been
+  sent since the dispatch, so it is *genuinely* empty. **The outbox is the last
+  test, not the only one, and it stands wherever a fix-applier exists** — that
+  is exactly where a ruling you still owe it is outstanding, so never dispatch
+  off it while you do. Empty your outbox to it first — including any ruling you
+  have withdrawn or reversed — then dispatch (below); a final report is not
+  proof it stopped. A PR that needs nothing fixed reaches a finisher through the
+  **fix-applier reports `no-op`** bullet below, never by waiting for a second CI
+  event this head will never produce. Then run the reconcile (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -1168,7 +1191,13 @@ multi-select**, and **a judgement the evidence cannot settle**.
   `suggestion` is the band a clean diff produces, and every out-of-scope or
   refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
-  not wait for an event** governs here too, not only implementer refill.
+  not wait for an event** governs here too, not only implementer refill. **This
+  bullet and the one above are a pair, and on a clean PR this one carries the
+  whole route to a finisher**: a `no-op` report satisfies the gate above by
+  itself — the review has returned, because a fix-applier exists only after it
+  did, and the member has reported — so nothing further is owed and no further
+  event is coming. Edit either bullet without the other and what strands is
+  exactly the PR that needed no fixes.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
   complete for this repo, so the CI-run-completion edge above never fires and
   waiting for it stalls the whole PR — the same silent-stall shape #111 reported
@@ -1831,7 +1860,9 @@ heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine — **solely** off that count, which is a condition to establish rather than
 infer, see the five-condition note in the fix-applier block above) — or
-`ci-state.mjs` reads `verdict: "no-ci"`, see below — dispatch a
+`ci-state.mjs` reads `verdict: "no-ci"`, see below — **and once the PR's review
+has returned and its fix-applier, if one was dispatched, has sent its report,
+which the CI-completes edge above states in full** — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
 with `model: "haiku"`.** Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
@@ -1841,7 +1872,10 @@ that puts the merge bot on the same tier below. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
-including a ruling you have since **withdrawn or reversed**. A withdrawal you
+including a ruling you have since **withdrawn or reversed**. **That is the test
+of THIS condition only**: an empty outbox says nothing is inbound from you, and
+nothing about whether the member considers itself finished, which is what the
+report condition above is for. A withdrawal you
 recorded only in the ledger is undelivered: the member still holds the original
 and will act on it. Relay everything — reversals too — then dispatch.
 
