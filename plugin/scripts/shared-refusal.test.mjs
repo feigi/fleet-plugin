@@ -378,7 +378,7 @@ test("#878: the digits rule is spelled in arg.mjs and in the one file that canno
 test("#878: review-pr.js's copy of the digits rule reaches the same verdict as arg.mjs's", () => {
   const prIsDigits = lift(src("../workflows/review-pr.js"), "isDigits", "value");
   const values = [
-    "abc", "42x", "x42", "", "   ", "4 2", " 42", "42 ", "1e3", "0x2a", "-1", "4.0", "4,2",
+    "abc", "42x", "x42", "", "   ", "4 2", " 42", "42 ", "1e3", "0x2a", "-1", "+42", "4.0", "4,2",
     "42\n", "my-branch", "null", null, undefined, NaN,
     "42", 42, "0", 0, "007",
   ];
@@ -394,7 +394,47 @@ test("#878: review-pr.js's copy of the digits rule reaches the same verdict as a
   }
   // The verdicts themselves, so a pair that drifted TOGETHER still reds.
   for (const v of ["42", 42, "0", 0, "007"]) assert.equal(isDigits(v), true, `must accept ${show(v)}`);
-  for (const v of ["abc", "42x", "x42", "", " 42", "1e3", "-1", "4.0", "my-branch", null, undefined]) {
+  for (const v of ["abc", "42x", "x42", "", " 42", "1e3", "-1", "+42", "4.0", "my-branch", null, undefined]) {
     assert.equal(isDigits(v), false, `must refuse ${show(v)}`);
   }
+});
+
+// #878's numArg() returns `number | null`, and that shape is only safe while
+// every caller tests absence as `=== null` — `!x` is true for a zero the
+// caller plainly GAVE, which is the exact fail-open #878 closed, just moved
+// from the digits rule to the caller's own absence check. Nothing in
+// numArg()'s construction stops a future or careless caller from writing
+// `if (!numArg(...))`; this sweep is the structural backstop the review
+// comment on this ticket asked for, in the one place a discovered set is the
+// right shape rather than a spelled-out one (contrast CONSUMERS/RULE_SITES
+// above): the risk here IS a future file adding a numArg() import, and a
+// spelled-out list would need editing at the exact moment the regression
+// landed to catch it — which, by definition, it never would.
+//
+// Two independent checks per consumer file, because a caller can reintroduce
+// the bug two ways: testing the bound variable (`if (!pr)`) or testing the
+// call inline (`if (!numArg("pr"))`) before ever binding one.
+test("#878: every numArg() consumer tests absence with === null, never a bare falsy check", () => {
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const files = readdirSync(dir).filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && f !== "arg.mjs");
+  const consumers = [];
+  for (const file of files) {
+    const text = src(file);
+    if (!/^import\s*\{[^}]*\bmakeNumArg\b[^}]*\}\s*from\s*"\.\/arg\.mjs";/m.test(text)) continue;
+    consumers.push(file);
+    assert.doesNotMatch(text, /!\s*numArg\(/, `${file} tests a numArg() call inline with a bare falsy check instead of === null`);
+    for (const [, name] of text.matchAll(/const\s+(\w+)\s*=\s*numArg\(/g)) {
+      assert.doesNotMatch(
+        text,
+        new RegExp(String.raw`![\s]*\b${name}\b`),
+        `${file} tests numArg()'s "${name}" result with a bare falsy check instead of === null — a zero the caller gave would read as absent`,
+      );
+    }
+  }
+  // A vacuousness guard: if the import scan above ever finds nothing, every
+  // assertion in the loop is skipped and this test passes for the wrong
+  // reason. Pinned against the known set (#878's routed three), not just a
+  // non-empty check, so the scan itself breaking (a reformat of the import
+  // line, say) reds here instead of silently stopping coverage.
+  assert.deepEqual(consumers.sort(), ["ci-state.mjs", "diff-stats.mjs", "pr-overlap.mjs"], "the numArg() consumer sweep found a different set than #878 routed — update this list deliberately for a new caller");
 });
