@@ -1313,6 +1313,58 @@ test("an awk-side failure deduplicating the at-risk commits is unanswerable, and
   );
 });
 
+/**
+ * Shadows `awk` on PATH with a wrapper that fails ONLY the stash-count call
+ * this guard reads — selected on content flowing THROUGH it, never on the
+ * program text handed to it, same technique and same reason as
+ * `withFailingDedupeAwk` above. `stash@{` is git's own `stash list` line
+ * prefix and cannot appear in the at-risk dedupe's commit-log input, so the
+ * two awk call sites stay distinguishable without either one shadowing the
+ * other.
+ */
+function withFailingStashCountAwk(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-stash-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "awk"), `#!/bin/sh
+f="${bin}/stdin.$$"
+cat > "$f"
+if grep -qF 'stash@{' "$f"; then
+  : > "${bin}/fired"
+  echo "SHIM: forced awk failure for test" >&2
+  exit 13
+fi
+exec ${real} "$@" < "$f"
+`);
+  chmodSync(join(bin, "awk"), 0o755);
+  return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
+}
+
+// Same shape as the dedupe guard's own test above, and the fix for finding 1
+// of #1160's follow-up review: this was the one external-tool command
+// substitution left in the file with no guard, and it reproduced the EXACT
+// symptom this script exists to remove — a clean worktree refused at exit 1,
+// no payload, no cause named — because it ANSWERS a question (the stash
+// count) rather than only rendering one, so it belongs with the `|| die`
+// family below, not with `render`'s family above.
+test("an awk-side failure counting the stash entries is unanswerable, and names awk rather than a bare set -e abort", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+
+  const awk = withFailingStashCountAwk(t);
+  const r = audit(c, { ...ENV, PATH: awk.path });
+  assert.ok(existsSync(awk.fired),
+    "the fault injection never fired — the stash count no longer flows through awk, so every assertion below is measuring an unmutated run");
+  assert.equal(r.status, 2, `a stash count that could not be computed is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload -- a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /awk failed counting the stash entries/,
+    "the guard must name awk, not fall through to a bare set -e abort — the #1160 symptom this fixes",
+  );
+});
+
 // #583: a POSIX pipeline's status is its LAST command's, so a fault in any
 // earlier stage is invisible to `set -e` and to a trailing `|| die` alike. The
 // stage that reads merge-tree's output is the one that can fail — measured on
@@ -2532,11 +2584,47 @@ test("a porcelain render that cannot reach stderr still refuses WITH its payload
     "and the dump the operator would have read is reported missing rather than dropped");
 });
 
+// render()'s trailing `|| :` is what stands between an aborted audit and a
+// caller whose stderr is completely gone — both the primary write AND its own
+// one-line fallback disclaimer fail. Extracted by function name rather than
+// duplicated, so this measures render() itself and not a copy that could
+// drift from it. Exercised standalone, not through the full script: every
+// OTHER bare `>&2` write in no-undo-audit.sh (the plain diagnostic echoes
+// beside each render, e.g. the status-command header and the `clean`/
+// `stash entries` lines) is unguarded too, and a closed fd 2 applied to the
+// whole process aborts on the first of those — a real, pre-existing gap, but
+// outside render()'s own contract and outside this PR's three findings.
+//
+// Neither of the stronger signals finding 2 raised fits this script without
+// breaking an invariant already established and tested elsewhere: `exec`-ing
+// a marker to fd 1 would inject a second value into the one-JSON-object
+// stdout contract every payload test parses strictly (`jq -e "."` above), and
+// a distinguishable exit code would hand a render exactly the
+// verdict-deciding power #1160 exists to take away — this file's own header
+// says a render "answers nothing and so must reach no exit at all". Pinning
+// the accepted tradeoff (the JSON payload already carries what every render
+// only duplicates onto stderr) rather than changing it.
+test("a render whose fallback disclaimer ALSO cannot reach stderr still returns cleanly", (t) => {
+  const renderSrc = readFileSync(SCRIPT, "utf8").match(/^render\(\) \{[\s\S]*?\n\}\n/m)?.[0];
+  assert.ok(renderSrc, "no-undo-audit.sh must still define render() for this test to extract it");
+
+  const r = spawnSync("sh", ["-c", `
+    set -eu
+    NAME=no-undo-audit
+    ${renderSrc}
+    render '    ' 'a line no caller will ever see' 'the thing' 2>&-
+  `], { encoding: "utf8" });
+
+  assert.equal(r.status, 0,
+    `both the primary write and its own fallback disclaimer failing must not reach the caller's exit status; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout, "", "render writes only to stderr; a closed fd 2 must not leak anything onto stdout instead");
+});
+
 /**
  * Fails the stash-diagnostic fold and nothing else, addressed by ARGV.
  *
  * That fold is the script's only two-operand `tr` whose first operand is the
- * literal `\n` — json.sh's three all carry either `-d` or a `\001-\007` range
+ * literal `\n` — json.sh's four all carry either `-d` or a `\001-\007` range
  * — so the argv test is exact. Content selection is unusable here:
  * `withBrokenEscaper` reads the tool's stdin through `$(cat)` and re-feeds it
  * with `printf '%s\n'`, and that round trip appends a newline to every value
