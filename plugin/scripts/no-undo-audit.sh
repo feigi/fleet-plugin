@@ -468,7 +468,8 @@ sl=$(git -C "$wt" stash list 2>/dev/null) || sl_rc=$?
 # counts the final incomplete record, so one statement answers both ends
 # (measured under `/bin/sh` with `set -eu`: "" -> 0, one/two/three entries with
 # no trailing newline -> 1/2/3, and no padding to strip).
-stash=$(printf '%s' "$sl" | awk 'END{print NR}')
+stash=$(printf '%s' "$sl" | awk 'END{print NR}') \
+  || die "awk failed counting the stash entries — cannot report the stash count"
 sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # Resolved lazily, inside the one state that asks the question: a healthy repo
