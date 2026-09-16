@@ -70,3 +70,32 @@ test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict
   const payload = JSON.parse(r.stdout);
   assert.deepEqual(payload, { a: 1, b: 2, files: ["src/shared.ts"], modules: ["shared"], dirs: ["src"], signal: "files" });
 });
+
+// #878: `--a 0`/`--b 0` is the row the `=== null` absence check exists for,
+// and the one a later "simplification" back to `!a || !b` silently breaks:
+// numArg() returns a NUMBER, so `!a` is true for a zero the caller plainly
+// GAVE, and the usage die above would then answer it as though `--a` were
+// never given at all. Companion to arg.test.mjs's identical row for
+// diff-stats.mjs and ci-state.test.mjs's own for `--pr` — #878's own comment
+// names all three callers as sharing this contract, and only diff-stats.mjs
+// had this row before.
+//
+// `strictEqual` on both fields, same reason as the well-formed test above: a
+// payload reading `a`/`b` back as the string "0" would satisfy a loose check
+// while breaking every consumer that keys on a number.
+test("#878: --a 0/--b 0 reach gh rather than drawing the usage line for an absent flag", () => {
+  const bin = mkdtempSync(join(tmpdir(), "pr-overlap-bin-"));
+  const gh = join(bin, "gh");
+  writeFileSync(gh, '#!/bin/sh\ncase "$3" in\n  0) echo src/shared.ts ;;\nesac\n');
+  chmodSync(gh, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", "0", "--b", "0"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /usage:/, `--a 0/--b 0 was answered as an absent flag: ${r.stderr}`);
+  const payload = JSON.parse(r.stdout);
+  assert.strictEqual(payload.a, 0, `a zero --a must survive to the payload as 0: ${r.stdout}`);
+  assert.strictEqual(payload.b, 0, `a zero --b must survive to the payload as 0: ${r.stdout}`);
+});
