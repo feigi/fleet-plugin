@@ -1,7 +1,18 @@
 // #1181: board.mjs's `tryParse` guarded its INPUT string against nullish and
-// not its PARSED VALUE. `JSON.parse("null")` succeeds and yields null, so a
-// bare `null` payload skipped the fallback and went to the caller as its
+// not its PARSED VALUE. `JSON.parse("null")` succeeded and yielded null, so a
+// bare `null` payload skipped the fallback and reached the caller as its
 // answer — the shape #1170 fixed one function over, in `mapCi`.
+//
+// That gap does not crash either of tryParse's two current callers today:
+// withNumber's own array guard already rejects a null `rows` at the ghRows
+// call site, and gather()'s ledger branch already treats a null parse as
+// falsy. This guard is defense in depth, not a crash fix — what it actually
+// changes is (a) one named "payload is JSON null" stderr line in place of a
+// caller's own, more generic shape complaint, and (b) real protection for a
+// future tryParse caller with no shape guard of its own downstream. The two
+// "refusal" tests below pin that stderr line; their value assertions were
+// already true before this guard existed, and stay here as regression
+// coverage for the caller-visible shape, not as proof of the fix.
 //
 // Driven through the exported `gather()` rather than against `tryParse`, which
 // is module-private: the guard is only observable where a caller consumes the
@@ -69,10 +80,11 @@ function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {
 test("gather: a `gh` payload that parses to JSON null degrades to an empty list, not to null (#1181)", () => {
   const r = gatherWith({ issuesJson: "null" });
   assert.deepEqual(r.issues, []);
-  // Without the guard the caller received null itself, and `.map` on it threw
-  // out of gather() — the crash the withNumber array guard now absorbs at this
-  // particular site, and which nothing absorbs for a caller that does not have
-  // one.
+  // Even without this guard tryParse still returns null here, and
+  // withNumber's own array check already rejects a null `rows` — this site
+  // never actually crashed. What the guard changes is the wording: this
+  // named line in place of withNumber's generic "expected an array of rows,
+  // got null" shape complaint.
   assert.match(r.stderr, /gh issue list: payload is JSON null/);
   // And not worded as the catch branch's fault: the parse succeeded. Reusing
   // that message is the likeliest way to write this guard, and it puts the two
