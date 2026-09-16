@@ -502,3 +502,142 @@ test("#878: --a 0/--b 0 reach gh rather than drawing the usage line for an absen
   assert.strictEqual(payload.a, 0, `a zero --a must survive to the payload as 0: ${r.stdout}`);
   assert.strictEqual(payload.b, 0, `a zero --b must survive to the payload as 0: ${r.stdout}`);
 });
+
+// A `-`/`+` diff marker followed by CONTENT that itself starts with a dash
+// or plus (a removed `--pin ...` line, an added `++retry ...` line) composes
+// to `---`/`+++` — the same three characters a real file-header line begins
+// with. Gating capture on the `@@` hunk boundary rather than on those three
+// characters is what tells the two apart; testing the header text alone
+// mistakes the hunk-body line for its own file header and drops it.
+test("prose: a hunk-body line beginning with -- or ++ is still read as a citation, not mistaken for a diff header", () => {
+  const REMOVED_CITER = "docs/removed-hazard.md";
+  const ADDED_CITER = "docs/added-hazard.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: [REMOVED_CITER, ADDED_CITER],
+          diff:
+            hunk(REMOVED_CITER, [`---pin ${TSV} (stale, drop it)`]) +
+            hunk(ADDED_CITER, [`+++retry ${TSV} (kept)`]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(
+    payload.prose.map((h) => h.citedBy).sort(),
+    [ADDED_CITER, REMOVED_CITER],
+  );
+});
+
+// `trackedBasenameCounts()`'s own `git ls-files` failure must name its cause
+// the same way `changedFiles()` and `diffOf()` do — a bare `null` collapsing
+// into a fixed string is indistinguishable from every OTHER git failure, and
+// disables the ambiguity guard (full paths only) with no diagnostic to act
+// on. Shadows `git` on PATH so `git ls-files -z` fails; the full-path
+// citation below still fires because the guard narrowing to full-paths-only
+// is exactly what a failed count means, not a disabled scan.
+test("prose: a git ls-files failure names its cause instead of vanishing into a fixed string", () => {
+  const fx = fixture({
+    prs: {
+      1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+      2: { names: ["docs/notes.md"], diff: hunk("docs/notes.md", [`+cites ${TSV} here`]) },
+    },
+  });
+  const git = join(fx.bin, "git");
+  writeFileSync(git, "#!/bin/sh\nexit 1\n");
+  chmodSync(git, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
+    encoding: "utf8",
+    cwd: fx.repo,
+    env: { ...process.env, PATH: `${fx.bin}:${process.env.PATH}` },
+  });
+  rmSync(fx.root, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.match(payload.proseUnrun, /git ls-files failed: exit 1/);
+  assert.match(r.stderr, /git ls-files failed: exit 1/);
+});
+
+// The guard counted only the PRE-PR index: a data file the PR itself ADDS is
+// untracked at this checkout, so subtracting nothing from an existing
+// OTHER tracked file's count left the added file wrongly "unique" — the two
+// files share a basename post-PR and neither should be citable by it alone.
+test("prose: a data file the PR itself adds is still checked against existing tracked basenames", () => {
+  const EXISTING = "other/dir/config.json";
+  const ADDED = "new/config.json";
+  const CITER = "docs/notes.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [ADDED], diff: hunk(ADDED, ['+{"x":1}']) },
+        2: { names: [CITER], diff: hunk(CITER, ["+see config.json for the format"]) },
+      },
+      tracked: [EXISTING],
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "none");
+  assert.deepEqual(payload.prose, []);
+});
+
+// The guard's other branch: a data file the PR only MODIFIES (already
+// tracked, exactly once) must still be matched by its bare basename. Only
+// the ambiguous case (count 2+) and the freshly-added case (count 0) were
+// covered before this — a mutation that narrows the "unique" boundary
+// silently drops this branch, and no test caught it.
+test("prose: a uniquely-tracked data file is still matched by its bare basename", () => {
+  const UNIQUE = "data/only-owner.json";
+  const CITER = "docs/notes.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [UNIQUE], diff: hunk(UNIQUE, ['+{"x":1}']) },
+        2: { names: [CITER], diff: hunk(CITER, ["+see only-owner.json for the schema"]) },
+      },
+      tracked: [UNIQUE],
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.token), ["only-owner.json"]);
+});
+
+// The other ranking pair: `dirs` sits ABOVE `prose` in the ladder, and no
+// test drove a PR pair where both fire simultaneously. A swap of that
+// ordering (`prose` checked before `dirs`) would pass the whole suite
+// untouched without this.
+test("prose: dirs outranks prose when both fire, and the prose hit is still reported", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV, "docs/metrics/other.md"], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["docs/metrics/notes.md"],
+          diff: hunk("docs/metrics/notes.md", [`+cites ${TSV} here`]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "dirs");
+  assert.deepEqual(payload.dirs, ["docs/metrics"]);
+  assert.equal(payload.prose.length, 1);
+  assert.match(r.stderr, /prose citation/);
+});

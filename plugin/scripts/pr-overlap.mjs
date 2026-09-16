@@ -144,7 +144,7 @@ const dirsOf = (fs) => fs.map(dirname).filter((d) => d !== ".");
 // Data side — an artifact whose meaning lives in prose somewhere else. A
 // `.ts` module's consumers are already found by `files`/`modules` above. `.md`
 // is deliberately absent: a doc citing a doc is what `dirs` fires on, and
-// `SKILL.md` recurs 3× in this repo's 250 tracked files (measured), so it is
+// `SKILL.md` recurs 3× in this repo's 251 tracked files (measured), so it is
 // the ambiguous-basename shape `moduleOf` above already refuses to guess at.
 const DATA_EXT = new Set([".tsv", ".csv", ".json", ".jsonl", ".ndjson", ".yml", ".yaml", ".toml"]);
 // Text side — prose, including prose inside a code comment. That half is not
@@ -154,6 +154,12 @@ const DATA_EXT = new Set([".tsv", ".csv", ".json", ".jsonl", ".ndjson", ".yml", 
 // Disjoint from DATA_EXT on purpose. Adding an extension to both would let a
 // file match its own hunks and fire against itself; keep them apart.
 const TEXT_EXT = new Set([".md", ".mjs", ".js", ".cjs", ".ts", ".tsx", ".sh", ".bash", ".zsh", ".py", ".txt", ".rst"]);
+// Asserted at startup, not only in this comment: an overlapping extension
+// would let a file match its own hunks and fire against itself, silently,
+// on whichever PR happens to touch it.
+for (const ext of DATA_EXT) {
+  if (TEXT_EXT.has(ext)) throw new Error(`${NAME}: DATA_EXT and TEXT_EXT both claim ${ext}`);
+}
 
 const dataFiles = (fs) => fs.filter((f) => DATA_EXT.has(extname(f)));
 const textFiles = (fs) => fs.filter((f) => TEXT_EXT.has(extname(f)));
@@ -168,6 +174,8 @@ const textFiles = (fs) => fs.filter((f) => TEXT_EXT.has(extname(f)));
 // `null` means the count could not be taken, which is NOT the same as "no
 // ambiguity": it narrows matching to full paths and is reported.
 let basenameCounts;
+let trackedPaths;
+let basenameCountsUnrun;
 function trackedBasenameCounts() {
   if (basenameCounts !== undefined) return basenameCounts;
   console.error(`$ git ls-files -z`);
@@ -176,14 +184,24 @@ function trackedBasenameCounts() {
     // quote. maxBuffer explicitly, for the reason diffOf() states below.
     const out = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     const counts = new Map();
+    const paths = new Set();
     for (const f of out.split("\0")) {
       if (!f) continue;
+      paths.add(f);
       const b = basename(f);
       counts.set(b, (counts.get(b) ?? 0) + 1);
     }
     basenameCounts = counts;
-  } catch {
+    trackedPaths = paths;
+  } catch (e) {
+    // Same three disjoint shapes changedFiles() and diffOf() name: a git
+    // failure with no captured reason is indistinguishable from a clean scan
+    // in unrunReasons, which is #705's own failure mode one level in.
     basenameCounts = null;
+    trackedPaths = null;
+    basenameCountsUnrun = `git ls-files failed: ${
+      e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
+    } — basenames unusable, full paths only`;
   }
   return basenameCounts;
 }
@@ -200,9 +218,12 @@ function tokensFor(dataFile) {
   if (bn === dataFile) return tokens;
   const counts = trackedBasenameCounts();
   if (counts === null) return tokens;
-  // 0 = not in this checkout's index, so it is a file the PR is adding —
-  // unique by assumption. ≥2 = ambiguous, dropped.
-  if ((counts.get(bn) ?? 0) <= 1) tokens.push(bn);
+  // Count OTHER owners of the basename: subtract dataFile itself when the
+  // pre-PR index already tracks it, so a file the PR merely modifies is not
+  // counted as its own rival, and a file the PR ADDS is compared against the
+  // full pre-PR set instead of getting a free pass because it isn't in it.
+  const others = (counts.get(bn) ?? 0) - (trackedPaths.has(dataFile) ? 1 : 0);
+  if (others === 0) tokens.push(bn);
   return tokens;
 }
 
@@ -241,6 +262,7 @@ function diffOf(pr, known) {
   const hunks = new Map();
   let unresolved = 0;
   let file = null;
+  let inHunk = false;
   for (const line of out.split("\n")) {
     if (line.startsWith("diff --git ")) {
       // Resolved against the authoritative `--name-only` list rather than
@@ -251,13 +273,21 @@ function diffOf(pr, known) {
       // makes an empty result incomplete, not clean.
       file = known.find((f) => line.endsWith(` b/${f}`)) ?? null;
       if (file === null) unresolved++;
+      inHunk = false;
       continue;
     }
     if (file === null) continue;
-    // Hunk-body lines only. `+++ `/`--- ` are file headers that begin with the
-    // same characters and carry the path itself, so a PR that also changed the
-    // data file would otherwise match its own header instead of any prose.
-    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    // `@@ ... @@` is the one line that reliably marks "metadata block ends,
+    // hunk body begins". Gating on that state — rather than testing each
+    // line's own text for `--- `/`+++ ` — means a hunk-BODY line whose
+    // content itself starts with `--` or `++` (a removed line beginning
+    // with a real `--` token, or an added one beginning with `++`) is never
+    // mistaken for a file header and silently dropped.
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
     if (!/^[+\- ]/.test(line)) continue;
     const lines = hunks.get(file);
     if (lines) lines.push(line);
@@ -321,7 +351,7 @@ const prose = [...ab.hits, ...ba.hits].sort((x, y) =>
 // `dimensionsUnrun` beside `dimensionsRun`: an absence of findings is not
 // coverage.
 const unrunReasons = [ab.unrun, ba.unrun];
-if (basenameCounts === null) unrunReasons.push("git ls-files failed — basenames unusable, full paths only");
+if (basenameCounts === null) unrunReasons.push(basenameCountsUnrun);
 const proseUnrun = unrunReasons.filter(Boolean).join("; ") || null;
 
 // Ranked BELOW `dirs`, so it can only ever turn a `none` into something. It
