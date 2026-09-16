@@ -107,16 +107,19 @@ test("probe 3 cites release-ticket.sh by construct, never by line (#800)", () =>
 });
 
 // The target side, bounded by `count_registry`'s own opening and by the entry
-// loop's comment below the guard. Both bounds survive the rename this pin
-// exists to catch, so a rename reds on the assertion — with its own message —
-// rather than on `between`'s update-this-test throw. Read RAW, never through
-// `stripHashGutter`: the `#` gutter is what stops a wrapped comment restating
+// loop's `-d` skip below the guard. Both bounds are CODE, deliberately: this
+// pin's subject is code, and bounding it on a neighbouring COMMENT would make
+// another file's prose load-bearing for this assertion — the rot this file is
+// about, one level out. Both survive the rename the pin exists to catch, so a
+// rename reds on the assertion, with its own message, rather than on
+// `between`'s update-this-test throw. The slice is read RAW, never through
+// `stripHashGutter`: the `#` gutter is what stops a WRAPPED comment restating
 // the guard from satisfying a `\s+`-joined phrase.
 const registryGuard = () =>
   between(
     RELEASE_TICKET,
     "count_registry() {",
-    "# A registry entry is a directory",
+    '[ -d "$entry" ] || continue',
     "release-ticket.sh",
   );
 
