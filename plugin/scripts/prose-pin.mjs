@@ -80,6 +80,72 @@ export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/
 // reason for existing, one gutter shape later.
 export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*>+\s?/, "")).join("\n");
 
+// One verbatim dispatch block, bounded by its OWN quote run rather than by the
+// next block's opening words, and returned with the gutter intact so the caller
+// owns the normalization. #1002: a whole-block golden fixture needs a slice that
+// is exactly one block, and the neighbour-anchored form every presence pin in
+// this directory uses is not one. Measured on `run-team/SKILL.md`:
+// `dispatch-block-pins-prose.test.mjs`'s `commitBlock` runs from `Commit
+// incrementally` to `**Every scratch file` and so already contains the whole
+// stash-prohibition block that landed between them, and its `worktreeBlock`
+// likewise contains the distilled-brief block. Both slices silently grew a
+// second block, which a presence pin never notices and a golden could not
+// survive: the fixture would be "this block plus whatever lands after it", and
+// re-blessing it would bless the insertion too.
+//
+// A maximal run of `>` lines is the bound markdown itself uses, so it cannot
+// drift: a sentence appended inside the block stays inside the run, and a block
+// spliced in after it is a SEPARATE run — which is what makes "every run in the
+// region has a fixture" a check a caller can make at all.
+//
+// Column-0 `>` only, matching how every pin in this directory already strips
+// this gutter (`/^>\s?/`) and how `member-prompt-prose.test.mjs` asserts every
+// member-facing line carries one. An indented gutter is not silently absorbed
+// here: it ends the run, so the block reds against its fixture instead of
+// passing under a changed markdown context.
+export function quoteBlocks(text) {
+  const runs = [];
+  let open = null;
+  for (const line of text.split("\n")) {
+    if (line.startsWith(">")) (open ??= []).push(line);
+    else if (open) {
+      runs.push(open.join("\n"));
+      open = null;
+    }
+  }
+  if (open) runs.push(open.join("\n"));
+  return runs;
+}
+
+// The one quote run that BEGINS with `opener`, for a caller comparing that run
+// against a golden copy. Both failure directions throw rather than return, for
+// the reason a golden makes sharper than a presence pin does: an extractor that
+// returns "" for a block it cannot find compares empty against empty — or
+// against a fixture nobody re-blessed — and a deleted block passes.
+//
+// Anchored at the run's START, not anywhere inside it, so the identifier names
+// the block rather than merely occurring in it: a later block quoting the same
+// opening words cannot answer to it. Matched through `phrase()` on the
+// flattened run for `paragraph`'s reason — a literal `indexOf` reds on a rewrap
+// that the opener itself survives, turning a reflow into a red.
+export function quoteBlock(text, opener, what) {
+  const head = new RegExp(`^${phrase(opener).source}`);
+  const hits = quoteBlocks(text).filter((run) =>
+    head.test(run.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join(" ").split(/\s+/).join(" ").trim()),
+  );
+  assert.notEqual(
+    hits.length,
+    0,
+    `${what}: no quote block opens on "${opener}" — the block was deleted, un-quoted, or its opening words changed. Re-anchor or restore it; this throws rather than comparing a golden fixture against nothing`,
+  );
+  assert.equal(
+    hits.length,
+    1,
+    `${what}: ${hits.length} quote blocks open on "${opener}" — a fixture would bind to whichever came first; narrow the opener`,
+  );
+  return hits[0];
+}
+
 // A `.js` line comment wraps at `// `, so a marked pair embedded as a
 // documentary comment (workflows/*.js — a Workflow script cannot `import`,
 // so a shared prose module is out of reach there) does not begin with its

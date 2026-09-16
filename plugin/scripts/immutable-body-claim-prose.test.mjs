@@ -27,12 +27,23 @@
 // that prompted the work.
 //
 // THE CEILING, the same one `dispatch-block-pins-prose.test.mjs` records and
-// #1002 tracks: these are pins on text being PRESENT and adjacent. A sentence
+// #1002 measured: these are pins on text being PRESENT and adjacent. A sentence
 // APPENDED after a pinned one that carves an exception out of it — "a claim
 // already settled earlier in the branch needs no re-run" — touches no pinned
 // fragment and stays green. Measured, not assumed: that mutant was run against
 // this file and passed. Do not read a green run here as "no carve-out was
 // added to this rule".
+//
+// AND IT STAYS OPEN HERE, by ruling rather than by neglect. #1002 closed the
+// same ceiling for the verbatim dispatch BLOCKS, with a whole-block golden
+// fixture (`dispatch-block-golden-prose.test.mjs`); its own out-of-scope is
+// explicit that the golden form is justified by those blocks being
+// change-controlled — they exist to reach a member unchanged — and that the
+// argument does not carry to ordinary prose. The rule this file pins is
+// ordinary prose: not a blockquote, not carried verbatim to anyone, and edited
+// by whoever next touches the correction-discipline block. A golden over it
+// would red on every legitimate rewording, with no change-control convention to
+// make that red a review point rather than an obstacle.
 //
 // That appended-clause half is the KNOWN ceiling, and it is what #1002 records
 // and measures. A second half is not: a MEANING-CHANGING clause inserted
@@ -59,7 +70,8 @@
 // zero-headroom gap RED on inserting the single word `it` into "not one to
 // assert bare". That is a meaning-preserving edit, and a pin that reds on one
 // is a pin the next person to touch this prose weakens or deletes.
-// The mechanism has to change, which is #1002's own conclusion.
+// The mechanism has to change, which was #1002's conclusion — and where it
+// changed is the dispatch blocks, not here. See the ruling above.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

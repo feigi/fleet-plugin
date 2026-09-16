@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, paragraph, phrase, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
+import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -187,4 +187,74 @@ test("paragraph returns the remainder when the rule's block ends the document", 
 // the contract it happens to pin today.
 test("anchorAt returns the offset where the anchor starts, not where it ends", () => {
   assert.equal(anchorAt("pad\n\nTHE RULE says X.", "THE RULE", "the fixture"), 5);
+});
+
+// `quoteBlocks` and `quoteBlock` are the bound a whole-block golden fixture
+// needs (#1002), and the one thing they must never do is what every slicer in
+// this directory did before them: return a slice that is not exactly one block.
+// Fixtures here are short literal strings for this file's standing reason —
+// pinning them against `run-team/SKILL.md` would re-couple them to whatever that
+// file's blocks say today.
+const QUOTED = "intro\n\n> first block, line one\n> line two\n>\n> second paragraph, same block\n\nprose between\n\n> second block\n\ntail";
+
+// A blank quote line continues the block; a line with no gutter ends it. Both
+// halves matter to a golden: the first decides whether a two-paragraph block is
+// one fixture or two, and the second is the whole reason a block spliced in
+// after this one cannot be absorbed into its slice.
+test("quoteBlocks returns each maximal quote run, and a bare `>` line does not split one", () => {
+  assert.deepEqual(quoteBlocks(QUOTED), [
+    "> first block, line one\n> line two\n>\n> second paragraph, same block",
+    "> second block",
+  ]);
+});
+
+// Nothing before the first quote line and nothing after the last may leak in: an
+// unquoted line inside the slice is text the controller does not carry, so a
+// fixture holding one would be blessing prose the member never sees.
+test("quoteBlocks returns no unquoted line, including at a run that ends the text", () => {
+  assert.deepEqual(quoteBlocks("> only\nprose"), ["> only"]);
+  assert.deepEqual(quoteBlocks("prose\n> last"), ["> last"]);
+});
+
+// The identifier names the block by what it BEGINS with. A later block that
+// merely contains the same words is the copy a `text.indexOf(opener)` bound
+// would have taken — this is the assertion that keeps `quoteBlock` from being
+// that bound with extra steps.
+test("quoteBlock returns the run that BEGINS with the opener, never one that merely contains it", () => {
+  const text = "> a rule about stashing\n\n> never stash: a rule about stashing is above";
+  assert.equal(quoteBlock(text, "never stash", "the fixture"), "> never stash: a rule about stashing is above");
+  // The case above never exercises the `^` anchor: "never stash" is not a
+  // substring of the non-matching block at all, so an unanchored
+  // `new RegExp(phrase(opener).source)` would pass it exactly as the anchored
+  // form does. This puts the opener MID-block instead, where only the `^`
+  // anchor tells the two regexes apart.
+  assert.throws(
+    () => quoteBlock("> intro sentence never stash mid-block words", "never stash", "the fixture"),
+    /no quote block opens/,
+  );
+});
+
+// Reflow-safe for `paragraph`'s reason, one bound over: an opener that the
+// source has wrapped is still that block's opener, and a literal `indexOf`
+// would throw "block deleted" on a reflow the block survived intact.
+test("quoteBlock finds a block whose opener is hard-wrapped across two lines", () => {
+  assert.equal(quoteBlock("> Read the\n> issue first\n> and only then", "Read the issue first", "the fixture"), "> Read the\n> issue first\n> and only then");
+});
+
+// The two throws, and the false green each one denies. A golden mechanism whose
+// extractor returns "" for a block it cannot find compares nothing against
+// nothing and a DELETED block passes; one that returns the first of two takes
+// the decoy and lets the real block be gutted.
+test("quoteBlock throws when no block opens on the identifier, rather than returning nothing", () => {
+  assert.throws(
+    () => quoteBlock("> some other rule\n\nRead the issue first — unquoted now", "Read the issue first", "the fixture"),
+    /the fixture: no quote block opens on "Read the issue first"/,
+  );
+});
+
+test("quoteBlock throws when two blocks open on the identifier, rather than binding the first", () => {
+  assert.throws(
+    () => quoteBlock("> Read the issue first\n\n> Read the issue first, again", "Read the issue first", "the fixture"),
+    /the fixture: 2 quote blocks open on "Read the issue first"/,
+  );
 });

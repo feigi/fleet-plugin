@@ -76,9 +76,19 @@
 //     unmutated file both pass, proving the pins hold the words, not today's
 //     line breaks.
 //
-// THE CEILING, same as every file in this directory: these are pins on text
-// being PRESENT and adjacent. A sentence appended after a pinned span that
-// carves an exception into it touches no pinned fragment and stays green.
+// THE CEILING these pins have: they are pins on text being PRESENT and
+// adjacent. A sentence appended after a pinned span that carves an exception
+// into it touches no pinned fragment and stays green.
+//
+// Both blocks this file pins are covered against that by #1002's whole-block
+// golden fixtures in `dispatch-block-golden-prose.test.mjs` — the implementer's
+// block as one of phase 2's, the fix-applier's inside the fix-applier prompt —
+// so an appended carve-out reds there on the equality while staying invisible
+// here. Measured: appending "A bare pop is fine when no sibling is running." to
+// the implementer block left every pre-existing prose pin green, including all
+// of this file's, and red the golden. The two are complementary — the golden
+// says the block changed, and a red HERE says which of the two stash rules lost
+// its WIP-commit substitute.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
