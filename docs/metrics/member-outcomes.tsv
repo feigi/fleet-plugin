@@ -6975,6 +6975,11 @@ b83f499b-03d0-4ace-81cc-b420f369962c	2026-07-31	memory	memory-proxy	claude-haiku
 b83f499b-03d0-4ace-81cc-b420f369962c	2026-07-31	memory	memory-proxy	claude-haiku-4-5-20251001				18825	2594	33	4	agent-af308bd163679fdaa	claude	
 b83f499b-03d0-4ace-81cc-b420f369962c	2026-07-31	other	silent-failure-105	claude-opus-5	xhigh			207147	30889	427	17	agent-asilent-failure-105-2609a036aa01ec8f	claude	
 b83f499b-03d0-4ace-81cc-b420f369962c	2026-07-31	other	test-analyzer-105	claude-opus-5	xhigh			112452	22379	415	14	agent-atest-analyzer-105-572531396ae29367	claude	
+b902ed72-4bef-45f7-865c-d655b09557ce	2026-09-10	specialist	omp-command-research	claude-sonnet-5	high			63583	11416	63	10	agent-a7990ddd0c8b79837	claude	
+b902ed72-4bef-45f7-865c-d655b09557ce	2026-09-10	specialist	general-purpose	claude-sonnet-5	high			61803	3909	55	3	agent-a9c1029841544b484	claude	
+b902ed72-4bef-45f7-865c-d655b09557ce	2026-09-10	specialist	brain-housekeeping	claude-opus-5	high			66782	4762	106	4	agent-abrain-housekeeping-1789caa12c429638	claude	memory-housekeeper
+b902ed72-4bef-45f7-865c-d655b09557ce	2026-09-10	other	cc-picker-verify	claude-haiku-4-5-20251001				43365	979	41	8	agent-acc-picker-verify-655cd62aca9115cf	claude	
+b902ed72-4bef-45f7-865c-d655b09557ce	2026-09-10	memory	memory-housekeeper	claude-opus-5	high			72576	4344	110	5	agent-amemory-housekeeper-a90721f789859cac	claude	memory-housekeeper
 b9385810-8f80-4931-b1e7-9c643d8ed3d7	2026-07-23	memory	memory-housekeeper	claude-opus-4-8	xhigh			59685	12409	237	5	agent-a51ff2718a0b18e2b	claude	
 bb19766a-4874-4e07-84d9-2a1a0e4a950e	2026-07-30	memory	memory-proxy	claude-haiku-4-5-20251001				7548	2446	36	4	agent-a79c07ab900a720c0	claude	
 bb19766a-4874-4e07-84d9-2a1a0e4a950e	2026-07-30	memory	memory-proxy	claude-haiku-4-5-20251001				8443	3062	52	6	agent-a94af67028cbc2e01	claude	
