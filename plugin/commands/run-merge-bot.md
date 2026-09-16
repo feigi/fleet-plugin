@@ -297,7 +297,12 @@ The pass ends, the queue does not. Once no labeled PR is actionable, arm a persi
 
 ```bash
 poll() { gh pr list --state open --label ready-to-merge --json number --jq '.[].number' 2>/dev/null; }
-seen=" $(poll | tr '\n' ' ')"
+if seed=$(poll); then
+  seen=" $(printf '%s\n' "$seed" | tr '\n' ' ')"
+else
+  echo 'ready-to-merge monitor: seed poll failed, not arming'
+  exit 1
+fi
 while true; do
   sleep 60
   if cur=$(poll); then
@@ -314,8 +319,8 @@ done
 
 Arm with `persistent: true`, description `ready-to-merge label on this repo's PRs`. Details that matter:
 
-- Seed `seen` **before** the loop so PRs already handled — including ones skipped for `CHANGES_REQUESTED` or left on red CI — do not re-fire every minute. Only a label appearing after arming is an event.
-- The `if cur=$(poll)` guard keeps `seen` intact when a `gh` call fails transiently; without it one failed poll replays the whole labeled set.
+- Seed `seen` **before** the loop so PRs already handled — including ones skipped for `CHANGES_REQUESTED` or left on red CI — do not re-fire every minute. Only a label appearing after arming is an event. The seed poll is guarded the same way as every tick: a `gh` call failing on the very first poll must not arm on an empty `seen`, which would replay the whole labeled set as spurious events on tick one.
+- The `if cur=$(poll)` guard — seed and every tick alike — keeps `seen` intact when a `gh` call fails transiently; without it a failed poll reads as an empty labeled set and either arms on nothing (the seed) or wipes `seen` (a tick), both replaying the full labeled set as events on the next successful poll. The guard depends on `poll` ending in the bare `gh` call, not in a pipe: `tr` sits at the call sites (not inside `poll`) precisely so a failing `gh` call's exit status reaches `cur=$(poll)` / `seed=$(poll)` instead of being swallowed by `tr`, which exits 0 regardless of what it reads.
 - **The per-PR loop is heredoc-fed on purpose — `for n in $cur` is the one form that cannot work here.** This runs under zsh, which word-splits an unquoted command substitution's result but *not* an unquoted parameter expansion, and `cur` is a parameter. Measured on zsh 5.9 with `seen="849 850 "` and `cur="849 850 852 "`: the bare form runs **one** iteration with the whole list glued into a single value and emits `ready-to-merge label added: PR #849 850 852`, one nonsense event naming no PR, while the real new PR is never reported; the heredoc form emits `PR #852` alone. `run-team/SKILL.md`'s **Shell traps** carries the mechanism, the remedy table and the `</dev/null` trap that bites the next command added inside this loop. Note the contrast with step 1's `for _ in $(seq 1 60)`: that is a command substitution, it splits, and it is correct as written.
 - 60s poll — remote API, stay off rate limits.
 - A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.
