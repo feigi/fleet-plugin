@@ -88,9 +88,11 @@
 // pattern it greps for and reports on itself.
 //
 // KNOWN LIMIT: the sweep half of this file needs an ambient `.git` (see `ROOT`
-// below). Where there is none — a `git archive` extraction, which is how review
-// specialists measure the suite (#1056) — those tests DECLINE, with a reason,
-// rather than running: the tree they would police is not reachable from here.
+// below). Where there is none — a bare `git archive` extraction, which is how
+// review specialists used to measure the suite (#1056; the review snapshot is
+// `git init`ed at cut time now, so these run there) — those tests DECLINE, with
+// a reason, rather than running: the tree they would police is not reachable
+// from here.
 // The fixture tests below run against literal strings and the behaviour tests
 // build their own repositories — both hold anywhere, so neither is gated. Until #1149 the same condition was an
 // uncaught throw at module load, which node could only report as one synthetic

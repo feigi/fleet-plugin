@@ -312,24 +312,32 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
     );
   }
-  // Declared beside them, but not one of them: `pathVerified` belongs to
-  // `required`, not to the gh-failure set, so it is pinned on its own rather
-  // than folded into the loop above — whose comment, and the one below, both
-  // read "these three". Only its `required` membership was pinned when it was
-  // added (#140); `additionalProperties: false` is what makes the DECLARATION
-  // mandatory too, for every field this schema carries.
-  assert.match(
-    props,
-    /^\s*pathVerified:\s*\{\s*type:/m,
-    "pathVerified is not declared in the schema's properties — additionalProperties:false drops it",
-  );
-  // The review must survive a gh failure. These three stay out of `required`.
+  // Declared beside them, but not one of them: `pathVerified` and
+  // `repoVerified` belong to `required`, not to the gh-failure set, so they are
+  // pinned on their own rather than folded into the loop above — whose comment,
+  // and the one below, both read "these three". Only `required` membership was
+  // pinned when `pathVerified` was added (#140); `additionalProperties: false`
+  // is what makes the DECLARATION mandatory too, for every field this schema
+  // carries. `repoError` is optional by design — a verified snapshot has
+  // nothing to say there — but an undeclared field the agent reports anyway is
+  // dropped, so it needs the same declaration pin (#1056).
+  for (const field of ["pathVerified", "repoVerified", "repoError"]) {
+    assert.match(
+      props,
+      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
+      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
+    );
+  }
+  // The review must survive a gh failure. Those three stay out of `required`.
   // `pathVerified` joins path+head instead (#140) — a caller check on whether
-  // the snapshot exists, not a `gh` fact that can legitimately be absent.
+  // the snapshot exists, not a `gh` fact that can legitimately be absent — and
+  // `repoVerified` joins them on the same rule (#1056): whether the snapshot is
+  // a git repository holding the reviewed tree is a check, not a network fact,
+  // and an omitted boolean must not read as a verified measurement environment.
   assert.match(
     snapshot,
-    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified"\]/,
-    "required must stay path+head+pathVerified only",
+    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified",\s*"repoVerified"\]/,
+    "required must stay path+head+pathVerified+repoVerified only",
   );
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
   // Measured: deleting this paragraph outright left this file at 12 pass, 0

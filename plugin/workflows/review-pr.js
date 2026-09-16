@@ -251,10 +251,11 @@ function usableDiff(snap) {
 // command to settle what the snapshot already settles.
 // The specialists are fleet-owned `fleet-review-*` agents (the fork ruled on
 // #1303) whose default, like the vendored definitions they replaced, is to
-// read `git diff`. The snapshot is `git archive HEAD | tar -x` and therefore
-// NOT a git repo, so that default fails and the only fallback is reading
-// files whole. Handing them the change is the fix; the bounding rule alone
-// would only treat the symptom.
+// read `git diff`. The snapshot IS a git repository since #1056, but its
+// history is one synthetic commit holding the reviewed tree: `git diff` there
+// is empty and `git diff <base>` names a ref that does not exist, so the
+// default still cannot produce the PR's change. Handing them the change is the
+// fix; the bounding rule alone would only treat the symptom.
 //
 // The third argument is the raw snapshot report, and it is here for one reason:
 // `readRules(diffPath, stats)` structurally cannot know WHY a diff was dropped,
@@ -309,8 +310,8 @@ change you are reviewing, and the snapshot around it is context.`
         } ${header}
 ${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
       : `No diff file and no file list were captured. Locate the files your
-dimension covers by searching the snapshot ('grep -rn', 'ls -R' — git does not
-run in it), then read them under the bounding rule below: 'wc -l' first.`;
+dimension covers by searching the snapshot ('grep -rn', 'ls -R'), then read
+them under the bounding rule below: 'wc -l' first.`;
 
   return `${change}
 
@@ -756,6 +757,7 @@ phase("Snapshot");
 const snap = await agent(
   `In ${worktree}, cut an immutable review snapshot, then size the PR's diff.
 
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR
     [ -n "${scratch}" ] || { echo SNAPSHOT_SCRATCH_UNSET; exit 1; }
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
@@ -766,6 +768,10 @@ const snap = await agent(
     mkdir -p "$SNAP"
     git -C ${worktree} archive HEAD | tar -x -C "$SNAP"
     [ -n "$(ls -A "$SNAP")" ] && echo SNAPSHOT_NONEMPTY || echo SNAPSHOT_EMPTY
+    ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
+    SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
+    { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
+    [ -d "$SNAP/.git" ] && printf 'node_modules\\n' >> "$SNAP/.git/info/exclude"
     if [ -n "$SNAP" ] && [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
 
 The destination is this RUN's and no other run's. 'mktemp -d' CREATES the run
@@ -831,18 +837,35 @@ validated where the command never runs (#142). No node_modules in the worktree,
 no symlink, nothing to report — that repo does not need one.
 
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY.
-Run it in the order above — BEFORE the symlink, never after. The symlink alone
-makes the directory non-empty, so a check placed below it prints
-SNAPSHOT_NONEMPTY on a totally failed 'git archive' in any repo that has
-node_modules, which is every repo the symlink exists for.
+Run it in the order above — BEFORE the 'git init' and BEFORE the symlink, never
+after either. Each of those creates an entry of its own, so a check placed
+below them prints SNAPSHOT_NONEMPTY on a totally failed 'git archive': the
+symlink does it in any repo that has node_modules, which is every repo the
+symlink exists for, and '.git' does it in every repo there is.
 A directory that exists but holds nothing is what a silently-failed
 'git archive | tar -x' looks like — 'git archive' failing or 'gh' auth lapsing
 leaves the pipe empty, tar extracts nothing from it, and 'mkdir -p' already made
 the directory exist regardless. This is the caller's own check on the tree it is
 about to hand every specialist, not your narration of one (#140).
 
-Verify it: 'git -C ${worktree} rev-parse HEAD' and confirm a couple of the
-diff's files are byte-identical between the snapshot and 'git show HEAD:<path>'.
+Report \`repoVerified\` = true ONLY if the last of those lines printed
+SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
+instead — SNAPSHOT_INIT_FAILED, or the whole SNAPSHOT_TREE_MISMATCH= value with
+both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE.
+Specialists run this repository's own suite inside it, and a suite whose tests
+ask git what ships needs a working tree at or above them: in a bare extraction
+those tests decline or fail for the environment rather than for the tree, and
+the payload reports a plausible total either way (#1056). The tree-hash compare
+is the verification, and it supersedes the byte-identity spot check this step
+used to ask for: two commits whose trees hash the same hold byte-identical
+content, so one comparison settles every file instead of a couple of them. It is
+also why the commit comes BEFORE the symlink — node_modules in the index would
+change the hash — and why 'git add' carries '-f': the extraction holds tracked
+files only, so anything a repo's own '.gitignore' would skip is a file that
+commit must still carry.
+
+Report \`head\` = the full sha 'git -C ${worktree} rev-parse HEAD' prints; the
+destination path carries only the short form.
 
 Then capture the PR's diff for the specialists, plus the two facts the caller
 needs to judge whether it is usable:
@@ -887,13 +910,14 @@ rather than sending six specialists into another run's tree. Report the HEAD
 sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
-omit diffStats entirely. Only runRoot, path, head and pathVerified are ever required —
-diffStats, diffPath, diffLines and prHead are each omitted independently when
-their command failed. Do not modify ${worktree}.`,
+omit diffStats entirely. Only runRoot, path, head, pathVerified and repoVerified
+are ever required — diffStats, diffPath, diffLines and prHead are each omitted
+independently when their command failed, and repoError only accompanies a false
+repoVerified. Do not modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", agentType: "fleet-ctl:fleet-review-snapshot", schema: {
       type: "object",
       additionalProperties: false,
-      required: ["runRoot", "path", "head", "pathVerified"],
+      required: ["runRoot", "path", "head", "pathVerified", "repoVerified"],
       properties: {
         // The run root 'mktemp -d' created, printed as SNAPSHOT_RUN_ROOT and
         // copied back verbatim. REQUIRED, and checked by `snapshotMissing`
@@ -913,6 +937,21 @@ their command failed. Do not modify ${worktree}.`,
         // false report into a refusal: the caller checks the tree exists rather
         // than trusting the agent said so (#140).
         pathVerified: { type: "boolean" },
+        // The tree-hash compare the shell block above runs, REQUIRED for
+        // `pathVerified`'s reason one step further on: that field says the tree
+        // is THERE, this one says it is MEASURABLE — a git repository whose
+        // commit holds the reviewed tree, so the suite specialists run inside
+        // it collects and runs what a checkout does. An omitted boolean must
+        // not read as a verified environment, because the defect was a
+        // measurement nothing in the payload said was taken somewhere else
+        // (#1056). Unlike `pathVerified` this one does NOT refuse the review —
+        // see `environmentNote`, which reports it instead.
+        repoVerified: { type: "boolean" },
+        // Only when `repoVerified` is false: whichever SNAPSHOT_* line the
+        // block printed in place of SNAPSHOT_TREE_MATCH, so the payload says
+        // WHY the environment differs and not merely that it does. Optional,
+        // because a verified snapshot has nothing to say here.
+        repoError: { type: "string" },
         // The verbatim single-line JSON from diff-stats.mjs stdout. Parsed by the
         // caller: routing the deterministic classifier's output through the agent
         // as one opaque blob — not six re-typed booleans — means a mangled copy
@@ -1045,11 +1084,60 @@ function snapshotMissing(snap, runRootPrefix) {
     return `the snapshot at ${snap.path} is not under this run's own root ${snap.runRoot} — refusing a tree that may belong to another run`;
   if (snap.path.includes("/../") || snap.path.endsWith("/.."))
     return `the snapshot at ${snap.path} climbs out of ${snap.runRoot} with a \`..\` segment — the prefix says nothing about where it resolves`;
-  if (!snap.pathVerified)
+  if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
     return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is ${snap.prHead} — refusing to review a commit that is not the PR`;
   return null;
+}
+
+// #1056. What a suite run inside the snapshot is evidence ABOUT, in one
+// paragraph every specialist prompt and the returned payload both carry.
+//
+// The defect: the snapshot was cut with `git archive HEAD | tar -x`, which is
+// not a git repository, and this repo's suite has whole files that need an
+// ambient working tree to police what ships. In a bare extraction they
+// declined — 19 tests of 2401, measured at ffa9026 — while the payload
+// reported a plausible total and `fail 0`, so no reader could tell a dimension
+// that measured the tree from one that measured 19 checks less of it. Earlier,
+// before those files learned to decline, the same cause hard-FAILED them, and
+// two dimensions in one run withdrew themselves over a red they could not
+// attribute.
+//
+// `repoVerified` false is deliberately NOT a refusal (`snapshotMissing` says
+// nothing about it): the tree is still reviewable, and refusing would trade a
+// wrong test count for no coverage at all — which is the expensive half of this
+// defect, not a remedy for it. What the review cannot do is present the count
+// as a validation while nothing says the measurement happened somewhere else,
+// so the fact travels with the payload instead.
+//
+// The verified branch states the synthetic history too, because making the
+// snapshot a repository is what makes a git command answer there AT ALL: one
+// commit, no ancestry, no remotes, so `git log`/`git diff` now return plausible
+// output about the snapshot in place of the `fatal:` that used to stop that
+// question being asked.
+function environmentNote(snap) {
+  if (snap && snap.repoVerified === true)
+    return `Test environment: the snapshot is a git repository whose single commit holds
+the reviewed tree — its tree hash was compared against the commit under review
+when the snapshot was cut. A suite run here collects and runs what a checkout at
+that commit does, so a failing or skipped test is a fact about the tree, not
+about this copy of it. Its history is that one synthetic commit: 'git log',
+'git diff' and every ancestry question answer about the snapshot and never about
+the PR.`;
+  const cause = snap && snap.repoError;
+  if (cause && cause.startsWith("SNAPSHOT_TREE_MISMATCH"))
+    return `Test environment UNVERIFIED — ${cause}.
+The init succeeded: the snapshot IS a git repository, but its tree is not the
+commit under review — 'git init' committed the extraction, and the commit's
+tree does not match. A suite run here still executes against a real checkout,
+so its counts are real measurements, but of a DIFFERENT tree than the one
+under review: a failure in it says nothing about the reviewed commit.`;
+  return `Test environment UNVERIFIED — ${cause || "the snapshot agent did not report a verified repository"}.
+A 'git archive' extraction is not a git repository, and every test that needs
+one skips or fails there for that reason alone, so a suite run here is NOT a
+validation of the tree: its counts are snapshot-measured, and a failure in it
+cannot be told apart from a regression.`;
 }
 
 // Neither sha is normalized on the way here. `prHead` is 40 lowercase hex from
@@ -1086,6 +1174,11 @@ if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 // unbackstopped one, so it is said rather than left to be inferred from a field
 // this line never printed.
 log(`snapshot ${snap.head} at ${snap.path} — PR head ${snap.prHead ?? "(absent): head check SKIPPED"}`);
+
+// The measurement environment, beside the tree it measures. Logged rather than
+// left to the payload alone so a run log read on its own still says which
+// regime every dimension's `test_run` was taken in.
+log(environmentNote(snap));
 
 // Resolved here, right after snap is known good: everything downstream (the
 // specialist prompt) just interpolates `testCmd`. Throws when neither an
@@ -1380,6 +1473,11 @@ everything skipped. And a count well below what the whole tree reports means you
 ran a PARTIAL copy: nothing downstream can catch that one for you, because only
 your own run knows what the full tree reports. Run from the snapshot's root, and
 report any of these as unrun.
+
+${environmentNote(snap)}
+
+A failure you cannot separate from the environment is neither a finding nor a
+reason to file nothing — say which it is, beside the counts, in \`test_run\`.
 Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
@@ -1466,6 +1564,8 @@ is set to a corrupted value, while zsh behaves exactly as with the bare
 
 ${readRules(usableDiff(snap), stats, snap)}
 
+${environmentNote(snap)}
+
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
 Scratch: ${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}/
 Everything you write — mutants, fixtures, scratch repos — goes there and nowhere
@@ -1534,6 +1634,12 @@ return {
   pr,
   head: snap.head,
   snapshot: snap.path,
+  // #1056. Present in BOTH regimes, not only the degraded one: a reader of
+  // this payload can never be left unable to tell an environment artifact from
+  // a regression, and saying so when nothing is wrong costs one line. A field
+  // that appeared only on failure would have to be noticed by its absence,
+  // which is how `dimensionsUnrun` came to be read past.
+  testEnvironment: environmentNote(snap),
   dimensionsRun: dimensions.map((d) => d.key),
   dimensionsUnrun,
   survived: survived.sort(bySeverity),

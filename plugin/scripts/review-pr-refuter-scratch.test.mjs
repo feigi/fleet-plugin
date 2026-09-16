@@ -63,7 +63,10 @@ const TEMPLATE_END = "{ label: `verify:";
 // — which is why `runScratch` is gone from this list. The binding is what makes
 // the "stays under the run's provisioned scratch root" test below mean what it
 // says: that root is per RUN now, not per session.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff"];
+// `environmentNote` joined the list at #1056: the refuter prompt now carries
+// what its own suite run is evidence about, so a render that does not bind it
+// throws a ReferenceError rather than dropping a paragraph silently.
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -95,6 +98,7 @@ function render({ finding = 0, lens = 0, runScratch = "/scr" } = {}) {
     finding,
     () => "READ RULES",
     () => null,
+    () => "TEST ENVIRONMENT",
   );
 }
 

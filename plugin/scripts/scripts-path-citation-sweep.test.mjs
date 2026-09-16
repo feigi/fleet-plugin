@@ -30,9 +30,10 @@
 // for the sibling `*-sweep.test.mjs` files in this directory.
 //
 // KNOWN LIMIT, same as those siblings: needs an ambient `.git` to ask what
-// ships. Absent one — a `git archive` extraction, how review specialists
-// measure this very suite (#1056) — the tests below DECLINE with a reason
-// rather than running; nothing here polices a tree it cannot see.
+// ships. Absent one — a bare `git archive` extraction, how review specialists
+// used to measure this very suite (#1056; the review snapshot carries a `.git`
+// since then) — the tests below DECLINE with a reason rather than running;
+// nothing here polices a tree it cannot see.
 //
 // Zero deps: `node --test plugin/scripts/scripts-path-citation-sweep.test.mjs`.
 

@@ -1488,7 +1488,17 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
+It returns `{pr, head, snapshot, testEnvironment, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
+**`testEnvironment` says what every dimension's `test_run` is evidence about**,
+and it is present on a healthy run as well as a degraded one, so there is
+nothing to notice by its absence. The snapshot is `git archive`d and then
+`git init`ed with one commit, and the block that cuts it compares that commit's
+tree hash against the reviewed commit's (#1056): verified, a suite run in the
+snapshot collects and runs what a checkout does, and a red is a fact about the
+tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
+the environment, and this field carries which line of the cut failed. Read it
+before you act on any `test_run` count, and before you rule a dimension unrun
+over a red suite.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Hand those over
 with the rest; never rule on them yourself. **`refutersDispatched`, carried on
@@ -2711,9 +2721,13 @@ failures arrive as *wrong findings*, not errors:
   still collide on one postgres. "I'm on my own copy" is exactly the intuition
   that skips the command — say both, every time. Which command depends on the
   audience: a member in a worktree uses `./agent-test`; a specialist on a
-  snapshot does not — the tracked bootstrap (#55) needs a real git repository
-  to materialize the runner, which a `git archive` snapshot lacks — and takes
-  the one `review-and-fix.md` hands out. See references/isolation.md.
+  snapshot does not — the runner that bootstrap materializes derives its
+  isolation triple from the directory name, and a snapshot is not a claimed
+  worktree, so every snapshot in the fleet gets the same fixed ports — and
+  takes the one `review-and-fix.md` hands out. The bootstrap itself now
+  SUCCEEDS there (the snapshot is a git repository since #1056), which is why
+  the reason to hand out a different command is the stack and not a
+  materialization failure. See references/isolation.md.
 - **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
   outside them.** Finding ids restart at 1 every review, so two fix-appliers on
   different PRs both reach for `unv1`; one agent overwrote a sibling's

@@ -132,6 +132,19 @@ test("a snapshot that omitted pathVerified is refused, not assumed true", () => 
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
 });
 
+// #1056 Finding 2: a string is not a boolean. `pathVerified` used to be
+// checked with `!snap.pathVerified` — a falsy check — so the STRING "false"
+// (truthy in JS) passed it silently, defeating the exact defect class this
+// field exists to guard against just as surely as an omitted field would.
+// `repoVerified`'s sibling check is `=== true` (snapshot-repo.test.mjs pins
+// it); this mirrors that guard onto `pathVerified`.
+test("a non-boolean truthy pathVerified is refused, not accepted as verified", () => {
+  const falseString = snapshotMissing({ path: SNAP, head: "abc123", pathVerified: "false" });
+  assert.equal(typeof falseString, "string", 'a `pathVerified` of the STRING "false" must still yield a reason — it is truthy, not the boolean the check requires');
+  const trueString = snapshotMissing({ path: SNAP, head: "abc123", pathVerified: "true" });
+  assert.equal(typeof trueString, "string", 'a `pathVerified` of the STRING "true" must still yield a reason — a schema bypass or a hand-built fixture can carry the word rather than the value');
+});
+
 // #532: the head compare already existed — in `usableDiff`, where a
 // mismatching `prHead` cost the review its DIFF and nothing else. The review
 // then ran to completion against a tree that was not the PR, on the fallback
@@ -405,6 +418,9 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
 //   probe AFTER the symlink -> `ls -A` counts the symlink, so a `git archive`
 //     that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in every repo that
 //     has node_modules (which is every repo the symlink exists for).
+//   probe AFTER the `git init` -> the same thing one directory entry later, and
+//     in EVERY repo rather than only the ones with node_modules: `.git` alone
+//     makes `ls -A` non-empty (#1056).
 //   guard MISSING -> the wipe is executed text, not evaluated JS, so an empty
 //     `scratch` emits a wipe rooted at `/` and runs it.
 //   wipe MISSING (or after `tar -x`) -> `mkdir -p` never empties and `tar -x`
@@ -434,6 +450,10 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
   const snapshot = snapshotBlock();
   let prev = -1;
   for (const [needle, gone] of [
+    [
+      /unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR/,
+      "the ambient git vars are no longer cleared before this block runs — an inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_TEMPLATE_DIR can retarget the SHA capture, the archive, the tree-hash compare, or the init's template silently, and nothing downstream in the block catches it (#1056)",
+    ],
     [
       /\[ -n "\$\{scratch\}" \] \|\| \{ echo SNAPSHOT_SCRATCH_UNSET/,
       "the empty-scratch guard is gone — an empty interpolation now creates this run's artefacts at `/` instead of refusing by name",
@@ -465,6 +485,26 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
     [/mkdir -p "?\$SNAP"?/, "the mkdir is gone — `tar -x` has nowhere to extract to"],
     [/git -C \$\{worktree\} archive HEAD/, "the archive is gone — there is no snapshot to review"],
     [/\[ -n "\$\(ls -A "\$SNAP"\)" \]/, "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
+    [
+      /\( cd "\$SNAP" && git init -q/,
+      "the snapshot is no longer made a git repository — a bare extraction leaves it unmeasurable, and repo-needing tests silently skip or fail there (#1056)",
+    ],
+    [
+      /git init -q && git add -A -f/,
+      "the init no longer force-adds — a file a repo's own .gitignore covers is tracked at HEAD and present in the extraction, so plain `git add` leaves it out and the tree hash cannot match",
+    ],
+    [
+      /commit -q --no-verify/,
+      "the snapshot commit is gone — an index alone gives no HEAD, so nothing can compare the snapshot's tree against the reviewed commit's",
+    ],
+    [
+      /SNAPTREE=\$\(git -C "?\$SNAP"? rev-parse 'HEAD\^\{tree\}'/,
+      "the snapshot's own tree hash is never read — `repoVerified` has nothing mechanical behind it",
+    ],
+    [
+      /echo SNAPSHOT_TREE_MATCH \|\| echo SNAPSHOT_TREE_MISMATCH/,
+      "the tree compare no longer names its two outcomes — a failed init or a snapshot that is not the reviewed tree goes back to being reported as a verified environment",
+    ],
     [/ln -s \$\{worktree\}\/node_modules/, "the node_modules symlink is gone — a derived `npm test --` cannot run"],
   ]) {
     const at = snapshot.search(needle);
@@ -508,11 +548,13 @@ test("the run root and the sha each refuse by name rather than shortening the de
 // `mktemp` would stay green on a block that had stopped varying. Only the lines
 // up to SNAPSHOT_RUN_ROOT are lifted — `mkdir`, `mktemp` and the echo, and the
 // block prints the root ahead of the sha precisely so those three stand alone.
-// So this needs no git at all, which matters because the suite is RUN from a
-// `git archive` snapshot during a review and that extraction is not a
-// repository: a test shelling out to `git rev-parse` there fails on the
-// environment rather than on the code. What the rest of the block does is
-// pinned by the sequence test.
+// So this needs no git at all, which is worth keeping even now that the review
+// snapshot is one: a test that shells out to git in the snapshot depends on the
+// very mechanism under review here (#1056), so a regression in the init would
+// surface as this pin failing on its environment instead of on the block it
+// pins. `snapshot-repo.test.mjs` is where git IS exercised, against fixture
+// repositories it builds itself. What the rest of the block does is pinned by
+// the sequence test.
 function mintScript(scratch) {
   const snapshot = snapshotBlock();
   const from = snapshot.search(/^ *mkdir -p "?\$\{runRootParent\}"?/m);
@@ -692,7 +734,7 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
   // after the schema that produces `pathVerified`, and before the first thing
   // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
   // for a tree that was never confirmed to exist.
-  const schemaAt = CODE.indexOf('required: ["runRoot", "path", "head", "pathVerified"]');
+  const schemaAt = CODE.indexOf('required: ["runRoot", "path", "head", "pathVerified", "repoVerified"]');
   const callAt = CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);");
   const testCmdAt = CODE.indexOf("const testCmd = resolveTestCmd(");
   assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");

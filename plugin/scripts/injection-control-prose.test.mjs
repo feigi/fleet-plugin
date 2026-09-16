@@ -155,7 +155,7 @@ const SEATS = [
 // The free names each template interpolates, in the order `render` binds them —
 // the same list review-pr-refuter-scratch.test.mjs uses, because both harnesses'
 // copies of this dispatch interpolate the same set.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff"];
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"];
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
 
@@ -184,6 +184,7 @@ function renderTemplate(dir, file) {
     0,
     () => "READ RULES",
     () => null,
+    () => "TEST ENVIRONMENT",
   );
 }
 
