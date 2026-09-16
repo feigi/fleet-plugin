@@ -195,10 +195,16 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
 
 test("the fleet implementer definitions classify as implementer — `^impl-` cannot reach an omp row", () => {
   // `^impl-` is anchored at the start of `${agentType} ${description}`, so it
-  // only ever fires through a Claude member NAME (`impl-332`). omp never puts a
-  // name in either field — its member id is a generated CamelCase word pair
-  // that names nothing — so the definition is the only implementer signal that
-  // side has. Measured 2026-09-16 before this branch: 90 omp
+  // only ever fires through a Claude member NAME (`impl-332`). readOmpMember
+  // never hands the AgentId to classifyRole — it is parsed only for
+  // parseMemberName's ticket/pr (member-record.mjs:554-555), by design, not
+  // passed as a role signal — so the definition is the only implementer
+  // signal a definition-dispatched omp member has. That does not close the
+  // gap for every omp member: one dispatched under the default `task`
+  // definition (`fix-pr-<n>`, `merge-bot-<n>`, `impl-<n>`) carries no
+  // definition signal either and still falls through to the description
+  // patterns below; reaching those is a separate change, left to a
+  // follow-up ticket. Measured 2026-09-16 before this branch: 90 omp
   // fleet-implementer/-alt rows split 73 other, 7 merge-bot, 5 finisher,
   // 5 reviewer, none of them implementer, while the same definition booked
   // implementer on all 109 Claude rows.
