@@ -1480,15 +1480,12 @@ iterates zero times over the empty substitution: no error, no latch, no DEGRADED
 line — total silence per tick, which is exactly what this section exists to
 remove. Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
 through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
-"$prs")` form, never a bare `for pr in $prs`** — measured, that bare form runs
-ONE iteration under zsh with both numbers glued into a single value, while
-`sh` and `bash` split it correctly, so the bug hides in whichever shell you
-happened to test in. zsh word-splits a command substitution's *result* but not a
-bare parameter expansion, so this applies to **every** loop in the block, the
-`blind`-latch removal included: under a bare `for b in $blind` a recovered PR
-never leaves the list and the block emits a fresh RECOVERED every tick
-thereafter — the per-tick volume the latch exists to prevent, wearing a latch's
-clothes again.
+"$prs")` form, never a bare `for pr in $prs`** — the assigned-variable trap in
+**Shell traps** above, which carries the mechanism and the measurements. It
+applies to **every** loop in this block, the `blind`-latch removal included:
+under a bare `for b in $blind` a recovered PR never leaves the list and the block
+emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
+exists to prevent, wearing a latch's clothes again.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 **gate on the payload's own fields**, applied to the watcher. `not-green` is an
@@ -2351,17 +2348,13 @@ would land in. Each is measured, and they fail in different directions:
   so a gate reading per-job state from it can never be satisfied. One bot polled
   ~2000 REST calls over 15 minutes on a PR that was green throughout, and had to
   be killed. It does not look like a bug; it looks like patience.
-- **`$?`/`PIPESTATUS` is unconditionally-TRUE in zsh.** zsh has no `PIPESTATUS`
-  (its array is lowercase `pipestatus`, 1-indexed), so `${PIPESTATUS[0]}` is
-  always empty and `[ "" -eq 0 ]` passes. A bot's merge gate opened without ever
-  reading an exit code.
-- **`status` is a READ-ONLY variable in zsh**, an alias for `$?`. So the obvious
-  bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` —
-  aborts with `read-only variable: status`. Measured this way it fails safe (a
-  hard abort, no merge), but the same assignment inside an `if`, or with stderr
-  suppressed, reads as a check that silently did not run. Same root cause as the
-  `PIPESTATUS` trap above, opposite failure direction — so name the variable
-  anything else (`ci_status`).
+- **Shell traps go in the brief too, verbatim** — every entry in that section,
+  which is where they are stated once, and this is the seat that has to paste
+  them: the bot's own watcher step captures `gh pr list` output and loops over
+  it, which is the assigned-variable trap, and its merge gate reads an exit code,
+  which is the `PIPESTATUS` and read-only-`status` pair. That step lives in
+  `run-merge-bot.md`'s **Then stay armed**, which a dispatched bot skips — so the
+  loop trap reaches it through this brief or not at all.
 - **A `jq` exit outside 0 and 1 is not a verdict.** `jq -e` exits 0 when its
   last output was truthy and 1 when it was false or null — the outcomes that
   invite reading the code as a boolean. Every other exit means the gate never
