@@ -604,17 +604,57 @@ So, when you re-create a worktree for an already-open PR:
   `git worktree add --detach <path> origin/<branch>`. Same scratch repo, same
   moment: this landed on the remote's commit. It removes the mechanism rather
   than catching it, and leaves no local ref for the next run to inherit.
-- **Then verify, and refuse on mismatch.** Compare
+- **Then verify against the branch REF, and refuse on mismatch.** Compare
   `git -C <path> rev-parse HEAD` against
-  `gh pr view <N> --json headRefOid -q .headRefOid`. Unequal → dispatch nothing
-  into that worktree, and report it naming BOTH commits, since their subjects
-  will not tell them apart.
+  `git ls-remote origin refs/heads/<branch> | cut -f1` — the ref itself, which
+  is what the PR's head actually is. Unequal → dispatch nothing into that
+  worktree, and report it naming BOTH commits, since their subjects will not
+  tell them apart. **An empty read is neither equal nor a mismatch**: the read
+  failed, or that head branch is not on `origin` at all (a fork PR, where the
+  creation form above cannot work either), so report the ref as unreadable
+  rather than the worktree as wrong — the same hole `[ -n "$pre" ]` closes on
+  the way into `run-merge-bot.md`'s step-1 poll.
+- **Read `gh pr view <N> --json headRefOid -q .headRefOid` here too, and
+  record it — it is NOT the gate.** A `headRefOid` that disagrees with the ref
+  is the PR-object desync `run-merge-bot.md`'s step 1 says needs a controller,
+  so it is a fact to carry into that decision, never the operand this refusal
+  turns on.
+
+**Why the ref and not `headRefOid`: during the PR object's lag both operands go
+stale in the SAME direction, so that compare fails OPEN as readily as it fails
+closed.** The PR object spends the lag sitting on the PRE-rebase sha — cleared
+on re-poll attempt 24 (~2 min) in one wave and attempt 14 (~84s) in the next,
+both after `gh pr update-branch --rebase` returned `rc=0`, measured in
+`run-merge-bot.md`'s step 1 — and that is the very commit a clone which has not
+fetched since the rebase still has `origin/<branch>` pointing at. So the false
+REFUSAL (worktree current, PR object behind) is only half of it: cut the
+worktree from the stale remote-tracking ref and both sides read the superseded
+sha, the check reads EQUAL, and the dispatch lands on exactly the commit this
+paragraph exists to catch. Measured in a scratch repo (git 2.50.1): with the
+branch rebased onto an advanced `main`, force-pushed, and the clone not fetched
+since, `git worktree add --detach <path> origin/<branch>` landed on the
+pre-rebase `c774756` and printed its subject unchanged by the rebase, while
+`git ls-remote origin refs/heads/<branch>` read the true tip `62ba798` from
+that same unfetched clone. **Re-reading `headRefOid` on a settle window does
+not reach that half at all** — it fires only where the two disagree — which is
+why the operand changes here rather than the verdict gaining a window.
+
+**A mismatch is usually one `git fetch origin` old, so fetch and re-create once
+before reporting it.** `git worktree add --detach <path> origin/<branch>`
+resolves the LOCAL remote-tracking ref (measured above), so the ordinary cause
+is this clone's own staleness, and re-creating after a fetch costs seconds
+where the refusal costs a dispatch. **Bounded at one retry**: still unequal
+after the fetch → refuse and report, because the second reading is a push that
+landed while you worked, or a ref this clone cannot resolve, and neither gets
+better with more waiting.
 
 `review-pr.js` refuses a snapshot whose head is not the PR head, so the workflow
 review path is backstopped — except when `gh pr view` returned no head at all,
 which skips the compare rather than refusing on it. Its run log names that case:
 `PR head (absent): head check SKIPPED`. A worktree you hand to an agent directly
-is not. Verify here anyway.
+is not. Verify here anyway. **And that backstop compares against `headRefOid`**,
+so it inherits the lag above rather than settling it: a second chance to notice a
+stale snapshot, never a reason to skip the ref compare.
 
 ## Phase 2 — dispatch implementers
 
