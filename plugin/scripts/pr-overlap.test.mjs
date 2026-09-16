@@ -11,10 +11,10 @@
 // --b` error instead of a clear refusal naming the flag.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { spawnSync, execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./pr-overlap.mjs", import.meta.url));
@@ -55,20 +55,423 @@ test("CLI: --a given a whitespace-only value dies naming the flag", () => {
 test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict", () => {
   const bin = mkdtempSync(join(tmpdir(), "pr-overlap-bin-"));
   const gh = join(bin, "gh");
+  const log = join(bin, "calls");
   // `$3` is the PR number pr-overlap.mjs passes as `gh pr diff <pr> --name-only`.
   writeFileSync(
     gh,
-    '#!/bin/sh\ncase "$3" in\n  1) echo src/shared.ts ;;\n  2) echo src/shared.ts ;;\nesac\n',
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> ${log}\ncase "$3" in\n  1) echo src/shared.ts ;;\n  2) echo src/shared.ts ;;\nesac\n`,
   );
   chmodSync(gh, 0o755);
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
+  const calls = readFileSync(log, "utf8").trim().split("\n");
   rmSync(bin, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const payload = JSON.parse(r.stdout);
-  assert.deepEqual(payload, { a: 1, b: 2, files: ["src/shared.ts"], modules: ["shared"], dirs: ["src"], signal: "files" });
+  assert.deepEqual(payload, {
+    a: 1,
+    b: 2,
+    files: ["src/shared.ts"],
+    modules: ["shared"],
+    dirs: ["src"],
+    prose: [],
+    proseUnrun: null,
+    signal: "files",
+  });
+  // #705's signal costs nothing on a pair with no data file on either side,
+  // which is nearly every pair. An unconditional full-diff read would double
+  // this tool's `gh` traffic and hand its ENOBUFS cliff to every caller, so
+  // the two `--name-only` calls are the whole bill here.
+  assert.deepEqual(calls, ["pr diff 1 --name-only", "pr diff 2 --name-only"]);
+});
+
+// ---------------------------------------------------------------------------
+// #705: the prose-citation signal.
+//
+// A fixture is one throwaway directory holding a fake `gh` on PATH, a
+// `<pr>.names` and `<pr>.diff` per PR, and a real git repo the script runs
+// inside — the last one because the basename-ambiguity guard counts with
+// `git ls-files`, so a test that cannot control the tree cannot reach the
+// branch where a basename is dropped. An ABSENT `<pr>.diff` makes the fake
+// `gh` exit non-zero, which is how the degradation case below is driven.
+function fixture({ prs, tracked = [] }) {
+  const root = mkdtempSync(join(tmpdir(), "pr-overlap-prose-"));
+  const bin = join(root, "bin");
+  const data = join(root, "data");
+  const repo = join(root, "repo");
+  for (const d of [bin, data, repo]) mkdirSync(d);
+  for (const [pr, { names, diff }] of Object.entries(prs)) {
+    writeFileSync(join(data, `${pr}.names`), `${names.join("\n")}\n`);
+    if (diff !== undefined) writeFileSync(join(data, `${pr}.diff`), diff);
+  }
+  const gh = join(bin, "gh");
+  writeFileSync(
+    gh,
+    "#!/bin/sh\n" +
+      `case "$4" in\n` +
+      `  --name-only) cat ${data}/"$3".names ;;\n` +
+      `  *) cat ${data}/"$3".diff ;;\n` +
+      "esac\n",
+  );
+  chmodSync(gh, 0o755);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  for (const f of tracked) {
+    mkdirSync(join(repo, dirname(f)), { recursive: true });
+    writeFileSync(join(repo, f), "x\n");
+  }
+  if (tracked.length) execFileSync("git", ["add", "--", ...tracked], { cwd: repo });
+  return { root, bin, repo };
+}
+
+function run({ prs, tracked }, a, b) {
+  const fx = fixture({ prs, tracked });
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", String(a), "--b", String(b)], {
+    encoding: "utf8",
+    cwd: fx.repo,
+    env: { ...process.env, PATH: `${fx.bin}:${process.env.PATH}` },
+  });
+  rmSync(fx.root, { recursive: true, force: true });
+  return r;
+}
+
+// A unified diff body for one file. Only hunk lines matter to the scan; the
+// `+++`/`---` headers are present because they are what the parser has to
+// skip — they carry the path itself, so a parser that reads them finds every
+// data file "cited" by the PR that changed it.
+const hunk = (file, lines) =>
+  `diff --git a/${file} b/${file}\nindex 1111111..2222222 100644\n--- a/${file}\n+++ b/${file}\n@@ -1,3 +1,3 @@\n${lines.map((l) => l + "\n").join("")}`;
+
+const TSV = "docs/metrics/tier-outcomes.tsv";
+
+// The defect itself. #704 appended rows to the TSV, #703 held the prose that
+// reads it, and the two share no path, no module and no directory — so the
+// three original signals answered `none`, which is the strongest clear this
+// tool has and the one that licenses a merge.
+test("prose: a data file named in the other PR's diff fires signal=prose", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490\tclass=routine"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md"],
+          diff: hunk("plugin/skills/run-team/SKILL.md", [
+            " **Recount before citing any of this.**",
+            `+grep -vc '^#' ${TSV}`,
+          ]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.files, []);
+  assert.deepEqual(payload.dirs, []);
+  assert.equal(payload.proseUnrun, null);
+  assert.deepEqual(payload.prose, [
+    { data: TSV, citedBy: "plugin/skills/run-team/SKILL.md", token: TSV, line: `+grep -vc '^#' ${TSV}` },
+  ]);
+  // The witness is the whole value of a weak signal: one read disproves it.
+  assert.match(r.stderr, /cited by plugin\/skills\/run-team\/SKILL\.md/);
+});
+
+// Every citing file gets its own witness, and each one gets its OWN most
+// specific token. A loop that stopped at the first token matching ANYWHERE
+// reports one file and drops the rest — and the set of citing files is
+// exactly what the caller has to go read to disprove the hold.
+test("prose: each citing file reports its own witness, path token preferred", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md", "plugin/commands/run-merge-bot.md"],
+          diff:
+            hunk("plugin/skills/run-team/SKILL.md", [`+recount off ${TSV} and also tier-outcomes.tsv`]) +
+            hunk("plugin/commands/run-merge-bot.md", ["+the append lands in tier-outcomes.tsv"]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(
+    payload.prose.map((h) => [h.citedBy, h.token]),
+    [
+      // Names it both ways -> reported once, by path.
+      ["plugin/commands/run-merge-bot.md", "tier-outcomes.tsv"],
+      ["plugin/skills/run-team/SKILL.md", TSV],
+    ],
+  );
+});
+
+// The citer side is an explicit extension list, and the stderr note prints it
+// as the scan's scope — so it is an advertised bound and has to hold. Here a
+// DATA file's own hunks name another data file: `member-outcomes.tsv`'s header
+// really does cite `tier-outcomes.tsv` in this repo, and a run-artifact PR
+// really does edit both. Widen the citer side to every changed file and this
+// fires on every such pair.
+//
+// Nothing is lost by refusing it, which is what makes the bound defensible
+// rather than merely narrow: both files live under `docs/metrics/`, so `dirs`
+// already reports that pair — at exactly the weak strength it deserves. The
+// assertion below is that the case is covered THERE, not that it is ignored.
+test("prose: a data file's own hunks are not a citation site, and dirs still covers the pair", () => {
+  const OTHER = "docs/metrics/member-outcomes.tsv";
+  const cite = `+# verdicts live in ${TSV}, joined on pr`;
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: { names: [OTHER], diff: hunk(OTHER, [cite]) },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(payload.prose, []);
+  assert.deepEqual(payload.dirs, ["docs/metrics"]);
+  assert.equal(payload.signal, "dirs");
+
+  // Positive control on the identical citation: move it into a `.md` and the
+  // signal fires. Without this, a partition that dropped the data file from
+  // the TARGET side too would pass above for the wrong reason.
+  const inProse = {
+    prs: {
+      1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+      2: { names: ["docs/metrics/README.md"], diff: hunk("docs/metrics/README.md", [cite]) },
+    },
+  };
+  const second = JSON.parse(run(inProse, 1, 2).stdout);
+  assert.deepEqual(second.prose.map((h) => h.citedBy), ["docs/metrics/README.md"]);
+});
+
+// Which PR holds the rows and which holds the prose is not knowable from the
+// flags, so both directions are scanned. A one-directional wiring passes the
+// test above and misses half the pairs.
+test("prose: fires when the data file is on --b and the prose on --a", () => {
+  const r = run(
+    {
+      prs: {
+        1: {
+          names: ["plugin/commands/run-merge-bot.md"],
+          diff: hunk("plugin/commands/run-merge-bot.md", [`+read ${TSV} before ruling`]),
+        },
+        2: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.citedBy), ["plugin/commands/run-merge-bot.md"]);
+});
+
+// A diff's `+++`/`--- ` lines carry the path and begin with the same
+// characters a hunk line does, so a scan that reads them attributes a
+// citation to the patch's own plumbing. Reachable whenever a text file's path
+// CONTAINS a data file's — `docs/x.json.md` documenting `a/x.json` is the
+// ordinary spelling of that — and the witness it produces is a diff header,
+// which is the confident nonsense `moduleOf` above refuses to emit.
+test("prose: a diff's own file headers are not read as citations", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: ["a/x.json"], diff: hunk("a/x.json", ['+{"x":1}']) },
+        2: {
+          names: ["docs/x.json.md"],
+          diff: hunk("docs/x.json.md", ["+unrelated prose that names no file"]),
+        },
+      },
+      tracked: ["a/x.json", "docs/x.json.md"],
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(payload.prose, []);
+  assert.equal(payload.signal, "none");
+});
+
+// The other half, and the one that decides whether this signal is usable:
+// #703 DID touch `run-team/SKILL.md`, the very file whose tier-guard
+// paragraph reads the TSV, and was still correctly unrelated — its hunks
+// never reach that paragraph. A whole-FILE read fires here, permanently,
+// because SKILL.md names the TSV in nine places; reading the DIFF is what
+// reproduces merge-bot-9's hand-run clearing grep. Re-measured live on
+// #703 vs #704: `signal=none prose=0`, `proseUnrun: null`.
+test("prose: a citing file edited AWAY from its citation does not fire", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md"],
+          diff: hunk("plugin/skills/run-team/SKILL.md", [
+            " Its four duties are a checklist — audit the worktree,",
+            "+report, and the merge gate downstream still catches it.",
+          ]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "none");
+  assert.deepEqual(payload.prose, []);
+  // An empty result is only a clear when the scan actually covered the diff.
+  assert.equal(payload.proseUnrun, null);
+});
+
+// A bare stem with no extension is a word, not a reference. Every one of
+// run-team/SKILL.md's nine references to this file is written with the
+// extension — `docs/metrics/tier-outcomes.tsv` ×7, `tier-outcomes.tsv` ×2
+// (measured) — so matching the stem buys no coverage and is where the false
+// positives the ticket warned about would come from.
+test("prose: a bare stem with no extension is never matched", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["docs/notes.md"],
+          diff: hunk("docs/notes.md", ["+the tier-outcomes corpus is confounded with calendar date"]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).prose, []);
+});
+
+// `moduleOf`'s measurement, one file type over: a shared basename is not a
+// shared file. Two `config.json` in unrelated subtrees, and the citing PR
+// names the OTHER one — the full paths differ, so the only thing that could
+// fire is the basename, and the tree says that basename is ambiguous.
+// Derived from `git ls-files` rather than a deny-list, so it needs no
+// upkeep; delete the count and this reds.
+test("prose: an ambiguous basename is dropped, and the full path still decides", () => {
+  const tracked = ["a/config.json", "b/config.json"];
+  const base = {
+    prs: {
+      1: { names: ["a/config.json"], diff: hunk("a/config.json", ['+{"x":1}']) },
+      2: { names: ["docs/notes.md"], diff: hunk("docs/notes.md", ["+see b/config.json for the other one"]) },
+    },
+    tracked,
+  };
+  assert.deepEqual(JSON.parse(run(base, 1, 2).stdout).prose, []);
+
+  // Positive control for the same tree: the ambiguity guard drops basenames,
+  // never paths, so naming the changed file BY PATH still fires. Without
+  // this, a guard that dropped the data file entirely would pass above.
+  const byPath = {
+    ...base,
+    prs: {
+      ...base.prs,
+      2: { names: ["docs/notes.md"], diff: hunk("docs/notes.md", ["+see a/config.json for the one that moved"]) },
+    },
+  };
+  const payload = JSON.parse(run(byPath, 1, 2).stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.token), ["a/config.json"]);
+});
+
+// Ranked below `dirs` so it can only ever turn a `none` into something. A
+// ladder that put it first would relabel every existing verdict, and the
+// count on the summary line is what keeps the evidence visible underneath a
+// stronger one.
+test("prose: a prose hit never masks a stronger signal, and is still reported", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV, "docs/notes.md"], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: { names: ["docs/notes.md"], diff: hunk("docs/notes.md", [`+cites ${TSV} here`]) },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "files");
+  assert.deepEqual(payload.files, ["docs/notes.md"]);
+  assert.equal(payload.prose.length, 1);
+  assert.match(r.stderr, /prose=1/);
+  // The caveat block is keyed on the COUNT, not on `signal`: under a `files`
+  // verdict the ladder hides the stronger evidence, and the witness is what
+  // the caller disproves the pair with. Key it on `signal` and this reds.
+  assert.match(r.stderr, /prose citation/);
+  assert.match(r.stderr, new RegExp(`${TSV} cited by docs/notes\\.md`));
+});
+
+// Context lines are searched along with added and removed ones, deliberately:
+// the hazard is prose being rewritten NEXT TO a citation, not only a citation
+// being typed, and merge-bot-9's own clearing grep on #703 counted context
+// too. A scan narrowed to `+`/`-` lines misses the whole rewrite-in-place
+// case, which is the shape #705 describes — a paragraph edited underneath
+// rows landing beneath it.
+test("prose: a citation on a context line counts", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md"],
+          diff: hunk("plugin/skills/run-team/SKILL.md", [
+            `  grep -vc '^#' ${TSV}`,
+            "+recount before citing any of this",
+          ]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.token), [TSV]);
+});
+
+// The degradation, and the reason it is a field rather than a `die()`. A
+// run-artifact PR appends thousands of rows, so the full-patch read is the
+// one call here with a real ENOBUFS cliff — and this signal is ranked last,
+// so it must never be the reason the three above become unavailable. An
+// empty `prose[]` with no reason beside it would be byte-identical to a
+// clean scan, which is #705's own failure mode one level in.
+test("prose: a full-diff read that fails names itself and leaves the other three answerable", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: { names: ["plugin/skills/run-team/SKILL.md"] }, // no .diff: the fake gh exits non-zero
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(payload.prose, []);
+  assert.match(payload.proseUnrun, /gh pr diff 2 failed/);
+  assert.equal(payload.signal, "none");
+  assert.match(r.stderr, /prose scan INCOMPLETE/);
+  assert.match(r.stderr, /does not clear the same-section case/);
 });
 
 // #878: `--a 0`/`--b 0` is the row the `=== null` absence check exists for,
@@ -98,4 +501,143 @@ test("#878: --a 0/--b 0 reach gh rather than drawing the usage line for an absen
   const payload = JSON.parse(r.stdout);
   assert.strictEqual(payload.a, 0, `a zero --a must survive to the payload as 0: ${r.stdout}`);
   assert.strictEqual(payload.b, 0, `a zero --b must survive to the payload as 0: ${r.stdout}`);
+});
+
+// A `-`/`+` diff marker followed by CONTENT that itself starts with a dash
+// or plus (a removed `--pin ...` line, an added `++retry ...` line) composes
+// to `---`/`+++` — the same three characters a real file-header line begins
+// with. Gating capture on the `@@` hunk boundary rather than on those three
+// characters is what tells the two apart; testing the header text alone
+// mistakes the hunk-body line for its own file header and drops it.
+test("prose: a hunk-body line beginning with -- or ++ is still read as a citation, not mistaken for a diff header", () => {
+  const REMOVED_CITER = "docs/removed-hazard.md";
+  const ADDED_CITER = "docs/added-hazard.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: [REMOVED_CITER, ADDED_CITER],
+          diff:
+            hunk(REMOVED_CITER, [`---pin ${TSV} (stale, drop it)`]) +
+            hunk(ADDED_CITER, [`+++retry ${TSV} (kept)`]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(
+    payload.prose.map((h) => h.citedBy).sort(),
+    [ADDED_CITER, REMOVED_CITER],
+  );
+});
+
+// `trackedBasenameCounts()`'s own `git ls-files` failure must name its cause
+// the same way `changedFiles()` and `diffOf()` do — a bare `null` collapsing
+// into a fixed string is indistinguishable from every OTHER git failure, and
+// disables the ambiguity guard (full paths only) with no diagnostic to act
+// on. Shadows `git` on PATH so `git ls-files -z` fails; the full-path
+// citation below still fires because the guard narrowing to full-paths-only
+// is exactly what a failed count means, not a disabled scan.
+test("prose: a git ls-files failure names its cause instead of vanishing into a fixed string", () => {
+  const fx = fixture({
+    prs: {
+      1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+      2: { names: ["docs/notes.md"], diff: hunk("docs/notes.md", [`+cites ${TSV} here`]) },
+    },
+  });
+  const git = join(fx.bin, "git");
+  writeFileSync(git, "#!/bin/sh\nexit 1\n");
+  chmodSync(git, 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
+    encoding: "utf8",
+    cwd: fx.repo,
+    env: { ...process.env, PATH: `${fx.bin}:${process.env.PATH}` },
+  });
+  rmSync(fx.root, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.match(payload.proseUnrun, /git ls-files failed: exit 1/);
+  assert.match(r.stderr, /git ls-files failed: exit 1/);
+});
+
+// The guard counted only the PRE-PR index: a data file the PR itself ADDS is
+// untracked at this checkout, so subtracting nothing from an existing
+// OTHER tracked file's count left the added file wrongly "unique" — the two
+// files share a basename post-PR and neither should be citable by it alone.
+test("prose: a data file the PR itself adds is still checked against existing tracked basenames", () => {
+  const EXISTING = "other/dir/config.json";
+  const ADDED = "new/config.json";
+  const CITER = "docs/notes.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [ADDED], diff: hunk(ADDED, ['+{"x":1}']) },
+        2: { names: [CITER], diff: hunk(CITER, ["+see config.json for the format"]) },
+      },
+      tracked: [EXISTING],
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "none");
+  assert.deepEqual(payload.prose, []);
+});
+
+// The guard's other branch: a data file the PR only MODIFIES (already
+// tracked, exactly once) must still be matched by its bare basename. Only
+// the ambiguous case (count 2+) and the freshly-added case (count 0) were
+// covered before this — a mutation that narrows the "unique" boundary
+// silently drops this branch, and no test caught it.
+test("prose: a uniquely-tracked data file is still matched by its bare basename", () => {
+  const UNIQUE = "data/only-owner.json";
+  const CITER = "docs/notes.md";
+  const r = run(
+    {
+      prs: {
+        1: { names: [UNIQUE], diff: hunk(UNIQUE, ['+{"x":1}']) },
+        2: { names: [CITER], diff: hunk(CITER, ["+see only-owner.json for the schema"]) },
+      },
+      tracked: [UNIQUE],
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.token), ["only-owner.json"]);
+});
+
+// The other ranking pair: `dirs` sits ABOVE `prose` in the ladder, and no
+// test drove a PR pair where both fire simultaneously. A swap of that
+// ordering (`prose` checked before `dirs`) would pass the whole suite
+// untouched without this.
+test("prose: dirs outranks prose when both fire, and the prose hit is still reported", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV, "docs/metrics/other.md"], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["docs/metrics/notes.md"],
+          diff: hunk("docs/metrics/notes.md", [`+cites ${TSV} here`]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "dirs");
+  assert.deepEqual(payload.dirs, ["docs/metrics"]);
+  assert.equal(payload.prose.length, 1);
+  assert.match(r.stderr, /prose citation/);
 });
