@@ -1873,7 +1873,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    or diverged halts the finisher *here*, before the label: it reports
    what it found and labels nothing. A finisher that verifies the dirt is
    harmless and labels anyway has substituted the rule's purpose for the rule,
-   and you find out at merge time. **Give it the two-cause block below,
+   and you find out at merge time. **Give it the cause block below,
    verbatim** — a bare SHA mismatch names no cause, and the halt report needs
    one. **Give it `<testCmd>` too** — the same string you passed the workflow
    and the fix-applier — because duty 2's mutation gate runs it and nothing
@@ -1976,9 +1976,9 @@ its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
 guard — but its refusal costs a wave and leaves the label lying, which is yours
 to clear either way.
 
-A halt at step 1 has exactly two causes, reading identical from a bare SHA
-mismatch. Give the finisher this verbatim, so it derives the cause itself
-instead of asking anyone:
+A halt at step 1 reads identical from a bare SHA mismatch whatever caused it,
+and the causes below are the ones seen so far, not a closed list. Give the
+finisher this verbatim, so it derives the cause itself instead of asking anyone:
 
 > Worktree differs from your pin, or from what you last read. **Check
 > head-equality first: `worktree HEAD == the SHA you were dispatched against` on
@@ -1991,8 +1991,8 @@ instead of asking anyone:
 > that head's provenance — the implementer's own pre-push replay — not
 > divergence from it, and needs no adjudication at all. Three finishers in one
 > run adjudicated a reflog this one check had already answered. Only when the
-> head differs from your pin, decide which of two things happened — both cheap,
-> both self-checkable:
+> head differs from your pin, work out what happened. Each cause below is cheap
+> and self-checkable, and `anything else` is a cause too, not a gap:
 >
 > - **Live editor.** `git status --porcelain -unormal` is dirty. Sample
 >   `git diff --stat` twice, a minute apart — diffstat growing means someone
@@ -2003,10 +2003,40 @@ instead of asking anyone:
 >   base — its own commits on a new parent, content-identical only on a
 >   conflict-free replay.
 >   Halt, name `rebase`, report the reflog line.
+> - **Work past the pin.** `git status --porcelain -unormal` is clean, head
+>   still differs from your pin, and `git reflog` in the worktree reads a plain
+>   `commit` at the move — no `reset`/rebase entry there, any of those sitting
+>   at or behind the pin as provenance. A member kept working and committed
+>   after you were dispatched. Measured 2026-08-28 on #983, where the finisher
+>   matched neither cause above and halted on its own judgement (#997).
+>   Halt, name `commit past the pin`, and report **the commit, and whether it
+>   is pushed, unpushed, or unknown**: `git log -1 --format='%h %s'` names it,
+>   and `git ls-remote origin <branch>` answers the rest — a non-zero exit or
+>   any other failed read is **unknown**, never folded into "unpushed": the
+>   same rule `release-ticket.sh`'s own `ls-remote` names ("a failure here is
+>   an unknown answer, never a 'no'") and `reaping.md`'s remote check shares
+>   ("its failure is an unknown answer, never a 'not pushed'"). Only a
+>   successful read settles pushed vs not: equal to that commit means pushed,
+>   and a fresh finisher can audit it; a successful read that comes back
+>   without it means the commit exists only in that worktree, where no
+>   reviewer can reach it. Ask the remote, not the PR object, whose head lags
+>   a ref move — the same field `run-merge-bot.md` refuses to poll, for that
+>   reason. The controller's next move differs between pushed, unpushed, and
+>   unknown, so a report naming only two of the three is not a report of this
+>   cause.
+> - **Anything else.** Matching none of the above is not a licence to report
+>   the mismatch as unexplained — that report is the one this block exists to
+>   make unnecessary, and it is where labelling over a moved head starts
+>   looking reasonable. Halt, and name what you did find: both
+>   `git status --porcelain -unormal` samples, the `git reflog` line at the
+>   move, and both SHAs. A cause nobody has named yet is still a cause you
+>   observed, and your report is what gets it named.
 >
-> Either cause halts, always — you never verify the dirt is harmless and label
-> over it, and a rebase is not a fast-forward you get to accept. Naming the
-> cause makes the halt cheap to resolve, never a reason to skip it.
+> Every cause halts, always — named or not, you never verify the dirt is
+> harmless and label over it, a rebase is not a fast-forward you get to accept,
+> a commit past the pin is not one either, and a cause you could not name is
+> the least settled of the lot. Naming the cause makes the halt cheap to
+> resolve, never a reason to skip it.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
@@ -2170,7 +2200,7 @@ reviewer applies findings and pushes as each relay lands, so an
 unrelayed report is exactly as inbound as a fix-applier ruling you haven't sent
 (above) — dispatch past it and you pin a SHA the reviewer is about to move past.
 Necessary, not sufficient — a reviewer re-reading its own inbox late still moves
-the head, which is what the two-cause halt block above is for.
+the head, which is what the halt block's cause list above is for.
 Vacuous on the workflow path: `agent()` already returned every report before
 you had a tree to dispatch a finisher against, so nothing is ever outstanding
 there.
