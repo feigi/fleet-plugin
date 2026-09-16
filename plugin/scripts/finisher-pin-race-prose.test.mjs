@@ -158,17 +158,17 @@ test("the commit-past-the-pin cause is named, with a discriminator neither other
   );
 });
 
-test("the commit-past-the-pin report names the commit and whether it is pushed", () => {
+test("the commit-past-the-pin report names the commit and whether it is pushed, unpushed, or unknown", () => {
   const text = causeText();
-  // Pushed and unpushed need different controller moves, so a report shape that
-  // names the commit alone is a report of a different cause. Contiguous: the
-  // report verb, the cause's own name, and the two facts it owes travel
-  // together, and splitting them lets a mutant keep the halt while dropping
-  // what the halt is worth.
+  // Pushed, unpushed, and unknown need different controller moves, so a report
+  // shape that collapses any two of them is a report of a different cause.
+  // Contiguous: the report verb, the cause's own name, and the three facts it
+  // owes travel together, and splitting them lets a mutant keep the halt
+  // while dropping what the halt is worth.
   assert.match(
     text,
-    /Halt, name `commit past the pin`, and report \*\*the commit and whether it is pushed\*\*/,
-    "the report shape no longer owes both facts — a halt naming the commit without saying whether it is pushed leaves the controller unable to tell an unreviewed push from a commit no reviewer can even fetch",
+    /Halt, name `commit past the pin`, and report \*\*the commit, and whether it is pushed, unpushed, or unknown\*\*/,
+    "the report shape no longer owes all three facts — a halt naming the commit without saying pushed/unpushed/unknown leaves the controller unable to tell an unreviewed push from a commit no reviewer can even fetch, or from a check that never got an answer",
   );
   // Both commands, because "whether it is pushed" is only self-checkable if the
   // block says what to run. The remote read is `ls-remote`, not the PR object's
@@ -185,12 +185,23 @@ test("the commit-past-the-pin report names the commit and whether it is pushed",
     /`git ls-remote origin <branch>` answers the rest/,
     "the pushed read is gone or moved off `git ls-remote` — the PR object's head lags a ref move, so asking it reports an already-pushed commit as local-only",
   );
-  // The consequence, in both directions. Without it the two answers read as
+  // #997 finding: a FAILED `git ls-remote` (unreachable origin, non-zero exit)
+  // used to read as "anything else" — the same shape as a genuinely absent
+  // ref — which folds an unknown answer into "unpushed" and reports an
+  // already-pushed commit as local-only. This is the unknown-answer-as-a-"no"
+  // hole `release-ticket.sh` (1157-1179) and `reaping.md` (55) both forbid;
+  // pinning that this bullet now matches them.
+  assert.match(
+    text,
+    /a non-zero exit or any other failed read is \*\*unknown\*\*, never folded into "unpushed"/,
+    "a failed `ls-remote` (unreachable origin, non-zero exit) no longer names a third, unknown answer — it reads as indistinguishable from a successful read finding no matching ref, reporting an unreachable-origin failure as 'unpushed'",
+  );
+  // The consequence, in all three directions. Without it the answers read as
   // trivia and the next reader deletes one of them as redundant.
   assert.match(
     text,
-    /equal to that commit means pushed, and a fresh finisher can audit it; anything else means the commit exists only in that worktree, where no reviewer can reach it/,
-    "the pushed/unpushed answers no longer say what each one means for the controller — the distinction survives as a fact nobody can act on",
+    /Only a successful read settles pushed vs not: equal to that commit means pushed, and a fresh finisher can audit it; a successful read that comes back without it means the commit exists only in that worktree, where no reviewer can reach it/,
+    "the pushed/unpushed answers no longer say what each one means for the controller, or no longer require a successful read to reach either — the distinction survives as a fact nobody can act on, or a failed read can satisfy the unpushed branch again",
   );
 });
 
@@ -198,13 +209,20 @@ test("the cause list is open — no count is asserted, and an unmatched cause is
   const lead = leadIn();
   const text = causeText();
 
-  // Generic over the number word, in both slices that carried one. A count that
-  // has been wrong once will be wrong again, so a rewrite to "exactly three
-  // causes" is this defect again and not a fix of it — that is why these pins
-  // do not name `two`.
+  // Generic over the number word, in both slices that carried one. A count
+  // that has been wrong once will be wrong again, so a rewrite to "exactly
+  // three causes" is this defect again and not a fix of it — that is why
+  // these pins do not name `two`.
+  //
+  // Wide, not `exactly \w+ causes`: that narrower gap only forbade the literal
+  // word "exactly" immediately before the count, so restoring a closed count
+  // as "the three causes below" (no "exactly", one extra word before "causes")
+  // passed it clean — measured, mutate.py M4. `(?:\s+\w+){0,3}` spans the
+  // count word forward to "causes"/"things" through up to three filler words,
+  // which is what both slices' surrounding prose needs room for.
   assert.doesNotMatch(
     lead,
-    /exactly \w+ causes/,
+    /\b(two|three|four|five|\d+)\b(?:\s+\w+){0,3}\s+causes\b/i,
     "the lead-in asserts a fixed number of causes again — the enumeration is closed, and the cause that is not on the list reads as impossible to the finisher deriving it",
   );
   assert.match(
@@ -212,9 +230,13 @@ test("the cause list is open — no count is asserted, and an unmatched cause is
     /not a closed list/,
     "the lead-in no longer says the list is open — silence there is the closed reading restored, since a list with no disclaimer is read as complete",
   );
+  // Same widening, same reason: `which of \w+ things happened` only forbids a
+  // single word between "of" and "things", so "which of the three things
+  // happened" (two words: "the three") passed it clean — measured, mutate.py
+  // M3.
   assert.doesNotMatch(
     text,
-    /which of \w+ things happened/,
+    /\b(two|three|four|five|\d+)\b(?:\s+\w+){0,3}\s+things\b/i,
     "the block the finisher reads counts the causes again — the count word inside the `>` block is the one that reaches the finisher verbatim",
   );
   assert.match(
