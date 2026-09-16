@@ -1483,18 +1483,27 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 // they assert the correct ANSWER, which is what both the split and the reader
 // owe.
 //
-// WHAT KILLS THE MUTANT TODAY IS NOT THE MECHANISM ABOVE, and the difference
-// matters to anyone tidying the script. Measured on this tree, with the pin
-// deleted: the reader parses both conflicting paths correctly whatever the
-// locale, and the run then dies further down, when the `conflict: ` render that
-// prints them to stderr crashes on the byte — `sed: RE error: illegal byte
-// sequence`, and the script exits 1 rather than reporting a short list at 0.
-// So this test's kill now rests on a diagnostic render that decides nothing,
-// carries no `|| die`, and reads like safe cleanup. Neutralise or remove that
-// render and the mutant stops dying, with nothing going red to say so. #1160
-// tracks that render's own defect — it aborts a clean audit with the status
-// that means dirty — and carries the same warning in the other direction:
-// whoever fixes it must give this test a new kill mechanism first.
+// WHAT KILLS THE MUTANT, and the difference matters to anyone tidying the
+// script. Measured on this tree with the pin deleted: the reader parses both
+// conflicting paths correctly whatever the locale, and the kill lands further
+// down, in the `conflict: ` render that prints them to stderr. `sed` exits on
+// the byte — `sed: RE error: illegal byte sequence` on `b\377ad.txt` — and
+// emits nothing, so neither conflict line reaches stderr.
+//
+// That produces TWO kills today, and only one of them is this test's to keep.
+// The other is the render's exit status: unguarded under `set -eu` the audit
+// takes sed's own 1, which out of this script is the dirty-worktree refusal,
+// fabricated on a worktree the audit had already printed `clean` for. That is
+// a defect in the render rather than a property of the pin, #1160 is the
+// ticket for it, and once it is fixed the status assertion below stays green
+// under the mutant.
+//
+// So the kill this test keeps is the pair of STDERR assertions at the end of
+// it: with the pin the render names both conflicting paths, with the pin
+// deleted it names neither. They are the whole of what pins the locale here on
+// the behavioural side — the payload, the exit status and `subjects()` all
+// survive the mutant once the render stops deciding the verdict. Do not drop
+// them to tidy the test.
 //
 // The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
 // are load-bearing. Explicit rather than inherited, because a suite that takes
@@ -1531,6 +1540,13 @@ test("a conflicting path holding an invalid-UTF-8 byte still names every conflic
   assert.match(r.json.conflicts[0], /^b.ad\.txt$/, "the bad path arrives whole, not cut down to `b`");
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
     "and the commit a careless resolution would eat is named, rather than atRisk: [] at exit 0");
+  // The kill, per the block above. Matched on `.` rather than on the byte:
+  // `audit()` decodes the child's stderr as UTF-8 and substitutes U+FFFD for
+  // it on the way in, the same lossy read #613 measured on stdout.
+  assert.match(r.stderr, /^ {4}conflict: b.ad\.txt$/m,
+    "the render must name the bad path — with `export LC_ALL=C` deleted, sed exits on the byte and emits nothing");
+  assert.match(r.stderr, /^ {4}conflict: plain\.txt$/m,
+    "and the path behind it, which sed's failure takes with it whether it aborts the audit or not");
 });
 
 // #613: the test above parses the payload through `audit()`'s
