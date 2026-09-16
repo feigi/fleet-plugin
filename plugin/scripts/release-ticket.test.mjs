@@ -20,6 +20,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("./inflight.sh", import.meta.url));
@@ -257,12 +258,21 @@ function awkShim(r, marker) {
   );
 }
 
-function release(r, c, { apply = true, env = {}, cwd = r.w } = {}) {
+/**
+ * `timeout` is a wall-clock ceiling for the bounded-lookup pair at the end of
+ * this file and nothing else: those two runs are the only ones whose transport
+ * can hang, and without a ceiling a watchdog that never fired would hang the
+ * suite instead of failing the case. `error` is returned for the same pair — a
+ * run killed by that ceiling has a null status, which would otherwise read as
+ * a verdict rather than as a test that never got an answer.
+ */
+function release(r, c, { apply = true, env = {}, cwd = r.w, timeout = undefined } = {}) {
   const argv = apply ? [...c.args, "--apply"] : c.args;
   const res = spawnSync("sh", [SCRIPT, ...argv], {
     cwd,
     env: r.env(env),
     encoding: "utf8",
+    timeout,
   });
   return {
     code: res.status,
@@ -272,6 +282,7 @@ function release(r, c, { apply = true, env = {}, cwd = r.w } = {}) {
     // would accept a reordered or reformatted payload as identical.
     out: res.stdout,
     stderr: res.stderr,
+    error: res.error,
   };
 }
 
@@ -4263,4 +4274,75 @@ test("a claim whose worktree path holds a newline blocks, never releases (#551)"
   assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a mid-flight refusal produces");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
+// #1039. The bounded-transport pattern's coverage used to stop at the shared
+// helper: net.sh's budget, its stalled-signal arm and its kill-tree walk are
+// each pinned, and unattended-git-sweep.test.mjs pins that this script still
+// sources net.sh and still reaches net_git — but nothing ever ran this
+// script's OWN stalled-versus-failed wrapper. Measured on #1030's head, on the
+// sibling that carries the same shape: replacing the budget variable in the
+// stalled branch with an unbound one, so `set -eu` aborts where `die` was
+// meant to render, left that suite at its baseline pass count, byte-identical.
+//
+// One pair, the shape net.test.mjs uses for verify-sha.sh and
+// inflight.test.mjs for probe 2: one real slow transport, a budget above its
+// delay and a budget under it. The WORDING is the assertion target, because
+// both of this lookup's declines leave the same unknown answer and the same
+// exit 2 — only one of them names a cause this script observed.
+//
+// `ls-remote`, not a fetch: this is the pushed-branch lookup, and the budget
+// it reads is `net_budget 30` rather than the fetch sites' 300. The pair only
+// needs FLEET_NET_TIMEOUT to shorten it, which is the one direction the
+// override has.
+test("a slow but working ls-remote still releases the claim — the budget is not a stopwatch on success", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  // Rewired only after the claim exists: `worktree add` resolves origin/main
+  // from a ref the clone already has, but every push the fixture makes needs
+  // `receive-pack` and the stub serves `upload-pack` alone.
+  const origin = git(r.w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(r.w, "remote", "set-url", "origin", SSH_URL);
+  warmStub(stub, r.env());
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "fixture");
+
+  const { code, json, stderr, error } = release(r, c, {
+    env: { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    timeout: 60_000,
+  });
+
+  assert.equal(error, undefined, `the run did not come back: ${stderr}`);
+  assert.equal(code, 0, `a budget above the delay must leave the verdict alone: ${stderr}`);
+  assert.equal(json.released, true,
+    "the lookup really answered, and it answered that nothing was pushed — the verdict an unbounded ls-remote reaches");
+  assert.deepEqual(json.blockers, []);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.doesNotMatch(stderr, /did not finish within/,
+    "and nothing claims a budget elapsed, which is the wording the failure path owns");
+});
+
+test("an ls-remote killed by its budget leaves the claim alone, in this script's own words", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const origin = git(r.w, "remote", "get-url", "origin");
+  const stub = slowTransport(origin);
+  git(r.w, "remote", "set-url", "origin", SSH_URL);
+
+  const { code, stderr, error } = release(r, c, {
+    env: { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    timeout: 60_000,
+  });
+
+  assert.equal(error, undefined, `the run did not come back: ${stderr}`);
+  assert.equal(code, 2, `the answer is unknown, which is a refusal and never the exit 1 that carries a blocker list: ${stderr}`);
+  assert.match(
+    stderr,
+    /release-ticket: git ls-remote did not finish within 1s and was killed, so whether fix\/9-release-ticket was pushed is unknown/,
+    "this script's own decline, rendered, with the budget and the branch named in it: collapsing the stalled arm into the generic `git ls-remote failed` decline keeps the same exit 2, so only this wording — not the status check — catches it",
+  );
+  assert.doesNotMatch(stderr, /git ls-remote failed/,
+    "and not the refused-lookup wording, which names a cause this run never observed");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true },
+    "and all three artefacts survive — a release that proceeded here would have deleted work on a question that was never answered");
 });

@@ -12,9 +12,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
 
 const SCRIPT = join(import.meta.dirname, "net.sh");
 
@@ -146,7 +147,12 @@ const ENV = {
 };
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
-/** Bare origin + clone with one commit on main, reached through a 3s-slow ssh stub. */
+/**
+ * Bare origin + clone with one commit on main, reached through the shared
+ * slow-but-working ssh stub: a real transport serving this fixture's own refs
+ * from behind a delay. `slow-transport.mjs` owns that delay, and the two
+ * budgets this pair of cases is built on are chosen against it.
+ */
 function slowRepo(t) {
   const root = mkdtempSync(join(tmpdir(), "net-slow-"));
   t.after(() => execFileSync("rm", ["-rf", root]));
@@ -159,25 +165,16 @@ function slowRepo(t) {
   git(w, "push", "-q", "-u", "origin", "main");
   const head = git(w, "rev-parse", "HEAD");
 
-  const stub = join(root, "slow-ssh.sh");
-  writeFileSync(stub, `#!/bin/sh\nsleep 3\nexec git upload-pack '${origin}'\n`);
-  chmodSync(stub, 0o755);
-  // example.invalid is never resolved: GIT_SSH_COMMAND replaces ssh outright.
-  // The URL only has to be ssh-SHAPED, which is what routes git to it at all.
-  git(w, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+  const stub = slowTransport(origin, root);
+  git(w, "remote", "set-url", "origin", SSH_URL);
   return { w, head, stub };
 }
 
 test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget is not a stopwatch on success", (t) => {
   const { w, head, stub } = slowRepo(t);
   // Pay the stub's first-exec OS scan cost HERE, outside the region
-  // FLEET_NET_TIMEOUT bounds below — a freshly written executable's first
-  // execution carries that cost regardless of what it does, measured at
-  // ~7s of the 13-14s the bounded call used to take before the stub was
-  // warm (#1099). Same file, same bytes, run once and discarded, so the
-  // bounded call below only ever execs an already-scanned stub. Exit status
-  // is whatever an unfed `git upload-pack` returns and is irrelevant here.
-  spawnSync(stub, [], { env: ENV, input: "", timeout: 10_000 });
+  // FLEET_NET_TIMEOUT bounds — slow-transport.mjs holds the measurement.
+  warmStub(stub, ENV);
   const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
     cwd: w, encoding: "utf8", timeout: 60_000,
     env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
