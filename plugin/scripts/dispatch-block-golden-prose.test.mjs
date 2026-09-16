@@ -61,7 +61,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, quoteBlock, quoteBlocks } from "./prose-pin.mjs";
+import { between, phrase, quoteBlock, quoteBlocks } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -734,8 +734,14 @@ test("a carve-out appended inside a block reds — the shape the presence pins c
 test("a clause inserted mid-gap reds — the second shape the gap-bounded spans absorb", () => {
   const entry = ALL.find((b) => b.what === "phase 2's enumerate-the-class block");
   const raw = quoteBlock(entry.slice(), entry.opener, entry.what);
+  // Located through `phrase()`, never a literal: the words this clause is
+  // inserted between are two thirds of the way through a wrapped line, so a
+  // literal anchor stops finding them the moment the block is reflowed, and the
+  // guard below would then decline a control that should have run. Measured —
+  // it declined against a 45-column rewrap of the region until this anchor
+  // learned to span a wrap point.
   const midGap = "every member of that class (yes, even the boring ones) —";
-  const mutant = raw.replace("every member of that class —", () => midGap);
+  const mutant = raw.replace(phrase("every member of that class —"), () => midGap);
   assert.notEqual(mutant, raw, "the mid-gap insertion point moved — the clause was never inserted, so what follows would measure nothing");
   assert.notEqual(
     norm(quoteBlock(entry.slice(RUN_TEAM.replace(raw, () => mutant)), entry.opener, entry.what)),

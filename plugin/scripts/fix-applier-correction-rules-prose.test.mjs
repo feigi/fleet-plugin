@@ -35,12 +35,23 @@
 // than imported for the reason `implementer-model-tier.test.mjs` gives for
 // its own copy: two files, seven lines, nothing detects drift between them).
 //
-// THE CEILING these pins share with every prose pin in this directory: they
-// prove a phrase is PRESENT and ADJACENT to its neighbor. A sentence
-// appended after a pinned span that carves out an exception touches no
-// pinned fragment and stays green — closing that needs a different
-// mechanism (an LLM judge, a schema'd rule format), tracked separately, not
-// attempted here.
+// THE CEILING these pins have: they prove a phrase is PRESENT and ADJACENT
+// to its neighbor. A sentence appended after a pinned span that carves out
+// an exception touches no pinned fragment and stays green, and so does a
+// clause inserted inside one of the gaps above while it has headroom.
+//
+// #1002 closed that half for this prompt, with a mechanism that is not a
+// regex: `dispatch-block-golden-prose.test.mjs` holds a whole-block golden
+// fixture for the fix-applier prompt — its nested refuter prompt included —
+// and any insertion reds there, because the prompt no longer equals its
+// known-good copy. An LLM judge and a schema'd rule format were the two
+// candidates considered there and both were rejected.
+//
+// These pins were kept, not replaced. A golden red says the prompt changed
+// and hands the reader a diff; a red here names the correction rule that
+// went missing. Editing this prompt now reds both, deliberately: the golden
+// is re-blessed in the same change, which is the review point these pins do
+// not have.
 //
 // #859's own third acceptance criterion — the candidates.test.mjs live-count
 // clause restated as a property — is NOT covered by this file. Verified

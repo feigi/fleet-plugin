@@ -37,13 +37,26 @@
 // a standing rule containing the word "unless" is exactly the kind of text that
 // belongs in a verbatim block.
 //
-// THE CEILING, and it is the same one `member-prompt-prose.test.mjs` records:
-// these are pins on text being PRESENT and adjacent. A sentence APPENDED inside
-// a block that carves an exception out of a pinned rule touches no pinned
-// fragment and stays green. Closing that half needs a mechanism other than a
-// regex — an LLM judge over the instruction file, or a schema'd rule format —
-// and is tracked separately. Do not read a green run here as "no exception
-// could have been added to these blocks".
+// THE CEILING THESE PINS HAVE, and it is why they are no longer alone. These
+// are pins on text being PRESENT and adjacent. A sentence APPENDED inside a
+// block, carving an exception out of a pinned rule, touches no pinned fragment
+// and stays green; so does a meaning-changing clause inserted MID-GAP, inside
+// one of the four `.{0,N}?` spans below, wherever that gap still has headroom.
+// Both shapes were measured green here.
+//
+// #1002 closed that half with a mechanism that is not a regex —
+// `dispatch-block-golden-prose.test.mjs` holds a whole-block golden fixture for
+// every block this file slices, and any insertion reds there because the block
+// no longer equals its known-good copy. An LLM judge and a schema'd rule format
+// were the two candidates and both were rejected: a nondeterministic gate, and
+// a large change that still has to keep these blocks readable as prose.
+//
+// So read a green run here as "every pinned rule is still present and still
+// adjacent", never as "no exception was added to these blocks" — that second
+// claim belongs to the golden file, and these two are complementary. A golden
+// red says the block changed; a red HERE says WHICH RULE was lost, which is the
+// more actionable half and the reason none of these pins was deleted when the
+// golden landed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -15,15 +15,25 @@ import { join } from "node:path";
 // prose IS the defect, and every word would still be somewhere in the file — a
 // pin that only searched the section would stay green through the whole bug.
 //
-// Known ceiling, measured against this file's 6 tests. These are PRESENCE pins
-// over a slice, which covers the location half and only that half: moving the
-// identity lines back out of the `>` quoting fails the suite (pass 5, fail 1),
-// but a sentence APPENDED inside a block that contradicts a pinned one does
-// not — a carve-out after the identity block, or a conditional permission
-// after `Never apply ready-to-merge`, each leaves all 6 green. Left open on
-// purpose: asserting the absence of arbitrary natural-language negation is
-// unbounded, and a word blacklist ("unless", "except") buys a false-positive
-// trap on ordinary prose rather than the guarantee.
+// The ceiling these six tests have, measured against them: they are PRESENCE
+// pins over a slice, which covers the location half and only that half. Moving
+// the identity lines back out of the `>` quoting fails the suite (pass 5, fail
+// 1), but a sentence APPENDED inside a block that contradicts a pinned one does
+// not — a carve-out after the identity block, or a conditional permission after
+// `Never apply ready-to-merge`, each left all 6 green.
+//
+// #1002 closed that half elsewhere rather than by tightening these regexes,
+// which was tried and rejected on measurement: asserting the absence of
+// arbitrary natural-language negation is unbounded, and a word blacklist
+// ("unless", "except") buys a false-positive trap on ordinary prose rather than
+// the guarantee. `dispatch-block-golden-prose.test.mjs` compares every block in
+// this region — the identity block included — against a whole-block golden
+// fixture it owns, so an appended carve-out reds there on the equality.
+//
+// These pins stay because they say something that file's diff does not: WHICH
+// rule went missing, and the one thing a golden cannot express — the ACCEPT
+// side of `sizing-a-ticket`'s own conditioning, which lives in another file
+// entirely (see the last test below).
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
