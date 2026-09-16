@@ -19,10 +19,11 @@ import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 // override a user's proxy or timeout config — so the whole defect lives in the
 // prose, and prose is the only place it can be pinned.
 //
-// A pair, like inflight-citation-prose.test.mjs's: the corrected claims must be
-// present, and the form that rotted must not come back. Neither alone holds —
-// the positive pins survive a stray "lands on top of" spliced back in, and the
-// negative pin survives the whole clause being deleted.
+// A pair, like inflight-citation-prose.test.mjs's citing-side pins: the
+// corrected claims must be present, and the form that rotted must not come
+// back. Neither alone holds — the positive pins survive a stray "lands on top
+// of" spliced back in, and the negative pin survives the whole clause being
+// deleted.
 //
 // THE CEILING, same as that file's: PRESENCE pins over a bounded slice. Text
 // spliced INSIDE a pinned clause reddens them; a whole new sentence appended

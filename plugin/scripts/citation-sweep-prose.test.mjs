@@ -19,6 +19,20 @@ import { join } from "node:path";
 // (twice) in ledger.test.mjs, which is that test's own input/assertion
 // subject. Neither is touched here — the patterns below are the exact stale
 // forms the sweep actually converted, not a general `\.mjs:\d+` ban.
+//
+// Not #516-only any more. The table is this repo's citation-regression record
+// rather than that ticket's frozen inventory: #1136 generalized one entry's ban
+// after the number rotted a third time, #1349 retired one whose target no
+// longer exists, and #870 adds a pair of citations PR #866 fixed BY HAND
+// rather than through a sweep. A citation fixed anywhere in this tree belongs
+// here; the alternative is each file growing a private pin that reads its own
+// source, which is the per-file creep this file exists to stop.
+//
+// Both halves here are CITING-side: the stale form must not return, and the
+// construct the citation names must still be named. Neither reads the cited
+// file, so nothing in this table notices the TARGET losing the construct — the
+// direction #870 closes for probe 3's citation, in
+// inflight-citation-prose.test.mjs, and leaves open for every entry below.
 const REPO = join(import.meta.dirname, "..");
 const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 
@@ -79,6 +93,33 @@ const FILES = [
     live: ["verify-sha.sh's fetch trace"],
   },
   {
+    // #870. Not a #516 conversion: PR #866 fixed these two citations by hand,
+    // both `release-ticket.sh:15-25` -> a bare `release-ticket.sh`, and left
+    // them unpinned in both directions. Banned generally rather than at the one
+    // drifted value, for the reason the run-merge-bot entry below gives: a ban
+    // on `:15-25` alone lets `:14-24` straight back in. This file carries no
+    // other `release-ticket.sh:<digit>`, so the general form costs nothing
+    // today — and it will refuse one thing tomorrow, the same thing
+    // net-ssh-precedence-prose.test.mjs's negative pin already refuses and
+    // documents: a future sentence in that file recounting what the citation
+    // USED to say. Accepted on the same ground — that history belongs on the
+    // commit, not in a comment a reader could act on.
+    path: ["scripts", "reaping-prose.test.mjs"],
+    stale: [/release-ticket\.sh:\d/],
+    // One needle per SITE — the file header, and the comment inside
+    // `test("release-ticket.sh: the comment at the dirty check ...")` — because
+    // the finding is that the stale form can return to EITHER of them, and a
+    // needle satisfied from one site would not notice the other reverting. A
+    // bare `release-ticket.sh` would be vacuous outright: that file names the
+    // script in unrelated prose, in a path join and in a test name. Needles
+    // this long are the price of that: a copy-edit to either sentence reds
+    // here, which is a citation-shaped change asking to be re-read anyway.
+    live: [
+      "The script's header (release-ticket.sh) already carried the corrected wording",
+      "The header (release-ticket.sh) states the limitation",
+    ],
+  },
+  {
     path: ["scripts", "release-ticket.test.mjs"],
     stale: [/release-ticket\.sh:303/],
     live: ["empty-entry skip"],
@@ -129,7 +170,7 @@ for (const { path, stale, live } of FILES) {
       assert.doesNotMatch(
         source,
         pattern,
-        `a stale line-numbered citation matching ${pattern} is back in ${label} — #516 swept this exact form out because the cited file rots out from under a line number silently`,
+        `a stale line-numbered citation matching ${pattern} is back in ${label} — this form was converted away because the cited file rots out from under a line number silently, with nothing going red when it does`,
       );
     });
   }
@@ -138,7 +179,7 @@ for (const { path, stale, live } of FILES) {
     test(`${label} still names the construct its citation points to (${needle})`, () => {
       assert.ok(
         prose.includes(needle),
-        `${label} no longer mentions "${needle}" anywhere — the construct-named citation #516 introduced here appears to have been deleted outright rather than kept current`,
+        `${label} no longer mentions "${needle}" anywhere — the construct-named citation that replaced the stale form here appears to have been deleted outright rather than kept current`,
       );
     });
   }
