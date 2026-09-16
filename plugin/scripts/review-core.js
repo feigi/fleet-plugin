@@ -64,6 +64,15 @@
 // executes the whole file as the workflow's body. The two are kept in step
 // by the SAME parity test reading `runReview`'s use of the shared pure
 // functions against review-pr.js's own call sites.
+//
+// ONE import, added by #878: arg.mjs's isDigits(). This file is an ordinary
+// module — review-eval.mjs imports it — so it consumes the repo's digits
+// rule directly, where review-pr.js has to declare its own copy for the
+// sandbox reason above. That copy is not a copy of anything HERE, so
+// review-core-parity.test.mjs is not its pin; shared-refusal.test.mjs is,
+// running review-pr.js's lifted isDigits and arg.mjs's over the same values.
+
+import { isDigits } from "./arg.mjs";
 
 // --- Schemas ----------------------------------------------------------
 // Identical to review-pr.js's copy (`review-core-parity.test.mjs` pins it).
@@ -470,6 +479,28 @@ export async function runReview(host, args) {
   const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
+
+  // #878. The truthiness check above is what made the CLI fail-open REACHABLE:
+  // `pr` is interpolated into `gh pr diff ${pr}`, `gh pr view ${pr}` and
+  // `diff-stats.mjs --pr ${pr}` in the snapshot prompt below, and a branch name
+  // passes all three — `gh` resolves a non-numeric ref as a BRANCH, so the
+  // snapshot is a real diff belonging to whatever PR that branch heads while
+  // every return value here still reports the string that was passed. It is
+  // also a PATH component by then (`scratch`, `runRootParent` above), so a
+  // value like `../x` names a run root outside the scratch tree.
+  //
+  // REFUSED, never coerced. `Number(pr)` would make a bad value the string
+  // "NaN" at every one of those interpolation sites — a plausible-looking
+  // scratch directory and a `gh pr view NaN` — which is the same fail-open one
+  // level up. Here rather than downstream for the reason stated beside
+  // `explicitDimensions` below: validating late buys a snapshot agent and a
+  // directory on disk before a one-character mistake can be refused.
+  //
+  // isDigits() coerces, so a caller passing the NUMBER 42 (the fleet's own
+  // shape) and one passing "42" both pass, and `null`/`undefined` answer false
+  // — which is why this sits BELOW the required-args throw and never merged
+  // into it: an absent `pr` is owed "required", not a complaint about digits.
+  if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 

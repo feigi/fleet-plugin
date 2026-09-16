@@ -1020,6 +1020,26 @@ test("the numeric shape board.mjs sends is accepted, and the payload names its P
   assert.equal(r.payload.pr, 42);
 });
 
+// `--pr 0` is the row the `=== null` absence check exists for, and the one a
+// later "simplification" back to `!pr` silently breaks: numArg() returns a
+// NUMBER, so `!pr` is true for a zero the caller plainly GAVE, and this file's
+// own usage die above would then answer it with "--pr is required" instead of
+// letting gh answer as no such PR. Companion to arg.test.mjs's identical row
+// for diff-stats.mjs and pr-overlap.mjs's own for `--a`/`--b` — #878's own
+// comment names all three callers as sharing this contract, and only
+// diff-stats.mjs had this row before.
+//
+// `strictEqual`, same reason as the "42" test above: a payload reading `pr`
+// back as the string "0" would satisfy a loose check while breaking every
+// consumer that keys on a number.
+test("#878: `--pr 0` reaches gh rather than drawing the usage line for an absent flag", () => {
+  const r = run([], { pr: "0", repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /usage:/, `--pr 0 was answered as an absent flag: ${r.stderr}`);
+  assert.equal(r.payload.verdict, "green");
+  assert.strictEqual(r.payload.pr, 0, `a zero PR must survive to the payload as 0: ${JSON.stringify(r.payload)}`);
+});
+
 // What the new guard's PLACEMENT could newly break. It sits below the usage die
 // on purpose: RegExp.test coerces a null argument to the string "null", so a
 // guard merged into that die — or hoisted above it — answers an omitted --pr

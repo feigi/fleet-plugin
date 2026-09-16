@@ -143,7 +143,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { makeDie } from "./arg.mjs";
+import { makeDie, isDigits } from "./arg.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -155,7 +155,7 @@ const PR_LIMIT = 200;
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
 // see arg.mjs for the #176/#328/#363 rationale). This file parses its own
 // options with node:util's parseArgs rather than arg()/has() — see OPTIONS
-// below — so only die() is shared here.
+// below — so die() and the isDigits() rule int() calls are all it shares.
 const die = makeDie(NAME);
 
 const OPTIONS = {
@@ -237,10 +237,17 @@ function counts() {
     // No fallback: the guard above proves the entry exists, so a miss here
     // cannot be reached rather than being papered over with another flag's text.
     if (raw === undefined) die(`--${name} is required. ${WHY[name]}`);
-    // Regex, not Number(): `Number("")` is 0 and `Number.isInteger(0)` is true,
-    // so `--pool ""` — the shape an unset shell variable produces — would read
-    // as a genuine, empty pool.
-    if (!/^\d+$/.test(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
+    // #878: the digits rule, called rather than restated — it lived here as
+    // `/^\d+$/` and in ci-state.mjs as `/^[0-9]+$/`, two spellings of one
+    // invariant. The wording below stays this file's own, per arg.mjs: what
+    // travels is the rule, never the refusal text.
+    //
+    // Digits, not Number(): `Number("")` is 0 and `Number.isInteger(0)` is
+    // true, so `--pool ""` — the shape an unset shell variable produces —
+    // would read as a genuine, empty pool. `String(raw).trim()` stays here
+    // too, because parseArgs hands over a value arg() would already have
+    // refused through isFlagLike.
+    if (!isDigits(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
     return Number(raw);
   };
   const cap = (name) => {

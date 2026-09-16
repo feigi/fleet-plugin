@@ -1,5 +1,6 @@
-// Shared CLI-boundary helpers for the fleet scripts: die(), arg(), has(),
-// sweep(), stray(), and the two refusal rules isFlagLike()/hasEqualsForm().
+// Shared CLI-boundary helpers for the fleet scripts: die(), arg(), numArg(),
+// has(), sweep(), stray(), and the three refusal rules
+// isFlagLike()/hasEqualsForm()/isDigits().
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
@@ -47,14 +48,25 @@
 // itself. Read that output for the roster — the scripts this header names
 // exemplify a way of qualifying, and were never the whole of it.
 //
-// fleet-tick.mjs is the one script still outside the rules, and deliberately:
-// it parses its flags with node:util's parseArgs, so its unknown-flag,
-// required-flag and range refusals are a separate edit site on their own
-// terms — as is the empty-or-blank value its integer guard refuses, which is
-// the one spelling of the rule below that it hand-writes, because parseArgs
-// takes an empty value and `Number("")` is 0. That guard answers a question
-// about an integer GRAMMAR, not "is this a value at all", so isFlagLike()
-// would not express it.
+// fleet-tick.mjs is the one script still outside arg()/has(), and
+// deliberately: it parses its flags with node:util's parseArgs, so its
+// unknown-flag, required-flag and range refusals are a separate edit site on
+// its own terms. Its integer guard is no longer one of them — #878 gave the
+// digits grammar its own predicate (isDigits() below) precisely because
+// isFlagLike() cannot express it, and int() now calls that instead of
+// hand-writing the third spelling. What stays fleet-tick's own there is the
+// `String(raw).trim()` its input needs and the wording of its refusal, not
+// the rule.
+//
+// workflows/review-pr.js is a second edit site this header's grep CANNOT
+// see, and #878 is where it became one. A Claude Code Workflow script cannot
+// perform an import at all (#538, review-core.js's header), so it consumes no
+// symbol from here and no `from "./arg.mjs"` row will ever name it — while
+// its `pr` argument reaches `gh pr diff`, `gh pr view` and `diff-stats.mjs
+// --pr` all the same. Its copy of the digits rule is held in step by
+// shared-refusal.test.mjs, which runs it and isDigits() over the same values;
+// its host-independent twin review-core.js is an ordinary module and imports
+// the real thing.
 //
 // candidates.mjs qualifies the other way, which the reach test cannot express:
 // it binds makeArg/makeHas, so arg()'s refusals DO reach it — `node
@@ -120,9 +132,11 @@ export function makeDie(name) {
 // caller in per flag with its own end-of-options separator, `--gone --
 // '<value>'`, read before arg() ever sees the value — bare, with no `--`
 // immediately before it, this refusal still stands unchanged.
-// #567: the two predicates below ARE those rules, exported so a caller that
-// cannot route through arg()/has() consumes them instead of copying the
-// expression — the header above says which callers and why.
+// #567: the two predicates immediately below ARE those rules, exported so a
+// caller that cannot route through arg()/has() consumes them instead of
+// copying the expression — the header above says which callers and why.
+// isDigits(), further down, is a third export on the same terms for a
+// different rule (#878); these two are the ones this paragraph is about.
 //
 // What travels is the RULE, never the refusal text: each caller keeps its own
 // die() wording, which is the constraint that made copying look necessary in
@@ -172,6 +186,104 @@ export function makeHas(die) {
   return function has(name) {
     if (hasEqualsForm(name)) die(`--${name} is a boolean flag, not --${name}=`);
     return process.argv.includes(`--${name}`);
+  };
+}
+
+// #878: the digits rule, stated once. #840 closed a non-numeric `--pr` in
+// ci-state.mjs alone, and the identical shape stayed live in its siblings.
+// Measured on the pre-fix tree against a stub `gh` that ANSWERS, the way a
+// real one does for a branch ref: `diff-stats.mjs --pr abc` reached
+// `gh pr view abc` and printed `{"pr":null,…}` at exit 0, and
+// `pr-overlap.mjs --a abc --b def` printed `{"a":null,"b":null,…}` at exit 0
+// under a real `signal: "files"` verdict. Each payload's only identifying
+// field was built with `Number()`, and `JSON.stringify(NaN)` is `null` — a
+// report that cannot be attributed to the PR it answered for, at the exit code
+// the fleet gates on. `gh pr view` resolves a non-numeric ref as a BRANCH, so
+// the answer underneath was genuine and about a different PR.
+//
+// The class is NOT bounded by the `arg("pr")` spelling — pr-overlap.mjs reads
+// `--a`/`--b` — so it is enumerated by SHAPE: an argument checked for
+// truthiness alone, then handed to `gh` as a ref AND to `Number()` in a
+// payload field. Its members are ci-state.mjs, diff-stats.mjs and
+// pr-overlap.mjs, and all three now route through numArg() below. A sweep for
+// the flag NAME finds two of the three, which is how the third stayed open
+// through #840's review.
+//
+// Stated here rather than a third time at the call sites, because the
+// invariant had no single expression: ci-state.mjs spelled it `/^[0-9]+$/`
+// while fleet-tick.mjs's int() spells it `/^\d+$/` over a parseArgs value,
+// each with its own wording. #367 overturned #169's "no shared module" ruling
+// to stop exactly this drift, and a fourth spelling IS the drift.
+
+// `+`, so the empty string is not a number. arg() already refuses that value
+// through isFlagLike, but this predicate's other consumers do not read argv
+// through arg(): fleet-tick.mjs's int() reads parseArgs values, where
+// `Number("")` is 0 and `Number.isInteger(0)` is true, so `--pool ""` — the
+// shape an unset shell variable produces — would read as a genuine, empty
+// pool.
+//
+// Digits, not a `Number()` coercion, and the difference is the whole guard:
+// `Number` accepts `1e3`, ` 42 `, `0x2a` and `Infinity`, and each of those
+// reaches `gh` as a ref that is not the PR the caller meant. It forfeits the
+// branch and URL spellings `gh pr view` itself takes — the same trade the
+// `--`-prefixed value rule above makes — and nothing in this repo passes one:
+// board.mjs's runCiState() sends `String(pr)` off a numeric record, and every
+// documented invocation is `--pr <N>`.
+//
+// RegExp.test coerces, which is load-bearing in both directions. It is what
+// lets review-core.js ask this about a workflow argument that arrives as the
+// number 42 rather than the string "42"; it is also why this can never be an
+// ABSENCE check, since `null` coerces to the string "null" and answers false.
+// Every caller reads absence first, on its own terms.
+//
+// Leading zeros are accepted: `Number("007")` is 7 and `gh pr view 007`
+// resolves PR 7, so there is nothing ambiguous to refuse. The shell half of
+// this same invariant (claim-ticket.sh, inflight.sh, release-ticket.sh,
+// drop-merged-label.sh) carries an extra `0?*` clause that refuses them, and
+// this rule deliberately does not adopt it — tightening here would refuse a
+// `--pr 007` that #840's shipped guard accepts, which is a behaviour change
+// dressed as a de-duplication.
+//
+// A plain export rather than a factory, for the reason isFlagLike and
+// hasEqualsForm are: it is a question about a value and binds no script name.
+export function isDigits(value) {
+  return /^[0-9]+$/.test(value);
+}
+
+// Built ON makeArg, not beside it, so the digits test runs AFTER arg()'s own
+// value guards: `--pr` given trailing still reports "--pr needs a value" and
+// `--pr=5` still reports the `=` form. Where both would refuse, the more
+// specific wording wins — the same ordering rule sweep() states below.
+//
+// Absent returns null and is never refused here. That half does not decompose:
+// pr-overlap.mjs's usage line names `--a` and `--b` at once, so its absent
+// case has no per-flag wording to give. So only the MALFORMED refusal travels,
+// and it is flag-named because all three callers mean one thing by it, while
+// each caller keeps its own absent refusal above its own usage text — the
+// header's "what travels is the RULE, never the refusal text", applied to a
+// product whose two refusals genuinely differ in that respect.
+//
+// This also discharges #840's placement rule structurally instead of
+// positionally. That guard had to sit BELOW ci-state.mjs's usage die because
+// RegExp.test coerces `null` to "null": hoisted above it, an omitted `--pr`
+// was answered with a complaint about a number and the usage line never
+// printed. numArg() only ever tests a value it actually read, so the refusal
+// is free to land at the read and no call site has to remember an order.
+//
+// Returns a NUMBER, which is what deletes the defect rather than guarding
+// upstream of it: the payload sites each built `pr: Number(pr)`, and that
+// expression is where `NaN` became `null`. Converted here, it cannot be
+// reached with anything but digits and no call site restates it. Callers test
+// absence as `=== null`, never `!pr` — `--pr 0` is a value the caller GAVE,
+// and answering it with a usage line claiming `--pr` is required would be a
+// lie, where `gh` answers it truthfully as no such PR.
+export function makeNumArg(die) {
+  const arg = makeArg(die);
+  return function numArg(name) {
+    const raw = arg(name);
+    if (raw === null) return null;
+    if (!isDigits(raw)) die(`--${name} needs a number, got ${raw}`);
+    return Number(raw);
   };
 }
 

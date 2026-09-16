@@ -472,6 +472,40 @@ const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
 
 if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
 
+// #878. The truthiness check above is what made the CLI fail-open REACHABLE:
+// `pr` is interpolated into `gh pr diff ${pr}`, `gh pr view ${pr}` and
+// `diff-stats.mjs --pr ${pr}` in the snapshot prompt below, and a branch name
+// passes all three — `gh` resolves a non-numeric ref as a BRANCH, so the
+// snapshot is a real diff belonging to whatever PR that branch heads while
+// every return value here still reports the string that was passed. It is also
+// a PATH component by then (`scratch`, `runRootParent` above), so a value like
+// `../x` names a run root outside the scratch tree.
+//
+// REFUSED, never coerced. `Number(pr)` would make a bad value the string "NaN"
+// at every one of those interpolation sites — a plausible-looking scratch
+// directory and a `gh pr view NaN` — which is the same fail-open one level up.
+// Here rather than downstream for the reason stated beside `explicitDimensions`
+// below: validating late buys a snapshot agent and a directory on disk before a
+// one-character mistake can be refused.
+//
+// BELOW the required-args throw and never merged into it: isDigits() coerces,
+// so `null`/`undefined` answer false and an absent `pr` would be told about
+// digits instead of being told it is required. The coercion is also what lets a
+// caller pass the NUMBER 42 — the fleet's own shape — as well as "42".
+//
+// A COPY of arg.mjs's isDigits(), because a Workflow script cannot `import`
+// anything (#538): the body compiles inside the harness VM, where `import()` is
+// refused before the specifier is even resolved and `require` is undefined. Its
+// host-independent twin review-core.js imports the real one. The copy is held
+// in step by shared-refusal.test.mjs, which lifts this declaration and runs it
+// against arg.mjs's over the same values — the same "duplicate, then pin the
+// duplicate" idiom review-core.js's header describes, applied to a rule that
+// lives in a third file.
+function isDigits(value) {
+  return /^[0-9]+$/.test(value);
+}
+if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
+
 // Resolved HERE, beside the required-args guard, not at the `const dimensions =
 // explicitDimensions || selectDimensions(…)` call site (#275). The override is
 // caller input and needs nothing from the diff, so validating it late bought a

@@ -231,3 +231,46 @@ test("resumeFor's omp branch reports re-run, never resumeFromRunId", () => {
   assert.match(result.resume, /re-run/);
   assert.doesNotMatch(result.resume, /resumeFromRunId/);
 });
+
+// #878, and the one half of that guard this repo can EXECUTE. review-pr.js
+// cannot be imported, so its copy is pinned by source position
+// (shared-refusal.test.mjs); review-core.js is an ordinary module, so the
+// refusal itself can be run — and running it is what proves the ordering claim
+// both files make, which a position assertion only describes.
+//
+// The dispatch counter is the load-bearing assertion. A throw alone is
+// reproducible by a LATER failure: leave the guard out and `agent()` is called,
+// the stub returns nothing usable, and runReview throws anyway — same
+// rejection, after paying for the snapshot agent and the run root it mkdirs.
+// Zero dispatches is the only evidence the refusal landed first.
+//
+// "my-branch" rather than "abc" because it is the value that actually gets in:
+// `gh` resolves a non-numeric ref as a BRANCH, so the snapshot would be a real
+// diff belonging to whatever PR that branch heads, reported under the string
+// that was passed.
+test("#878: runReview refuses a non-numeric args.pr before dispatching any agent", async () => {
+  let dispatched = 0;
+  const host = {
+    agent: async () => {
+      dispatched++;
+      return null;
+    },
+    phase: () => {},
+    log: () => {},
+  };
+  await assert.rejects(
+    () => core.runReview(host, { pr: "my-branch", worktree: "/tmp/wt" }),
+    /args\.pr must be a PR number, got "my-branch"/,
+  );
+  assert.equal(dispatched, 0, "a non-numeric pr bought an agent dispatch before being refused");
+
+  // The must-ACCEPT direction, on the same harness: the fleet holds a PR
+  // number as a NUMBER, so a guard that lost isDigits()'s coercion would
+  // refuse every real invocation while still refusing every bad one. Proven by
+  // getting PAST this guard to the snapshot dispatch — the stub's null return
+  // fails later, which is a different rejection and one this assertion does
+  // not read.
+  dispatched = 0;
+  await assert.rejects(() => core.runReview(host, { pr: 42, worktree: "/tmp/wt" }));
+  assert.equal(dispatched, 1, "a numeric pr was refused before the snapshot dispatch it must reach");
+});

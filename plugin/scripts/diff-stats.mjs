@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, makeNumArg, makeSweep, makeStray } from "./arg.mjs";
 
 const NAME = "diff-stats";
 
@@ -99,14 +99,17 @@ export function computeStats(files, changedFiles) {
 
 // --- CLI (runs only when executed directly, never on import) ---------------
 
-// die()/arg() shared with the other fleet scripts — see arg.mjs for the
-// fail-open (#61/#169) and pipe-safety (#176/#328) rationale. `--pr` is the
-// only flag read here, and the `if (!pr) die(...)` below already caught a
-// trailing `--pr` on its own — `undefined` is falsy — so this file was never
-// a silent-widening site the way ci-state.mjs's was; the shared arg() just
-// makes the refusal explicit and immediate, naming the flag.
+// die()/numArg() shared with the other fleet scripts — see arg.mjs for the
+// fail-open (#61/#169/#878) and pipe-safety (#176/#328) rationale. `--pr` is
+// the only flag read here, and numArg() rather than arg() because this file
+// was the live half of #840's defect: the `if (!pr)` below caught a trailing
+// `--pr` — `undefined` is falsy — but never a non-numeric one, so `--pr abc`
+// reached `gh pr view abc` and printed `{"pr":null,…}` at exit 0. Measured
+// against a stub gh that answers, which is what a real one does for `abc`:
+// it resolves as a BRANCH, so the stats underneath were genuine and about
+// whatever PR that branch heads, reported under a null id.
 const die = makeDie(NAME);
-const arg = makeArg(die);
+const numArg = makeNumArg(die);
 const sweep = makeSweep(die);
 const stray = makeStray(die);
 
@@ -174,8 +177,12 @@ function run(cmd, args) {
 }
 
 function main() {
-  const pr = arg("pr");
-  if (!pr) die("usage: diff-stats.mjs --pr <number>");
+  // `=== null`, not `!pr`: numArg() returns a NUMBER, so `--pr 0` — a value
+  // the caller did give — would otherwise draw a usage line claiming `--pr` is
+  // required, where gh answers it truthfully as no such PR. Absent is this
+  // file's own refusal and malformed is numArg()'s, per arg.mjs.
+  const pr = numArg("pr");
+  if (pr === null) die("usage: diff-stats.mjs --pr <number>");
   // #365, weaker here for the same reason as pr-overlap.mjs: `--pr` is
   // required, so a misspelled `--prr 5` already fell through to the usage die
   // above. What was silently ignored at exit 0 is a stray riding along with a
@@ -220,7 +227,7 @@ function main() {
       (stats.truncated ? ` (TRUNCATED: gh listed ${stats.files} of ${stats.truncated} files)` : ""),
   );
 
-  console.log(JSON.stringify({ pr: Number(pr), ...stats }));
+  console.log(JSON.stringify({ pr, ...stats }));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
