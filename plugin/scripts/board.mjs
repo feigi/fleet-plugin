@@ -141,10 +141,37 @@ function tryRun(cmd, args) {
 // Parse tool stdout defensively: a tool can exit 0 yet print malformed or
 // warning-prefixed stdout. Treat that like a failed read (fall back to the
 // caller's empty default), never let it crash the tick.
+//
+// A nullish INPUT and a null PARSED VALUE are two faults, and the first guard
+// does not cover the second: `JSON.parse("null")` succeeds and yields null, so
+// without the second guard a bare `null` payload arrives at the caller as its
+// answer. Strictly `=== null`, never falsiness — `0`, `false` and `""` are all
+// answers a caller can read, and refusing them would substitute a shape
+// judgement this helper is not in a position to make.
+//
+// Null is guarded here and shape is not, because null is the only parse result
+// no caller of this helper can use: every other one boxes and reads, null alone
+// has no properties, whatever shape the caller wanted. Shape is the caller's
+// question and keeps the caller's answer — withNumber below rejects a non-array
+// for the `gh ... list` reads, readAgent parses its own sidecar so it can demand
+// an object, and gather()'s ledger branch takes any shape ledger.mjs emits,
+// deliberately, for the reason stated there. A shape policy could not be written
+// in here anyway: `fallback` is `[]` where ghRows calls this and null where the
+// ledger read does, so the helper is never told what its caller wanted — only
+// that null is not it.
+//
+// Reported, and never as "parse failed": the parse succeeded, and keeping the
+// state a read reached apart from the state it failed at is what #816 was about.
 function tryParse(json, fallback, what) {
   if (json == null) return fallback;
-  try { return JSON.parse(json); }
+  let parsed;
+  try { parsed = JSON.parse(json); }
   catch (e) { console.error(`${NAME}: ${what} parse failed: ${e.message}`); return fallback; }
+  if (parsed === null) {
+    console.error(`${NAME}: ${what}: payload is JSON null, not a usable answer; falling back`);
+    return fallback;
+  }
+  return parsed;
 }
 
 // A row without a usable `number` cannot be placed: compute-board.mjs joins
