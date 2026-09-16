@@ -4339,7 +4339,7 @@ test("an ls-remote killed by its budget leaves the claim alone, in this script's
   assert.match(
     stderr,
     /release-ticket: git ls-remote did not finish within 1s and was killed, so whether fix\/9-release-ticket was pushed is unknown/,
-    "this script's own decline, rendered, with the budget and the branch named in it: an unbound variable in that branch aborts under `set -eu` at the same exit 2 and prints none of this",
+    "this script's own decline, rendered, with the budget and the branch named in it: collapsing the stalled arm into the generic `git ls-remote failed` decline keeps the same exit 2, so only this wording — not the status check — catches it",
   );
   assert.doesNotMatch(stderr, /git ls-remote failed/,
     "and not the refused-lookup wording, which names a cause this run never observed");

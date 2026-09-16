@@ -980,7 +980,7 @@ test("a fetch killed by its budget refuses to prove a merge on stale refs, in th
   assert.match(
     r.stderr,
     /prove-merge: git fetch did not finish within 1s and was killed — refusing to prove a merge on stale refs/,
-    "this script's own decline, rendered, with the budget named in it: an unbound variable in that branch aborts under `set -eu` at the same exit 2 and prints none of this",
+    "this script's own decline, rendered, with the budget named in it: collapsing the stalled arm into the generic `fetch failed` decline keeps the same exit 2, so only this wording — not the status check — catches it",
   );
   assert.doesNotMatch(r.stderr, /fetch failed — refusing to prove a merge/,
     "and not the refused-fetch wording, which names a cause this run never observed");
