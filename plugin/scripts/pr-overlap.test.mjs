@@ -337,6 +337,40 @@ test("prose: a prose hit never masks a stronger signal, and is still reported", 
   assert.deepEqual(payload.files, ["docs/notes.md"]);
   assert.equal(payload.prose.length, 1);
   assert.match(r.stderr, /prose=1/);
+  // The caveat block is keyed on the COUNT, not on `signal`: under a `files`
+  // verdict the ladder hides the stronger evidence, and the witness is what
+  // the caller disproves the pair with. Key it on `signal` and this reds.
+  assert.match(r.stderr, /prose citation/);
+  assert.match(r.stderr, new RegExp(`${TSV} cited by docs/notes\\.md`));
+});
+
+// Context lines are searched along with added and removed ones, deliberately:
+// the hazard is prose being rewritten NEXT TO a citation, not only a citation
+// being typed, and merge-bot-9's own clearing grep on #703 counted context
+// too. A scan narrowed to `+`/`-` lines misses the whole rewrite-in-place
+// case, which is the shape #705 describes — a paragraph edited underneath
+// rows landing beneath it.
+test("prose: a citation on a context line counts", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md"],
+          diff: hunk("plugin/skills/run-team/SKILL.md", [
+            `  grep -vc '^#' ${TSV}`,
+            "+recount before citing any of this",
+          ]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose");
+  assert.deepEqual(payload.prose.map((h) => h.token), [TSV]);
 });
 
 // The degradation, and the reason it is a field rather than a `die()`. A

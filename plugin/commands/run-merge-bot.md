@@ -18,14 +18,18 @@ Before touching labeled PR `N`, list every open PR below `N` lacking the label. 
 ~/.fleet/bin/fleet-run pr-overlap.mjs --a <lower-pr> --b <N>
 ```
 
-**Any** of its three signals (`files`, `modules`, `dirs`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/foo.test.ts` in one PR and `tests/unit/…/foo.test.ts` in the other — same module, zero shared paths.
+**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/foo.test.ts` in one PR and `tests/unit/…/foo.test.ts` in the other — same module, zero shared paths.
 
 Two false positives in signal 3:
 
 - **Repo root (`.`) is excluded above.** Every top-level file shares it, so it fires on PRs with nothing in common.
 - **A bare top-level directory (`docs`, `tests`, `src`) is weak evidence.** Two PRs editing different documents under `docs/` are unrelated. Look at the actual files first: same document, module, or config → related. Different subjects sharing an ancestor → not related; proceed and say so.
 
-Directory-only hits prompt investigation. Shared *files* and *module names* are verdicts.
+**Signal 4, `prose`, is the one `signal=none` used to miss, and the only one that reads content rather than paths.** It fires when one PR changes a data file (`.tsv`, `.json`, `.yml`, …) whose path or basename appears in the other PR's own diff — the append-vs-rewrite collision `docs/metrics/tier-outcomes.tsv` has with `run-team/SKILL.md`'s tier guard by construction, since the file is append-only and every run produces a PR touching it. Weak evidence, on a par with a directory hit, and it prints its witness — the cited file, the citing file, the token and the line — because one read disproves it. It is ranked LAST, so it only ever converts a `none`: a `files`, `modules` or `dirs` verdict still reads exactly as it did before, with `prose=<n>` on the summary line beside it.
+
+**`prose=0` is a clear only when `proseUnrun` is `null`.** A non-null `proseUnrun` means the scan was reached and could not cover the diff, so an empty `prose[]` there is silence rather than data — read the reason it names and settle the pair by hand.
+
+Directory-only and prose-only hits prompt investigation. Shared *files* and *module names* are verdicts.
 
 - **Related → HOLD `N`.** Do not rebase, do not merge. Report `held-behind-#<lower>` and move on. The watcher picks it up once the lower PR is signed off and merged.
 - **Unrelated → proceed**, and report that it went ahead of `#<lower>` and on what evidence.
@@ -34,7 +38,7 @@ Also **related** even with an empty file intersection when:
 
 - both reference the same issue, or were split from one
 - one branch is stacked on the other, or their names share an issue/cluster
-- they change the same exported symbol, config key, or docs section from different files
+- they change the same exported symbol, config key, or docs section from different files — signal 4 mechanises the half of this where the section is a **data file** cited by name, so read `prose` before reaching for this bullet; a bare symbol or key name is still yours to read, and the measurement in the next paragraph is why it stays that way
 
 Genuinely unclear → **hold**. Waiting costs a label; merging out of order costs a conflict resolution on someone else's branch, and the loser is the PR already reviewed.
 
