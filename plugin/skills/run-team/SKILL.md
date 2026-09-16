@@ -607,7 +607,9 @@ So, when you re-create a worktree for an already-open PR:
 - **Then verify against the branch REF, and refuse on mismatch.** Compare
   `git -C <path> rev-parse HEAD` against
   `git ls-remote origin refs/heads/<branch> | cut -f1` — the ref itself, which
-  is what the PR's head actually is. Unequal → dispatch nothing into that
+  is what the PR's head actually is, and **never `git rev-parse
+  origin/<branch>`**, which is the ref the worktree was just cut from and so
+  agrees with it by construction. Unequal → dispatch nothing into that
   worktree, and report it naming BOTH commits, since their subjects will not
   tell them apart. **An empty read is neither equal nor a mismatch**: the read
   failed, or that head branch is not on `origin` at all (a fork PR, where the
