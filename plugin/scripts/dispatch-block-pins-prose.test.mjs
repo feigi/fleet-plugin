@@ -41,7 +41,8 @@
 // are pins on text being PRESENT and adjacent. A sentence APPENDED inside a
 // block, carving an exception out of a pinned rule, touches no pinned fragment
 // and stays green; so does a meaning-changing clause inserted MID-GAP, inside
-// one of the four `.{0,N}?` spans below, wherever that gap still has headroom.
+// one of the six `.{0,N}?` spans below (five assertions, one of which spans
+// two gaps), wherever that gap still has headroom.
 // Both shapes were measured green here.
 //
 // #1002 closed that half with a mechanism that is not a regex —
