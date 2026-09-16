@@ -34,7 +34,7 @@ const memberBlocks = () =>
   between(RUN_TEAM, "and each of these verbatim:", "Each rule in the enumerate-and-declare block", "run-team phase 2");
 
 const finisherLabelDuty = () =>
-  between(RUN_TEAM, "Add `ready-to-merge`", "A halt at step 1 has exactly two causes", "run-team finisher duty 3");
+  between(RUN_TEAM, "Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3");
 
 test("next-ticket's step 7 writes the label with a command of its own, not a flag on the create", () => {
   const s = step7();

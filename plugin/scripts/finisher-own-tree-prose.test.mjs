@@ -200,9 +200,9 @@ test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clippe
   // ACCEPT side, and the neighbour check. Duty 1's halt is the guard that
   // caught #389 live; the throwaway tree makes an overlap harmless, which is
   // not a reason to stop detecting one. It is unpinned everywhere else, and it
-  // sits one duty away from this edit. (The always-halts invariant in the
-  // two-cause block is already owned by finisher-pin-race-prose.test.mjs — not
-  // re-pinned here.)
+  // sits one duty away from this edit. (The always-halts invariant in the halt
+  // block's cause list is already owned by finisher-pin-race-prose.test.mjs —
+  // not re-pinned here.)
   assert.match(
     duty1Text(),
     /Dirty or diverged halts the finisher \*here\*, before the label/,

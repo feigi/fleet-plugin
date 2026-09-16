@@ -218,7 +218,7 @@ const labelRecovery = () =>
   between(
     RUN_TEAM,
     "**Once the label is on, take it off before you approve any push.**",
-    "A halt at step 1 has exactly two causes,",
+    "A halt at step 1 reads identical from a bare SHA mismatch",
     "run-team/SKILL.md",
   );
 
