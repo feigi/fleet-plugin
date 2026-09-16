@@ -641,14 +641,15 @@ that same unfetched clone. **Re-reading `headRefOid` on a settle window does
 not reach that half at all** — it fires only where the two disagree — which is
 why the operand changes here rather than the verdict gaining a window.
 
-**A mismatch is usually one `git fetch origin` old, so fetch and re-create once
-before reporting it.** `git worktree add --detach <path> origin/<branch>`
-resolves the LOCAL remote-tracking ref (measured above), so the ordinary cause
-is this clone's own staleness, and re-creating after a fetch costs seconds
-where the refusal costs a dispatch. **Bounded at one retry**: still unequal
-after the fetch → refuse and report, because the second reading is a push that
-landed while you worked, or a ref this clone cannot resolve, and neither gets
-better with more waiting.
+**A mismatch is usually one `git fetch origin` old, so `git worktree remove
+--force <path>` first, then fetch and re-create once before reporting it.**
+`git worktree add --detach <path> origin/<branch>` resolves the LOCAL
+remote-tracking ref (measured above), so the ordinary cause is this clone's
+own staleness, and re-creating after a fetch costs seconds where the refusal
+costs a dispatch. **Bounded at one retry**: still unequal after the fetch →
+refuse and report, because the second reading is a push that landed while
+you worked, or a ref this clone cannot resolve, and neither gets better with
+more waiting.
 
 `review-pr.js` refuses a snapshot whose head is not the PR head, so the workflow
 review path is backstopped — except when `gh pr view` returned no head at all,
