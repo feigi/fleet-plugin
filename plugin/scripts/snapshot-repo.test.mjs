@@ -388,6 +388,23 @@ test("environmentNote says a verified snapshot measures the tree, and an unverif
   // A string is not a boolean: `=== true` is deliberate, since a schema bypass
   // or a hand-built fixture can carry the word rather than the value.
   assert.match(environmentNote({ repoVerified: "true" }), /UNVERIFIED/, "a non-boolean truthy value reads as a verified environment");
+
+  // #1056 Finding 5: SNAPSHOT_TREE_MISMATCH means the init SUCCEEDED — the
+  // snapshot IS a git repository, just not one holding the reviewed tree —
+  // which is a different cause than SNAPSHOT_INIT_FAILED (no repository at
+  // all). Repo-gated tests behave differently under it: they actually RUN
+  // there, so a failure is a real measurement of a DIFFERENT tree, not the
+  // "every test that needs one skips or fails" story the init-failed case
+  // tells.
+  const mismatched = environmentNote({ repoVerified: false, repoError: "SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb" });
+  assert.match(mismatched, /UNVERIFIED/, "a mismatched tree is not announced as degraded");
+  assert.match(mismatched, /SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb/, "the mismatch reason is dropped — a reader cannot tell which tree was measured");
+  assert.match(mismatched, phrase("the snapshot IS a git repository"), "the mismatch case no longer says the init succeeded — it reads as no repository at all, which is the wrong cause");
+  assert.doesNotMatch(
+    mismatched,
+    phrase("NOT a validation of the tree"),
+    "the mismatch case still carries the init-failed consequence, which claims repo-gated tests skip or fail there when they actually RUN against the wrong tree",
+  );
 });
 
 // The snapshot is handed a node_modules symlink AFTER its commit, so it is

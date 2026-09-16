@@ -1125,7 +1125,15 @@ that commit does, so a failing or skipped test is a fact about the tree, not
 about this copy of it. Its history is that one synthetic commit: 'git log',
 'git diff' and every ancestry question answer about the snapshot and never about
 the PR.`;
-  return `Test environment UNVERIFIED — ${(snap && snap.repoError) || "the snapshot agent did not report a verified repository"}.
+  const cause = snap && snap.repoError;
+  if (cause && cause.startsWith("SNAPSHOT_TREE_MISMATCH"))
+    return `Test environment UNVERIFIED — ${cause}.
+The init succeeded: the snapshot IS a git repository, but its tree is not the
+commit under review — 'git init' committed the extraction, and the commit's
+tree does not match. A suite run here still executes against a real checkout,
+so its counts are real measurements, but of a DIFFERENT tree than the one
+under review: a failure in it says nothing about the reviewed commit.`;
+  return `Test environment UNVERIFIED — ${cause || "the snapshot agent did not report a verified repository"}.
 A 'git archive' extraction is not a git repository, and every test that needs
 one skips or fails there for that reason alone, so a suite run here is NOT a
 validation of the tree: its counts are snapshot-measured, and a failure in it
