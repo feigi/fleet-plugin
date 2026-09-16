@@ -242,15 +242,54 @@ test("readRules names a rejected diff rather than denying a file that exists", (
   assert.match(out, /NOT\s+this\s+snapshot's\s+commit/);
 });
 
-// The empty-file case is the OTHER rejection, and it must not borrow the head-
-// skew wording — `gh pr diff 999999` exits 1 leaving a 0-byte file, with no
-// commit to name. Isolates `skew` from `rejected`.
-test("readRules distinguishes an empty rejected diff from a skewed one", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+// Two rejections with nothing in common but the verdict — and the snapshot
+// schema makes a further shape routine: `diffLines` is declared in that schema's
+// `properties` and absent from its `required` list, and the snapshot agent's
+// own prompt instructs the omission ("do not withhold one field because
+// another failed"), so a run where `gh pr diff` captured the PR's whole change
+// and only `wc -l` failed arrives here with no count at all. `usableDiff`
+// rejects that diff like the others — deliberately, since the count is the
+// only thing that rules out the 0-byte file — but the REASON handed to every
+// specialist is a separate question, and a count that measured 0 is the only
+// rejection that licenses "it is empty".
+//
+// The fixture is what these pins turn on, so each spells its own out. The case
+// named for the empty diff used to report no count at all — `git show
+// f743264:plugin/scripts/review-pr-reads.test.mjs | grep -A2 'distinguishes an
+// empty rejected'` — so the empty case went unexercised under its own name,
+// and the label it pinned was the conflation (#1131).
+test("readRules calls a rejected diff empty only when a count measured it", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa", diffLines: 0 });
   assert.match(out, /REJECTED — it is empty/);
-  assert.doesNotMatch(out, /describes commit/);
+  assert.doesNotMatch(
+    out,
+    /describes commit/,
+    "the empty case borrows the head-skew wording — `gh pr diff 999999` leaves a 0-byte file with no commit to name",
+  );
   // No skew, complete list — closure is TRUE here and must still be claimed.
   assert.match(out, /touched exactly these files and no others/);
+});
+
+// The case the label used to lie about, and the one the snapshot schema's own
+// optional `diffLines` makes ordinary: `gh pr diff` can succeed while `wc -l`
+// fails, so the file a
+// specialist is told not to read may hold the PR's whole change, and "it is
+// empty" is then the silent green of `tests 0` served as a review instruction.
+// review-pr.js's diff-decision log already obeys this rule — the pin named
+// "the no-diff log reports the raw fields, not a guard it did not measure"
+// holds it there — and this is the copy every specialist reads.
+test("readRules does not call a rejected diff empty when no count was reported", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+  assert.match(out, /REJECTED — its\s+line\s+count\s+was\s+never\s+reported/);
+  assert.doesNotMatch(
+    out,
+    /it is empty/,
+    "an unreported count is served as a measured emptiness — every specialist reads that the PR changed nothing",
+  );
+  assert.doesNotMatch(out, /describes commit/, "nothing measured a head skew here either");
+  // Still rejected: `usableDiff`'s guard is unchanged, and a diff no count
+  // measured is still the one file not to read.
+  assert.match(out, /Do not read it/);
 });
 
 // A run with no diffPath at all is not a rejection: nothing was captured, and

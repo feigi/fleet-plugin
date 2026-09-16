@@ -36,17 +36,30 @@ test("usableDiff agrees on both sides", () => {
 test("readRules agrees on both sides", () => {
   const prFn = lift(CODE, "readRules", "diffPath, stats, snap");
   const snap = { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", prHead: "abc123def" };
+  const LIST = { paths: [{ path: "a.js", loc: 5 }, { path: "b.js", loc: 3 }] };
   const fixtures = [
     // A usable diff — the "read it first" branch.
     ["/s/pr7/run-ab/pr.diff", null, snap],
     // No diff, but a real file list.
-    [null, { paths: [{ path: "a.js", loc: 5 }, { path: "b.js", loc: 3 }] }, { ...snap, diffPath: undefined }],
+    [null, LIST, { ...snap, diffPath: undefined }],
     // A truncated file list.
     [null, { paths: [{ path: "a.js", loc: 5 }], truncated: 100 }, { ...snap, diffPath: undefined }],
-    // Rejected + skew (diffPath dropped, but the snapshot still reported one that mismatched head).
-    [null, null, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", head: "zzzzzz" }],
-    // Rejected + empty (diffLines falsy).
-    [null, null, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0 }],
+    // Every rejection reason, each with a file list: `rejected` is only
+    // interpolated where `stats.paths.length` is truthy, so a rejection row
+    // carrying `stats: null` takes the no-file-list branch and compares nothing
+    // about the label. Measured against the fixture set that carried `null`
+    // there — not one of its rows produced a `REJECTED` string on either side,
+    // so the label was an expression with a copy per harness and no parity pin
+    // over it (#1131).
+    //
+    // Skew: diffPath dropped, but the snapshot still reported one, for a head
+    // the PR's own does not match.
+    [null, LIST, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", head: "zzzzzz" }],
+    // Empty: a count came back and it measured 0.
+    [null, LIST, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0 }],
+    // Unmeasured: `wc -l` failed, so no count came back at all. Spelled out
+    // rather than spread, so `diffLines` is genuinely absent.
+    [null, LIST, { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", head: "abc123", prHead: "abc123def" }],
     // Nothing at all — no diff, no file list.
     [null, null, { ...snap, diffPath: undefined }],
   ];

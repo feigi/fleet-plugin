@@ -299,13 +299,41 @@ ${stats.truncated}, so there are more it does not name:`
 commit — treat the list as approximate:`
         : `The PR touched exactly these files and no others:`;
 
+  // `skew` names one rejection reason, and the rest are not one reason under
+  // two spellings. `usableDiff` refuses on `!snap.diffLines`, which is true
+  // both when the count measured 0 and when the field is ABSENT because `wc -l`
+  // failed while `gh pr diff` succeeded — the shape this file's own snapshot
+  // prompt instructs ("do not withhold one field because another failed"), with
+  // `diffLines` declared in that schema's `properties` and left out of its
+  // `required` list. Refusing either is deliberate (see `usableDiff`);
+  // reporting both as "it is empty" is not, because an empty PR is the claim
+  // that ends a review — a specialist told the PR changed nothing has no reason
+  // to look further, and it may be reading past a diff that holds the whole
+  // change. The diff-decision log already separates them
+  // (`diffLines=${snap.diffLines ?? "(absent)"}`); this is the copy every
+  // specialist reads (#1131).
+  //
+  // The label keys on the measured-0 test rather than on a test for absence
+  // because every call site passes `readRules(usableDiff(snap), stats, snap)`,
+  // so a rejection is always `usableDiff`'s, and the falsy counts it refuses on
+  // are exactly a measured 0 and an omitted field. A hand-made call carrying a
+  // truthy count with no `prHead` reaches the never-reported clause and reads
+  // wrong — `usableDiff` accepts that shape, so nothing in this workflow can
+  // produce it, and inventing a reason for it would mint the kind of claim this
+  // fix removes.
   const change = diffPath
     ? `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
 change you are reviewing, and the snapshot around it is context.`
     : stats && stats.paths && stats.paths.length
       ? `${
           rejected
-            ? `A diff was captured at ${rejected} and REJECTED — ${skew ? `it describes commit ${snap.prHead}, not this snapshot` : "it is empty"}. Do not read it.`
+            ? `A diff was captured at ${rejected} and REJECTED — ${
+                skew
+                  ? `it describes commit ${snap.prHead}, not this snapshot`
+                  : snap.diffLines === 0
+                    ? "it is empty"
+                    : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
+              }. Do not read it.`
             : "No diff file was captured."
         } ${header}
 ${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
