@@ -42,10 +42,33 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.repla
 // search-to-blank-line slicer locally, every copy carrying both false greens
 // above by construction; #1372 migrated them onto it. A pin needing this bound
 // imports it — a local copy is the defect, not a style choice.
-export function paragraph(text, anchor, what) {
-  const rest = text.slice(anchorAt(text, anchor, what));
+export function paragraph(text, anchor, what, options) {
+  const rest = text.slice(anchorAt(text, anchor, what, options));
   const end = rest.search(/\n[ \t]*\n/);
   return end === -1 ? rest : rest.slice(0, end);
+}
+
+// Anchor matching only — never the compared text, so a caller that turns this
+// on still returns raw bytes with emphasis intact. Exported so a pin comparing
+// two files' copies of the same block (`**` moving on one side is real drift)
+// does not hand-roll a second definition to locate the block it is comparing.
+export const unemphasized = (s) => s.replace(/\*\*/g, "");
+
+// Maps an offset found in `unemphasized(text)` back to `text`, stopping before
+// any `**` at that point rather than after it — so a slice starting there
+// keeps the marker instead of silently dropping it from the raw bytes a
+// caller goes on to compare or substring-replace.
+function rawOffset(text, unemphasizedOffset) {
+  let seen = 0;
+  let i = 0;
+  while (seen < unemphasizedOffset) {
+    if (text.startsWith("**", i)) i += 2;
+    else {
+      seen += 1;
+      i += 1;
+    }
+  }
+  return i;
 }
 
 // The offset of an anchor that must occur EXACTLY ONCE, mirroring `markedLine`'s
@@ -60,11 +83,19 @@ export function paragraph(text, anchor, what) {
 // bound is not a blank line needs the same guarantee and must not copy it: the
 // source site in `quiet-payload-prose.test.mjs` anchors on a declaration and
 // takes the `//` comment block ABOVE it, bounded by code at both ends.
-export function anchorAt(text, anchor, what) {
-  const hits = [...text.matchAll(new RegExp(phrase(anchor).source, "g"))];
+// `emphasisTolerant` is opt-in and off by default: most anchors here are
+// typed WITH `**` when the source is (see e.g. `ancestry-check-position-prose
+// .test.mjs`), so matching against `unemphasized(text)` unconditionally would
+// break every anchor that itself carries emphasis. On, it lets an anchor
+// typed WITHOUT `**` still find its target after a meaning-preserving
+// emphasis move on the matched words — measured need in
+// `tracker-block-copy-prose.test.mjs`, where the opener anchor has none.
+export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) {
+  const haystack = emphasisTolerant ? unemphasized(text) : text;
+  const hits = [...haystack.matchAll(new RegExp(phrase(anchor).source, "g"))];
   assert.notEqual(hits.length, 0, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
   assert.equal(hits.length, 1, `${what}: slice anchor "${anchor}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`);
-  return hits[0].index;
+  return emphasisTolerant ? rawOffset(text, hits[0].index) : hits[0].index;
 }
 
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
@@ -128,10 +159,17 @@ export function quoteBlocks(text) {
 // opening words cannot answer to it. Matched through `phrase()` on the
 // flattened run for `paragraph`'s reason — a literal `indexOf` reds on a rewrap
 // that the opener itself survives, turning a reflow into a red.
-export function quoteBlock(text, opener, what) {
+// `emphasisTolerant` mirrors `anchorAt`'s option and for the same reason: off
+// by default because an opener typed WITH `**` must still match one, on so an
+// opener typed WITHOUT it can find a target whose emphasis moved. Safe to
+// apply only to the match, never to `hits[0]` itself — the returned run keeps
+// its `**` intact, since that is the raw byte content callers go on to
+// compare or rewrap.
+export function quoteBlock(text, opener, what, { emphasisTolerant = false } = {}) {
   const head = new RegExp(`^${phrase(opener).source}`);
+  const view = emphasisTolerant ? unemphasized : (s) => s;
   const hits = quoteBlocks(text).filter((run) =>
-    head.test(run.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join(" ").split(/\s+/).join(" ").trim()),
+    head.test(view(run.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join(" ").split(/\s+/).join(" ").trim())),
   );
   assert.notEqual(
     hits.length,
