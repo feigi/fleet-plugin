@@ -48,6 +48,33 @@ export function classifyRole(meta) {
   // correctness", which would otherwise book half the fan-out as reviewer spend.
   if (Number(meta?.spawnDepth ?? 0) >= 1) return "specialist";
 
+  // Then the agent DEFINITION a dispatch named, for the members whose role the
+  // two signals above cannot reach. omp is where that happens: its review path
+  // runs `review-eval.mjs` inside the CONTROLLER's own session rather than as a
+  // nested Workflow, so its fan-out arrives at depth 0 — measured 2026-09-16 on
+  // the live corpus, 466 of 477 `fleet-review-*` rows — and falls straight
+  // through to the description patterns below, which is precisely the
+  // "Review PR 539 correctness" misread the depth check above exists to
+  // prevent. Before this branch one definition, `fleet-review-verifier`, was
+  // split across four buckets on nothing but prompt wording: 211 other, 172
+  // reviewer, 20 finisher, 2 merge-bot (#1486).
+  //
+  // Matched against `type` ALONE, never the `hay` blend the patterns below use:
+  // a fleet member's own dispatch prompt says what it is, so these names occur
+  // in description prose constantly, and a member that merely mentions a
+  // definition was not dispatched as one. `(^|:)` tolerates the
+  // `fleet-ctl:`-prefixed spelling a dispatch may write where the sidecar
+  // records the bare name — the same allowance member-outcomes.tsv's own
+  // deliberate-pair query is written with.
+  //
+  // The review side is a PREFIX and the implementer side is EXACT, deliberately:
+  // the fan-out's dimensions are an open set that `review-pr.js` sizes per PR, so
+  // a dimension added tomorrow must not silently fall back to prose, while the
+  // implementer definitions are closed at two by the alternate-tier pairing that
+  // depends on exactly those two names existing.
+  if (/(^|:)fleet-review-/.test(type)) return "specialist";
+  if (/(^|:)fleet-implementer(-alt)?$/.test(type)) return "implementer";
+
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
   // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss

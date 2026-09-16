@@ -154,6 +154,80 @@ test("implementers classify off agentType, which is where `impl-` actually appea
   assert.equal(classifyRole({ spawnDepth: 0, agentType: "impl-332", description: "whatever" }), "implementer");
 });
 
+test("the omp review fan-out classifies off its agent DEFINITION — depth cannot reach it there", () => {
+  // The depth check above books Claude's fan-out, whose specialists are the
+  // reviewer's grandchildren. omp has no such nesting: its review path runs
+  // `review-eval.mjs` inside the CONTROLLER's own session, so every fan-out
+  // member arrives at depth 0 and falls through to the description patterns —
+  // which is the exact "Review PR 539 correctness" misread the depth check
+  // exists to prevent. Measured 2026-09-16 over the live corpus: 466 of 477
+  // `fleet-review-*` rows sit at depth 0, and one definition
+  // (`fleet-review-verifier`) split across four buckets — 211 other, 172
+  // reviewer, 20 finisher, 2 merge-bot — on nothing but prompt wording.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-verifier", description: "Refute finding unv1 on PR 1353" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-correctness", description: "Review PR 1353 correctness" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-snapshot", description: "Cut the snapshot for PR 1353" }), "specialist");
+  // A dispatch may write the `fleet-ctl:`-prefixed spelling (run-team's Phase 2
+  // does) even though every sidecar on disk records the bare name — the same
+  // tolerance member-outcomes.tsv's own pair query is written with.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-ctl:fleet-review-tests", description: "whatever" }), "specialist");
+});
+
+test("a definition name in the dispatch PROSE is not a dispatch — the fleet branches read `type` alone", () => {
+  // The false-positive half. Every fleet member's own prompt says what it is, so
+  // these names appear in description text constantly; matching the
+  // `${agentType} ${description}` blend would book a finisher that merely
+  // mentions the review fan-out as one of its specialists.
+  //
+  // The cases below are written in the `fleet-ctl:`-PREFIXED spelling on
+  // purpose. A prose mention in the bare spelling cannot reach either pattern
+  // anyway — `hay` starts with a space when `type` is blank, so neither `^` nor
+  // `:` sits in front of it — which means a bare-name test passes even against a
+  // `hay`-matching implementation and proves nothing. The prefixed spelling is
+  // the one every dispatch instruction in run-team's own prose is written in, so
+  // it is both the realistic prose shape and the one that discriminates.
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Relay the report to fleet-ctl:fleet-review-verifier" }), "other");
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-ctl:fleet-implementer" }), "other");
+  // And the control that must stay GREEN: prose-only input still classifies by
+  // its prose, so this narrowing did not cost the description patterns anything.
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Apply fleet-review-verifier findings, then finish PR 563" }), "finisher");
+});
+
+test("the fleet implementer definitions classify as implementer — `^impl-` cannot reach an omp row", () => {
+  // `^impl-` is anchored at the start of `${agentType} ${description}`, so it
+  // only ever fires through a Claude member NAME (`impl-332`). readOmpMember
+  // never hands the AgentId to classifyRole — it is parsed only for
+  // parseMemberName's ticket/pr (member-record.mjs:554-555), by design, not
+  // passed as a role signal — so the definition is the only implementer
+  // signal a definition-dispatched omp member has. That does not close the
+  // gap for every omp member: one dispatched under the default `task`
+  // definition (`fix-pr-<n>`, `merge-bot-<n>`, `impl-<n>`) carries no
+  // definition signal either and still falls through to the description
+  // patterns below; reaching those is a separate change, left to a
+  // follow-up ticket. Measured 2026-09-16 before this branch: 90 omp
+  // fleet-implementer/-alt rows split 73 other, 7 merge-bot, 5 finisher,
+  // 5 reviewer, none of them implementer, while the same definition booked
+  // implementer on all 109 Claude rows.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-ctl:fleet-implementer-alt", description: "whatever" }), "implementer");
+  // EXACT, unlike the review prefix above: the alternate-tier pairing is closed
+  // at these two names, so a third `fleet-implementer-`-prefixed definition is a
+  // deliberate addition and not something to classify in advance.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer-probe", description: "whatever" }), "other");
+});
+
+test("depth still outranks the definition — a fleet member's own fan-out is not another implementer", () => {
+  // Ordering pin. Both new branches sit BEHIND the depth check, so a child an
+  // implementer dispatched is the specialist it structurally is rather than
+  // inheriting its parent's definition. Move either branch above the depth
+  // check and this goes red.
+  assert.equal(classifyRole({ spawnDepth: 1, agentType: "fleet-implementer", description: "whatever" }), "specialist");
+  // And memory still outranks both, which is the rule that keeps memory-system
+  // work out of review spend.
+  assert.equal(classifyRole({ spawnDepth: 0, agentType: "memory-proxy", description: "Review PR 1353 correctness" }), "memory");
+});
+
 test("a role outside ROLE_ORDER is still reported, so percentages sum to 100", () => {
   // Regression: roles were built by mapping over ROLE_ORDER, so an unknown role
   // vanished from the table while its tokens stayed in totals — the column

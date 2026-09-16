@@ -168,11 +168,13 @@ test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additiv
 });
 
 test("readOmpMember: subagent_type is session_init's `agent`, blank when the transcript carries no session_init", () => {
-  // #1066's omp arm. It cannot ride on `role`: omp books a fleet implementer
-  // as role=other (classifyRole reads the dispatch TASK text, and the fleet's
-  // omp prompt does not name the role), so a pair query filtered on role
-  // silently drops this whole harness — 23 fleet-implementer/-alt members
-  // measured on disk 2026-09-12, every one of them role=other.
+  // #1066's omp arm. It cannot ride on `role`: since #1486 both definitions
+  // book `role=implementer`, so a role filter selects the pair's members
+  // without saying which arm each is — and before #1486 it failed the other
+  // way, omp booking every one of them `role=other` (23 fleet-implementer/-alt
+  // members measured on disk 2026-09-12) so a role-filtered pair query dropped
+  // this whole harness. A classification that moved twice is why the join key
+  // is the dispatch RECORD.
   const withAgent = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
     sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", "fleet-implementer-alt"),
@@ -230,6 +232,70 @@ test("readOmpMember: a nested member whose task reads like a reviewer books as s
   ];
   const rec = readOmpMember(lines.join("\n"), "/fake/path.jsonl", "NestedReviewer", 1);
   assert.equal(rec.role, "specialist");
+});
+
+test("readOmpMember: role comes off session_init's `agent`, the identity the row already records (#1486)", () => {
+  // The defect this closes. `agent` was in scope and written to the row's own
+  // `subagent_type` column, but never handed to classifyRole — so classifyRole's
+  // FIRST branch, the one whose comment says memory-system work must "never land
+  // in review spend", was structurally unreachable from this harness and every
+  // omp row's role was decided by dispatch-prompt prose alone.
+  //
+  // Measured 2026-09-16 over the live corpus: 50 omp/memory-proxy rows, none of
+  // them role=memory — 47 booked `other`, 2 `finisher`, 1 `reviewer`, entirely
+  // on how each dispatch prompt happened to read. The task text below is a real
+  // shape of that: prose that says "finish", from a member that is not a
+  // finisher.
+  const memory = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
+    sessionInitEvt("Save the merge-bot label cycle memory, then finish PR 1485", "anthropic/claude-sonnet-5", "memory-proxy"),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 41982, totalTokens: 2 }),
+  ];
+  const rec = readOmpMember(memory.join("\n"), "/fake/path.jsonl", "SaveMergeBotLabelCycleMemory", 0);
+  assert.equal(rec.role, "memory");
+  // The column and the role now read the same dispatch record rather than
+  // disagreeing about what the member was.
+  assert.equal(rec.subagent_type, "memory-proxy");
+
+  // The review fan-out is the same defect at depth 0, which is where omp puts
+  // it: `review-eval.mjs` runs inside the controller's own session, so the
+  // depth branch that books Claude's fan-out cannot fire here.
+  const verifier = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
+    sessionInitEvt("Refute finding unv1 on PR 1353", "anthropic/claude-sonnet-5", "fleet-review-verifier"),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(verifier.join("\n"), "/fake/path.jsonl", "RefuteUnvOne", 0).role, "specialist");
+
+  const impl = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
+    sessionInitEvt("Your full dispatch brief is at local://dispatch-1486.md", "anthropic/claude-opus-5", "fleet-implementer"),
+    assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(impl.join("\n"), "/fake/path.jsonl", "InstallVerifySearch", 0).role, "implementer");
+});
+
+test("readOmpMember: the agent definition is a role signal in its own right, so a task-less dispatch still classifies", () => {
+  // `hasRoleSignal` named two signals because only two existed; `agent` is now a
+  // third, and leaving it out would REFUSE a classification to a row that holds
+  // a perfectly readable identity. `session_init.task` is documented as present
+  // only "when present", so this is a shape the format sanctions rather than one
+  // invented here — measured 2026-09-16, 0 of 1,403 transcripts on disk carry
+  // `agent` without `task` today, which is exactly why nothing else pins it.
+  const lines = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
+    evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", resolvedModelIdentity: "anthropic/claude-sonnet-5", agent: "memory-proxy" }),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(lines.join("\n"), "/fake/path.jsonl", "NoTaskMemory", 0).role, "memory");
+
+  // And the hole stays visible where there genuinely is no signal: a transcript
+  // with no session_init line at all still refuses to guess off the AgentId.
+  const bare = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"),
+    assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
+  ];
+  assert.equal(readOmpMember(bare.join("\n"), "/fake/path.jsonl", "InstallVerifySearch", 0).role, "-");
 });
 
 test("readOmpMember: role is `-`, never a guess off the bare AgentId, when neither task nor depth gives a real signal", () => {

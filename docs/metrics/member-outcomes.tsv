@@ -67,9 +67,14 @@
 # A within-run PAIR — the only unconfounded comparison — is a session that ran
 # BOTH implementer definitions at DIFFERENT models: one member dispatched
 # `fleet-implementer-alt`, another dispatched `fleet-implementer`. Both arms
-# are named by the DISPATCH, never by the role classifier (omp books a fleet
-# implementer as role=other, so a role filter silently drops that harness) and
-# never by "these two models differ" alone. #1066: the session+role+model
+# are named by the DISPATCH, never by the role classifier, and
+# never by "these two models differ" alone. The role classifier cannot name an
+# arm at all: both definitions book `role=implementer`, so a role filter
+# selects the pair's two members without distinguishing which is which. Until
+# #1486 it failed the other way on omp — a fleet implementer booked
+# `role=other` there, so a role filter dropped that harness outright — and that
+# a DERIVED classification moved under the query at all is the standing reason
+# this key is the dispatch record instead. #1066: the session+role+model
 # query this replaces counted every session that happened to stage a routine
 # ticket beside a correction one. Measured 2026-09-12 on this corpus: 198 keys
 # as that query is written, 35 sessions across 21 run_dates once restricted to
