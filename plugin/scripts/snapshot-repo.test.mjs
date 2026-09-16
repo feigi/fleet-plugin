@@ -458,8 +458,31 @@ for (const [name, path] of SOURCES) {
 // "recurring pin defect" comment describes — with the omp path (review-core.js)
 // the one every review in this session actually runs, so a Claude-only fix
 // would leave the live path broken while every pin over review-pr.js passed.
+//
+// Widened past `cutLines`'s own start: the stale-run-root prune (#1083) sits
+// between the run-root echo and the sha capture, above where `cutLines` begins
+// lifting text (at `git archive`) precisely so `render`'s narrow, worktree-only
+// `new Function` never has to interpolate `${scratch}`/`${runRootParent}`/
+// `${runRootPrefix}`/`$RUN`/`$SHA` (see `withUnset`'s own comment on why it
+// does not reach that far either). This test only COMPARES text, never
+// executes it, so it can afford the wider window without touching either
+// helper — and needs it, or a reorder applied to one copy's prune line alone
+// (ahead of its own `mkdir -p`, which fails a parent that does not exist yet
+// on a PR's first review) passes both `cutLines`-based tests and this one
+// unnoticed.
+function fullBlock(path) {
+  const code = stripComments(readFileSync(path, "utf8"));
+  const from = code.search(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
+  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
+  assert.ok(
+    from !== -1 && to > from,
+    `${path} no longer runs from the ambient-var clear down to the node_modules symlink — the block was reshaped past what this test lifts; update it or restore the block`,
+  );
+  return code.slice(from, code.indexOf("\n", to));
+}
+
 test("both harnesses cut the snapshot with byte-identical shell", () => {
-  const [claude, omp] = SOURCES.map(([, path]) => withUnset(path));
+  const [claude, omp] = SOURCES.map(([, path]) => fullBlock(path));
   assert.equal(omp, claude, "the two copies of the snapshot block have diverged — a fix landed on one harness only");
 });
 
