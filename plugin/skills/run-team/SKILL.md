@@ -2735,9 +2735,33 @@ only if it changes what they do *now*.
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
-| Member **killed** (spend limit, API error, crash) | New member, new name, prompt carries inherited state |
+| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
 
 A red PR never silently becomes `ready-to-merge`.
+
+**A frozen transcript does not establish that a member is dead — the
+discriminator is its scratch dir.** A member wedged on a blocked tool call
+emits the whole signature of a dead one: record counts unchanged from one poll
+of its transcript to the next. So read the mtimes of the files in the scratch
+subdirectory its own dispatch prompt assigned it — `<scratch>/impl-<N>/` for an
+implementer, `<scratch>/pr<N>/...` on the review side — at two observations a
+poll apart: **mtimes that moved between the two mean BLOCKED, a live member
+still holding its claim and its worktree, so the killed row above does not
+apply to it; mtimes unchanged at both are the dead signature.** Only the first
+of those two verdicts is conclusive — a member wedged on a call that writes
+nothing freezes its scratch dir as well — so settle the dead one on the
+liveness read below, never on the two listings alone. The filenames are not a
+contract: they are whatever that member happens to be writing, and they differ
+by member and by role. That second listing is cheap at the price, because the
+cost of the wrong call is asymmetric: a live member concluded dead gets killed
+and re-dispatched, which discards the work in flight and, where it holds a
+claim or a worktree, collides the fleet with itself, while a dead member left
+one poll longer costs that poll. Measured on #503 — a refuter wedged forever on
+`until grep -q` for a marker `node --test` never writes, its record counts
+unchanged across two polls while its scratch files carried fresh mtimes
+throughout. The refuter's own observation rule in the fix-applier prompt above
+stops a member from creating that state; this one stops you from misreading
+whoever reaches it anyway, and neither replaces the other.
 
 Settle outcome and liveness are different facts — and a different state
 machine on each harness, not the same table with two spellings. Recovery is a
