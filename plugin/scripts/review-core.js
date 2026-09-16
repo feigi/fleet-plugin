@@ -252,7 +252,13 @@ change you are reviewing, and the snapshot around it is context.`
     : stats && stats.paths && stats.paths.length
       ? `${
           rejected
-            ? `A diff was captured at ${rejected} and REJECTED — ${skew ? `it describes commit ${snap.prHead}, not this snapshot` : "it is empty"}. Do not read it.`
+            ? `A diff was captured at ${rejected} and REJECTED — ${
+                skew
+                  ? `it describes commit ${snap.prHead}, not this snapshot`
+                  : snap.diffLines === 0
+                    ? "it is empty"
+                    : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
+              }. Do not read it.`
             : "No diff file was captured."
         } ${header}
 ${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
