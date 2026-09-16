@@ -171,6 +171,7 @@ line-exact under every shell:
 
 ```sh
 while IFS= read -r pr; do
+  [ -n "$pr" ] || continue                        # a blank line from an empty capture, not a probe that could not look
   node …/ci-state.mjs --pr "$pr" </dev/null      # every inner call, per the trap below
 done <<EOF
 $prs
@@ -181,7 +182,10 @@ The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what Phase
 3's block uses, but it splits on *every* whitespace character, so it is safe only
 for values that cannot contain one — PR numbers cannot, branch names and paths
 can. Measured on a two-line list whose first value is `two words`: three
-iterations through `$(printf …)`, two through `while IFS= read -r`.
+iterations through `$(printf …)`, two through `while IFS= read -r`. On an empty
+`$prs` the counts diverge the other way: `for pr in $(printf '%s\n' "$prs")`
+iterates **zero** times, but the heredoc form iterates **once** with `pr` empty —
+the guard above is what stops that iteration from probing `--pr ""`.
 
 **`</dev/null` every command inside a `while read` loop.** The loop's stdin *is*
 the list, and any inner command that reads stdin eats the rest of it. Measured on
