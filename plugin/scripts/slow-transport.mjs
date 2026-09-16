@@ -37,10 +37,17 @@ const SLOW_DELAY_S = 3;
 export const SSH_URL = "ssh://git@example.invalid/x/y.git";
 
 /**
- * An ssh stub that sleeps `SLOW_DELAY_S` — 3 seconds, the constant both halves
- * of a caller's pair are chosen against, one budget above it and one under —
- * and then serves the bare repo at `origin` through `git upload-pack`. Returns
- * its path, for GIT_SSH_COMMAND.
+ * An ssh stub that sleeps `SLOW_DELAY_S` before it serves the bare repo at
+ * `origin` through `git upload-pack`. Returns its path, for GIT_SSH_COMMAND.
+ *
+ * `SLOW_DELAY_S` (3s) is the sleep PER INVOCATION, not the cost a bounded
+ * caller actually pays: git's ssh transport invokes this stub TWICE for
+ * every network command routed through it — once with `-G` to resolve the
+ * connection before it opens one, once for the real session — for a fetch
+ * and an ls-remote alike (measured, git 2.50.1). So the region a caller's
+ * budget bounds really costs ~2 × SLOW_DELAY_S (~6s measured), and that
+ * doubled number, not the 3s constant alone, is what each caller's pair is
+ * chosen against: one budget above it, one under.
  *
  * Written beside `origin` unless `dir` names somewhere else — a fixture whose
  * origin sits outside the tree under test needs the stub where its own cleanup
