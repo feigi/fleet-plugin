@@ -806,9 +806,11 @@ root cannot match — 'mktemp -d' created it milliseconds earlier — so no
 exclusion clause names it; an exclusion that can never fire is the kind of
 assertion #1129 dropped for killing no mutant. A stale absolute reference a
 consumer still holds therefore keeps resolving for a week rather than for ever.
-It refuses by NAME and does not exit: a parent that cannot be pruned is
-housekeeping an operator should see, never a reason to cancel a review whose
-snapshot is fine.
+It refuses by NAME and does not exit, and that name is deliberately not a
+reported field: a per-PR parent that cannot be pruned says nothing about whether
+this run's snapshot is good, so SNAPSHOT_PRUNE_FAILED lands in this agent's own
+output and never in 'pathVerified' or 'repoVerified'. Wiring it into either
+would let a housekeeping failure cancel a review whose snapshot is fine.
 
 Run these lines as ONE shell invocation. "$RUN", "$SHA" and "$SNAP" are shell
 variables, not text this prompt can re-spell, so a fresh shell per line loses
@@ -826,10 +828,10 @@ Empty, the 'mkdir -p' reads '/pr<N>' and the 'mktemp -d' template reads
 '/pr<N>/run-XXXXXXXX'. What the guard buys is a NAMED refusal —
 SNAPSHOT_SCRATCH_UNSET — rather than blast-radius containment, which is still
 not this block's problem. The 'find' deletes, but only ever inside
-'${runRootParent}' — the directory the 'mkdir -p' two lines above it created —
-so the worst an unguarded empty 'scratch' can do is create '/pr<N>' and then
-find nothing a week old in a directory this same block just made, and for any
-user who is not root both creating commands fail there anyway.
+'${runRootParent}' — the directory this block's own 'mkdir -p' creates — so the
+worst an unguarded empty 'scratch' can do is create '/pr<N>' and then find
+nothing a week old in a directory this same block just made, and for any user
+who is not root both creating commands fail there anyway.
 Testing the emitted "${scratch}" is what
 catches it in the shell that runs it; a suffix check would not, since the
 trailing components are appended literally here and so are always present.
