@@ -1160,8 +1160,8 @@ multi-select**, and **a judgement the evidence cannot settle**.
   currency gate) in `failure` → dispatch a finisher to label, a `check`
   **failure** → a fixer. A `check`-green board whose heavy jobs are merely
   `skipped` (behind-count staleness, the normal wave case) still labels — do NOT
-  gate on `ci-state --quiet` exit 0, which a behind PR never reaches.
-  **This edge fires for every CI run the PR produces, and the implementer's own
+  gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
+  edge fires for every CI run the PR produces, and the implementer's own
   firing comes first for every PR** — `ci.yml` triggers on `pull_request`, so
   opening the PR at the end of `next-ticket` step 7 starts a run within seconds,
   while the review workflow returns 20-40 minutes later. That first firing is
@@ -1172,17 +1172,17 @@ multi-select**, and **a judgement the evidence cannot settle**.
   is mid-work on a SHA the member may still move, which its own prompt tells it
   not to hand over. A push is therefore not an exit, and a report that has not
   arrived is asked for by name rather than read as one. Neither shape is caught
-  by an empty outbox: on the
-  implementer's firing there is no fix-applier to owe anything to, so the outbox
-  is *vacuously* empty, and on a fix-applier's mid-work push nothing has been
-  sent since the dispatch, so it is *genuinely* empty. **The outbox is the last
-  test, not the only one, and it stands wherever a fix-applier exists** — that
-  is exactly where a ruling you still owe it is outstanding, so never dispatch
-  off it while you do. Empty your outbox to it first — including any ruling you
-  have withdrawn or reversed — then dispatch (below); a final report is not
-  proof it stopped. A PR that needs nothing fixed reaches a finisher through the
-  **fix-applier reports `no-op`** bullet below, never by waiting for a second CI
-  event this head will never produce. Then run the reconcile (below).
+  by an empty outbox: on the implementer's firing there is no fix-applier to owe
+  anything to, so the outbox is *vacuously* empty, and on a fix-applier's
+  mid-work push nothing has been sent since the dispatch, so it is *genuinely*
+  empty. **The outbox is the last test, not the only one, and it stands wherever
+  a fix-applier exists** — that is exactly where a ruling you still owe it is
+  outstanding, so never dispatch off it while you do. Empty your outbox to it
+  first — including any ruling you have withdrawn or reversed — then dispatch
+  (below); a final report is not proof it stopped. A PR that needs nothing fixed
+  reaches a finisher through the **fix-applier reports `no-op`** bullet below,
+  never by waiting for a second CI event this head will never produce.
+  Then run the reconcile (below).
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
