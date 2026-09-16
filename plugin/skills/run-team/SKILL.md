@@ -1488,7 +1488,17 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
+It returns `{pr, head, snapshot, testEnvironment, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
+**`testEnvironment` says what every dimension's `test_run` is evidence about**,
+and it is present on a healthy run as well as a degraded one, so there is
+nothing to notice by its absence. The snapshot is `git archive`d and then
+`git init`ed with one commit, and the block that cuts it compares that commit's
+tree hash against the reviewed commit's (#1056): verified, a suite run in the
+snapshot collects and runs what a checkout does, and a red is a fact about the
+tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
+the environment, and this field carries which line of the cut failed. Read it
+before you act on any `test_run` count, and before you rule a dimension unrun
+over a red suite.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Hand those over
 with the rest; never rule on them yourself. **`refutersDispatched`, carried on

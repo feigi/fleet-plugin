@@ -184,11 +184,14 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // derive-testcmd.sh must not abort a snapshot that is otherwise good —
   // resolveTestCmd is what turns a missing derivation into a refusal, not a
   // required-field validation error one layer down. `pathVerified` joins
-  // path+head instead (#140): unlike testCmd, its absence must abort.
+  // path+head instead (#140): unlike testCmd, its absence must abort. So does
+  // `repoVerified` (#1056) — whether the snapshot is a repository holding the
+  // reviewed tree decides what a suite run in there is evidence about, and a
+  // silently omitted boolean would read as a verified environment.
   assert.match(
     snapshot,
-    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified"\]/,
-    "required must stay path+head+pathVerified only",
+    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified",\s*"repoVerified"\]/,
+    "required must stay path+head+pathVerified+repoVerified only",
   );
 });
 

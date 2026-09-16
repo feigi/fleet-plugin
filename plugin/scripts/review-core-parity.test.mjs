@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 import { lift } from "./lift.mjs";
 import * as core from "./review-core.js";
 
@@ -51,6 +52,24 @@ test("readRules agrees on both sides", () => {
   ];
   for (const [diffPath, stats, s] of fixtures)
     assert.equal(core.readRules(diffPath, stats, s), prFn(diffPath, stats, s), JSON.stringify({ diffPath, stats, s }));
+});
+
+// #1056. Both branches and the three ways `repoVerified` can fail to be true —
+// false, absent, and a non-boolean the `=== true` compare must also reject.
+// The reason string rides through the false branch, so a copy that dropped it
+// reds here rather than in a live review's payload.
+test("environmentNote agrees on both sides", () => {
+  const prFn = lift(CODE, "environmentNote", "snap");
+  const fixtures = [
+    { repoVerified: true },
+    { repoVerified: false, repoError: "SNAPSHOT_INIT_FAILED" },
+    { repoVerified: false, repoError: "SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb" },
+    { repoVerified: false },
+    { repoVerified: "true" },
+    {},
+    null,
+  ];
+  for (const f of fixtures) assert.equal(core.environmentNote(f), prFn(f), JSON.stringify(f));
 });
 
 test("resolveTestCmd agrees on both sides", () => {
@@ -207,6 +226,34 @@ test("FINDINGS_SCHEMA and VERDICT_SCHEMA are structurally identical between the 
   const prVerdict = new Function(`${CODE.match(/^const VERDICT_SCHEMA = \{[\s\S]*?^\};$/m)[0]}\nreturn VERDICT_SCHEMA;`)();
   assert.deepEqual(core.FINDINGS_SCHEMA, prFindings);
   assert.deepEqual(core.VERDICT_SCHEMA, prVerdict);
+});
+
+// SNAPSHOT_SCHEMA had no parity pin at all, and #1056 is what made that a live
+// risk rather than a latent one: the two copies now carry a `required` list of
+// five, and a field added to one harness only is a review that validates less
+// than its sibling with every other pin green. Compared as the schema's
+// substance — the `required` set and each property's declared type — rather
+// than as text, because review-pr.js's copy is inline in its `agent()` options
+// while review-core.js's is a module-scope const, so the two can never be
+// byte-identical and a text pin would have to be written loose enough to pass
+// on a real divergence.
+test("SNAPSHOT_SCHEMA agrees on required fields and declared types between the two copies", () => {
+  const inline = between(CODE, 'agentType: "fleet-ctl:fleet-review-snapshot", schema: {', "\n    } }", "review-pr.js's inline snapshot schema");
+  const required = inline.match(/required: \[([^\]]*)\]/);
+  assert.ok(required, "review-pr.js's inline snapshot schema no longer declares a `required` array — update this test");
+  assert.deepEqual(
+    required[1].split(",").map((f) => f.trim().replace(/"/g, "")).sort(),
+    [...core.SNAPSHOT_SCHEMA.required].sort(),
+    "the two copies of the snapshot schema require different fields — one harness accepts a report the other refuses",
+  );
+  const declared = [...between(inline, "properties: {", "\n      },", "review-pr.js's snapshot properties").matchAll(/^\s*(\w+): \{ type: "(\w+)"/gm)]
+    .map((m) => `${m[1]}:${m[2]}`)
+    .sort();
+  assert.deepEqual(
+    declared,
+    Object.entries(core.SNAPSHOT_SCHEMA.properties).map(([k, v]) => `${k}:${v.type}`).sort(),
+    "the two copies declare different snapshot fields — `additionalProperties: false` then drops on one harness what the other accepts",
+  );
 });
 
 // `resumeFor` is the ONE declared exception (review-core.js's own header
