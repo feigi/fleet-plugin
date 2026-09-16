@@ -1490,20 +1490,20 @@ test("a conflicting path that looks like pathspec magic names the commits at ris
 // the byte — `sed: RE error: illegal byte sequence` on `b\377ad.txt` — and
 // emits nothing, so neither conflict line reaches stderr.
 //
-// That produces TWO kills today, and only one of them is this test's to keep.
-// The other is the render's exit status: unguarded under `set -eu` the audit
-// takes sed's own 1, which out of this script is the dirty-worktree refusal,
-// fabricated on a worktree the audit had already printed `clean` for. That is
-// a defect in the render rather than a property of the pin, #1160 is the
-// ticket for it, and once it is fixed the status assertion below stays green
-// under the mutant.
+// It used to produce a second kill beside that one, and it no longer does. The
+// render was a bare pipeline, so `set -eu` took sed's own 1 — which out of
+// this script is the dirty-worktree refusal, fabricated on a worktree the
+// audit had already printed `clean` for — and the status assertion below
+// caught the mutant on that. #1160 put the render behind a guard, so the
+// verdict no longer moves when it fails, and the status, payload and
+// `subjects()` assertions below now all stay GREEN under the mutant.
 //
-// So the kill this test keeps is the pair of STDERR assertions at the end of
-// it: with the pin the render names both conflicting paths, with the pin
-// deleted it names neither. They are the whole of what pins the locale here on
-// the behavioural side — the payload, the exit status and `subjects()` all
-// survive the mutant once the render stops deciding the verdict. Do not drop
-// them to tidy the test.
+// So the kill is the pair of STDERR assertions at the end of this test and
+// nothing else. Measured both ways at #1160's own commit: with the pin, both
+// conflicting paths are named; with it deleted, `no-undo-audit: could not
+// render the conflicting-path list to stderr` stands in their place, at the
+// same exit 0 over the same payload. Do not drop them to tidy the test —
+// on this script nothing else observes the pin.
 //
 // The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
 // are load-bearing. Explicit rather than inherited, because a suite that takes
@@ -2454,6 +2454,140 @@ test("a shimmed escaper that works answers the audit in full — the guards refu
   assert.deepEqual(r.json.conflicts, ["boom-conflict.txt"], "the array the first case could not render, rendered");
   assert.deepEqual(r.json.conflictsRewritten, [false]);
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "and the at-risk array the second one could not");
+});
+
+// --- #1160: the OTHER direction from the three cases above, on the same shim.
+// Those escape `conflicts[]` and `atRisk[]` into the payload and must reach
+// exit 2 when they cannot. These two only RENDER already-computed values to
+// stderr for a human, so they decide nothing and must reach no exit at all.
+// Written bare — `printf … | sed 's/^/    conflict: /' >&2` — the pipeline's
+// status was sed's and `set -eu` took it, so a render exited the audit at 1,
+// the dirty-worktree refusal, on a worktree the same run had already printed
+// `clean` for, with no payload and no `no-undo-audit:` line naming a cause.
+//
+// A shim rather than the locale, and that is what makes these the half CI can
+// run. The invalid-UTF-8 case above reaches the same renders through the pin,
+// but only on BSD sed: under a GNU toolchain the byte passes straight through
+// and no render ever fails, and `ci.yml`'s `check` job runs ubuntu-latest.
+//
+// `selector` is the renders' shared `s/^/` prefix, so one shim reaches the
+// `conflict: ` and `at risk: ` renders and the porcelain one, and reaches
+// json.sh's escapers not at all — their only `s/^/` rule is `s/^/"/` (#119's
+// cases above select on exactly that). `marker: ""` switches the helper's
+// content gate off: it exists because the two jarr call sites share one argv,
+// and these three do not, so argv alone addresses them.
+const withFailingRenders = (t) =>
+  withBrokenEscaper(t, { tool: "sed", marker: "", selector: `'s/^/    '` });
+
+test("a render that cannot reach stderr leaves the verdict it decides nothing about intact (#1160)", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withFailingRenders(t) });
+
+  // The fault injection first: without it every assertion below measures an
+  // unmutated run and passes on a script with the guards deleted.
+  assert.doesNotMatch(r.stderr, /^ {4}conflict: /m,
+    "the fault injection never fired — the conflict list still rendered, so nothing here is measuring a failed render");
+  assert.doesNotMatch(r.stderr, /^ {4}at risk: /m,
+    "nor did it reach the at-risk render, which is a separate call site and was a separate bare pipeline");
+
+  assert.equal(r.status, 0,
+    `the worktree is clean and was measured clean — exit 1 here is the render deciding the verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["boom-conflict.txt"],
+    "the payload is computed before either render and must survive both of them failing");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "and the run continues past the first failed render rather than stopping at it — the at-risk step is downstream of it");
+
+  // Not `|| :`: a dropped conflict list reads exactly like an empty one, which
+  // is the same silent-failure class as the abort. Each render names itself,
+  // because a single shared message could not tell the operator which went
+  // missing.
+  assert.match(r.stderr, /^no-undo-audit: could not render the conflicting-path list to stderr/m,
+    "a lost diagnostic must say so, and say which one");
+  assert.match(r.stderr, /^no-undo-audit: could not render the at-risk commit list to stderr/m,
+    "and the at-risk render must name itself rather than share the line above");
+});
+
+test("a porcelain render that cannot reach stderr still refuses WITH its payload (#1160)", (t) => {
+  // The dirty half, and the one the case above cannot cover: here exit 1 is
+  // the correct answer, so the status cannot discriminate and the PAYLOAD is
+  // what does. This render runs before the payload is written, so unguarded
+  // its abort took the whole answer with it — a refusal with nothing on stdout
+  // to say what was measured, indistinguishable from the exit 1 a failing
+  // render fabricates on a clean tree.
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c, { ...ENV, PATH: withFailingRenders(t) });
+
+  assert.doesNotMatch(r.stderr, /^ {4}\?\? uncommitted\.txt$/m,
+    "the fault injection never fired — the porcelain dump still rendered");
+  assert.equal(r.status, 1,
+    `a dirty worktree refuses on its own account, at the status it always did; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `the refusal must still carry its payload; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.clean, false, "and the payload must say what was measured, not merely that something failed");
+  assert.match(r.stderr, /REFUSED — commit the worktree before rebasing/,
+    "the refusal the caller acts on is the audit's own sentence, which sits past the failed render");
+  assert.match(r.stderr, /^no-undo-audit: could not render the uncommitted-work list to stderr/m,
+    "and the dump the operator would have read is reported missing rather than dropped");
+});
+
+/**
+ * Fails the stash-diagnostic fold and nothing else, addressed by ARGV.
+ *
+ * That fold is the script's only two-operand `tr` whose first operand is the
+ * literal `\n` — json.sh's three all carry either `-d` or a `\001-\007` range
+ * — so the argv test is exact. Content selection is unusable here:
+ * `withBrokenEscaper` reads the tool's stdin through `$(cat)` and re-feeds it
+ * with `printf '%s\n'`, and that round trip appends a newline to every value
+ * json.sh escapes through its own `tr` calls.
+ */
+function withFailingDiagnosticFold(t) {
+  const s = shimDir(t, "no-undo-audit-fold-");
+  const real = s.real("tr");
+  const fired = join(s.bin, "fired");
+  s.write("tr", `if [ $# -eq 2 ] && [ "$1" = '\\n' ] && [ "$2" = ' ' ]; then
+  : >"${fired}"
+  echo "tr: RIP" >&2
+  exit 1
+fi
+exec ${real} "$@"
+`);
+  return { path: s.path(), fired };
+}
+
+test("a stash diagnostic that cannot be folded still answers, and says which half went missing (#1160)", (t) => {
+  // The FOURTH site of the class, and the one #1160's body does not enumerate
+  // — it is named only in this script's own locale-pin comment, alongside the
+  // three renders. It folds git's multi-line `stash list` diagnostic onto the
+  // audit's own line, decides nothing (`$stash` is already `null` and this
+  // branch is already reporting a fault), and unguarded an assignment's
+  // `$( … | tr … )` still hands `set -eu` tr's own status. `tr` is the surer
+  // carrier than the sed renders too: it exits on an invalid byte wherever in
+  // the line it sits, where sed tolerates some positions.
+  //
+  // Same fixture as the fold's own behaviour test above — a corrupt stash TIP
+  // object, the state where `stash list` itself fails and git says why.
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644);
+  writeFileSync(obj, "junk\n");
+
+  const fold = withFailingDiagnosticFold(t);
+  const r = audit(c, { ...ENV, PATH: fold.path });
+
+  assert.ok(existsSync(fold.fired),
+    "the fault injection never fired — git's diagnostic no longer flows through a `tr`, so nothing below measures a failed fold");
+  assert.equal(r.status, 0,
+    `the worktree is clean and was measured clean — exit 1 here is the fold deciding the verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null,
+    "the count is still unknown — that verdict is reached before the fold and must not depend on it");
+  assert.equal(stashLines(r).length, 1, "and the line is still printed, exactly once");
+  assert.match(stashLine(r), /git said more, and folding it onto this line failed/,
+    "git's own text is the half that went missing, and the line says so rather than ending where the fold did or carrying it truncated at the byte");
 });
 
 // --- #431: the same broken escaper, one block further down, and the OPPOSITE
