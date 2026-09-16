@@ -32,7 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { environmentNote } from "./review-core.js";
@@ -442,7 +442,17 @@ test("a snapshot carrying the node_modules symlink still reads clean", (t) => {
 test("the block only symlinks node_modules where the reviewed tree has one", (t) => {
   const worktree = reviewedRepo(t);
   const { snap } = cut(t, render(SOURCES[0][1], worktree));
-  assert.ok(!existsSync(join(snap, "node_modules")), "a snapshot of a repo with no node_modules carries one anyway — the guard on the symlink is gone");
+  // `existsSync` resolves through a symlink, so a mutation that bypasses the
+  // `-d ${worktree}/node_modules` guard by producing a DANGLING symlink at
+  // this path would still read as "nothing here" and pass silently.
+  // `lstatSync` inspects the entry itself, dangling or not.
+  let entry = true;
+  try {
+    lstatSync(join(snap, "node_modules"));
+  } catch {
+    entry = false;
+  }
+  assert.ok(!entry, "a snapshot of a repo with no node_modules carries one anyway — the guard on the symlink is gone");
   assert.ok(existsSync(join(snap, ".git", "info", "exclude")), "the exclude file is missing, so the clean-status property above rests on nothing");
   assert.match(
     readFileSync(join(snap, ".git", "info", "exclude"), "utf8"),
