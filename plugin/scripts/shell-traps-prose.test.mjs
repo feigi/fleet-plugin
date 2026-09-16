@@ -85,14 +85,17 @@ const LIST = "849\\n850\\n852\\n";
 // the next reader weakens instead of reading.
 const phrase = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
 
-test("the section exists and is the only place the zsh loop family is stated", () => {
+test("the section exists and is the only place the zsh loop family is stated, in either document", () => {
   // The mechanism sentence lives once. The two seats that consume it cite the
   // section instead of restating it — that is #854's placement ruling, and the
-  // drift it prevents is a second copy going stale against the first.
+  // drift it prevents is a second copy going stale against the first, whether
+  // that copy lands back in SKILL.md or in run-merge-bot.md, the document this
+  // ticket edits most heavily and whose own brief bullet was replaced by a
+  // pointer.
   const mechanism = phrase("word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion");
   assert.match(TRAPS, mechanism, "the Shell traps section dropped the mechanism sentence");
 
-  const elsewhere = SKILL.replace(TRAPS, "");
+  const elsewhere = SKILL.replace(TRAPS, "") + MERGE_BOT;
   assert.ok(
     !/zsh has no `PIPESTATUS`/.test(elsewhere),
     "a second copy of the PIPESTATUS trap is back outside Shell traps — #854 collapsed them into one seat",
@@ -281,12 +284,15 @@ const events = (out) => out.split("\n").filter((l) => l.includes("ready-to-merge
 // would be this ticket's own inversion re-committed as a test.
 const COLLAPSING_LOOP = /for\s+\w+\s+in\s+\$\{?\w/;
 
-// Comments are stripped first: both blocks NAME the forbidden form in a comment
-// so the next editor sees the rule at the line it applies to, and matching that
-// would make the fix look like the defect. Removing text can only delete
-// matches, never create one, so the crude sweep is safe here even where it
-// clips the tail of a string containing `#`.
-const code = (block) => block.replace(/(^|\s)#.*$/gm, "$1");
+// Line continuations are folded to a space FIRST: a backslash-newline breaks
+// the regex's `\s+` run (the literal `\` is not whitespace), so a wrapped
+// `for n in \` / `  $cur` reads as safe when it collapses under zsh exactly
+// like the unwrapped form. Comments are stripped second: both blocks NAME the
+// forbidden form in a comment so the next editor sees the rule at the line it
+// applies to, and matching that would make the fix look like the defect.
+// Removing text can only delete matches, never create one, so the crude sweep
+// is safe here even where it clips the tail of a string containing `#`.
+const code = (block) => block.replace(/\\\n/g, " ").replace(/(^|\s)#.*$/gm, "$1");
 
 test("no prescriptive loop in either document iterates a bare parameter", () => {
   // The behavioural tests above catch this only where zsh exists, and CI runs
@@ -376,13 +382,49 @@ test("the monitor does not fire on an empty labeled set", (t) => {
   }
 });
 
+test("a failed poll is skipped without losing `seen` — the seed/tick guard is load-bearing", (t) => {
+  if (!SHELLS.length) return t.skip("no shell on PATH");
+  // #854 silently made `if cur=$(poll)` (and the seed's mirror of it) load-
+  // bearing for the FIRST time by moving `| tr` out of `poll()` and onto the
+  // call sites. Nothing pinned that before this test: fold `| tr` back INTO
+  // `poll()` — a "natural tidy-up", since `tr` now appears twice at the call
+  // sites — and `poll`'s exit status becomes `tr`'s, which is 0 regardless of
+  // whether the `gh` call underneath it failed. The guard stops guarding: a
+  // failed poll then reads as an empty labeled set, `seen` gets reassigned to
+  // blank, and the next successful poll fires one event per already-seen PR
+  // instead of staying silent on the ones it already reported.
+  stub(
+    "gh",
+    `#!/bin/sh
+c="$CALLS/n"
+n=$(cat "$c" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" >"$c"
+if [ "$n" -eq 1 ]; then printf '849\\n850\\n'
+elif [ "$n" -eq 2 ]; then exit 1
+else printf '849\\n850\\n852\\n'
+fi
+`,
+  );
+  try {
+    for (const shell of SHELLS) {
+      const out = runMonitor(shell, MONITOR, 2);
+      assert.deepEqual(
+        events(out),
+        ["ready-to-merge label added: PR #852"],
+        `${shell}: a poll that fails on one tick must not fire an event on that tick, and must not lose \`seen\` — expected exactly one event (PR #852) on the next successful poll, not a replay of 849/850:\n${out}`,
+      );
+    }
+  } finally {
+    restoreGh();
+  }
+});
+
 test("run-merge-bot.md's bounded poll is left alone — it is not an instance", () => {
   // The ticket's filer retracted the claim that step 1's poll was a second
   // instance of this bug, and a later reader "fixing" it would be acting on the
   // retracted version. Pin the form so that edit has to argue with a test.
   assert.match(
     MERGE_BOT,
-    /for _ in \$\(seq 1 60\); do/,
+    phrase("for _ in $(seq 1 60); do"),
     "step 1's bounded poll was rewritten — it is a command substitution, it splits correctly (60 iterations, measured), and #854's filer retracted the claim that it was broken",
   );
 });
