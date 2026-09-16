@@ -55,7 +55,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, quoteBlock } from "./prose-pin.mjs";
+import { paragraph, quoteBlock, unemphasized } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
@@ -69,11 +69,14 @@ const OPENER = "Read the issue with `gh issue view <N>";
 const SKILL_END = /^Re-derive the ticket's claims against/;
 const TRACKER_END = /^#/;
 
-// Anchor matching only — never the compared text. See the header for why the
-// two differ. Written without `**` on both sides of the test so an anchor that
-// someone later types WITH the markers still matches, and so the anchors above
-// read as the sentences they name rather than as markup.
-const unemphasized = (s) => s.replace(/\*\*/g, "");
+// Imported from `prose-pin.mjs` — anchor matching only, never the compared
+// text. See the header for why the two differ. Written without `**` on both
+// sides of the test so an anchor that someone later types WITH the markers
+// still matches, and so the anchors above read as the sentences they name
+// rather than as markup. `skillBlock`/`trackerBlock` below opt the same
+// helper into `quoteBlock`/`paragraph`'s own anchor matching, so an opener
+// move like this one does not stop at those two fixtures while `block`
+// itself stays green (#1004, measured — see the comment above them).
 
 // The far end of the slice is anchored on the first thing that is NOT this
 // rule, and never on the block's own last sentence. A closing-phrase anchor
@@ -154,11 +157,20 @@ const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRA
 // That is not hypothetical tidiness: a sibling rewrap fixture in
 // `dispatch-block-pins-prose.test.mjs` ran one line past its block, spliced two
 // blocks onto one line, and left its own staleness guard vacuous (#1003).
-const skillBlock = () => quoteBlock(SKILL, OPENER, "run-team's issue-read block");
+//
+// `emphasisTolerant: true` on both: OPENER carries no `**`, and `block` above
+// already tolerates a `**` landing on its words via `unemphasized`. Without
+// this, the same emphasis move throws HERE instead — `quoteBlock`/`anchorAt`
+// matched the raw byte here, not the unemphasized view, so a fixture-locating
+// anchor this file never meant to be emphasis-sensitive went stale on an edit
+// `block` itself shrugs off (#1004, measured: `**Read the issue**` reddened
+// both fixture-based tests below, not just this one, with a stale-anchor
+// message rather than the growth or reflow they are meant to catch).
+const skillBlock = () => quoteBlock(SKILL, OPENER, "run-team's issue-read block", { emphasisTolerant: true });
 // The tracker's copy is plain prose in a `##` section, not a quote run, so its
 // bound is the paragraph — `prose-pin.mjs`'s single definition of that bound,
 // blank-line-terminated and anchored exactly once.
-const trackerBlock = () => paragraph(TRACKER, OPENER, "the tracker's copy of the issue-read block");
+const trackerBlock = () => paragraph(TRACKER, OPENER, "the tracker's copy of the issue-read block", { emphasisTolerant: true });
 
 // Gutter off, whitespace collapsed — the shape wrap width cannot change, used
 // below to prove a rewrap moved the breaks and nothing else.
@@ -176,7 +188,7 @@ const flat = (s) =>
 // currently contain. Never splits a word, so the words and their order are
 // invariant — which is what makes the equality check on `flat` below a real
 // guard against a corrupt fixture rather than a restatement of the wrap.
-const rewrap = (text, width, gutter) => {
+const rewrapOne = (text, width, gutter) => {
   const lines = [[]];
   let len = 0;
   for (const word of flat(text).split(" ")) {
@@ -189,6 +201,25 @@ const rewrap = (text, width, gutter) => {
   }
   return lines.map((l) => `${gutter}${l.join(" ")}`).join("\n");
 };
+
+// Per quote-paragraph, not over the whole flattened run: once the block has
+// grown a blank-gutter-line paragraph beside it (the growth test below),
+// `skillBlock()` returns TWO `>` paragraphs, and flattening both into one run
+// before wrapping — the previous shape of this function — deletes the
+// internal separator between them. The rewrapped text comes back as a single
+// paragraph, `block()` re-splits the untouched copy on the blank line it
+// still has, and the equality check compares a 2-paragraph copy against a
+// 1-paragraph rewrap with no cause named (#1004, measured: the only red was a
+// bare equality diff on "a rewrapped copy still matches"). Splitting on the
+// separator line first — gutter-only, so it matches whether the gutter is
+// `> ` or absent — and rejoining with that same line after wrapping each
+// piece keeps every paragraph's wrap independent and the separator intact
+// either way.
+const rewrap = (text, width, gutter) =>
+  text
+    .split(/\n[ \t]*(?:>[ \t]*)?\n/)
+    .map((part) => rewrapOne(part, width, gutter))
+    .join(`\n${gutter.trimEnd()}\n`);
 
 test("the tracker's copy of the issue-read block carries the block whole", () => {
   // Equality, not containment: every stale copy this section has produced has
