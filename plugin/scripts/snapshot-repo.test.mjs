@@ -61,11 +61,17 @@ const SOURCES = [
 // reason: inherited, `git init` exits 0 and creates nothing in the target, so a
 // fixture built under an ambient GIT_DIR would be no repository at all while
 // every status check passed (repo-root.test.mjs's own measurement).
+// `GIT_TEMPLATE_DIR` joins them (#1056): an ambient template directory with no
+// `info/` subdirectory makes `git init` produce no `.git/info`, so the block's
+// `.git/info/exclude` append silently fails and every fixture below would be
+// measuring the ambient host's template instead of the hazard this file
+// exists to catch.
 const ENV = {
   ...process.env,
   GIT_DIR: undefined,
   GIT_WORK_TREE: undefined,
   GIT_INDEX_FILE: undefined,
+  GIT_TEMPLATE_DIR: undefined,
   GIT_AUTHOR_NAME: undefined,
   GIT_AUTHOR_EMAIL: undefined,
   GIT_COMMITTER_NAME: undefined,
@@ -132,17 +138,36 @@ function cutLines(path) {
 const render = (path, worktree) => new Function("worktree", "return `" + cutLines(path) + "`")(worktree);
 
 /**
+ * `cutLines`'s slice, prefixed with the block's own ambient-var clearing
+ * line — pulled from the source by its literal text rather than assumed, so
+ * a rewrap or a dropped var still fails this the same way
+ * review-pr-snapshot-path.test.mjs's own sequence pin would. Neither
+ * `cutLines` nor `render` widen to include it: in the real script the
+ * clearing line sits ABOVE `${scratch}`/`${runRootParent}`, and pulling it
+ * into `render`'s narrow, worktree-only `new Function` would need those too.
+ */
+function withUnset(path) {
+  const code = stripComments(readFileSync(path, "utf8"));
+  const m = code.match(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
+  assert.ok(m, `${path} no longer clears the ambient git vars before the snapshot block — the hoist this test depends on is gone (#1056)`);
+  return `${m[0]}\n${cutLines(path)}`;
+}
+
+/** `withUnset`, rendered for one worktree. */
+const renderWithUnset = (path, worktree) => new Function("worktree", "return `" + withUnset(path) + "`")(worktree);
+
+/**
  * Runs a rendered block and returns what it printed plus where it wrote. The
  * status is returned rather than asserted: two tests below are about a block
  * whose `git archive` FAILS, and that is a scenario, not a test failure.
  */
-function cut(t, script, { snapName = "snapshot-deadbee" } = {}) {
+function cut(t, script, { snapName = "snapshot-deadbee", env = ENV } = {}) {
   const runRoot = scratch(t, "snapshot-repo-run-");
   const snap = join(runRoot, snapName);
   const r = spawnSync(
     "sh",
     ["-c", ["SHA=deadbee", `SNAP=${JSON.stringify(snap)}`, 'mkdir -p "$SNAP"', script].join("\n")],
-    { env: ENV, encoding: "utf8" },
+    { env, encoding: "utf8" },
   );
   return { snap, out: r.stdout ?? "", err: r.stderr ?? "", status: r.status };
 }
@@ -280,6 +305,52 @@ for (const [name, path] of SOURCES) {
     assert.match(refuter, /\$\{environmentNote\(snap\)\}/, "the refuter prompt no longer carries it — a refuter that runs the suite to check a finding draws the same wrong conclusion");
     assert.match(code, /testEnvironment: environmentNote\(snap\)/, "the returned payload no longer carries the measurement environment — the controller is back to reading a count with nothing saying where it was taken");
   });
+
+  // #1056 Finding 3: `unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE` used to sit
+  // INSIDE the init's own subshell, so the SHA capture, the archive and the
+  // tree-hash compare — all of them OUTSIDE that subshell — ran with an
+  // ambient GIT_DIR still outranking every `-C`. Measured: pointed at an
+  // unrelated repository, the old block archived and compared THAT repo
+  // instead of the worktree, and reported SNAPSHOT_TREE_MATCH for it. The
+  // fix hoists the clearing to the top of the whole block.
+  test(`${name}: an ambient GIT_DIR naming an unrelated repository does not retarget the snapshot`, (t) => {
+    const worktree = reviewedRepo(t);
+    const stranger = scratch(t, "snapshot-repo-stranger-");
+    git(stranger, "init", "-q");
+    writeFileSync(join(stranger, "stranger.txt"), "stranger\n");
+    git(stranger, "add", "-A");
+    git(stranger, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "stranger");
+
+    const { snap, out } = cut(t, renderWithUnset(path, worktree), { env: { ...ENV, GIT_DIR: join(stranger, ".git") } });
+
+    assert.ok(!existsSync(join(snap, "stranger.txt")), `an ambient GIT_DIR retargeted the archive at the unrelated repository: ${out}`);
+    assert.ok(existsSync(join(snap, "plain.txt")), `the archive did not pull from the worktree under review: ${out}`);
+    assert.match(out, /SNAPSHOT_TREE_MATCH\b/, `an ambient GIT_DIR pointed at an unrelated repository must not stop the block from settling the real tree: ${out}`);
+  });
+
+  // #1056 Finding 4: an ambient GIT_TEMPLATE_DIR with no `info/` subdirectory
+  // makes `git init` skip populating `.git/info`, so the block's own
+  // `.git/info/exclude` append has nowhere to land and node_modules goes back
+  // to being untracked but NOT excluded — the exact dirty-status regression
+  // the symlink tests above guard against, reachable through the host's
+  // environment instead of through the diff.
+  test(`${name}: an ambient GIT_TEMPLATE_DIR with no info/ still leaves the snapshot clean`, (t) => {
+    const worktree = reviewedRepo(t);
+    mkdirSync(join(worktree, "node_modules"), { recursive: true });
+    const emptyTemplate = scratch(t, "snapshot-repo-template-");
+    const { snap, out } = cut(t, renderWithUnset(path, worktree), { env: { ...ENV, GIT_TEMPLATE_DIR: emptyTemplate } });
+
+    assert.match(out, /SNAPSHOT_TREE_MATCH/, `an ambient GIT_TEMPLATE_DIR must not stop the init from settling the tree: ${out}`);
+    assert.ok(
+      existsSync(join(snap, ".git", "info", "exclude")),
+      "an ambient GIT_TEMPLATE_DIR without info/ leaves the exclude file missing — node_modules is untracked but not excluded",
+    );
+    assert.equal(
+      git(snap, "status", "--porcelain", "--untracked-files=all"),
+      "",
+      "an ambient GIT_TEMPLATE_DIR left the snapshot reading dirty",
+    );
+  });
 }
 
 // One block, two harnesses. The fix that matters is the same four lines in both
@@ -288,7 +359,7 @@ for (const [name, path] of SOURCES) {
 // the one every review in this session actually runs, so a Claude-only fix
 // would leave the live path broken while every pin over review-pr.js passed.
 test("both harnesses cut the snapshot with byte-identical shell", () => {
-  const [claude, omp] = SOURCES.map(([, path]) => cutLines(path));
+  const [claude, omp] = SOURCES.map(([, path]) => withUnset(path));
   assert.equal(omp, claude, "the two copies of the snapshot block have diverged — a fix landed on one harness only");
 });
 

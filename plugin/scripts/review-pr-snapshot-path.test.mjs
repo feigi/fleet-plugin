@@ -451,6 +451,10 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
   let prev = -1;
   for (const [needle, gone] of [
     [
+      /unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR/,
+      "the ambient git vars are no longer cleared before this block runs — an inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_TEMPLATE_DIR can retarget the SHA capture, the archive, the tree-hash compare, or the init's template silently, and nothing downstream in the block catches it (#1056)",
+    ],
+    [
       /\[ -n "\$\{scratch\}" \] \|\| \{ echo SNAPSHOT_SCRATCH_UNSET/,
       "the empty-scratch guard is gone — an empty interpolation now creates this run's artefacts at `/` instead of refusing by name",
     ],
@@ -482,8 +486,8 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
     [/git -C \$\{worktree\} archive HEAD/, "the archive is gone — there is no snapshot to review"],
     [/\[ -n "\$\(ls -A "\$SNAP"\)" \]/, "the emptiness probe is gone — nothing mechanical stands behind pathVerified"],
     [
-      /\( cd "\$SNAP" && unset GIT_DIR/,
-      "the snapshot is no longer made a git repository, or the init stopped clearing an inherited GIT_DIR — a bare extraction under an ambient GIT_DIR commits somewhere else and leaves the snapshot unmeasurable (#1056)",
+      /\( cd "\$SNAP" && git init -q/,
+      "the snapshot is no longer made a git repository — a bare extraction leaves it unmeasurable, and repo-needing tests silently skip or fail there (#1056)",
     ],
     [
       /git init -q && git add -A -f/,
