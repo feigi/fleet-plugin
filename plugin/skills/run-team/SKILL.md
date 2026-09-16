@@ -1149,15 +1149,17 @@ multi-select**, and **a judgement the evidence cannot settle**.
 - **The run ends, or the maintainer says drain** → release every claim that never
   became a PR (below). Nothing else in the loop fires for those.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
-  the bound `<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
-  ticket's ledger row, which outlives your context. That key cannot be
-  reconstructed once the head is superseded, so a controller holding only the
-  colour cannot later tell an edge it has already spent from one that never
-  fired, and that is the distinction the sibling bullet below turns on. The
-  whole key, never the conclusion alone: **a conclusion is not stable** (below),
-  because a rerun rewrites the run in place. The diff-validating `check` job
-  green with no heavy job (the diff-validating suites, not the `rebase-check`
-  currency gate) in `failure` → dispatch a finisher to label, a `check`
+  it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
+  ticket's ledger row, which outlives your context. `row` **replaces the whole
+  line** (above), so repeat `class=`, `ports=` and `→ PR#` or they are gone.
+  That key cannot be reconstructed once the head is superseded, so a
+  controller holding only the colour cannot later tell an edge it has already
+  spent from one that never fired, and that is the distinction the sibling
+  bullet below turns on. The whole key, never the conclusion alone: **a
+  conclusion is not stable** (below), because a rerun rewrites the run in
+  place. The diff-validating `check` job green with no heavy job (the
+  diff-validating suites, not the `rebase-check` currency gate) in `failure`
+  → a finisher CANDIDATE (gated below), a `check`
   **failure** → a fixer. A `check`-green board whose heavy jobs are merely
   `skipped` (behind-count staleness, the normal wave case) still labels — do NOT
   gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
