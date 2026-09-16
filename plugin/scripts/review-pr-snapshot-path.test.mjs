@@ -421,17 +421,24 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
 //   probe AFTER the `git init` -> the same thing one directory entry later, and
 //     in EVERY repo rather than only the ones with node_modules: `.git` alone
 //     makes `ls -A` non-empty (#1056).
-//   guard MISSING -> the wipe is executed text, not evaluated JS, so an empty
-//     `scratch` emits a wipe rooted at `/` and runs it.
-//   wipe MISSING (or after `tar -x`) -> `mkdir -p` never empties and `tar -x`
-//     MERGES, so a reused destination keeps the previous run's files. Measured
-//     across two PRs sharing one scratch: reviewing prB, the snapshot held
-//     prA's file. A merged tree is non-empty for REAL, so the probe cannot
-//     catch this one at all — only the wipe can.
-// Both end the same way: the agent honestly reports `pathVerified: true`,
-// because that is what it was told to report. Hence a sequence pin, not a
-// presence pin — every one of these lines is in the right place or the
-// guard is decorative.
+//   guard MISSING -> the `find` deletes, so an empty `scratch` sends it at
+//     '/pr<N>' — the directory this block's own `mkdir -p "${runRootParent}"`
+//     creates — so what the guard buys is a NAMED refusal, not containment.
+//   prune MISSING -> nothing ever removes a run root and the scratch tree grows
+//     without bound (#1083). No probe here can see it: the growth is in SIBLING
+//     roots and this run's own snapshot is perfectly good, which is why
+//     `snapshot-repo.test.mjs` executes the prune against fixtures instead.
+//   prune ABOVE the `mkdir -p` -> on a PR's first review the parent does not
+//     exist yet, so `find` fails and a healthy run prints SNAPSHOT_PRUNE_FAILED,
+//     training a reader to ignore the marker. That is POSITION, not presence, so
+//     this pin is the one that catches it and the executed one cannot.
+// The two probe reorderings end the same way: the agent honestly reports
+// `pathVerified: true`, because that is what it was told to report. Hence a
+// sequence pin, not a presence pin — every one of these lines is in the right
+// place or the guard is decorative. The destination itself needs no wipe to
+// pin any more; #1129 measured what one cost (reviewing prB, the snapshot held
+// prA's file, across two PRs sharing one scratch) and retired it by making the
+// destination per-run instead of re-bounding it.
 //
 // #1129 moved the destination off `${scratch}/snapshot` and onto a per-run root
 // the SHELL mints, so the needles below address `$RUN` and `$SNAP`. The order is
@@ -469,6 +476,10 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
     [
       /echo SNAPSHOT_RUN_ROOT="?\$RUN"?/,
       "the run root is never printed — the agent cannot report a `runRoot` it can no longer read off this prompt, and the caller's containment check has nothing to check",
+    ],
+    [
+      /find "?\$\{runRootParent\}"?[^\n]*-exec rm -rf \{\} \+ \|\| echo SNAPSHOT_PRUNE_FAILED/,
+      "the stale-run-root prune is gone or no longer refuses by name — every review leaves a tree nothing removes (#1083), and `snapshot-repo.test.mjs`'s executed prune test is where its behaviour is measured",
     ],
     [
       /SHA=\$\(git -C \$\{worktree\} rev-parse --short HEAD\)/,

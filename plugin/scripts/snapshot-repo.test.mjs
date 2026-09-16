@@ -32,7 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { environmentNote } from "./review-core.js";
@@ -136,6 +136,33 @@ function cutLines(path) {
 
 /** `cutLines`, rendered for one worktree. */
 const render = (path, worktree) => new Function("worktree", "return `" + cutLines(path) + "`")(worktree);
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The stale-run-root prune, lifted by its own named marker rather than by the
+ * `find` expression that currently implements it. The marker is the line's
+ * identity in this block's output vocabulary, so a rewrite of the expression
+ * still lifts and only a prune that is GONE reds the assertion here — the
+ * distinction `review-pr-snapshot-path.test.mjs`'s own needle comment draws
+ * about pinning "the shape that decides behaviour and nothing else".
+ *
+ * The line carries no shell variables, only the script's `${runRootParent}`,
+ * so it renders to a standalone command and needs none of `cut`'s scaffolding.
+ */
+function pruneLine(path) {
+  const code = stripComments(readFileSync(path, "utf8"));
+  const m = code.match(/^ *[^\n]*SNAPSHOT_PRUNE_FAILED[^\n]*$/m);
+  assert.ok(
+    m,
+    `${path} no longer prunes stale run roots out of the per-PR parent — #1083's growth half is back, and every review leaves a tree nothing ever removes`,
+  );
+  return m[0].trim();
+}
+
+/** `pruneLine`, rendered for one per-PR parent directory. */
+const renderPrune = (path, runRootParent) =>
+  new Function("runRootParent", "return `" + pruneLine(path) + "`")(runRootParent);
 
 /**
  * `cutLines`'s slice, prefixed with the block's own ambient-var clearing
@@ -351,6 +378,79 @@ for (const [name, path] of SOURCES) {
       "an ambient GIT_TEMPLATE_DIR left the snapshot reading dirty",
     );
   });
+
+  // #1083's remaining half, executed. #1129 gave every run its own root and
+  // said in the same breath that nothing removes it; this is the line that
+  // does, and every fixture below kills one distinct mutant of it:
+  //
+  //   the line DELETED          -> `run-staleaa` survives
+  //   `-mtime +7` dropped       -> `run-recentb` is deleted
+  //   `-maxdepth 1` dropped     -> the nested `run-` under a LIVE root goes
+  //   `-name 'run-*'` dropped   -> `snapshot-keep-me` goes
+  //   `-type d` dropped         -> the stale FILE goes
+  //
+  // Nine days and five, rather than one age and a fresh directory: the pair
+  // BRACKETS the cutoff, so widening it to a decade (a prune that never fires
+  // again) reds on the nine-day root and tightening it to a day reds on the
+  // five-day one. A fresh directory would pin neither, and this run's OWN root
+  // is excluded by the same gate the five-day fixture measures, at four orders
+  // of magnitude more margin — `mktemp -d` creates it milliseconds earlier —
+  // so it is not a sixth fixture here.
+  test(`${name}: the prune takes run roots nothing has touched for a week and leaves every other entry standing`, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-"), "pr7");
+    const stale = join(parent, "run-staleaa");
+    const recent = join(parent, "run-recentb");
+    const nested = join(recent, "verify-types", "run-nestedc");
+    const foreign = join(parent, "snapshot-keep-me");
+    const staleFile = join(parent, "run-stalefile");
+
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(stale, { recursive: true });
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(staleFile, "");
+    // Deepest first. Creating a child sets its parent's mtime to now, so
+    // `recent` has to be aged after `nested` exists or the fixture ages nothing
+    // and the depth assertion below passes vacuously.
+    const age = (p, days) => {
+      const when = (Date.now() - days * DAY) / 1000;
+      utimesSync(p, when, when);
+    };
+    age(nested, 9);
+    age(stale, 9);
+    age(foreign, 9);
+    age(staleFile, 9);
+    age(recent, 5);
+
+    const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
+
+    assert.equal(r.status, 0, `the prune exited non-zero on a healthy per-PR parent: ${r.stderr}`);
+    assert.doesNotMatch(
+      r.stdout ?? "",
+      /SNAPSHOT_PRUNE_FAILED/,
+      `the prune named a failure on a parent it could read and write: ${r.stderr}`,
+    );
+
+    assert.ok(
+      !existsSync(stale),
+      "a run root nothing has touched for nine days survived the prune — #1083's growth half is back and the tree grows without bound",
+    );
+    assert.ok(
+      existsSync(recent),
+      "a five-day-old run root was removed — a fix-applier outlives the review that produced its findings and reads absolute paths into that tree (#1129), which is the trade that ticket refused",
+    );
+    assert.ok(
+      existsSync(nested),
+      "the prune descended into a live run root and took a refuter's own `run-`-named fixture with it — the depth bound is gone, so the prune now reaches inside trees it must not touch",
+    );
+    assert.ok(
+      existsSync(foreign),
+      "the prune removed an entry outside the `run-` namespace this script mints — its blast radius is no longer the roots it owns, and the per-PR parent holds whatever the caller put there",
+    );
+    assert.ok(
+      existsSync(staleFile),
+      "the prune removed a stale FILE named like a run root — a run root is a directory `mktemp -d` created, and `-type d` is what says so",
+    );
+  });
 }
 
 // One block, two harnesses. The fix that matters is the same four lines in both
@@ -358,8 +458,31 @@ for (const [name, path] of SOURCES) {
 // "recurring pin defect" comment describes — with the omp path (review-core.js)
 // the one every review in this session actually runs, so a Claude-only fix
 // would leave the live path broken while every pin over review-pr.js passed.
+//
+// Widened past `cutLines`'s own start: the stale-run-root prune (#1083) sits
+// between the run-root echo and the sha capture, above where `cutLines` begins
+// lifting text (at `git archive`) precisely so `render`'s narrow, worktree-only
+// `new Function` never has to interpolate `${scratch}`/`${runRootParent}`/
+// `${runRootPrefix}`/`$RUN`/`$SHA` (see `withUnset`'s own comment on why it
+// does not reach that far either). This test only COMPARES text, never
+// executes it, so it can afford the wider window without touching either
+// helper — and needs it, or a reorder applied to one copy's prune line alone
+// (ahead of its own `mkdir -p`, which fails a parent that does not exist yet
+// on a PR's first review) passes both `cutLines`-based tests and this one
+// unnoticed.
+function fullBlock(path) {
+  const code = stripComments(readFileSync(path, "utf8"));
+  const from = code.search(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
+  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
+  assert.ok(
+    from !== -1 && to > from,
+    `${path} no longer runs from the ambient-var clear down to the node_modules symlink — the block was reshaped past what this test lifts; update it or restore the block`,
+  );
+  return code.slice(from, code.indexOf("\n", to));
+}
+
 test("both harnesses cut the snapshot with byte-identical shell", () => {
-  const [claude, omp] = SOURCES.map(([, path]) => withUnset(path));
+  const [claude, omp] = SOURCES.map(([, path]) => fullBlock(path));
   assert.equal(omp, claude, "the two copies of the snapshot block have diverged — a fix landed on one harness only");
 });
 
