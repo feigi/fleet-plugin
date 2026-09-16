@@ -421,13 +421,16 @@ const scratch = A.scratch || `/tmp/review-pr-${pr}`;
 // names, so it cannot hand two runs one path even in the same millisecond, and
 // it fails rather than returning a name that already exists.
 //
-// What this costs: every run now leaves its own tree instead of overwriting one,
-// and nothing here removes it — the growth is real and it is #1083's, which
-// covers cleanup for the same directories. Deliberately not absorbed: a wipe on
-// return is the very trade this ticket refused, since it forecloses the post-hoc
-// inspection a fix-applier reading a finding's path depends on. #1083's other
-// half — a re-review reading the previous run's mutants — is closed here as a
-// side effect, because the refuter directories below hang off this root too.
+// What this costs: every run leaves its own tree instead of overwriting one.
+// That growth is BOUNDED rather than absorbed — the snapshot block below prunes
+// sibling run roots nothing has touched for over a week and keeps every younger
+// one (#1083). The bound is an age and not a count because a wipe on RETURN is
+// still refused: a fix-applier outlives the review that produced its findings
+// and reads absolute paths into that root, so a run's tree has to survive the
+// run that made it, and a count would delete it the moment the next review
+// starts. #1083's other half — a re-review reading the previous run's mutants —
+// this derivation closes on its own, because the refuter directories below hang
+// off this root too.
 //
 // What the script keeps is the one segment it can own, and it REFUSES a
 // reported root that does not start with it — so "this tree belongs to this
@@ -762,6 +765,7 @@ const snap = await agent(
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     echo SNAPSHOT_RUN_ROOT="$RUN"
+    find "${runRootParent}" -maxdepth 1 -type d -name 'run-*' -mtime +7 -exec rm -rf {} + || echo SNAPSHOT_PRUNE_FAILED
     SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
     SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"
@@ -786,14 +790,25 @@ reads plausible.
 The symlink tests "$SNAP" for the same reason the first line tests 'scratch'.
 It is the one command below whose target is not created by an earlier line, so
 it is the one that would still act on an empty "$SNAP" — writing at
-'/node_modules' — where every other line fails first. With the wipe gone that is
-the last way anything here reaches outside this run's own root.
+'/node_modules' — where every other line fails first.
 
-There is NO wipe here, and that is not an omission. A freshly minted "$RUN" has
-never held anything, so "$SNAP" cannot exist before 'mkdir -p' creates it and
-'tar -x' has nothing to merge into. The 'rm -rf' this block used to carry was
-the one command in it that could reach outside the run, and a destination
-'mktemp' guarantees is fresh retires it rather than re-bounding it.
+There is NO wipe of the DESTINATION here, and that is not an omission. A freshly
+minted "$RUN" has never held anything, so "$SNAP" cannot exist before 'mkdir -p'
+creates it and 'tar -x' has nothing to merge into. The 'rm -rf' this block used
+to carry addressed the destination, and a destination 'mktemp' guarantees is
+fresh retires it rather than re-bounding it.
+
+The 'find' is the one command here that addresses anything outside this run's
+own root, and it is bounded by what it SELECTS rather than by where it starts:
+depth 1 of the per-PR parent, directories only, only the 'run-' prefix this
+script mints, and only those nothing has touched for over a week. This run's own
+root cannot match — 'mktemp -d' created it milliseconds earlier — so no
+exclusion clause names it; an exclusion that can never fire is the kind of
+assertion #1129 dropped for killing no mutant. A stale absolute reference a
+consumer still holds therefore keeps resolving for a week rather than for ever.
+It refuses by NAME and does not exit: a parent that cannot be pruned is
+housekeeping an operator should see, never a reason to cancel a review whose
+snapshot is fine.
 
 Run these lines as ONE shell invocation. "$RUN", "$SHA" and "$SNAP" are shell
 variables, not text this prompt can re-spell, so a fresh shell per line loses
@@ -809,10 +824,13 @@ agent's shell, not evaluated by this script, so 'scratch' being non-empty at
 interpolation time is a fact about today's caller, not about the text that runs.
 Empty, the 'mkdir -p' reads '/pr<N>' and the 'mktemp -d' template reads
 '/pr<N>/run-XXXXXXXX'. What the guard buys is a NAMED refusal —
-SNAPSHOT_SCRATCH_UNSET — rather than blast-radius containment, which is no
-longer this block's problem: with the wipe gone, the worst an unguarded empty
-'scratch' can do is CREATE directories at '/', and for any user who is not root
-both commands fail there anyway. Testing the emitted "${scratch}" is what
+SNAPSHOT_SCRATCH_UNSET — rather than blast-radius containment, which is still
+not this block's problem. The 'find' deletes, but only ever inside
+'${runRootParent}' — the directory the 'mkdir -p' two lines above it created —
+so the worst an unguarded empty 'scratch' can do is create '/pr<N>' and then
+find nothing a week old in a directory this same block just made, and for any
+user who is not root both creating commands fail there anyway.
+Testing the emitted "${scratch}" is what
 catches it in the shell that runs it; a suffix check would not, since the
 trailing components are appended literally here and so are always present.
 

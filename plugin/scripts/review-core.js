@@ -563,6 +563,7 @@ export async function runReview(host, args) {
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     echo SNAPSHOT_RUN_ROOT="$RUN"
+    find "${runRootParent}" -maxdepth 1 -type d -name 'run-*' -mtime +7 -exec rm -rf {} + || echo SNAPSHOT_PRUNE_FAILED
     SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
     SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"
