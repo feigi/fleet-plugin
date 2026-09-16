@@ -531,11 +531,13 @@ test("the run root and the sha each refuse by name rather than shortening the de
 // `mktemp` would stay green on a block that had stopped varying. Only the lines
 // up to SNAPSHOT_RUN_ROOT are lifted — `mkdir`, `mktemp` and the echo, and the
 // block prints the root ahead of the sha precisely so those three stand alone.
-// So this needs no git at all, which matters because the suite is RUN from a
-// `git archive` snapshot during a review and that extraction is not a
-// repository: a test shelling out to `git rev-parse` there fails on the
-// environment rather than on the code. What the rest of the block does is
-// pinned by the sequence test.
+// So this needs no git at all, which is worth keeping even now that the review
+// snapshot is one: a test that shells out to git in the snapshot depends on the
+// very mechanism under review here (#1056), so a regression in the init would
+// surface as this pin failing on its environment instead of on the block it
+// pins. `snapshot-repo.test.mjs` is where git IS exercised, against fixture
+// repositories it builds itself. What the rest of the block does is pinned by
+// the sequence test.
 function mintScript(scratch) {
   const snapshot = snapshotBlock();
   const from = snapshot.search(/^ *mkdir -p "?\$\{runRootParent\}"?/m);

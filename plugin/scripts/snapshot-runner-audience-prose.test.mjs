@@ -1,12 +1,22 @@
-// #141. `review-and-fix.md` establishes that `./agent-test` cannot run in a
-// review snapshot: `agent-test` is a TRACKED bootstrap (#55) present in any
-// `git archive HEAD | tar -x` copy, but the bootstrap materializes the runner
-// via `claim-ticket.sh --write-runner`, which requires a real git repository
-// (`git rev-parse --git-dir`) — a git-archive snapshot has no `.git`, so it
-// cannot. The "filesystem isolation is not stack isolation"
+// #141. `review-and-fix.md` establishes that `./agent-test` is not the command
+// to hand a specialist in a review snapshot: `agent-test` is a TRACKED
+// bootstrap (#55) present in any `git archive HEAD | tar -x` copy, and it
+// materializes the runner via `claim-ticket.sh --write-runner`, which derives
+// the isolation triple from the directory name — a snapshot is not a claimed
+// worktree, so every snapshot in the fleet resolves to the same fixed ports.
+// The "filesystem isolation is not stack isolation"
 // guard in both run-team documents said the opposite — it paired the snapshot
 // with `./agent-test` and closed with "say both, every time", handing a
-// specialist on a snapshot a command that is not there.
+// specialist on a snapshot a command that collides with every sibling's.
+//
+// The reason moved once, and the conclusion did not. Until #1056 the
+// materialization simply FAILED there (`claim-ticket: not inside a git
+// repository`, since a bare extraction has no `.git`); the snapshot is now
+// `git init`ed at cut time, so the bootstrap succeeds and produces a runner
+// that is the wrong command for a different, older reason — the stack this
+// section is named for. Measured in a snapshot cut by the current block:
+// `--write-runner` exits 0 and reports `ports derive from the issue number:
+// postgres=16000 ollama=22000`.
 //
 // The two audiences are not interchangeable and neither pin below stands alone:
 // the member in a worktree DOES have the runner and must keep being told to use

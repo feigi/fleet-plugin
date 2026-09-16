@@ -5,9 +5,14 @@
 // deliberate and unchanged: an untracked scratch script is not what ships, and
 // a fleet script that moves out of its directory must not fall out of a sweep
 // with it. What the premise costs is a precondition: there has to be a `.git`
-// at or above the file. A checkout and a worktree both have one; a `git
-// archive` extraction does not, and that is how review specialists measure the
-// suite (#1056).
+// at or above the file. A checkout and a worktree both have one; a bare `git
+// archive` extraction does not. Review specialists used to measure the suite in
+// exactly such an extraction, which cost this repo 19 silent declines per run
+// (#1056); since that ticket the review snapshot is `git init`ed and committed
+// at cut time, so the declines below are no longer the review's normal path.
+// They remain the answer for any OTHER repo-less tree — a hand-cut archive, a
+// tarball unpacked in CI — which is why the guard stays rather than becoming
+// dead weight.
 //
 // Before #1149 each file paid that cost as a bare module-scope `execFileSync`
 // whose failure escaped. Node cannot attribute a throw during module

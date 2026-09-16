@@ -37,12 +37,13 @@ import { repoRoot, skipWithoutRepo, trackedShellScripts } from "./repo-root.mjs"
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
 // Needs an ambient git working tree: this gate asks git what ships rather than
-// walking the directory. `repoRoot` answers `null` where there is none — a `git
-// archive` extraction, which is how review specialists measure the suite
-// (#1056) — and the tests below then DECLINE with a reason instead of running,
-// because the tree they would police is not reachable from here. Until #1149
-// this threw at module load and node could only report it as one synthetic
-// failing test at line 1.
+// walking the directory. `repoRoot` answers `null` where there is none — a bare
+// `git archive` extraction, which is how review specialists used to measure the
+// suite (#1056; the review snapshot is a repository from its cut onward now) —
+// and the tests below then DECLINE with a reason instead of running, because the
+// tree they would police is not reachable from here. Until #1149 this threw at
+// module load and node could only report it as one synthetic failing test at
+// line 1.
 const ROOT = repoRoot(DIR);
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "this sweep over what ships");
 
