@@ -56,7 +56,7 @@
 // `immutable-body-claim-prose.test.mjs`. The copies of these blocks in other
 // files are a separate question too — `docs/agents/issue-tracker.md` reproduces
 // the issue-read block, and `tracker-block-copy-prose.test.mjs` compares the two
-// (#1004 owns that comparison's own fixture; nothing here touches it).
+// (#374 owns that comparison's own fixture; nothing here touches it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -620,6 +620,22 @@ for (const { label, slice, blocks, table } of SURFACES) {
   });
 }
 
+// The two coverage tests above are each bounded by their OWN surface's
+// anchors, not by the dispatch surface as a whole — a verbatim block added
+// past `region()`'s or `reviewers()`'s anchors but still inside `## Phase 2`
+// (or wherever a future dispatch surface lands) is invisible to both loops
+// above and to the whole prose suite. This test catches that shape: it counts
+// every quote run in the WHOLE file and asserts it equals the sum of the runs
+// inside the two named surfaces, so a quote run outside both reds here even
+// though no per-surface loop above ever saw it.
+test("run-team/SKILL.md has no verbatim block outside both fixtured surfaces", () => {
+  assert.equal(
+    quoteBlocks(RUN_TEAM).length,
+    quoteBlocks(region()).length + quoteBlocks(reviewers()).length,
+    "run-team/SKILL.md holds a quote block outside both fixtured surfaces — a block added past either surface's anchors is invisible to the coverage tests above",
+  );
+});
+
 // Re-wrapped, one gutter depth at a time, so the fix-applier prompt's nested
 // refuter prompt is re-wrapped as its own quote rather than having its inner `>`
 // markers shuffled into the outer text. Wrapping at word boundaries, never one
@@ -630,9 +646,11 @@ const rewrap = (block, width) =>
     .split("\n")
     .reduce((groups, line) => {
       const gutter = line.match(/^(?:>[ \t]?)+/)[0];
+      const depth = (gutter.match(/>/g) ?? []).length;
+      const words = line.slice(gutter.length).trim();
       const last = groups[groups.length - 1];
-      if (last && last.gutter === gutter) last.text.push(line.slice(gutter.length));
-      else groups.push({ gutter, text: [line.slice(gutter.length)] });
+      if (words !== "" && last && last.text.length > 0 && last.depth === depth) last.text.push(words);
+      else groups.push({ gutter, depth, text: words === "" ? [] : [words] });
       return groups;
     }, [])
     .map(({ gutter, text }) => {
@@ -666,7 +684,10 @@ test("a re-wrapped block does not red — this mechanism refuses drift, not refl
     // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
     // interpreted in the latter, and the fix-applier prompt carries a literal
     // `$(...)` command substitution today.
-    const flat = norm(quoteBlock(slice(RUN_TEAM.replace(raw, () => narrow)), opener, what));
+    const mutated = RUN_TEAM.replace(raw, () => narrow);
+    const after = quoteBlock(slice(mutated), opener, what);
+    assert.notEqual(after, raw, `the re-wrap never landed in ${what}'s slice — this control did not run`);
+    const flat = norm(after);
     assert.equal(flat, norm(golden.join("\n")), `${what} reds on a pure re-wrap — the words are identical and only the wrap points moved, so the normalization above is broken, not the block`);
   }
 });
@@ -729,7 +750,7 @@ test("a carve-out appended inside a block reds — the shape the presence pins c
 // a meaning-changing clause inserted strictly BETWEEN the two anchors of an
 // ordered span, touching neither fragment, absorbed by that span's `.{0,N}?`
 // tolerance. Measured on the enumerate pin's first half, whose gap spends 56 of
-// its 120 characters today — this 26-character insertion fits, and the presence
+// its 120 characters today — this 27-character insertion fits, and the presence
 // pin stays green.
 test("a clause inserted mid-gap reds — the second shape the gap-bounded spans absorb", () => {
   const entry = ALL.find((b) => b.what === "phase 2's enumerate-the-class block");
