@@ -649,7 +649,12 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   // be labelled "read" here. ledger.mjs is this repo's own, already-tested
   // producer of this JSON, so that gap is accepted rather than guarded.
   const parsedLedger = tryParse(ledgerJson, null, "ledger read");
-  const ledger = parsedLedger
+  // Strictly `!== null`, never falsiness — a ledger payload that parses to
+  // `0`, `false` or `""` is a real answer tryParse already forwarded (see
+  // tryParse's own comment above), and treating it as falsy here would
+  // silently discard it into `unparsed`, the exact bug class tryParse's
+  // guard exists to prevent, one caller downstream of the fix.
+  const ledger = parsedLedger !== null
     ? { ...parsedLedger, state: "read" }
     : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };
 
