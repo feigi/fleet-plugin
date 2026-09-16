@@ -523,24 +523,40 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // against it directly.
 //
 // `role` is NEVER guessed off the bare AgentId — a generated CamelCase word
-// pair names nothing classifyRole can read. Two REAL signals exist instead:
+// pair names nothing classifyRole can read. THREE REAL signals exist instead:
+// `session_init.agent` (the agent DEFINITION the dispatch named),
 // `session_init.task` (the dispatch prompt, when present) and `spawnDepth`
 // (the transcript's own nesting depth, supplied by readOmpSession from the
 // walk — a fact about where the file lives, not a guess about what it is).
 // Depth matters on its own: classifyRole checks depth BEFORE any text match,
 // specifically so a nested member whose task happens to read like a
 // reviewer's ("Review PR 1353 correctness") still books as the fan-out
-// specialist it structurally is, not a reviewer. Neither signal present
+// specialist it structurally is, not a reviewer. None present
 // yields `"-"` — the same visible-hole spelling as `thinking`, never a
 // default like "other", which only makes sense where a real dispatch record
 // (Claude's meta.json) backs it.
+//
+// `agent` reaches classifyRole as its `agentType` (#1486). It is the same
+// value the `subagent_type` column below already records, and withholding it
+// here made classifyRole's FIRST branch — the one whose comment says
+// memory-system work must "never land in review spend" — structurally
+// unreachable from this harness, leaving every omp row's role decided by
+// dispatch-prompt prose alone. Measured 2026-09-16 before the fix: 50
+// omp/memory-proxy rows, not one of them `role=memory`, and a single
+// definition (`fleet-review-verifier`) split across four buckets on nothing
+// but how each prompt happened to read. It is passed as `agentType` rather
+// than under a name of its own because classifyRole's contract is the
+// DISPATCH's identity for the member, which is what this field is; Claude's
+// reader fills the same parameter from its own sidecar.
 export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const folded = foldOmpTranscript(jsonlText, filePath);
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
   const { ticket, pr } = parseMemberName(member);
-  const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string";
-  const role = hasRoleSignal ? classifyRole({ description: folded.task ?? "", spawnDepth }) : "-";
+  const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string";
+  const role = hasRoleSignal
+    ? classifyRole({ agentType: folded.agent ?? "", description: folded.task ?? "", spawnDepth })
+    : "-";
   return {
     harness: "omp",
     role,
