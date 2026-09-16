@@ -179,6 +179,81 @@ test("prose: a data file named in the other PR's diff fires signal=prose", () =>
   assert.match(r.stderr, /cited by plugin\/skills\/run-team\/SKILL\.md/);
 });
 
+// Every citing file gets its own witness, and each one gets its OWN most
+// specific token. A loop that stopped at the first token matching ANYWHERE
+// reports one file and drops the rest — and the set of citing files is
+// exactly what the caller has to go read to disprove the hold.
+test("prose: each citing file reports its own witness, path token preferred", () => {
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: {
+          names: ["plugin/skills/run-team/SKILL.md", "plugin/commands/run-merge-bot.md"],
+          diff:
+            hunk("plugin/skills/run-team/SKILL.md", [`+recount off ${TSV} and also tier-outcomes.tsv`]) +
+            hunk("plugin/commands/run-merge-bot.md", ["+the append lands in tier-outcomes.tsv"]),
+        },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(
+    payload.prose.map((h) => [h.citedBy, h.token]),
+    [
+      // Names it both ways -> reported once, by path.
+      ["plugin/commands/run-merge-bot.md", "tier-outcomes.tsv"],
+      ["plugin/skills/run-team/SKILL.md", TSV],
+    ],
+  );
+});
+
+// The citer side is an explicit extension list, and the stderr note prints it
+// as the scan's scope — so it is an advertised bound and has to hold. Here a
+// DATA file's own hunks name another data file: `member-outcomes.tsv`'s header
+// really does cite `tier-outcomes.tsv` in this repo, and a run-artifact PR
+// really does edit both. Widen the citer side to every changed file and this
+// fires on every such pair.
+//
+// Nothing is lost by refusing it, which is what makes the bound defensible
+// rather than merely narrow: both files live under `docs/metrics/`, so `dirs`
+// already reports that pair — at exactly the weak strength it deserves. The
+// assertion below is that the case is covered THERE, not that it is ignored.
+test("prose: a data file's own hunks are not a citation site, and dirs still covers the pair", () => {
+  const OTHER = "docs/metrics/member-outcomes.tsv";
+  const cite = `+# verdicts live in ${TSV}, joined on pr`;
+  const r = run(
+    {
+      prs: {
+        1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+        2: { names: [OTHER], diff: hunk(OTHER, [cite]) },
+      },
+    },
+    1,
+    2,
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.deepEqual(payload.prose, []);
+  assert.deepEqual(payload.dirs, ["docs/metrics"]);
+  assert.equal(payload.signal, "dirs");
+
+  // Positive control on the identical citation: move it into a `.md` and the
+  // signal fires. Without this, a partition that dropped the data file from
+  // the TARGET side too would pass above for the wrong reason.
+  const inProse = {
+    prs: {
+      1: { names: [TSV], diff: hunk(TSV, ["+1490\timpl-1490"]) },
+      2: { names: ["docs/metrics/README.md"], diff: hunk("docs/metrics/README.md", [cite]) },
+    },
+  };
+  const second = JSON.parse(run(inProse, 1, 2).stdout);
+  assert.deepEqual(second.prose.map((h) => h.citedBy), ["docs/metrics/README.md"]);
+});
+
 // Which PR holds the rows and which holds the prose is not knowable from the
 // flags, so both directions are scanned. A one-directional wiring passes the
 // test above and misses half the pairs.

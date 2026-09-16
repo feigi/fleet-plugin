@@ -268,7 +268,9 @@ function diffOf(pr, known) {
 
 // One witness per (data file, citing file) pair, most specific token first, so
 // a file naming the TSV by both its path and its basename reports once and
-// reports the path.
+// reports the path — while a SECOND file naming it still gets its own witness.
+// Stopping at the first token that matches anywhere would report only the one
+// file, and it is the set of citing files the caller has to read.
 const WITNESS_CAP = 120;
 function proseHits(target, citer) {
   const targets = dataFiles(target.files);
@@ -280,20 +282,20 @@ function proseHits(target, citer) {
   if (hunks === null) return { hits: [], unrun };
   const hits = [];
   for (const data of targets) {
-    for (const token of tokensFor(data)) {
-      let matched = false;
-      for (const text of citers) {
-        const line = (hunks.get(text) ?? []).find((l) => l.includes(token));
+    const tokens = tokensFor(data);
+    for (const text of citers) {
+      const lines = hunks.get(text) ?? [];
+      for (const token of tokens) {
+        const line = lines.find((l) => l.includes(token));
         if (!line) continue;
-        matched = true;
         hits.push({
           data,
           citedBy: text,
           token,
           line: line.length > WITNESS_CAP ? `${line.slice(0, WITNESS_CAP)}…` : line,
         });
+        break;
       }
-      if (matched) break;
     }
   }
   return { hits, unrun };
