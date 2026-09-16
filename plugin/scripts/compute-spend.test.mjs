@@ -177,10 +177,20 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
   // The false-positive half. Every fleet member's own prompt says what it is, so
   // these names appear in description text constantly; matching the
   // `${agentType} ${description}` blend would book a finisher that merely
-  // mentions the review fan-out as one of its specialists. The control that
-  // must stay GREEN: prose-only input still classifies by its prose.
+  // mentions the review fan-out as one of its specialists.
+  //
+  // The cases below are written in the `fleet-ctl:`-PREFIXED spelling on
+  // purpose. A prose mention in the bare spelling cannot reach either pattern
+  // anyway — `hay` starts with a space when `type` is blank, so neither `^` nor
+  // `:` sits in front of it — which means a bare-name test passes even against a
+  // `hay`-matching implementation and proves nothing. The prefixed spelling is
+  // the one every dispatch instruction in run-team's own prose is written in, so
+  // it is both the realistic prose shape and the one that discriminates.
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Relay the report to fleet-ctl:fleet-review-verifier" }), "other");
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-ctl:fleet-implementer" }), "other");
+  // And the control that must stay GREEN: prose-only input still classifies by
+  // its prose, so this narrowing did not cost the description patterns anything.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Apply fleet-review-verifier findings, then finish PR 563" }), "finisher");
-  assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-implementer" }), "other");
 });
 
 test("the fleet implementer definitions classify as implementer — `^impl-` cannot reach an omp row", () => {
