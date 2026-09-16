@@ -168,11 +168,13 @@ test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additiv
 });
 
 test("readOmpMember: subagent_type is session_init's `agent`, blank when the transcript carries no session_init", () => {
-  // #1066's omp arm. It cannot ride on `role`: omp books a fleet implementer
-  // as role=other (classifyRole reads the dispatch TASK text, and the fleet's
-  // omp prompt does not name the role), so a pair query filtered on role
-  // silently drops this whole harness — 23 fleet-implementer/-alt members
-  // measured on disk 2026-09-12, every one of them role=other.
+  // #1066's omp arm. It cannot ride on `role`: since #1486 both definitions
+  // book `role=implementer`, so a role filter selects the pair's members
+  // without saying which arm each is — and before #1486 it failed the other
+  // way, omp booking every one of them `role=other` (23 fleet-implementer/-alt
+  // members measured on disk 2026-09-12) so a role-filtered pair query dropped
+  // this whole harness. A classification that moved twice is why the join key
+  // is the dispatch RECORD.
   const withAgent = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
     sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", "fleet-implementer-alt"),
