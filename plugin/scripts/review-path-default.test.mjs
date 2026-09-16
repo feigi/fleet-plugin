@@ -271,9 +271,10 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   // controller ACTS from these two bullets, and that is the site that produced
   // the failure: a ruling handed over after the finisher was already dispatched
   // put a new commit under a mid-audit finisher. A pin on the narrative copy
-  // alone stays green while the acting site still reads "a member is rarely
-  // still waiting". One bullet each, not the whole loop — the loop slice is
-  // satisfied by either bullet carrying it.
+  // alone stays green while the acting site still licenses the dispatch — which
+  // it did until #1053, reading a fix-applier's push as an exit. One bullet
+  // each, not the whole loop — the loop slice is satisfied by either bullet
+  // carrying it.
   // Unwrap first: these are wrapped prose bullets, so a pinned phrase spans a
   // newline plus indent and an exact-adjacency regex reports a rule that is
   // right there as missing.
@@ -282,7 +283,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   assert.match(
     ciEdge,
     /never dispatch off it while you do/i,
-    "the CI-completes edge lost the outstanding-ruling gate — it fires on the fix-applier's own push, which is exactly when a ruling is still owed",
+    "the CI-completes edge lost the outstanding-ruling gate — it applies wherever a fix-applier pushed, which is one of the firings this edge takes (#1053)",
   );
   const noCiEdge = flat(section(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "- **Pool empty**", "run-team no-ci edge"));
   assert.match(
