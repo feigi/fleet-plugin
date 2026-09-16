@@ -45,16 +45,22 @@ const SOURCES = [
   ["scripts/review-core.js", join(REPO, "scripts", "review-core.js")],
 ];
 
-// Identity is scrubbed, not supplied: an unattended snapshot agent runs wherever
-// the fleet put it, and a `git commit` with no `user.email` anywhere refuses
-// ("Author identity unknown"). The block carries its own `-c user.name`/
-// `-c user.email` for that, so dropping them has to REDDEN here — which it
-// cannot if the fixture hands the child an identity through the environment the
-// way repo-root.test.mjs's fixtures do (they commit without the flags, so they
-// must). `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` are cleared for the mirror
+// Every git identity is scrubbed — both config files and all four `GIT_*` name
+// and email variables — so the commit the block takes can only be the one the
+// block's own `-c user.name`/`-c user.email` supply. That does NOT make the
+// commit impossible without them: measured here, git auto-detects an identity
+// from the OS and committed as `Christian Ziegler <chris@Mac.fritz.box>` with
+// both config files pointed at /dev/null
+// (`env -u GIT_AUTHOR_NAME … GIT_CONFIG_GLOBAL=/dev/null git commit`). So the
+// flags are pinned by the AUTHOR assertion below rather than by a refusal:
+// unflagged, a review stamps whoever's machine ran it onto a commit nobody
+// wrote, and on a host whose name gives git no address it can form the commit
+// fails outright instead.
+//
+// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` are cleared for a different
 // reason: inherited, `git init` exits 0 and creates nothing in the target, so a
 // fixture built under an ambient GIT_DIR would be no repository at all while
-// every status check passed.
+// every status check passed (repo-root.test.mjs's own measurement).
 const ENV = {
   ...process.env,
   GIT_DIR: undefined,
@@ -152,7 +158,7 @@ for (const [name, path] of SOURCES) {
     const { snap, out, status } = cut(t, render(path, worktree));
 
     assert.match(out, /SNAPSHOT_NONEMPTY/, `the extraction came back empty: ${out}`);
-    assert.doesNotMatch(out, /SNAPSHOT_INIT_FAILED/, "the init or the commit failed — a snapshot agent's shell has no git identity to inherit, so the block must carry its own");
+    assert.doesNotMatch(out, /SNAPSHOT_INIT_FAILED/, `the init or the commit failed: ${out}`);
     assert.match(out, /SNAPSHOT_TREE_MATCH/, `the block did not settle that the snapshot is the reviewed tree: ${out}`);
     assert.equal(status, 0, "the block exited non-zero — a snapshot agent reads that as a failed cut");
 
@@ -161,6 +167,16 @@ for (const [name, path] of SOURCES) {
       git(snap, "rev-parse", "HEAD^{tree}"),
       git(worktree, "rev-parse", "HEAD^{tree}"),
       "the snapshot's commit does not hold the reviewed tree",
+    );
+    // The identity flags, pinned where they have an observable effect. The
+    // snapshot commit is a mechanism, not a contribution, and nothing about it
+    // is the operator's: unflagged, git auto-detects a name and address off the
+    // machine (measured in the header) and every review in the fleet stamps
+    // whoever ran it onto a commit nobody wrote.
+    assert.equal(
+      git(snap, "log", "-1", "--format=%an <%ae>"),
+      "fleet <fleet@invalid>",
+      "the snapshot commit is not attributed to the block's own synthetic identity",
     );
     // The `-f` on `git add`, measured rather than read off the flag: this file
     // is tracked at HEAD, so `git archive` carries it, and the extraction's own
