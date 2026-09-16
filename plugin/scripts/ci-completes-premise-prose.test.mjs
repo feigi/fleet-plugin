@@ -37,6 +37,13 @@ import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+// The third site: the member-facing command that names the same gate. Its own
+// suite doesn't guard it, so the falsified premise closing here while staying
+// open there is exactly the loophole #1053 found.
+const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+// Every negative pin below wants the WIDEST scope, both sites combined — a
+// copy of the false premise surviving in either file is the whole defect back.
+const ALL_PROSE = `${RUN_TEAM}\n${REVIEW_AND_FIX}`;
 
 // One bullet each. The phase-3 loop is a flat list of `- **...**` items and
 // `finisher`, `dispatch`, `push` and `report` all recur through every one of
@@ -66,17 +73,33 @@ const narrativeGate = () =>
     "run-team narrative finisher gate",
   );
 
-test("no sentence anywhere claims the edge fires on the fix-applier's push", () => {
-  // Deliberately file-wide, the mirror image of every positive pin here: a
-  // negative wants the WIDEST scope, because a copy of the false premise
-  // surviving just outside a narrow slice is the whole defect back again.
-  // Matched on the claim rather than the original sentence, so a splice mutant
-  // that keeps every pinned word below and appends the premise back in — the
-  // mutant this ticket's PR body states — still reds.
+test("no sentence anywhere claims the edge fires on the pushing member, or that green alone licenses a dispatch", () => {
+  // Deliberately file-wide across both sites naming this gate (SKILL.md's
+  // loop bullet and review-and-fix.md step 4) — the mirror image of every
+  // positive pin here: a negative wants the WIDEST scope, because a copy of
+  // the false premise surviving just outside a narrow slice, or in the other
+  // file entirely, is the whole defect back again.
+  //
+  // Wording-specific, not claim-specific: these patterns catch the
+  // demonstrated paraphrases (`a fix-applier` as well as `the fix-applier`,
+  // `only once ... has pushed` as well as `fires on`, and the gate's inverse
+  // — "green alone" licensing a dispatch, or the review condition read as a
+  // formality) but remain matches over phrasing rather than a semantic
+  // check: a restatement outside these alternations could still slip past.
   assert.doesNotMatch(
-    RUN_TEAM,
-    /edge\s+fires\s+on\s+the\s+fix-applier/,
+    ALL_PROSE,
+    /edge\s+fires\s+(?:on|only\s+(?:when|once))\s+(?:the|a)\s+fix-applier/,
     "the falsified premise is back: the edge fires on every CI run the PR produces, and the implementer's own firing is first for every PR",
+  );
+  assert.doesNotMatch(
+    ALL_PROSE,
+    /green\s+alone\s+(?:is\s+(?:enough|sufficient)|suffices|licens\w*\s+a\s+dispatch)/i,
+    "the gate's inverse is back: green alone licensing a dispatch",
+  );
+  assert.doesNotMatch(
+    ALL_PROSE,
+    /review\s+return(?:ed|ing|s)?\s+is\s+(?:a\s+)?formality/i,
+    "the gate's inverse is back: the review-returned condition demoted to a formality rather than a condition",
   );
 });
 
@@ -120,6 +143,23 @@ test("the finisher gate names both conditions and distinguishes pushed from repo
   assert.match(s, phrase("genuinely"));
 });
 
+test("the first actionable clause in the loop bullet is already conditioned, not an unconditional dispatch", () => {
+  const s = ciEdge();
+  assert.match(
+    s,
+    phrase("a finisher CANDIDATE (gated below)"),
+    "the arrow clause is back to an unconditional dispatch instruction, so a top-to-bottom reader hits it before reaching the two-condition gate 9 lines later",
+  );
+  const candidateIndex = s.indexOf("a finisher CANDIDATE");
+  const gateIndex = s.indexOf("Green is therefore not the gate");
+  assert.ok(candidateIndex >= 0, "the conditioned arrow clause is missing");
+  assert.ok(gateIndex >= 0, "the corrective gate sentence is missing");
+  assert.ok(
+    candidateIndex < gateIndex,
+    "the arrow clause no longer precedes the gate sentence it defers to, so the deferral reads backwards",
+  );
+});
+
 test("the outbox rule survives, as the last test rather than the only one", () => {
   const s = ciEdge();
   assert.match(
@@ -136,12 +176,17 @@ test("the outbox rule survives, as the last test rather than the only one", () =
   assert.match(s, phrase("a final report is not proof it stopped"));
 });
 
-test("the controller records the bound run identifier, not just that CI was green", () => {
+test("the controller records the bound run identifier under a named field, not just that CI was green", () => {
   const s = ciEdge();
   assert.match(
     s,
-    phrase('record the bound `<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
-    "the bullet no longer tells the controller to record the bound run identifier",
+    phrase('record it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
+    "the bullet no longer tells the controller to record the bound run identifier under a named field",
+  );
+  assert.match(
+    s,
+    phrase("`row` **replaces the whole line** (above), so repeat `class=`, `ports=` and `→ PR#`"),
+    "the instruction no longer cross-references the replace-whole-line warning, so a controller following it will silently destroy the row's other tokens",
   );
   assert.match(
     s,
