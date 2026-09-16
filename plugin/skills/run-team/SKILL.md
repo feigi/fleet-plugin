@@ -2009,15 +2009,21 @@ finisher this verbatim, so it derives the cause itself instead of asking anyone:
 >   at or behind the pin as provenance. A member kept working and committed
 >   after you were dispatched. Measured 2026-08-28 on #983, where the finisher
 >   matched neither cause above and halted on its own judgement (#997).
->   Halt, name `commit past the pin`, and report **the commit and whether it is
->   pushed**: `git log -1 --format='%h %s'` names it, and
->   `git ls-remote origin <branch>` answers the rest — equal to that commit
->   means pushed, and a fresh finisher can audit it; anything else means the
->   commit exists only in that worktree, where no reviewer can reach it. Ask
->   the remote, not the PR object, whose head lags a ref move — the same field
->   `run-merge-bot.md` refuses to poll, for that reason. The controller's next
->   move differs between pushed and unpushed, so a report that omits it is not
->   a report of this cause.
+>   Halt, name `commit past the pin`, and report **the commit, and whether it
+>   is pushed, unpushed, or unknown**: `git log -1 --format='%h %s'` names it,
+>   and `git ls-remote origin <branch>` answers the rest — a non-zero exit or
+>   any other failed read is **unknown**, never folded into "unpushed": the
+>   same rule `release-ticket.sh`'s own `ls-remote` names ("a failure here is
+>   an unknown answer, never a 'no'") and `reaping.md`'s remote check shares
+>   ("its failure is an unknown answer, never a 'not pushed'"). Only a
+>   successful read settles pushed vs not: equal to that commit means pushed,
+>   and a fresh finisher can audit it; a successful read that comes back
+>   without it means the commit exists only in that worktree, where no
+>   reviewer can reach it. Ask the remote, not the PR object, whose head lags
+>   a ref move — the same field `run-merge-bot.md` refuses to poll, for that
+>   reason. The controller's next move differs between pushed, unpushed, and
+>   unknown, so a report naming only two of the three is not a report of this
+>   cause.
 > - **Anything else.** Matching none of the above is not a licence to report
 >   the mismatch as unexplained — that report is the one this block exists to
 >   make unnecessary, and it is where labelling over a moved head starts
