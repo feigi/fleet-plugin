@@ -3478,6 +3478,13 @@ test("a missing worktree.sh is exit 2, and the design spec's row names the libra
 test("a slow but working fetch still reaps the merged [gone] branch — the budget is not a stopwatch on success", (t) => {
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
+  // mergedGoneBranch's own `git push --delete` above already left this
+  // clone's local `refs/remotes/origin/feature/merged` gone — `[gone]` would
+  // already be true before the bounded fetch below ever runs. Planting the
+  // tracking ref back makes the verdict below reachable only through a fetch
+  // that genuinely lands, not through the fixture's own prior pushes (#1039
+  // review, finding 3).
+  git(w, "update-ref", "refs/remotes/origin/feature/merged", git(w, "rev-parse", "feature/merged"));
   // Rewired only now: every push this fixture makes needs `receive-pack`, and
   // the stub serves `upload-pack` alone.
   const origin = git(w, "remote", "get-url", "origin");

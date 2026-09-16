@@ -935,6 +935,13 @@ test("a shadowed `sed` that works still proves the merge — the guard refuses o
 // branch exists.
 test("a slow but working fetch still proves the merge — the budget is not a stopwatch on success", (t) => {
   const { w, head, merge, mainTip } = provenMerge(t);
+  // provenMerge's own `git push origin main` above already advanced this
+  // clone's local `origin/main` past the merge, so the ancestor gate below
+  // would already pass before the bounded fetch ever runs. Moving the local
+  // tracking ref back to the pre-merge tip makes `proved` reachable only
+  // through a fetch that genuinely lands, not through the fixture's own
+  // prior push (#1039 review, finding 3).
+  git(w, "update-ref", "refs/remotes/origin/main", mainTip);
   // Read back rather than rebuilt: `repo` returns the clone alone, and a
   // second spelling of the origin path is a fixture that can point the stub at
   // a repo the clone never used.
