@@ -223,6 +223,15 @@ test("quoteBlocks returns no unquoted line, including at a run that ends the tex
 test("quoteBlock returns the run that BEGINS with the opener, never one that merely contains it", () => {
   const text = "> a rule about stashing\n\n> never stash: a rule about stashing is above";
   assert.equal(quoteBlock(text, "never stash", "the fixture"), "> never stash: a rule about stashing is above");
+  // The case above never exercises the `^` anchor: "never stash" is not a
+  // substring of the non-matching block at all, so an unanchored
+  // `new RegExp(phrase(opener).source)` would pass it exactly as the anchored
+  // form does. This puts the opener MID-block instead, where only the `^`
+  // anchor tells the two regexes apart.
+  assert.throws(
+    () => quoteBlock("> intro sentence never stash mid-block words", "never stash", "the fixture"),
+    /no quote block opens/,
+  );
 });
 
 // Reflow-safe for `paragraph`'s reason, one bound over: an opener that the
