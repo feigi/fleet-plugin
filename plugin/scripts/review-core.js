@@ -367,7 +367,7 @@ export function snapshotMissing(snap, runRootPrefix) {
     return `the snapshot at ${snap.path} is not under this run's own root ${snap.runRoot} — refusing a tree that may belong to another run`;
   if (snap.path.includes("/../") || snap.path.endsWith("/.."))
     return `the snapshot at ${snap.path} climbs out of ${snap.runRoot} with a \`..\` segment — the prefix says nothing about where it resolves`;
-  if (!snap.pathVerified)
+  if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
     return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is ${snap.prHead} — refusing to review a commit that is not the PR`;

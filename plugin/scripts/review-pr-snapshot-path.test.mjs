@@ -132,6 +132,19 @@ test("a snapshot that omitted pathVerified is refused, not assumed true", () => 
   assert.equal(typeof reason, "string", "an absent pathVerified must yield a reason, not pass through as verified");
 });
 
+// #1056 Finding 2: a string is not a boolean. `pathVerified` used to be
+// checked with `!snap.pathVerified` — a falsy check — so the STRING "false"
+// (truthy in JS) passed it silently, defeating the exact defect class this
+// field exists to guard against just as surely as an omitted field would.
+// `repoVerified`'s sibling check is `=== true` (snapshot-repo.test.mjs pins
+// it); this mirrors that guard onto `pathVerified`.
+test("a non-boolean truthy pathVerified is refused, not accepted as verified", () => {
+  const falseString = snapshotMissing({ path: SNAP, head: "abc123", pathVerified: "false" });
+  assert.equal(typeof falseString, "string", 'a `pathVerified` of the STRING "false" must still yield a reason — it is truthy, not the boolean the check requires');
+  const trueString = snapshotMissing({ path: SNAP, head: "abc123", pathVerified: "true" });
+  assert.equal(typeof trueString, "string", 'a `pathVerified` of the STRING "true" must still yield a reason — a schema bypass or a hand-built fixture can carry the word rather than the value');
+});
+
 // #532: the head compare already existed — in `usableDiff`, where a
 // mismatching `prHead` cost the review its DIFF and nothing else. The review
 // then ran to completion against a tree that was not the PR, on the fallback
