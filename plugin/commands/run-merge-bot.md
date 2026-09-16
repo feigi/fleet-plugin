@@ -296,15 +296,18 @@ top-level invocation.
 The pass ends, the queue does not. Once no labeled PR is actionable, arm a persistent Monitor so a later sign-off restarts the loop without re-running this command:
 
 ```bash
-poll() { gh pr list --state open --label ready-to-merge --json number --jq '.[].number' 2>/dev/null | tr '\n' ' '; }
-seen=$(poll)
+poll() { gh pr list --state open --label ready-to-merge --json number --jq '.[].number' 2>/dev/null; }
+seen=" $(poll | tr '\n' ' ')"
 while true; do
   sleep 60
   if cur=$(poll); then
-    for n in $cur; do
-      case " $seen " in *" $n "*) ;; *) echo "ready-to-merge label added: PR #$n" ;; esac
-    done
-    seen="$cur"
+    while IFS= read -r n; do                 # capture-then-loop: heredoc-fed, never `for n in $cur`
+      [ -n "$n" ] || continue                # a blank line in OUR OWN list, not a probe that could not look
+      case "$seen" in *" $n "*) ;; *) echo "ready-to-merge label added: PR #$n" ;; esac
+    done <<EOF
+$cur
+EOF
+    seen=" $(printf '%s\n' "$cur" | tr '\n' ' ')"
   fi
 done
 ```
@@ -313,6 +316,7 @@ Arm with `persistent: true`, description `ready-to-merge label on this repo's PR
 
 - Seed `seen` **before** the loop so PRs already handled — including ones skipped for `CHANGES_REQUESTED` or left on red CI — do not re-fire every minute. Only a label appearing after arming is an event.
 - The `if cur=$(poll)` guard keeps `seen` intact when a `gh` call fails transiently; without it one failed poll replays the whole labeled set.
+- **The per-PR loop is heredoc-fed on purpose — `for n in $cur` is the one form that cannot work here.** This runs under zsh, which word-splits an unquoted command substitution's result but *not* an unquoted parameter expansion, and `cur` is a parameter. Measured on zsh 5.9 with `seen="849 850 "` and `cur="849 850 852 "`: the bare form runs **one** iteration with the whole list glued into a single value and emits `ready-to-merge label added: PR #849 850 852`, one nonsense event naming no PR, while the real new PR is never reported; the heredoc form emits `PR #852` alone. `run-team/SKILL.md`'s **Shell traps** carries the mechanism, the remedy table and the `</dev/null` trap that bites the next command added inside this loop. Note the contrast with step 1's `for _ in $(seq 1 60)`: that is a command substitution, it splits, and it is correct as written.
 - 60s poll — remote API, stay off rate limits.
 - A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.
 
