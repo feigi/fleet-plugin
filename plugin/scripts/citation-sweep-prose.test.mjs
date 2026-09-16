@@ -163,7 +163,7 @@ for (const { path, stale, live } of FILES) {
       assert.doesNotMatch(
         source,
         pattern,
-        `a stale line-numbered citation matching ${pattern} is back in ${label} — #516 swept this exact form out because the cited file rots out from under a line number silently`,
+        `a stale line-numbered citation matching ${pattern} is back in ${label} — this form was converted away because the cited file rots out from under a line number silently, with nothing going red when it does`,
       );
     });
   }
@@ -172,7 +172,7 @@ for (const { path, stale, live } of FILES) {
     test(`${label} still names the construct its citation points to (${needle})`, () => {
       assert.ok(
         prose.includes(needle),
-        `${label} no longer mentions "${needle}" anywhere — the construct-named citation #516 introduced here appears to have been deleted outright rather than kept current`,
+        `${label} no longer mentions "${needle}" anywhere — the construct-named citation that replaced the stale form here appears to have been deleted outright rather than kept current`,
       );
     });
   }
