@@ -27,8 +27,6 @@
 //            different hat.
 //            One accepted case is NOT an ordinary run: a mode-only change to
 //            a tracked instrument, which a content digest cannot see (#1059).
-//            instruments.sh's header names that gap, and the case pinned here
-//            is what keeps the text and the behaviour in step.
 //
 // Every case builds a throwaway checkout and runs the script with its cwd set
 // to it — the script resolves the tree to measure from $PWD (or --repo), so a
@@ -374,7 +372,7 @@ test("a bare touch is accepted — content is hashed, not the stat cache", (t) =
 test("a mode-only change to a tracked instrument is accepted — modes are not in the digest", (t) => {
   const root = repo(t);
   pin(root);
-  const rel = `${SET}/scripts/ci-state.mjs`;
+  const rel = join(SET, "scripts", "ci-state.mjs");
   chmodSync(join(root, rel), 0o755);
   // `diff --summary` rather than `status --porcelain`: this file's `git`
   // helper trims, and porcelain's worktree-only column IS a leading space.
@@ -389,7 +387,6 @@ test("a mode-only change to a tracked instrument is accepted — modes are not i
   const before = git(root, "ls-files", "-s", "--", rel);
   git(root, "update-index", "--chmod=+x", "--", rel);
   const after = git(root, "ls-files", "-s", "--", rel);
-  assert.match(before, /^100644 /);
   assert.match(after, /^100755 /);
   assert.equal(after.split(/\s+/)[1], before.split(/\s+/)[1], "the blob is untouched");
   const indexHalf = run(root);

@@ -61,7 +61,9 @@
 # and `git update-index --chmod=+x` moves the index entry to `100755` with the
 # blob untouched; both exit 0 here. A mode change that costs the hash its READ
 # is caught instead: `chmod 000` on a tracked instrument refuses at exit 2
-# through `could not hash every tracked file`. So the exposure is the bits that
+# through `could not hash every tracked file` — as root that never fires,
+# since root reads a mode-000 file regardless (instruments.test.mjs skips
+# this case there for the same reason). So the exposure is the bits that
 # still permit reading, the exec bit above all — and that bit is not how a
 # fleet probe runs: fleet-run hands `.sh` to `sh` and `.mjs` to `node`, so a
 # stripped `+x` is invisible through the Resolver, while invoking one by path
@@ -70,13 +72,9 @@
 # `[ -x "$f" ]` — is a behaviour change to the gate on a channel with no
 # silently wrong reading to its name, and whether a mode-only edit is worth
 # refusing on is a decision rather than a fix, so #1059 names the gap and
-# leaves the behaviour alone. Evidence that decision can lean on: no fleet
-# script chmods a tracked instrument at all — the only chmod calls outside
-# this repo's test code are claim-ticket.sh's on the worktree's untracked
-# `agent-test` runner, fleet-bootstrap's on `~/.fleet/bin/fleet-run` outside
-# the repo, and slow-transport.mjs's on a stub it has just written into a
-# fixture. instruments.test.mjs pins the accepted pair, so closing the gap
-# later goes red there rather than leaving this paragraph stale.
+# leaves the behaviour alone. instruments.test.mjs pins the accepted pair,
+# so closing the gap later goes red there rather than leaving this
+# paragraph stale.
 #
 # REFS ARE DELIBERATELY NOT IN THE DIGEST, and the reason is not that they do
 # not matter. The corroborating evidence on #436 is a stray `fix/42-slug` branch
