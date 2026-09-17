@@ -1271,9 +1271,15 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // comment line inside makeDie must not turn this pin red (measured — the
   // adjacency form over-fired on exactly that). Do not terminate the lines
   // with `$` either; that over-fires on a trailing comment (measured).
+  //
+  // #889: the guard also has to consume writeSync's return value in a loop,
+  // not just enter the try — a short write returns the count it managed and
+  // throws nothing at all, so a body that still calls writeSync once and
+  // discards the count satisfies a bare `try { writeSync(2,` pin while
+  // silently truncating the refusal. Mirrors ci-state.mjs's emit() (#885).
   assert.match(
     stripComments(readFileSync(ARG_MODULE, "utf8")),
-    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*writeSync\(2,/m,
+    /^\s*(?:return )?function die\(msg\) \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(2, buf\)\);/m,
   );
 });
 

@@ -102,7 +102,7 @@ test("die()'s refusal starts its own line even when a partial line is already on
 // could not read reads as a legitimate verdict the fleet then gates on.
 //
 // candidates.test.mjs already pins the guard's source SHAPE, and that pin is
-// deterministic — but it is a text pin, and it stops at `try { writeSync(2,`.
+// deterministic — but it is a text pin, and it stops at `buf = buf.subarray(writeSync(2, buf));`.
 // It says nothing about what the catch does or whether the exit below still
 // runs: `catch { process.exit(1); }` satisfies it (measured, green) and is the
 // whole defect back. Nothing in this repo EXECUTED the catch until here.

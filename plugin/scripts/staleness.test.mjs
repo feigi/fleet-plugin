@@ -32,10 +32,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./staleness.mjs", import.meta.url));
 
@@ -454,4 +455,29 @@ test("a second --gone -- <value> refuses, rather than overwriting the first", (t
   assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
   assert.equal(r.json, null);
   assert.match(r.stderr, /unknown flag --/);
+});
+
+// ── #889: verdict()'s writeSync must consume its own return value ────────
+//
+// A single writeSync call can short-write on a pipe whose fd already has a
+// stream initialised on it: it returns the count it actually wrote and
+// throws nothing at all, so a `try`/`catch` wrapped around one call never
+// fires and the verdict payload is silently truncated with no diagnostic —
+// the same class ci-state.mjs's emit() had before #885. Racing a reader into
+// that exact non-blocking state is what the NOT-PINNED comment above
+// verdict() already refuses to do for the pipe-closed case, so this is a
+// deterministic source-shape pin instead, the same technique
+// candidates.test.mjs uses for arg.mjs's die() (search that file for
+// "Each fragment anchored at a line start" for the anchoring rationale this
+// pin reuses verbatim).
+//
+// A body that still calls writeSync once and discards the count — `try {
+// writeSync(1, ...) } catch { die(...) }` — satisfies a pin that stops at
+// `try {`, so this one requires the loop that resumes from writeSync's own
+// return value, mirroring ci-state.mjs's emit() (#885).
+test("verdict()'s writeSync consumes its own return value in a loop, not just a bare call", () => {
+  assert.match(
+    stripComments(readFileSync(SCRIPT, "utf8")),
+    /^\s*try \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(1, buf\)\);/m,
+  );
 });
