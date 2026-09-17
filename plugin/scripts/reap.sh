@@ -320,6 +320,14 @@ removed=""
 # it emitted a payload no parser accepts at exit 0, while the branch was
 # correctly kept (#119). The stderr lines stay raw: they are prose for an
 # operator, not JSON.
+#
+# A sixth joined the five above at #1419: grep's own stderr, `$gq_err`,
+# surfaced through `gp_why "$gq_err"` in `keep`'s message at the two cherry
+# checks and the two registry re-reads (reap.sh:635, 991, 1195, 1307) —
+# arbitrary text on the same footing as `$cherry`, routed through the same
+# jfield/jstr escaping the paragraph above already covers. Left out of the
+# "eleven call sites" figure above, which still counts only the original
+# five; four more now carry grep's stderr specifically.
 jfield() {
   if jf=$(jstr "$1"); then
     printf '"%s"' "$jf"
@@ -486,6 +494,18 @@ gp_why() {
 # pattern keeps a fixed, non-optional slot no flag list can shift it out of:
 # #730 measured what a positional argument does when a flag is inserted ahead
 # of it.
+#
+# `%%"$gp_sep"*` for `$gq_err` and `##*"$gp_sep"*` for `$gq_rc` split at
+# OPPOSITE ends on purpose: `$gq_err` is grep's stderr, arbitrary bytes this
+# function does not control, and could itself contain a byte matching
+# `$gp_sep` — a `#*"$gp_sep"` split on the shortest match would then read
+# everything after that stray byte, including the real trailing separator, as
+# part of `$gq_rc`, handing `[ "$gq_rc" -le 1 ]` a non-numeric string and
+# leaking a raw shell diagnostic. Splitting `$gq_rc` on the LAST occurrence
+# instead reaches past any such stray byte to the one separator this function
+# itself appended, so a corrupted rc field cannot happen — a corrupted
+# `$gq_err` still can, and is truncated at the stray byte, but the verdict
+# stays numeric and this function still fails closed either way.
 grep_probe() {
   gq_hay=$1
   gq_pat=$2
@@ -497,8 +517,29 @@ grep_probe() {
     } 3>&1
   )
   gq_err=${gq_raw%%"$gp_sep"*}
-  gq_rc=${gq_raw#*"$gp_sep"}
+  gq_rc=${gq_raw##*"$gp_sep"}
   [ "$gq_rc" -le 1 ]
+}
+
+# Sets `$state` to name what a re-read of the worktree registry found after a
+# `git worktree remove` refusal — shared by the branch sweep and the
+# branchless/detached-worktree sweep below, which otherwise carried this
+# four-way chain, `$wt_list`/`$gq_rc`/`$gq_err` and all, as two byte-identical
+# copies. One copy so a fix to the chain cannot land in one sweep and miss
+# the other, same reasoning as `gp_why` taking its guards as an argument
+# above. The two call sites still earn their own `#1419` test fixtures: both
+# pin that both sweeps actually CALL this, which one shared body cannot do by
+# itself.
+wt_reg_state() {
+  if ! wt_listing; then
+    state="cannot tell whether the registration survived"
+  elif ! grep_probe "$wt_list" "worktree $1" -xF; then
+    state="cannot tell whether the registration survived — the registry scan itself failed$(gp_why "$gq_err")"
+  elif [ "$gq_rc" -eq 0 ]; then
+    state="registration intact"
+  else
+    state="registration cleared"
+  fi
 }
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
@@ -622,8 +663,7 @@ for b in $gone_branches; do
   if ! grep_probe "$cherry" '^+'; then
     keep "$b" "cherry scan failed — cannot tell if merged$(gp_why "$gq_err")"
     continue
-  fi
-  if [ "$gq_rc" -eq 0 ]; then
+  elif [ "$gq_rc" -eq 0 ]; then
     keep "$b" "unmerged commits"
     continue
   fi
@@ -973,15 +1013,7 @@ for b in $gone_branches; do
       # sweep, and a directory whose contents nobody has inspected is not this
       # script's to delete.
       if ! err=$(git worktree remove "$wt" 2>&1); then
-        if ! wt_listing; then
-          state="cannot tell whether the registration survived"
-        elif ! grep_probe "$wt_list" "worktree $wt" -xF; then
-          state="cannot tell whether the registration survived — the registry scan itself failed$(gp_why "$gq_err")"
-        elif [ "$gq_rc" -eq 0 ]; then
-          state="registration intact"
-        else
-          state="registration cleared"
-        fi
+        wt_reg_state "$wt"
         keep "$b" "worktree remove refused ($state): $(printf '%s' "$err" | tr '\n' ' ')"
         continue
       fi
@@ -1182,8 +1214,7 @@ else
     if ! grep_probe "$cherry" '^+'; then
       keep "" "cherry scan failed — cannot tell if worktree $wt is merged$(gp_why "$gq_err")"
       continue
-    fi
-    if [ "$gq_rc" -eq 0 ]; then
+    elif [ "$gq_rc" -eq 0 ]; then
       keep "" "worktree $wt holds commits that exist nowhere else"
       continue
     fi
@@ -1289,15 +1320,7 @@ else
       # names what the REGISTRY answered and claims nothing about what is left
       # on disk.
       if ! err=$(git worktree remove "$wt" 2>&1); then
-        if ! wt_listing; then
-          state="cannot tell whether the registration survived"
-        elif ! grep_probe "$wt_list" "worktree $wt" -xF; then
-          state="cannot tell whether the registration survived — the registry scan itself failed$(gp_why "$gq_err")"
-        elif [ "$gq_rc" -eq 0 ]; then
-          state="registration intact"
-        else
-          state="registration cleared"
-        fi
+        wt_reg_state "$wt"
         # `$wt` interpolated, unlike the branch sweep's byte-identical twin: there
         # `keep "$b"` names the subject, here the branch field is `null` and
         # git's own message for a locked worktree carries no path, so two
