@@ -517,7 +517,7 @@ if (noCi) {
   vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
   const runs = runJson(
     "gh",
-    ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt,updatedAt"],
+    ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt"],
     (v) => {
       if (!Array.isArray(v)) return "expected an array of runs";
       const bad = v.findIndex((r) => !isObject(r));
@@ -536,20 +536,35 @@ if (noCi) {
   // the second: two runs GitHub started in the same instant (measured on PR
   // #1402, both 6 jobs green — one `cancelled`, one `completed`, and the
   // stable sort below previously let API order pick the loser). Ranking
-  // status ahead of createdAt here would let an older completed run beat a
-  // newer in-progress one on an unrelated, untied pair — a fresh regression,
-  // not a fix (#1410 review) — so status only ever compares within a tie.
+  // conclusion ahead of createdAt here would let an older completed run beat
+  // a newer in-progress one on an unrelated, untied pair — a fresh
+  // regression, not a fix (#1410 review) — so conclusion only ever compares
+  // within a tie.
   const compareRuns = (x, y) => {
-    const byCreatedAt = String(y.createdAt).localeCompare(String(x.createdAt));
+    const byCreatedAt = bySecond(y.createdAt).localeCompare(bySecond(x.createdAt));
     if (byCreatedAt !== 0) return byCreatedAt;
-    const rank = (r) => (r.status === "completed" ? 0 : 1);
-    const byStatus = rank(x) - rank(y);
-    if (byStatus !== 0) return byStatus;
-    const byUpdatedAt = String(y.updatedAt ?? "").localeCompare(String(x.updatedAt ?? ""));
-    if (byUpdatedAt !== 0) return byUpdatedAt;
-    // Last resort once createdAt, status, and updatedAt all agree — total
-    // determinism, never expected to matter in practice.
-    return String(y.databaseId).localeCompare(String(x.databaseId));
+    // `status` is the run's LIFECYCLE (queued/in_progress/completed) and is
+    // NOT the outcome — a cancelled run reports status:"completed",
+    // conclusion:"cancelled", same as a successful one. Ranking on status
+    // here (as an earlier draft of this fix did) could never actually prefer
+    // a completed-and-successful run over a completed-but-cancelled sibling,
+    // because both share status:"completed". Rank on `conclusion` instead.
+    const rank = (r) => {
+      if (r.conclusion === "success" || r.conclusion === "skipped") return 0;
+      // Still running: no conclusion yet and not yet completed. Neither a
+      // proven win nor a proven loss, so it sits between a settled success
+      // and a settled failure/cancellation rather than being ranked as
+      // either extreme.
+      if (r.conclusion === null && r.status !== "completed") return 1;
+      return 2;
+    };
+    const byConclusion = rank(x) - rank(y);
+    if (byConclusion !== 0) return byConclusion;
+    // Last resort once createdAt (to the second) and conclusion rank both
+    // agree — total determinism, never expected to matter in practice.
+    // Numeric, not string, compare: "9" sorts ahead of "10" lexicographically
+    // but the higher/most-recent id is 10.
+    return Number(y.databaseId) - Number(x.databaseId);
   };
   const matching = runs.filter((r) => r.headSha === prHead).sort(compareRuns);
 
@@ -569,11 +584,11 @@ if (noCi) {
     if (tiedAtCreatedAt.length > 1) {
       const others = tiedAtCreatedAt
         .filter((r) => r.databaseId !== chosen.databaseId)
-        .map((r) => `#${r.databaseId} (${r.status})`)
+        .map((r) => `#${r.databaseId} (${r.status}/${r.conclusion ?? "null"})`)
         .join(", ");
       emit(
         2,
-        `${NAME}: run selection tie-break — ${tiedAtCreatedAt.length} runs share head ${prHead} and createdAt ${bySecond(chosen.createdAt)}; chose #${chosen.databaseId} (${chosen.status}) over ${others}\n`,
+        `${NAME}: run selection tie-break — ${tiedAtCreatedAt.length} runs share head ${prHead} and createdAt ${bySecond(chosen.createdAt)}; chose #${chosen.databaseId} (${chosen.status}/${chosen.conclusion ?? "null"}) over ${others}\n`,
       );
     }
     runId = chosen.databaseId;
