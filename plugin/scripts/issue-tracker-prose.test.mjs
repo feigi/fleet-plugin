@@ -16,6 +16,17 @@
 // copies; it is the catch-up copy, not their source, so this pin keeps the
 // doc from drifting back out, nothing more.
 //
+// What DEPENDS on this doc is settled by MUTATION, never by grepping for
+// `issue-tracker`: the string matches many more paths than read the doc,
+// and a match cannot tell a mention from a dependency. Write `MUTATED` over
+// `docs/agents/issue-tracker.md` in a scratch copy of the tree and run
+// `node --test plugin/scripts/*.test.mjs` (every test file lives there);
+// what reddens against that copy's own green baseline is what reads it.
+// Measured on this commit: this file, `closing-keyword-prose.test.mjs` and
+// `tracker-block-copy-prose.test.mjs`, no other suite. Re-run the mutation
+// rather than trusting that list — a grep result frozen into a header is
+// the defect #1119 names.
+//
 // THE CEILING, same as fleet-tick-prose.test.mjs: this proves a phrase is
 // PRESENT. It cannot prove it is not negated by a sentence added beside it.
 import { test } from "node:test";
