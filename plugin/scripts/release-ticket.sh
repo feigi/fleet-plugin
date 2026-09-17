@@ -999,18 +999,11 @@ shquote() {
   # `${…%%\'*}` is the run up to the next quote and `${…#*\'}` everything past
   # it, so each turn appends one run plus the escape and stops when no quote is
   # left. The pair of quotes goes on at the end, around the whole accumulation.
-  while :; do
-    case $shq_rest in
-      *\'*)
-        shq="$shq${shq_rest%%\'*}'\\''"
-        shq_rest=${shq_rest#*\'}
-        ;;
-      *)
-        shq="'$shq$shq_rest'"
-        return 0
-        ;;
-    esac
+  while [ "$shq_rest" != "${shq_rest#*\'}" ]; do
+    shq="$shq${shq_rest%%\'*}'\\''"
+    shq_rest=${shq_rest#*\'}
   done
+  shq="'$shq$shq_rest'"
 }
 # WHICH entry, for the unresolved-HEAD arm alone. That arm is the one fault with
 # no remedy to name — measured on a corrupt-HEAD entry, `git worktree repair`
