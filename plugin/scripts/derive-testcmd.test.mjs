@@ -30,8 +30,8 @@ function repo(files) {
   return dir;
 }
 
-function derive(dir, ref = "HEAD") {
-  const r = spawnSync("sh", [SCRIPT, dir, ref], { encoding: "utf8" });
+function derive(dir, ref = "HEAD", env = process.env) {
+  const r = spawnSync("sh", [SCRIPT, dir, ref], { encoding: "utf8", env });
   return { status: r.status, out: r.stdout.trim(), err: r.stderr };
 }
 
@@ -385,4 +385,67 @@ test("an ambient GIT_DIR does not derive another repository's entrypoint (#1020)
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "npm test --",
     "an ambient GIT_DIR must not answer for another repository — both consumers act on this string, and claim-ticket.sh bakes it into the runner it materialises");
+});
+
+// --- #1175: the cross-file invariant claim-ticket.sh's `$testcmd` rests on.
+//
+// That script captures THIS one with stderr merged and then reads the result
+// on its SUCCESS path — echoed, compared against the literal `node --test`,
+// and baked into the `exec $testcmd "$@"` of the runner it materialises — with
+// no shape guard on the capture, unlike the `ndeps` capture above it. Its own
+// comment states what makes that safe: "derive-testcmd.sh writes nothing to
+// stderr when it succeeds, so the success path still captures the command
+// alone." Nothing pinned that, and it is a claim about THIS file's behaviour,
+// enforceable only here.
+//
+// Measured against the tracked scripts: claim-ticket.sh's capture construct,
+// copied verbatim, pointed at a copy of this script carrying one added
+// `echo >&2` before its `node --test` emit, captures `warning: chatty\nnode
+// --test` — the `= "node --test"` comparison silently takes the wrong arm and
+// the emitted runner's `exec` runs the chatter as a command. So a warning, a
+// deprecation notice or a `set -x` left on a success path here is a live
+// defect in a sibling file, with nothing between the two but this case.
+//
+// The chatter env is not decoration and the fixtures must carry a manifest.
+// What keeps node's OWN stderr out of this script's today is that both inner
+// node calls are captured `2>&1` (into $nodeerr and $pkgerr) and read only in
+// refusal arms — and neither call happens at all unless `git show
+// <ref>:package.json` returned something. A manifest-less fixture pins the
+// emit lines but says NOTHING about that swallowing, which is the half that is
+// actually load-bearing: #1175's own verification ran against this repo at
+// origin/main, which has no package.json, so it never invoked node and could
+// not have observed the thing it reported as verified.
+const CHATTY_NODE = { ...process.env, NODE_DEBUG: "module" };
+test("every success path writes nothing to stderr, even when node is chatty (#1175)", () => {
+  // Positive control, resolved by NAME exactly as the script resolves it: the
+  // env really does make that interpreter noisy, so green below is the
+  // swallowing working rather than an inert variable.
+  const control = spawnSync("node", ["-e", "0"], { encoding: "utf8", env: CHATTY_NODE });
+  assert.equal(control.status, 0, "fixture: `node -e 0` must run for this control to mean anything");
+  assert.ok(control.stderr.length > 0,
+    "fixture: NODE_DEBUG=module must make node write to its own stderr, or these legs prove nothing");
+
+  // All three success routes, not just the two manifest-bearing ones: a
+  // declared scripts.test (the parse probe exits 0), a manifest declaring
+  // none (exits 1, falling through to the test-file check), and no manifest
+  // at all ($pkg empty, skipping the whole `if [ -n "$pkg" ]` block — #1175's
+  // own review found this exact gap, since a stderr write reachable only on
+  // that route runs neither inner node call and so has no swallowing to hide
+  // behind). Each manifest-bearing arm runs both inner node calls under the
+  // control's env; the no-manifest arm invokes node zero times, so it is the
+  // one route where the swallowing argument does not apply at all and only
+  // the emit arms can write. Plain-env legs are omitted, not forgotten — this
+  // env is strictly the more hostile one, and a stray write on any arm fails
+  // here identically.
+  for (const [arm, files] of [
+    ["npm test --", { "package.json": pkg({ scripts: { test: "vitest" } }) }],
+    ["node --test", { "package.json": pkg({ name: "x" }), "t.test.mjs": PASSES }],
+    ["node --test", { "t.test.mjs": PASSES }],
+  ]) {
+    const r = derive(repo(files), "HEAD", CHATTY_NODE);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, arm, "fixture: this tree must derive the arm under test");
+    assert.equal(r.err, "",
+      `the ${arm} path must write nothing to stderr — claim-ticket.sh merges this stream into the $testcmd it compares against a literal and execs, with no guard of its own`);
+  }
 });
