@@ -49,7 +49,9 @@ issue's existence: **is the finding worth a claim.**
   future run re-deriving the finding lands on the record instead of re-filing.
 - **Promotion path:** a later review returning the same finding as
   `survived`, or a maintainer hitting the defect, files it open then, citing
-  the record.
+  the record — or, where a later review re-derives it in scope and applies
+  the fix instead of filing it, the `Promoted — applied, not filed` comment
+  on the record carries the same signal.
 - **Anything alleging wrong behavior files open**, under 0001's confirmed/torn
   split, whatever band it sat in — `unverified` with crashed refuters
   included.
@@ -72,7 +74,24 @@ Input: `Below the claim bar` entries recorded after this decision lands on
 - **Floor:** 20 below-bar entries across at least 3 distinct run dates.
 - **Trigger A — bar too wide:** 5 or more of those entries promoted (a later
   `survived` finding or a maintainer hit). The bar is burying real work;
-  retune or revert.
+  retune or revert. **Promotion signal — two marks, both on the record
+  issue:** an open issue citing the record, and a
+  `Promoted — applied, not filed` comment on it, which `review-and-fix.md`
+  step 5 requires where a later review re-derives the entry in scope, its
+  refuter lets it through, and the run applies the fix instead of filing it.
+  That second path files nothing, so without the comment this trigger would
+  count only promotions that happened to need a ticket of their own and would
+  miss the entry re-derived, checked and worth fixing — the strongest
+  evidence there is that the bar buried real work. Count both marks off each
+  record's own timeline — `gh api repos/{owner}/{repo}/issues/<n>/timeline
+  --paginate` — and record the date taken with the verdict, as 0001's guard
+  does.
+  **The citing issue must be a promotion, not a sample:** it counts only
+  when it carries step 5's own `Deferred from PR #<pr> review` line and
+  names the below-bar entry it promotes — a cross-reference from an issue
+  that merely samples records as evidence (a measurement ticket, a sibling
+  record issue, a review PR) is not a promotion, and does not mint this
+  mark on its own.
 - **Trigger B — bar missed the load:** non-record `wontfix` closes still above
   half of all closes over the same window. The clause is not where the volume
   is; 0001's shelved options come back off the shelf.
