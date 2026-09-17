@@ -548,6 +548,22 @@ const REVIEWER_BLOCKS = [
     ],
   },
   {
+    what: "the finisher's instrument re-check block",
+    opener: "**Re-check the instrument set before you act on what duty 1 or duty 2 read",
+    golden: [
+      "**Re-check the instrument set before you act on what duty 1 or duty 2 read,",
+      "and again before you add the label.**",
+      "`~/.fleet/bin/fleet-run instruments.sh --repo \"$(dirname \"$(git rev-parse --git-common-dir)\")\"`.",
+      "Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and",
+      "exit 2 (the check could not answer) both halt you: report what it printed,",
+      "add no label, and do NOT re-read the script that gave you the reading.",
+      "`--repo` is required and the spelling is the point — the run's baseline lives",
+      "in the audited checkout's gitignored `.fleet/`, which the scratch worktree",
+      "you take at duty 2 does not carry, so a bare invocation from there exits 2 on",
+      "a missing baseline instead of comparing anything.",
+    ],
+  },
+  {
     what: "the finisher's halt-cause block",
     opener: "Worktree differs from your pin",
     golden: [
