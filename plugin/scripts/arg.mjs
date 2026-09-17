@@ -96,19 +96,42 @@ import { writeSync } from "node:fs";
 // line-anchored; without the leading newline they silently stop matching
 // under exactly the large-stderr failure writeSync exists to survive.
 //
-// The write itself can still fail: once enough forwarded stderr is already
-// queued on a pipe, this fd is non-blocking and writeSync throws EAGAIN.
-// Uncaught, that skips process.exit(2) below and the process falls through
-// to Node's default exit 1 — inverting the caller's own exit-code contract
-// (#299/#328). The try/catch keeps the exit code landing regardless; the
-// exit code is the contract, recovering the refusal TEXT under that exact
-// race would need a retry loop and is out of scope.
+// The write itself can still fail, two ways. Once enough forwarded stderr
+// is already queued on a pipe, this fd is non-blocking, and a single call
+// either short-writes — returns the count it managed and throws nothing at
+// all, silently truncating the refusal with no diagnostic (#889, the same
+// class ci-state.mjs's emit() had before #885) — or throws EAGAIN outright.
+// Uncaught, EAGAIN skips process.exit(2) below and the process falls
+// through to Node's default exit 1 — inverting the caller's own exit-code
+// contract (#299/#328). The loop below mirrors emit() (#885): it resumes a
+// short write where writeSync left off, and retries EAGAIN after a 1ms
+// Atomics.wait, capped at MAX_EAGAIN_RETRIES so a reader that never drains
+// still reaches process.exit(2) instead of hanging forever; the outer try
+// covers msg's own string coercion too, so a throwing msg can never skip
+// the exit code either.
+const MAX_EAGAIN_RETRIES = 200;
+
+// Shared across every retry: Atomics.wait never writes or notifies it, so one
+// instance times out exactly as a fresh one would, without allocating a
+// SharedArrayBuffer on every EAGAIN.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
 export function makeDie(name) {
   return function die(msg) {
     try {
-      writeSync(2, `\n${name}: ${msg}\n`);
+      let buf = Buffer.from(`\n${name}: ${msg}\n`);
+      let retries = 0;
+      while (buf.length) {
+        try {
+          buf = buf.subarray(writeSync(2, buf));
+        } catch (e) {
+          // Message may be lost; the exit code below must not be.
+          if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) break;
+          Atomics.wait(IDLE, 0, 0, 1);
+        }
+      }
     } catch {
-      // Message may be lost; the exit code below must not be.
+      // Message (or its own construction) may be lost; the exit code below must not be.
     }
     process.exit(2);
   };

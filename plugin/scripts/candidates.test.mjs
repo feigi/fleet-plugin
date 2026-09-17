@@ -1233,9 +1233,11 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // pin at the end is the only gate on this platform.
   //
   // Text, not just status: this only asserts the EXIT CODE, not the refusal
-  // wording. `die()`'s catch swallows the write failure to keep exit 2, so
-  // under the exact EAGAIN this test forces, the message CAN still be lost —
-  // recovering it needs a retry loop, and #299 puts that out of scope.
+  // wording. #889 gave die() a bounded EAGAIN retry loop (MAX_EAGAIN_RETRIES
+  // in arg.mjs) that resumes a short write and retries the exact EAGAIN this
+  // test forces, so the message is no longer lost on the first EAGAIN the way
+  // it was before #889 — only a reader that never drains past the retry cap
+  // can still lose it, and #299 is what keeps the exit code honest either way.
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
     ["--require-label", "ready-for-agent"],
@@ -1271,9 +1273,19 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // comment line inside makeDie must not turn this pin red (measured — the
   // adjacency form over-fired on exactly that). Do not terminate the lines
   // with `$` either; that over-fires on a trailing comment (measured).
+  //
+  // #889: the guard also has to consume writeSync's return value in a loop,
+  // not just enter the try — a short write returns the count it managed and
+  // throws nothing at all, so a body that still calls writeSync once and
+  // discards the count satisfies a bare `try { writeSync(2,` pin while
+  // silently truncating the refusal. Mirrors ci-state.mjs's emit() (#885).
+  // The retry loop is itself capped and now sits inside an OUTER try that
+  // also covers `Buffer.from` — msg's own string coercion — so a mutant that
+  // moves the buffer construction back outside the guard (the #299/#328
+  // inversion this file's die() promises never to repeat) fails this pin too.
   assert.match(
     stripComments(readFileSync(ARG_MODULE, "utf8")),
-    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*writeSync\(2,/m,
+    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(2, buf\)\);/m,
   );
 });
 

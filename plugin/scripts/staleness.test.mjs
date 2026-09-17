@@ -32,10 +32,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./staleness.mjs", import.meta.url));
 
@@ -454,4 +455,91 @@ test("a second --gone -- <value> refuses, rather than overwriting the first", (t
   assert.equal(r.code, 2, `expected refusal (exit 2), got ${r.code}: ${r.stderr}`);
   assert.equal(r.json, null);
   assert.match(r.stderr, /unknown flag --/);
+});
+
+// ── #889: verdict()'s writeSync must consume its own return value ────────
+//
+// A single writeSync call can short-write on a non-blocking pipe: it returns
+// the count it actually wrote and throws nothing at all, so a `try`/`catch`
+// wrapped around one call never fires and the verdict payload is silently
+// truncated with no diagnostic — the same class ci-state.mjs's emit() had
+// before #885. Unlike ci-state.mjs, staleness.mjs never initialises its own
+// stream on fd 1 (nothing here calls console.log/process.stdout), so fd 1
+// only goes non-blocking if a parent process hands it that way; the
+// hardening still matters for that caller shape, which is why it is pinned
+// here rather than dropped as unreachable. Racing a reader into that
+// non-blocking state is what the NOT-PINNED comment above verdict() already
+// refuses to do for the pipe-closed case, so this is a deterministic
+// source-shape pin instead, the same technique candidates.test.mjs uses for
+// arg.mjs's die() (search that file for "Each fragment anchored at a line
+// start" for the anchoring rationale this pin reuses verbatim).
+//
+// A body that still calls writeSync once and discards the count — `try {
+// writeSync(1, ...) } catch { die(...) }` — satisfies a pin that stops at
+// `try {`, so this one requires the loop that resumes from writeSync's own
+// return value, mirroring ci-state.mjs's emit() (#885). #889 also capped the
+// retry (see below), which is why `retries` now sits between the try and the
+// buffer it counts against.
+test("verdict()'s writeSync consumes its own return value in a loop, not just a bare call", () => {
+  assert.match(
+    stripComments(readFileSync(SCRIPT, "utf8")),
+    /^\s*try \{\s*^\s*let retries = 0;\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(1, buf\)\);/m,
+  );
+});
+
+// verdict()'s EAGAIN retry loop had the same #889 gap as die()'s: no cap, so
+// a stdout reader that stays open but never drains left writeSync throwing
+// EAGAIN forever and the "a failed write is a could-not-check" downgrade this
+// function's own comment promises — the whole reason it writeSyncs instead of
+// console.log — never ran. MAX_EAGAIN_RETRIES bounds it: past the cap the
+// loop re-throws, the outer catch calls die(), and the process still exits 2
+// with the could-not-check refusal on stderr.
+//
+// Reproduced with a real non-blocking pipe, not a mock: fcntl sets O_NONBLOCK
+// on the write end before the child ever touches it, so the OS — not a stub
+// — is what throws EAGAIN. The read end is held open but never read, which is
+// the case this pins: closing it instead would make every write EPIPE, a
+// different (already-handled) failure this loop's cap is not needed for.
+test("verdict() falls through to the could-not-check downgrade within a bound when stdout is a saturated pipe whose reader never drains — #889's retry cap", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const w = repo(t);
+
+  const harness = [
+    "import fcntl, os, subprocess, sys, time",
+    "r, w = os.pipe()",
+    "fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
+    "try:",
+    "    while True:",
+    "        os.write(w, b'x' * 65536)",
+    "except BlockingIOError:",
+    "    pass",
+    "start = time.time()",
+    "proc = subprocess.Popen(sys.argv[1:], stdout=w, stderr=subprocess.PIPE)",
+    "os.close(w)",
+    "try:",
+    "    _, err = proc.communicate(timeout=5)",
+    "except subprocess.TimeoutExpired:",
+    "    proc.kill()",
+    "    proc.wait()",
+    "    print('TIMEOUT')",
+    "    sys.exit(1)",
+    "print(f'EXIT={proc.returncode} ELAPSED={time.time() - start:.3f}')",
+    "sys.stderr.write(err.decode())",
+  ].join("\n");
+
+  const r = spawnSync(
+    "python3",
+    ["-c", harness, process.execPath, SCRIPT, "--path", "src.mjs", "--gone", "a spelling this file never had"],
+    { cwd: w, env: ENV, encoding: "utf8" },
+  );
+  assert.match(
+    r.stdout,
+    /^EXIT=2 ELAPSED=\d/m,
+    `verdict() must exit 2 within the bound against a permanently saturated stdout pipe; got stdout=${r.stdout} stderr=${r.stderr}`,
+  );
+  assert.match(
+    r.stderr,
+    /the verdict could not be written to stdout . could not check/,
+    `verdict() must still deliver the could-not-check refusal on stderr once the retry cap is hit; got: ${r.stderr}`,
+  );
 });

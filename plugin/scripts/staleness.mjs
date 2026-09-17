@@ -165,6 +165,13 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
+const MAX_EAGAIN_RETRIES = 200;
+
+// Shared across every retry: Atomics.wait never writes or notifies it, so one
+// instance times out exactly as a fresh one would, without allocating a
+// SharedArrayBuffer on every EAGAIN.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
 function verdict(v, extra) {
   // writeSync, not console.log, for the reason arg.mjs gives for die(): a
   // failed write to stdout is invisible through console.log, so a reader that
@@ -181,8 +188,25 @@ function verdict(v, extra) {
   // worse than none. The measurement above is what stands behind it. Closing
   // it properly needs a seam that makes fd 1 fail on demand, which is the same
   // testability seam #822 turns on.
+  //
+  // A single writeSync call can also short-write — return the count it
+  // managed and throw nothing at all — so the loop below mirrors
+  // ci-state.mjs's emit() (#885/#889): resume from where writeSync left off,
+  // and retry EAGAIN after a 1ms Atomics.wait rather than treat it as the
+  // pipe-closed failure this catch exists for — but only up to
+  // MAX_EAGAIN_RETRIES, so a reader that never drains still falls through to
+  // the could-not-check downgrade below instead of hanging forever.
   try {
-    writeSync(1, `${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
+    let retries = 0;
+    let buf = Buffer.from(`${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
+    while (buf.length) {
+      try {
+        buf = buf.subarray(writeSync(1, buf));
+      } catch (e) {
+        if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) throw e;
+        Atomics.wait(IDLE, 0, 0, 1);
+      }
+    }
   } catch {
     die("the verdict could not be written to stdout — could not check");
   }
