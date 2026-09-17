@@ -1007,7 +1007,13 @@ esac`);
  * The sentinel keeps it to one shot — the suite's own cleanup shells out to
  * git too, and a shim that mutated on every listing would never converge.
  * Returned so a case can assert it actually fired: a shim that silently stops
- * matching turns this into a test of nothing.
+ * matching turns this into a test of nothing. A second sentinel,
+ * `<fired>.failed`, is stamped if `mutation` itself exits nonzero — firing is
+ * necessary but not sufficient evidence a real race was exercised: a mutation
+ * that fails after its target path already exists (or after some other
+ * partial effect) can still leave that on-disk trace behind with the
+ * registry never actually touched, so a case must assert this sentinel's
+ * absence alongside any on-disk witness, never the witness alone.
  */
 function registryRaceShim(bin, mutation) {
   const fired = join(bin, "race-fired");
@@ -1015,7 +1021,7 @@ function registryRaceShim(bin, mutation) {
   "worktree list --porcelain -z")
     if [ ! -e '${fired}' ]; then
       : > '${fired}'
-      ${mutation}
+      ${mutation} || : > '${fired}.failed'
     fi ;;
 esac`);
   return fired;
@@ -1039,6 +1045,8 @@ test("probe 3: a sibling worktree ADD between the two reads is absorbed, not an 
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(`${fired}.failed`), false,
+    "the shim's add actually exited zero, otherwise no real race was exercised");
   assert.equal(existsSync(sibling), true,
     "the shim's mutation actually added the sibling worktree, otherwise no real race was exercised");
   assert.equal(r.status, 0, `a concurrent add is not an unanswerable probe: ${r.stderr}`);
@@ -1059,8 +1067,15 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(`${fired}.failed`), false,
+    "the shim's remove actually exited zero, otherwise no real race was exercised");
+  // Unlike the ADD case above, a broken remove here was never silent: the
+  // pre-existing `r.status` check below already reds on it, because a
+  // worktree the shim failed to remove still reports `taken: true`. This
+  // assertion is a better diagnostic (names the actual cause), not new
+  // coverage — don't "simplify" it away as symmetric boilerplate with ADD.
   assert.equal(existsSync(wt), false,
-    "the shim's mutation actually removed the sibling worktree, otherwise no real race was exercised");
+    "the shim's mutation actually removed the worktree it targeted, otherwise no real race was exercised");
   assert.equal(r.status, 0, `a concurrent remove is not an unanswerable probe: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all");
   assert.equal(JSON.parse(r.stdout).taken, false);
