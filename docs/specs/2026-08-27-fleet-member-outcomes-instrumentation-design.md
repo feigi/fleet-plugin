@@ -521,9 +521,18 @@ are. No report script until the data proves one is needed.
   key; a silent fallback writes `agentType: <the name you passed>` **with** a
   `model` key. This is a live hazard for Part 2 — see its Global Constraints.
 - **Whether `opts.model` beats `agentType` frontmatter in workflow `agent()`.**
-  Open since the #211 spec; `review-pr.js:364-370` still carries the UNVERIFIED
-  note. It does not block this work — no fleet dimension is sent both — but the
-  same read that settles the item above settles this one.
+  Open since the #211 spec, and now MOOT in this workflow rather than answered.
+  The 2026-09-09 omp port (#1349, per #1303's gap 3) deleted the per-call tier
+  knobs the question was about, and the UNVERIFIED note that carried it went with
+  them. `review-pr.js` records that ruling in the comment under its `verifiers`
+  declaration — *"the three per-call tier knobs this block used to expose — are
+  GONE, not renamed"* — so tier lives only in each `fleet-review-*` definition's
+  frontmatter, and no dispatch here sends a per-call model for frontmatter to
+  beat. Cited by content, not by line (#1130): this bullet named a line range
+  that was already off by one when it was written, drifted ten lines further
+  under an unrelated PR, and then outlived its target entirely — three states in
+  which a reader re-reading the number learns nothing about whether the item is
+  still open.
 - **Sizing verdict availability.** Phase 0 computes light/heavy, but nothing
   confirms it survives anywhere durable once the wave moves on. Moving `sizing`
   onto the controller-written `tier-outcomes.tsv` row sidesteps the storage
