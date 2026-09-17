@@ -517,21 +517,65 @@ if (noCi) {
   vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
   const runs = runJson(
     "gh",
-    ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt"],
+    ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt,updatedAt"],
     (v) => {
       if (!Array.isArray(v)) return "expected an array of runs";
       const bad = v.findIndex((r) => !isObject(r));
       return bad === -1 ? null : `run list row ${bad} is not an object`;
     },
   );
-  const matching = runs
-    .filter((r) => r.headSha === prHead)
-    .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
+  const bySecond = (createdAt) => {
+    // GitHub's createdAt is already whole-second precision; this guards
+    // against any future sub-second drift silently hiding a genuine tie.
+    const s = String(createdAt);
+    const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(s);
+    return m ? m[1] : s;
+  };
+  // Recency is the primary key — a newer run always outranks an older one,
+  // tied or not. The tie-break below fires ONLY when createdAt is equal to
+  // the second: two runs GitHub started in the same instant (measured on PR
+  // #1402, both 6 jobs green — one `cancelled`, one `completed`, and the
+  // stable sort below previously let API order pick the loser). Ranking
+  // status ahead of createdAt here would let an older completed run beat a
+  // newer in-progress one on an unrelated, untied pair — a fresh regression,
+  // not a fix (#1410 review) — so status only ever compares within a tie.
+  const compareRuns = (x, y) => {
+    const byCreatedAt = String(y.createdAt).localeCompare(String(x.createdAt));
+    if (byCreatedAt !== 0) return byCreatedAt;
+    const rank = (r) => (r.status === "completed" ? 0 : 1);
+    const byStatus = rank(x) - rank(y);
+    if (byStatus !== 0) return byStatus;
+    const byUpdatedAt = String(y.updatedAt ?? "").localeCompare(String(x.updatedAt ?? ""));
+    if (byUpdatedAt !== 0) return byUpdatedAt;
+    // Last resort once createdAt, status, and updatedAt all agree — total
+    // determinism, never expected to matter in practice.
+    return String(y.databaseId).localeCompare(String(x.databaseId));
+  };
+  const matching = runs.filter((r) => r.headSha === prHead).sort(compareRuns);
 
   if (matching.length === 0) {
     reasons.push(`no ${workflow} run whose headSha equals the PR head ${prHead}`);
   } else {
     const chosen = matching[0];
+    // A tie-break note is NOT pushed into `reasons` — reasons drives the
+    // green/not-green verdict below, and disambiguating between otherwise-
+    // identical candidates must never turn a green board red on its own.
+    // It goes to stderr unconditionally, like the verdict summary further
+    // down, rather than behind `vlog`/`--quiet`: the callers most likely to
+    // hit this — hot pollers that pass `--quiet` — are exactly the ones who
+    // need to know the pick required disambiguation rather than being the
+    // one unambiguous match.
+    const tiedAtCreatedAt = matching.filter((r) => bySecond(r.createdAt) === bySecond(chosen.createdAt));
+    if (tiedAtCreatedAt.length > 1) {
+      const others = tiedAtCreatedAt
+        .filter((r) => r.databaseId !== chosen.databaseId)
+        .map((r) => `#${r.databaseId} (${r.status})`)
+        .join(", ");
+      emit(
+        2,
+        `${NAME}: run selection tie-break — ${tiedAtCreatedAt.length} runs share head ${prHead} and createdAt ${bySecond(chosen.createdAt)}; chose #${chosen.databaseId} (${chosen.status}) over ${others}\n`,
+      );
+    }
     runId = chosen.databaseId;
     // Re-query the run itself. The list's conclusion is a second read from a
     // different moment; the authoritative job list is this one.

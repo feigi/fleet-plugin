@@ -386,6 +386,63 @@ test("no run in the list matches the PR head at all: not-green, exit 1 — the u
   assert.match(r.payload.reasons.join("; "), /no CI run whose headSha equals the PR head abc123def/);
 });
 
+// --- #1410: two runs tied on head SHA AND createdAt to the second ----------
+// A stable sort with no tie-break keeps gh's own (unspecified) API order on
+// an exact createdAt tie. Measured live on PR #1402: two runs on the same
+// head, started the same second, one `cancelled` and one `completed`, both
+// 6 jobs green — the tool bound to the cancelled duplicate. Recency (createdAt)
+// must stay the PRIMARY key; status only breaks a tie, so a newer in-progress
+// run on an unrelated pair still beats an older completed one (see the
+// untied-path test below) — promoting status to primary would be a fresh
+// regression, not a fix.
+
+test("two runs share head SHA and createdAt to the second, one cancelled one completed: the completed run wins and a tie-break note reaches stderr — PR #1402", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "cancelled", conclusion: "cancelled", event: "pull_request", createdAt, updatedAt: createdAt };
+  const completed = { databaseId: 1, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt, updatedAt: createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    // Cancelled listed FIRST: with no tie-break, a stable sort on an exact
+    // createdAt tie keeps this API order and picks it — the exact shape
+    // measured on PR #1402.
+    runList: JSON.stringify([cancelled, completed]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, completed.databaseId, "must bind to the completed run, not the cancelled sibling sharing its head and createdAt");
+  assert.match(r.log, new RegExp(`run view ${completed.databaseId}\\b`));
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${completed.databaseId} \\(completed\\) over #${cancelled.databaseId} \\(cancelled\\)`));
+});
+
+test("multiple completed runs share head SHA and createdAt to the second: the most recently updated one wins", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  const older = { databaseId: 3, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt, updatedAt: "2026-03-01T10:05:00Z" };
+  const newer = { databaseId: 4, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt, updatedAt: "2026-03-01T10:10:00Z" };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([older, newer]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, newer.databaseId, "must bind to the completed sibling with the most recent updatedAt");
+  assert.match(r.log, new RegExp(`run view ${newer.databaseId}\\b`));
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${newer.databaseId} \\(completed\\) over #${older.databaseId} \\(completed\\)`));
+});
+
+test("untied path: a newer non-completed run still beats an older completed one on the same head — status never outranks recency", () => {
+  const older = { databaseId: 5, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  const newer = { databaseId: 6, headSha: PR_HEAD, status: "in_progress", conclusion: null, event: "pull_request", createdAt: "2026-01-02T00:00:00Z", updatedAt: "2026-01-02T00:05:00Z" };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([older, newer]),
+    runView: JSON.stringify({ jobs: [{ name: "check", status: "in_progress", conclusion: null }], attempt: 1, status: "in_progress", conclusion: null, headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.equal(r.payload.runId, newer.databaseId, "recency stays primary: a newer in-progress run must still beat an older completed one when createdAt is NOT tied");
+  assert.doesNotMatch(r.stderr, /run selection tie-break/, "createdAt differs here, so no tie-break note should fire");
+});
+
 // --- #169: a flag given with no value must die, never read as absent -------
 // `base`/`workflow`/`workflow-file` all read via `arg(name) || default`, so a
 // trailing flag previously fell straight through to the DEFAULT — the caller
