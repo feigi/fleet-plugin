@@ -96,19 +96,28 @@ import { writeSync } from "node:fs";
 // line-anchored; without the leading newline they silently stop matching
 // under exactly the large-stderr failure writeSync exists to survive.
 //
-// The write itself can still fail: once enough forwarded stderr is already
-// queued on a pipe, this fd is non-blocking and writeSync throws EAGAIN.
-// Uncaught, that skips process.exit(2) below and the process falls through
-// to Node's default exit 1 — inverting the caller's own exit-code contract
-// (#299/#328). The try/catch keeps the exit code landing regardless; the
-// exit code is the contract, recovering the refusal TEXT under that exact
-// race would need a retry loop and is out of scope.
+// The write itself can still fail, two ways. Once enough forwarded stderr
+// is already queued on a pipe, this fd is non-blocking, and a single call
+// either short-writes — returns the count it managed and throws nothing at
+// all, silently truncating the refusal with no diagnostic (#889, the same
+// class ci-state.mjs's emit() had before #885) — or throws EAGAIN outright.
+// Uncaught, EAGAIN skips process.exit(2) below and the process falls
+// through to Node's default exit 1 — inverting the caller's own exit-code
+// contract (#299/#328). The loop below mirrors emit() (#885): it resumes a
+// short write where writeSync left off, and retries EAGAIN after a 1ms
+// Atomics.wait; the catch still keeps the exit code landing regardless of
+// what the write does.
 export function makeDie(name) {
   return function die(msg) {
-    try {
-      writeSync(2, `\n${name}: ${msg}\n`);
-    } catch {
-      // Message may be lost; the exit code below must not be.
+    let buf = Buffer.from(`\n${name}: ${msg}\n`);
+    while (buf.length) {
+      try {
+        buf = buf.subarray(writeSync(2, buf));
+      } catch (e) {
+        // Message may be lost; the exit code below must not be.
+        if (e.code !== "EAGAIN") break;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      }
     }
     process.exit(2);
   };

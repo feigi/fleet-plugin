@@ -181,8 +181,22 @@ function verdict(v, extra) {
   // worse than none. The measurement above is what stands behind it. Closing
   // it properly needs a seam that makes fd 1 fail on demand, which is the same
   // testability seam #822 turns on.
+  //
+  // A single writeSync call can also short-write — return the count it
+  // managed and throw nothing at all — so the loop below mirrors
+  // ci-state.mjs's emit() (#885/#889): resume from where writeSync left off,
+  // and retry EAGAIN after a 1ms Atomics.wait rather than treat it as the
+  // pipe-closed failure this catch exists for.
   try {
-    writeSync(1, `${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
+    let buf = Buffer.from(`${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
+    while (buf.length) {
+      try {
+        buf = buf.subarray(writeSync(1, buf));
+      } catch (e) {
+        if (e.code !== "EAGAIN") throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      }
+    }
   } catch {
     die("the verdict could not be written to stdout — could not check");
   }
