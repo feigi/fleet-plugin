@@ -125,11 +125,17 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 // init` — a fresh scratch dir has no toplevel and exits 128 — and a guard that
 // cannot pass on the clean path gets ignored. Naming a path alone does not
 // catch the observed failure either, which was an agent BELIEVING it was
-// already in scratch and being wrong.
+// already in scratch and being wrong. Gaps are the literal prose between the
+// four clauses, typed out rather than left as a free-text `.{0,N}` span —
+// mutation-tested: a short exception clause spliced into any of the first,
+// third, or fourth gaps (e.g. "except in CI runners," right after the
+// leading `:`, or "except during rebase," right after "not a failure;")
+// reds this assertion; the same splices pass a `.{0,N}`-gapped version of
+// this regex undetected.
 test("the rendered specialist prompt requires a toplevel assertion around git init/commit", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,80}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path/s,
+    /`git\s+rev-parse\s+--show-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository,\s+and\s+a\s+fresh\s+scratch\s+dir's\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+pass,\s+not\s+a\s+failure;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path/s,
     "review-core.js's specialist prompt carries no toplevel assertion around a fixture's own git init/commit — an agent " +
       "that wrongly believes it is already in its scratch copy runs `git init`/`git commit` against the repository (#1550)",
   );
