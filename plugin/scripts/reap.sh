@@ -19,11 +19,19 @@ set -eu
 # parses branch names out of `git branch -vv`, worktree paths out of
 # `git worktree list --porcelain`, and the ignored-file names
 # `git status --ignored` prints; `paste -sd, -` joins those ignored names. `tr`
-# and `grep` see none of that — both process `$cherry`, `git cherry`'s output,
-# whose commit subjects git constrains to no encoding at all, which makes it
-# arguably the likeliest carrier of the four. Under a UTF-8 locale BSD `tr`
-# exits 1 on a byte that is not valid UTF-8, `grep` silently drops the line
-# holding it, and `paste` truncates its whole output at it and still exits 0.
+# sees none of that: it processes `$cherry`, `git cherry`'s output, whose commit
+# subjects git constrains to no encoding at all, which makes it arguably the
+# likeliest carrier of the four. `grep` reads `$cherry` at the two
+# merged-commit checks AND `$wt_list` at the two registry re-reads, so it is
+# the one tool here that sees both a commit subject and a raw worktree path.
+# The sentence this replaces said `grep` saw only `$cherry`, and had been false
+# for as long as those registry reads have existed. Under a UTF-8 locale BSD
+# `tr` exits 1 on a byte that is not valid UTF-8, `paste` truncates its whole
+# output at it and still exits 0, and `grep` does one of TWO things: it drops
+# the offending line at rc 0/1, or it gives up on the scan and exits 2. Only
+# the first half was ever written down here, which is why the second read as a
+# clean no-match at all four call sites until #1419 — the reason `grep_probe`
+# below takes grep's own status apart from grep's verdict.
 #
 # `awk` is NOT immune, and reap.test.mjs's own #614 fixture measured the
 # earlier claim here false: it is byte-identical only when every rule matches
@@ -404,15 +412,22 @@ gp_cut_short() {
   return 1
 }
 
-# `: <what git said>`, or nothing at all when git said nothing. Two reasons not
-# to interpolate $gp_err directly. It keeps its trailing newline — it is read
-# straight out of the pipe, unlike $gp_out, which command substitution strips —
-# so a bare `tr '\n' ' '` leaves a trailing space inside the JSON reason. And a
-# git that dies without writing to stderr (measured: a signal-killed git exits
-# 137 with stderr empty) would otherwise leave a dangling `": "` naming no
-# cause, on the one path this whole change exists to make name one.
+# `: <what the probe said>`, or nothing at all when it said nothing. Two
+# reasons not to interpolate $gp_err directly. It keeps its trailing newline —
+# it is read straight out of the pipe, unlike $gp_out, which command
+# substitution strips — so a bare `tr '\n' ' '` leaves a trailing space inside
+# the JSON reason. And a git that dies without writing to stderr (measured: a
+# signal-killed git exits 137 with stderr empty) would otherwise leave a
+# dangling `": "` naming no cause, on the one path this whole change exists to
+# make name one.
+#
+# `$gp_err` is the default, not the only input: `grep_probe` below captures its
+# own scanner's stderr into `$gq_err`, and both need these same two guards.
+# Taken as an argument rather than by duplicating the stripper, so a fix to
+# either guard cannot land in one copy and miss the other. Every git-side call
+# site passes nothing and still reads `$gp_err`. #1419
 gp_why() {
-  gp_w=$(printf '%s' "$gp_err" | tr '\n' ' ')
+  gp_w=$(printf '%s' "${1-$gp_err}" | tr '\n' ' ')
   while :; do
     case "$gp_w" in
       *' ') gp_w=${gp_w% } ;;
@@ -420,6 +435,70 @@ gp_why() {
     esac
   done
   if [ -n "$gp_w" ]; then printf ': %s' "$gp_w"; fi
+}
+
+# Runs `grep -q` over CAPTURED text and hands back grep's own status separately
+# from the verdict grep was asked for.
+#
+# `grep -q` has THREE outcomes and a bare `if … | grep -q …; then` has room for
+# two: rc 0 a line matched, rc 1 no line matched, rc 2+ grep could not finish
+# scanning. Under `-q` both POSIX and GNU reserve 0 for a match even when an
+# error also occurred, so an rc 2 means specifically "no match AND the scan
+# broke". Tested two ways, that 2 lands in the NO-MATCH arm — a scanner that
+# could not look reads exactly like a measurement that looked and found
+# nothing. At the two merged-commit checks below, the no-match arm is what
+# authorizes `git branch -D` and `git worktree remove`, so this swallow spends
+# commits rather than merely miswording a reason: #1419 is the same
+# misattribution as #789 and #1413 one tool further down the pipeline, a
+# tool's own failure reported as a clean verdict about the thing it was
+# scanning.
+#
+# The shape, so no call site reaches the third outcome by accident: this
+# returns 0 whenever grep delivered a verdict at all — `$gq_rc` then holds 0
+# for matched and 1 for not — and non-zero when it did not. A call site reads
+# `if ! grep_probe …` for "could not look" and `[ "$gq_rc" -eq 0 ]` for
+# "matched", so the two questions stay as separate in the source as they are in
+# grep. What it deliberately does NOT do is decide which way an unanswerable
+# scan should fall: each call site rules on that for itself, because the cost
+# differs — the cherry checks must keep, the registry re-reads have nothing
+# left to protect and only a reason to get right.
+#
+# grep's stderr is kept, for #625's reason at `git_probe` above: a probe that
+# dies naming no cause reaches an operator as a bare refusal. Same fd3 dup into
+# the same pipe the substitution reads, same `$gp_sep` split once the text is
+# back in the real shell, and for the same reason — a plain variable set inside
+# a command substitution cannot escape its subshell, only the TEXT written
+# there survives. The `if …; then gq_r=0; else gq_r=$?; fi` shape is
+# `git_probe`'s too, and load-bearing for the same measured reason: under
+# `set -e` a bare `gq_r=$?` after a failing command never runs.
+#
+# `>/dev/null` after `2>&3`, in that order: grep's stdout is the same pipe the
+# separator is written to. `-q` promises silence there, so this guards a
+# promise rather than an observation — cheap, and what it forecloses is a
+# spliced `$gq_raw` that would make every rc in this function unreadable at
+# once.
+#
+# `-e "$gq_pat"`, never a bare `$gq_pat`: `grep --` is not portable, and a
+# pattern read as a flag is the shape that makes a guard match nothing and
+# report it as a clean no-match — this function's own defect, one layer down.
+#
+# Extra flags come AFTER the pattern (`grep_probe "$hay" "$pat" -xF`) so the
+# pattern keeps a fixed, non-optional slot no flag list can shift it out of:
+# #730 measured what a positional argument does when a flag is inserted ahead
+# of it.
+grep_probe() {
+  gq_hay=$1
+  gq_pat=$2
+  shift 2
+  gq_raw=$(
+    {
+      if printf '%s\n' "$gq_hay" | grep -q "$@" -e "$gq_pat" 2>&3 >/dev/null; then gq_r=0; else gq_r=$?; fi
+      printf '%s' "$gp_sep$gq_r"
+    } 3>&1
+  )
+  gq_err=${gq_raw%%"$gp_sep"*}
+  gq_rc=${gq_raw#*"$gp_sep"}
+  [ "$gq_rc" -le 1 ]
 }
 
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
@@ -528,9 +607,23 @@ for b in $gone_branches; do
   # so the failure reason can carry git's own words — and an unanchored match
   # reads a `+` anywhere in a diagnostic as a commit line, keeping a branch that
   # is merged. This pipe is safe where the one it replaces was not: it consumes
-  # a variable, never git, and the `git cherry` probe already took git's status,
-  # so grep's is the only status left to take. Anchored like release-ticket.sh's.
-  if printf '%s\n' "$cherry" | grep -q '^+'; then
+  # a variable, never git, and the `git cherry` probe already took git's status.
+  # Anchored like release-ticket.sh's.
+  #
+  # What "grep's is the only status left to take" missed, and what this shape
+  # exists for: taking it is not the same as READING it. grep answers three
+  # ways, and until #1419 the `if` had two arms — an rc 2 scan that never
+  # examined `$cherry` fell into the merged arm, and `git branch -D` below is
+  # authorized by this check and by nothing else. So the deletion went ahead on
+  # a merge status no tool had established. `grep_probe` splits the two
+  # questions; the answers are ruled on here, in the order that makes the
+  # unanswerable case fail CLOSED like every other could-not-check in this
+  # file: scan first, verdict second.
+  if ! grep_probe "$cherry" '^+'; then
+    keep "$b" "cherry scan failed — cannot tell if merged$(gp_why "$gq_err")"
+    continue
+  fi
+  if [ "$gq_rc" -eq 0 ]; then
     keep "$b" "unmerged commits"
     continue
   fi
@@ -867,6 +960,14 @@ for b in $gone_branches; do
       # that reports it must not reintroduce. A registry read that itself fails
       # says so, rather than being misread as "cleared".
       #
+      # `grep_probe`, not a bare `grep -q`, for the half of that the capture
+      # alone never covered: grep's rc 2 also read as "cleared" here, so a
+      # scanner that could not examine the listing reported the alarming state
+      # as a measurement. Nothing on disk turns on it — both arms keep and
+      # continue — which is exactly why it is a REASON bug and not a deletion
+      # bug, and why the unanswerable arm here joins the existing
+      # unread-listing arm rather than inventing a third verdict. #1419
+      #
       # Still keep, still continue, and nothing on disk is touched either way:
       # one refusal must not strand the remaining branches of an unattended
       # sweep, and a directory whose contents nobody has inspected is not this
@@ -874,7 +975,9 @@ for b in $gone_branches; do
       if ! err=$(git worktree remove "$wt" 2>&1); then
         if ! wt_listing; then
           state="cannot tell whether the registration survived"
-        elif printf '%s\n' "$wt_list" | grep -qxF "worktree $wt"; then
+        elif ! grep_probe "$wt_list" "worktree $wt" -xF; then
+          state="cannot tell whether the registration survived — the registry scan itself failed$(gp_why "$gq_err")"
+        elif [ "$gq_rc" -eq 0 ]; then
           state="registration intact"
         else
           state="registration cleared"
@@ -1072,7 +1175,15 @@ else
       keep "" "cherry probe failed — cannot tell if worktree $wt is merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
       continue
     fi
-    if printf '%s\n' "$cherry" | grep -q '^+'; then
+    # Three-way, for the reason the branch sweep's copy of this check records
+    # in full: grep's rc 2 is not its rc 1, and the no-match arm here reaches
+    # `git worktree remove`, so the swallow cost DIRECTORIES in this sweep and
+    # not only a branch ref. #1419
+    if ! grep_probe "$cherry" '^+'; then
+      keep "" "cherry scan failed — cannot tell if worktree $wt is merged$(gp_why "$gq_err")"
+      continue
+    fi
+    if [ "$gq_rc" -eq 0 ]; then
       keep "" "worktree $wt holds commits that exist nowhere else"
       continue
     fi
@@ -1180,7 +1291,9 @@ else
       if ! err=$(git worktree remove "$wt" 2>&1); then
         if ! wt_listing; then
           state="cannot tell whether the registration survived"
-        elif printf '%s\n' "$wt_list" | grep -qxF "worktree $wt"; then
+        elif ! grep_probe "$wt_list" "worktree $wt" -xF; then
+          state="cannot tell whether the registration survived — the registry scan itself failed$(gp_why "$gq_err")"
+        elif [ "$gq_rc" -eq 0 ]; then
           state="registration intact"
         else
           state="registration cleared"
