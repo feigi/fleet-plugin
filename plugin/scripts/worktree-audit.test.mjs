@@ -132,6 +132,46 @@ test("a clean readable worktree ahead of base is reported with real counts", (t)
   assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
 });
 
+test("a local ref shadowing `origin/main` does not read the ahead count as 0 (#1329)", (t) => {
+  // release-ticket.sh (#1320) already measured this class: `origin/main` is a
+  // SHORTHAND, and git resolves a shorthand through its own disambiguation
+  // order (gitrevisions: refs/<name>, refs/tags/<name>, refs/heads/<name>,
+  // refs/remotes/<name>, …), in which refs/remotes/origin/main comes LAST. A
+  // local TAG literally named `origin/main` outranks the real remote-tracking
+  // branch, so `rev-list --count "$base"..HEAD` against the bare shorthand
+  // answers about the tag's target instead — silently, at rc 0, with nothing
+  // on stderr distinguishing it from a genuinely clean worktree. #172's own
+  // comment in this script says an ahead:0/dirty:0 entry tells the fleet
+  // controller "nothing here", so a wrong 0 is not just an inaccurate number,
+  // it is a false "safe to discard" for a worktree that genuinely carries
+  // unpushed work.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work that exists nowhere else");
+
+  // Pointed at the worktree's own tip, the cheapest way to plant a colliding
+  // ref that makes the bare shorthand resolve to a commit already equal to
+  // HEAD — the shape that reads `ahead: 0` if the measurement is not
+  // requalified.
+  git(w, "tag", "origin/main", "refs/heads/fix/9-x");
+  assert.equal(
+    git(w, "rev-parse", "origin/main"),
+    git(w, "rev-parse", "refs/heads/fix/9-x"),
+    "fixture: the shorthand now resolves to the worktree's own tip",
+  );
+  assert.notEqual(
+    git(w, "rev-parse", "refs/remotes/origin/main"),
+    git(w, "rev-parse", "refs/heads/fix/9-x"),
+    "fixture: the real upstream is still a different, older commit",
+  );
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.ahead, 1, "must measure against refs/remotes/origin/main, not the shadowing tag");
+  assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
+});
+
 test("a dirty worktree lists its dirty files and their count", (t) => {
   const w = repo(t);
   const wt = addWorktree(w, "fix/9-x");

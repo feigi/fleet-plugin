@@ -57,7 +57,7 @@ export LC_ALL=C
 # that happened to be found first.
 #
 # GIT_DIR: every git call above the per-worktree loop is bare — `rev-parse
-# --git-dir`, `rev-parse --verify "$base"`, and the `worktree list` behind
+# --git-dir`, `rev-parse --verify "$base_rev"`, and the `worktree list` behind
 # `wt_listing` — so an ambient one retargets the whole listing. Measured:
 # standing in clone A with `GIT_DIR` naming clone B's `.git`, this script
 # emits a full, confident array describing B's worktrees, at rc 0, with
@@ -115,8 +115,37 @@ wt_lib="$(dirname "$0")/worktree.sh"
 unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
 base=${BASE_REF:-origin/main}
+# This script is audit-only — it prints ahead/dirty counts to stdout and never
+# itself writes to git state, so a fleet controller acting on a wrong number
+# is the whole blast radius, not this process. Unlike release-ticket.sh's
+# `--apply` path (which deletes a branch and worktree on the strength of its
+# own measurement), there is no accept-list here restricting BASE_REF to a
+# remote-tracking ref — judged out of scope for this ticket. What still must
+# be fixed regardless of what $base is allowed to name: the measurement
+# against it must not be silently wrong.
+#
+# release-ticket.sh (#1320) found the same bug in the same default: `origin/
+# main` is a SHORTHAND, and git resolves a shorthand through its own
+# disambiguation order (gitrevisions: refs/<name>, refs/tags/<name>,
+# refs/heads/<name>, refs/remotes/<name>, …), in which refs/remotes/origin/
+# main comes LAST. A local TAG literally named `origin/main` — `git tag
+# origin/main refs/heads/<branch>` — outranks the real remote-tracking
+# branch, and every measurement against the bare shorthand then answers
+# about the tag's target instead: `ahead` silently reads 0 against a
+# worktree that genuinely carries unpushed work, exactly the "nothing here"
+# signal below (#172) tells a fleet controller to trust.
+#
+# The fix is to stop MEASURING against the shorthand: qualify it to the full
+# refs/remotes/ path, where there is nothing left to disambiguate, unless it
+# is already qualified. $base itself is left unqualified — it never appears
+# in this script's JSON output, only in `die` text, where the shorthand
+# spelling is what an operator expects to read.
+case "$base" in
+  refs/remotes/*) base_rev=$base;;
+  *) base_rev="refs/remotes/$base";;
+esac
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
-git rev-parse --verify "$base" >/dev/null || die "$base does not resolve"
+git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 
 echo "\$ git worktree list --porcelain -z" >&2
 
@@ -208,7 +237,7 @@ while IFS="$(printf '\t')" read -r br wt; do
     # entry, silently dropping that granularity for whoever reads this
     # array. Proven, not just asserted: see the nested-directory test in
     # worktree-audit.test.mjs.
-    elif ahead=$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null) \
+    elif ahead=$(git -C "$wt" rev-list --count "$base_rev"..HEAD 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain -uall 2>/dev/null); then
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')
       # substr, not $2: a dirty file's own name may hold a space — "XY " is
