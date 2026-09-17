@@ -72,7 +72,18 @@ Input: `Below the claim bar` entries recorded after this decision lands on
 - **Floor:** 20 below-bar entries across at least 3 distinct run dates.
 - **Trigger A — bar too wide:** 5 or more of those entries promoted (a later
   `survived` finding or a maintainer hit). The bar is burying real work;
-  retune or revert.
+  retune or revert. **Promotion signal — two marks, both on the record
+  issue:** an open issue citing the record, and a
+  `Promoted — applied, not filed` comment on it, which `review-and-fix.md`
+  step 5 requires where a later review re-derives the entry in scope, its
+  refuter lets it through, and the run applies the fix instead of filing it.
+  That second path files nothing, so without the comment this trigger would
+  count only promotions that happened to need a ticket of their own and would
+  miss the entry re-derived, checked and worth fixing — the strongest
+  evidence there is that the bar buried real work. Count both marks off each
+  record's own timeline — `gh api repos/{owner}/{repo}/issues/<n>/timeline
+  --paginate` — and record the date taken with the verdict, as 0001's guard
+  does.
 - **Trigger B — bar missed the load:** non-record `wontfix` closes still above
   half of all closes over the same window. The clause is not where the volume
   is; 0001's shelved options come back off the shelf.

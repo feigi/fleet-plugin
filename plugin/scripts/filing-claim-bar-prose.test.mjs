@@ -25,6 +25,21 @@
 // floor retuned 20 → 50 — each reddened its own pin and no other. Controls: an
 // unpinned step-5 sentence reworded and the ADR's guard bullets rewrapped both
 // stayed green.
+//
+// #1113 added the applied-promotion pin. Trigger A counts entries "promoted",
+// and the filed path leaves a citation on the record while the fix-applier's
+// apply path files nothing at all — so the promotion the trigger most needs to
+// see left no mark on the record. Step 5 now writes one under a fixed opening
+// and the ADR's guard names the same string; the pin compares the two by
+// EQUALITY, because a search for one inside the other passes on a narrowing
+// rename. Measured on the working tree with restore after each: five mutations
+// — step 5's apply-path verdict inverted (files nothing → files its own issue),
+// step 5's marker narrowed, the ADR's marker narrowed, the ADR's
+// promotion-signal definition reworded down to the filed path alone, and step
+// 5's marker unquoted — each reddened this pin and no other, while retuning
+// Trigger A's 5 reddened only the older guard pin. Controls: the ADR's Trigger
+// A bullet reflowed onto one line and an unpinned step-5 sentence reworded both
+// stayed green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -100,5 +115,44 @@ test("step 5 points at an ADR that exists, and the ADR keeps its pre-chosen guar
     adr,
     phrase("**Trigger B — bar missed the load:** non-record `wontfix` closes still above half of all closes"),
     "the ADR lost trigger B — nothing detects the clause missing the volume it was priced against",
+  );
+});
+
+test("the applied promotion path is stated in step 5 and read by the ADR's guard", () => {
+  const s = step5();
+  // The path and its consequence as ONE span. "is that same promotion signal"
+  // pinned apart from "it files nothing" leaves the join open, and the second
+  // half is the whole reason the first needs writing down: this path leaves no
+  // filed issue behind, so nothing lands on the record by itself.
+  assert.match(
+    s,
+    phrase("**An in-scope rediscovery step 2 applied is that same promotion signal, and it files nothing**"),
+    "step 5 no longer treats an applied below-bar rediscovery as a promotion — the entry re-derived, checked and worth fixing goes unrecorded",
+  );
+  // Read the comment's fixed opening out of each file's own prose and compare
+  // the two, rather than restating the string here. A rename on one side alone
+  // leaves Trigger A counting a mark nothing writes, and neither file is wrong
+  // on its own after it. Equality, never a match of one inside the other:
+  // measured, shortening step 5's opening to `Promoted — applied` stays green
+  // under a `phrase(marker)` search of the ADR, because the ADR's longer string
+  // contains it.
+  const [, marker] = s.match(/comment on that record issue, opening `([^`]+)`/) ?? [];
+  assert.ok(marker, "step 5 no longer gives the applied-promotion comment a fixed opening, so the guard has no mark to count");
+  const [, adrPath] = s.match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
+  assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
+  const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
+  const [, adrMarker] = adr.match(/`([^`]+)` comment on it/) ?? [];
+  assert.equal(
+    adrMarker,
+    marker,
+    `ADR 0002's guard counts \`${adrMarker}\` while step 5 writes \`${marker}\` — the trigger reads a mark nothing leaves`,
+  );
+  // The definition itself, not just the marker: a guard whose input is
+  // undefined is not a guard, and the filed path alone is the half that
+  // systematically undercounts.
+  assert.match(
+    adr,
+    phrase("**Promotion signal — two marks, both on the record issue:** an open issue citing the record, and a"),
+    "ADR 0002's Trigger A no longer defines what counts as a promotion, so the filed path is the only one an evaluator can see",
   );
 });
