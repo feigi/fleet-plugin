@@ -1710,6 +1710,45 @@ test("the entry search survives a `$` in the worktree path (#455)", (t) => {
   );
 });
 
+test("the entry search survives a literal `'` in the worktree path (#1100)", (t) => {
+  // The residual the `$` case above leaves standing, and the reason quoting the
+  // paths is not the whole answer: an embedded `'` CLOSES the quote the hint
+  // opened, so the operator is handed a command their shell refuses to parse at
+  // all (`unexpected EOF while looking for matching ''`, rc 2, measured) — loud
+  // where the `$` defect was silent, but still an instruction that cannot run,
+  // and naming the entry is all this arm has left to hand over.
+  //
+  // git accepts `'` in a refname and in a worktree directory name (measured,
+  // git 2.50.1), so this path is reachable for the same reason the `$` one is.
+  // BOTH interpolations carry one here: the claim's own directory, through
+  // <slug>, and the registry root, through the checkout it hangs off — which no
+  // argument to this script controls, so an escape applied to one path only
+  // still hands over a broken command.
+  //
+  // Pinned by RUNNING the command, which is the only thing that separates the
+  // POSIX escape from a plausible-looking one: the quoted run ENDS, a
+  // backslash-escaped quote stands on its own outside it, and a fresh quoted
+  // run begins — so the shell reading it sees one literal quote character and
+  // no unterminated quote.
+  const r = repo(t, "w'q");
+  const c = claim(r.w, 9, "release'ticket");
+  writeFileSync(join(r.w, ".git", "worktrees", "9-release'ticket", "HEAD"), "garbage\n");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /could not read its HEAD/);
+
+  const search = json.blockers[0].replace(/^[\s\S]*entry with: /, "");
+  assert.notEqual(search, json.blockers[0], `the blocker says how to find the entry: ${json.blockers[0]}`);
+  assert.deepEqual(
+    execFileSync("sh", ["-c", search], { encoding: "utf8" }).trim().split("\n")
+      .map((p) => p.split("/").slice(-2).join("/")),
+    ["9-release'ticket/gitdir"],
+    `the search lands on this claim's entry and no other: ${search}`,
+  );
+});
+
 test("the entry search treats a regex metacharacter in the path as a character (#455)", (t) => {
   // What `-F` is for, and nothing else in this file discriminates it: every
   // other fixture's path is alnum, hyphen and slash only, so grep's literal and
