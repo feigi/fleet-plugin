@@ -36,8 +36,8 @@ rationale did once survive in three places at once. Both live sites now carry it
 `workflows/review-pr.js` reads *"NOT because those face refuters"*, and the
 comment above `select-dimensions.test.mjs`'s "the refuter budget is keyed on
 severity alone, never on a dimension" test says of the retired rationale that it
-*"was never able to separate these six"*. The remaining hits are in `docs/specs/`
-and `docs/plans/`, which are dated records of what was decided on 2026-08-06, and
+*"was never able to separate these six"*. The remaining hit is in `docs/specs/`,
+a dated record of what was decided on 2026-08-06, and
 the spec carries its own correction in the paragraph opening *"Corrected after
 implementation (#221)"* (*"'faces refuters' cannot be what puts one on"*). There
 is no live surface still asserting the retired rule.

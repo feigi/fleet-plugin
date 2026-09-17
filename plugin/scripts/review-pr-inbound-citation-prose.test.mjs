@@ -125,7 +125,7 @@ const SITES = [
     block: () =>
       commentAbove(
         readPlugin(SOURCE),
-        `const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure", "comments"]);`,
+        `const SIZE_TIER_DIMS = new Set(`,
         SOURCE,
       ),
     fragment: "NOT because those face refuters",
@@ -174,7 +174,7 @@ const SITES = [
     quote: `"the three per-call tier knobs this block used to expose — are GONE, not renamed"`,
     target: SOURCE,
     names: "the comment under the `verifiers` declaration",
-    block: () => commentBelow(readPlugin(SOURCE), "const verifiers = A.verifiers || 2;", SOURCE),
+    block: () => commentBelow(readPlugin(SOURCE), "const verifiers = A.verifiers", SOURCE),
     fragment: "the three per-call tier knobs this block used to expose — are GONE, not renamed",
   },
 ];
@@ -186,8 +186,12 @@ for (const { label, doc, docSlice, quote, target, names, block, fragment } of SI
       `${doc} no longer quotes ${quote} — the citation lost the fragment half of its anchor, leaving only the name of a block, which nothing can check. It names ${names} in ${target}; quote that block's own words back, or re-anchor both sides together.`,
     );
     assert.ok(
+      docSlice().includes(fragment),
+      `${doc} no longer quotes ${fragment} — the anchored words inside ${quote} have drifted, even though the surrounding quote marks are still present. It names ${names} in ${target}; quote that block's own words back, or re-anchor both sides together.`,
+    );
+    assert.ok(
       block().includes(fragment),
-      `${target}: ${names} no longer contains ${quote}, which ${doc} quotes as the anchor for ${label} — so that citation now resolves to nothing. This is the failure #1130 measured on the "those four alone" wording: the source was reworded and the recorded quote silently stopped matching. Update the document's quotation in the same commit as the source.`,
+      `${target}: ${names} no longer contains ${fragment}, which ${doc} quotes as the anchor for ${label} — so that citation now resolves to nothing. This is the failure #1130 measured on the "those four alone" wording: the source was reworded and the recorded quote silently stopped matching. Update the document's quotation in the same commit as the source.`,
     );
   });
 }
