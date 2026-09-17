@@ -959,7 +959,7 @@ fi
 # `entry_stray` is empty and the suffix key alone answers, exactly as before.
 # Not a fail-open — an entry git could not read is one git drops from the
 # listing, and the listed-vs-registered count above refuses first.
-stray_own="is this claim's"
+stray_own="matches this claim's directory name $issue-$slug"
 # WHICH entry, for the unresolved-HEAD arm alone. That arm is the one fault with
 # no remedy to name — measured on a corrupt-HEAD entry, `git worktree repair`
 # and `git worktree prune -v` both leave it standing at rc 0, and `remove` with
@@ -1041,11 +1041,33 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   # `else` cannot tell "genuinely on some other branch" from "git could not
   # tell", and asserts the former for both.
   #
-  # `$stray_own` says which key found this worktree, because only the suffix key
-  # establishes that it is this claim's. The `else` keeps the literal: it is the
-  # `! unresolved_head` branch, and the entry key is credited only where
-  # `unresolved_head` is true, so `$stray_own` can never be the entry phrase by
-  # the time control reaches it.
+  # `$stray_own` defaults, at its assignment above, to the only claim the
+  # suffix key establishes — the directory-name match — so every arm below,
+  # including this `else`, states just that unless the entry key overrode it.
+  # This `else` can never see that override: entry-key credit is granted only
+  # where `unresolved_head` is true, which is not this branch.
+  #
+  # A directory NAME is not ownership, and this arm is where that bites. The
+  # suffix key admits any linked worktree whose basename is `<issue>-<slug>` and
+  # prints the FIRST in porcelain order, so a stranger registered under that
+  # basename and sorting ahead of the claim is what it answers with — measured
+  # on a healthy decoy at `.worktrees/0-decoy/<issue>-<slug>`, which took this
+  # blocker while the claim's own detached directory sat behind it (#1064, and
+  # the fixture is pinned below). `is this claim's` then sent an operator to
+  # hand-release somebody else's live tree, over a worktree the script had just
+  # read a DIFFERENT branch off — the one case where it can say the assertion is
+  # false. Name the collision instead: same directory name, wrong branch, which
+  # is all the key established and is CONTEXT.md's own definition of a Stray.
+  #
+  # In the ordinary case the match IS the claim's own directory, and the weaker
+  # sentence stays true of it — a directory named `<issue>-<slug>` matches that
+  # name. Nothing distinguishable is lost, because the script cannot distinguish
+  # the two: that is the reason it must not assert the difference.
+  #
+  # Still a refusal, and deliberately: a same-basename directory under
+  # `.worktrees` is a collision an operator should look at whoever owns it, and
+  # releasing would delete the claim's branch while this tree stands. Wording
+  # only — the match and the verdict are unchanged.
   if locked "$stray"; then
     block "worktree $stray $stray_own and is locked — git worktree unlock $stray, then prune or remove it"
   elif gone "$stray"; then
@@ -1053,7 +1075,7 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   elif unresolved_head "$stray"; then
     block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand$stray_find"
   else
-    block "worktree $stray is this claim's but is not on $branch — release it by hand"
+    block "worktree $stray $stray_own but is not on $branch — release it by hand"
   fi
 fi
 

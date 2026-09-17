@@ -824,10 +824,13 @@ test("a worktree that is no longer on the branch blocks instead of releasing aro
 
   const { code, json } = release(r, c);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
-  assert.match(json.blockers[0], /is this claim's but is not on fix\/9-release-ticket/);
+  // The name match and the branch mismatch, which is the whole of what the
+  // suffix key established — not ownership, even here where the match really is
+  // this claim's own directory. The case below is why (#1064).
+  assert.match(json.blockers[0], /matches this claim's directory name 9-release-ticket but is not on fix\/9-release-ticket/);
   // The entry search belongs to the unresolved-HEAD arm alone (#455). Here git
-  // resolved the branch and said whose it is, so there is no entry to go
-  // looking for and nothing to search for it with.
+  // resolved the branch, so there is no entry to go looking for and nothing to
+  // search for it with.
   assert.doesNotMatch(json.blockers[0], /entry with: grep/, "a resolved branch leaves no entry to hunt for");
   assert.equal(json.released, false);
   assert.equal(code, 1);
@@ -836,6 +839,69 @@ test("a worktree that is no longer on the branch blocks instead of releasing aro
   assert.ok(
     git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
     "the branch survives",
+  );
+});
+
+test("a stranger's worktree sharing the claim's directory name is not called the claim's", (t) => {
+  // The suffix key matches ANY linked worktree whose directory basename is
+  // `<issue>-<slug>` and takes the first in porcelain order, so what it
+  // establishes is a name collision, not ownership — which is what CONTEXT.md's
+  // Stray already says: "matching this claim's directory name", not "this
+  // claim's". Measured here: a decoy added FIRST takes the registry entry
+  // `9-release-ticket` (the claim's own is then `9-release-ticket1`) and its
+  // path sorts ahead of the claim's, so the key answers with the stranger while
+  // the claim's own detached directory sits behind it.
+  //
+  // Refusing is still right — a same-basename directory under `.worktrees` is a
+  // real collision an operator should look at — and the direction was never the
+  // fault: rc 1, nothing deleted. The fault was the blocker asserting the
+  // stranger's live tree was this claim's and sending the operator to
+  // hand-release it. (#1064)
+  const r = repo(t);
+  // Under its own subdirectory, because `0-decoy` is what makes it sort ahead:
+  // this is the fixture only while the stranger, not the claim, is the first
+  // match.
+  const decoy = join(r.w, ".worktrees", "0-decoy", "9-release-ticket");
+  git(r.w, "worktree", "add", "-q", decoy, "-b", "decoy/9", "origin/main");
+  const decoyReal = realpathSync(decoy);
+  const c = claim(r.w, 9, "release-ticket");
+  // The claim loses its `branch` line, so the branch lookup finds nothing and
+  // the suffix key is what answers — the same route as the case above.
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+  // realpathSync for the reason `relocate` gives: git canonicalises the paths it
+  // records, so on macOS this suite's /var/... tmpdir reaches the listing as
+  // /private/var/...
+  const listing = git(r.w, "worktree", "list", "--porcelain");
+  assert.ok(
+    listing.indexOf(decoyReal) < listing.indexOf(realpathSync(c.wt)),
+    `fixture: the stranger must sort ahead of the claim, or the key answers with the claim: ${listing}`,
+  );
+
+  const { code, json } = release(r, c);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.ok(
+    json.blockers[0].startsWith(`worktree ${decoyReal} `),
+    `the blocker is about the stranger, which is what makes what it says about it matter: ${json.blockers[0]}`,
+  );
+  // Additive, not a second opinion: the positive pin below already fails on
+  // the exact #1064 wording, so this only earns its place if a blocker somehow
+  // carried BOTH phrases — the positive match alone would let that through.
+  assert.doesNotMatch(
+    json.blockers[0],
+    /is this claim's/,
+    "ownership the suffix key never established, and on this fixture false outright",
+  );
+  assert.match(json.blockers[0], /matches this claim's directory name 9-release-ticket but is not on fix\/9-release-ticket/);
+  assert.equal(json.released, false);
+  assert.equal(code, 1);
+  assert.deepEqual(r.calls(), [], "and the label is never touched");
+  assert.equal(existsSync(join(c.wt, "scratch.txt")), true, "the claim's work stays put");
+  assert.equal(existsSync(decoy), true, "and so does the stranger's tree");
+  assert.deepEqual(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").sort(),
+    ["decoy/9", "fix/9-release-ticket", "main"],
+    "neither branch is deleted",
   );
 });
 
