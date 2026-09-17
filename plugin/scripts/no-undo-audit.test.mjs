@@ -1875,13 +1875,44 @@ test("unrelated histories are unanswerable (2), never safe (0)", (t) => {
 test("a BASE_REF that dereferences to a blob is unanswerable (2), never safe (0)", (t) => {
   const c = repo(t);
   const blob = git(c.w, "hash-object", "-w", "f.txt");
-  git(c.w, "tag", "blobtag", blob);
-  assert.equal(git(c.w, "rev-parse", "--verify", "--quiet", "blobtag"), blob, "fixture must pass the rev-parse guard");
+  // Named under refs/remotes/ rather than as a tag, so it clears the
+  // accept-list (#1565) and reaches the qualify step unchanged, exercising
+  // rev-parse resolving to the wrong TYPE rather than the wrong ref.
+  git(c.w, "update-ref", "refs/remotes/origin/blobtag", blob);
+  assert.equal(git(c.w, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/blobtag"), blob, "fixture must pass the rev-parse guard");
 
-  const r = audit(c, { ...ENV, BASE_REF: "blobtag" });
+  const r = audit(c, { ...ENV, BASE_REF: "refs/remotes/origin/blobtag" });
   assert.equal(r.status, 2, `merge-tree could not answer; got ${r.status} with stdout ${r.stdout}`);
   assert.doesNotMatch(r.stdout, /"conflicts"/, "an unanswerable audit must not emit a payload");
   assert.match(r.stderr, /cannot determine conflicts/);
+});
+
+test("a local ref shadowing `origin/main` does not read a real add/add conflict as none (#1565)", (t) => {
+  // Same class release-ticket.sh (#1320) and worktree-audit.sh (#1329) already
+  // found in the same default: `origin/main` is a SHORTHAND, and git resolves
+  // a shorthand through its own disambiguation order (gitrevisions: refs/
+  // <name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>, …), in
+  // which refs/remotes/origin/main comes LAST. A local TAG literally named
+  // `origin/main` outranks the real remote-tracking branch, so `git
+  // merge-tree` and `git merge-base`/`git log` against the bare shorthand
+  // below answer about the tag's target instead — silently, at rc 0.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  // The tag points at the FORK point — one commit behind main's real tip —
+  // rather than at main's tip. The fork point never touched `path`, so a
+  // merge-tree probe against the tag sees only the branch's ADD and reports
+  // a clean merge; the real origin/main tip added the same path on its own
+  // side, which is the add/add conflict this fixture exists to carry.
+  const fork = git(c.w, "rev-parse", "main~1");
+  git(c.w, "tag", "origin/main", fork);
+  assert.equal(git(c.w, "rev-parse", "origin/main"), fork, "fixture: the shorthand now resolves to the fork point, not main's tip");
+  assert.notEqual(git(c.w, "rev-parse", "refs/remotes/origin/main"), fork, "fixture: the real upstream is still main's later commit");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "must measure the merge-tree probe against refs/remotes/origin/main, not the shadowing tag");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "must measure the at-risk commit list against refs/remotes/origin/main, not the shadowing tag");
 });
 
 test("every unanswerable precondition exits 2 and emits no payload", (t) => {
@@ -1895,7 +1926,8 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
     ["worktree does not exist", [join(c.w, "nope"), c.branch], ENV, /does not exist/],
     ["not a git worktree", [plain, c.branch], ENV, /is not a git worktree/],
     ["branch never pushed", [c.w, "never-pushed"], ENV, /origin\/never-pushed does not resolve/],
-    ["BASE_REF does not resolve", [c.w, c.branch], { ...ENV, BASE_REF: "no/such/ref" }, /does not resolve/],
+    ["BASE_REF does not resolve", [c.w, c.branch], { ...ENV, BASE_REF: "origin/no-such-ref" }, /does not resolve/],
+    ["BASE_REF outside the remote-tracking namespace", [c.w, c.branch], { ...ENV, BASE_REF: "refs/heads/main" }, /BASE_REF must be a remote-tracking ref, got 'refs\/heads\/main'/],
   ];
 
   for (const [why, args, env, re] of cases) {
@@ -2446,7 +2478,7 @@ const nonZeroCell = () => {
  * does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), `BASE_REF` does not name a remote-tracking ref (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
 
 /**
  * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
@@ -2477,6 +2509,7 @@ const LINKAGE_CLAUSE = "a worktree git does not answer for";
 const REF_CLAUSE = "a ref that does not resolve";
 const PROBE_CLAUSE = "a probe that could not run";
 const ESCAPE_CLAUSE = "a conflicting-path or at-risk array that could not be escaped (#119)";
+const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` does not name a remote-tracking ref (#1565)";
 
 /**
  * Every `die` site in no-undo-audit.sh, bound to the phrase in the row that
@@ -2501,6 +2534,7 @@ const CAUSES = new Map([
   ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
   ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["BASE_REF must be a remote-tracking ref, got '$base'", BASE_REF_SHAPE_CLAUSE],
   ["$base does not resolve", REF_CLAUSE],
   ["origin/$branch does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
   ["git status failed in $wt — cannot tell a clean worktree from a dirty one", PROBE_CLAUSE],
