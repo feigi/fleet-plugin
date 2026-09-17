@@ -199,6 +199,33 @@ test("a failed label read is reported, never swallowed", (t) => {
   assert.deepEqual(json.failed, [41]);
 });
 
+// #1543. Same defect class PR #1519 fixed in reap.sh's grep_probe: `grep -q`
+// has THREE outcomes and the bare `if … grep -qx …; then had=true; else
+// had=false; fi` this script used to run had room for only two — rc 0
+// matched, rc 1 none did, rc 2+ the scan itself broke — so grep's OWN failure
+// used to fold into `had=false`, reading exactly like the "already clear"
+// case two tests up and letting a merged ticket keep the label with nothing
+// reported.
+function grepScanFailShim(t) {
+  const bin = mkdtempSync(join(tmpdir(), "drop-merged-label-grep-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "grep"), `#!/bin/sh\necho "grep: illegal byte sequence" >&2\nexit 2\n`, { mode: 0o755 });
+  return bin;
+}
+
+test("a grep scan failure over an issue's labels is reported failed, never read as already clear", (t) => {
+  const s = stub(t);
+  const bin = grepScanFailShim(t);
+  const base = s.env({ CLOSES: "41", LABELS_41: "in-progress" });
+  const { code, json } = run(9, { apply: true, env: { ...base, PATH: `${bin}:${base.PATH}` } });
+  assert.equal(code, 1, "a swallowed scan failure would read as success (exit 0)");
+  assert.deepEqual(json.issues, [{ issue: 41, hadLabel: null, removed: false }],
+    "hadLabel must be null (unknown), not false — false is the reading a completed, genuinely-empty scan earns");
+  assert.deepEqual(json.failed, [41]);
+  assert.ok(!s.calls().some((c) => c.startsWith("issue edit")),
+    "an unscanned label must not be removed on a guess either");
+});
+
 test("a failed removal is reported loudly, not swallowed — the acceptance criterion", (t) => {
   const s = stub(t);
   const { code, json, stderr } = run(9, {

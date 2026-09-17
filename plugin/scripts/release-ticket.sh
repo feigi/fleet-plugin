@@ -1441,7 +1441,21 @@ echo "\$ gh issue view $issue --json labels" >&2
 if ! labels=$(gh issue view "$issue" --json labels --jq '.labels[].name'); then
   die "gh issue view $issue failed, so the in-progress label cannot be released"
 fi
-if printf '%s\n' "$labels" | grep -qx in-progress; then has_label=true; else has_label=false; fi
+# grep's OWN scan failing (rc 2+) must not read as "no in-progress label":
+# the same defect PR #1519 fixed in reap.sh's grep_probe (#1543). A bare
+# `if … grep -qx …; then has_label=true; else has_label=false; fi` has room
+# for only two of grep's three `-q` outcomes — rc 0 matched, rc 1 none did,
+# rc 2+ the scan itself broke — so a scan that could not look would read
+# here exactly like a measurement that looked and found the label already
+# gone, and the release below would leave the ticket invisible to
+# candidates.mjs with no artefact left to explain it — the same failure
+# mode the comment above this block already guards against on the `gh` side.
+if printf '%s\n' "$labels" | grep -qx in-progress; then rt_gp_rc=0; else rt_gp_rc=$?; fi
+case $rt_gp_rc in
+  0) has_label=true ;;
+  1) has_label=false ;;
+  *) die "could not scan #$issue's labels for in-progress (grep exited $rt_gp_rc), so whether it can be released is unknown" ;;
+esac
 
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2

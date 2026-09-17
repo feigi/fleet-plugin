@@ -166,8 +166,17 @@ if [ -n "$pkg" ]; then
   esac
 fi
 
-if printf '%s\n' "$files" | grep -qE "$testfile_re"; then
-  echo "node --test"
-else
-  die "$ref has no scripts.test and no test files — refusing to emit a command that would pass vacuously"
-fi
+# grep's OWN scan failing (rc 2+) must not read as "no test files": the same
+# defect PR #1519 fixed in reap.sh's grep_probe. `grep -q` has THREE outcomes
+# and a bare `if … grep -q …; then` has room for only two — rc 0 a line
+# matched, rc 1 none did, rc 2+ the scan itself broke — so folding 2 into 1
+# lets grep's own failure reach this refusal indistinguishable from a repo
+# that genuinely carries no test files, handing claim-ticket.sh and
+# review-pr.js's snapshot agent the wrong cause for a listing nothing
+# actually read. #1543
+if printf '%s\n' "$files" | grep -qE "$testfile_re"; then tf_rc=0; else tf_rc=$?; fi
+case $tf_rc in
+  0) echo "node --test" ;;
+  1) die "$ref has no scripts.test and no test files — refusing to emit a command that would pass vacuously" ;;
+  *) die "could not scan $ref's file listing for test files (grep exited $tf_rc) — refusing to guess" ;;
+esac
