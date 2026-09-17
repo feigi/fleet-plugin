@@ -115,15 +115,24 @@ wt_lib="$(dirname "$0")/worktree.sh"
 unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
 base=${BASE_REF:-origin/main}
-# This script is audit-only — it prints ahead/dirty counts to stdout and never
-# itself writes to git state, so a fleet controller acting on a wrong number
-# is the whole blast radius, not this process. Unlike release-ticket.sh's
-# `--apply` path (which deletes a branch and worktree on the strength of its
-# own measurement), there is no accept-list here restricting BASE_REF to a
-# remote-tracking ref — judged out of scope for this ticket. What still must
-# be fixed regardless of what $base is allowed to name: the measurement
-# against it must not be silently wrong.
-#
+# Only a remote-tracking ref is accepted — the accept-list reap.sh:156 (#924)
+# and release-ticket.sh:229 (#1320) both carry, and this script had none of.
+# Unlike those two, this script is audit-only: it prints ahead/dirty counts
+# to stdout and never itself writes to git state, so a fleet controller
+# acting on a wrong number is the whole blast radius, not this process. That
+# does not make the list optional, because the qualify step below
+# unconditionally prepends `refs/remotes/` to whatever $base is. A spelling
+# that used to resolve fine before this fix — a bare `main`, a raw 40-char
+# SHA, `HEAD`, `refs/heads/main` — turns into a ref nothing asked to exist
+# (`refs/remotes/main`, `refs/remotes/<sha>`, …) and the resolve below dies.
+# Restricting the input first turns that crash into a refusal naming the
+# real constraint, not a "$base does not resolve" that blames a guess for a
+# qualification this script chose to make.
+case "$base" in
+  origin/*|refs/remotes/*) ;;
+  *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
+esac
+
 # release-ticket.sh (#1320) found the same bug in the same default: `origin/
 # main` is a SHORTHAND, and git resolves a shorthand through its own
 # disambiguation order (gitrevisions: refs/<name>, refs/tags/<name>,
@@ -133,13 +142,17 @@ base=${BASE_REF:-origin/main}
 # branch, and every measurement against the bare shorthand then answers
 # about the tag's target instead: `ahead` silently reads 0 against a
 # worktree that genuinely carries unpushed work, exactly the "nothing here"
-# signal below (#172) tells a fleet controller to trust.
+# signal #82, #128 established this script's readers trust.
 #
 # The fix is to stop MEASURING against the shorthand: qualify it to the full
 # refs/remotes/ path, where there is nothing left to disambiguate, unless it
-# is already qualified. $base itself is left unqualified — it never appears
-# in this script's JSON output, only in `die` text, where the shorthand
-# spelling is what an operator expects to read.
+# is already qualified. The accept-list above is what makes this qualify
+# step safe rather than a guess — #924 recorded qualifying as unavailable
+# without one, because BASE_REF could otherwise name a tag, a SHA or a local
+# branch, leaving no prefix that is always correct. $base itself is left
+# unqualified — it never appears in this script's JSON output, only in
+# `die` text, where the shorthand spelling is what an operator expects to
+# read.
 case "$base" in
   refs/remotes/*) base_rev=$base;;
   *) base_rev="refs/remotes/$base";;
