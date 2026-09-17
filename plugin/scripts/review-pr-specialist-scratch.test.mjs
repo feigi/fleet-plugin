@@ -57,6 +57,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
@@ -72,21 +73,17 @@ const TEMPLATE_END = "label: `review:";
 // a ReferenceError instead.
 const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "testCmd", "readRules", "usableDiff", "environmentNote"];
 
-function specialistTemplate() {
-  const start = CODE.indexOf(TEMPLATE_START);
-  assert.notEqual(
-    start,
-    -1,
-    "review-pr.js no longer builds a specialist prompt opening `Review PR #${pr} (branch ${branch}) for: ` — " +
-      "either it was renamed, or the whole review fan-out is commented out. Update this test, or restore the prompt.",
-  );
-  const end = CODE.indexOf(TEMPLATE_END, start);
-  assert.notEqual(end, -1, "the specialist agent() call no longer carries a `review:` label after its prompt — update this test");
-  const slice = CODE.slice(start, end);
-  return slice.slice(1, slice.lastIndexOf("`"));
-}
+// `between` owns the bounded-slice extraction (and both failure messages);
+// only the backtick trim below is specific to a template literal and stays
+// here.
+const SLICE = between(
+  CODE,
+  TEMPLATE_START,
+  TEMPLATE_END,
+  "review-pr.js's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
+);
 
-const RENDER = new Function(...SCOPE, "return `" + specialistTemplate() + "`");
+const RENDER = new Function(...SCOPE, "return `" + SLICE.slice(1, SLICE.lastIndexOf("`")) + "`");
 
 // One specialist's prompt. Every argument is fixed: these pins are about what
 // the prompt SAYS, not about how it varies, so nothing here needs to.
@@ -107,7 +104,11 @@ const render = () =>
 // The first of the two rules, in the prompt that was missing it. ONE contiguous
 // regex rather than two assertions, for the reason refuter-scratch-prose.test
 // .mjs states about the same wording: an unbounded gap lets a spliced sentence
-// carve an exception INTO the rule and stay green.
+// carve an exception INTO the rule and stay green. Both gaps are the literal
+// punctuation the rendered prompt carries around "never" ("…`, " before it,
+// a line break plus backtick after) rather than a free-text `.{0,N}` span —
+// mutation-tested: an exception clause spliced into either gap (e.g. "never
+// except during setup steps") reds this assertion.
 //
 // Both spellings are required, and the negative one is what carries the rule —
 // `cd "$D" && git …` alone reads as a suggestion, and the observed failure is an
@@ -115,7 +116,7 @@ const render = () =>
 test("the rendered specialist prompt chains cd into the git command, never semicolon", () => {
   assert.match(
     render(),
-    /cd\s+"\$D"\s+&&\s+git\s+….{0,60}never.{0,60}cd\s+"\$D";\s+git\s+…/s,
+    /cd\s+"\$D"\s+&&\s+git\s+…`,\s+never\s+`cd\s+"\$D";\s+git\s+…/s,
     "the workflow's specialist prompt carries no cd-chaining rule — a silently failed `cd` leaves the following `git` " +
       "running in the checkout, which is what produced commit 020d6ea during the PR #488 fix-applier run",
   );
@@ -130,7 +131,7 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 test("the rendered specialist prompt requires a toplevel assertion around git init/commit", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+equal\s+your\s+scratch\s+path/s,
+    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path/s,
     "the workflow's specialist prompt carries no toplevel assertion around a fixture's own git init/commit — an agent " +
       "that wrongly believes it is already in its scratch copy runs `git init`/`git commit` against the repository",
   );
@@ -143,9 +144,12 @@ test("the rendered specialist prompt requires a toplevel assertion around git in
 // directory sentence goes, and a rule about a fixture's git is inert if the
 // prompt no longer orders mutation work in a copy of its own.
 //
-// The scratch sentence and the first rule are asserted as one bounded span, so
-// a sentence spliced between them cannot carve the write area back open while
-// leaving both halves present.
+// The scratch sentence and the first rule are asserted as one bounded span,
+// with the gap between them typed as `\s+` — the rendered prompt carries
+// exactly one space there, never a free-text `.{0,N}` — so a sentence
+// spliced between them (mutation-tested: "Except for git fixtures, which
+// may live anywhere.") reds this assertion instead of leaving both halves
+// present and passing.
 test("the added rules still sit on a prompt that names a write area and orders work in its own copy", () => {
   const prompt = render();
   assert.match(
@@ -156,7 +160,7 @@ test("the added rules still sit on a prompt that names a write area and orders w
   );
   assert.match(
     prompt,
-    /Scratch\s+files\s+go\s+in\s+\/scr\/run-1\/correctness\/\s+and\s+nowhere\s+else\..{0,80}Chain\s+the\s+directory\s+change\s+into\s+the\s+command/s,
+    /Scratch\s+files\s+go\s+in\s+\/scr\/run-1\/correctness\/\s+and\s+nowhere\s+else\.\s+Chain\s+the\s+directory\s+change\s+into\s+the\s+command/s,
     "the specialist prompt no longer names the scratch directory immediately before the cd rule — either the write " +
       "area is gone, leaving 'your scratch path' naming nothing, or a sentence between them carves an exception into it",
   );
