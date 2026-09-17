@@ -1694,13 +1694,13 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
   assert.equal(existsSync(dir), false, `cliFixture registered no cleanup on its test: ${dir} survived it`);
 });
 
-// ── A stray flag in a free-text subject tail, or the id slot ahead of it (#584) ──
+// ── A stray flag in check's subject tail, or the id slot ahead of a tail (#584) ──
 //
 // `--file`/`--require-file` are spliced out of argv by NAME before `cmd`/
 // `rest` are ever split, so a misspelled flag is the ordinary way one reaches
 // here — though not the only way: the splice is `indexOf`-based and takes one
 // occurrence, so a REPEATED correctly-spelled flag survives into the tail too
-// and is refused by the same rule. #362 closed the swallow at the
+// and meets the same rules. #362 closed the swallow at the
 // `--file`/`--require-file` positions; this is the tail beyond them, where a
 // stray token used to fold straight into the duplicate-filing subject.
 //
@@ -1708,6 +1708,12 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
 // for subject "--requre-file widget guard missing" — a DIFFERENT subject than
 // the seeded one — and answered exit 0 where the correctly-spelled invocation
 // answers ALREADY FILED at exit 1.
+//
+// Two rules, not one, and they answer different slots. The tail LENGTH rule is
+// `check`'s alone — #1161: `filed`, `row` and `ruled` are documented with a
+// bare multi-word tail, and the rule refused what those docs prescribe, so
+// they are pinned ACCEPTING that shape below. The id-slot prefix test is those
+// three's, and is where #584's own signature reaches them.
 test("CLI: a stray flag in check's tail is refused, naming it (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1748,7 +1754,7 @@ test("CLI: an unquoted multi-word subject with no stray flag is still accepted (
 });
 
 // Known residual, deliberately left open: a stray flag with no subject at all
-// is a ONE-element tail, so refuseStrayInTail() never fires on it — it is
+// is a ONE-element tail, so refuseStrayInCheckTail() never fires on it — it is
 // accepted as the subject itself. Left open because closing it costs the
 // legitimate one-argument `--`-leading subject, which is the case #584 exists
 // to keep working, and the residual is harmless: the run searches for the
@@ -1766,24 +1772,46 @@ test("CLI: a stray flag alone, with no subject, is accepted as the degenerate su
   assert.equal(JSON.parse(r.stdout).subject, "--requre-file");
 });
 
-// `filed` takes the same free-text tail, past its issue-number argument
-// (`subjectParts`, not `rest` — the issue number sits ahead of it), and is
-// refused by the same rule.
-// Seeded with nothing on purpose: `filed` has no missing-file path of its own
-// — save() writes the sections itself — so a pre-created empty ledger here
-// would only hide the assertion below, that a refusal leaves no ledger at all.
-test("CLI: a stray flag in filed's subject is refused, naming it (#584)", (t) => {
+// #1161: the length rule above is `check`'s alone. `filed`, `row` and `ruled`
+// are documented with a bare multi-word tail — run-team/SKILL.md's ledger
+// section spells them `filed <issue> <subject>`, `row <ticket> <text>` and
+// `ruled <pr> <decision>`, as do this script's own usage strings for them —
+// and a subject carrying a `--` word is the ordinary shape of a finding title
+// in this repo, so reading the rule there refused exactly what those docs
+// prescribe. Measured: each of these exited 2 before the narrowing, where the
+// tree before #584 answered all three at exit 0.
+//
+// The recorded TEXT is asserted, not only the exit code: accepting the call
+// and then dropping or mangling the `--` word would pass a status-only pin,
+// and that record is what a later `check` and a replacement controller read.
+// A file per subcommand, so a failure names which one lost the text.
+test("CLI: filed/row/ruled accept an unquoted multi-word subject carrying a '--' word (#1161)", (t) => {
   const { dir, cli } = cliFixture(t);
-  const file = join(dir, "ledger.md");
-  const r = cli(["--file", file, "filed", "999", "--typo-flag", "some new subject"]);
-  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
-  assert.match(r.stderr, /unknown flag --typo-flag/);
-  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
-  assert.equal(existsSync(file), false, "a refusal must not write a ledger either");
+  for (const [cmd, id, field] of [
+    ["filed", "999", "subject"],
+    ["row", "42", "line"],
+    ["ruled", "77", "decision"],
+  ]) {
+    const file = join(dir, `${cmd}.md`);
+    const r = cli(["--file", file, cmd, id, "the", "--basee", "flag", "is", "unread"]);
+    assert.equal(r.status, 0, `${cmd}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(
+      JSON.parse(r.stdout)[field],
+      /the --basee flag is unread$/,
+      `${cmd}: the tail must reach the payload with its '--' word intact`,
+    );
+    assert.match(
+      readFileSync(file, "utf8"),
+      /^- #\d+ the --basee flag is unread$/m,
+      `${cmd}: and the ledger on disk`,
+    );
+  }
 });
 
-// filed's own subject-legitimately-starting-with-'--' pin, the counterpart
-// of check's.
+// filed's own subject-legitimately-starting-with-'--' pin, the counterpart of
+// check's. It answers the id-slot rule rather than the tail one: the prefix
+// test reads `issue` and must never be extended to `subjectParts[0]`, which
+// is where a quoted `--`-leading subject lands.
 test("CLI: filed accepts a subject legitimately starting with '--', given as one argument (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1793,27 +1821,20 @@ test("CLI: filed accepts a subject legitimately starting with '--', given as one
   assert.equal(JSON.parse(r.stdout).subject, subject, "the subject must reach the ledger unchanged");
 });
 
-// The stray-flag refusal pins each put the flag FIRST in the tail, so they stay
-// green against a guard that only ever inspects `tail[0]` — a narrowing a
-// future reader could make believing the tests still cover it. These drive
-// the flag into a later position instead, and across all four subcommands
-// that read a free-text tail rather than only the two that read it into a
-// duplicate-filing answer.
-test("CLI: a stray flag is refused from a later position in the tail too, on every tail-reading subcommand (#584)", (t) => {
+// The stray-flag refusal pins above put the flag FIRST in the tail, so they
+// stay green against a guard that only ever inspects `tail[0]` — a narrowing a
+// future reader could make believing the tests still cover it. This drives the
+// flag into a later position instead. `check` alone now: the loop this used to
+// run over all four tail-reading subcommands is the acceptance pin above for
+// the other three (#1161).
+test("CLI: a stray flag in check's tail is refused from a later position too (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
-  for (const argv of [
-    ["check", "widget", "guard", "--typo-flag"],
-    ["filed", "999", "some new subject", "--typo-flag"],
-    ["row", "42", "some state text", "--typo-flag"],
-    ["ruled", "77", "merge it", "--typo-flag"],
-  ]) {
-    const r = cli(["--file", file, ...argv]);
-    assert.equal(r.status, 2, `${argv[0]}: got exit ${r.status}\n${r.stderr}`);
-    assert.match(r.stderr, /unknown flag --typo-flag/, `${argv[0]}: must name the stray`);
-    assert.equal(r.stdout, "", `${argv[0]}: a refusal must not also emit a payload`);
-  }
-  assert.equal(existsSync(file), false, "no refusal may write a ledger");
+  const r = cli(["--file", file, "check", "widget", "guard", "--typo-flag"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /unknown flag --typo-flag/, "the refusal must name the stray");
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+  assert.equal(existsSync(file), false, "the refusal must not write a ledger");
 });
 
 // The tail guard cannot reach the slot ahead of it: a stray flag one token

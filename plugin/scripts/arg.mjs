@@ -360,15 +360,23 @@ export function makeNumArg(die) {
 // "--require-file silently absent when value missing"` works today and is the
 // shape of issue titles in this repo — so this sweep would refuse working
 // invocations, which #365's own AC calls worse than the bug. #584 NARROWED
-// that gap without routing through this sweep, rather than closing it:
-// ledger.mjs's own refuseStrayInTail() refuses a `--`-prefixed token only
-// when it shares the tail with something else — the shape an unquoted stray
-// flag makes, never the shape a one-argument subject makes — so a subject
-// that legitimately opens with `--`, given as that one argument, is accepted
-// and emitted in the payload's `subject` field unchanged. Unchanged there,
-// not everywhere: `check` normalises and reorders the subject before it
-// becomes a tracker query, so `the --basee flag is unread` is queried as
-// `unread basee flag`.
+// that gap without routing through this sweep, rather than closing it, and
+// #1161 narrowed it again: ledger.mjs's own refuseStrayInCheckTail() is read on
+// `check`'s tail ALONE, and refuses a `--`-prefixed token there only when it
+// shares that tail with something else — the shape an unquoted stray flag
+// makes, never the shape a one-argument subject makes — so a subject that
+// legitimately opens with `--`, given as that one argument, is accepted and
+// emitted in the payload's `subject` field unchanged. Unchanged there, not
+// everywhere: `check` normalises and reorders the subject before it becomes a
+// tracker query, so `the --basee flag is unread` is queried as `unread basee
+// flag`.
+//
+// `check` alone because the length rule is only sound where the documented
+// convention IS one quoted argument, and `filed`, `row` and `ruled` are
+// documented with a bare multi-word tail — so on those three the gate refused
+// what their own docs prescribe, measured (#1161). What guards them instead is
+// ledger.mjs's refuseStrayInId(), a bare prefix test on the id slot ahead of
+// the tail, where a `--` token is never data.
 //
 // It is the LENGTH gate that spares the legitimate case, not the prefix test
 // — that test is `startsWith("--")`, the same one this sweep uses. A prefix
@@ -376,12 +384,10 @@ export function makeNumArg(die) {
 //
 // #584 does not make this file's cost disappear; it buys a smaller version of
 // the same cost. An unquoted subject carrying a `--` word is a working
-// invocation ledger.mjs now refuses too: `check the --basee flag is unread`
-// answered at exit 0 before #584 and exits 2 after it. Two residuals stay
-// open and owned — a lone stray with no subject beside it is still taken as
-// the subject, which ledger.mjs's own comment prices, and #1161 tracks that
-// the tree documents those subcommands unquoted while the guard wants one
-// quoted argument.
+// invocation ledger.mjs's `check` now refuses too: `check the --basee flag is
+// unread` answered at exit 0 before #584 and exits 2 after it. The residual
+// that stays open and owned is a lone stray with no subject beside it, still
+// taken as the subject, which ledger.mjs's own comment prices.
 export function makeSweep(die) {
   return function sweep(known) {
     for (const a of process.argv.slice(2)) {
