@@ -64,11 +64,30 @@ test("a -v<n> re-dispatch suffix is stripped the same way as a retry letter", ()
   // this fell through to a blank pr column, orphaning the token row from the
   // PR's outcome.
   assert.deepEqual(parseMemberName("finisher-pr-1475-v2"), { ticket: "", pr: "1475" });
+  // Two-digit suffixes are the same spelling, not a special case: -v10 is
+  // the tenth re-dispatch, not a different pattern than -v2.
+  assert.deepEqual(parseMemberName("finisher-pr-1475-v10"), { ticket: "", pr: "1475" });
   // The existing single-letter retry suffix keeps working unchanged.
   assert.deepEqual(parseMemberName("finisher-pr-1475-b"), { ticket: "", pr: "1475" });
   // The numeric-only suffix (a genuine second-ticket batch, not a retry) is
-  // still deliberately NOT stripped.
+  // still deliberately NOT stripped for a TICKET-shaped name.
   assert.deepEqual(parseMemberName("impl-137-2"), { ticket: "", pr: "" });
+});
+
+test("a bare numeric re-dispatch suffix is stripped for PR-shaped names only (#1482)", () => {
+  // The commoner numeric re-dispatch spelling (no `-v`, no letter) also falls
+  // through the old regex: `finisher-pr-1440-2`, `fix-pr-1281-2`. A
+  // PR-shaped name carries exactly one number, the PR itself, so a second
+  // trailing `-\d+` cannot be a second ticket the way `impl-<ticket>-<n>`'s
+  // can — measured across docs/metrics/member-outcomes.tsv: 476,202
+  // cache-create tokens across 7 real rows fell through to a blank pr column
+  // this way, more than the 37,580 the -v<n> fix above addressed.
+  assert.deepEqual(parseMemberName("finisher-pr-1440-2"), { ticket: "", pr: "1440" });
+  assert.deepEqual(parseMemberName("finisher-pr-1321-3"), { ticket: "", pr: "1321" });
+  assert.deepEqual(parseMemberName("fix-pr-1281-2"), { ticket: "", pr: "1281" });
+  // The ticket-shaped impl-<ticket>-<n> family is untouched: its
+  // second-ticket ambiguity is real, and a PR-shaped name's is not.
+  assert.deepEqual(parseMemberName("impl-753-2"), { ticket: "", pr: "" });
 });
 
 test("an unrecognised name yields blanks, never a guess", () => {

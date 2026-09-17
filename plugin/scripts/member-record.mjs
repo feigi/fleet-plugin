@@ -134,14 +134,27 @@ export function normalizeModel(raw) {
 // because it looks like a second-ticket suffix — no naming convention in
 // this repo otherwise uses a literal `-v` + digits tail.
 //
-// The NUMERIC suffix (`impl-137-2`) looks like the same retry spelling and is
-// deliberately NOT stripped. The one real instance on disk describes itself
-// as "Implement 137+138+139 set" — a multi-ticket batch that no single
-// `ticket` value represents. Blank is the honest answer; booking it to 137
-// would join the row to two tickets it did not do.
+// The NUMERIC suffix on a TICKET-shaped name (`impl-137-2`) looks like the
+// same retry spelling and is deliberately NOT stripped there. The one real
+// instance on disk describes itself as "Implement 137+138+139 set" — a
+// multi-ticket batch that no single `ticket` value represents. Blank is the
+// honest answer; booking it to 137 would join the row to two tickets it did
+// not do.
+//
+// A PR-shaped name's numeric suffix is a DIFFERENT case: `fix-pr-<n>`,
+// `review-pr-<n>` and `finisher-pr-<n>` carry exactly ONE number, the PR
+// itself, so a second trailing `-\d+` cannot be a second ticket the way
+// `impl-<ticket>-<n>`'s can — there is only ever one PR per such name. A
+// trailing `-\d+` there (`finisher-pr-1440-2`, `fix-pr-1281-2`) is the same
+// re-dispatch retry the letter and `-v<n>` suffixes above already cover, and
+// is now stripped for PR-shaped names only (#1482, measured: 476,202
+// cache-create tokens across 7 real rows fell through to a blank pr column
+// this way — more than the 37,580 the `-v<n>` fix above addressed). The
+// ticket-shaped `impl-<ticket>-<n>` family above is untouched: its
+// second-ticket ambiguity is real, and a PR-shaped name's is not.
 export function parseMemberName(name) {
   const s = String(name ?? "").trim().replace(/-(?:[a-z]|v\d+)$/, "");
-  let m = /^(?:fix|review|finish|finisher)-pr-(\d+)$/.exec(s);
+  let m = /^(?:fix|review|finish|finisher)-pr-(\d+)(?:-\d+)?$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^finish(?:er)?-(\d+)$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
