@@ -133,6 +133,11 @@ test("the `unknown` path says the missing-object cause names itself in git's own
 // in both of those the reflog is untouched and still names the stash SHA as
 // its second field, where `git stash show -p <that sha>` printed the hunk
 // staged or not, while `git show <that sha>` again printed none when staged.
+// #1055 added the third member of that enumeration: measured, git 2.50.1, `rm
+// refs/stash` with no `packed-refs` fails both the same way (`ambiguous
+// argument` / `refs/stash is not a valid reference`) while the reflog still
+// names the SHA, and after `git pack-refs --all` both succeed at rc 0 — so the
+// clause enumerates the UNPACKED absence, not absence as such.
 test("the `unknown` path names git show refs/stash as the recovery when the file reads come back empty", () => {
   assert.match(
     flat(noUndoAudit()),
@@ -144,8 +149,97 @@ test("the `unknown` path names git show refs/stash as the recovery when the file
   );
   assert.match(
     flat(noUndoAudit()),
-    /Both fail only where the ref FILE is itself the broken one — unreadable, or holding text that is not a SHA — and there the SHA `cat` already printed, in the reflog's second field, is what `git stash show -p <that sha>` recovers instead/,
+    /Both fail only where the ref FILE is itself the broken one — unreadable, holding text that is not a SHA, or gone with nothing in `packed-refs` — and there the SHA `cat` already printed, in the reflog's second field, is what `git stash show -p <that sha>` recovers instead/,
   );
+});
+
+// #1055: the fallback above IS a SHA `cat` printed, so it is unavailable in the
+// double fault — where the premise clause ("`cat` denied") fires and the ref is
+// also unresolvable — and the paragraph went on offering it there. Measured,
+// git 2.50.1, all three shapes (`chmod 000` on `refs/stash` AND
+// `logs/refs/stash`; `printf 'not-a-sha' > refs/stash` plus `chmod 000` on
+// `logs/refs/stash`; `rm refs/stash` with no `packed-refs` plus `chmod 000`
+// on `logs/refs`): `git stash list` empty at rc 0, `git show refs/stash`
+// `ambiguous argument`, `git stash show -p refs/stash` `refs/stash is not a
+// valid reference`, and `cat` rc 1 printing no SHA to fall back on.
+//
+// The recovery SPLITS by shape, measured, not inferred — an earlier draft
+// claimed one outcome for all three, which is the defect #1055 fixed here.
+// `chmod 644` on the two files (`chmod 755` on an unsearchable `logs/refs`)
+// puts the entry straight back in `git stash list` ONLY where the ref FILE's
+// own content survived — the both-unreadable shape. Where the ref file's
+// content is itself gone or garbage, restoring the reflog's mode only makes
+// `cat` print the SHA again; `git stash list` stays empty at rc 0 until the
+// ref is re-pointed by hand: `git update-ref refs/stash <sha>` succeeds
+// directly once the file is gone, but on garbage text it answers `fatal: …
+// reference broken` even with `-d` — measured — so the file has to be `rm`'d
+// first either way. Once re-pointed, both land the entry as a NEW
+// `stash@{0}` (empty subject, the update's own reflog line) with the
+// recovered one pushed down to `stash@{1}`, never restored to its original
+// slot — measured with `git stash list` before and after `git update-ref`.
+//
+// Failing all of that, `git fsck` prints `dangling commit <sha>` per stash
+// entry — 3 of 3 entries in a three-stash fixture, and still with every
+// object packed by `repack -ad` — at rc 10 in the unreadable-ref shape while
+// printing them, and still at rc 0 with both files simply deleted and
+// nothing in `packed-refs`. `git stash show -p <that sha>` printed the hunk
+// there, including for an entry staged before `git stash`, refusing a
+// non-stash dangling commit with `is not a stash-like commit`. Its measured
+// limits are why the doc calls it a lead: fsck hands back no `stash@{N}`,
+// and an entry dropped by `git stash drop` is dangling with the same `WIP on
+// <branch>:` subject and the same rc 0 from `git stash show -p` as a live
+// one.
+//
+// `git gc --prune=now` is deliberately NOT mentioned either way: measured, it
+// dies `fatal: bad object refs/stash` / `failed to run repack` at rc 128 in the
+// unreadable-ref shape, so the obvious "recover before something prunes it"
+// warning would be false for the shape it reads as being about.
+//
+// Six claims pinned separately, never one span: the STATE (now three
+// shapes), the permission fix's SCOPE (one shape names it back outright),
+// the re-point recovery the other two shapes need instead, the stash@{0}/
+// stash@{1} shape that re-point leaves behind, the fsck lead, and the lead's
+// unreliability — each rots independently. Dropping the state turns the
+// caveat into unscoped advice; dropping the last one promotes a lead to a
+// listing, which is the specific rewrite this paragraph's history predicts;
+// widening the permission fix back across all three shapes silently
+// reintroduces the exact false promise #1055 corrected, which is why its
+// scope is pinned as a short span rather than folded into the fix
+// instruction's own sentence.
+test("the double fault leaves no ref-based recovery, and names the mode fix, the re-point fallback and the fsck lead in their place", () => {
+  assert.match(
+    flat(noUndoAudit()),
+    /That fallback is a SHA `cat` printed, so it is gone where the reflog is the denied read too — both files unreadable, `refs\/stash` holding text that is not a SHA while the reflog cannot be read, or `refs\/stash` gone with nothing in `packed-refs` while the reflog cannot be read — and nothing ref-based recovers there/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /Only the both-files-unreadable shape then has `git stash list` name the entry again on its own/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /so restoring the reflog's mode only unlocks the SHA `cat` now prints; `git stash list` stays empty at rc 0 until you clear the broken ref and re-point it yourself/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /`git update-ref refs\/stash <that sha>` works directly once `refs\/stash` is already gone; where it instead holds garbage text, `git update-ref` refuses that too \(`reference broken`, even with `-d`\) until you `rm` the file first/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /Either path is measured to list the entry again as a new `stash@\{0\}` \(an empty-subject entry the update itself adds\), pushing the recovered one down to `stash@\{1\}` rather than restoring it to its original slot/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /`git fsck` still prints a `dangling commit <sha>` line per stash entry, objects loose or packed/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /refusing anything that is not a stash \(`is not a stash-like commit`\)/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /Treat it as a lead, not a listing: no `stash@\{N\}` comes back with it, and an entry someone dropped on purpose is indistinguishable from a live one/,
+  );
+  assert.match(flat(noUndoAudit()), /Restore read permission where the mode is yours to fix/);
 });
 
 // #376 added a fourth cause whose `ls -l` signature is the OPPOSITE of the
