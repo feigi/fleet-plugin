@@ -714,6 +714,17 @@ function sedShim(t, body) {
   return bin;
 }
 
+// For the `in-progress` label scan's own grep_probe-style fix (#1543).
+const REAL_GREP = execFileSync("sh", ["-c", "command -v grep"], { encoding: "utf8" }).trim();
+
+/** A dir holding a `grep` shim with the given body, prepended to PATH. */
+function grepShim(t, body) {
+  const bin = mkdtempSync(join(tmpdir(), "release-ticket-grep-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "grep"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return bin;
+}
+
 test("a receipt field that cannot be escaped is exit 2, never the `nothing was touched` verdict", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "esc-boom");
@@ -1880,6 +1891,37 @@ test("a gh failure aborts before anything is deleted", (t) => {
   const { code, stderr } = release(r, c, { env: { GH_RC: "1" } });
   assert.equal(code, 2);
   assert.match(stderr, /in-progress label cannot be released/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a grep scan failure over the label listing is unknown, never a clean 'label absent' (#1543)", (t) => {
+  // Same defect class PR #1519 fixed in reap.sh's grep_probe: `grep -q` has
+  // THREE outcomes and the bare `if … grep -qx …; then has_label=true; else
+  // has_label=false; fi` this script used to run had room for only two — rc 0
+  // matched, rc 1 none did, rc 2+ the scan itself broke — so grep's OWN
+  // failure used to fold into `has_label=false`, letting the release below
+  // proceed exactly as it does for a ticket that genuinely never carried the
+  // label — the test above's own failure mode, one tool further down the
+  // pipeline. The shim below matches only the `in-progress` scan, never the
+  // unrelated `grep -c .` the dirty check runs earlier, so that precondition
+  // still passes on real grep and this run reaches the label read at all.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const bin = grepShim(
+    t,
+    `case " $* " in
+  *" in-progress "*) echo "grep: illegal byte sequence" >&2; exit 2 ;;
+esac
+exec ${REAL_GREP} "$@"`,
+  );
+
+  const { code, stderr } = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
+
+  assert.equal(code, 2, "unanswerable is exit 2, not this script's clean-release exit 0");
+  assert.match(stderr, /could not scan #9's labels for in-progress/,
+    "grep's own scan failure must be named as the cause");
+  assert.doesNotMatch(stderr, /in-progress label cannot be released/,
+    "that is the gh-read failure's wording above — a different cause must not share it");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
 });
 

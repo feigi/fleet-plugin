@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -251,6 +251,33 @@ test("an unborn HEAD names the listing failure too", () => {
   assert.notEqual(status, 0);
   assert.match(err, /derive-testcmd: cannot list HEAD/);
   assert.doesNotMatch(err, /pass vacuously/);
+});
+
+// #1543. Same defect class PR #1519 fixed in reap.sh's grep_probe: `grep -q`
+// has THREE outcomes and the `if … grep -qE …; then … else … fi` guarding
+// this refusal used to have room for only two — rc 0 a line matched, rc 1
+// none did, rc 2+ the scan itself broke — so grep's OWN failure fell into the
+// same arm as a genuine no-match and this script reported a repo as having no
+// test files when it had never actually looked. The shim below always fails
+// as grep does when it gives up scanning (rc 2, a diagnostic on stderr), so
+// this proves the two causes now read distinctly rather than pinning a
+// specific corrupt-input trigger.
+function grepScanFailShim(t) {
+  const bin = mkdtempSync(join(tmpdir(), "derive-testcmd-grep-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "grep"), `#!/bin/sh\necho "grep: illegal byte sequence" >&2\nexit 2\n`, { mode: 0o755 });
+  return bin;
+}
+
+test("a grep scan failure over the file listing refuses distinctly from a genuine no-match (#1543)", (t) => {
+  const dir = repo({ "t.test.mjs": PASSES });
+  const bin = grepScanFailShim(t);
+  const r = derive(dir, "HEAD", { ...process.env, PATH: `${bin}:${process.env.PATH}` });
+  assert.equal(r.status, 1, `a scan failure is a refusal — this script's only failure code\n${r.err}`);
+  assert.match(r.err, /could not scan HEAD's file listing for test files \(grep exited 2\)/,
+    "grep's own scan failure must be named as the cause");
+  assert.doesNotMatch(r.err, /has no scripts\.test and no test files/,
+    "that message is reserved for a scan that actually ran and found none — a repo with a real test file must not get it");
 });
 
 // A manifest that does not parse is not evidence of a manifest without a test
