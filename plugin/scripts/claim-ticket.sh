@@ -232,7 +232,11 @@ elif ! ndeps=$(printf '%s' "$pkg" | node -e 'const p=JSON.parse(require("fs").re
 # produced it.
 # The derive-testcmd.sh capture merges its stderr the same way with no such
 # guard. What protects it is its callee folding its own node's stderr into the
-# reason it returns rather than emitting it — not the capture's shape.
+# reason it returns rather than emitting it — not the capture's shape. That
+# makes it a cross-file invariant, enforceable only where the behaviour lives:
+# derive-testcmd.test.mjs pins it (#1175), so either of that script's success
+# arms acquiring a stderr write fails there rather than surfacing here as a
+# silently wrong branch and a runner that execs the chatter.
 elif case "$ndeps" in ''|*[!0-9]*) true ;; *) false ;; esac; then
   die "could not read $ref:package.json — unexpected output: $ndeps"
 elif [ "$ndeps" = 0 ]; then install="true"
@@ -261,7 +265,10 @@ testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 # captures or redirects it gets nothing, and the missing-sibling case (a PATH
 # or symlink invocation where `dirname -- "$0"` is not this directory) is
 # unreadable either way. derive-testcmd.sh writes nothing to stderr when it
-# succeeds, so the success path still captures the command alone.
+# succeeds, so the success path still captures the command alone — checked
+# where that behaviour lives, not promised here: derive-testcmd.test.mjs's
+# "every success path writes nothing to stderr" case asserts it for both
+# derivations, under an interpreter made deliberately chatty (#1175).
 script_dir=$(dirname -- "$0")
 if ! testcmd=$("$script_dir/derive-testcmd.sh" . "$ref" 2>&1); then
   die "$testcmd"
