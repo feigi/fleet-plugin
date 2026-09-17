@@ -105,11 +105,11 @@ test("gather: a previous board whose `tickets` is a number is ignored, not fatal
 
 // The case an `Array.isArray(tickets)` check alone lets straight through, and
 // the second one the ticket names: `[null]` IS an array, so it clears the
-// container check and throws one line later on the per-entry `t.pr` read. The
-// whole payload is refused rather than the bad entry filtered out — validation
-// happens once, where the payload enters, and a board with one unreadable
-// ticket is not a board whose OTHER tickets can be trusted to carry CI state
-// forward.
+// container check and throws on the per-entry `t.pr` read inside the prevCi
+// map instead. The whole payload is refused rather than the bad entry
+// filtered out — validation happens once, where the payload enters, and a
+// board with one unreadable ticket is not a board whose OTHER tickets can be
+// trusted to carry CI state forward.
 test("gather: a `tickets` array holding a non-object is ignored, not fatal (#1192)", () => {
   const r = gathered('{"tickets": [null]}');
   assert.equal(r.ci[42], "unknown");
@@ -119,4 +119,132 @@ test("gather: a `tickets` array holding a non-object is ignored, not fatal (#119
   // The index, because a real board carries dozens of tickets and "one of them
   // is wrong" is not a diagnostic anybody can act on.
   assert.match(lines[0], /expected tickets\[0\] to be a JSON object, got null/);
+});
+
+// ── the rest of the class ────────────────────────────────────────────────────
+//
+// One row per DISTINCT route into the defect, not per value: a wrong-typed
+// container, a wrong-typed entry, and a wrong-typed payload are three
+// different reads, and the three kind words below are the three branches of
+// the guard's own naming expression — a `typeof`-only version reports both
+// `null` and `[]` as "object", which is the diagnostic the operator cannot act
+// on. Every row asserts the gather COMPLETED (inside `gathered`) with an empty
+// carry-forward and exactly one diagnostic naming the file.
+const REFUSED = [
+  ['{"tickets": "5"}', /expected tickets to be an array, got string/],
+  ['{"tickets": {"42": "red"}}', /expected tickets to be an array, got object/],
+  ['{"tickets": [1]}', /expected tickets\[0\] to be a JSON object, got number/],
+  ['{"tickets": [{"pr": 42, "ci": "red"}, "x"]}', /expected tickets\[1\] to be a JSON object, got string/],
+  ['{"tickets": [[]]}', /expected tickets\[0\] to be a JSON object, got array/],
+  // Top-level faults. These four did NOT crash before the guard — `prev?.x`
+  // reads undefined off all of them — so the defect here is the silence: the
+  // operator passed a file that is not a board and the run said nothing, then
+  // carried nothing forward. Ignoring them is unchanged; SAYING so is new.
+  ["null", /expected a JSON object, got null/],
+  ["5", /expected a JSON object, got number/],
+  ['"a board"', /expected a JSON object, got string/],
+  ["[]", /expected a JSON object, got array/],
+];
+
+for (const [body, reason] of REFUSED) {
+  test(`gather: an unusable previous board ${body} is ignored with one named diagnostic (#1192)`, () => {
+    const r = gathered(body);
+    assert.equal(r.ci[42], "unknown", "an unusable previous board must carry nothing forward");
+    // Nothing reaches the payload's other three readers either — `prev?.repo`,
+    // `prev?.repoUrl` and compute-board.mjs's dwell tracking, which reads the
+    // returned `prev` through the same `(prev?.tickets || []).map` shape.
+    assert.equal(r.prev, null);
+    const lines = ignoreLines(r.stderr);
+    assert.equal(lines.length, 1, `expected exactly one diagnostic, got:\n${r.stderr}`);
+    assert.ok(lines[0].includes(r.prevFile), `diagnostic must name the file: ${lines[0]}`);
+    assert.match(lines[0], reason);
+  });
+}
+
+// A parse fault is the path that already worked, and its wording is not the
+// shape fault's: re-using one message for both would put a reader who sees
+// "expected a JSON object" in front of a file that never parsed.
+test("gather: a previous board that is not JSON still takes the ignore path with its own message (#1192)", () => {
+  const r = gathered("not json at all");
+  assert.equal(r.ci[42], "unknown");
+  const lines = ignoreLines(r.stderr);
+  assert.equal(lines.length, 1, `expected exactly one diagnostic, got:\n${r.stderr}`);
+  assert.match(lines[0], /is not valid JSON/);
+  assert.doesNotMatch(lines[0], /expected a JSON object/,
+    "a parse fault must not be reported as a shape fault");
+});
+
+// ── the accept side: what this guard must NOT refuse ─────────────────────────
+
+test("gather: a well-formed previous board still supplies the carry-forward (#1192)", () => {
+  // The behaviour the guard exists to protect, not merely to leave alone: PR
+  // 42's own CI read fails here, so "red" can only have come from this file.
+  // A guard that refused the payload — or nulled `prev` on its way past —
+  // would show up here as "unknown" and nowhere else.
+  const r = gathered('{"tickets": [{"pr": 42, "ci": "red"}]}');
+  assert.equal(r.ci[42], "red");
+  assert.deepEqual(r.prev, { tickets: [{ pr: 42, ci: "red" }] },
+    "an accepted payload must reach gather()'s callers whole — compute-board.mjs reads it for dwell");
+  assert.deepEqual(ignoreLines(r.stderr), [], "a usable previous board must draw no diagnostic");
+});
+
+// The rows a stricter guard gets wrong. `prev?.tickets || []` reads all three
+// as the empty carry-forward today, so all three are USABLE payloads, and a
+// guard written as `!Array.isArray(p.tickets)` or `"tickets" in p` would
+// start refusing boards that work — printing a diagnostic about a file whose
+// only fault is having no tickets on it, and throwing away the `repo`/`repoUrl`
+// the same payload still carries.
+const ACCEPTED = ['{}', '{"tickets": null}', '{"tickets": []}', '{"repo": "o/r"}'];
+
+for (const body of ACCEPTED) {
+  test(`gather: a previous board with no usable tickets, ${body}, is accepted in silence (#1192)`, () => {
+    const r = gathered(body);
+    assert.equal(r.ci[42], "unknown");
+    assert.deepEqual(r.prev, JSON.parse(body), "a payload with nothing to carry is still a payload");
+    assert.deepEqual(ignoreLines(r.stderr), [],
+      "nullish/empty tickets is an empty carry-forward, not a fault");
+  });
+}
+
+// ── the process contract: an ignored previous board is not an error ──────────
+//
+// Only observable out here: `gather()`'s return says nothing about the exit
+// code, and the diagnostic's CHANNEL is the thing a cockpit consuming
+// `board build` stdout depends on. The stub `gh` fails every call — each gh
+// read degrades through tryRun — so the board still builds with no network and
+// no read of this repo's live issue list.
+function runBuild(prevArgs) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-cli-"));
+  const home = mkdtempSync(join(tmpdir(), "board-prevshape-home-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-prevshape-cli-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "gh"), 0o755);
+  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
+    cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+  });
+}
+
+test("build: an ignored previous board changes neither the exit code nor stdout (#1192)", () => {
+  const prevFile = join(mkdtempSync(join(tmpdir(), "board-prevshape-file-")), "prev.json");
+  writeFileSync(prevFile, '{"tickets": 5}');
+  const withPrev = runBuild(["--prev", prevFile]);
+  // The baseline is measured in the same run rather than asserted as a
+  // constant: "whatever it would have been with no --prev at all" is the
+  // criterion, and a rig that started failing for its own reasons would
+  // otherwise read as this fix regressing.
+  const without = runBuild([]);
+  assert.equal(withPrev.status, without.status,
+    `--prev changed the exit code: ${withPrev.status} vs ${without.status}\n${withPrev.stderr.slice(-400)}`);
+  // Pinned absolutely too, so a rig broken in both arms cannot pass by
+  // agreeing with itself. 70 was the pre-fix answer — main()'s internal-fault
+  // handler (#1093) — and 2 is a refusal.
+  assert.equal(withPrev.status, 0, withPrev.stderr.slice(-400));
+  // stderr carries it, and only once.
+  assert.equal(ignoreLines(withPrev.stderr).length, 1, withPrev.stderr);
+  // stdout stays the board and nothing else: the cockpit parses this whole.
+  const board = JSON.parse(withPrev.stdout);
+  assert.ok(Array.isArray(board.tickets), "stdout must still be a board model");
+  assert.doesNotMatch(withPrev.stdout, /ignoring unreadable prev board/,
+    "a diagnostic on stdout would break every consumer that parses it");
 });
