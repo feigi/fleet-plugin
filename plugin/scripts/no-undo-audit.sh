@@ -11,9 +11,14 @@ set -eu
 
 # Byte semantics for every tool below, and not a stylistic pin. `tr` is
 # locale-sensitive: under a UTF-8 locale BSD tr exits 1 on a byte that is not
-# valid UTF-8. `tr` is not the only carrier: `sed` exits 1 on the same byte and
-# emits nothing at all, and `paste -sd, -` truncates its whole output at the
-# byte while still exiting 0.
+# valid UTF-8, wherever in the line it sits. `tr` is not the only carrier, and
+# the others are pickier: `sed` exits 1 emitting nothing at all, but only on
+# some positions — measured under `LANG=en_US.UTF-8` with LC_ALL unset,
+# `printf 'b\377ad.txt\n' | sed 's/^/x: /'` gives `sed: RE error: illegal byte
+# sequence` at rc 1 while `printf 'bad\377path.txt\n' | sed 's/^/x: /'`
+# renders it at rc 0, so a fixture proving sed immune proves only that its
+# byte landed somewhere sed tolerates. `paste -sd, -` truncates its whole
+# output at the byte while still exiting 0.
 #
 # `awk` is NOT immune, and reap.sh's own #614 fixture measured the earlier
 # claim here false: it is byte-identical only when every rule matches at an
@@ -33,9 +38,17 @@ set -eu
 # tool whose whole job is to say whether a rebase would eat a commit. That
 # split is now a single byte-oriented reader whose status nothing discards
 # (#583), so this pin is no longer the only thing standing between that byte
-# and a false safe there. It still is for the `sed` and `tr` below that render
-# a path or git's own diagnostic to stderr — grep this file for them; json.sh's
-# escapers do not rely on it, pinning the locale on each call instead.
+# and a false safe there. Nor is it anywhere else: the `sed` and `tr` below
+# that render a path or git's own diagnostic to stderr used to take the audit
+# down with them on that byte, at the exit status that means dirty, and since
+# #1160 each renders through a guard (`render`, and the fold in the stash
+# branch) whose failure cannot reach the verdict. What the pin still buys is
+# those renders WORKING: unpinned, BSD sed exits emitting nothing and BSD tr
+# exits truncating, so the operator loses the diagnostic while the payload and
+# the exit status stay correct. That is now the whole cost of removing it here,
+# and no-undo-audit.test.mjs' invalid-UTF-8 case is what measures it — grep
+# this file for those renders; json.sh's escapers do not rely on this pin,
+# pinning the locale on each call instead.
 #
 # Global rather than per-site, unlike inflight.sh's five: this script sorts
 # nothing, folds no case, and uses a `[a-z]` range nowhere. It does hold ONE
@@ -86,6 +99,41 @@ NAME=no-undo-audit
 # `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
 # caller-supplied path, and this is the one place they all route through.
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
+
+# Every operator-facing render that pipes a captured value through an external
+# tool goes through here — bar the stash-diagnostic fold below, which folds
+# rather than indents and carries the same guard inline — and the point of it
+# is that a render CANNOT decide the verdict (#1160).
+# Written bare — `printf '%s\n' "$v" | sed 's/^/    /' >&2` — the pipeline's
+# status is sed's, `set -eu` takes it, and the script exits with it: on this
+# script exit 1 is the dirty-worktree refusal, so a render fabricated that
+# refusal over a worktree the run had already printed `clean` for, with the
+# payload never emitted and nothing naming a cause. Reachable with no shim at
+# all, on the byte and the position the header above measures: with the pin
+# deleted, a conflicting path spelled `b\377ad.txt` gave
+# `sed: RE error: illegal byte sequence`, nothing rendered, and exit 1 over a
+# worktree the same run had just reported clean. Same shape as the
+# `|| die`s further down, opposite resolution: those guard statements that
+# ANSWER something and so must reach exit 2, this one guards statements that
+# answer nothing and so must reach no exit at all.
+#
+# Three pieces, each covering what the others cannot. The first `||` keeps the
+# verdict out of the render's hands. Its message keeps the failure out of
+# silence — a bare `|| :` fixes the status and leaves a lost conflict list
+# indistinguishable from an empty one, which is the same silent-failure class
+# as the abort. The trailing `|| :` is for the render whose fallback ALSO
+# fails, stderr itself being gone: an unguarded `||` branch is one more command
+# whose status `set -e` reads, and it would abort for the reason this function
+# exists to remove.
+#
+# `$1` lands in sed's REPLACEMENT text, where `&` and `\` are metacharacters.
+# Every prefix passed below is a literal in this file and holds neither; a
+# caller-derived prefix would have to be escaped first.
+render() { # render <line-prefix> <text> <what-the-text-is>
+  printf '%s\n' "$2" | sed "s/^/$1/" >&2 \
+    || printf '%s: could not render %s to stderr; the payload and the exit status stand\n' "$NAME" "$3" >&2 \
+    || :
+}
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
@@ -291,7 +339,7 @@ porcelain=$(git -C "$wt" status --porcelain -uall) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
   clean=false
-  printf '%s\n' "$porcelain" | sed 's/^/    /' >&2
+  render '    ' "$porcelain" "the uncommitted-work list"
 else
   clean=true
   echo "    clean" >&2
@@ -420,7 +468,8 @@ sl=$(git -C "$wt" stash list 2>/dev/null) || sl_rc=$?
 # counts the final incomplete record, so one statement answers both ends
 # (measured under `/bin/sh` with `set -eu`: "" -> 0, one/two/three entries with
 # no trailing newline -> 1/2/3, and no padding to strip).
-stash=$(printf '%s' "$sl" | awk 'END{print NR}')
+stash=$(printf '%s' "$sl" | awk 'END{print NR}') \
+  || die "awk failed counting the stash entries — cannot report the stash count"
 sr_rc=0
 git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # Resolved lazily, inside the one state that asks the question: a healthy repo
@@ -510,8 +559,23 @@ if [ -n "$msg" ]; then
   # `objects/info/alternates` holding a path containing a backslash, git prints
   # it back verbatim, `error: unable to normalize alternate object path:
   # /no\clue/objects`.
+  #
+  # The fold is guarded for the reason `render` at the top of this file is: it
+  # decides nothing — `$stash` is already `null` and this branch already
+  # reports a fault — while an unguarded `$( … | tr … )` inside an assignment
+  # hands `set -eu` tr's own status, and 1 out of this script is the
+  # dirty-worktree refusal. `tr` is the surer carrier of that abort than the
+  # `sed` renders are, per the header's own measurement — it exits on the byte
+  # wherever in the line it sits, where sed tolerates some positions. Losing
+  # the fold is not losing the line — `$msg` already names the state, and the
+  # fallback says which part went missing rather than printing git's text
+  # truncated at the byte, which is what tr leaves behind on its way out.
   diag=$(git -C "$wt" stash list 2>&1 >/dev/null) || true
-  if [ -n "$diag" ]; then msg="$msg — $(printf '%s' "$diag" | tr '\n' ' ')"; fi
+  if [ -n "$diag" ]; then
+    flat=$(printf '%s' "$diag" | tr '\n' ' ') \
+      || flat="(git said more, and folding it onto this line failed)"
+    msg="$msg — $flat"
+  fi
   printf '%s\n' "$msg" >&2
 elif [ "$stash_reflog_rc" -ne 0 ]; then
   stash=null
@@ -637,7 +701,7 @@ case "$conflicts" in
   *"$nl"*) die "a conflicting path contains a newline — cannot build a pathspec for it" ;;
 esac
 if [ -n "$conflicts" ]; then
-  printf '%s\n' "$conflicts" | sed 's/^/    conflict: /' >&2
+  render '    conflict: ' "$conflicts" "the conflicting-path list"
 else
   echo "    no conflicting files" >&2
 fi
@@ -703,7 +767,14 @@ if [ -n "$conflicts" ]; then
   # which is what its own message names.
   at_risk=$(printf '%s\n' "$at_risk" | awk '!seen[$1]++') \
     || die "awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat"
-  [ -n "$at_risk" ] && printf '%s\n' "$at_risk" | sed 's/^/    at risk: /' >&2
+  # An `if`, not `[ -n "$at_risk" ] && render …`: an empty at-risk list is a
+  # normal outcome, and as the non-last member of an AND-OR list its false
+  # test left that list exiting 1 — silent under `set -e` only because -e
+  # skips every member but the last. The guard inside `render` cannot reach
+  # that status, so the shape stays out of the way of it entirely.
+  if [ -n "$at_risk" ]; then
+    render '    at risk: ' "$at_risk" "the at-risk commit list"
+  fi
 fi
 # Same guard, same reason as the conflicts pair above.
 at_risk_json=$(printf '%s' "$at_risk" | jarr) \
