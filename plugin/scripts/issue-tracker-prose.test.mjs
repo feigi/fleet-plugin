@@ -27,6 +27,17 @@
 // rather than trusting that list — a grep result frozen into a header is
 // the defect #1119 names.
 //
+// This mutation only catches PRESENCE pins: a test asserting the doc LACKS
+// some phrase reads `MUTATED` as still lacking it and stays green, invisible
+// to this method. None of the three files above pins an absence today, but
+// a future one needs a different check.
+//
+// The full `plugin/scripts/*.test.mjs` glob is 140+ files; a loaded machine
+// can leave dozens uncompleted instead of green, so the "own green
+// baseline" precondition can itself fail before the mutation ever runs.
+// Confirm against the three files named above first — that trio settles in
+// under a second — before trusting a run against the full glob.
+//
 // THE CEILING, same as fleet-tick-prose.test.mjs: this proves a phrase is
 // PRESENT. It cannot prove it is not negated by a sentence added beside it.
 import { test } from "node:test";
