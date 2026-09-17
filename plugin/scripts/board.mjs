@@ -999,8 +999,10 @@ export function faultText(e) {
 // A single writeSync call can also short-write — return the count it
 // managed and throw nothing at all — or throw EAGAIN outright, the same
 // failure #889 gave die() (arg.mjs) a bounded retry loop for, and PR #1523
-// then gave staleness.mjs's verdict() too. This is the largest single
-// payload of the four writeSync sites in this file — a full stack, not a
+// then gave staleness.mjs's verdict() too. board.mjs has exactly one
+// writeSync call site — this one, not four — but among the fleet's four
+// (arg.mjs's die(), this one, ci-state.mjs's emit(), and staleness.mjs's
+// verdict()) it carries the largest single payload: a full stack, not a
 // one-line refusal — so it is the one most likely to collide with a
 // saturated pipe and lose the diagnostic silently. The loop below mirrors
 // those two: resume a short write where writeSync left off, and retry

@@ -438,7 +438,9 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // defect (a corrupt prev board is meant to be ignored, not fatal), and a test
 // riding on it would turn green-and-vacuous the day that one is fixed. This
 // route rests on a documented non-guard instead of a broken one.
-function runBoardFaulted() {
+// Split from the spawn itself so the timing test below can drive the same
+// fixture through python3's saturated-pipe rig instead of spawnSync.
+function boardFaultFixture() {
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), "board-fault-cwd-")));
   const bin = mkdtempSync(join(tmpdir(), "board-fault-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
@@ -447,10 +449,16 @@ function runBoardFaulted() {
   // array. Answers any argv, which is all gather()'s single `node` read needs.
   writeFileSync(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);
   chmodSync(join(bin, "node"), 0o755);
-  return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md")], {
-    cwd, encoding: "utf8",
+  return {
+    cwd,
+    argv: [BOARD, "build", "--ledger", join(cwd, "nope.md")],
     env: { ...process.env, HOME: cwd, PATH: `${bin}:${process.env.PATH}` },
-  });
+  };
+}
+
+function runBoardFaulted() {
+  const { cwd, argv, env } = boardFaultFixture();
+  return spawnSync(process.execPath, argv, { cwd, encoding: "utf8", env });
 }
 
 test("build: an internal fault exits 70 with a stack, where a refusal exits 2 with one line", () => {
@@ -474,4 +482,86 @@ test("build: an internal fault exits 70 with a stack, where a refusal exits 2 wi
   assert.equal(refusal.status, 2);
   assert.equal(refusal.stdout, "");
   assert.notEqual(refusal.status, r.status, "a fault and a refusal must not share an exit code");
+});
+
+// #1547: fault()'s EAGAIN retry loop, executed rather than pinned only as
+// source shape (board.test.mjs's companion pin covers the shape; this drives
+// the real writeSync(2, ...) call through the fixture above). The rig mirrors
+// staleness.test.mjs's verdict() test and arg.test.mjs's die() test: a real
+// non-blocking stderr pipe, filled to capacity with fcntl's O_NONBLOCK before
+// the child ever touches it, held open with its read end never drained.
+//
+// Those two tests only bound the WORST case — the loop must still give up
+// and call process.exit() rather than hang — and that alone cannot tell a
+// retry loop from a bare `try { writeSync(2, buf) } catch {}`: against a pipe
+// that never drains, a doomed single call and a 200-retry loop both write
+// nothing and both reach process.exit(FAULT_EXIT) well inside any generous
+// bound. What the loop spends that a bare call does not is TIME: every
+// EAGAIN costs a real syscall plus a 1ms Atomics.wait, so
+// MAX_EAGAIN_RETRIES iterations measurably outlast one failed call.
+//
+// Isolating that from this fixture's own cost is the rest of the rig: a cold
+// `build` invocation here spawns two subprocesses (the stub `node` for the
+// ledger read, then `gh`) and can take single-digit SECONDS on a loaded
+// machine, against ~50ms once the OS/file caches are warm (measured on this
+// machine) — noise far larger than the retry loop's own cost. A discarded
+// warm-up run of the IDENTICAL fixture before both timed runs cancels that
+// noise; what is left is the loop's own cost. Measured on this machine: the
+// real loop adds ~300-360ms over a from-/dev/null baseline of the same
+// fixture; a body that calls writeSync once and swallows the exception adds
+// ~20-30ms. FAULT_RETRY_FLOOR_MS sits an order of magnitude above the
+// bare-call ceiling and well under the real loop's floor.
+const FAULT_RETRY_FLOOR_MS = 150;
+
+test("fault()'s writeSync loop spends real time retrying a saturated stderr, not the ~30ms a bare call would take", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const { cwd, argv, env } = boardFaultFixture();
+
+  const harness = [
+    "import fcntl, os, subprocess, sys, time",
+    "argv = sys.argv[1:]",
+    "def run_baseline():",
+    "    t0 = time.time()",
+    "    r = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)",
+    "    return time.time() - t0, r.returncode",
+    "def run_saturated():",
+    "    r, w = os.pipe()",
+    "    fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
+    "    try:",
+    "        while True:",
+    "            os.write(w, b'x' * 65536)",
+    "    except BlockingIOError:",
+    "        pass",
+    "    t0 = time.time()",
+    "    proc = subprocess.Popen(argv, stderr=w, stdout=subprocess.DEVNULL)",
+    "    os.close(w)",
+    "    proc.wait(timeout=60)",
+    "    elapsed = time.time() - t0",
+    "    os.close(r)",
+    "    return elapsed, proc.returncode",
+    "run_baseline()",
+    "base_t, base_code = run_baseline()",
+    "sat_t, sat_code = run_saturated()",
+    "print(f'BASE={base_t:.3f} BASE_EXIT={base_code} SAT={sat_t:.3f} SAT_EXIT={sat_code}')",
+  ].join("\n");
+
+  const r = spawnSync("python3", ["-c", harness, process.execPath, ...argv], { cwd, env, encoding: "utf8", timeout: 120_000 });
+  assert.equal(r.status, 0, `harness itself failed: ${r.stderr}`);
+  const m = r.stdout.match(/^BASE=(\d+\.\d+) BASE_EXIT=(-?\d+) SAT=(\d+\.\d+) SAT_EXIT=(-?\d+)$/m);
+  assert.ok(m, `harness printed no timing line: stdout=${r.stdout} stderr=${r.stderr}`);
+  const [, baseS, baseExit, satS, satExit] = m;
+  assert.equal(Number(baseExit), 70, `baseline run did not reach the fault exit: ${r.stdout}`);
+  assert.equal(Number(satExit), 70, `saturated run did not reach the fault exit: ${r.stdout}`);
+  const deltaMs = (Number(satS) - Number(baseS)) * 1000;
+  assert.ok(
+    deltaMs > FAULT_RETRY_FLOOR_MS,
+    `fault() against a saturated stderr took only ${deltaMs.toFixed(0)}ms more than baseline — the retry ` +
+      `loop must spend real time on EAGAIN, not return almost immediately like a bare call: ${r.stdout}`,
+  );
+  // No upper bound here: MAX_EAGAIN_RETRIES capping the loop rather than
+  // spinning forever against a reader that never drains is board.test.mjs's
+  // job (the regex pin anchors the cap and the break condition) — this test's
+  // job is only the floor above. An upper bound here would also be the first
+  // thing to false-positive under real scheduling contention, since each
+  // Atomics.wait(…, 1) is a 1ms TARGET, not a guarantee, under load.
 });
