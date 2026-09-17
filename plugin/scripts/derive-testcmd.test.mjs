@@ -30,8 +30,8 @@ function repo(files) {
   return dir;
 }
 
-function derive(dir, ref = "HEAD") {
-  const r = spawnSync("sh", [SCRIPT, dir, ref], { encoding: "utf8" });
+function derive(dir, ref = "HEAD", env = process.env) {
+  const r = spawnSync("sh", [SCRIPT, dir, ref], { encoding: "utf8", env });
   return { status: r.status, out: r.stdout.trim(), err: r.stderr };
 }
 
@@ -425,20 +425,27 @@ test("every success path writes nothing to stderr, even when node is chatty (#11
   assert.ok(control.stderr.length > 0,
     "fixture: NODE_DEBUG=module must make node write to its own stderr, or these legs prove nothing");
 
-  // Both emit arms, and with them both manifest outcomes that reach one: a
-  // declared scripts.test (the parse probe exits 0) and a manifest declaring
-  // none (exits 1, falling through to the test-file check). Each runs both
-  // inner node calls under the control's env. Plain-env legs are omitted, not
-  // forgotten — this env is strictly the more hostile one, and a stray write
-  // on either arm fails here identically.
+  // All three success routes, not just the two manifest-bearing ones: a
+  // declared scripts.test (the parse probe exits 0), a manifest declaring
+  // none (exits 1, falling through to the test-file check), and no manifest
+  // at all ($pkg empty, skipping the whole `if [ -n "$pkg" ]` block — #1175's
+  // own review found this exact gap, since a stderr write reachable only on
+  // that route runs neither inner node call and so has no swallowing to hide
+  // behind). Each manifest-bearing arm runs both inner node calls under the
+  // control's env; the no-manifest arm invokes node zero times, so it is the
+  // one route where the swallowing argument does not apply at all and only
+  // the emit arms can write. Plain-env legs are omitted, not forgotten — this
+  // env is strictly the more hostile one, and a stray write on any arm fails
+  // here identically.
   for (const [arm, files] of [
     ["npm test --", { "package.json": pkg({ scripts: { test: "vitest" } }) }],
     ["node --test", { "package.json": pkg({ name: "x" }), "t.test.mjs": PASSES }],
+    ["node --test", { "t.test.mjs": PASSES }],
   ]) {
-    const r = spawnSync("sh", [SCRIPT, repo(files), "HEAD"], { encoding: "utf8", env: CHATTY_NODE });
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout.trim(), arm, "fixture: this tree must derive the arm under test");
-    assert.equal(r.stderr, "",
+    const r = derive(repo(files), "HEAD", CHATTY_NODE);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, arm, "fixture: this tree must derive the arm under test");
+    assert.equal(r.err, "",
       `the ${arm} path must write nothing to stderr — claim-ticket.sh merges this stream into the $testcmd it compares against a literal and execs, with no guard of its own`);
   }
 });
