@@ -64,7 +64,18 @@ function liftFromSource(name) {
 
 const DEFAULT_DIMENSIONS = liftFromSource("DEFAULT_DIMENSIONS");
 const selectDimensions = liftFromSource("selectDimensions");
-const resolveDimensions = lift(SOURCE, "resolveDimensions", "override, all");
+// STRIPPED text, not raw SOURCE (#1125). lift() matches with a non-global
+// `.match`, so the FIRST `function resolveDimensions(override, all)` in the
+// text it is given wins — and in raw source a block-commented copy is still
+// text it can match. Measured on a scratch copy of the tree: with the live
+// declaration's `override == null` guard reverted to `!override` AND a correct
+// copy of the whole function parked in a `/* */` block above it, this file ran
+// 40 pass / 0 fail against raw SOURCE — the pin was satisfied by the dead copy
+// while review-pr.js shipped the regression. Passing stripComments(SOURCE)
+// blanks the parked copy, so the same mutation reds "a falsy-but-present
+// override stops the run" below. The three lifts above are deliberately left
+// on raw SOURCE by this ticket and are unchanged.
+const resolveDimensions = lift(stripComments(SOURCE), "resolveDimensions", "override, all");
 
 // Drive the matrix from REAL file lists through the real classifier, not from
 // hand-written profile strings. A `diff-stats` classifier change that silently
