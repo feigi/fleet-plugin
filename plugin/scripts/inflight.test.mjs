@@ -1039,6 +1039,8 @@ test("probe 3: a sibling worktree ADD between the two reads is absorbed, not an 
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(sibling), true,
+    "the shim's mutation actually added the sibling worktree, otherwise no real race was exercised");
   assert.equal(r.status, 0, `a concurrent add is not an unanswerable probe: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all");
   assert.equal(JSON.parse(r.stdout).taken, false);
@@ -1057,6 +1059,8 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(wt), false,
+    "the shim's mutation actually removed the sibling worktree, otherwise no real race was exercised");
   assert.equal(r.status, 0, `a concurrent remove is not an unanswerable probe: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all");
   assert.equal(JSON.parse(r.stdout).taken, false);
