@@ -189,6 +189,61 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
   );
 });
 
+// ── #1548: die()'s writeSync loop delivers the FULL message, EXECUTED ────
+//
+// The retry-cap test above only proves the loop gives up in time against a
+// pipe that never drains at all; it says nothing about what a loop that DOES
+// keep draining actually delivers. #889's source-shape pin (candidates.mjs's
+// die() regex) has the same gap: a mutant that collapses the whole while loop
+// to one bare `writeSync(2, buf)` still matches a pin anchored on the try
+// block's shape, and a short write from that single call would silently
+// truncate the message with nothing here to catch it.
+//
+// Forced deterministically, no fcntl or python3 needed: `console.error("")`
+// lazily initialises Node's own stream object for fd 2, and that
+// initialisation is what puts a pipe fd into O_NONBLOCK — the exact
+// mechanism ci-state.mjs's own vlog relies on (ci-state.mjs, "Initialising a
+// stream for an fd ... puts that fd in O_NONBLOCK"). Once fd 2 is
+// non-blocking, a single writeSync of a buffer larger than one pipe buffer
+// (measured at 65536 bytes on this OS, ci-state.test.mjs's PIPE_BUFFER_BYTES)
+// SHORT-WRITES rather than blocking until spawnSync's reader drains it —
+// measured here at exactly one buffer plus the byte `console.error("")`
+// itself contributed, zero variance over repeated runs.
+//
+// die()'s own catch swallows the message but never the exit code, so exit 2
+// is not what discriminates the loop from a bare call — both reach it. What
+// discriminates them is whether every byte after the first short write ever
+// arrives: a bare call stops at the first short write, the loop resumes from
+// writeSync's own return value until the buffer is empty or the retry cap
+// gives up, and spawnSync's default draining is fast enough that the cap
+// (200 retries * 1ms) is never the limiting factor here (measured).
+test("die() resumes from a genuine short write and delivers the full message, not just the first pipe buffer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "arg-die-short-"));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  const msg = "x".repeat(200_000);
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { makeDie } from "./arg.mjs";',
+    '// Lazily touching fd 2 through console.error puts it in O_NONBLOCK.',
+    'console.error("");',
+    `makeDie("probe")(${JSON.stringify(msg)});`,
+    "",
+  ].join("\n"));
+
+  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(r.status, 2, `die() must still exit 2: stderr had ${r.stderr?.length} bytes`);
+  // The leading byte is console.error("")'s own newline; die()'s message
+  // follows it whole, or not at all. 200,000 x's is well past the 65536-byte
+  // pipe buffer (measured), so a bare `writeSync(2, buf)` with no loop
+  // delivers only one buffer's worth and stops there (measured: 65537 bytes,
+  // reverting the loop reproduces exactly this) — the assertion below is
+  // false on that shape and true only once every retried write lands.
+  const expected = Buffer.concat([Buffer.from("\n"), Buffer.from(`\nprobe: ${msg}\n`)]);
+  assert.ok(
+    r.stderr.equals(expected),
+    `die() dropped bytes across a short write: got ${r.stderr.length}, expected ${expected.length}`,
+  );
+});
+
 // The three scripts #328 names plus fleet-tick, end to end. Each forwards gh's
 // own stderr (execFileSync with no `stdio`, so Node re-emits it through the
 // ASYNC process.stderr) and only then refuses through die() — so the flood has

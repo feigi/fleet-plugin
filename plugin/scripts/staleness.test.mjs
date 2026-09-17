@@ -543,3 +543,72 @@ test("verdict() falls through to the could-not-check downgrade within a bound wh
     `verdict() must still deliver the could-not-check refusal on stderr once the retry cap is hit; got: ${r.stderr}`,
   );
 });
+
+// ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
+//
+// The retry-cap test above only proves the loop gives up in time against a
+// pipe that never drains at all; it says nothing about what a loop that DOES
+// keep draining actually delivers, and #889's source-shape pin above has the
+// same gap arg.mjs's die() pin does: a mutant that collapses the while loop
+// to one bare `writeSync(1, buf)` still satisfies a pin anchored on the try
+// block's shape, and a short write from that single call would silently
+// truncate the verdict with nothing here to catch it.
+//
+// Unlike die()'s companion test, staleness.mjs never touches
+// console.log/process.stdout itself (the comment above the source-shape pin
+// says so), so fd 1 stays blocking and this loop is never exercised by
+// running the real CLI script as-is — a blocking write to a full pipe just
+// blocks until spawnSync's reader drains it, never short-writing. A copy of
+// staleness.mjs is run instead through a one-line wrapper that forces the
+// same O_NONBLOCK state die()'s test forces on fd 2: `console.log("")`
+// lazily initialises Node's stream object for fd 1, and that initialisation
+// is what puts a pipe fd into O_NONBLOCK (ci-state.mjs's own vlog relies on
+// exactly this for fd 2). Once fd 1 is non-blocking, a payload past one pipe
+// buffer (65536 bytes, measured, ci-state.test.mjs's PIPE_BUFFER_BYTES)
+// SHORT-WRITES rather than blocking — a `--gone` needle is echoed verbatim
+// into the JSON payload's own `needle` field, so a 200,000-byte needle is a
+// deterministic way to force that payload past one buffer without needing a
+// git history fixture to make it that large.
+//
+// The needle is real to git, not just a value die()'s own writeSync sees: an
+// unmatched pathspec-scale string is still walked by `git log -S`, so this
+// exercises the "gone" not-found path, not a stub. The verdict's own prose
+// (`why`) is not pinned here — this file's header already says why not — so
+// the assertion is round-trip fidelity instead: a truncated write lands mid
+// `needle`, which is not valid JSON at all (measured: reverting the loop
+// makes `JSON.parse` throw on the payload this test's fixture produces).
+test("verdict() resumes from a genuine short write and delivers the full payload, not just the first pipe buffer", (t) => {
+  const w = repo(t);
+  const scriptDir = mkdtempSync(join(tmpdir(), "staleness-short-"));
+  writeFileSync(join(scriptDir, "arg.mjs"), readFileSync(fileURLToPath(new URL("./arg.mjs", import.meta.url))));
+  writeFileSync(join(scriptDir, "staleness.mjs"), readFileSync(SCRIPT));
+  writeFileSync(join(scriptDir, "run.mjs"), [
+    '// Lazily touching fd 1 through console.log puts it in O_NONBLOCK.',
+    'console.log("");',
+    'await import("./staleness.mjs");',
+    "",
+  ].join("\n"));
+
+  const needle = "y".repeat(200_000);
+  const r = spawnSync(process.execPath, [join(scriptDir, "run.mjs"), "--path", "src.mjs", "--gone", needle], {
+    cwd: w,
+    env: ENV,
+    encoding: null,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  assert.equal(r.status, 2, `expected the unknown verdict's exit code: stderr=${r.stderr.toString()}`);
+  // console.log("") contributed the leading byte; the JSON payload follows.
+  assert.equal(r.stdout[0], 10, "console.log(\"\")'s own newline is missing from the front of stdout");
+  let payload;
+  assert.doesNotThrow(
+    () => (payload = JSON.parse(r.stdout.subarray(1).toString("utf8"))),
+    `verdict()'s payload is not valid JSON — a short write landed mid-needle: ${r.stdout.length} bytes captured`,
+  );
+  assert.equal(payload.verdict, "unknown");
+  assert.equal(
+    payload.needle.length,
+    needle.length,
+    `needle arrived truncated: got ${payload.needle.length} bytes, sent ${needle.length}`,
+  );
+  assert.equal(payload.needle, needle);
+});
