@@ -960,6 +960,58 @@ fi
 # Not a fail-open — an entry git could not read is one git drops from the
 # listing, and the listed-vs-registered count above refuses first.
 stray_own="matches this claim's directory name $issue-$slug"
+
+# $1 single-quoted for pasting into a shell, answered in `$shq`, with every
+# embedded `'` emitted as `'\''` — the only way to carry a quote through a
+# single-quoted string, which has no escape of its own: the quoted run ends, a
+# backslash-escaped quote stands on its own outside it, and a fresh quoted run
+# begins. Without it the path's own quote CLOSES the one the hint below opened
+# and the operator is handed a command the shell refuses to parse at all
+# (`unexpected EOF`, rc 2, measured) — loud rather than wrong, but an
+# instruction that cannot run, over a path git accepts in both a refname and a
+# worktree directory name. #1100
+#
+# A parameter-expansion loop, not the `sed` one-liner it wants to be. Two
+# measurements say why, both on /bin/sh (bash 3.2) and /bin/dash:
+#
+#   - `esc=$(printf '%s' "$1" | sed …)` on its own line puts this hint behind a
+#     binary that can be missing or shimmed — this script's own suite shims
+#     `sed` — and left unguarded `set -e` kills the run there at sed's status
+#     with sed's diagnostic and no mention of the claim (rc 127).
+#   - Inline, which is the shape the string below wants, the two substitutions
+#     share one assignment word and only the LAST one's status survives: a
+#     failed first substitution contributes an EMPTY path at exit 0, where no
+#     `|| die` can see it. The hint would then read `grep -Fxl '' …`, which
+#     under `-x` matches no `gitdir` line at all (rc 1, no output, BSD grep
+#     2.6.0) — no entry reported while the entry is right there, the same
+#     silent wrong answer the quoting exists to stop, and the same shape as the
+#     `$( )` in printf's argument list the receipt fields above are assigned
+#     ahead of.
+#
+# The loop spawns nothing, so there is no status to guard. Answered in a global
+# rather than echoed for that second reason exactly — the caller needs this
+# twice in one string, and a `$( )` around each call is the condemned shape —
+# and in globals rather than `local`, which is not POSIX and which the repo's
+# `shellcheck -x -S warning` gate refuses at SC3043.
+shquote() {
+  shq=
+  shq_rest=$1
+  # `${…%%\'*}` is the run up to the next quote and `${…#*\'}` everything past
+  # it, so each turn appends one run plus the escape and stops when no quote is
+  # left. The pair of quotes goes on at the end, around the whole accumulation.
+  while :; do
+    case $shq_rest in
+      *\'*)
+        shq="$shq${shq_rest%%\'*}'\\''"
+        shq_rest=${shq_rest#*\'}
+        ;;
+      *)
+        shq="'$shq$shq_rest'"
+        return 0
+        ;;
+    esac
+  done
+}
 # WHICH entry, for the unresolved-HEAD arm alone. That arm is the one fault with
 # no remedy to name — measured on a corrupt-HEAD entry, `git worktree repair`
 # and `git worktree prune -v` both leave it standing at rc 0, and `remove` with
@@ -985,15 +1037,18 @@ stray_own="matches this claim's directory name $issue-$slug"
 # in the path expands again when the operator runs it and the search comes back
 # EMPTY at rc 1 — no entry reported while the entry is right there, this arm's
 # own defect one step further out — and an unquoted `$wtroot/*/gitdir` splits
-# on a space. A literal `'` in the path still defeats this, acceptably: it
-# breaks the pasted command LOUDLY (`unexpected EOF`, rc 2, measured) rather
-# than answering wrongly.
+# on a space. Through `shquote`, because quoting a path is not the same as
+# wrapping it in quotes: the one character that defeats a quoted string is the
+# quote, and git accepts one in a worktree directory name.
 #
 # Empty on the entry key, which read `$wtroot/$issue-$slug/gitdir` itself and
 # puts that name in `$stray_own`: searching for what it already measured would
 # be the step backwards. Assigned before that key can answer, so `$stray` here
 # is the suffix key's or nothing.
-stray_find="; find that entry with: grep -Fxl '$stray/.git' '$wtroot'/*/gitdir"
+shquote "$stray/.git"
+stray_needle=$shq
+shquote "$wtroot"
+stray_find="; find that entry with: grep -Fxl $stray_needle $shq/*/gitdir"
 if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wtroot/$issue-$slug/gitdir" ]; then
   entry_wt=$(cat "$wtroot/$issue-$slug/gitdir") ||
     die "could not read the worktree registry entry $wtroot/$issue-$slug/gitdir for #$issue"
