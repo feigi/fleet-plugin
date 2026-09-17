@@ -649,8 +649,9 @@ fi
 
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
-# than a second invented convention — but the two copies have since diverged
-# and this comment no longer claims they match. Three of the four items that
+# than a second invented convention — but the two copies diverged from there
+# and have since converged back on behaviour, the remaining difference being
+# plumbing, not what the recount does (below). Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
 # direction split — were ported to that copy by #395; the recount was the last
 # of the four, ported by #694. That copy's skip reading only `ls`'s output,
@@ -744,10 +745,13 @@ if ! wtfile=$(mktemp); then
 fi
 # A function, not inline, because the recount below needs this whole pair —
 # git's own read of the listing and the count derived from it — re-taken
-# TOGETHER rather than one of them re-assigned on its own. `worktrees`,
-# `listed` and `linked` are this function's OUTPUT, exactly as `registered` is
-# `count_registry`'s. Mirrors release-ticket.sh's `count_linked`, which is the
-# same extraction over the same pair for the same recount (#1408). #1421
+# TOGETHER rather than one of them re-assigned on its own. `worktrees` and
+# `linked` are this function's OUTPUT, exactly as `registered` is
+# `count_registry`'s — `listed` is scratch the count derives `linked` from and
+# the `-ge 1` guard below checks, never read outside this function, matching
+# release-ticket.sh's own `count_linked`, whose comment (line 383) likewise
+# names only `linked` and `wt_list`/`wt_err`. Mirrors that same extraction over
+# the same pair for the same recount (#1408). #1421
 #
 # The `mktemp` stays ABOVE this function rather than moving inside it, where
 # release-ticket.sh's `wt_listing` creates and removes one of its own: the temp
@@ -869,6 +873,23 @@ count_linked || return 1
 # the whole span back to the first listing. Both directions pinned in
 # inflight.test.mjs. Mirrors release-ticket.sh's copy of this recount, which
 # #1408 fixed the same way. #1421
+#
+# The retake pair above is still two reads, not one, and the gap it opens
+# between ITSELF — after `count_registry` has already re-scanned but before
+# `count_linked` re-lists — is narrower than the window this recount closes,
+# not zero. A mutation landing there still escapes: `registered` is re-taken
+# first, so an ADD landing in this gap is missed by the registry scan that
+# already ran and IS seen by the git listing still to come — `linked -gt
+# registered`, "the registry read missed entries git can see" — while a
+# REMOVE the same way lands `linked -lt registered`, "the listing is
+# incomplete", indistinguishable from the fault that message exists to name
+# even though nothing here is actually wrong. Pinned in inflight.test.mjs.
+# Reordering to `count_linked && count_registry` does not remove this
+# residual, it only moves the ADD case's false report onto the
+# `linked -lt registered` branch instead — the direction the comment below
+# calls out by name as sending an operator hunting a permissions fault that
+# is not there. `count_registry` first, `count_linked` second, mirrors
+# release-ticket.sh:484 for the same reason.
 #
 # `&&`, not `;`, between the two: `count_registry` reports an unreadable
 # registry through `add_unknown` and a non-zero return, and under `;` the

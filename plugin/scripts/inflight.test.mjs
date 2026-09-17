@@ -1149,32 +1149,112 @@ test("probe 3: a SECOND mutation inside the recount's own window is absorbed too
 
 test("probe 3: a SECOND mutation inside the recount's own window is absorbed too, remove then add (#1421)", (t) => {
   // The same window, the opposite-looking mutation first: a pre-existing
-  // sibling REMOVED before git's listing runs, then a different sibling ADDED
-  // inside the recount's own window. The removal alone is what the
+  // sibling REMOVED before git's listing runs, then TWO different siblings
+  // ADDED inside the recount's own window. The removal alone is what the
   // single-mutation case above already absorbs; what this adds is that the
-  // recount's re-read of the registry now SEES the second add, so a recount
+  // recount's re-read of the registry now SEES both adds, so a recount
   // that refreshed only `registered` came back disagreeing in the
   // fewer-listed-than-registered direction — the one shape that reads as an
   // entry git dropped because it could not read it.
+  //
+  // TWO adds, not one, deliberately: one add nets the registry count back to
+  // the same 1 it held before the remove, so a mutant that drops
+  // `count_registry` from the retake and leaves `registered` pinned to its
+  // FIRST-pass value (also 1, taken before the remove) would compare against
+  // that coincidentally-equal number and pass for the wrong reason — measured
+  // (`{ count_linked; }` in place of `{ count_registry && count_linked; }`:
+  // this case stayed green while the "add then add" case above correctly
+  // went red). A second add breaks the coincidence: `registered`'s first-pass
+  // value (1) can no longer match `linked`'s post-mutation count (2) unless
+  // the retake actually re-takes `registered` too.
   const { repo, env, bin } = fixture(t, 8, { detachedWorktreeUnder: "nospace" });
   const wt = join(repo, "..", "nospace", "fix-8-slug");
-  const sibling = join(repo, "..", "sibling-b");
+  const siblingB = join(repo, "..", "sibling-b");
+  const siblingC = join(repo, "..", "sibling-c");
   const fired = twoMutationShim(bin,
     `'${REAL_GIT}' worktree remove --force '${wt}' >/dev/null 2>&1`,
-    `'${REAL_GIT}' worktree add -q --detach '${sibling}' HEAD >/dev/null 2>&1`);
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1 && ` +
+    `'${REAL_GIT}' worktree add -q --detach '${siblingC}' HEAD >/dev/null 2>&1`);
 
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.ok(existsSync(fired), "the shim fired: both mutations really landed");
   assert.equal(existsSync(wt), false,
     "fixture: the remove really landed before git's listing");
-  assert.equal(existsSync(sibling), true,
-    "fixture: the add really landed inside the recount's window");
+  assert.equal(existsSync(siblingB), true,
+    "fixture: the first add really landed inside the recount's window");
+  assert.equal(existsSync(siblingC), true,
+    "fixture: the second add really landed inside the recount's window");
   assert.equal(r.status, 0, `a concurrent remove then add is not an unanswerable probe: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /the listing is incomplete/,
     "the dropped-entry message must never be reported for a benign remove/add pair");
   assert.doesNotMatch(r.stderr, /registry entries/,
     "no mismatch is reported at all — the recount absorbed both");
   assert.equal(JSON.parse(r.stdout).taken, false);
+});
+
+/**
+ * Targets the retake PAIR's own window, not either window above: those two
+ * calls (`{ count_registry && count_linked; }`, inflight.sh:884) are still
+ * two reads, not one, and the narrow gap they open BETWEEN themselves — after
+ * the retake's `count_registry` has already re-scanned the registry, before
+ * its `count_linked` re-lists — is the one this recount narrows but cannot
+ * close. `first` fires ahead of the FIRST `worktree list --porcelain -z`
+ * call, to manufacture the mismatch that makes the recount run at all;
+ * `second` fires ahead of the SECOND call — the retake's own — landing
+ * exactly in that residual window. #1421
+ *
+ * One shot per slot, for the reason `registryRaceShim`'s is: a shim that kept
+ * firing on every later listing (the suite's own cleanup shells out to git
+ * too) would never let the run converge.
+ */
+function retakeGapShim(bin, first, second) {
+  const seen = join(bin, "retake-gap-seen");
+  const fired = join(bin, "retake-gap-fired");
+  gitShim(bin, `case "$*" in
+  "worktree list --porcelain -z")
+    if [ -e '${seen}' ]; then
+      ${second}
+      : > '${fired}'
+    else
+      : > '${seen}'
+      ${first}
+    fi ;;
+esac`);
+  return fired;
+}
+
+test("probe 3: a mutation inside the RETAKE PAIR's own window still escapes it, add then add (#1421)", (t) => {
+  // What the two tests above do NOT cover: both drive their second mutation
+  // through `twoMutationShim`, which is one-shot and so only ever brackets
+  // the FIRST `worktree list --porcelain -z` call — the retake's own second
+  // call runs untouched in both of those cases. This fixture instead lands a
+  // mutation on that SECOND call, i.e. inside the gap the retake pair opens
+  // between its own `count_registry` and `count_linked` (inflight.sh:884).
+  // That gap is real and untested until now: `registered` is re-taken first,
+  // so a sibling add landing after it but before `count_linked` re-lists is
+  // missed by the registry scan that already ran and IS seen by the git
+  // listing still to come, same shape as the ORIGINAL pair's escape this
+  // whole recount exists to close — just narrower. Pinning it, not chasing
+  // it: the recount closing every window a further recount could still miss
+  // is not what #1421 claims.
+  const { repo, env, bin } = fixture(t, 8, {});
+  const siblingA = join(repo, "..", "sibling-a");
+  const siblingB = join(repo, "..", "sibling-b");
+  const fired = retakeGapShim(bin,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingA}' HEAD >/dev/null 2>&1`,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1`);
+  git(repo, env, "commit", "-q", "--allow-empty", "-m", "x");
+
+  const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
+  assert.ok(existsSync(fired), "the shim fired: the second add landed inside the retake's own window");
+  assert.equal(existsSync(siblingA), true, "fixture: the first add really landed before git's first listing");
+  assert.equal(existsSync(siblingB), true, "fixture: the second add really landed inside the retake's own window");
+  assert.equal(r.status, 2, "the retake pair cannot close a window inside itself");
+  assert.match(r.stderr, /git listed 2 worktrees but only 1 registry entries were counted/,
+    "MORE listed than registered: the retake's own git listing sees the second add before its own registry re-scan does");
+  assert.doesNotMatch(r.stderr, /the listing is incomplete/,
+    "a landed add must never surface under the dropped-entry message");
+  assert.equal(JSON.parse(r.stdout).unknown[0], "local");
 });
 
 // --- probe 3, the branch half's SPELLING (#915).
