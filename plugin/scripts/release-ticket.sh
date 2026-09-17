@@ -447,12 +447,12 @@ count_linked
 # script directly: 3/100 dry-run releases aborted on this cross-check under a
 # throttled churner, 48-66/80 unthrottled, all with zero real faults among them.
 #
-# inflight.sh already recounts here (`count_registry || return 1`, #694) into
+# inflight.sh already recounts here (#694) into
 # its own accumulate-and-continue probe; this script's whole contract is `die`
 # on any unmet precondition instead, so the port keeps that shape rather than
-# inheriting the accumulator. But this copy recounts BOTH `registered` and
-# `linked`, where inflight.sh's still recounts only `registered` — a deliberate
-# divergence, not an incomplete port. Re-taking `registered` alone leaves
+# inheriting the accumulator. Both copies recount BOTH `registered` and
+# `linked` — this one from #1408, inflight.sh's from #1421, which closed the
+# same window in that copy. Re-taking `registered` alone leaves
 # `linked` pinned to the FIRST `wt_listing` call: a second sibling mutation
 # landing after that call returns but before the lone recount re-scans the
 # registry inflates `registered` without touching `linked`, which can flip
@@ -468,8 +468,9 @@ count_linked
 # second, mirroring lines 364-434 above), gives the RECOUNT pair that same
 # invariant: escaping it needs a mutation inside the narrower window these two
 # calls open between themselves, not the whole span back to the first
-# `wt_listing` (measured on inflight.sh's registered-only copy, the same shape
-# of window: 1.99% -> 0.00% at 2 mutations/s, 56.6% -> 1.29% saturated). A
+# `wt_listing` (measured on inflight.sh's copy while it was still
+# registered-only, the same shape of window: 1.99% -> 0.00% at 2 mutations/s,
+# 56.6% -> 1.29% saturated). A
 # genuinely dropped entry is a standing state, not a moment, so it survives
 # the recount and still refuses. The unreadable-registry case above is
 # unaffected: `count_registry`'s own `[ -r ] && [ -x ]` guard on $wtroot dies
