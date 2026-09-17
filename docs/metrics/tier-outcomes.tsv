@@ -101,6 +101,42 @@
 # wrong, and a pushed commit body cannot be edited, so this paragraph is where
 # that record lives.
 #
+# WHICH FILE'S `run_date` SUPPLIES WHICH DISTINCT-DATE COUNT. The tier guard in
+# run-team/SKILL.md states TWO floors that both count distinct `run_date`s, and
+# only one of them is counted over this file. Neither substitutes for the other.
+#   * The revert FLOOR — at least three `class=routine` PRs spanning two or more
+#     distinct `run_date`s — IS this file's `run_date`, counted by the awk the
+#     guard prints beside it (`d[$1]=1` ... `length(d)`, column 1 here).
+#   * The pairing PRECONDITION — at least ten within-run pairs across five or
+#     more distinct `run_date`s, the floor that forbids reading the pairs early
+#     — is NOT read here at all. It comes from the pairing query in
+#     `docs/metrics/member-outcomes.tsv`'s own header, which keys its dates off
+#     THAT file's `run_date` (`d[$1]=$2` ... `length(r)`) and prints the pair
+#     count beside the number of dates those pairs span. That header says so
+#     itself: the two numbers it prints are "exactly what run-team's gate
+#     reads". Recounting it over this file answers a different question.
+#
+# AND THE TWO `run_date` COLUMNS DO NOT MEAN THE SAME THING. Here it is RULED BY
+# HAND — the controller writes it when it rules a PR's review, never a script —
+# so it records WHICH RUN THE PR BELONGS TO. In `member-outcomes.tsv` it is
+# DERIVED in code: `member-outcomes.mjs` stamps every row of a session from the
+# NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so
+# it records WHEN THE SESSION LAST WROTE. It moves only when the session WRITES
+# AGAIN — a member re-dispatched after midnight, picked up by the next scrape —
+# never because the file was merely re-scraped: a backfill scrape in December
+# still dates an August session in August. The two therefore disagree by
+# construction whenever the run a PR is ruled into and that session's last write
+# fall on different days. Joined on `pr`:
+#   awk -F'\t' 'FNR==NR {if (!/^#/ && $2!="") t[$2]=$1; next} \
+#     !/^#/ && $8!="" && ($8 in t) {seen[$8]; if ($2==t[$8]) ok[$8]} \
+#     END{for (p in seen) {n++; if (!(p in ok)) d++} print n+0, d+0}' \
+#     docs/metrics/tier-outcomes.tsv docs/metrics/member-outcomes.tsv
+#     -> 2026-09-17: 267 PRs carry rows in both files, and on 92 of them this
+#        file's run_date appears on NO member row for that PR
+# Recount before citing: an append to either file lands a row without touching
+# this header. #1071 documents this asymmetry deliberately rather than removing
+# it — renaming either column is a larger change nobody has weighed.
+#
 # run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note	sizing	profile	loc	files
 2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
 2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
