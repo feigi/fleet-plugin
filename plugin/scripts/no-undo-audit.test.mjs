@@ -2247,6 +2247,12 @@ test("a payload that cannot be written is unanswerable (2), never a refusal (1)"
     encoding: "utf8",
   });
   assert.equal(r.status, 2, `got ${r.status}; 1 would claim the worktree is dirty`);
+  // WHICH 2 it is, and the only signal a caller whose stdout is gone can still
+  // read. The design spec's row names this cause in its closed list (#1472),
+  // and a refusal that reached here silently would be indistinguishable from
+  // every other 2 in that list.
+  assert.match(r.stderr, /^no-undo-audit: could not write the audit for /m,
+    `the write failure must name itself on stderr; got ${JSON.stringify(r.stderr)}`);
 });
 
 test("a modified tracked file refuses, like an untracked one", (t) => {
@@ -2272,6 +2278,17 @@ test("a staged change refuses", (t) => {
   assert.equal(r.json.clean, false);
 });
 
+/** The design spec's script-surface row for this script, as one line. */
+function specRow() {
+  const spec = readFileSync(
+    fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
+  return row;
+}
+
 // The design spec's script-surface table names this script's payload field by
 // field, and #146 added four fields to it. The table went stale in the same
 // commit that added them — the fix for that is one edited row, and this is the
@@ -2283,12 +2300,7 @@ test("the design spec's script-surface row names every field the payload actuall
   const r = audit(c);
   assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
 
-  const spec = readFileSync(
-    fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
-    "utf8",
-  );
-  const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
-  assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
+  const row = specRow();
 
   // The Out cell alone, since the rest of the row legitimately names things that
   // are not keys: scanning the whole row let the In cell's `<worktree>` satisfy
@@ -2346,6 +2358,260 @@ test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
     assert.ok(line.includes(LINKAGE_PARENTHETICAL),
       `${rel} no longer names both linkage failures as distinct: a deleted \`.git\` is the one git walks up from, and a \`.git\` naming another worktree's admin dir is the one git answers for this worktree while reading the other one's HEAD and index. Merging them, or generalising until it names neither, both land here.`);
   }
+});
+
+// --- #1472: the exit-2 cause census.
+//
+// The two pins above read this row for its FIELDS and for one clause of its
+// exit-2 prose. Neither asks the closed-list question — does the row name
+// every cause this script can refuse for, and none it cannot reach? #1108
+// answered that for worktree-audit.sh and reap.sh after two PRs in one wave
+// each left a row asserting an enumeration its script had outgrown with the
+// suite green (#1104/#525, #1105/#482). This block answers it here, both
+// directions:
+//
+//   TOO NARROW — the script grows a refusal the row does not carry. `CAUSES`
+//   binds every `die` site to the phrase that represents it, and the census
+//   test asserts that binding is EXACTLY the set of sites the script has. Add
+//   a `die` and it reds on an unbound site; delete one and it reds on a
+//   binding whose cause the script can no longer produce. The set is derived
+//   from the script, so the binding cannot rot silently the way the row did —
+//   a reworded message reds too, which is the point: the row is what then has
+//   to be revisited.
+//
+//   TOO BROAD — the row grows a cause no `die` produces. The census cannot see
+//   that; a phrase added to the cell binds to nothing and no assert notices.
+//   `EXIT2_ENUMERATION` is the pin that does: the whole closed list, byte for
+//   byte, in the `UNKNOWN_LINE`/`ORPHAN_LINE` verbatim-constant discipline
+//   this file already uses on the stash lines above.
+//
+// The span pin's cost is deliberate, and it was #1108's ruling: it reds on
+// EVERY edit to the enumeration, a legitimate rewording included. A structural
+// assertion loose enough to survive rewording cannot red on a rewrite that
+// quietly drops a real cause, which is the defect that was measured twice.
+//
+// WHAT THIS SCRIPT'S SHAPE CHANGES, and it is not cosmetic. Its two siblings
+// answer with a 2 or not at all, so their cells OPEN on `exit 2 only` and a
+// prefix slice is its own anchor. Exit 2 is one of THREE outcomes here:
+// the cell opens on the exit-1 refusal — which carries a closed list of its
+// own, the `stash: null` shapes — and closes on the exit-0 `null`-field rule.
+// Two consequences, and a copied exit-2-only census gets both wrong.
+//
+//   The anchor is asserted, never assumed: `exit 2` occurs exactly once in the
+//   cell, and the list is read from there for exactly its own length. A prefix
+//   slice would red here on the exit-1 clause it never meant to read, and an
+//   `includes` would let a cause be smuggled in ahead of the list.
+//
+//   The premise is pinned, not inherited: `exitStatements` asserts that `die`'s
+//   `exit 2` and the verdict's `exit "$rc"` are the only exits the script
+//   spells, and that `$rc` is only ever 0 or 1. A sibling suite gets "every
+//   nonzero exit is a `die`" for free; on this script an `exit 2` spelled
+//   outside `die` would be an exit-2 cause with no message to bind, invisible
+//   to the census, and a third verdict code would be an outcome no cell in the
+//   row describes.
+//
+// Scoped to this script's own suite beside its siblings rather than lifted
+// into one shared table over every row: `.out-of-scope/cli-guard-test-
+// consolidation.md` refuses that consolidation for the CLI-guard pins, and its
+// reason holds unchanged here — a file no single script's suite runs recreates
+// the blind spot these pins exist to close.
+
+/** The `Non-zero when` cell of this script's row, and no more of the row. */
+const nonZeroCell = () => specRow().split("|")[4];
+
+/**
+ * The row's exit-2 enumeration, verbatim: from `exit 2` to the end of the
+ * sentence that closes the list. The exit-1 refusal ahead of it and the
+ * exit-0 `null`-field rule behind it are their own claims with their own pins,
+ * so the span stops where the closed list does — the slice is the size of the
+ * claim.
+ */
+const EXIT2_ENUMERATION =
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119), or the audit itself could not be written (#1472) — and no payload is emitted.";
+
+/**
+ * The clauses the ROW collapses several refusals into, named because the
+ * bindings below share them and a phrase typed eight times drifts seven ways.
+ *
+ * Sharing is the row's editorial call and not a looseness here: a reader who
+ * meets any of the eight refusals about a worktree git will not answer for
+ * does the same thing about it, and so does one who meets either library
+ * refusal. The phrases are the short load-bearing labels; their exact wording
+ * is `EXIT2_ENUMERATION`'s job.
+ */
+const LIBRARY_CLAUSE = "`json.sh` missing, unreadable or failed to load";
+const LINKAGE_CLAUSE = "a worktree git does not answer for";
+const REF_CLAUSE = "a ref that does not resolve";
+const PROBE_CLAUSE = "a probe that could not run";
+const ESCAPE_CLAUSE = "a conflicting-path or at-risk array that could not be escaped (#119)";
+
+/**
+ * Every `die` site in no-undo-audit.sh, bound to the phrase in the row that
+ * represents it.
+ *
+ * The KEY is the message as the script spells it, interpolations and all.
+ * `die` is this script's only exit-2 path — `exitStatements` asserts that of
+ * the script rather than assuming it — so the message set IS the exit-2 cause
+ * set, and keying on it is what makes this derived rather than a third
+ * hand-written copy of the contract sitting beside the script and the row.
+ */
+const CAUSES = new Map([
+  ["cannot read $json_lib — refusing to act without the JSON escaping helpers", LIBRARY_CLAUSE],
+  ["$json_lib failed to load", LIBRARY_CLAUSE],
+  ["usage: no-undo-audit.sh <worktree> <branch>", "bad argument"],
+  ["worktree $wt does not exist", "no such worktree"],
+  ["$wt is not a git worktree", LINKAGE_CLAUSE],
+  ["git answers for the repo above $wt, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["git will not name the git dir answering for $wt — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["git will not name $wt's common git dir — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["$gd/gitdir is missing or unreadable — cannot verify $wt's linkage", LINKAGE_CLAUSE],
+  ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
+  ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["$base does not resolve", REF_CLAUSE],
+  ["origin/$branch does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
+  ["git status failed in $wt — cannot tell a clean worktree from a dirty one", PROBE_CLAUSE],
+  ["awk failed counting the stash entries — cannot report the stash count", PROBE_CLAUSE],
+  ["cannot create a temporary file", PROBE_CLAUSE],
+  ["git merge-tree could not answer (exit $mt_rc) against origin/$branch — cannot determine conflicts", PROBE_CLAUSE],
+  ["could not read git merge-tree's output (python3) — cannot determine conflicts", PROBE_CLAUSE],
+  ["a conflicting path contains a newline — cannot build a pathspec for it", "a conflicting path no pathspec can name"],
+  ["could not escape the conflicting paths for $branch", ESCAPE_CLAUSE],
+  ["git merge-base failed for $base and origin/$branch — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["could not escape the at-risk commits for $branch", ESCAPE_CLAUSE],
+  ["could not write the audit for $branch", "the audit itself could not be written (#1472)"],
+]);
+
+/**
+ * How many sites a message may have. One, except the `mktemp` refusal, which
+ * the script arms before each of the two temporaries it creates and spells
+ * identically at both: it is one cause, and an operator does nothing
+ * different about the second.
+ *
+ * The siblings' census asserts instead that every message is unique. That is
+ * true of their scripts and is a FALSE REFUSAL here — copied over, it reds on
+ * this script for something that is not a defect. Counting keeps what
+ * uniqueness was buying: a new `die` reusing an existing message reds on the
+ * count rather than binding to a cause that is not its own, and a shared
+ * message that stops being shared reds as the missing site it is.
+ */
+const SITES_PER_MESSAGE = new Map([["cannot create a temporary file", 2]]);
+
+/**
+ * The message of every `die` call in the script, read off the script, one
+ * entry per cause.
+ *
+ * Comment lines are dropped: prose quoting a `die "…"` is not a call site, and
+ * minting a cause out of one would red this suite over a comment. Greedy to
+ * the last quote on the line, so a message carrying a nested `"$…"`
+ * substitution arrives whole rather than truncated at its first inner quote.
+ */
+function dieSites() {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.match(
+    src,
+    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2; exit 2; \}$/m,
+    "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
+  );
+  const sites = src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => [...l.matchAll(/(?:^|[;&|(\s])die "(.*)"/g)].map((m) => m[1]));
+  assert.ok(sites.length > 1, `the scan found ${sites.length} die sites, so its spelling has drifted off the script`);
+  for (const message of new Set(sites)) {
+    assert.equal(
+      sites.filter((m) => m === message).length,
+      SITES_PER_MESSAGE.get(message) ?? 1,
+      `\`die "${message}"\` is spelled at a number of sites this census does not expect: two causes sharing a message cannot be bound apart, and a message that stops being shared is a site that went missing`,
+    );
+  }
+  return new Set(sites);
+}
+
+/**
+ * Every `exit` statement the script spells, as it spells it.
+ *
+ * Read from anywhere on the line, not just statement position: `&& exit 2` is
+ * an exit path as much as a bare one, and a scan anchored on line start or
+ * `; ` misses it — measured, and measured green against a stray `exit 2` this
+ * census exists to red on.
+ *
+ * Quoted spans are cut out first, which is what keeps the word inside a
+ * MESSAGE from being minted into an exit path: `die "git merge-tree could not
+ * answer (exit $mt_rc) …"` carries one, and so does the render fold's "the
+ * payload and the exit status stand". Comment lines are dropped for the reason
+ * `dieSites` drops them.
+ */
+function exitStatements(src) {
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => {
+      const quoted = [...l.matchAll(/'[^']*'|"[^"]*"/g)].map((m) => [m.index, m.index + m[0].length]);
+      return [...l.matchAll(/\bexit\b *([^;)&|]*)/g)]
+        .filter((m) => !quoted.some(([from, to]) => m.index >= from && m.index < to))
+        .map((m) => `exit ${m[1].trim()}`.trim());
+    });
+}
+
+test("`die` is the only way this script reaches exit 2, and its other exits are the two verdicts (#1472)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+
+  assert.deepEqual(
+    exitStatements(src).sort(),
+    ['exit "$rc"', "exit 2"],
+    "the census reads the exit-2 causes off `die`'s messages, so every exit-2 path must BE a `die`: an `exit 2` spelled anywhere else is a cause with no message to bind, and the row could stay silent about it with this suite green",
+  );
+
+  assert.deepEqual(
+    [...new Set([...src.matchAll(/^\s*rc=(\S+)$/gm)].map((m) => m[1]))].sort(),
+    ["0", "1"],
+    "`$rc` is the verdict, and the row states exactly two of them — 1 the worktree is dirty, 0 it is clean. A third value assigned here is an outcome no cell in that row describes",
+  );
+
+  // `set -eu` is on, so an unguarded command failing exits with ITS status
+  // rather than with any of the three — a 1 out of a failed `.` or `printf`
+  // reads as the dirty-worktree refusal, which is what the guards above are
+  // for and what their own fixtures pin. This test is about the exits the
+  // script spells itself.
+});
+
+test("the design spec's row represents every exit-2 cause this script can reach, and none it cannot (#1472)", () => {
+  // Both directions in one equality: an unbound site is a cause the row may be
+  // silent about, and a binding with no site is a cause the row claims while
+  // the script can no longer produce it.
+  assert.deepEqual([...dieSites()].sort(), [...CAUSES.keys()].sort());
+
+  const cell = nonZeroCell();
+  for (const phrase of new Set(CAUSES.values())) {
+    assert.equal(
+      cell.split(phrase).length - 1,
+      1,
+      `the \`Non-zero when\` cell must carry "${phrase}" exactly once.\ncell: ${cell}`,
+    );
+  }
+});
+
+test("the design spec's row states this script's exit-2 causes as a closed list, byte for byte (#1472)", () => {
+  const cell = nonZeroCell();
+
+  // The anchor, asserted rather than assumed: this cell does not open on the
+  // exit-2 list the way its siblings' cells do, so the span below is read from
+  // the one place the cell names exit 2 — and that there is exactly one such
+  // place is half the claim. A second one is a second enumeration, which is
+  // the row carrying its own contradiction.
+  assert.equal(
+    cell.split("exit 2 ").length - 1,
+    1,
+    `the cell must name exit 2 exactly once — it is the anchor the closed list is read from.\ncell: ${cell}`,
+  );
+
+  // A slice, not an `includes`: a cause smuggled in anywhere inside the list
+  // sits outside an exact span of the list's own length.
+  const from = cell.indexOf("exit 2 ");
+  assert.equal(cell.slice(from, from + EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
 });
 
 // --- #119: the escaping library this script now sources rather than carries.
