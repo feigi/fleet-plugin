@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter, unemphasized } from "./prose-pin.mjs";
+import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
 
 // #472: this file's header has never been pinned, while SKILL.md's guard tells
 // the controller that "that file's header carries the column meanings" — so the
@@ -288,5 +289,232 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
     slice,
     phrase("Do not re-derive the verdict from the diff to fill the gap"),
     "the ruling step no longer forbids substituting a diff-derived proxy for the member's verdict",
+  );
+});
+
+// #1071: `run_date` is DERIVED in `member-outcomes.tsv` (a transcript mtime)
+// and RULED BY HAND here, and phase 2 states TWO floors that each count
+// distinct `run_date`s — three PRs across two dates over this file, ten pairs
+// across five dates over the other. The ticket's filer read the ten/five floor
+// as a count over THIS file. It is not one, and nothing in this header said so.
+//
+// The paragraph that now says it makes claims about files this one does not
+// contain, which is the shape that rots silently: it stays true only while
+// member-outcomes.tsv keeps carrying the pairing query, `member-outcomes.mjs`
+// keeps stamping dates off an mtime, and SKILL.md keeps both floors' numbers.
+// So the pins below DERIVE each claim from its real source — the same reason
+// the `profile` pin above derives the enum instead of restating it.
+const MEMBER_TSV = readFileSync(join(REPO, "docs", "metrics", "member-outcomes.tsv"), "utf8");
+const MEMBER_SRC = readFileSync(join(REPO, "plugin", "scripts", "member-outcomes.mjs"), "utf8");
+
+const memberHeaderLines = [];
+for (const l of MEMBER_TSV.split("\n")) {
+  if (!l.startsWith("#") && l.trim()) break;
+  memberHeaderLines.push(l);
+}
+
+// Bounded at both ends, for `between`'s own stated reason: this header is 140
+// lines about exactly these words, so an unbounded match is satisfiable from
+// the provenance block above the paragraph or the column legend below it. The
+// end bound is the column line's tab-separated shape, which no prose line has.
+const runDateSources = () =>
+  stripHashGutter(between(HEADER, "WHICH FILE'S `run_date` SUPPLIES", "# run_date\t", "the header"));
+
+test("the header says which file each distinct-`run_date` count is read from, and that the two columns differ", () => {
+  const block = runDateSources();
+
+  // Each floor bound to its file in ONE span. Split into a mention of the
+  // number and a separate mention of the file, a reader counting the ten/five
+  // floor over this file satisfies both halves and is wrong anyway — which is
+  // the defect, not a wording preference.
+  assert.match(
+    block,
+    phrase("at least three `class=routine` PRs spanning two or more distinct `run_date`s — IS this file's `run_date`"),
+    "the header no longer says the revert floor's distinct-date count is read from THIS file",
+  );
+  assert.match(
+    block,
+    phrase(
+      "at least ten within-run pairs across five or more distinct `run_date`s, the floor that forbids reading the pairs early — is NOT read here at all. It comes from the pairing query in `docs/metrics/member-outcomes.tsv`'s own header",
+    ),
+    "the header no longer says the pairing floor's distinct-date count is read from member-outcomes.tsv, not here",
+  );
+
+  // The definitional halves, each joined to what it makes the column MEAN. A
+  // reader told only that the two are "different" still has to guess which way.
+  assert.match(
+    block,
+    phrase("Here it is RULED BY HAND — the controller writes it when it rules a PR's review, never a script — so it records WHICH RUN THE PR BELONGS TO"),
+    "the header no longer says this file's `run_date` is hand-ruled and records which run the PR belongs to",
+  );
+  assert.match(
+    block,
+    phrase(
+      "In `member-outcomes.tsv` it is DERIVED in code: `member-outcomes.mjs` stamps every row of a session from the NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so it records WHEN THE SESSION LAST WROTE",
+    ),
+    "the header no longer says member-outcomes.tsv's `run_date` is derived from a transcript mtime",
+  );
+
+  // The correction the ticket itself got wrong: it reported the derived date as
+  // drifting "if the session is re-scraped after midnight". A re-scrape moves
+  // nothing — the mtime is fixed once written, which is why a December backfill
+  // still dates an August session in August. Dropping this sentence restores
+  // the false claim into a header other prose cites.
+  assert.match(
+    block,
+    phrase("It moves only when the session WRITES AGAIN"),
+    "the header no longer says the derived date moves on a re-write, not on a re-scrape",
+  );
+  assert.match(
+    block,
+    phrase("never because the file was merely re-scraped"),
+    "the header no longer rules out a bare re-scrape as a cause of date drift",
+  );
+});
+
+test("the header's `run_date` source claims still hold against the query, the scraper and the guard", () => {
+  const block = runDateSources();
+
+  // The floor half: SKILL.md's own recount accumulates distinct dates keyed on
+  // a positional field of THIS file. Resolve that `$n` against the column list
+  // rather than trusting the paragraph's word for it — the mutation this must
+  // survive is repointing the recount at another column.
+  const floorAwk = between(RUN_TEAM, "grep -vc '^#' docs/metrics/tier-outcomes.tsv", "```", "SKILL.md's recount block");
+  const floorKey = /d\[\$(\d+)\]=1/.exec(floorAwk);
+  assert.ok(floorKey, "SKILL.md's recount no longer accumulates the floor's distinct dates");
+  assert.match(floorAwk, /length\(d\)/, "SKILL.md's recount no longer prints the floor's distinct-date count");
+  assert.equal(COLUMNS[floorKey[1] - 1], "run_date", "the floor's distinct-date count is not this file's `run_date`");
+  assert.ok(
+    block.includes(floorKey[0]),
+    `the header cites an idiom for the floor's date key that SKILL.md no longer uses (\`${floorKey[0]}\`)`,
+  );
+
+  // The header's own prose also names WHICH column that count reads
+  // ("column 1 here") — a positional claim nothing above checked, since
+  // `floorKey[0]` only pins the awk idiom, not the number the header prints
+  // beside it in English. Resolve it against the same `$n` the recount
+  // above actually keys on.
+  const floorColumnCite = /column (\d+) here/.exec(block);
+  assert.ok(floorColumnCite, "the header no longer names which column the revert floor's distinct-date count reads");
+  assert.equal(
+    Number(floorColumnCite[1]),
+    Number(floorKey[1]),
+    "the header's `column N here` cite no longer matches the column SKILL.md's recount actually keys on",
+  );
+
+  // The pairing half: the query lives in the OTHER file's header and keys its
+  // dates off the other file's own columns, so resolve it against that file's
+  // COLUMNS export. This is the claim that makes the paragraph load-bearing —
+  // if the query moves or is rekeyed, "read it from there" stops being true.
+  // Bounded to the query BLOCK, not the whole 140-line header —
+  // member-outcomes-header.test.mjs's own `pairQuery()` bounds it the same
+  // way, for the same reason: an unbounded match is satisfiable by a stale
+  // `d[$1]=$2` idiom anywhere in that header even after the real query moved
+  // or was rekeyed, which is exactly what would make "read it from there"
+  // stop being true without this pin noticing.
+  const pairQueryStart = memberHeaderLines.findIndex((l) => l.includes("awk -F") && l.includes("fleet-implementer-alt"));
+  assert.ok(pairQueryStart >= 0, "member-outcomes.tsv's header lost its within-run pair query");
+  let pairQueryEnd = pairQueryStart;
+  while (pairQueryEnd < memberHeaderLines.length && !memberHeaderLines[pairQueryEnd].endsWith("docs/metrics/member-outcomes.tsv")) pairQueryEnd++;
+  assert.ok(pairQueryEnd < memberHeaderLines.length, "the pairing query never reaches the file it reads");
+  const pairQueryBlock = memberHeaderLines.slice(pairQueryStart, pairQueryEnd + 1).join("\n");
+
+  const pairKey = /d\[\$(\d+)\]=\$(\d+)/.exec(pairQueryBlock);
+  assert.ok(pairKey, "member-outcomes.tsv's header no longer carries the pairing query this header points at");
+  assert.equal(
+    MEMBER_COLUMNS[pairKey[2] - 1],
+    "run_date",
+    "the pairing query's distinct-date count is not member-outcomes.tsv's `run_date`",
+  );
+  assert.ok(
+    block.includes(pairKey[0]),
+    `the header cites an idiom for the pairing query's date key that member-outcomes.tsv no longer uses (\`${pairKey[0]}\`)`,
+  );
+
+  // The header also cites the query's distinct-date ACCUMULATOR
+  // (`length(r)`) — resolve the variable name against the query's own
+  // `length(...)` call rather than trusting the header's word for it.
+  const pairAccumulator = /print n\+0, length\((\w+)\)/.exec(pairQueryBlock);
+  assert.ok(pairAccumulator, "member-outcomes.tsv's pair query no longer prints its distinct-date count via `length(...)`");
+  assert.ok(
+    block.includes(`length(${pairAccumulator[1]})`),
+    `the header cites the wrong accumulator for the pairing query's distinct-date count (expected \`length(${pairAccumulator[1]})\`)`,
+  );
+
+  // The DERIVED half as code, not prose: the date comes off a transcript
+  // mtime. A scraper switched to a clock read would make this header's
+  // central contrast false while every prose pin above stayed green. Bound
+  // to EACH of member-outcomes.mjs's two independent stamp sites separately
+  // — rowsForSession (the live path every real caller uses to build rows)
+  // and rowsForOmpSession (the omp-session sibling) — rather than scanning
+  // the whole file: `assert.match` over MEMBER_SRC as a whole is satisfied
+  // by EITHER site alone, so a regression confined to just the live path
+  // left the header's contrast false while this assertion, and the suite,
+  // stayed green.
+  const rowsForSessionSrc = between(
+    MEMBER_SRC,
+    "export function rowsForSession(sessionDir, stats = {}) {",
+    "export const COLUMNS",
+    "member-outcomes.mjs's rowsForSession",
+  );
+  assert.match(
+    rowsForSessionSrc,
+    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
+    "member-outcomes.mjs's rowsForSession no longer takes its date from a transcript mtime",
+  );
+  assert.match(
+    rowsForSessionSrc,
+    /const run_date = newest \? new Date\(newest\)/,
+    "member-outcomes.mjs's rowsForSession no longer stamps `run_date` from that mtime",
+  );
+
+  const rowsForOmpSessionSrc = between(
+    MEMBER_SRC,
+    "function rowsForOmpSession(sessionDir, stats) {",
+    "export function rowsForSession",
+    "member-outcomes.mjs's rowsForOmpSession",
+  );
+  assert.match(
+    rowsForOmpSessionSrc,
+    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
+    "member-outcomes.mjs's rowsForOmpSession no longer takes its date from a transcript mtime",
+  );
+  assert.match(
+    rowsForOmpSessionSrc,
+    /const run_date = newest \? new Date\(newest\)/,
+    "member-outcomes.mjs's rowsForOmpSession no longer stamps `run_date` from that mtime",
+  );
+
+  // The RULED-BY-HAND half as SKILL.md's stated duty. If this file ever becomes
+  // script-generated, the paragraph's "never a script" is the first thing false.
+  assert.match(
+    unemphasized(RUN_TEAM),
+    phrase("Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review"),
+    "SKILL.md no longer makes this file's rows a hand-authored ruling artifact",
+  );
+
+  // Both floors' numbers, as the paragraph quotes them. It names four figures
+  // it does not own; a threshold changed in SKILL.md alone leaves this header
+  // quietly citing the old one.
+  const guard = unemphasized(RUN_TEAM);
+  assert.match(
+    guard,
+    phrase("Floor: the file holds at least three `class=routine` PRs spanning two or more distinct `run_date`s"),
+    "SKILL.md's revert floor is no longer three PRs across two dates — the header quotes those numbers",
+  );
+  assert.match(
+    guard,
+    phrase("there are at least ten of them across five or more distinct `run_date`s"),
+    "SKILL.md's pairing floor is no longer ten pairs across five dates — the header quotes those numbers",
+  );
+  assert.match(
+    block,
+    phrase("at least three `class=routine` PRs spanning two or more"),
+    "the header no longer states the revert floor it attributes to this file",
+  );
+  assert.match(
+    block,
+    phrase("at least ten within-run pairs across five or more"),
+    "the header no longer states the pairing floor it attributes to the other file",
   );
 });
