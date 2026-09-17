@@ -622,10 +622,56 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
 
 export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
-  // (the fallback safety net itself) is ignored, not fatal.
+  // (the fallback safety net itself) is ignored, not fatal. That holds for a
+  // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
+  // payload here so both leave through the one catch, which names the file the
+  // operator passed. A wrong-typed `tickets` left to reach the prevCi map
+  // instead throws `.filter is not a function` out of gather(), which made a
+  // corrupt prev board fatal after all and blamed an "intermediate value".
+  //
+  // Validated HERE and not per-read, deliberately: this payload has three more
+  // readers (`prev?.repo`/`prev?.repoUrl` below, and compute-board.mjs's dwell
+  // tracking, which consumes the whole `prev` this returns), and the prevCi
+  // expression's `|| []` is the demonstration — it defends against an ABSENT
+  // `tickets`, never a present one of the wrong type. This guard covers that one
+  // shape — `prev` is an object, `tickets` is an array of objects — not every
+  // field those three readers go on to trust: a wrong-typed `repo`, `repoUrl`, or
+  // `sinceEnteredStage` still reaches them unchanged. Those `?.`/`|| []` defaults
+  // stay as the belt to these braces.
   let prev = null;
   if (prevFile && existsSync(prevFile)) {
-    try { prev = JSON.parse(readFileSync(prevFile, "utf8")); }
+    try {
+      // JSON.parse SUCCEEDS on `null`, a bare number, a string and an array,
+      // none of which is a board; `null` in particular is absent, not an
+      // object, and `typeof null` alone would wave it through. Same check and
+      // same wording as readAgent's sidecar-meta read, which is this repo's
+      // precedent for rejecting a parsed-but-wrong payload at its own read.
+      const p = JSON.parse(readFileSync(prevFile, "utf8"));
+      if (typeof p !== "object" || p === null || Array.isArray(p))
+        throw new TypeError(`expected a JSON object, got ${p === null ? "null" : Array.isArray(p) ? "array" : typeof p}`);
+      // Nullish `tickets` is ABSENT and stays usable: `|| []` reads it as the
+      // empty carry-forward, which is what a board with no PRs on it says.
+      // Only a present-and-wrong-typed one is a fault.
+      if (p.tickets != null) {
+        if (!Array.isArray(p.tickets))
+          throw new TypeError(`expected tickets to be an array, got ${typeof p.tickets}`);
+        // Per ENTRY too, and not because a `[null]` is exotic: `Array.isArray`
+        // is satisfied by an array of anything, and the very next thing the
+        // prevCi map does is read `t.pr` off each element. The whole payload
+        // goes, not the bad entry — a board with one unreadable ticket is not a board
+        // whose others can be trusted to carry CI state forward, and filtering here
+        // (drop the bad entry, keep the rest) would make this a new, fourth policy for
+        // one payload class in this file — mapCi's null-only guard and tryParse's
+        // unguarded read are the other two — rather than the reject-whole-payload
+        // policy this guard already shares with readAgent's sidecar-meta read.
+        const bad = p.tickets.findIndex((t) => typeof t !== "object" || t === null || Array.isArray(t));
+        if (bad !== -1) {
+          const t = p.tickets[bad];
+          throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${t === null ? "null" : Array.isArray(t) ? "array" : typeof t}`);
+        }
+      }
+      prev = p;
+    }
     catch (e) { console.error(`${NAME}: ignoring unreadable prev board ${prevFile}: ${e.message}`); }
   }
 
@@ -916,9 +962,10 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
 // line. Every guard in this file refuses through die(), which writes its own
 // line and calls process.exit(2) itself (arg.mjs) rather than throwing, so
 // nothing a caller can type unwinds as far as the catch below. Re-checked
-// against the tree rather than taken from the ticket: the file's only `throw`
-// is readAgent's sidecar-shape guard, caught by the try that raises it, so the
-// whole population reaching this handler is this script breaking. Handing that
+// against the tree rather than taken from the ticket: every `throw` in this
+// file — readAgent's sidecar-shape guard, and the three prev-board shape guards
+// gather() gained in #1192 — is caught by the try that raises it, so the whole
+// population reaching this handler is this script breaking. Handing that
 // to die() printed a bug under the wording and the exit code a typo gets — one
 // `board: <text>` line, exit 2, no stack — and an operator could not tell the
 // two apart.
