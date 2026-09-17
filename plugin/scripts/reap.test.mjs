@@ -45,10 +45,14 @@ const git = (cwd, ...args) =>
 // Absolute path to the real git, for any test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
-// Absolute paths to the real `awk` and `paste`, for the sites this file's own
-// four #789 fixtures shadow on PATH — the same reason REAL_GIT exists above.
+// Absolute paths to the real `awk`, `paste` and `grep`, for the sites this
+// file's own fault-injection fixtures shadow on PATH — the same reason
+// REAL_GIT exists above. `grep` joined them for #1419: it is the last tool in
+// both merged-commit checks and both registry re-reads, and the only one whose
+// own failure used to read as a clean verdict about what it had not scanned.
 const REAL_AWK = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 const REAL_PASTE = execFileSync("sh", ["-c", "command -v paste"], { encoding: "utf8" }).trim();
+const REAL_GREP = execFileSync("sh", ["-c", "command -v grep"], { encoding: "utf8" }).trim();
 
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
@@ -2651,6 +2655,174 @@ test("a `+` inside a cherry diagnostic does not strand a detached worktree (#381
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
   assert.deepEqual(json.worktreesRemoved, [wt], "noisy stderr must not strand a merged worktree");
   assert.equal(existsSync(wt), false);
+});
+
+// #1419. `grep -q` answers three ways and every call site in reap.sh read two:
+// rc 0 a line matched, rc 1 none did, rc 2+ grep could not finish the scan at
+// all. Under `-q` both POSIX and GNU reserve 0 for a match even when an error
+// also occurred, so an rc 2 means specifically "no match AND the scan broke" —
+// and a bare `if … | grep -q …; then` files that 2 under no-match, which at the
+// two merged-commit checks is the arm that authorizes `git branch -D` and
+// `git worktree remove`.
+//
+// Measured on `origin/main` with the shims below, all four sites: the branch
+// was REAPED, the worktree DIRECTORY removed, and both registry re-reads
+// reported `registration cleared` about a listing nothing had read — every one
+// at exit 0 with the fault plainly on stderr. Same misattribution as #789 and
+// #1413, one tool further down the same pipelines.
+//
+// The shims select on the PATTERN, never on a flag spelling or an argv
+// position. This fix respelled `-qxF` as `-q -xF -e …`, and a shim matching
+// `-xF` stopped firing on the new spelling and went green vacuously —
+// measured while writing these, on the `origin/main` comparison runs, which is
+// #730's lesson arriving in a third place.
+
+/**
+ * A PATH `grep` that exits `code` having matched nothing, whenever `match`
+ * holds against its argv. `code` defaults to 2, the status a grep that could
+ * not finish scanning leaves under `-q`; pass 1 for a scan that COMPLETED and
+ * merely warned.
+ */
+function grepFailShim(t, match, code = 2) {
+  return toolFailShim(t, "grep", REAL_GREP, match, ["grep: illegal byte sequence"], code);
+}
+
+// The two merged-commit checks. Both sweeps pass the same `^+`, so unlike the
+// `git cherry` shims above the recorded argv cannot say WHICH one fired — the
+// REASONS discriminate instead, and each test below asserts its own sweep's
+// wording rather than settling for presence.
+const CHERRY_SCAN = `case " $* " in *" ^+ "*) : ;; *) false ;; esac`;
+
+// The two registry re-reads: the only greps in a run whose pattern begins
+// `worktree `.
+const REGISTRY_SCAN = `case " $* " in *" worktree "*) : ;; *) false ;; esac`;
+
+test("a cherry scan that could not scan does not authorize `git branch -D` (#1419)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = grepFailShim(t, CHERRY_SCAN);
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "grep", "the cherry scan never ran — this arm passes on any fixture", /\^\+/);
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, [], "a scan that never looked is not a clean merge verdict");
+  assert.equal(branchExists(w, "feature/merged"), true,
+    "the branch whose merge status no tool established must survive");
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /cannot tell if merged/,
+    `an unscanned cherry is unknown, not merged: ${json.kept[0].reason}`);
+  assert.match(json.kept[0].reason, /illegal byte sequence/,
+    "and the scan's own cause reaches the payload, per #625 at git_probe");
+  assert.doesNotMatch(json.kept[0].reason, /unmerged commits/,
+    "nor is it a positive unmerged verdict — nothing was read in either direction");
+});
+
+test("a cherry scan that could not scan does not authorize removing the DIRECTORY (#1419)", (t) => {
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  const bin = grepFailShim(t, CHERRY_SCAN);
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "grep", "this sweep's cherry scan never ran", /\^\+/);
+  assert.equal(code, 0);
+  assert.deepEqual(json.worktreesRemoved, [], "a directory is not deleted on a scan that never completed");
+  assert.equal(existsSync(wt), true, "the only copy of that commit is still on disk");
+  assert.deepEqual(json.reaped, []);
+  // `detachedMergedWorktree` leaves refs/heads/docs/79-brief behind, so the
+  // BRANCH sweep meets the same name as [gone] and its own scan fails too.
+  // Two entries, and #985's ruling is that two refusals must not read as one.
+  assert.equal(json.kept.length, 2);
+  const wtEntry = json.kept.find((k) => k.branch === null);
+  assert.ok(wtEntry, `the branchless sweep's own refusal must be present: ${JSON.stringify(json.kept)}`);
+  assert.ok(wtEntry.reason.includes(`cannot tell if worktree ${wt} is merged`),
+    `and must name the worktree it declined to remove: ${wtEntry.reason}`);
+  assert.notEqual(json.kept[0].reason, json.kept[1].reason,
+    "the two sweeps' refusals must stay distinguishable");
+});
+
+test("a registry re-read whose scan fails is unknown, never 'registration cleared' (#1419)", (t) => {
+  // The git-side half of this sentence is already pinned above (#391): a
+  // `worktree list` that dies must not read as cleared. This is the GREP-side
+  // half the same fix left open. The lock is what makes the fixture decisive —
+  // the registration is provably INTACT, and `origin/main` reported it
+  // `cleared`: the more alarming of the two states, asserted as a measurement,
+  // about a listing nothing managed to read.
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  git(w, "worktree", "lock", wt);
+  const bin = grepFailShim(t, REGISTRY_SCAN);
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "grep", "the registry scan never ran — this arm passes on any fixture", /worktree /);
+  assert.equal(code, 0);
+  assert.equal(json.kept.length, 1);
+  assert.match(json.kept[0].reason, /cannot tell whether the registration survived/,
+    `an unscanned registry is unknown, not a measurement: ${json.kept[0].reason}`);
+  assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the alarming state must never be guessed");
+  assert.doesNotMatch(json.kept[0].reason, /registration intact/, "nor the reassuring one");
+  assert.match(json.kept[0].reason, /illegal byte sequence/, "and the scan's own cause reaches the operator");
+  assert.match(json.kept[0].reason, /locked working tree/, "git's reason for the refusal still reaches the payload");
+});
+
+test("the branchless sweep's OWN registry re-read is unknown too when its scan fails (#1419)", (t) => {
+  // The fourth of four sites, and the one the ticket did not name: this sweep
+  // carries its own copy of the registry re-read, byte-identical to the branch
+  // sweep's. A fix that lands in one copy and not its twin is the shape this
+  // file is full of second tickets for (#622, #985, #1441), so the twin gets a
+  // fixture rather than a comment claiming the first one covers it.
+  //
+  // The leftover branch is deleted so ONLY this sweep sees the worktree:
+  // `detachedMergedWorktree` leaves refs/heads behind, and the branch sweep
+  // would otherwise reach the removal first and produce the entry the test
+  // above already pins.
+  const w = repo(t);
+  const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+  git(w, "branch", "-D", "docs/79-brief");
+  git(w, "worktree", "lock", wt);
+  const bin = grepFailShim(t, REGISTRY_SCAN);
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "grep", "this sweep's registry scan never ran", /worktree /);
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, null, "this sweep's entry names no branch");
+  assert.match(json.kept[0].reason, /cannot tell whether the registration survived/,
+    `the twin must answer the same way: ${json.kept[0].reason}`);
+  assert.doesNotMatch(json.kept[0].reason, /registration cleared/, "the alarming state must never be guessed here either");
+  assert.doesNotMatch(json.kept[0].reason, /registration intact/, "nor the reassuring one");
+});
+
+test("a cherry scan that COMPLETES and merely warns still reaps (#1419)", (t) => {
+  // What the new guard must not refuse, and the reason it reads grep's rc
+  // rather than grep's stderr. `gp_cut_short`'s comment in reap.sh records the
+  // measured cost of gating on "anything on stderr": an operator's broken
+  // gitconfig makes tools warn at a SUCCESS status with their output complete,
+  // and a stderr gate then strands every branch it guards for as long as the
+  // config stays broken, blaming the branch for the fault. That wrong gate is
+  // available one tool further down, so the rc-1 arm is pinned with a scan
+  // that answers "no match" AND writes to stderr: the verdict is real, the
+  // branch is merged, and the reap has to proceed.
+  //
+  // The fail-closed tests above cannot catch that mutation — they assert a
+  // KEEP, which a stderr gate also produces. Only an ACCEPT can.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = grepFailShim(t, CHERRY_SCAN, 1);
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "grep", "the warning never reached a scan — this arm reaps on any fixture", /\^\+/);
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/merged"],
+    "rc 1 is a verdict: no `+` line, so the branch is merged and reapable");
+  assert.deepEqual(json.kept, [], "a warning is not a failure to scan");
+  assert.equal(branchExists(w, "feature/merged"), false);
 });
 
 test("a bare repo in the registry is not diagnosed as an unresolvable HEAD (#381)", (t) => {
