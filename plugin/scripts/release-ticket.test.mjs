@@ -3407,9 +3407,15 @@ fi`,
  * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
  * listing — after this script's own initial registry count has already run,
  * and before git's own read of the same registry — then hands off to the real
- * binary. Mirrors inflight.test.mjs's own `registryRaceShim` (#694): shimmed
- * rather than slept, because this is the same window inflight.sh measured at
- * ~10ms, and a test that tries to hit it with a sleep is a flake generator.
+ * binary. Modeled on inflight.test.mjs's own `registryRaceShim` (#694) and
+ * still shimmed rather than slept for the same reason: this is the same
+ * window inflight.sh measured at ~10ms, and a test that tries to hit it with
+ * a sleep is a flake generator. The two copies have since diverged, though:
+ * PR #1516 taught inflight.test.mjs's copy a `<fired>.failed` sentinel that
+ * stamps when `mutation` itself exits nonzero, so its callers can assert the
+ * mutation actually succeeded rather than trusting an on-disk witness alone;
+ * this copy was not updated to match, so its callers below still assert only
+ * the on-disk effect.
  *
  * The sentinel keeps it to one shot — release-ticket.sh's own delete calls
  * shell out to git too, and a mutation that kept firing would never let the
