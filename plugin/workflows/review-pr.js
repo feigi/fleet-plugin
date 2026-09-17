@@ -1634,7 +1634,7 @@ Chain the directory change into the command, \`cd "$D" && git …\`, never
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
 before \`git init\` it must NOT resolve to the repository, and a fresh scratch
 dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must equal your scratch path.`,
+before any \`git commit\` it must resolve to your scratch path — compare resolved forms (\`realpath\`), since \`--show-toplevel\` can report \`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.`,
               { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-ctl:fleet-review-verifier", schema: VERDICT_SCHEMA },
             ),
           ),
