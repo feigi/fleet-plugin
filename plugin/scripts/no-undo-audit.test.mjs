@@ -2394,7 +2394,9 @@ test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
 // answer with a 2 or not at all, so their cells OPEN on `exit 2 only` and a
 // prefix slice is its own anchor. Exit 2 is one of THREE outcomes here:
 // the cell opens on the exit-1 refusal — which carries a closed list of its
-// own, the `stash: null` shapes — and closes on the exit-0 `null`-field rule.
+// own, the `stash: null` shapes — and closes on the `worktree`/`branch`
+// `null`-field rule, which fires at the verdict's own exit code — 0 or 1 —
+// never exclusively at exit 0.
 // Two consequences, and a copied exit-2-only census gets both wrong.
 //
 //   The anchor is asserted, never assumed: `exit 2` occurs exactly once in the
@@ -2416,18 +2418,49 @@ test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
 // reason holds unchanged here — a file no single script's suite runs recreates
 // the blind spot these pins exist to close.
 
-/** The `Non-zero when` cell of this script's row, and no more of the row. */
-const nonZeroCell = () => specRow().split("|")[4];
+/**
+ * The `Non-zero when` cell of this script's row, and no more of the row.
+ *
+ * The row is split on `|` and the fifth cell taken; a stray `|` inside any
+ * earlier cell's prose would silently narrow what gets scanned instead of
+ * erroring, so the split's own arity is asserted first — measured at 6
+ * (leading empty, script name, args, JSON shape, `Non-zero when`, trailing
+ * empty).
+ */
+const nonZeroCell = () => {
+  const cells = specRow().split("|");
+  assert.equal(
+    cells.length,
+    6,
+    "the no-undo-audit.sh row's cell count changed — an earlier cell may have gained a literal `|`",
+  );
+  return cells[4];
+};
 
 /**
  * The row's exit-2 enumeration, verbatim: from `exit 2` to the end of the
  * sentence that closes the list. The exit-1 refusal ahead of it and the
- * exit-0 `null`-field rule behind it are their own claims with their own pins,
- * so the span stops where the closed list does — the slice is the size of the
- * claim.
+ * `worktree`/`branch` `null`-field rule behind it — which fires at the
+ * verdict's own exit code, 0 or 1, never exclusively at exit 0 — are their
+ * own claims with their own pins, so the span stops where the closed list
+ * does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119), or the audit itself could not be written (#1472) — and no payload is emitted.";
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+
+/**
+ * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
+ * `worktree`/`branch` `null`-field rule the enumeration's own doc comment
+ * says is its own claim with its own pin. Without this, the byte-span
+ * equality below only ever inspects a fixed-length window starting at
+ * `exit 2 ` — a phantom cause appended after the enumeration's closing
+ * sentence, worded without repeating the literal string `exit 2`, would
+ * sit past that window and pass unseen. Pinning the remainder too closes
+ * that gap: together the two constants account for every byte of the cell
+ * from the anchor to the end of the row's cell.
+ */
+const EXIT2_TAIL =
+  " `worktree` and `branch` are the exception (#431): they echo argv rather than reporting a finding, so an escaper that cannot render one reports that field and its `*Rewritten` flag as JSON `null` on the payload the audit already earned, at the verdict's own exit code. A `null` there is \"this run could not render the path or branch you passed in\", never \"there is no worktree\" and never a path ";
 
 /**
  * The clauses the ROW collapses several refusals into, named because the
@@ -2556,6 +2589,29 @@ function exitStatements(src) {
     });
 }
 
+/**
+ * Every `rc=<value>` assignment to the verdict variable, scanned the same
+ * way `exitStatements` scans `exit`: from anywhere on the line rather than
+ * anchored to its start, with quoted spans cut out first and comment lines
+ * dropped. A line-start/line-end anchor would miss a value assigned inline
+ * (`… && rc=2`) or trailed by a comment (`rc=2 # oops`) — exactly the two
+ * shapes `exitStatements` was already built to survive. `\brc=` — not a bare
+ * `rc=` — is what keeps `sl_rc=`, `sr_rc=`, `mt_rc=` and `stash_reflog_rc=`
+ * out: an underscore is a word character, so there is no boundary between it
+ * and the `r` those names share with the verdict variable.
+ */
+function rcAssignments(src) {
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => {
+      const quoted = [...l.matchAll(/'[^']*'|"[^"]*"/g)].map((m) => [m.index, m.index + m[0].length]);
+      return [...l.matchAll(/\brc=(\S+)/g)]
+        .filter((m) => !quoted.some(([from, to]) => m.index >= from && m.index < to))
+        .map((m) => m[1]);
+    });
+}
+
 test("`die` is the only way this script reaches exit 2, and its other exits are the two verdicts (#1472)", () => {
   const src = readFileSync(SCRIPT, "utf8");
 
@@ -2566,7 +2622,7 @@ test("`die` is the only way this script reaches exit 2, and its other exits are 
   );
 
   assert.deepEqual(
-    [...new Set([...src.matchAll(/^\s*rc=(\S+)$/gm)].map((m) => m[1]))].sort(),
+    [...new Set(rcAssignments(src))].sort(),
     ["0", "1"],
     "`$rc` is the verdict, and the row states exactly two of them — 1 the worktree is dirty, 0 it is clean. A third value assigned here is an outcome no cell in that row describes",
   );
@@ -2609,9 +2665,16 @@ test("the design spec's row states this script's exit-2 causes as a closed list,
   );
 
   // A slice, not an `includes`: a cause smuggled in anywhere inside the list
-  // sits outside an exact span of the list's own length.
+  // sits outside an exact span of the list's own length. The check runs to
+  // the END of the cell, not just the enumeration's own length: a phantom
+  // cause appended after the enumeration's closing sentence would otherwise
+  // sit past a fixed-length window and pass unseen, provided it avoided the
+  // literal string `exit 2` (which the anchor assertion above would still
+  // catch) — `EXIT2_TAIL` is what closes that gap for a phantom cause that
+  // doesn't repeat it.
   const from = cell.indexOf("exit 2 ");
   assert.equal(cell.slice(from, from + EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
+  assert.equal(cell.slice(from + EXIT2_ENUMERATION.length), EXIT2_TAIL);
 });
 
 // --- #119: the escaping library this script now sources rather than carries.
