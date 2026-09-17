@@ -34,11 +34,14 @@ import assert from "node:assert/strict";
 // chance to register, turning a named failure into an opaque file-level error
 // instead.
 //
-// `code` is a parameter, not a module-level constant: some callers lift from
-// raw SOURCE, others from CODE = stripComments(SOURCE) (see strip-comments.mjs
-// for why a commented-out declaration needs stripping first so a pin cannot be
-// satisfied by dead code). Passing it in keeps that choice with the caller
-// instead of this module silently picking one.
+// `code` is a parameter, not a module-level constant: every current caller
+// passes CODE = stripComments(SOURCE) (see strip-comments.mjs for why a
+// commented-out declaration needs stripping first so a pin cannot be
+// satisfied by dead code — see select-dimensions.test.mjs's `verifiersFor`
+// lift for the same reasoning applied to a local, non-shared match). This
+// module never reads a caller's SOURCE itself, so it could not silently pick
+// one even if a future caller wanted raw text again; passing it in keeps
+// that choice — and the obligation to strip — with the caller.
 export function lift(code, name, signature) {
   const re = new RegExp(
     `^function ${RegExp.escape(name)}\\(${RegExp.escape(signature)}\\) \\{[\\s\\S]*?^\\}$`,

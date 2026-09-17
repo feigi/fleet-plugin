@@ -22,7 +22,12 @@ const REPO = join(import.meta.dirname, "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 
 // Every declaration below ends at a column-0 terminator and is the only
-// top-level declaration of its name, so these matches are unambiguous.
+// top-level declaration of its name — that makes the ANCHOR unique, not the
+// match: a block-commented dead copy is textual too, so a non-global
+// `.match` can still find the wrong one first (#1125). `verifiersFor` below
+// matches STRIPPED text for that reason — it is the repo's only guard on the
+// live `verifiersBySeverity` map. `DEFAULT_DIMENSIONS` and `selectDimensions`
+// still match raw SOURCE.
 //
 // Only `resolveDimensions` routes through the shared lift() in lift.mjs — it
 // is a plain top-level `function name(signature) { ... }` with no free
@@ -55,7 +60,17 @@ function liftFromSource(name) {
     // is that the budget is a function of severity, not that the default is 2.
     // lift() has no parameter channel — it always calls `new Function(body)()`
     // with zero arguments.
-    const m = SOURCE.match(/^const verifiersBySeverity = A\.verifiersBySeverity \|\| \{[\s\S]*?^const verifiersFor = .*;$/m);
+    //
+    // STRIPPED text, not raw SOURCE (#1125 follow-up): this is the repo's only
+    // guard on the live `verifiersBySeverity` map, so a block-commented correct
+    // copy parked above the mutated live declaration must not be able to
+    // satisfy it. Measured the same way as `resolveDimensions` below: mutate
+    // the live map's `suggestion: 0` to `suggestion: verifiers` and park a
+    // correct decoy above it — against raw SOURCE the mutation ships green
+    // ("the refuter budget is keyed on severity alone" below still asserts
+    // `verifiersFor("suggestion") === 0`), against stripComments(SOURCE) it reds.
+    const CODE = stripComments(SOURCE);
+    const m = CODE.match(/^const verifiersBySeverity = A\.verifiersBySeverity \|\| \{[\s\S]*?^const verifiersFor = .*;$/m);
     assert.ok(m, "review-pr.js no longer declares verifiersBySeverity then verifiersFor at top level — update this test");
     return new Function("A", "verifiers", `${m[0]}\nreturn verifiersFor;`)({}, 7);
   }
@@ -64,7 +79,20 @@ function liftFromSource(name) {
 
 const DEFAULT_DIMENSIONS = liftFromSource("DEFAULT_DIMENSIONS");
 const selectDimensions = liftFromSource("selectDimensions");
-const resolveDimensions = lift(SOURCE, "resolveDimensions", "override, all");
+// STRIPPED text, not raw SOURCE (#1125). lift() matches with a non-global
+// `.match`, so the FIRST `function resolveDimensions(override, all)` in the
+// text it is given wins — and in raw source a block-commented copy is still
+// text it can match. Measured on a scratch copy of the tree: with the live
+// declaration's `override == null` guard reverted to `!override` AND a correct
+// copy of the whole function parked in a `/* */` block above it, this file ran
+// 40 pass / 0 fail against raw SOURCE — the pin was satisfied by the dead copy
+// while review-pr.js shipped the regression. Passing stripComments(SOURCE)
+// blanks the parked copy, so the same mutation reds "a falsy-but-present
+// override stops the run" below. The other two lifts above (DEFAULT_DIMENSIONS,
+// selectDimensions) are deliberately left on raw SOURCE by this ticket and
+// are unchanged; `verifiersFor` below was moved to stripped text too, for the
+// same reason as this one (see its branch in liftFromSource above).
+const resolveDimensions = lift(stripComments(SOURCE), "resolveDimensions", "override, all");
 
 // Drive the matrix from REAL file lists through the real classifier, not from
 // hand-written profile strings. A `diff-stats` classifier change that silently
