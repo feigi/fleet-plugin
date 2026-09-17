@@ -57,6 +57,26 @@ function claim(dir) {
 const TESTS = "t.test.mjs";
 const pkg = (o) => JSON.stringify(o);
 
+// `node --test` marks the processes it spawns, and an inherited mark makes
+// the runner's own `node --test` report to a parent that is not listening —
+// status 0 and not a byte of stdout. An artifact of testing a test runner
+// from inside one; strip it so these assertions see what a member sees.
+// FORCE_COLOR is stripped for the same reason: it reaches the runner's own
+// `node --test`, which then SGR-wraps its summary even into a pipe
+// (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
+// that reads that summary literally. A developer with FORCE_COLOR set is
+// exactly what these assertions have to survive, not exercise. Shared by
+// every fixture that spawns an emitted runner directly, not just `apply()` —
+// a `--write-runner` fixture inherits the same three variables and needs the
+// same strip.
+function runnerEnv() {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_TEST_WORKER_ID;
+  delete env.FORCE_COLOR;
+  return env;
+}
+
 // Runs the script for real and returns the emitted runner plus its worktree.
 // `--apply` labels the issue, so `gh` is stubbed; everything else — the
 // worktree, the install, the exclude file, the runner — is the real thing.
@@ -74,19 +94,7 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const wt = join(dir, ".worktrees", "42-slug");
-  // `node --test` marks the processes it spawns, and an inherited mark makes
-  // the runner's own `node --test` report to a parent that is not listening —
-  // status 0 and not a byte of stdout. An artifact of testing a test runner
-  // from inside one; strip it so these assertions see what a member sees.
-  // FORCE_COLOR is stripped for the same reason: it reaches the runner's own
-  // `node --test`, which then SGR-wraps its summary even into a pipe
-  // (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
-  // that reads that summary literally. A developer with FORCE_COLOR set is
-  // exactly what these assertions have to survive, not exercise.
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  delete env.NODE_TEST_WORKER_ID;
-  delete env.FORCE_COLOR;
+  const env = runnerEnv();
   return {
     wt,
     env,
@@ -559,14 +567,19 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // V1 — the runner's own directory is named `node_modules`, so a bare
   // invocation's implicit `.` resolves to `$root` itself and the walk's first
   // iteration is the equality. No claim can emit a runner there: the worktree
-  // is always `.worktrees/<issue>-<slug>`, which cannot be that name. So the
-  // EMITTED runner is relocated byte-for-byte — its bytes are what is under
-  // test, and the move is what puts a guard-readable basename on `$root`.
-  const emitted = apply(SUITE);
+  // is always `.worktrees/<issue>-<slug>`, which cannot be that name. So this
+  // uses `--write-runner` (already exercised further down this file) to emit
+  // straight into a `node_modules` destination instead of claiming normally
+  // and relocating the result byte-for-byte — same emitter, same bytes, no
+  // copy step, and no `gh` stub or worktree the assertions below never
+  // inspect.
   const home = join(mkdtempSync(join(tmpdir(), "nm-")), "node_modules");
   mkdirSync(home, { recursive: true });
-  copyFileSync(join(emitted.wt, "agent-test"), join(home, "agent-test"));
-  chmodSync(join(home, "agent-test"), 0o755);
+  const wr = spawnSync("sh", [SCRIPT, "--write-runner", join(home, "agent-test"), "42"], {
+    cwd: repo({ [TESTS]: "" }),
+    encoding: "utf8",
+  });
+  assert.equal(wr.status, 0, wr.stdout + wr.stderr);
   writeFileSync(join(home, "a.test.mjs"), PASSES);
   // Vendored content one level in, where the exemption is at its widest: the
   // runner's own directory name IS the excluded word, and the guard still has
@@ -575,10 +588,15 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
   const v1 = (...args) =>
-    spawnSync(join(home, "agent-test"), args, { cwd: home, encoding: "utf8", env: emitted.env });
+    spawnSync(join(home, "agent-test"), args, { cwd: home, encoding: "utf8", env: runnerEnv() });
   // `pass 1`, not merely exit 0: the fixture holds two test files and one of
-  // them is vendored, so a count is what says the vendored one stayed out
-  // while the argument was honoured.
+  // them is vendored, so a count is what says the vendored one stayed out.
+  // It does NOT say the argument was honoured rather than dropped — measured,
+  // discarding the runner's own file-list handoff (`set -- "$@"` in place of
+  // `set -- "$@" $files`, claim-ticket.sh:834) leaves this row byte-identical
+  // at `pass 1`, because node's own default discovery from this cwd
+  // independently excludes the same vendored file too. V2's `pass 12` below
+  // is what pins the argument being honoured; this row does not.
   const bare = v1();
   assert.equal(bare.status, 0, bare.stdout + bare.stderr);
   assert.match(bare.stdout, /^(?:ℹ|#) pass 1$/m);
