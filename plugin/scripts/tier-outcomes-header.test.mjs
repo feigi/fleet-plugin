@@ -329,12 +329,14 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // the defect, not a wording preference.
   assert.match(
     block,
-    phrase("distinct `run_date`s — IS this file's `run_date`"),
+    phrase("at least three `class=routine` PRs spanning two or more distinct `run_date`s — IS this file's `run_date`"),
     "the header no longer says the revert floor's distinct-date count is read from THIS file",
   );
   assert.match(
     block,
-    phrase("is NOT read here at all. It comes from the pairing query in `docs/metrics/member-outcomes.tsv`'s own header"),
+    phrase(
+      "at least ten within-run pairs across five or more distinct `run_date`s, the floor that forbids reading the pairs early — is NOT read here at all. It comes from the pairing query in `docs/metrics/member-outcomes.tsv`'s own header",
+    ),
     "the header no longer says the pairing floor's distinct-date count is read from member-outcomes.tsv, not here",
   );
 
@@ -347,7 +349,9 @@ test("the header says which file each distinct-`run_date` count is read from, an
   );
   assert.match(
     block,
-    phrase("NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so it records WHEN THE SESSION LAST WROTE"),
+    phrase(
+      "In `member-outcomes.tsv` it is DERIVED in code: `member-outcomes.mjs` stamps every row of a session from the NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so it records WHEN THE SESSION LAST WROTE",
+    ),
     "the header no longer says member-outcomes.tsv's `run_date` is derived from a transcript mtime",
   );
 
@@ -385,11 +389,37 @@ test("the header's `run_date` source claims still hold against the query, the sc
     `the header cites an idiom for the floor's date key that SKILL.md no longer uses (\`${floorKey[0]}\`)`,
   );
 
+  // The header's own prose also names WHICH column that count reads
+  // ("column 1 here") — a positional claim nothing above checked, since
+  // `floorKey[0]` only pins the awk idiom, not the number the header prints
+  // beside it in English. Resolve it against the same `$n` the recount
+  // above actually keys on.
+  const floorColumnCite = /column (\d+) here/.exec(block);
+  assert.ok(floorColumnCite, "the header no longer names which column the revert floor's distinct-date count reads");
+  assert.equal(
+    Number(floorColumnCite[1]),
+    Number(floorKey[1]),
+    "the header's `column N here` cite no longer matches the column SKILL.md's recount actually keys on",
+  );
+
   // The pairing half: the query lives in the OTHER file's header and keys its
   // dates off the other file's own columns, so resolve it against that file's
   // COLUMNS export. This is the claim that makes the paragraph load-bearing —
   // if the query moves or is rekeyed, "read it from there" stops being true.
-  const pairKey = /d\[\$(\d+)\]=\$(\d+)/.exec(memberHeaderLines.join("\n"));
+  // Bounded to the query BLOCK, not the whole 140-line header —
+  // member-outcomes-header.test.mjs's own `pairQuery()` bounds it the same
+  // way, for the same reason: an unbounded match is satisfiable by a stale
+  // `d[$1]=$2` idiom anywhere in that header even after the real query moved
+  // or was rekeyed, which is exactly what would make "read it from there"
+  // stop being true without this pin noticing.
+  const pairQueryStart = memberHeaderLines.findIndex((l) => l.includes("awk -F") && l.includes("fleet-implementer-alt"));
+  assert.ok(pairQueryStart >= 0, "member-outcomes.tsv's header lost its within-run pair query");
+  let pairQueryEnd = pairQueryStart;
+  while (pairQueryEnd < memberHeaderLines.length && !memberHeaderLines[pairQueryEnd].endsWith("docs/metrics/member-outcomes.tsv")) pairQueryEnd++;
+  assert.ok(pairQueryEnd < memberHeaderLines.length, "the pairing query never reaches the file it reads");
+  const pairQueryBlock = memberHeaderLines.slice(pairQueryStart, pairQueryEnd + 1).join("\n");
+
+  const pairKey = /d\[\$(\d+)\]=\$(\d+)/.exec(pairQueryBlock);
   assert.ok(pairKey, "member-outcomes.tsv's header no longer carries the pairing query this header points at");
   assert.equal(
     MEMBER_COLUMNS[pairKey[2] - 1],
@@ -401,18 +431,58 @@ test("the header's `run_date` source claims still hold against the query, the sc
     `the header cites an idiom for the pairing query's date key that member-outcomes.tsv no longer uses (\`${pairKey[0]}\`)`,
   );
 
-  // The DERIVED half as code, not prose: the date comes off a transcript mtime.
-  // A scraper switched to a clock read would make this header's central
-  // contrast false while every prose pin above stayed green.
-  assert.match(
+  // The header also cites the query's distinct-date ACCUMULATOR
+  // (`length(r)`) — resolve the variable name against the query's own
+  // `length(...)` call rather than trusting the header's word for it.
+  const pairAccumulator = /print n\+0, length\((\w+)\)/.exec(pairQueryBlock);
+  assert.ok(pairAccumulator, "member-outcomes.tsv's pair query no longer prints its distinct-date count via `length(...)`");
+  assert.ok(
+    block.includes(`length(${pairAccumulator[1]})`),
+    `the header cites the wrong accumulator for the pairing query's distinct-date count (expected \`length(${pairAccumulator[1]})\`)`,
+  );
+
+  // The DERIVED half as code, not prose: the date comes off a transcript
+  // mtime. A scraper switched to a clock read would make this header's
+  // central contrast false while every prose pin above stayed green. Bound
+  // to EACH of member-outcomes.mjs's two independent stamp sites separately
+  // — rowsForSession (the live path every real caller uses to build rows)
+  // and rowsForOmpSession (the omp-session sibling) — rather than scanning
+  // the whole file: `assert.match` over MEMBER_SRC as a whole is satisfied
+  // by EITHER site alone, so a regression confined to just the live path
+  // left the header's contrast false while this assertion, and the suite,
+  // stayed green.
+  const rowsForSessionSrc = between(
     MEMBER_SRC,
-    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
-    "member-outcomes.mjs no longer takes its date from a transcript mtime",
+    "export function rowsForSession(sessionDir, stats = {}) {",
+    "export const COLUMNS",
+    "member-outcomes.mjs's rowsForSession",
   );
   assert.match(
-    MEMBER_SRC,
+    rowsForSessionSrc,
+    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
+    "member-outcomes.mjs's rowsForSession no longer takes its date from a transcript mtime",
+  );
+  assert.match(
+    rowsForSessionSrc,
     /const run_date = newest \? new Date\(newest\)/,
-    "member-outcomes.mjs no longer stamps `run_date` from that mtime",
+    "member-outcomes.mjs's rowsForSession no longer stamps `run_date` from that mtime",
+  );
+
+  const rowsForOmpSessionSrc = between(
+    MEMBER_SRC,
+    "function rowsForOmpSession(sessionDir, stats) {",
+    "export function rowsForSession",
+    "member-outcomes.mjs's rowsForOmpSession",
+  );
+  assert.match(
+    rowsForOmpSessionSrc,
+    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
+    "member-outcomes.mjs's rowsForOmpSession no longer takes its date from a transcript mtime",
+  );
+  assert.match(
+    rowsForOmpSessionSrc,
+    /const run_date = newest \? new Date\(newest\)/,
+    "member-outcomes.mjs's rowsForOmpSession no longer stamps `run_date` from that mtime",
   );
 
   // The RULED-BY-HAND half as SKILL.md's stated duty. If this file ever becomes
