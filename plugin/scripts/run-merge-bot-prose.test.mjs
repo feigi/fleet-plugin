@@ -133,6 +133,11 @@ test("the `unknown` path says the missing-object cause names itself in git's own
 // in both of those the reflog is untouched and still names the stash SHA as
 // its second field, where `git stash show -p <that sha>` printed the hunk
 // staged or not, while `git show <that sha>` again printed none when staged.
+// #1055 added the third member of that enumeration: measured, git 2.50.1, `rm
+// refs/stash` with no `packed-refs` fails both the same way (`ambiguous
+// argument` / `refs/stash is not a valid reference`) while the reflog still
+// names the SHA, and after `git pack-refs --all` both succeed at rc 0 — so the
+// clause enumerates the UNPACKED absence, not absence as such.
 test("the `unknown` path names git show refs/stash as the recovery when the file reads come back empty", () => {
   assert.match(
     flat(noUndoAudit()),
@@ -144,8 +149,62 @@ test("the `unknown` path names git show refs/stash as the recovery when the file
   );
   assert.match(
     flat(noUndoAudit()),
-    /Both fail only where the ref FILE is itself the broken one — unreadable, or holding text that is not a SHA — and there the SHA `cat` already printed, in the reflog's second field, is what `git stash show -p <that sha>` recovers instead/,
+    /Both fail only where the ref FILE is itself the broken one — unreadable, holding text that is not a SHA, or gone with nothing in `packed-refs` — and there the SHA `cat` already printed, in the reflog's second field, is what `git stash show -p <that sha>` recovers instead/,
   );
+});
+
+// #1055: the fallback above IS a SHA `cat` printed, so it is unavailable in the
+// double fault — where the premise clause ("`cat` denied") fires and the ref is
+// also unresolvable — and the paragraph went on offering it there. Measured,
+// git 2.50.1, both shapes (`chmod 000` on `refs/stash` AND `logs/refs/stash`;
+// `rm refs/stash` with no `packed-refs` plus `chmod 000` on `logs/refs`): `git
+// stash list` empty at rc 0, `git show refs/stash` `ambiguous argument`, `git
+// stash show -p refs/stash` `refs/stash is not a valid reference`, and `cat`
+// rc 1 printing no SHA to fall back on.
+//
+// The two recoveries are measured, not inferred. `chmod 644` on the two files
+// (and `chmod 755` on an unsearchable `logs/refs`) puts the entry back in `git
+// stash list` outright. Failing that, `git fsck` prints `dangling commit <sha>`
+// per stash entry — 3 of 3 entries in a three-stash fixture, and still with
+// every object packed by `repack -ad` — at rc 10 in the unreadable-ref shape
+// while printing them, and `git stash show -p <that sha>` printed the hunk
+// there, including for an entry staged before `git stash`, refusing a
+// non-stash dangling commit with `is not a stash-like commit`. Its measured
+// limits are why the doc calls it a lead: fsck hands back no `stash@{N}`, and
+// an entry dropped by `git stash drop` is dangling with the same `On <branch>:`
+// subject and the same rc 0 from `git stash show -p` as a live one.
+//
+// `git gc --prune=now` is deliberately NOT mentioned either way: measured, it
+// dies `fatal: bad object refs/stash` / `failed to run repack` at rc 128 in the
+// unreadable-ref shape, so the obvious "recover before something prunes it"
+// warning would be false for the shape it reads as being about.
+//
+// Four claims pinned separately, never one span: the STATE, the permission
+// recovery, the fsck lead, and the lead's unreliability each rot
+// independently. Dropping the state turns the caveat into unscoped advice;
+// dropping the last one promotes a lead to a listing, which is the specific
+// rewrite this paragraph's history predicts. The permission claim is held by
+// two SHORT spans — the instruction and the outcome it asserts — rather than
+// its sentence verbatim, because that sentence also names the `ls` tells,
+// which are pinned above already; what must not vanish is that the first
+// recovery offered here is a mode fix and that it puts the entry back in the
+// list. Measured: with only the other three pins standing, cutting that
+// sentence out of the doc reds nothing.
+test("the double fault leaves no ref-based recovery, and names the mode fix and the fsck lead in its place", () => {
+  assert.match(
+    flat(noUndoAudit()),
+    /That fallback is a SHA `cat` printed, so it is gone where the reflog is the denied read too — both files unreadable, or `refs\/stash` gone with nothing in `packed-refs` while the reflog cannot be read — and nothing ref-based recovers there/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /`git fsck` still prints a `dangling commit <sha>` line per stash entry, objects loose or packed/,
+  );
+  assert.match(
+    flat(noUndoAudit()),
+    /Treat it as a lead, not a listing: no `stash@\{N\}` comes back with it, and an entry someone dropped on purpose is indistinguishable from a live one/,
+  );
+  assert.match(flat(noUndoAudit()), /Restore read permission where the mode is yours to fix/);
+  assert.match(flat(noUndoAudit()), /and `git stash list` names the entry again/);
 });
 
 // #376 added a fourth cause whose `ls -l` signature is the OPPOSITE of the
