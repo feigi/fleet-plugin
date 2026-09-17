@@ -206,6 +206,14 @@ For each labeled PR clearing the hold rule, lowest first:
 
    **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
 
+   **Re-check the instrument set before you act on this gate's reading, the same way the controller re-checks before its own gates** (`run-team/SKILL.md`, **You read your instruments out of a tree every member can write to**). That rule is stated once, in the controller's file, and nothing dispatches a merge bot to read it — so this seat carries its own copy or runs the gate unchecked. Exit 0 is the only code that lets this gate proceed; exit 1 (the set changed) and exit 2 (the check could not answer) both refuse — report `instrument-set-changed-#<pr>` with what it printed, leave the label alone, and do **not** re-read the gate.
+
+   ```bash
+   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(git rev-parse --git-common-dir)")"
+   ```
+
+   `--repo` is not optional at this seat, and the spelling is the load-bearing half. The baseline the run pinned lives in the audited checkout's gitignored `.fleet/`, which a worktree does not carry, so a bare invocation from one exits **2** on a missing baseline instead of comparing anything — a permanent refusal that reads exactly like a real one. `--git-common-dir` names the directory every worktree shares, the same resolution `ledger.mjs` uses to reach the run's one ledger, so this one spelling answers identically from the audited checkout and from any worktree under it.
+
    ```bash
    ~/.fleet/bin/fleet-run ci-state.mjs --pr <pr>
    ```
@@ -259,7 +267,7 @@ Measured over one three-merge wave: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / rebase-fallback-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / rebase-fallback-#X / instrument-set-changed-#X / blocked after the pass.
 
 ## No-undo audit (before every rebase)
 
