@@ -386,6 +386,109 @@ test("no run in the list matches the PR head at all: not-green, exit 1 — the u
   assert.match(r.payload.reasons.join("; "), /no CI run whose headSha equals the PR head abc123def/);
 });
 
+// --- #1410: two runs tied on head SHA AND createdAt to the second ----------
+// A stable sort with no tie-break keeps gh's own (unspecified) API order on
+// an exact createdAt tie. Measured live on PR #1402: two runs on the same
+// head, started the same second, one cancelled and one completed, both 6
+// jobs green — the tool bound to the cancelled duplicate. Recency (createdAt,
+// truncated to the second) stays the PRIMARY key; conclusion only breaks a
+// tie, so a newer in-progress run on an unrelated pair still beats an older
+// completed one (see the untied-path test below) — promoting conclusion to
+// primary would be a fresh regression, not a fix.
+//
+// Fixtures use gh's REAL run shape: a cancelled run reports
+// status:"completed", conclusion:"cancelled" — its LIFECYCLE (status) is
+// "completed", same as a successful run; only its OUTCOME (conclusion)
+// differs. A comparator ranking on status alone (an earlier draft of this
+// fix did exactly that) can never tell them apart, since both share
+// status:"completed" — the original #1402 bug would stay unfixed for real
+// GitHub data.
+
+test("two runs share head SHA and createdAt to the second, one cancelled one completed: the completed run wins and a tie-break note reaches stderr — PR #1402, cancelled listed first", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "completed", conclusion: "cancelled", event: "pull_request", createdAt };
+  const completed = { databaseId: 1, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    // Cancelled listed FIRST: with no tie-break, a stable sort on an exact
+    // createdAt tie keeps this API order and picks it — the exact shape
+    // measured on PR #1402.
+    runList: JSON.stringify([cancelled, completed]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, completed.databaseId, "must bind to the completed run, not the cancelled sibling sharing its head and createdAt");
+  assert.match(r.log, new RegExp(`run view ${completed.databaseId}\\b`));
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${completed.databaseId} \\(completed/success\\) over #${cancelled.databaseId} \\(completed/cancelled\\)`));
+});
+
+test("two runs share head SHA and createdAt to the second, one cancelled one completed: the completed run wins regardless of array order — mirrored order", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "completed", conclusion: "cancelled", event: "pull_request", createdAt };
+  const completed = { databaseId: 1, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    // Completed listed FIRST this time. A stable sort would already pick it
+    // by accident in this order alone, so this test never proves the
+    // comparator does anything by itself — it only proves the reversed-order
+    // test above isn't vacuously passing because of array order.
+    runList: JSON.stringify([completed, cancelled]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, completed.databaseId, "must bind to the completed run regardless of gh's response order");
+});
+
+test("two runs share head SHA, createdAt to the second, and conclusion rank: the numerically higher databaseId wins, not the lexicographically greater one", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  // databaseId 9 and 10: "9" sorts ahead of "10" under a STRING compare
+  // (localeCompare), backwards from the numerically higher/newer id. Listed
+  // with the lexicographically-winning id first so a lingering string
+  // compare would pick it by accident too.
+  const lowerId = { databaseId: 9, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt };
+  const higherId = { databaseId: 10, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([lowerId, higherId]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, higherId.databaseId, "the numerically higher databaseId must win the final tie-break, not the lexicographically greater one");
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${higherId.databaseId} \\(completed/success\\) over #${lowerId.databaseId} \\(completed/success\\)`));
+});
+
+test("two runs' createdAt differs only in the fractional-second component: still treated as a tie, not two distinct instants", () => {
+  // GitHub's createdAt is documented as whole-second precision, but the
+  // comparator truncates via bySecond() defensively. If the comparator
+  // instead compared full-precision strings, these two would never be
+  // grouped as tied — the cancelled run's fractionally-LATER createdAt would
+  // win on recency alone, and conclusion would never even be consulted.
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "completed", conclusion: "cancelled", event: "pull_request", createdAt: "2026-03-01T10:00:00.900Z" };
+  const completed = { databaseId: 1, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt: "2026-03-01T10:00:00.100Z" };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([cancelled, completed]),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.runId, completed.databaseId, "sub-second createdAt drift must not hide a genuine tie; conclusion still decides");
+  assert.match(r.stderr, /run selection tie-break/);
+});
+
+test("untied path: a newer non-completed run still beats an older completed one on the same head — conclusion never outranks recency", () => {
+  const older = { databaseId: 5, headSha: PR_HEAD, status: "completed", conclusion: "success", event: "pull_request", createdAt: "2026-01-01T00:00:00Z" };
+  const newer = { databaseId: 6, headSha: PR_HEAD, status: "in_progress", conclusion: null, event: "pull_request", createdAt: "2026-01-02T00:00:00Z" };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([older, newer]),
+    runView: JSON.stringify({ jobs: [{ name: "check", status: "in_progress", conclusion: null }], attempt: 1, status: "in_progress", conclusion: null, headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.equal(r.payload.runId, newer.databaseId, "recency stays primary: a newer in-progress run must still beat an older completed one when createdAt is NOT tied");
+  assert.doesNotMatch(r.stderr, /run selection tie-break/, "createdAt differs here, so no tie-break note should fire");
+});
+
 // --- #169: a flag given with no value must die, never read as absent -------
 // `base`/`workflow`/`workflow-file` all read via `arg(name) || default`, so a
 // trailing flag previously fell straight through to the DEFAULT — the caller

@@ -524,14 +524,73 @@ if (noCi) {
       return bad === -1 ? null : `run list row ${bad} is not an object`;
     },
   );
-  const matching = runs
-    .filter((r) => r.headSha === prHead)
-    .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
+  const bySecond = (createdAt) => {
+    // GitHub's createdAt is already whole-second precision; this guards
+    // against any future sub-second drift silently hiding a genuine tie.
+    const s = String(createdAt);
+    const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(s);
+    return m ? m[1] : s;
+  };
+  // Recency is the primary key — a newer run always outranks an older one,
+  // tied or not. The tie-break below fires ONLY when createdAt is equal to
+  // the second: two runs GitHub started in the same instant (measured on PR
+  // #1402, both 6 jobs green — one `cancelled`, one `completed`, and the
+  // stable sort below previously let API order pick the loser). Ranking
+  // conclusion ahead of createdAt here would let an older completed run beat
+  // a newer in-progress one on an unrelated, untied pair — a fresh
+  // regression, not a fix (#1410 review) — so conclusion only ever compares
+  // within a tie.
+  const compareRuns = (x, y) => {
+    const byCreatedAt = bySecond(y.createdAt).localeCompare(bySecond(x.createdAt));
+    if (byCreatedAt !== 0) return byCreatedAt;
+    // `status` is the run's LIFECYCLE (queued/in_progress/completed) and is
+    // NOT the outcome — a cancelled run reports status:"completed",
+    // conclusion:"cancelled", same as a successful one. Ranking on status
+    // here (as an earlier draft of this fix did) could never actually prefer
+    // a completed-and-successful run over a completed-but-cancelled sibling,
+    // because both share status:"completed". Rank on `conclusion` instead.
+    const rank = (r) => {
+      if (r.conclusion === "success" || r.conclusion === "skipped") return 0;
+      // Still running: no conclusion yet and not yet completed. Neither a
+      // proven win nor a proven loss, so it sits between a settled success
+      // and a settled failure/cancellation rather than being ranked as
+      // either extreme.
+      if (r.conclusion === null && r.status !== "completed") return 1;
+      return 2;
+    };
+    const byConclusion = rank(x) - rank(y);
+    if (byConclusion !== 0) return byConclusion;
+    // Last resort once createdAt (to the second) and conclusion rank both
+    // agree — total determinism, never expected to matter in practice.
+    // Numeric, not string, compare: "9" sorts ahead of "10" lexicographically
+    // but the higher/most-recent id is 10.
+    return Number(y.databaseId) - Number(x.databaseId);
+  };
+  const matching = runs.filter((r) => r.headSha === prHead).sort(compareRuns);
 
   if (matching.length === 0) {
     reasons.push(`no ${workflow} run whose headSha equals the PR head ${prHead}`);
   } else {
     const chosen = matching[0];
+    // A tie-break note is NOT pushed into `reasons` — reasons drives the
+    // green/not-green verdict below, and disambiguating between otherwise-
+    // identical candidates must never turn a green board red on its own.
+    // It goes to stderr unconditionally, like the verdict summary further
+    // down, rather than behind `vlog`/`--quiet`: the callers most likely to
+    // hit this — hot pollers that pass `--quiet` — are exactly the ones who
+    // need to know the pick required disambiguation rather than being the
+    // one unambiguous match.
+    const tiedAtCreatedAt = matching.filter((r) => bySecond(r.createdAt) === bySecond(chosen.createdAt));
+    if (tiedAtCreatedAt.length > 1) {
+      const others = tiedAtCreatedAt
+        .filter((r) => r.databaseId !== chosen.databaseId)
+        .map((r) => `#${r.databaseId} (${r.status}/${r.conclusion ?? "null"})`)
+        .join(", ");
+      emit(
+        2,
+        `${NAME}: run selection tie-break — ${tiedAtCreatedAt.length} runs share head ${prHead} and createdAt ${bySecond(chosen.createdAt)}; chose #${chosen.databaseId} (${chosen.status}/${chosen.conclusion ?? "null"}) over ${others}\n`,
+      );
+    }
     runId = chosen.databaseId;
     // Re-query the run itself. The list's conclusion is a second read from a
     // different moment; the authoritative job list is this one.
