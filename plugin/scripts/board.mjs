@@ -994,13 +994,40 @@ export function faultText(e) {
 // writeSync and the leading newline for die()'s own reasons (arg.mjs): tryRun
 // re-emits gh's stderr through this process's async stream, so a stack queued
 // behind it on a pipe is what process.exit() discards. The empty catch is
-// die()'s too — the message can be lost, the exit code cannot. A sibling
-// script that wants a fault path adopts this shape rather than spelling a
-// second one; it is deliberately not in arg.mjs, which exists to hold the
-// helpers that already had copies to collapse.
+// die()'s too — the message can be lost, the exit code cannot.
+//
+// A single writeSync call can also short-write — return the count it
+// managed and throw nothing at all — or throw EAGAIN outright, the same
+// failure #889 gave die() (arg.mjs) a bounded retry loop for, and PR #1523
+// then gave staleness.mjs's verdict() too. This is the largest single
+// payload of the four writeSync sites in this file — a full stack, not a
+// one-line refusal — so it is the one most likely to collide with a
+// saturated pipe and lose the diagnostic silently. The loop below mirrors
+// those two: resume a short write where writeSync left off, and retry
+// EAGAIN after a 1ms Atomics.wait, capped at MAX_EAGAIN_RETRIES so a reader
+// that never drains still reaches process.exit() below instead of hanging
+// forever. A sibling script that wants a fault path adopts this shape
+// rather than spelling a second one; it is deliberately not in arg.mjs,
+// which exists to hold the helpers that already had copies to collapse.
+const MAX_EAGAIN_RETRIES = 200;
+
+// Shared across every retry: Atomics.wait never writes or notifies it, so one
+// instance times out exactly as a fresh one would, without allocating a
+// SharedArrayBuffer on every EAGAIN.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
 function fault(e) {
   try {
-    writeSync(2, `\n${NAME}: internal fault (exit ${FAULT_EXIT}) — a bug in ${NAME}.mjs, not in what you typed\n${faultText(e)}\n`);
+    let buf = Buffer.from(`\n${NAME}: internal fault (exit ${FAULT_EXIT}) — a bug in ${NAME}.mjs, not in what you typed\n${faultText(e)}\n`);
+    let retries = 0;
+    while (buf.length) {
+      try {
+        buf = buf.subarray(writeSync(2, buf));
+      } catch (writeErr) {
+        if (writeErr.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) break;
+        Atomics.wait(IDLE, 0, 0, 1);
+      }
+    }
   } catch {
     // Message may be lost; the exit code below must not be.
   }

@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText } from "./board.mjs";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -1316,6 +1317,40 @@ test("faultText renders any rejected value, so no fault prints an empty diagnost
   const e = new Error("boom");
   assert.equal(faultText(e), e.stack);
   assert.match(faultText(e), /\n\s+at /);
+});
+
+// #1547: fault() writes a full stack trace in a single writeSync(2, ...) call
+// — the same unlooped shape die()'s pre-#889 bug had (arg.mjs), and the
+// largest single payload of the four writeSync sites in this file. A short
+// write returns the count it actually wrote and throws nothing at all, so a
+// bare try/catch around one call never sees it and the diagnostic is
+// silently truncated with no error — the class ci-state.mjs's emit() had
+// before #885, and the reason #889 gave die()/verdict() a bounded retry loop.
+//
+// Racing a real reader into that exact non-blocking state to reproduce the
+// truncation live is what verdict()'s own NOT-PINNED comment (staleness.mjs)
+// already refuses to do for its pipe-closed case — a deterministic source-
+// shape pin is the established alternative (staleness.test.mjs's "verdict()'s
+// writeSync consumes its own return value in a loop", candidates.test.mjs's
+// die() pin). This is that same pin for fault().
+//
+// A body that still calls writeSync once and discards the count — `try {
+// writeSync(2, ...) } catch {}` — satisfies a pin that stops at `try {`, so
+// this one requires the loop that resumes from writeSync's own return value.
+// Each fragment is anchored at a line start and joined with `\s*^\s*`, and no
+// fragment is terminated with `$`, so a comment line added inside fault()
+// does not redden this and a trailing comment cannot satisfy it — the
+// anchoring candidates.test.mjs's die() pin documents in full.
+test("fault()'s writeSync consumes its own return value in a loop, not just a bare call", () => {
+  assert.equal(
+    stripComments(readFileSync(SCRIPT, "utf8")).match(/^\s*function fault\(/gm)?.length,
+    1,
+    "board.mjs declares fault() more than once, or not at all — the pin below reads the first",
+  );
+  assert.match(
+    stripComments(readFileSync(SCRIPT, "utf8")),
+    /^\s*function fault\(e\) \{\s*^\s*try \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(2, buf\)\);/m,
+  );
 });
 
 // board.mjs had no row in the design spec's script-surface table, so neither of
