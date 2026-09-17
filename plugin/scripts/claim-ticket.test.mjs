@@ -57,6 +57,26 @@ function claim(dir) {
 const TESTS = "t.test.mjs";
 const pkg = (o) => JSON.stringify(o);
 
+// `node --test` marks the processes it spawns, and an inherited mark makes
+// the runner's own `node --test` report to a parent that is not listening —
+// status 0 and not a byte of stdout. An artifact of testing a test runner
+// from inside one; strip it so these assertions see what a member sees.
+// FORCE_COLOR is stripped for the same reason: it reaches the runner's own
+// `node --test`, which then SGR-wraps its summary even into a pipe
+// (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
+// that reads that summary literally. A developer with FORCE_COLOR set is
+// exactly what these assertions have to survive, not exercise. Shared by
+// every fixture that spawns an emitted runner directly, not just `apply()` —
+// a `--write-runner` fixture inherits the same three variables and needs the
+// same strip.
+function runnerEnv() {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_TEST_WORKER_ID;
+  delete env.FORCE_COLOR;
+  return env;
+}
+
 // Runs the script for real and returns the emitted runner plus its worktree.
 // `--apply` labels the issue, so `gh` is stubbed; everything else — the
 // worktree, the install, the exclude file, the runner — is the real thing.
@@ -74,19 +94,7 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const wt = join(dir, ".worktrees", "42-slug");
-  // `node --test` marks the processes it spawns, and an inherited mark makes
-  // the runner's own `node --test` report to a parent that is not listening —
-  // status 0 and not a byte of stdout. An artifact of testing a test runner
-  // from inside one; strip it so these assertions see what a member sees.
-  // FORCE_COLOR is stripped for the same reason: it reaches the runner's own
-  // `node --test`, which then SGR-wraps its summary even into a pipe
-  // (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
-  // that reads that summary literally. A developer with FORCE_COLOR set is
-  // exactly what these assertions have to survive, not exercise.
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  delete env.NODE_TEST_WORKER_ID;
-  delete env.FORCE_COLOR;
+  const env = runnerEnv();
   return {
     wt,
     env,
@@ -512,6 +520,106 @@ test("runner: a resolution outside the worktree is judged from the divergence, n
     assert.equal(r.status, 0, `${arg}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m, arg);
   }
+});
+
+// The walk's EXACT-MATCH arm, `| "$shared"` (#1327). The test above pins the
+// anchor the walk produces; nothing pinned the arm that ENDS the walk when the
+// argument resolves TO an ancestor rather than under it. Deleting it reads as a
+// no-op — the next iteration's `"$shared"/*` matches the same path — and is not
+// one: it matches against a `$shared` one segment shorter, so
+// `${resolved#"$shared"}` gains a leading `/<basename of $resolved>`, and where
+// that basename is literally `node_modules` the guard refuses the shared
+// ancestor itself. That is the false refusal the walk's own comment already
+// names in prose — "a worktree living under one refused every directory
+// argument, including the bare invocation's implicit `.`" — asserted there and
+// unnoticed here: measured, deleting the arm left the rest of this file green.
+//
+// Two fixtures, because the arm is reached on two different iterations and the
+// mutations that reach them are disjoint. V1 breaks on the FIRST iteration
+// ($resolved IS $root); V2 on a later one ($resolved is a proper ancestor of
+// $root). Measured over five template variants, every cell run against an
+// emitted runner:
+//                                        V1 bare  V1 vendored  V2 ../../..
+//   `| "$shared"` deleted                RED      pass         RED
+//   `case "$1"/ in "$shared"/*`          pass     pass         pass
+//   `shared=${root%/*}`                  RED      pass         pass
+//   `shared=${shared%/*/*}`              pass     pass         RED
+//   guard skipped when $root is vendored pass     RED          pass
+// Row two is the behaviour-preserving rewrite of the same `case` — the equality
+// spelled as a slash-bound subject instead of its own alternative — and it has
+// to stay green, or these rows pin the spelling rather than the behaviour.
+// The vendored row is asserted on the MESSAGE, not the status: under the
+// over-exempt variant it still exits 1, with node's own `Could not find`, so
+// status alone cannot tell a guard that refused from one that was skipped and
+// handed node a path it drops (#100's silent shape — the same reason the
+// relative-spelling test above asserts its message too).
+//
+// The file arm needs no row of its own, and that is measured rather than
+// assumed. #1016 left ONE walk holding ONE such arm: it occurs exactly once in
+// this template, and deleting that occurrence changes exactly one line of the
+// emitted runner, so these rows pin it for both callers — and the mixed-argv
+// rows above already pin that the file arm re-runs the walk rather than reading
+// a stale `$shared`. The file caller cannot reach the arm in any case: it runs
+// only from the `else` of `[ -d "$arg" ]`, over `realpath`'s answer for a path
+// that is NOT a directory, while every value `$shared` can hold is `$root` or
+// one of its ancestors — all directories, so the equality can never hold.
+test("runner: the divergence walk ends on an argument that resolves TO the shared ancestor", () => {
+  // V1 — the runner's own directory is named `node_modules`, so a bare
+  // invocation's implicit `.` resolves to `$root` itself and the walk's first
+  // iteration is the equality. No claim can emit a runner there: the worktree
+  // is always `.worktrees/<issue>-<slug>`, which cannot be that name. So this
+  // uses `--write-runner` (already exercised further down this file) to emit
+  // straight into a `node_modules` destination instead of claiming normally
+  // and relocating the result byte-for-byte — same emitter, same bytes, no
+  // copy step, and no `gh` stub or worktree the assertions below never
+  // inspect.
+  const home = join(mkdtempSync(join(tmpdir(), "nm-")), "node_modules");
+  mkdirSync(home, { recursive: true });
+  const wr = spawnSync("sh", [SCRIPT, "--write-runner", join(home, "agent-test"), "42"], {
+    cwd: repo({ [TESTS]: "" }),
+    encoding: "utf8",
+  });
+  assert.equal(wr.status, 0, wr.stdout + wr.stderr);
+  writeFileSync(join(home, "a.test.mjs"), PASSES);
+  // Vendored content one level in, where the exemption is at its widest: the
+  // runner's own directory name IS the excluded word, and the guard still has
+  // to bite on a path that genuinely descends through another.
+  const vendor = join(home, "node_modules", "pkg");
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
+  const v1 = (...args) =>
+    spawnSync(join(home, "agent-test"), args, { cwd: home, encoding: "utf8", env: runnerEnv() });
+  // `pass 1`, not merely exit 0: the fixture holds two test files and one of
+  // them is vendored, so a count is what says the vendored one stayed out.
+  // It does NOT say the argument was honoured rather than dropped — measured,
+  // discarding the runner's own file-list handoff (`set -- "$@"` in place of
+  // `set -- "$@" $files`, claim-ticket.sh:834) leaves this row byte-identical
+  // at `pass 1`, because node's own default discovery from this cwd
+  // independently excludes the same vendored file too. V2's `pass 12` below
+  // is what pins the argument being honoured; this row does not.
+  const bare = v1();
+  assert.equal(bare.status, 0, bare.stdout + bare.stderr);
+  assert.match(bare.stdout, /^(?:ℹ|#) pass 1$/m);
+  const vendored = v1(join("node_modules", "pkg"));
+  assert.notEqual(vendored.status, 0, vendored.stdout + vendored.stderr);
+  assert.match(vendored.stderr, /is under node_modules — excluded from the run/);
+
+  // V2 — the runner where the claim actually put it, under a `node_modules`
+  // ancestor, with an argument naming that ancestor exactly:
+  // `42-slug` -> `.worktrees` -> `claim-XXXX` -> the `node_modules` itself.
+  // The walk reaches the equality three iterations down rather than on the
+  // first, and the runner is unmoved, so this row cannot be dismissed as an
+  // artifact of relocating one.
+  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  mkdirSync(under, { recursive: true });
+  const a = apply(SUITE, SCRIPT, under);
+  // 12: the six test files of the committed fixture, once in the repo's own
+  // checkout and once in the worktree built from it, both under the named
+  // ancestor. Bare discovery from the worktree reports 6, so the count also
+  // says the argument reached node instead of being dropped.
+  const r = a.run(join("..", "..", ".."));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 12$/m);
 });
 
 // The guard resolves `$arg` against the process cwd, but `$root` against the
