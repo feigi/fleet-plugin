@@ -31,14 +31,26 @@ comment.** That is the mechanism being asked for, in the only form that does not
 duplicate the judgement — it forces the question rather than answering it.
 
 **The drift class cited as motivation is closed.** The retired "faces refuters"
-rationale did once survive in three places at once. Re-measured when this record
-was written: `workflows/review-pr.js:404` and
-`select-dimensions.test.mjs:218,238` now carry it **only as an explicit
-negation** — *"NOT because those four alone face refuters"*. The remaining hits
-are in `docs/specs/` and `docs/plans/`, which are dated records of what was
-decided on 2026-08-06, and the spec carries its own correction at `:179`
-(*"'faces refuters' cannot be what puts one on"*). There is no live surface
-still asserting the retired rule.
+rationale did once survive in three places at once. Both live sites now carry it
+**only as an explicit negation**: the comment above `SIZE_TIER_DIMS` in
+`workflows/review-pr.js` reads *"NOT because those face refuters"*, and the
+comment above `select-dimensions.test.mjs`'s "the refuter budget is keyed on
+severity alone, never on a dimension" test says of the retired rationale that it
+*"was never able to separate these six"*. The remaining hit is in `docs/specs/`,
+a dated record of what was decided on 2026-08-06, and
+the spec carries its own correction in the paragraph opening *"Corrected after
+implementation (#221)"* (*"'faces refuters' cannot be what puts one on"*). There
+is no live surface still asserting the retired rule.
+
+Cited by content for the reason given one paragraph up, and #1130 is why that
+reason is restated here rather than left implied. When this record was written
+both live sites were cited by line, at `:404` and `:218,238`; every one of those
+numbers has since moved. The `review-pr.js` negation drifted in wording too — it
+read "those four alone" until #218 put `comments` on the size-tier floor and left
+three — so the pointer and the quotation rotted together, and re-grepping the old
+quote now finds nothing rather than finding it moved.
+`review-pr-inbound-citation-prose.test.mjs` pins each quotation above against the
+block it names, in both directions.
 
 **A pin over the rule prose itself would be vacuous.** A positive regex over a
 comment block is anchored by its slice size, not by its content, and this repo
