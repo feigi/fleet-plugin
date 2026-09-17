@@ -671,12 +671,30 @@ function runCheck() {
       // `.git` gitfile. Do not name one of them — carry git's own reason,
       // because this call leaves stdio at the default pipe, so git's stderr
       // reaches no terminal and this string is the only place the cause is
-      // ever seen (the same call the gh catch below makes, #176). Capped for
-      // the same reason too: it ships on stdout inside `tracker.error` — see
-      // cause(), which owns both the cap and the choice between the fields a
-      // failed git can put a reason in. Empty here is a tolerable answer where
-      // it is not for the gh catch below: the message this interpolates into
-      // still names the probe that failed and the path it failed on.
+      // ever seen (the same call the gh catch below makes, #176). The CAUSE is
+      // capped for the same reason: it ships on stdout inside `tracker.error`
+      // — see cause(), which owns both that cap and the choice between the
+      // fields a failed git can put a reason in. Empty here is a tolerable
+      // answer where it is not for the gh catch below: the message this
+      // interpolates into still names the probe that failed and the path it
+      // failed on.
+      //
+      // That cap covers the cause and NOTHING else. `tracker.error` as a whole
+      // is deliberately unbounded here, because the directory interpolates
+      // raw: the field measured 1100 characters from a 557-character
+      // directory, a cause already cut to 500, and 43 of fixed text (#940).
+      // Capping the directory would buy the payload no ceiling — `subject`
+      // and `tracker.query` ride in the same JSON uncapped: as JSON fields
+      // from a 3000-character subject word they measure 3012 and 3010
+      // characters respectively (the 2-char gap is `query` being a shorter
+      // key than `subject`, not a difference in the values) — and it would
+      // cut the path the probe actually failed on, which is what this
+      // message is for.
+      // cause() is the wrong instrument for it twice over: it keeps the END,
+      // so on a path it drops the root and returns a `…`-prefixed string that
+      // reads like a path and is not one, and what it exists to contain is a
+      // child's stderr, which nothing bounds, where the climb above leaves
+      // this a path that exists.
       //
       // Either way there is no repository for the query to bind to — the same
       // state as this process's own cwd not being a repo, which already
