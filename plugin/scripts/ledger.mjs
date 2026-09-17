@@ -157,34 +157,56 @@ function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
-// #584: every subcommand that reads a free-text tail — `check`, `filed`,
-// `row` and `ruled` alike, not only the pair the ticket opened on — takes a
-// tail where a `--`-prefixed token can legitimately BE the data (arg.mjs's
-// makeSweep() comment names why sweep() stays out of this file). What
-// separates a stray flag from that data is length: the calling convention
-// hands the subject as ONE argument, so an unquoted stray reveals itself by
-// making the tail longer than that one argument allows. `check --requre-file
-// "widget guard missing"` is a two-element tail; `check "--require-file
-// silently absent when value missing"` is one. A one-element tail is accepted
-// unchanged, whatever it starts with; a multi-element tail carrying a
-// `--`-prefixed element is refused by name. Structural, not a distance
-// threshold.
+// #584: a `--`-prefixed token in `check`'s free-text tail used to fold
+// straight into the duplicate-filing subject, so a misspelled flag searched
+// for a DIFFERENT subject and read "safe to file" where the correct spelling
+// answers ALREADY FILED at exit 1. A `--` token can legitimately BE that data
+// (arg.mjs's makeSweep() comment names why sweep() stays out of this file),
+// so what separates a stray flag from data is length: `check`'s documented
+// calling convention hands the subject as ONE argument, so an unquoted stray
+// reveals itself by making the tail longer than that one argument allows.
+// `check --requre-file "widget guard missing"` is a two-element tail; `check
+// "--require-file silently absent when value missing"` is one. A one-element
+// tail is accepted unchanged, whatever it starts with; a multi-element tail
+// carrying a `--`-prefixed element is refused by name. Structural, not a
+// distance threshold.
 //
-// The convention that rests on is documented for `check` alone
-// (run-team/SKILL.md, review-and-fix.md). `filed`, `row` and `ruled` are
-// spelled UNQUOTED everywhere the tree documents them, this file's own usage
-// strings included; #1161 tracks closing that gap and holds the measurements.
+// `check`'s tail ALONE — narrower than #584's first pass, which called this
+// from `filed`, `row` and `ruled` too. The length rule is only sound where
+// the documented convention IS one quoted argument, and `check` is the only
+// subcommand where it is: both places that instruct a caller to run it spell
+// it `ledger.mjs check "<subject>"` (run-team/SKILL.md's finisher step,
+// review-and-fix.md's filing step), while run-team/SKILL.md's ledger section
+// spells the other three `filed <issue> <subject>`, `row <ticket> <text>` and
+// `ruled <pr> <decision>` — a bare multi-word tail, as did this file's own
+// usage strings for them. Applied there, the rule refused what the docs
+// prescribe: measured on the tree ahead of this narrowing, `filed 999 the
+// --basee flag is unread`, `row 42 the --basee flag is unread` and `ruled 77
+// the --basee flag is unread` each exited 2, where the tree before #584
+// (07dc927) answered all three at exit 0. #1161 ruled the guard back to
+// `check` rather than respelling three conventions SKILL.md carries, two
+// other tickets holding that file open.
 //
-// The cost is real and is what #365's AC prices, so it is stated rather than
-// denied: a legitimate subject carrying a `--` word anywhere, given unquoted,
-// was accepted before this guard and is refused by it — `check the --basee
-// flag is unread` answered at exit 0 before and exits 2 now, and the same
-// holds for the other three. Quoting the subject accepts it unchanged. The
-// trade the ticket ruled for is that this refusal is loud and recoverable
-// where the wrong-subject answer it replaces was silent.
+// Narrowing it is not giving up #584's signature on those three: that reaches
+// them through the ID slot one token to the LEFT, and refuseStrayInId() below
+// still refuses it there. What the tail rule covered on them beyond that slot
+// was a `--` word no rule can tell apart from the subject a caller typed —
+// which is why it is the DOCUMENTED convention, not the hazard, that decides
+// where the length rule may be read at all.
 //
-// Narrowed, not closed: a lone stray with no subject beside it is a
-// one-element tail, so it is still taken as the subject and answered at
+// The cost `check` keeps is real and is what #365's AC prices, so it is
+// stated rather than denied: a legitimate subject carrying a `--` word
+// anywhere, given unquoted, was accepted before this guard and is refused by
+// it — `check the --basee flag is unread` answered at exit 0 before and exits
+// 2 now. Quoting the subject accepts it unchanged. The trade the ticket ruled
+// for is that this refusal is loud and recoverable where the wrong-subject
+// answer it replaces was silent. One residual of that trade is not this
+// file's to close: SKILL.md's ledger section spells `check <subject>`
+// unquoted inside the same entry that spells `filed <issue> <subject>`, where
+// the two instructions that tell a caller to RUN it quote the subject.
+//
+// Narrowed on `check` too, not closed: a lone stray with no subject beside it
+// is a one-element tail, so it is still taken as the subject and answered at
 // exit 0. Harmless because it then searches for a string nothing matches, and
 // ledger.test.mjs's degenerate-subject case pins it so it stays deliberate.
 function refuseStrayInTail(tail) {
@@ -193,14 +215,16 @@ function refuseStrayInTail(tail) {
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
-// The id slot AHEAD of that tail is a second hazard needing a different rule.
-// A stray flag one token earlier lands in `issue`/`ticket`/`pr`, and the tail
-// left behind carries no `--` element at all, so refuseStrayInTail() passes
-// it. Widening that rule to cover it is what cannot be done: the same helper
-// over the whole of `rest` refuses `filed <issue> "--flag-like subject"` too,
-// which is a two-element tail with a `--` element and is pinned here as
-// must-keep-working. An id is never legitimately `--`-prefixed, so this slot
-// takes the bare prefix test the tail cannot have.
+// The id slot ahead of `filed`/`row`/`ruled`'s tail is a hazard of its own,
+// and the only one of the three a rule can act on. refuseStrayInTail() above
+// is not read on those subcommands at all (#1161), and would not catch this
+// shape if it were: a stray flag one token earlier lands in
+// `issue`/`ticket`/`pr`, and the tail left behind carries no `--` element to
+// find. Nor could that helper be read over the whole of `rest` instead — that
+// refuses `filed <issue> "--flag-like subject"` too, a two-element tail with
+// a `--` element, pinned here as must-keep-working. An id is never
+// legitimately `--`-prefixed, so this slot takes the bare prefix test a
+// free-text tail cannot have.
 function refuseStrayInId(value, what) {
   if (value.startsWith("--")) die(`unknown flag ${value} — expected ${what}`);
 }
@@ -316,7 +340,6 @@ if (cmd === "read") {
   // lookup below matches on — so the real ticket's next `row` call finds no
   // match and appends a second row instead of rewriting the first.
   refuseStrayInId(ticket, "a ticket number");
-  refuseStrayInTail(textParts);
   const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
   const line = `${key} ${textParts.join(" ")}`;
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
@@ -334,13 +357,14 @@ if (cmd === "read") {
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
-  // This slot is where #584's own signature survives the tail guard: a stray
-  // flag here shifts the issue number into the subject, and the row it writes
-  // no longer answers the subject a later `check` asks about — that check
-  // reports not-filed at exit 0 where the correctly-spelled filing makes it
-  // report already-filed at exit 1.
+  // This slot is where #584's own signature reaches `filed`, and the only
+  // place on this subcommand a rule can meet it: a stray flag here shifts the
+  // issue number into the subject, and the row it writes no longer answers the
+  // subject a later `check` asks about — that check reports not-filed at exit
+  // 0 where the correctly-spelled filing makes it report already-filed at
+  // exit 1. The tail behind this slot is documented unquoted and so takes no
+  // length rule (#1161); the id is not, and takes this one.
   refuseStrayInId(issue, "an issue number");
-  refuseStrayInTail(subjectParts);
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
   save(data);
@@ -350,10 +374,10 @@ if (cmd === "read") {
   if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
   // Nothing reads this section back — save() is its only consumer — so the
   // harm here is the narrowest of the three: a permanently wrong decision
-  // record in an append-only file, with no verdict riding on it. Guarded
-  // anyway because the shape is identical and the record is the point.
+  // record in an append-only file, with no verdict riding on it. The id slot
+  // is guarded anyway because the shape is identical and the record is the
+  // point.
   refuseStrayInId(pr, "a PR number");
-  refuseStrayInTail(decisionParts);
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
   save(data);
@@ -410,7 +434,12 @@ function runCheck() {
   }
   refuseStrayInTail(rest);
   const subject = rest.join(" ");
-  if (!subject) die("usage: ledger.mjs check <subject>");
+  // Quoted here, unlike the three usage strings above, because
+  // refuseStrayInTail() is the reason: `check` is the subcommand whose tail
+  // must arrive as ONE argument, and this is the only spelling of its call
+  // inside the script (#1161). The other three take their tail as the words a
+  // caller typed.
+  if (!subject) die("usage: ledger.mjs check \"<subject>\"");
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const tokenSet = (s) => new Set(norm(s).split(/\s+/).filter(Boolean));
   const target = tokenSet(subject);
