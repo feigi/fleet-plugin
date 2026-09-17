@@ -25,6 +25,8 @@
 //            gate, and a guard that fires on ordinary runs becomes noise the
 //            controller learns to ignore, which is the same defect wearing a
 //            different hat.
+//            One accepted case is NOT an ordinary run: a mode-only change to
+//            a tracked instrument, which a content digest cannot see (#1059).
 //
 // Every case builds a throwaway checkout and runs the script with its cwd set
 // to it — the script resolves the tree to measure from $PWD (or --repo), so a
@@ -360,6 +362,35 @@ test("a bare touch is accepted — content is hashed, not the stat cache", (t) =
   utimesSync(join(root, SET, "scripts", "ci-state.mjs"), later, later);
   const r = run(root);
   assert.equal(r.status, 0, r.stderr);
+});
+
+// The gap instruments.sh's own header now names, pinned from the accept side
+// so that folding modes into the digest goes red HERE and sends whoever does
+// it at that paragraph, rather than leaving the file claiming a coverage it
+// stopped having. Both halves of #1059's repro: the worktree bit and the
+// index entry.
+test("a mode-only change to a tracked instrument is accepted — modes are not in the digest", (t) => {
+  const root = repo(t);
+  pin(root);
+  const rel = join(SET, "scripts", "ci-state.mjs");
+  chmodSync(join(root, rel), 0o755);
+  // `diff --summary` rather than `status --porcelain`: this file's `git`
+  // helper trims, and porcelain's worktree-only column IS a leading space.
+  assert.match(
+    git(root, "diff", "--summary", "--", rel),
+    /^mode change 100644 => 100755 /,
+    "git sees the worktree mode flip",
+  );
+  const worktreeHalf = run(root);
+  assert.equal(worktreeHalf.status, 0, worktreeHalf.stderr);
+  // Through the index: the blob is identical, only the entry's mode moves.
+  const before = git(root, "ls-files", "-s", "--", rel);
+  git(root, "update-index", "--chmod=+x", "--", rel);
+  const after = git(root, "ls-files", "-s", "--", rel);
+  assert.match(after, /^100755 /);
+  assert.equal(after.split(/\s+/)[1], before.split(/\s+/)[1], "the blob is untouched");
+  const indexHalf = run(root);
+  assert.equal(indexHalf.status, 0, indexHalf.stderr);
 });
 
 test("branch and worktree churn in the shared ref store is accepted", (t) => {

@@ -55,6 +55,27 @@
 # change that lands on the same size and mtime does not reach it, and a bare
 # `touch` does. This hashes bytes, so it accepts a touch and refuses a rewrite.
 #
+# MODES ARE NOT IN THE DIGEST, and that one is a GAP rather than a trade: a
+# mode-only change to a tracked instrument is ACCEPTED. Measured — `chmod +x`
+# on a tracked `100644` instrument leaves `git status` printing ` M` for it,
+# and `git update-index --chmod=+x` moves the index entry to `100755` with the
+# blob untouched; both exit 0 here. A mode change that costs the hash its READ
+# is caught instead: `chmod 000` on a tracked instrument refuses at exit 2
+# through `could not hash every tracked file` — as root that never fires,
+# since root reads a mode-000 file regardless (instruments.test.mjs skips
+# this case there for the same reason). So the exposure is the bits that
+# still permit reading, the exec bit above all — and that bit is not how a
+# fleet probe runs: fleet-run hands `.sh` to `sh` and `.mjs` to `node`, so a
+# stripped `+x` is invisible through the Resolver, while invoking one by path
+# instead is EACCES at exec (126), loud rather than a wrong verdict. Folding
+# modes in — digesting `git ls-files -s` alongside the contents, or a per-file
+# `[ -x "$f" ]` — is a behaviour change to the gate on a channel with no
+# silently wrong reading to its name, and whether a mode-only edit is worth
+# refusing on is a decision rather than a fix, so #1059 names the gap and
+# leaves the behaviour alone. instruments.test.mjs pins the accepted pair,
+# so closing the gap later goes red there rather than leaving this
+# paragraph stale.
+#
 # REFS ARE DELIBERATELY NOT IN THE DIGEST, and the reason is not that they do
 # not matter. The corroborating evidence on #436 is a stray `fix/42-slug` branch
 # left in the main checkout by something running this repo's own fixtures — a
