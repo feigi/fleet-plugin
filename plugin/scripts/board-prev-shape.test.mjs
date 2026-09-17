@@ -102,3 +102,21 @@ test("gather: a previous board whose `tickets` is a number is ignored, not fatal
   assert.ok(lines[0].includes(r.prevFile), `diagnostic must name the file: ${lines[0]}`);
   assert.match(lines[0], /expected tickets to be an array, got number/);
 });
+
+// The case an `Array.isArray(tickets)` check alone lets straight through, and
+// the second one the ticket names: `[null]` IS an array, so it clears the
+// container check and throws one line later on the per-entry `t.pr` read. The
+// whole payload is refused rather than the bad entry filtered out — validation
+// happens once, where the payload enters, and a board with one unreadable
+// ticket is not a board whose OTHER tickets can be trusted to carry CI state
+// forward.
+test("gather: a `tickets` array holding a non-object is ignored, not fatal (#1192)", () => {
+  const r = gathered('{"tickets": [null]}');
+  assert.equal(r.ci[42], "unknown");
+  const lines = ignoreLines(r.stderr);
+  assert.equal(lines.length, 1, `expected exactly one diagnostic, got:\n${r.stderr}`);
+  assert.ok(lines[0].includes(r.prevFile), `diagnostic must name the file: ${lines[0]}`);
+  // The index, because a real board carries dozens of tickets and "one of them
+  // is wrong" is not a diagnostic anybody can act on.
+  assert.match(lines[0], /expected tickets\[0\] to be a JSON object, got null/);
+});

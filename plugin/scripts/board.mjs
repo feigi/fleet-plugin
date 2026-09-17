@@ -651,6 +651,18 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
       // Only a present-and-wrong-typed one is a fault.
       if (p.tickets != null && !Array.isArray(p.tickets))
         throw new TypeError(`expected tickets to be an array, got ${typeof p.tickets}`);
+      // Per ENTRY too, and not because a `[null]` is exotic: `Array.isArray`
+      // is satisfied by an array of anything, and the very next thing the
+      // prevCi map does is read `t.pr` off each element. The whole payload
+      // goes, not the bad entry — a board with one unreadable ticket is not a
+      // board whose others can be trusted to carry CI state forward, and
+      // filtering here would make this read the fourth policy for one payload
+      // class rather than the second.
+      const bad = (p.tickets ?? []).findIndex((t) => typeof t !== "object" || t === null || Array.isArray(t));
+      if (bad !== -1) {
+        const t = p.tickets[bad];
+        throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${t === null ? "null" : Array.isArray(t) ? "array" : typeof t}`);
+      }
       prev = p;
     }
     catch (e) { console.error(`${NAME}: ignoring unreadable prev board ${prevFile}: ${e.message}`); }
