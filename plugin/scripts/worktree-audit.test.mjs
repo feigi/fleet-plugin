@@ -132,6 +132,83 @@ test("a clean readable worktree ahead of base is reported with real counts", (t)
   assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
 });
 
+test("a local ref shadowing `origin/main` does not read the ahead count as 0 (#1329)", (t) => {
+  // release-ticket.sh (#1320) already measured this class: `origin/main` is a
+  // SHORTHAND, and git resolves a shorthand through its own disambiguation
+  // order (gitrevisions: refs/<name>, refs/tags/<name>, refs/heads/<name>,
+  // refs/remotes/<name>, …), in which refs/remotes/origin/main comes LAST. A
+  // local TAG literally named `origin/main` outranks the real remote-tracking
+  // branch, so `rev-list --count "$base"..HEAD` against the bare shorthand
+  // answers about the tag's target instead — silently, at rc 0, with nothing
+  // on stderr distinguishing it from a genuinely clean worktree. This script's
+  // own header comment (#82, #128) says an ahead:0/dirty:0 entry tells the fleet
+  // controller "nothing here", so a wrong 0 is not just an inaccurate number,
+  // it is a false "safe to discard" for a worktree that genuinely carries
+  // unpushed work.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work that exists nowhere else");
+
+  // Pointed at the worktree's own tip, the cheapest way to plant a colliding
+  // ref that makes the bare shorthand resolve to a commit already equal to
+  // HEAD — the shape that reads `ahead: 0` if the measurement is not
+  // requalified.
+  git(w, "tag", "origin/main", "refs/heads/fix/9-x");
+  assert.equal(
+    git(w, "rev-parse", "origin/main"),
+    git(w, "rev-parse", "refs/heads/fix/9-x"),
+    "fixture: the shorthand now resolves to the worktree's own tip",
+  );
+  assert.notEqual(
+    git(w, "rev-parse", "refs/remotes/origin/main"),
+    git(w, "rev-parse", "refs/heads/fix/9-x"),
+    "fixture: the real upstream is still a different, older commit",
+  );
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.ahead, 1, "must measure against refs/remotes/origin/main, not the shadowing tag");
+  assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
+});
+
+test("BASE_REF already qualified as refs/remotes/<name> is used as-is, not double-prefixed (#1329)", (t) => {
+  // The qualify step's `refs/remotes/*) base_rev=$base;;` arm exists to avoid
+  // turning an already-qualified BASE_REF into the nonsense
+  // `refs/remotes/refs/remotes/origin/main`. Nothing above this test ever set
+  // BASE_REF to a refs/remotes/-qualified value, so this arm ran on every
+  // fixture only by falling through the OTHER arm never firing — a bug that
+  // silently double-prefixed here would still show every other test green.
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work that exists nowhere else");
+
+  const { code, json, stderr } = runAudit(w, { env: { BASE_REF: "refs/remotes/origin/main" } });
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.ahead, 1, "an already-qualified BASE_REF must resolve, not be rejected or double-prefixed");
+  assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
+});
+
+test("BASE_REF spelled outside the remote-tracking namespace is refused, not silently mis-qualified (#1329)", (t) => {
+  // Before the accept-list, the qualify step below unconditionally prepended
+  // `refs/remotes/` to whatever BASE_REF was. A caller-supplied `refs/heads/
+  // main` — a shape sibling scripts (reap.sh, release-ticket.sh) also reject —
+  // turned into `refs/remotes/refs/heads/main`, which resolves nowhere, and
+  // the die message named the ORIGINAL `refs/heads/main` as "does not
+  // resolve" even though `refs/heads/main` itself resolves fine — the
+  // qualification this script chose to make was the actual cause, misspelled
+  // as a bad guess by the caller. The accept-list turns that into a refusal
+  // naming the real constraint before the qualify step ever runs.
+  const w = repo(t);
+  addWorktree(w, "fix/9-x");
+
+  const { code, json, stderr } = runAudit(w, { env: { BASE_REF: "refs/heads/main" } });
+  assert.equal(code, 2);
+  assert.equal(json, null);
+  assert.match(stderr, /BASE_REF must be a remote-tracking ref, got 'refs\/heads\/main'/);
+});
+
 test("a dirty worktree lists its dirty files and their count", (t) => {
   const w = repo(t);
   const wt = addWorktree(w, "fix/9-x");
@@ -1020,7 +1097,7 @@ const exit2Cell = () => specRow().split("|")[4];
  * where the closed list does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 only — any argument at all (#525), not a repository, `${BASE_REF:-origin/main}` does not resolve, `json.sh` or `worktree.sh` is missing, unreadable or failed to load (both guards fire above the opening `[`, so nothing is emitted), the `git worktree list` the audit is assembled from could not be read (#551), or an entry could not be escaped (#119) — that one fires inside the emitting loop, so stdout carries the array truncated mid-element and unparseable, which the exit 2 and the named stderr line are what distinguish from a complete answer.";
+  "exit 2 only — any argument at all (#525), not a repository, `BASE_REF` does not name a remote-tracking ref (#1329), `${BASE_REF:-origin/main}` does not resolve, `json.sh` or `worktree.sh` is missing, unreadable or failed to load (both guards fire above the opening `[`, so nothing is emitted), the `git worktree list` the audit is assembled from could not be read (#551), or an entry could not be escaped (#119) — that one fires inside the emitting loop, so stdout carries the array truncated mid-element and unparseable, which the exit 2 and the named stderr line are what distinguish from a complete answer.";
 
 /**
  * The clause that collapses this script's four library refusals into one
@@ -1051,6 +1128,7 @@ const CAUSES = new Map([
   ["cannot read $wt_lib — refusing to audit without the worktree readers", LIBRARY_CLAUSE],
   ["$wt_lib failed to load", LIBRARY_CLAUSE],
   ["not inside a git repository", "not a repository"],
+  ["BASE_REF must be a remote-tracking ref, got '$base'", "`BASE_REF` does not name a remote-tracking ref (#1329)"],
   ["$base does not resolve", "`${BASE_REF:-origin/main}` does not resolve"],
   ["$wt_err", "the `git worktree list` the audit is assembled from could not be read (#551)"],
   ["could not escape the entry for $wt", "an entry could not be escaped (#119)"],
