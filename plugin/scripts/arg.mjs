@@ -105,19 +105,33 @@ import { writeSync } from "node:fs";
 // through to Node's default exit 1 — inverting the caller's own exit-code
 // contract (#299/#328). The loop below mirrors emit() (#885): it resumes a
 // short write where writeSync left off, and retries EAGAIN after a 1ms
-// Atomics.wait; the catch still keeps the exit code landing regardless of
-// what the write does.
+// Atomics.wait, capped at MAX_EAGAIN_RETRIES so a reader that never drains
+// still reaches process.exit(2) instead of hanging forever; the outer try
+// covers msg's own string coercion too, so a throwing msg can never skip
+// the exit code either.
+const MAX_EAGAIN_RETRIES = 200;
+
+// Shared across every retry: Atomics.wait never writes or notifies it, so one
+// instance times out exactly as a fresh one would, without allocating a
+// SharedArrayBuffer on every EAGAIN.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
 export function makeDie(name) {
   return function die(msg) {
-    let buf = Buffer.from(`\n${name}: ${msg}\n`);
-    while (buf.length) {
-      try {
-        buf = buf.subarray(writeSync(2, buf));
-      } catch (e) {
-        // Message may be lost; the exit code below must not be.
-        if (e.code !== "EAGAIN") break;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    try {
+      let buf = Buffer.from(`\n${name}: ${msg}\n`);
+      let retries = 0;
+      while (buf.length) {
+        try {
+          buf = buf.subarray(writeSync(2, buf));
+        } catch (e) {
+          // Message may be lost; the exit code below must not be.
+          if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) break;
+          Atomics.wait(IDLE, 0, 0, 1);
+        }
       }
+    } catch {
+      // Message (or its own construction) may be lost; the exit code below must not be.
     }
     process.exit(2);
   };

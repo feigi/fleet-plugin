@@ -135,6 +135,60 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
   assert.equal(r.status, 2, `exit ${r.status}: die()'s writeSync threw and took the exit code with it`);
 });
 
+// die()'s EAGAIN retry loop resumes short writes and waits out transient
+// backpressure, but #889's loop originally had no cap: a stderr reader that
+// stays open but never drains — not just a slow one — left writeSync
+// throwing EAGAIN forever, so process.exit(2) never ran and the guarantee
+// this file exists to keep was traded for an indefinite hang.
+// MAX_EAGAIN_RETRIES bounds it: past the cap the loop gives up on the
+// message and falls through to exit 2 anyway, same as a non-EAGAIN error
+// already did.
+//
+// Reproduced with a real non-blocking pipe, not a mock: fcntl sets O_NONBLOCK
+// on the write end before the child ever touches it, so the OS — not a stub
+// — is what throws EAGAIN. The read end is held open but never read, which is
+// the case this pins: closing it instead would make every write EPIPE, a
+// different (already-handled) failure this loop's cap is not needed for.
+test("die() exits 2 within a bound even when stderr is a saturated pipe whose reader never drains — #889's retry cap", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = mkdtempSync(join(tmpdir(), "arg-die-stall-"));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { makeDie } from "./arg.mjs";',
+    'makeDie("probe")("refused");',
+    "",
+  ].join("\n"));
+
+  const harness = [
+    "import fcntl, os, subprocess, sys, time",
+    "r, w = os.pipe()",
+    "fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
+    "try:",
+    "    while True:",
+    "        os.write(w, b'x' * 65536)",
+    "except BlockingIOError:",
+    "    pass",
+    "start = time.time()",
+    "proc = subprocess.Popen(sys.argv[1:], stderr=w, stdout=subprocess.DEVNULL)",
+    "os.close(w)",
+    "try:",
+    "    code = proc.wait(timeout=5)",
+    "except subprocess.TimeoutExpired:",
+    "    proc.kill()",
+    "    proc.wait()",
+    "    print('TIMEOUT')",
+    "    sys.exit(1)",
+    "print(f'EXIT={code} ELAPSED={time.time() - start:.3f}')",
+  ].join("\n");
+
+  const r = spawnSync("python3", ["-c", harness, process.execPath, join(dir, "run.mjs")], { encoding: "utf8" });
+  assert.match(
+    r.stdout,
+    /^EXIT=2 ELAPSED=\d/m,
+    `die() must exit 2 within the bound against a permanently saturated pipe; got stdout=${r.stdout} stderr=${r.stderr}`,
+  );
+});
+
 // The three scripts #328 names plus fleet-tick, end to end. Each forwards gh's
 // own stderr (execFileSync with no `stdio`, so Node re-emits it through the
 // ASYNC process.stderr) and only then refuses through die() — so the flood has

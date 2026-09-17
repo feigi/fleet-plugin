@@ -224,11 +224,12 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 //     a repeated run and absent in one isolated shot, so n=1 is not evidence
 //     here in either direction, including a single green run of this test.
 //   - One 25-run sample of the FIXED build lost the refusal 1/25, with a
-//     546,301-byte outlier. That is #889 — die()'s writeSync is unlooped, so a
-//     non-blocking pipe can short-write it — not this gate's subject. It did
-//     not recur over 100 further runs, and the whole test flaked 0/30 end to
-//     end. If this test ever does red on a correct build, that is the cause and
-//     #889 is the fix; do not re-gate this on the platform for it.
+//     546,301-byte outlier. That was #889 — die()'s writeSync used to be
+//     unlooped, so a non-blocking pipe could short-write it — not this gate's
+//     subject. It did not recur over 100 further runs, and the whole test
+//     flaked 0/30 end to end. #889 landed die()'s bounded EAGAIN-retry loop
+//     (arg.mjs); if this test ever goes red on a correct build now, the
+//     cause is elsewhere.
 //
 // Nothing about the EAGAIN exit-code inversion (#299/#328) is claimed here.
 // That is the other half of this file family — probabilistic, and genuinely
