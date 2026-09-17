@@ -707,7 +707,15 @@ ${environmentNote(snap)}
 
 A failure you cannot separate from the environment is neither a finding nor a
 reason to file nothing — say which it is, beside the counts, in \`test_run\`.
-Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else.
+Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else. Chain the
+directory change into the command, \`cd "$D" && git …\`, never
+\`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
+checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
+before \`git init\` it must NOT resolve to the repository, and a fresh scratch
+dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
+before any \`git commit\` it must resolve to your scratch path — compare
+resolved forms (\`realpath\`), since \`--show-toplevel\` can report
+\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs
 in 'suggestion', not 'critical'. State your search scope for every negative
