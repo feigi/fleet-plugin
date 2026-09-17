@@ -209,10 +209,10 @@ For each labeled PR clearing the hold rule, lowest first:
    **Re-check the instrument set before you act on this gate's reading, the same way the controller re-checks before its own gates** (`run-team/SKILL.md`, **You read your instruments out of a tree every member can write to**). That rule is stated once, in the controller's file, and nothing dispatches a merge bot to read it — so this seat carries its own copy or runs the gate unchecked. Exit 0 is the only code that lets this gate proceed; exit 1 (the set changed) and exit 2 (the check could not answer) both refuse — report `instrument-set-changed-#<pr>` with what it printed, leave the label alone, and do **not** re-read the gate.
 
    ```bash
-   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(git rev-parse --git-common-dir)")"
+   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"
    ```
 
-   `--repo` is not optional at this seat, and the spelling is the load-bearing half. The baseline the run pinned lives in the audited checkout's gitignored `.fleet/`, which a worktree does not carry, so a bare invocation from one exits **2** on a missing baseline instead of comparing anything — a permanent refusal that reads exactly like a real one. `--git-common-dir` names the directory every worktree shares, the same resolution `ledger.mjs` uses to reach the run's one ledger, so this one spelling answers identically from the audited checkout and from any worktree under it.
+   `--repo` is not optional at this seat, and the spelling is the load-bearing half. The baseline the run pinned lives in the audited checkout's gitignored `.fleet/`, which a worktree does not carry, so a bare invocation from one exits **2** on a missing baseline instead of comparing anything — a permanent refusal that reads exactly like a real one. `--git-common-dir` names the directory every worktree shares, the same resolution `ledger.mjs` uses to reach the run's one ledger, so this one spelling answers identically from the audited checkout and from any worktree under it. The `env -u GIT_DIR -u GIT_WORK_TREE` wrapper is not decoration: those two variables are read from the *caller's* environment before the substitution ever runs, so an ambient `GIT_DIR` left over from another repo silently points this gate at the wrong tree — `instruments.sh`'s own internal unset (its line 101) cannot reach back and fix a path its caller already resolved wrong.
 
    ```bash
    ~/.fleet/bin/fleet-run ci-state.mjs --pr <pr>
@@ -232,6 +232,14 @@ For each labeled PR clearing the hold rule, lowest first:
    confirmation of it, since the flag only echoes itself back. Without it you'd
    read a legitimately labeled PR as stuck red forever, off a run that will
    never exist.
+
+   **Re-check the instrument set once more, immediately before you merge.** The check above ran before `ci-state.mjs`, not before the write below — and CI waits (Watch checks settle) can put minutes between the two — so it does not cover the window this step is about to act in. The finisher's copy takes the same second check before it labels (`run-team/SKILL.md`, **Give the finisher the instrument re-check verbatim too**); this seat's analogous last write is the merge itself:
+
+   ```bash
+   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"
+   ```
+
+   Same rule as above: exit 0 only. Exit 1 or 2 → report `instrument-set-changed-#<pr>`, leave the label alone, do not merge, and do not re-read the gate.
 
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
