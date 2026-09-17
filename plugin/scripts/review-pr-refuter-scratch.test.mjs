@@ -208,13 +208,75 @@ test("every refuter's scratch path stays under the run's provisioned scratch roo
 // write targets" into the `git show` exemption, so the exemption bounds the tail
 // instead of leaving it open — the read permission the test below asserts in its
 // own right is what closes this rule.
+//
+// #1088. The gap between the two halves is asserted STRUCTURALLY, not by a
+// character budget. It was `.{0,200}` and the prose uses 182, so the entire
+// resistance to a spliced exception was 18 bytes of slack — porous and brittle
+// in the same 18. Splicing "Except fixtures." (+17) left all 10 tests green,
+// while "Fixtures excepted." (+19) — the same sentence, two bytes longer — red;
+// and innocent growth of the middle sentence past 18 chars red as a FALSE
+// positive. No value fixes that, because a byte budget cannot state a semantic
+// property: lowering it shrinks the porous half and grows the brittle one.
+//
+// So the gap names exactly ONE sentence — the sibling-collision sentence's
+// opening, its body, its single terminator — with only whitespace at each
+// boundary. A first cut at the body, `[^.!?]*`, traded the budget's false
+// positive for a new one: any `.`/`!`/`?` landing inside the sentence's own
+// prose — a decimal ("2.0"), a backtick-quoted literal ("`out.txt`"), the
+// closing dot of a two-letter abbreviation ("e.g.") — now reds the pin even
+// though nothing exceptional was spliced in. Measured: appending "(e.g.
+// `out.txt`)" or "of the 2.0 layout" to the sentence's own body turned every
+// test red.
+//
+// The body below instead names what a REAL sentence terminator looks like —
+// `.`/`!`/`?` followed by whitespace — and excepts only the two shapes that
+// put punctuation there without ending a sentence: a terminator with no
+// whitespace after it (decimals, backtick literals), and the closing dot of a
+// bare two-letter abbreviation (`e.g.`, `i.e.`). Everything else that looks
+// like a sentence end IS one, so an interposed sentence still has to bring a
+// second one of those or displace the opening: every splice measured this way
+// stays red — "Except fixtures." at either end, "Unless." at +8, replacing the
+// middle sentence outright, and a lowercase-start splice riding the comma
+// after "alone:" — regardless of length.
+//
+// A capital-letter-lookahead version of this same idea was tried and rejected:
+// treating "terminator + whitespace + lowercase" as never a boundary also
+// fixed both false positives, but it also stopped catching a splice inserted
+// right before this sentence's own (lowercase) continuation — exactly the
+// shape commit 020d6ea used to reach the checkout — flipping four previously-
+// caught splices green along with the two false positives. Measured, not
+// assumed: re-implement this rule as a capital-letter check only after
+// re-running that same splice-at-opening case.
+//
+// The remaining ceiling, and it is not a regression: an exception welded into
+// the middle sentence as a comma clause interposes nothing and passes. The
+// budget did not cover that class either — it caught ", except for fixtures"
+// (+21) and passed ", bar fixtures" (+14), which is length, not meaning.
+// Catching it needs a denylist of exception words, and a denylist is wordable
+// around. Nor does a terminator-free splice ("Except fixtures" with no `.`)
+// or an outright single-sentence replacement register — either shape keeps
+// the body to its one required terminator, which is what the structure checks
+// for; a denylist of exception words is the only thing that would catch a
+// splice this well-formed, and it is exactly as wordable-around as the
+// comma-clause gap above.
+//
+// The span also now runs through "Chain the directory change into the
+// command" rather than stopping at "read fine anywhere" — the `git show`/
+// `git archive` exemption bounded the tail against a splice landing INSIDE
+// it, but left the seam right after it, between "anywhere." and "Chain the
+// directory", open: an appended sentence there stayed green in both the old
+// and the new gap. The cd-chaining pin below already requires "Chain the
+// directory change into the command" to exist as the very next clause, so
+// asserting it here too costs nothing and closes that seam.
 test("the rendered refuter prompt bans writing outside the scratch dir in one unbroken clause", () => {
   assert.match(
     render(),
-    /goes\s+there\s+and\s+nowhere\s+else\..{0,200}The\s+checkout\s+and\s+any\s+worktree\s+are\s+never\s+write\s+targets,\s+though\s+`git\s+show`\/`git\s+archive`\s+at\s+a\s+pinned\s+ref\s+read\s+fine\s+anywhere/s,
+    /goes\s+there\s+and\s+nowhere\s+else\.\s+That\s+directory\s+is\s+yours\s+alone(?:[a-z]\.[a-z]\.|[^.!?]|[.!?](?!\s))*[.!?]\s+The\s+checkout\s+and\s+any\s+worktree\s+are\s+never\s+write\s+targets,\s+though\s+`git\s+show`\/`git\s+archive`\s+at\s+a\s+pinned\s+ref\s+read\s+fine\s+anywhere\.\s+Chain\s+the\s+directory\s+change\s+into\s+the\s+command/,
     "the workflow's refuter prompt no longer confines refuter writes to the scratch directory in one clause — either " +
-      "half is gone, or a sentence between them carves an exception into the rule, which is how commit 020d6ea " +
-      "reached the checkout during the PR #488 fix-applier run",
+      "half is gone, the sibling-collision sentence between them was reworded at its opening or split in two, a " +
+      "spliced sentence carves an exception into the rule (which is how commit 020d6ea reached the checkout during " +
+      "the PR #488 fix-applier run), or a splice landed in the seam right after the `git show`/`git archive` " +
+      "exemption and before the cd-chaining sentence",
   );
 });
 
