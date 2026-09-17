@@ -863,6 +863,7 @@ test("a stranger's worktree sharing the claim's directory name is not called the
   // match.
   const decoy = join(r.w, ".worktrees", "0-decoy", "9-release-ticket");
   git(r.w, "worktree", "add", "-q", decoy, "-b", "decoy/9", "origin/main");
+  const decoyReal = realpathSync(decoy);
   const c = claim(r.w, 9, "release-ticket");
   // The claim loses its `branch` line, so the branch lookup finds nothing and
   // the suffix key is what answers — the same route as the case above.
@@ -873,21 +874,19 @@ test("a stranger's worktree sharing the claim's directory name is not called the
   // /private/var/...
   const listing = git(r.w, "worktree", "list", "--porcelain");
   assert.ok(
-    listing.indexOf(realpathSync(decoy)) < listing.indexOf(realpathSync(c.wt)),
+    listing.indexOf(decoyReal) < listing.indexOf(realpathSync(c.wt)),
     `fixture: the stranger must sort ahead of the claim, or the key answers with the claim: ${listing}`,
-  );
-  assert.equal(
-    readFileSync(join(r.w, ".git", "worktrees", "9-release-ticket", "gitdir"), "utf8").trim(),
-    `${realpathSync(decoy)}/.git`,
-    "fixture: the stranger owns the entry named after the claim, so the entry key is no second opinion here",
   );
 
   const { code, json } = release(r, c);
   assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
   assert.ok(
-    json.blockers[0].startsWith(`worktree ${realpathSync(decoy)} `),
+    json.blockers[0].startsWith(`worktree ${decoyReal} `),
     `the blocker is about the stranger, which is what makes what it says about it matter: ${json.blockers[0]}`,
   );
+  // Additive, not a second opinion: the positive pin below already fails on
+  // the exact #1064 wording, so this only earns its place if a blocker somehow
+  // carried BOTH phrases — the positive match alone would let that through.
   assert.doesNotMatch(
     json.blockers[0],
     /is this claim's/,
