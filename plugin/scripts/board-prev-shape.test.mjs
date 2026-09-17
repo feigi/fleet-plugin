@@ -47,7 +47,12 @@ process.exit(2);`;
 
 // `prevBody` is written RAW, not through JSON.stringify: half the cases below
 // are payloads JSON.stringify cannot produce (`not json`) or would launder.
-function gatherPrev(prevBody) {
+//
+// The gather has to COMPLETE, not merely not-throw: a driver that died on the
+// prevCi TypeError exits non-zero with no stdout, and every value assertion
+// below would read `undefined` from a parse of nothing. Asserting status here
+// keeps that failure legible at the one place it can happen.
+function gathered(prevBody) {
   const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-"));
   const bin = mkdtempSync(join(tmpdir(), "board-prevshape-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-prevshape-scripts-"));
@@ -72,56 +77,15 @@ function gatherPrev(prevBody) {
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr, prevFile };
-}
-
-// The gather has to COMPLETE, not merely not-throw: a driver that died on the
-// prevCi TypeError exits non-zero with no stdout, and every value assertion
-// below would read `undefined` from a parse of nothing. Asserting status and
-// parsing here keeps that failure legible at the one place it can happen.
-function gathered(prevBody) {
-  const r = gatherPrev(prevBody);
   assert.equal(r.status, 0,
     `the gather refused a previous board it promises to ignore\n${r.stderr}`);
-  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr, prevFile: r.prevFile };
+  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr, prevFile };
 }
 
 const ignoreLines = (stderr) =>
   stderr.split("\n").filter((l) => l.includes("ignoring unreadable prev board"));
 
-test("gather: a previous board whose `tickets` is a number is ignored, not fatal (#1192)", () => {
-  const r = gathered('{"tickets": 5}');
-  // The carry-forward is EMPTY, not absent-and-crashed: PR 42's CI read failed,
-  // so this value is what the carry-forward answered. "unknown" is gather()'s
-  // no-previous-value fallback, the same answer a run with no --prev gives.
-  assert.equal(r.ci[42], "unknown");
-  const lines = ignoreLines(r.stderr);
-  assert.equal(lines.length, 1, `expected exactly one diagnostic, got:\n${r.stderr}`);
-  // The file the operator passed, and what was wrong with it — the crash named
-  // an "intermediate value" and implicated nothing the caller typed.
-  assert.ok(lines[0].includes(r.prevFile), `diagnostic must name the file: ${lines[0]}`);
-  assert.match(lines[0], /expected tickets to be an array, got number/);
-});
-
-// The case an `Array.isArray(tickets)` check alone lets straight through, and
-// the second one the ticket names: `[null]` IS an array, so it clears the
-// container check and throws on the per-entry `t.pr` read inside the prevCi
-// map instead. The whole payload is refused rather than the bad entry
-// filtered out — validation happens once, where the payload enters, and a
-// board with one unreadable ticket is not a board whose OTHER tickets can be
-// trusted to carry CI state forward.
-test("gather: a `tickets` array holding a non-object is ignored, not fatal (#1192)", () => {
-  const r = gathered('{"tickets": [null]}');
-  assert.equal(r.ci[42], "unknown");
-  const lines = ignoreLines(r.stderr);
-  assert.equal(lines.length, 1, `expected exactly one diagnostic, got:\n${r.stderr}`);
-  assert.ok(lines[0].includes(r.prevFile), `diagnostic must name the file: ${lines[0]}`);
-  // The index, because a real board carries dozens of tickets and "one of them
-  // is wrong" is not a diagnostic anybody can act on.
-  assert.match(lines[0], /expected tickets\[0\] to be a JSON object, got null/);
-});
-
-// ── the rest of the class ────────────────────────────────────────────────────
+// ── the invalid-shape class ──────────────────────────────────────────────────
 //
 // One row per DISTINCT route into the defect, not per value: a wrong-typed
 // container, a wrong-typed entry, and a wrong-typed payload are three
@@ -131,6 +95,17 @@ test("gather: a `tickets` array holding a non-object is ignored, not fatal (#119
 // on. Every row asserts the gather COMPLETED (inside `gathered`) with an empty
 // carry-forward and exactly one diagnostic naming the file.
 const REFUSED = [
+  // `{"tickets": 5}` is the ticket's own reproduction (#1192): a wrong-typed
+  // container reached the prevCi map's `.filter` and crashed gather() before
+  // this guard existed.
+  ['{"tickets": 5}', /expected tickets to be an array, got number/],
+  // The case an `Array.isArray` check alone lets straight through: `[null]`
+  // IS an array, so it clears the container check and throws on the per-entry
+  // `t.pr` read inside the prevCi map instead. The whole payload is refused
+  // rather than the bad entry filtered out — a board with one unreadable
+  // ticket is not a board whose OTHER tickets can be trusted to carry CI
+  // state forward.
+  ['{"tickets": [null]}', /expected tickets\[0\] to be a JSON object, got null/],
   ['{"tickets": "5"}', /expected tickets to be an array, got string/],
   ['{"tickets": {"42": "red"}}', /expected tickets to be an array, got object/],
   ['{"tickets": [1]}', /expected tickets\[0\] to be a JSON object, got number/],
