@@ -1308,6 +1308,59 @@ test("a repository probe that fails behind an overrunning git stderr keeps the e
   assert.doesNotMatch(r.json.tracker.error, /z{500}/, "the cause must stay bounded — 600 padding characters went in");
 });
 
+test("a repository probe against a long ledger directory reports the WHOLE path, never cause()'s `…`-clipped form (#940)", () => {
+  // #940's own decision, pinned executably: the comment above the repository
+  // probe (ledger.mjs ~line 682) argues `tracker.error` must stay uncapped on
+  // the directory even though cause() — the helper that DOES cap, at
+  // CAUSE_MAX=500 — sits right there and would be the obvious thing to reach
+  // for. Capping the directory with cause() passes every other fixture in
+  // this file unchanged, because none of them builds a path anywhere near
+  // 500 characters. This one does, deliberately past CAUSE_MAX, so a
+  // regression that wraps `ledgerDir` in cause() is observable here: the
+  // directory would arrive `…`-prefixed with its root dropped, exactly the
+  // "reads like a path and is not one" damage the comment warns against.
+  //
+  // Built as real nested directories (not one long segment) so no OS
+  // path-component limit is hit, and deliberately never `git init`-ed so the
+  // probe fails and `tracker.error` is the only place this path is echoed.
+  const base = mkdtempSync(join(tmpdir(), "ledger-longpath-"));
+  let dir = base;
+  while (dir.length < 540) dir = join(dir, "a".repeat(40));
+  mkdirSync(dir, { recursive: true });
+  try {
+    const file = join(dir, "ledger.md");
+    writeFileSync(file, ledgerText([]));
+    const bin = join(base, "bin");
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(REAL_GIT, join(bin, "git"));
+    const env = { ...process.env, PATH: bin };
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "check", "some distinctive subject words entirely"], {
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(r.status, 0, "an unresolvable repository still degrades rather than blocking the filing");
+    const json = JSON.parse(r.stdout);
+    assert.equal(json.tracker.ok, false);
+    assert.ok(
+      dir.length > 500,
+      "sanity: the fixture directory must itself exceed CAUSE_MAX (500) or this test cannot tell cause() apart from no cap at all",
+    );
+    assert.ok(
+      json.tracker.error.includes(dir),
+      "the interpolated directory must arrive VERBATIM — cause() would have kept only its last CAUSE_MAX-1 characters",
+    );
+    assert.doesNotMatch(
+      json.tracker.error,
+      /\(…/,
+      "a `(…`-prefixed pseudo-path means cause() wrongly swallowed the directory and dropped its root, the #940 remedy this comment exists to rule out",
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("the documented flow — no --file, run from inside the repo — is unchanged: tracker still gets checked", () => {
   // defaultLedgerPath() resolves `.fleet/ledger.md` from --git-common-dir when
   // no --file is given; `noFile` + `procCwd` drive that path instead of

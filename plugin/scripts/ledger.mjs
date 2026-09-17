@@ -684,14 +684,17 @@ function runCheck() {
       // raw: the field measured 1100 characters from a 557-character
       // directory, a cause already cut to 500, and 43 of fixed text (#940).
       // Capping the directory would buy the payload no ceiling — `subject`
-      // and `tracker.query` ride in the same JSON uncapped, measured at 3012
-      // apiece from a 3000-character subject word — and it would cut the path
-      // the probe actually failed on, which is what this message is for.
+      // and `tracker.query` ride in the same JSON uncapped: as JSON fields
+      // from a 3000-character subject word they measure 3012 and 3010
+      // characters respectively (the 2-char gap is `query` being a shorter
+      // key than `subject`, not a difference in the values) — and it would
+      // cut the path the probe actually failed on, which is what this
+      // message is for.
       // cause() is the wrong instrument for it twice over: it keeps the END,
       // so on a path it drops the root and returns a `…`-prefixed string that
       // reads like a path and is not one, and what it exists to contain is a
       // child's stderr, which nothing bounds, where the climb above leaves
-      // this a directory that exists.
+      // this a path that exists.
       //
       // Either way there is no repository for the query to bind to — the same
       // state as this process's own cwd not being a repo, which already
