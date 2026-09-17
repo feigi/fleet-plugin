@@ -361,7 +361,7 @@ export function makeNumArg(die) {
 // shape of issue titles in this repo — so this sweep would refuse working
 // invocations, which #365's own AC calls worse than the bug. #584 NARROWED
 // that gap without routing through this sweep, rather than closing it, and
-// #1161 narrowed it again: ledger.mjs's own refuseStrayInTail() is read on
+// #1161 narrowed it again: ledger.mjs's own refuseStrayInCheckTail() is read on
 // `check`'s tail ALONE, and refuses a `--`-prefixed token there only when it
 // shares that tail with something else — the shape an unquoted stray flag
 // makes, never the shape a one-argument subject makes — so a subject that

@@ -1754,7 +1754,7 @@ test("CLI: an unquoted multi-word subject with no stray flag is still accepted (
 });
 
 // Known residual, deliberately left open: a stray flag with no subject at all
-// is a ONE-element tail, so refuseStrayInTail() never fires on it — it is
+// is a ONE-element tail, so refuseStrayInCheckTail() never fires on it — it is
 // accepted as the subject itself. Left open because closing it costs the
 // legitimate one-argument `--`-leading subject, which is the case #584 exists
 // to keep working, and the residual is harmless: the run searches for the

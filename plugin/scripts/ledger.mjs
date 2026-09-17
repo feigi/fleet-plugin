@@ -187,12 +187,18 @@ function unescapeText(s) {
 // `check` rather than respelling three conventions SKILL.md carries, two
 // other tickets holding that file open.
 //
-// Narrowing it is not giving up #584's signature on those three: that reaches
-// them through the ID slot one token to the LEFT, and refuseStrayInId() below
-// still refuses it there. What the tail rule covered on them beyond that slot
-// was a `--` word no rule can tell apart from the subject a caller typed —
-// which is why it is the DOCUMENTED convention, not the hazard, that decides
-// where the length rule may be read at all.
+// Narrowing it does not keep #584's signature whole on those three: only the
+// ID-slot vector survives — a stray flag one token to the LEFT is still
+// refused by refuseStrayInId() below. The tail-slot vector does not: a
+// stray `--` word inside filed/row/ruled's tail is now accepted as data (no
+// rule can tell it apart from the subject a caller typed), so `filed 999
+// --typo-flag some new subject` exits 0 and writes a row a later `check
+// "some new subject"` cannot exact-match — a near-miss at best, the same
+// wrong-subject shape #584 closed, reopened here on the tail. That is the
+// cost of taking the ticket's option 2 (narrow the guard rather than
+// requote the docs, #1161) instead of option 1; it is why it is the
+// DOCUMENTED convention, not the hazard, that decides where the length rule
+// may be read at all.
 //
 // The cost `check` keeps is real and is what #365's AC prices, so it is
 // stated rather than denied: a legitimate subject carrying a `--` word
@@ -209,22 +215,22 @@ function unescapeText(s) {
 // is a one-element tail, so it is still taken as the subject and answered at
 // exit 0. Harmless because it then searches for a string nothing matches, and
 // ledger.test.mjs's degenerate-subject case pins it so it stays deliberate.
-function refuseStrayInTail(tail) {
+function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find((a) => a.startsWith("--"));
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
 // The id slot ahead of `filed`/`row`/`ruled`'s tail is a hazard of its own,
-// and the only one of the three a rule can act on. refuseStrayInTail() above
-// is not read on those subcommands at all (#1161), and would not catch this
-// shape if it were: a stray flag one token earlier lands in
+// and the only one of the three a rule can act on. refuseStrayInCheckTail()
+// above is not read on those subcommands at all (#1161), and would not
+// catch this shape if it were: a stray flag one token earlier lands in
 // `issue`/`ticket`/`pr`, and the tail left behind carries no `--` element to
-// find. Nor could that helper be read over the whole of `rest` instead — that
-// refuses `filed <issue> "--flag-like subject"` too, a two-element tail with
-// a `--` element, pinned here as must-keep-working. An id is never
-// legitimately `--`-prefixed, so this slot takes the bare prefix test a
-// free-text tail cannot have.
+// find. Nor could that helper be read over the whole of `rest` instead —
+// that refuses `filed <issue> "--flag-like subject"` too, a two-element
+// tail with a `--` element, pinned here as must-keep-working. An id is
+// never legitimately `--`-prefixed, so this slot takes the bare prefix
+// test a free-text tail cannot have.
 function refuseStrayInId(value, what) {
   if (value.startsWith("--")) die(`unknown flag ${value} — expected ${what}`);
 }
@@ -432,10 +438,10 @@ function runCheck() {
       `${NAME}: WARNING — ${file} exists but does not look like a ledger (no "${FILED}" header found). Every check will read "safe to file" until it is fixed.`,
     );
   }
-  refuseStrayInTail(rest);
+  refuseStrayInCheckTail(rest);
   const subject = rest.join(" ");
   // Quoted here, unlike the three usage strings above, because
-  // refuseStrayInTail() is the reason: `check` is the subcommand whose tail
+  // refuseStrayInCheckTail() is the reason: `check` is the subcommand whose tail
   // must arrive as ONE argument, and this is the only spelling of its call
   // inside the script (#1161). The other three take their tail as the words a
   // caller typed.
