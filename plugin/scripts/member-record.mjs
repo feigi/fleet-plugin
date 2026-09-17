@@ -126,7 +126,13 @@ export function normalizeModel(raw) {
 // booking it as a pr would join the row to an unrelated PR's verdict. A
 // single trailing lowercase letter is a retry suffix (-b, -c and -d all
 // observed) and is stripped first, because a re-dispatched member works the
-// same unit.
+// same unit. A trailing `-v<n>` (`-v2`, `-v10`, ...) is a DIFFERENT spelling
+// of the same re-dispatch, used when a controller re-dispatches a
+// finisher/reviewer against a PR whose head moved after label (#1482,
+// measured: ~67% of one finisher's tokens fell through to a blank pr column
+// under the old letter-only regex); it is stripped for the same reason, not
+// because it looks like a second-ticket suffix — no naming convention in
+// this repo otherwise uses a literal `-v` + digits tail.
 //
 // The NUMERIC suffix (`impl-137-2`) looks like the same retry spelling and is
 // deliberately NOT stripped. The one real instance on disk describes itself
@@ -134,7 +140,7 @@ export function normalizeModel(raw) {
 // `ticket` value represents. Blank is the honest answer; booking it to 137
 // would join the row to two tickets it did not do.
 export function parseMemberName(name) {
-  const s = String(name ?? "").trim().replace(/-[a-z]$/, "");
+  const s = String(name ?? "").trim().replace(/-(?:[a-z]|v\d+)$/, "");
   let m = /^(?:fix|review|finish|finisher)-pr-(\d+)$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^finish(?:er)?-(\d+)$/.exec(s);

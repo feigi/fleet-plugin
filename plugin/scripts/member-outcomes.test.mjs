@@ -58,6 +58,19 @@ test("a retry suffix does not change what the name identifies", () => {
   assert.deepEqual(parseMemberName("finisher-pr-903-c"), { ticket: "", pr: "903" });
 });
 
+test("a -v<n> re-dispatch suffix is stripped the same way as a retry letter", () => {
+  // #1482: a controller re-dispatches a finisher/reviewer against a PR whose
+  // head moved after label as `<name>-v2`, `<name>-v10`, etc. Left unstripped
+  // this fell through to a blank pr column, orphaning the token row from the
+  // PR's outcome.
+  assert.deepEqual(parseMemberName("finisher-pr-1475-v2"), { ticket: "", pr: "1475" });
+  // The existing single-letter retry suffix keeps working unchanged.
+  assert.deepEqual(parseMemberName("finisher-pr-1475-b"), { ticket: "", pr: "1475" });
+  // The numeric-only suffix (a genuine second-ticket batch, not a retry) is
+  // still deliberately NOT stripped.
+  assert.deepEqual(parseMemberName("impl-137-2"), { ticket: "", pr: "" });
+});
+
 test("an unrecognised name yields blanks, never a guess", () => {
   assert.deepEqual(parseMemberName("size candidate 7"), { ticket: "", pr: "" });
   assert.deepEqual(parseMemberName(""), { ticket: "", pr: "" });
