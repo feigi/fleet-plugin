@@ -208,13 +208,39 @@ test("every refuter's scratch path stays under the run's provisioned scratch roo
 // write targets" into the `git show` exemption, so the exemption bounds the tail
 // instead of leaving it open — the read permission the test below asserts in its
 // own right is what closes this rule.
+//
+// #1088. The gap between the two halves is asserted STRUCTURALLY, not by a
+// character budget. It was `.{0,200}` and the prose uses 182, so the entire
+// resistance to a spliced exception was 18 bytes of slack — porous and brittle
+// in the same 18. Splicing "Except fixtures." (+17) left all 10 tests green,
+// while "Fixtures excepted." (+19) — the same sentence, two bytes longer — red;
+// and innocent growth of the middle sentence past 18 chars red as a FALSE
+// positive. No value fixes that, because a byte budget cannot state a semantic
+// property: lowering it shrinks the porous half and grows the brittle one.
+//
+// So the gap now names exactly ONE sentence — the sibling-collision sentence's
+// opening, `[^.!?]*` for its body, its single terminator — with only whitespace
+// at each boundary. An interposed sentence has to bring a second terminator or
+// displace that opening, so every splice measured is red regardless of length:
+// "Except fixtures." at either end, a terminator-free "Except fixtures",
+// "Unless." at +8, and replacing the middle sentence with "Except fixtures."
+// outright, which the budget passed too. The middle sentence's body is now
+// unbounded — green at +34 and +205, where the budget red at both.
+//
+// The remaining ceiling, and it is not a regression: an exception welded into
+// the middle sentence as a comma clause interposes nothing and passes. The
+// budget did not cover that class either — it caught ", except for fixtures"
+// (+21) and passed ", bar fixtures" (+14), which is length, not meaning.
+// Catching it needs a denylist of exception words, and a denylist is wordable
+// around. `/s` went with the budget: every `.` in the pattern is now a literal.
 test("the rendered refuter prompt bans writing outside the scratch dir in one unbroken clause", () => {
   assert.match(
     render(),
-    /goes\s+there\s+and\s+nowhere\s+else\..{0,200}The\s+checkout\s+and\s+any\s+worktree\s+are\s+never\s+write\s+targets,\s+though\s+`git\s+show`\/`git\s+archive`\s+at\s+a\s+pinned\s+ref\s+read\s+fine\s+anywhere/s,
+    /goes\s+there\s+and\s+nowhere\s+else\.\s+That\s+directory\s+is\s+yours\s+alone[^.!?]*\.\s+The\s+checkout\s+and\s+any\s+worktree\s+are\s+never\s+write\s+targets,\s+though\s+`git\s+show`\/`git\s+archive`\s+at\s+a\s+pinned\s+ref\s+read\s+fine\s+anywhere/,
     "the workflow's refuter prompt no longer confines refuter writes to the scratch directory in one clause — either " +
-      "half is gone, or a sentence between them carves an exception into the rule, which is how commit 020d6ea " +
-      "reached the checkout during the PR #488 fix-applier run",
+      "half is gone, the sibling-collision sentence between them was reworded at its opening or split in two, or a " +
+      "spliced sentence carves an exception into the rule, which is how commit 020d6ea reached the checkout during " +
+      "the PR #488 fix-applier run",
   );
 });
 
