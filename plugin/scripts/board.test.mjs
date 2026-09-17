@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText } from "./board.mjs";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -1316,6 +1317,52 @@ test("faultText renders any rejected value, so no fault prints an empty diagnost
   const e = new Error("boom");
   assert.equal(faultText(e), e.stack);
   assert.match(faultText(e), /\n\s+at /);
+});
+
+// #1547: fault() writes a full stack trace in a single writeSync(2, ...) call
+// — the same unlooped shape die()'s pre-#889 bug had (arg.mjs). board.mjs has
+// exactly one writeSync call site — this is it, not the largest of four in
+// this file — but it is one of four across the fleet (arg.mjs's die(),
+// board.mjs's fault(), ci-state.mjs's emit(), staleness.mjs's verdict()) and
+// carries the largest single payload of the four: a full stack, not a
+// one-line refusal. A short write returns the count it actually wrote and
+// throws nothing at all, so a bare try/catch around one call never sees it
+// and the diagnostic is silently truncated with no error — the class
+// ci-state.mjs's emit() had before #885, and the reason #889 gave
+// die()/verdict() a bounded retry loop.
+//
+// A source-shape pin alone cannot tell a retry loop from a bare call that
+// happens to fit in one write, and the pin below used to stop at the resumed
+// writeSync call itself — the EAGAIN check, the MAX_EAGAIN_RETRIES cap and
+// the Atomics.wait backoff that follow were unanchored, so a mutant that
+// collapses the whole catch block to a bare `break;` — deleting the retry
+// this PR exists to add — still passed it (measured). The regex below now
+// anchors through those lines too, and board-cli.test.mjs pairs this with an
+// EXECUTED companion: a real non-blocking stderr pipe that starts fully
+// saturated and is never drained, the same rig staleness.test.mjs's verdict()
+// test and arg.test.mjs's die() test use — but timed, not just bounded, since
+// a doomed single call and a 200-retry loop against a pipe that never drains
+// both write nothing and both still reach process.exit() well inside any
+// generous bound; only the loop spends real time doing it.
+//
+// A body that still calls writeSync once and discards the count — `try {
+// writeSync(2, ...) } catch {}` — satisfies a pin that stops at `try {`, so
+// this one requires the loop that resumes from writeSync's own return value,
+// and now the retry/backoff that follows it too. Each fragment is anchored at
+// a line start and joined with `\s*^\s*`, and no fragment is terminated with
+// `$`, so a comment line added inside fault() does not redden this and a
+// trailing comment cannot satisfy it — the anchoring candidates.test.mjs's
+// die() pin documents in full.
+test("fault()'s writeSync loop consumes its own return value and retries EAGAIN with a capped backoff, not just a bare call", () => {
+  assert.equal(
+    stripComments(readFileSync(SCRIPT, "utf8")).match(/^\s*function fault\(/gm)?.length,
+    1,
+    "board.mjs declares fault() more than once, or not at all — the pin below reads the first",
+  );
+  assert.match(
+    stripComments(readFileSync(SCRIPT, "utf8")),
+    /^\s*function fault\(e\) \{\s*^\s*try \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(2, buf\)\);\s*^\s*\} catch \(writeErr\) \{\s*^\s*if \(writeErr\.code !== "EAGAIN" \|\| \+\+retries > MAX_EAGAIN_RETRIES\) break;\s*^\s*Atomics\.wait\(IDLE, 0, 0, 1\);/m,
+  );
 });
 
 // board.mjs had no row in the design spec's script-surface table, so neither of
