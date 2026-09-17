@@ -111,6 +111,12 @@ changed.
   lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
   answer) both refuse: report what it printed and do NOT re-read the
   instrument** — a guard that fails open on "could not look" protects nothing.
+  **A label gate and a CI verdict are also taken by dispatched members, not
+  only by you** — the finisher labels, and the merge bot merges on its own
+  reading — and neither is dispatched to read this file, so neither can be
+  reached by stating the rule here. Each carries its own copy: the finisher's
+  in the verbatim block at its duties below, the merge bot's in
+  `run-merge-bot.md`'s CI gate.
 - **Re-pin only after a change you made deliberately.** The mid-run tooling fix
   below is the one legitimate writer. Re-pinning to clear a refusal you cannot
   explain discards the check.
@@ -2132,6 +2138,26 @@ a minute apart showed *different* mutants, so a member's report and any single
 4. `SendMessage` you the label, the deferral issue numbers, and anything it
    halted on — cause and evidence, below, never a bare "head moved".
 
+**Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
+each run a script the digest covers — `worktree-audit.sh` and `ledger.mjs`,
+both under `plugin/scripts/` — and the label at duty 3 rests on what they
+returned. The rule is stated once, at the top of this file, which no finisher
+is dispatched to read, so it reaches one through this block or not at all:
+
+> **Re-check the instrument set before you act on what duty 1 or duty 2 read,
+> and again before you add the label.**
+> `~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
+> Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and
+> exit 2 (the check could not answer) both halt you: report what it printed,
+> add no label, and do NOT re-read the script that gave you the reading.
+> `--repo` is required and the spelling is the point — the run's baseline lives
+> in the audited checkout's gitignored `.fleet/`, which the scratch worktree
+> you take at duty 2 does not carry, so a bare invocation from there exits 2 on
+> a missing baseline instead of comparing anything. The `env -u GIT_DIR -u
+> GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell
+> pointing this check at the wrong tree — the script's own internal unset
+> cannot reach back and fix a path you already resolved wrong.
+
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
 branch — on #180 it survived a push and came to sit on a commit nobody had
@@ -2901,6 +2927,7 @@ only if it changes what they do *now*.
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot finds the head moved after `ready-to-merge` was applied | `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
+| Merge bot's own instrument re-check refuses (exit 1 or exit 2) | Report `instrument-set-changed-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-read the gate |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
