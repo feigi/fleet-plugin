@@ -141,7 +141,14 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   const [, adrPath] = s.match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
   assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
   const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
-  const [, adrMarker] = adr.match(/`([^`]+)` comment on it/) ?? [];
+  // Scoped to the Trigger A bullet, not the whole flattened ADR — an
+  // unscoped search matches whichever `X` comment on it` substring appears
+  // FIRST in the file, so narrowing Trigger A's own marker while an earlier
+  // sentence still carries the old string stays green. `between` throws if
+  // the bullet's own bounds go missing, for the same reason a missing
+  // anchor elsewhere in this file throws rather than widening.
+  const triggerA = between(adr, "- **Trigger A — bar too wide:**", "- **Trigger B", "ADR 0002 Trigger A");
+  const [, adrMarker] = triggerA.match(/`([^`]+)` comment on it/) ?? [];
   assert.equal(
     adrMarker,
     marker,
@@ -149,9 +156,10 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   );
   // The definition itself, not just the marker: a guard whose input is
   // undefined is not a guard, and the filed path alone is the half that
-  // systematically undercounts.
+  // systematically undercounts. Checked against the same Trigger A slice,
+  // for the same scoping reason as the marker above.
   assert.match(
-    adr,
+    triggerA,
     phrase("**Promotion signal — two marks, both on the record issue:** an open issue citing the record, and a"),
     "ADR 0002's Trigger A no longer defines what counts as a promotion, so the filed path is the only one an evaluator can see",
   );
