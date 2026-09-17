@@ -447,19 +447,19 @@ count_linked
 # script directly: 3/100 dry-run releases aborted on this cross-check under a
 # throttled churner, 48-66/80 unthrottled, all with zero real faults among them.
 #
-# inflight.sh already recounts here (`count_registry || return 1`, #694) into
-# its own accumulate-and-continue probe; this script's whole contract is `die`
-# on any unmet precondition instead, so the port keeps that shape rather than
-# inheriting the accumulator. But this copy recounts BOTH `registered` and
-# `linked`, where inflight.sh's still recounts only `registered` — a deliberate
-# divergence, not an incomplete port. Re-taking `registered` alone leaves
-# `linked` pinned to the FIRST `wt_listing` call: a second sibling mutation
-# landing after that call returns but before the lone recount re-scans the
-# registry inflates `registered` without touching `linked`, which can flip
-# which branch fires below and name the wrong cause — reporting "the listing
-# is incomplete" (implying a fault) for what is, underneath, the same benign
-# race the elif below already names correctly. Verified against this script
-# directly with a shim landing a second mutation in exactly that window.
+# inflight.sh already recounts here (#694) into its own accumulate-and-continue
+# probe; this script's whole contract is `die` on any unmet precondition
+# instead, so the port keeps that shape rather than inheriting the accumulator.
+# Both copies recount BOTH `registered` and `linked` — this one from #1408,
+# inflight.sh's from #1421, which closed the same window in that copy.
+# Re-taking `registered` alone leaves `linked` pinned to the FIRST `wt_listing`
+# call: a second sibling mutation landing after that call returns but before
+# the lone recount re-scans the registry inflates `registered` without touching
+# `linked`, which can flip which branch fires below and name the wrong cause —
+# reporting "the listing is incomplete" (implying a fault) for what is,
+# underneath, the same benign race the elif below already names correctly.
+# Verified against this script directly with a shim landing a second mutation
+# in exactly that window.
 #
 # A mutation landing between the FIRST count and git's listing is already
 # reflected in that listing, so the second count agrees with it — that is the
@@ -468,18 +468,19 @@ count_linked
 # second, mirroring lines 364-434 above), gives the RECOUNT pair that same
 # invariant: escaping it needs a mutation inside the narrower window these two
 # calls open between themselves, not the whole span back to the first
-# `wt_listing` (measured on inflight.sh's registered-only copy, the same shape
-# of window: 1.99% -> 0.00% at 2 mutations/s, 56.6% -> 1.29% saturated). A
-# genuinely dropped entry is a standing state, not a moment, so it survives
-# the recount and still refuses. The unreadable-registry case above is
-# unaffected: `count_registry`'s own `[ -r ] && [ -x ]` guard on $wtroot dies
-# the same way on either call, before the recount is ever reached. The
-# cannot-read-inside case is NOT unaffected the same way — an entry inside
-# $wtroot that `ls -A` cannot read is counted as registered rather than
-# dying (above), so a stale one survives the recount too, but what fires on
-# it is the mismatch below, not `count_registry` itself: a different guard,
-# a different exit code, under "the listing is incomplete" — a cause that
-# is not actually what happened.
+# `wt_listing` (measured on inflight.sh's copy while it was still
+# registered-only, the same shape of window: 1.99% -> 0.00% at 2 mutations/s,
+# 56.6% -> 1.29% saturated). A genuinely dropped entry is a standing state, not
+# a moment, so it survives the recount and still refuses.
+#
+# The unreadable-registry case above is unaffected: `count_registry`'s own
+# `[ -r ] && [ -x ]` guard on $wtroot dies the same way on either call, before
+# the recount is ever reached. The cannot-read-inside case is NOT unaffected
+# the same way — an entry inside $wtroot that `ls -A` cannot read is counted as
+# registered rather than dying (above), so a stale one survives the recount
+# too, but what fires on it is the mismatch below, not `count_registry` itself:
+# a different guard, a different exit code, under "the listing is incomplete" —
+# a cause that is not actually what happened.
 [ "$linked" -eq "$registered" ] || { count_registry; count_linked; }
 if [ "$linked" -lt "$registered" ]; then
   die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"

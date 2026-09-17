@@ -649,21 +649,25 @@ fi
 
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
-# than a second invented convention — but the two copies have since diverged
-# and this comment no longer claims they match. Three of the four items that
+# than a second invented convention — but the two copies diverged from there
+# and have since converged back on behaviour, the remaining difference being
+# plumbing, not what the recount does (below). Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
 # direction split — were ported to that copy by #395; the recount was the last
 # of the four, ported by #694. That copy's skip reading only `ls`'s output,
 # not its exit STATUS, was a further divergence — #697 closed it: both
 # copies' skip now reads the exit status.
 #
-# Porting the recount did not converge the two copies on it, though: this
-# script's recount below still only re-takes `registered` (`count_registry`
-# alone), while release-ticket.sh's copy of the SAME recount (#1408) re-takes
-# `registered` AND `linked` together, because re-taking `registered` alone
+# Porting the recount did not converge the two copies on it at once, though:
+# this script's recount re-took `registered` alone (`count_registry`), while
+# release-ticket.sh's copy of the SAME recount re-took `registered` AND
+# `linked` together from #1408 on, because re-taking `registered` by itself
 # leaves `linked` pinned to the first listing and can misname a benign
-# concurrent-worktree race as a fault. That is the one open divergence left
-# here — tracked as #1421, not fixed by this change.
+# concurrent-worktree race as a fault. #1421 closed that divergence here: both
+# copies now re-take the pair, this one through the `count_linked` below. The
+# mechanism under it is still each script's own — that copy reads the listing
+# through worktree.sh's `wt_listing`, this one through the single EXIT trap's
+# `$wtfile` — which is a difference in plumbing, not in what the recount does.
 #
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
@@ -739,70 +743,97 @@ if ! wtfile=$(mktemp); then
   add_unknown "local" "could not create a temporary file to hold the worktree list, so whether #$n has a worktree is unknown"
   return 1
 fi
-# Two operands, one status: the redirect is new here (the base ran this as a
-# command substitution, which had nothing to write to), so a `git` that could
-# not run and a `$wtfile` that could not be written are indistinguishable at
-# this `if`. The message names both rather than blaming git for a write it never
-# reached — the shell prints its own "Permission denied" naming the path when it
-# is the redirect, which is the half a reader can tell apart.
-if ! git worktree list --porcelain -z >"$wtfile"; then
-  add_unknown "local" "git worktree list failed, or its output could not be written to $wtfile, so whether #$n has a worktree is unknown"
-  return 1
-fi
-# NOT `awk -v RS='\0'`. That is a gawk/BWK extension, and the awk this script
-# actually runs on macOS — /usr/bin/awk, BWK awk 20200816 — does not merely
-# ignore it: it stops dead at the first NUL and reports ONE record for a
-# listing of any length. Measured, all three spellings, `-v RS='\0'`,
-# `-v RS='\000'` and `BEGIN{RS="\0"}`, every one of them `count=1`. No awk
-# program here can hold a NUL byte, so the swap has to happen before awk sees
-# the stream at all.
+# A function, not inline, because the recount below needs this whole pair —
+# git's own read of the listing and the count derived from it — re-taken
+# TOGETHER rather than one of them re-assigned on its own. `worktrees` and
+# `linked` are this function's OUTPUT, exactly as `registered` is
+# `count_registry`'s — `listed` is scratch the count derives `linked` from and
+# the `-ge 1` guard below checks, never read outside this function, matching
+# release-ticket.sh's own `count_linked`, whose comment (line 383) likewise
+# names only `linked` and `wt_list`/`wt_err`. Mirrors that same extraction over
+# the same pair for the same recount (#1408). #1421
 #
-# One `tr` pass does it: NUL becomes the newline awk already splits on, and a
-# newline inside a path becomes \001. `tr` translates simultaneously from one
-# table, so the two mappings cannot feed each other the way two piped stages
-# would. Both awks below then read the listing unchanged.
+# The `mktemp` stays ABOVE this function rather than moving inside it, where
+# release-ticket.sh's `wt_listing` creates and removes one of its own: the temp
+# files here are the ONE EXIT trap's at the top of this file, and it holds a
+# single slot per file, so a second `mktemp` in here would overwrite `$wtfile`
+# and leak the first path with nothing said. The re-take truncates the same
+# inode instead — the reason probe 1's second `2>"$errfile"` does, spelled out
+# there.
 #
-# Ceiling, deliberate: jstr renders that \001 as a space rather than as `\n`,
-# so a path containing a newline is reported WHOLE but with the newline
-# neutralised — the treatment every C0 byte WITHOUT a JSON short form gets. Not
-# the tab in `…/fix-88-a<TAB>b`: \011 is one of the five RFC 8259 gives a short
-# form, jstr's `sed` escapes it to `\t` before this `tr` stage runs at all, and
-# jrewritten's delete set skips it — so a tab round-trips byte-identical and
-# reports `worktreeRewritten: false`, which is what the probe-3 tab case pins.
-# Swapping the byte back would restore `\n` here at the cost of corrupting the
-# opposite case — a path that really contains \001 — for a diagnostic field
-# whose verdict is already correct either way. One failure mode is better than
-# two.
-if ! worktrees=$(LC_ALL=C tr '\n\000' '\001\n' <"$wtfile"); then
-  add_unknown "local" "could not read the worktree list for #$n"
-  return 1
-fi
-# The main worktree is always listed first and has no registry entry of its
-# own, hence the -1.
-#
-# awk, not `grep -c … || true`, for exactly the reason probe 2's filter above
-# is one awk. `grep -c` exits 1 on zero matches — legitimate, and `set -e`
-# would read it as fatal — so a `|| true` has to absorb it, and that same
-# `|| true` absorbs a grep that could not RUN AT ALL. Then the count is the
-# empty string, `$((listed - 1))` is -1, and the mismatch report below blames
-# `git worktree list` for a count no listing can produce. awk needs no such
-# case separated out: the program contains no `exit`, so it returns 0 whether
-# or not anything matched and every non-zero status is a real failure.
-listed=$(printf '%s\n' "$worktrees" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
-  { add_unknown "local" "could not count the worktrees git listed for #$n"; return 1; }
-# The guard above closes only the route where awk could not RUN. An empty but
-# SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
-# cannot fire, and the mismatch report below blames `git worktree list` for the
-# very count that guard exists to keep out of an operator's face. One comparison
-# closes it for every branch below at once, the recount included. `-ge 1`, not
-# `-gt 1`: `listed=1` is the main checkout alone, `linked=0`, the ordinary repo
-# with no linked worktree — a guard that refused that would make every probe in
-# a clean repo unknown. Real `git worktree list --porcelain` always prints the
-# main worktree, so reaching this needs a broken or shimmed git; the refusal
-# direction was already right, only the number was nonsense. #699
-[ "$listed" -ge 1 ] ||
-  { add_unknown "local" "git listed no worktrees at all for #$n — not even the main checkout, so the listing cannot be trusted"; return 1; }
-linked=$((listed - 1))
+# `return 1` inside returns from THIS function now, not from `probe_local`, so
+# every call site carries its own `|| return 1` exactly as `count_registry`'s
+# do. Without it a listing that could not be read would be recorded by
+# `add_unknown` and then walked straight past, and the probe would answer
+# `taken=false` off a listing it never had — the one answer this script must
+# never invent.
+count_linked() {
+  # Two operands, one status: the redirect is new here (the base ran this as a
+  # command substitution, which had nothing to write to), so a `git` that could
+  # not run and a `$wtfile` that could not be written are indistinguishable at
+  # this `if`. The message names both rather than blaming git for a write it never
+  # reached — the shell prints its own "Permission denied" naming the path when it
+  # is the redirect, which is the half a reader can tell apart.
+  if ! git worktree list --porcelain -z >"$wtfile"; then
+    add_unknown "local" "git worktree list failed, or its output could not be written to $wtfile, so whether #$n has a worktree is unknown"
+    return 1
+  fi
+  # NOT `awk -v RS='\0'`. That is a gawk/BWK extension, and the awk this script
+  # actually runs on macOS — /usr/bin/awk, BWK awk 20200816 — does not merely
+  # ignore it: it stops dead at the first NUL and reports ONE record for a
+  # listing of any length. Measured, all three spellings, `-v RS='\0'`,
+  # `-v RS='\000'` and `BEGIN{RS="\0"}`, every one of them `count=1`. No awk
+  # program here can hold a NUL byte, so the swap has to happen before awk sees
+  # the stream at all.
+  #
+  # One `tr` pass does it: NUL becomes the newline awk already splits on, and a
+  # newline inside a path becomes \001. `tr` translates simultaneously from one
+  # table, so the two mappings cannot feed each other the way two piped stages
+  # would. Both awks below then read the listing unchanged.
+  #
+  # Ceiling, deliberate: jstr renders that \001 as a space rather than as `\n`,
+  # so a path containing a newline is reported WHOLE but with the newline
+  # neutralised — the treatment every C0 byte WITHOUT a JSON short form gets. Not
+  # the tab in `…/fix-88-a<TAB>b`: \011 is one of the five RFC 8259 gives a short
+  # form, jstr's `sed` escapes it to `\t` before this `tr` stage runs at all, and
+  # jrewritten's delete set skips it — so a tab round-trips byte-identical and
+  # reports `worktreeRewritten: false`, which is what the probe-3 tab case pins.
+  # Swapping the byte back would restore `\n` here at the cost of corrupting the
+  # opposite case — a path that really contains \001 — for a diagnostic field
+  # whose verdict is already correct either way. One failure mode is better than
+  # two.
+  if ! worktrees=$(LC_ALL=C tr '\n\000' '\001\n' <"$wtfile"); then
+    add_unknown "local" "could not read the worktree list for #$n"
+    return 1
+  fi
+  # The main worktree is always listed first and has no registry entry of its
+  # own, hence the -1.
+  #
+  # awk, not `grep -c … || true`, for exactly the reason probe 2's filter above
+  # is one awk. `grep -c` exits 1 on zero matches — legitimate, and `set -e`
+  # would read it as fatal — so a `|| true` has to absorb it, and that same
+  # `|| true` absorbs a grep that could not RUN AT ALL. Then the count is the
+  # empty string, `$((listed - 1))` is -1, and the mismatch report below blames
+  # `git worktree list` for a count no listing can produce. awk needs no such
+  # case separated out: the program contains no `exit`, so it returns 0 whether
+  # or not anything matched and every non-zero status is a real failure.
+  listed=$(printf '%s\n' "$worktrees" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
+    { add_unknown "local" "could not count the worktrees git listed for #$n"; return 1; }
+  # The guard above closes only the route where awk could not RUN. An empty but
+  # SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
+  # cannot fire, and the mismatch report below blames `git worktree list` for the
+  # very count that guard exists to keep out of an operator's face. One comparison
+  # closes it for every branch below at once, the recount included. `-ge 1`, not
+  # `-gt 1`: `listed=1` is the main checkout alone, `linked=0`, the ordinary repo
+  # with no linked worktree — a guard that refused that would make every probe in
+  # a clean repo unknown. Real `git worktree list --porcelain` always prints the
+  # main worktree, so reaching this needs a broken or shimmed git; the refusal
+  # direction was already right, only the number was nonsense. #699
+  [ "$listed" -ge 1 ] ||
+    { add_unknown "local" "git listed no worktrees at all for #$n — not even the main checkout, so the listing cannot be trusted"; return 1; }
+  linked=$((listed - 1))
+}
+count_linked || return 1
 # Recount before refusing. The two reads happen at different instants, and the
 # gap is not theoretical: measured at ~10ms (two independent methods agreeing —
 # the fork+exec of git, which is almost the whole cost of `worktree list`, and
@@ -811,13 +842,67 @@ linked=$((listed - 1))
 # THIS fleet is routine rather than exotic: measured 1.99% of probes aborting
 # spuriously at λ = 2 mutations/s, 56.6% under saturation.
 #
-# One recount closes it rather than moving it: a mutation between the first
-# count and git's read is already reflected in git's own figure, so the second
-# count agrees with it. Escaping still needs a SECOND mutation inside the
-# recount window — measured 1.99% → 0.00% at λ = 2/s, 56.6% → 1.29% saturated.
-# A real dropped entry is a standing state, not a moment, so it survives the
-# recount and still refuses (verified: #84's unreadable `gitdir` still aborts).
-[ "$linked" -eq "$registered" ] || count_registry || return 1
+# One recount closes it rather than moving it: a mutation landing between the
+# FIRST count and git's listing is already reflected in that listing, so the
+# second count agrees with it — the invariant the ORIGINAL pair above relies
+# on. Escaping still needs a SECOND mutation inside the recount's own window.
+# The two rates #694 measured for recounting at all — 1.99% → 0.00% at
+# λ = 2/s, 56.6% → 1.29% saturated — were taken on the registered-only
+# recount this replaces, so that 1.29% residual bounds what narrowing the
+# window below can still leave rather than describing it; it was not
+# re-measured after that change. A real dropped entry is a standing state,
+# not a moment, so it survives the recount and still refuses (verified: #84's
+# unreadable `gitdir` still aborts).
+#
+# BOTH counts, not `registered` alone, which is what that invariant costs.
+# Re-taking the registry by itself leaves `linked` pinned to the FIRST
+# listing, so a second sibling mutation landing after that listing returned
+# but before the recount re-scans the registry moves one count and not the
+# other. Reproduced in both directions, and they fail differently. Two
+# `git worktree add`s straddling the listing call FLIP the disagreement:
+# `linked -gt registered` on the first pair becomes `linked -lt registered`
+# on the recount, reported as "git listed 1 worktrees for 2 registry entries
+# … the listing is incomplete" — a corruption report for two ordinary adds.
+# A remove then an add makes it PERSIST instead: the registry count comes
+# back to the same 1 for a different entry while `linked` stays at the 0 it
+# read before the add, and the same message fires at 0 against 1. Neither run
+# had anything wrong with it.
+# Re-taking `registered` and `linked` together, in the same order the pair
+# above takes them, hands the RECOUNT pair the invariant too: the window an
+# escape needs is the narrow gap these two calls open between themselves, not
+# the whole span back to the first listing. Both directions pinned in
+# inflight.test.mjs. Mirrors release-ticket.sh's copy of this recount, which
+# #1408 fixed the same way. #1421
+#
+# The retake pair above is still two reads, not one, and the gap it opens
+# between ITSELF — after `count_registry` has already re-scanned but before
+# `count_linked` re-lists — is narrower than the window this recount closes,
+# not zero. A mutation landing there still escapes: `registered` is re-taken
+# first, so an ADD landing in this gap is missed by the registry scan that
+# already ran and IS seen by the git listing still to come — `linked -gt
+# registered`, "the registry read missed entries git can see" — while a
+# REMOVE the same way lands `linked -lt registered`, "the listing is
+# incomplete", indistinguishable from the fault that message exists to name
+# even though nothing here is actually wrong. Pinned in inflight.test.mjs.
+# Reordering to `count_linked && count_registry` does not remove this
+# residual, it only moves the ADD case's false report onto the
+# `linked -lt registered` branch instead — the direction the comment below
+# calls out by name as sending an operator hunting a permissions fault that
+# is not there. `count_registry` first, `count_linked` second, mirrors
+# release-ticket.sh:484 for the same reason.
+#
+# `&&`, not `;`, between the two: `count_registry` reports an unreadable
+# registry through `add_unknown` and a non-zero return, and under `;` the
+# group's status would be `count_linked`'s alone, so this probe would walk
+# past a refusal it had already recorded. Measured, that is belt-and-braces
+# and not a behaviour difference: every state that fails `count_registry`'s
+# `[ -r ] && [ -x ]` guard also stops git enumerating $wtroot, so `linked`
+# collapses to 0 alongside `registered` and the comparison below matches
+# either way — checked at mode 000 landed inside this very window, under both
+# spellings, and the registry message is the only one reported by both. The
+# `&&` stays because the status of a count that refused is not
+# `count_linked`'s to overwrite, not because a case turns on it today.
+[ "$linked" -eq "$registered" ] || { count_registry && count_linked; } || return 1
 # Name the direction actually observed. The two disagreements have opposite
 # causes and send the reader to opposite places, so one message cannot serve
 # both: FEWER listed than registered is git silently dropping an entry it could
