@@ -98,31 +98,138 @@ test("the Specialists section says to brace a variable ref, and that quoting is 
 });
 
 // The colon is what makes this a hazard, so the colon is what the pattern
-// requires: `git show "$SHA" -- <path>` is prescribed two sentences up in the
-// same section and has to stay green. `cat-file` and a positional `$1` are in
-// because they produce the identical silent shape — measured, `git cat-file -p
-// "$SHA:t"` prints the tree object at exit 0 where the braced form exits 128.
-// Deliberately over-strict in one spot: `git show "$SHA":<path>` is safe (the
-// closing quote ends the parameter name) and reds anyway. Five further blind
-// spots — other porcelain, a ref in its own code span, a wrapped line, `$a[1]`,
-// and single-quoted forms, which fail loudly rather than silently — are
-// measured and filed as #780 rather than guessed at here.
-const UNBRACED_REF = /git (?:show|cat-file)[^`\n]*?\s["']?\$[A-Za-z_0-9]+["']?:/;
+// requires: `git show "$SHA" -- <path>`, the colon-free form this section
+// prescribes for one named commit, has to stay green. Measured under zsh 5.9,
+// `"$SHA:t"` expands to the bare sha — `:t` is taken as a history modifier
+// inside double quotes as well as outside — where `"${SHA}:t"` stays literal.
+// A positional (`"$1:t"`) mangles identically, and a subscript is no
+// protection (`"$refs[1]:t"` expands to the element with the suffix eaten), so
+// the pattern lets the parameter name carry one.
+//
+// The eaten part is whatever follows the colon, not "any path": only a
+// suffix that begins with a recognized zsh history-modifier letter is
+// consumed. Measured under zsh 5.9 in a throwaway repo: `git show
+// "$SHA:t"` and `git show "$SHA:s/x/y/"` (a no-op substitution, nothing to
+// replace) both exit 0 on the bare commit — the same silent shape as `:t` —
+// while `git show "$SHA:file.txt"` and `git show "$SHA:package.json"` are
+// left completely literal, so git reads the colon on its own and exits 0 or
+// 128 depending only on whether that path exists at that commit, same as
+// the braced form either way. A path name isn't chosen to dodge modifier
+// letters, so its shape decides nothing here — which is exactly why the
+// rule this section teaches is unconditional bracing, never "brace only
+// when the path could be mistaken for a modifier".
+//
+// #780 widened the verb set to every porcelain measured to take `<rev>:<path>`
+// AND still exit 0 once the suffix is eaten — exit 0 is what makes the misread
+// silent, and the silent shape is the whole reason this pin exists. Measured
+// in a throwaway repo where path `t` does not exist, unbraced rc then braced
+// rc: `show` 0 printing the commit / 128; `cat-file -p` 0 printing the commit
+// object / 128; `ls-tree` 0 listing the root tree / 128; `rev-parse` 0 echoing
+// the sha / 128; `grep` 0 searching the whole tree when the pattern
+// matches / 128 (a non-matching pattern exits 1 unbraced too, so grep's
+// silence is conditional, not guaranteed like the rest); `checkout` 0
+// detaching HEAD / 1; `diff` 0 printing an empty diff / 128; `restore
+// --source` 0 restoring from the commit / 128; `archive` 0 archiving the whole
+// tree / 128. A measured list and not `git [a-z-]+`, decided on measurement
+// rather than taste: the wildcard reds real lines in this repo's own
+// scripts — both genuine `$ref:path` invocations already caught above by the
+// measured verbs `show`/`cat-file` (`claim-ticket.sh`, `derive-testcmd.sh`)
+// and incidental colon-after-`$var` text inside comments and halt-message
+// strings that carry no such hazard at all — on top of contrived ones like
+// `git commit -m "$TITLE: ..."` and `git remote add origin
+// "$HOST:$REPO.git"`, where the colon is nobody's rev separator. Extending
+// the set means measuring the new verb the same way, not appending on
+// resemblance.
+
+// A global option between `git` and the verb — `-C <dir>`, `--git-dir=<dir>`,
+// `--work-tree=<dir>`, or any other `--flag` — must not defeat the pin: it's
+// the identical silent misread, just relocated one token earlier, and
+// `git -C <dir> ...` / `git -C <worktree> ...` is this repo's own idiom in
+// the doc family the pin guards (plugin/scripts/derive-testcmd.sh:124,
+// plugin/skills/run-team/SKILL.md:608/1228,
+// plugin/skills/run-team/references/member-lifecycle.md:75,
+// plugin/commands/run-merge-bot.md:161). Verified: `git -C $D show
+// "$SHA:t"` exits 0 unbraced on an absent path `t`, 128 braced — the
+// identical 0/128 split the table above records for bare `show`. The
+// leading-option group still misses the legitimate `git -C "$wt" rev-parse
+// HEAD`, `git -C <worktree> status` and `git log -S '<old>' --oneline
+// origin/main -- <file>` forms the docs actually use, and repo-wide it adds
+// exactly one new hit outside this section (plugin/scripts/derive-testcmd.sh:124,
+// itself a genuine unbraced-ref hazard, not a false positive).
+//
+// Single-quoted forms are pinned on doc quality, not on that silent hazard,
+// and the failure message says so rather than claiming a silent read:
+// measured, `git show '$SHA:<path>'` and `git show '${SHA}:<path>'` both exit
+// 128 `fatal: invalid object name`, single quotes suppressing expansion
+// outright. So the unbraced one reds and the braced one stays green on the
+// brace rule this section teaches, never on an exit code.
+//
+// Over-strict in one spot, ruled on in #775 and deliberately untouched here:
+// `git show "$SHA":<path>` is safe — the closing quote ends the parameter
+// name, so the colon is literal — and reds anyway. Nothing in the tree
+// recommends that form and bracing fixes it, so the false positive was
+// accepted rather than shipping an unmeasured variant.
+//
+// Out of this mechanism's reach and NOT fixed by #780: a verb and its ref in
+// separate markdown code spans, and a backslash-wrapped example. `[^`\n]`
+// crosses neither a backtick nor a newline, and that character class is what
+// keeps this pin cheap, so either one needs a different matcher rather than a
+// wider class. Both stay measured on #780's record.
+const UNBRACED_REF =
+  /git (?:(?:-C|--git-dir|--work-tree)[= ]\S+ |--[a-z-]+ )*(?:show|cat-file|ls-tree|rev-parse|grep|checkout|diff|restore|archive)[^`\n]*?\s["']?\$[A-Za-z_0-9]+(?:\[[^\]\n]+\])?["']?:/;
 
 test("no unbraced variable ref survives in the Specialists section's own examples", () => {
   assert.doesNotMatch(
     specialists(),
     UNBRACED_REF,
-    "an example in review-and-fix.md's Specialists section builds a `git show` or `git cat-file` object argument from an unbraced parameter — zsh takes the `:<path>` suffix as a history modifier, inside double quotes too, and the read can return the commit at exit 0 instead of the blob",
+    "an example in review-and-fix.md's Specialists section builds a git `<rev>:<path>` argument from an unbraced parameter — bare or double-quoted, a suffix colliding with a zsh history-modifier letter (like `:t`) is eaten and the read can return the commit at exit 0 instead of the blob; single-quoted, the parameter never expands and git exits 128 on `invalid object name`. Only the first is silent, and both are wrong in the one section that tells a reader how to settle a citation",
   );
 
-  // The other half: what this regex must ACCEPT. Fed the braced form the rule
-  // prescribes, it has to stay quiet — a pin that forbids its own remedy sends
-  // the next editor back to the unbraced form to get the suite green. Both
-  // quoting styles, because a plausible mis-edit that widens this to single
-  // quotes without carrying the brace exclusion across passes the double-quoted
-  // case on its own (measured).
-  const braced = ['git show "${SHA}:<path>"', "git show '${SHA}:<path>'"];
+  // What the pattern must CATCH — one case per verb the alternation names, plus
+  // each parameter form. Narrow the verb set or drop the subscript branch and
+  // these red, which is what keeps the widening load-bearing instead of
+  // decorative: #775 shipped a pattern whose under-match went green in
+  // silence, and a pin never mutated in this direction is how that happens.
+  const hazardous = [
+    'git show "$SHA:<path>"',
+    'git cat-file -p "$SHA:<path>"',
+    'git ls-tree "$SHA:<path>"',
+    'git rev-parse "$SHA:<path>"',
+    'git grep needle "$SHA:<path>"',
+    'git checkout "$SHA:<path>"',
+    'git diff "$SHA:<path>"',
+    'git restore --source "$SHA:<path>" -- <path>',
+    'git archive --format=tar "$SHA:<path>"',
+    'git show "$1:<path>"',
+    'git show "$refs[1]:<path>"',
+    'git show "$refs[$i]:<path>"',
+    "git show '$SHA:<path>'",
+    'git -C "$dir" show "$SHA:<path>"',
+    'git -C <dir> cat-file -p "$SHA:<path>"',
+    'git --no-pager show "$SHA:<path>"',
+    'git --git-dir="$dir" show "$SHA:<path>"',
+  ];
+  for (const form of hazardous) {
+    assert.match(
+      form,
+      UNBRACED_REF,
+      `the unbraced-ref pin stopped catching a form measured to misread or fail: ${form}`,
+    );
+  }
+
+  // The other half, and the one that makes the ban worth anything: what this
+  // regex must ACCEPT. Fed the braced form the rule prescribes, it has to stay
+  // quiet — a pin that forbids its own remedy sends the next editor back to the
+  // unbraced form to get the suite green. One case per quoting style and per
+  // brace form, because a mis-edit that widens a quote class without carrying
+  // the brace exclusion across still passes the double-quoted case on its own
+  // (measured); the verb never interacts with bracing, so it is not re-listed.
+  const braced = [
+    'git show "${SHA}:<path>"',
+    "git show '${SHA}:<path>'",
+    "git show ${SHA}:<path>",
+    'git show "${refs[1]}:<path>"',
+  ];
   for (const form of braced) {
     assert.doesNotMatch(
       form,
@@ -131,11 +238,42 @@ test("no unbraced variable ref survives in the Specialists section's own example
     );
   }
 
-  // And the colon-free form the same section prescribes for one named commit,
-  // where there is no suffix for a history modifier to eat and so no hazard.
-  assert.doesNotMatch(
+  // Colon-free commands, where there is no suffix for a history modifier to
+  // eat and so no hazard. `git show "$SHA" -- <path>` and `git diff
+  // <base>...<head> -- <path>` are what the section itself prescribes; the
+  // `grep` case covers a newly added verb, since widening the verb set is
+  // exactly the edit that could start redding a recommended colon-free form.
+  // The doc-literal `<base>...<head>` row above carries neither `$` nor `:`,
+  // so no mutation of either requirement can ever red it; the parameterized
+  // twin below does, once a mutation drops the colon requirement.
+  const colonFree = [
     'git show "$SHA" -- <path>',
-    UNBRACED_REF,
-    'the unbraced-ref pin reds `git show "$SHA" -- <path>`, which carries no colon and no history-modifier hazard and is what the section prescribes for one named commit',
-  );
+    "git diff <base>...<head> -- <path>",
+    'git grep -n "$PATTERN" -- <path>',
+    'git -C "$wt" rev-parse HEAD',
+    'git diff "$BASE"..."$HEAD" -- <path>',
+  ];
+  for (const form of colonFree) {
+    assert.doesNotMatch(
+      form,
+      UNBRACED_REF,
+      `the unbraced-ref pin reds ${form}, which carries no colon and no history-modifier hazard`,
+    );
+  }
+
+  // And colons that are no rev separator at all. The verb set is a measured
+  // list rather than any git subcommand precisely so a review doc can still
+  // show these; collapsing it to `git [a-z-]+` reds every one (measured).
+  const nonRev = [
+    'git commit -m "$TITLE: fix the thing"',
+    'git remote add origin "$HOST:$REPO.git"',
+    'git push "$REMOTE" "$LOCAL:$REMOTE_BRANCH"',
+  ];
+  for (const form of nonRev) {
+    assert.doesNotMatch(
+      form,
+      UNBRACED_REF,
+      `the unbraced-ref pin reds ${form}, where the colon is not a rev separator`,
+    );
+  }
 });
