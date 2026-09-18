@@ -366,10 +366,48 @@ keep() {
 # pipe `gp_raw=$( … )` reads — no separate pipe or file needed for it. Command
 # substitution runs in its own subshell (POSIX), so a plain variable set
 # inside — git's stdout, git's own $? — cannot escape it; only the TEXT
-# written there survives. `gp_sep` (a byte no porcelain line or ordinary
-# warning contains) marks where one piece ends and the next begins, so
-# `gp_raw` can be split apart with plain parameter expansion once it is back
-# in the real, top-level shell.
+# written there survives. `gp_sep` marks where one piece ends and the next
+# begins, so `gp_raw` can be split apart with plain parameter expansion once
+# it is back in the real, top-level shell.
+#
+# THE SEPARATOR IS SAFE BECAUSE OF WHAT GIT DOES, NOT BECAUSE OF WHAT 0x02
+# IS, and it is safe only for the commands this helper is currently pointed
+# at: every call site below reads `status --porcelain` (`-uall`, or
+# `-unormal --ignored`). Nothing in the body checks that. Both halves of
+# git's answer put a control byte in a path beyond reach of the split, by
+# two DIFFERENT rules — measured on git 2.50.1 (Apple Git-155), against a
+# file named `weird<0x02>file` and a chmod-000 directory `dir<0x02>name`:
+#
+#   $gp_out: git C-quotes the path — `?? "weird\002file"`, a literal
+#   backslash-002 inside quotes, never the raw byte. This does NOT hang on
+#   `core.quotePath`, which only demotes bytes >= 0x80 out of "unusual";
+#   "git quotes unusual bytes" is therefore the wrong claim to rest on,
+#   since #614 measured that exact escape hatch for the HIGH-BIT class (see
+#   derive-testcmd.sh). Zero raw 0x02 out of `--porcelain -uall` and out of
+#   `--porcelain --ignored`, under core.quotePath true AND false.
+#
+#   $gp_err: git writes an unprintable byte in a path as `?` in its own
+#   diagnostics — `warning: could not open directory 'dir?name/'`. Zero raw
+#   0x02 there either.
+#
+# SO DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT IS NOT QUOTED THAT
+# WAY. It takes `git "$@"`, so the invariant is the CALLER's to keep and
+# nothing here catches a caller who drops it: a raw separator truncates
+# $gp_out at that byte and concatenates the rest of the real output onto
+# $gp_rc, which then reaches `return` as a non-numeric string (measured
+# against a stub git, PR #1209 review). It is one flag away, not
+# hypothetical — same git, same fixture: `status --porcelain -uall -z`
+# carries the raw 0x02 straight through, `-z` being the machine-readable
+# form that drops the quoting, and so does any command emitting CONTENT
+# rather than paths (`log --format=%s`, `show <rev>:<path>`, both measured).
+#
+# Left unguarded anyway, deliberately (#1212): every call site is shaped
+# `if ! git_probe …; then keep …`, so a garbled $gp_rc can never come back 0
+# and so can never turn a KEEP into a REAP. For a script whose only costly
+# failure is deleting something it should have kept, that is the direction
+# that matters, and it already fails closed. A numeric guard on $gp_rc was
+# the competing remedy and was rejected: it buys loudness this failure mode
+# does not need.
 #
 # `if gp_o=$(...); then gp_rc=0; else gp_rc=$?; fi`, never a bare
 # `gp_o=$(...); gp_rc=$?`: under `set -e` a bare failing assignment aborts the
