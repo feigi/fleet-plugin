@@ -16,8 +16,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, r
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
+// The one thing tested by reading THIS file back rather than ledger.mjs: the
+// #1199 warm-up below lives entirely in run()'s own test-helper source, never
+// in the script under test, so a source-shape pin on it has to point here.
+const THIS_FILE = fileURLToPath(new URL(import.meta.url));
 
 // #155's fix resolves the ledger's own repository with a real `git`
 // subprocess (both here in test setup and inside ledger.mjs itself), so PATH
@@ -250,6 +255,32 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
 function queryOf(r) {
   return r.ghArgv[r.ghArgv.indexOf("--search") + 1];
 }
+
+// #1199's whole fix lives inside run()'s OWN test-helper source above, not in
+// ledger.mjs — the warm-up spawn pays the freshly-written gh stub's first-exec
+// OS scan (measured 148 ms idle, 3.3-8.9 s under five concurrent copies of
+// this suite) BEFORE the timed script spawn, so that scan is never charged
+// against the 20 s budget ledger.mjs puts on its own gh child. Delete the
+// warm-up line and every existing test here still passes — the load #1199
+// measured only shows up under five concurrent copies of the whole suite,
+// which this file cannot reproduce as a deterministic single-run assertion,
+// and a timing pin here would just be the flake this fix exists to remove.
+//
+// Pinned as SHAPE instead, the same technique arg.mjs's die() and
+// candidates.mjs's EXCLUDE use elsewhere in this fleet: read this file's own
+// source back through stripComments() (a comment alone must not satisfy it)
+// and require the warm-up to sit INSIDE the `if (gh)` block, after the stub
+// is written and made executable and before the block closes — anchored at
+// line starts under `/m` so an unrelated line inserted between them cannot
+// still match.
+test("run()'s gh-stub warm-up survives — deleting it would let a cold PATH scan spend #1199's budget again (structural pin)", () => {
+  const src = stripComments(readFileSync(THIS_FILE, "utf8"));
+  assert.match(
+    src,
+    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\], \{ env: \{ PATH: bin \}, timeout: 30_000 \}\);\s*^\s*\}/m,
+    "run() must warm the freshly-written gh stub (--fleet-warm) before the timed spawn below it — deleting this line reopens #1199 under fleet load",
+  );
+});
 
 const FILED_114 =
   "#114 fleet-plugin-design Non-zero column written from intent — audit 11 rows (review-pr-108)";
@@ -2344,14 +2375,16 @@ function gitFixture(t, gitBody) {
   writeFileSync(gitPath, gitBody.replace("__DIR__", dir));
   chmodSync(gitPath, 0o755);
   // Records that it was reached, so an accepted probe is told from a degraded
-  // one by something better than an exit code both of them share. The `--warm`
-  // arm is load-bearing, not defensive: without it the warm-up below writes
-  // the sentinel itself and every `ghRan: false` assertion here reads true —
-  // caught by these tests failing, which is the same pollution that makes
-  // warming run()'s own gh stub in place unsafe.
+  // one by something better than an exit code both of them share. The
+  // `--fleet-warm` arm is load-bearing, not defensive: without it the warm-up
+  // below writes the sentinel itself and every `ghRan: false` assertion here
+  // reads true — caught by these tests failing, which is the same pollution
+  // that makes warming run()'s own gh stub in place unsafe. Same spelling as
+  // run()'s own GH_STUB, so the sentinel this file invents stays one flag,
+  // not two that can drift.
   const ghSentinel = join(dir, "gh-ran");
   const ghPath = join(bin, "gh");
-  writeFileSync(ghPath, `#!/bin/sh\ncase " $* " in *" --warm "*) exit 0 ;; esac\n: > '${ghSentinel}'\nprintf '[]\\n'\n`);
+  writeFileSync(ghPath, `#!/bin/sh\ncase " $* " in *" --fleet-warm "*) exit 0 ;; esac\n: > '${ghSentinel}'\nprintf '[]\\n'\n`);
   chmodSync(ghPath, 0o755);
 
   // Pay both stubs' first-exec OS scan HERE, before anything bounded runs.
@@ -2360,7 +2393,7 @@ function gitFixture(t, gitBody) {
   // budgets of seconds. Left inside the bounded region it is indistinguishable
   // from the stall these cases exist to detect, and the verdicts below would
   // ride on machine load — #1099's finding, and its remedy.
-  for (const p of [gitPath, ghPath]) spawnSync(p, ["--warm"], { env: { PATH: bin }, timeout: 30_000 });
+  for (const p of [gitPath, ghPath]) spawnSync(p, ["--fleet-warm"], { env: { PATH: bin }, timeout: 30_000 });
 
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
@@ -2400,8 +2433,9 @@ test("a git that never answers the repository probe is bounded, not waited on (#
 
 // The sibling probe, and it is a different call site with a different degrade:
 // defaultLedgerPath() does not report an unchecked tracker, it falls back to a
-// cwd-relative ledger — the #155 worktree fail-open — so an unbounded hang
-// there wedges the run before a ledger is ever chosen.
+// cwd-relative ledger — a pre-existing fallback #155 leaves alone, not one it
+// introduces — so an unbounded hang there wedges the run before a ledger is
+// ever chosen.
 test("a git that never answers the ledger-path resolution is bounded too (#1199)", (t) => {
   const check = gitFixture(t, GIT_HANGS);
   const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "2" }, noFile: true });
@@ -2410,6 +2444,8 @@ test("a git that never answers the ledger-path resolution is bounded too (#1199)
     `the run was held to the CALLER's backstop — defaultLedgerPath()'s git is unbounded: ${JSON.stringify(r.error)}`);
   assert.match(r.stderr, /could not resolve --git-common-dir/,
     "the fallback must still announce itself; a silent degrade here is the guard failing open");
+  assert.match(r.stderr, /ETIMEDOUT/,
+    "an ETIMEDOUT stall and an instant \"not a repository\" print the same generic text otherwise — cause() must name which one, matching runCheck()'s sibling probe above");
 });
 
 // The other half. Every case above is a probe the budget must CUT, and a bound
@@ -2454,4 +2490,33 @@ test("LEDGER_GIT_TIMEOUT cannot lengthen the bound, only shorten it (#1199)", (t
   assert.equal(r.error, undefined,
     `a 600 s override became the bound, so configuration can remove it: ${JSON.stringify(r.error)}`);
   assert.match(r.json.tracker.error, /ETIMEDOUT/, "the default must still have fired");
+});
+
+// isDigits()'s whole job, named in the block comment above gitBudget(): the
+// accepted spelling is the shell rule's `*[!0-9]*`, so anything Number()
+// would still happily parse — a decimal point, a leading `-`, exponent
+// notation — has to be rejected FLAT, not clamped or truncated, leaving the
+// default bound standing in silence. `-5` and `5e3` both fail the `seconds >
+// 0` / `seconds < defaultSeconds` clauses on their own even with isDigits()
+// deleted outright, so neither exercises anything the guard alone still
+// catches. `3.5` is the discriminating case: Number("3.5") is 3.5, strictly
+// between 0 and the 10 s default, so a regression that swapped
+// `isDigits(String(override)) ? Number(override) : 0` for a bare
+// `Number(override ?? 0)` takes it as a genuine 3.5 s bound (measured: that
+// exact substitution still passes every other #1199 test above unmodified).
+//
+// The probe sleeps 5 s: past a 3.5 s bound (cut, ETIMEDOUT) and comfortably
+// short of the untouched 10 s default (accepted, real answer) — the same
+// margin the slow-but-working acceptance test above uses against its own
+// bound.
+test("a malformed LEDGER_GIT_TIMEOUT override is rejected outright, not coerced by Number() (#1199)", (t) => {
+  const check = gitFixture(t, gitSlow(5, "__DIR__"));
+  const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "3.5" } });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r.error)}`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ghRan, true,
+    "a malformed override must not shorten the bound — the probe should still be accepted at the untouched 10 s default");
+  assert.equal(r.json.tracker.ok, true, `a malformed override cut the probe short: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /ETIMEDOUT/, "the default bound must not have fired");
 });
