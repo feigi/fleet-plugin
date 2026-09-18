@@ -38,7 +38,16 @@ if (!REAL_GIT) throw new Error("ledger.test.mjs setup: could not locate a `git` 
 // silently assert the offline path instead. The `|| [ -n "$line" ]` guard emits
 // the last line of a fixture written without a trailing newline, which is what
 // JSON.stringify produces.
+//
+// The one exception to "record argv first" is `--fleet-warm`, and it is above
+// the record precisely so it writes NOTHING: run() execs the stub once under
+// that argv to pay its first-exec OS scan outside the 20 s budget ledger.mjs
+// puts on its gh child (#1199). Warming without this arm would create
+// `$GH_ARGS_FILE` itself, and every "gh was never queried" assertion in this
+// file — the claims `ghRan` exists for — would read as though it had been.
+// ledger.mjs never passes this flag, so no real invocation can take the arm.
 const GH_STUB = `#!/bin/sh
+case " $* " in *" --fleet-warm "*) exit 0 ;; esac
 printf '%s\\n' "$@" > "$GH_ARGS_FILE"
 pwd -P > "$GH_CWD_FILE"
 printf 'GIT_DIR=%s\\nGH_REPO=%s\\n' "\${GIT_DIR-}" "\${GH_REPO-}" > "$GH_ENV_FILE"
@@ -161,6 +170,29 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       const ghPath = join(bin, "gh");
       writeFileSync(ghPath, GH_STUB);
       chmodSync(ghPath, 0o755);
+      // Pay this stub's first-exec OS scan HERE, before the spawn below, so it
+      // is spent outside the 20 s budget ledger.mjs puts on its gh child.
+      //
+      // Measured (#1199): the first execution of a newly written executable
+      // costs ~148 ms on an idle machine and 3.3-8.9 s under five concurrent
+      // copies of this suite — the fleet's normal condition — while a second
+      // execution of the same file stays at ~4 ms either way. Warm exec is
+      // flat under load; only the first one is not, so the whole
+      // load-sensitive term is this one scan, and unwarmed it was being spent
+      // inside the budget.
+      //
+      // That is the reported failure, mechanically: a stub killed while still
+      // being scanned has executed none of its own lines, so it records no
+      // argv, `queryOf()` reads `r.ghArgv[-1 + 1]` as undefined, and the test
+      // reds with `actual: undefined` against a child that produced no output
+      // in 20 s. Two members hit exactly that on 2026-09-02.
+      //
+      // #1099 reached the same term in net.test.mjs and ruled on the remedy:
+      // stop spending the budget on a scan rather than widen the budget. The
+      // budget here is untouched. Warming, not a shared stub, because PATH
+      // lookup from execFileSync needs a real file per fixture and the sentinel
+      // paths are what keep the cases isolated.
+      spawnSync(ghPath, ["--fleet-warm"], { env: { PATH: bin }, timeout: 30_000 });
     }
     // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
     // readable at all. spawnSync drains stdout and stderr concurrently, so the
