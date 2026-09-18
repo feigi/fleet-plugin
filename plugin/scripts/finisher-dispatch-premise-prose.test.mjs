@@ -43,17 +43,31 @@
 // the defect this file exists to remove. (Triage measured the same on a
 // 570-test family; it has grown to 601 since, same result.)
 //
-// AFTER this file, 604/604 green clean, and each mutation reds exactly the pins
-// that own it, never the whole file:
-//   (M1) "dispatches a finisher on green"          → 2 red (the span pin + the
-//                                                     reverted-wording pin)
-//   (M2) "once CI is green"                        → 1 red (the span pin)
-//   (M3) "once your report has arrived"            → 1 red (the span pin)
-//   (M4) "...has arrived OR CI is green"           → 1 red (the span pin) — the
-//                                                     mutant two half-pins miss
-//   (C1) step 4 rewrapped at 53 cols, meaning identical → 0 red, all 604 pass
-// M2/M3 reddening singly is what proves each half is separately load-bearing;
-// C1 staying green is what proves the span pin refuses drift, not line breaks.
+// AFTER this file, 606/606 green clean, and each mutation reds exactly the pins
+// that own it, by test NAME — never a raw failure count, which `node --test`
+// prints twice per red:
+//   (M1) "dispatches a finisher on green"      → 3 red: span pin, reverted-
+//                                                 wording pin, reflow control
+//   (M2) "once CI is green"                    → 2 red: span pin, reflow control
+//   (M3) "once your report has arrived"        → 2 red: span pin, reflow control
+//   (M4) "...has arrived OR CI is green"       → 2 red: span pin, reflow control
+//                                                 — the mutant half-pins miss
+//   (C1) step 4 rewrapped at 53 cols, meaning identical → every pin in this
+//                                                 file green
+// M2/M3 reddening on their own is what proves each half is separately
+// load-bearing; only M1 additionally trips the reverted-wording pin, which is
+// that pin owning exactly its one claim. The reflow control reds alongside the
+// span pin on all four because it is derived from the LIVE slice rather than a
+// quoted copy of today's line — the property that makes it a reflow control and
+// not a second fixture to keep in sync.
+//
+// C1 also reddens ONE pin outside this file — `pointer-target-prose.test.mjs`'s
+// "every pointer clause in the document is still recognised", which extracts
+// `see **…**` clauses per physical line and finds 3 instead of 5 once step 4
+// wraps. That is pre-existing brittleness in another file's pin, not fallout
+// from this one: with this file deleted, the same rewrap reds the same single
+// test (measured, 598/599). Not touched here — #1499 scopes this ticket to the
+// third site's guard and explicitly out of migrating anything else.
 //
 // THE CEILING: a prose pin. It proves the two-condition gate is STATED where a
 // fix-applier reads it, bounded to the step that states it. It cannot prove a
