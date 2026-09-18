@@ -42,6 +42,169 @@ test("between throws when the end anchor exists only BEFORE the start anchor", (
   assert.throws(() => between("zzSTARTzz", "START", "END", "the fixture"), /no longer contains "END" after "START"/);
 });
 
+// #1492. The anchor-pair primitive's emphasis-tolerant mode, mirroring the one
+// `anchorAt` and `quoteBlock` already carry. Every move below is
+// meaning-preserving in the rendered document, and every one of them reds a
+// literal `indexOf` anchor — the defect class this option closes. The anchor is
+// typed WITH `**` here on purpose: that is how this population writes them, and
+// it is the direction `anchorAt`'s own tolerant mode does not cover, since it
+// strips only the document.
+//
+// THE CLASS, enumerated. `**` emphasis may, meaning-preservingly: vanish from
+// the anchored words, appear on them, narrow onto fewer of them, widen past
+// them, or move to a different word boundary inside them. All five are covered
+// below. Deliberately LEFT, and out of this option's name: single-asterisk
+// `*italic*` and `_underscore_` emphasis, and backtick code spans — the
+// acceptance criterion is to reuse `unemphasized`, which is this directory's
+// one definition of an emphasis marker and is `**`-only; a second stripper
+// here would be the duplicate that criterion forbids. Also left: a lone `*`
+// whose pairing differs between the anchor and the document, since `**` pairs
+// globally in the document and locally in the anchor. No anchor in this repo
+// carries one.
+//
+// Mutation-tested 2026-09-18 against a scratch copy of `prose-pin.mjs` under
+// `/tmp/fleet-scratch/impl-1492/` (never the real module), each substitution
+// asserted to have applied before the run was believed — two of the first
+// patterns matched `anchorAt`/`quoteBlock` as well and were reported UNAPPLIED
+// rather than silently passing as survivors. 11 mutations, 0 survivors. Reds
+// by test NAME, not count, so per-pin discrimination is visible:
+//   (M1) tolerance ignored, raw document searched — reds 9
+//   (M2) start-anchor uniqueness guard deleted — reds the ambiguity pin alone
+//   (M3) [superseded by #1613] this session predates the END-anchor guard;
+//        symmetrizing it onto the END anchor reded both END pins below at
+//        the time and is now the SHIPPED behavior — see `between`'s own doc
+//        comment and the end-anchor ambiguity/empty-anchor pins added below
+//   (M4) end anchor searched from 0 — reds the both-ends pin, old and new
+//   (M5) `rawOffset` dropped, stripped offsets cut raw text — reds 6
+//   (M6) tolerant match routed through `phrase()` — reds the whitespace pin
+//        alone, and reds NOTHING until that pin covered the start anchor too
+//   (M7a/b) document stripped but the anchor left literal — reds 7 / 3
+//   (M8) tolerance on by default — reds the pre-existing literal `between`
+//        pin, which is the off-by-default criterion holding without an edit
+//   (M9) `occurrenceCount` stops at the first hit — reds the ambiguity pin
+//   (M10) tolerant slice returned emphasis-stripped — reds 5
+//
+// Each row states the WHOLE slice it expects, byte for byte, rather than
+// matching a phrase inside it. Two contracts ride on that: the bounds moved to
+// the right places, and the returned bytes still carry whatever `**` the
+// document has — a tolerant anchor locates, it never rewrites what the caller
+// gets back. A `phrase()` match inside the slice would see neither, and would
+// pass against a slice that had silently swallowed `pad`.
+const MOVES = [
+  ["emphasis removed", "pad\n\nstart here — the rule.\n\nEND", "start here — the rule.\n\n"],
+  ["emphasis narrowed to one word", "pad\n\n**start** here — the rule.\n\nEND", "**start** here — the rule.\n\n"],
+  ["emphasis widened past the anchor", "pad\n\n**start here — the** rule.\n\nEND", "**start here — the** rule.\n\n"],
+  ["emphasis moved to another word boundary", "pad\n\nstart **here** — the rule.\n\nEND", "start **here** — the rule.\n\n"],
+  ["emphasis unchanged", "pad\n\n**start here** — the rule.\n\nEND", "**start here** — the rule.\n\n"],
+];
+
+for (const [move, doc, expected] of MOVES) {
+  test(`between with emphasisTolerant still finds its anchor when ${move}`, () => {
+    assert.equal(between(doc, "**start here**", "END", "the fixture", { emphasisTolerant: true }), expected);
+  });
+}
+
+// The over-widening case, and the reason the tolerant mode needs a guard the
+// literal one does not. Stripping `**` can only ADD matches, so a tolerant
+// START anchor can land EARLIER than the literal one did — here on a decoy
+// stating the rule in plain text ABOVE the real, emphasized one. Taking the
+// first hit slices from the decoy and pulls in everything between, which no
+// assertion inside the slice can see: the pinned words are all still there,
+// just sourced from the wrong copy. A green pin over the wrong region is worse
+// than the red it replaces, so it throws.
+//
+// The literal call on the SAME fixture is asserted alongside it, and that
+// pairing is what makes this a widening test rather than a duplicate-anchor
+// test: the exact-match anchor resolves to ONE place and returns the narrow,
+// correct slice, so the region the tolerant mode refuses to guess at is
+// demonstrably real and demonstrably wider.
+const TWO_STATES = "decoy: the RULE — and then it drifts.\n\n**never slice me**\n\nreal: the **RULE** — and then it holds.\n\nEND";
+
+test("between throws on an ambiguous tolerant start anchor rather than slicing from the wrong occurrence", () => {
+  assert.throws(
+    () => between(TWO_STATES, "the **RULE** —", "END", "the fixture", { emphasisTolerant: true }),
+    /the fixture: emphasis-tolerant slice anchor "the \*\*RULE\*\* —" occurs 2 times once `\*\*` is ignored/,
+  );
+  // Exact-match, same fixture, same anchors: one hit, and the slice the
+  // tolerant mode declined to widen past.
+  assert.equal(between(TWO_STATES, "the **RULE** —", "END", "the fixture"), "the **RULE** — and then it holds.\n\n");
+});
+
+// The END anchor now gets the SAME guard, symmetric with the START — added
+// by #1613 after review found the asymmetry could silently narrow OR widen a
+// tolerant slice (see `between`'s own doc comment). Here the end anchor's
+// text appears twice AFTER the start in two different emphasis states, which
+// is exactly the shape the START guard refuses; the END guard now refuses it
+// too, rather than resolving to the first and silently dropping whatever sat
+// between the two.
+//
+// The literal call on the SAME fixture is asserted alongside it: literal
+// mode never gets this guard (see `between`'s own doc comment for why) and
+// still resolves to the first occurrence — proving the guard is scoped to
+// `emphasisTolerant` and did not regress the literal path.
+const REPEATED_END = "HEAD one\n\nthe STOP mark, plain.\n\nmiddle\n\nthe **STOP** mark, bold.\n\nEND";
+
+test("between throws on an ambiguous tolerant end anchor rather than stopping at the first occurrence", () => {
+  assert.throws(
+    () => between(REPEATED_END, "HEAD one", "the **STOP** mark", "the fixture", { emphasisTolerant: true }),
+    /the fixture: emphasis-tolerant slice end anchor "the \*\*STOP\*\* mark" occurs 2 times after the start once `\*\*` is ignored/,
+  );
+  assert.equal(between(REPEATED_END, "HEAD one", "the **STOP** mark", "the fixture"), "HEAD one\n\nthe STOP mark, plain.\n\nmiddle\n\n");
+});
+
+// `occurrenceCount`'s own contract, unverified until now: cursor-bounded
+// (`i = hit + 1`) rather than chained off the previous hit's length, so an
+// anchor that strips to "" under `emphasisTolerant` terminates instead of
+// spinning forever on `indexOf("", i)`'s clamped return. Confirmed by
+// reverting to the chained form (`i = hit + needle.length`): every other
+// test in this file still passes, and only this fixture hangs, because
+// `needle.length` is 0 and the cursor never advances.
+test("between throws rather than hanging when a tolerant anchor strips to empty", () => {
+  assert.throws(
+    () => between("pad\n\n**start here**\n\nEND", "**", "END", "the fixture", { emphasisTolerant: true }),
+    /the fixture: emphasis-tolerant slice anchor "\*\*" occurs \d+ times once `\*\*` is ignored/,
+  );
+});
+
+// `between`'s both-ends contract has to survive the new search view: the end
+// anchor is still searched from `at + start.length`, measured in the STRIPPED
+// document, never from 0. A tolerant search that lost that offset finds the
+// copy above the start anchor and returns "", the false green this module
+// exists to kill — and the throw below is the same guard one document later.
+// The message names the anchor as the caller TYPED it, `**` and all, so it can
+// be grepped for.
+test("between's tolerant END anchor is still searched only after the start anchor", () => {
+  assert.equal(
+    between("**EDGE** early\n\nHEAD\n\nbody here\n\nEDGE late", "HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }),
+    "HEAD\n\nbody here\n\n",
+  );
+  assert.throws(
+    () => between("**EDGE** early\n\nHEAD\n\nbody here", "HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }),
+    /the fixture no longer contains "\*\*EDGE\*\*" after "HEAD" — update this test/,
+  );
+});
+
+// Emphasis tolerance and WHITESPACE tolerance are separate axes, and this pin
+// is the one that keeps them separate. The obvious implementation mirrors
+// `anchorAt` and runs the stripped anchor through `phrase()`; `phrase()` is
+// `s.trim().split(/\s+/)`, so it discards the leading newline — and this
+// family's anchors carry load-bearing ones, e.g.
+// `fix-applier-correction-rules-prose.test.mjs`'s `PROMPT_END`,
+// `"\n**Put the standing CI facts"`: the leading `\n` ties it to the line
+// where that phrase starts, not to any earlier occurrence of the same words
+// mid-line. `phrase()`'s `.trim()` would strip that newline before matching.
+//
+// Both fixtures reproduce that shape: the anchor's word appears inline earlier
+// and at a line start later, and only the line-start one is the bound. Route
+// either anchor through `phrase()` and it binds the inline copy instead —
+// widening the slice at the start bound, cutting it short at the end bound.
+// Both anchors are pinned because either one alone leaves the other free to
+// pick up `phrase()` on the next edit.
+test("between's tolerant mode leaves whitespace literal at both anchors, so a leading newline still bounds the slice", () => {
+  assert.equal(between("HEAD one **Put** two\n**Put the rest", "HEAD", "\n**Put", "the fixture", { emphasisTolerant: true }), "HEAD one **Put** two");
+  assert.equal(between("pad **HEAD** inline\nHEAD at line start\n\nEND", "\n**HEAD**", "END", "the fixture", { emphasisTolerant: true }), "\nHEAD at line start\n\n");
+});
+
 // `\s+` between words, never a literal space: the prose these match against is
 // hard-wrapped, so any inter-word space in the source may be a newline plus
 // indent. Replacing the join with " " passes a single-line fixture and fails

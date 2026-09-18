@@ -1,13 +1,105 @@
 import assert from "node:assert/strict";
 
+// How many times `needle` occurs in `haystack`, overlaps included — two
+// overlapping hits are two places a slice could start, which is exactly the
+// ambiguity the caller below refuses. A count, not the offsets: the caller
+// needs only "more than one" and the number to say so with. Cursor-bounded
+// rather than chained off the previous hit, so an anchor that strips to ""
+// terminates instead of spinning on `indexOf("", i)`'s clamped return.
+function occurrenceCount(haystack, needle) {
+  let n = 0;
+  for (let i = 0; i <= haystack.length; ) {
+    const hit = haystack.indexOf(needle, i);
+    if (hit === -1) break;
+    n += 1;
+    i = hit + 1;
+  }
+  return n;
+}
+
 // Bound at BOTH ends: an unbounded end lets a later, unrelated occurrence of the
 // same phrase satisfy the assertion with the real clause deleted.
-export function between(text, from, to, what) {
-  const at = text.indexOf(from);
+//
+// `emphasisTolerant` mirrors the option `anchorAt` and `quoteBlock` already
+// carry — same name, same default of off — and reuses their `unemphasized`/
+// `rawOffset` pair rather than carrying a second stripper. On, BOTH the anchors
+// and the document are read through `unemphasized`, so `**` may be removed,
+// added, narrowed, widened, or moved to another word boundary anywhere inside
+// an anchor without moving the slice. Stripping the ANCHOR too is what
+// `anchorAt`'s own tolerant mode does not do, and is the direction this family
+// needs: its anchors are typed WITH `**` when the source is, so a document that
+// loses the emphasis is the common break.
+//
+// BOTH anchors must then resolve EXACTLY ONCE when tolerant — the standard
+// `anchorAt` and `quoteBlock` already hold for their one anchor, and the price
+// of tolerance here, paid at both ends alike (`occurrenceCount` below is
+// shared by both guards). Stripping `**` can only ADD matches to a search over
+// the stripped view, never remove one the literal anchor had, so a tolerant
+// anchor can resolve somewhere the literal one never could: on a text-identical
+// phrase sitting in a different emphasis state elsewhere in the document, or —
+// when an anchor literal itself carries a `*` run that does not collapse to a
+// clean `**`-pair count — on a shorter, less specific phrase the literal anchor
+// never matched at all, which can make a tolerant match genuinely WIDER than
+// the literal one, not merely earlier. Either direction is invisible to every
+// assertion inside the slice: at the START, the pinned words are all present,
+// sourced from the wrong copy; at the END, a slice that lands short silently
+// DELETES content, which can flip a `doesNotMatch` pin from correctly RED to
+// falsely GREEN — the same false-green class a wrong START does, just reached
+// from the other side. Both throw instead, for the reason a missing anchor
+// throws rather than widening to the whole file.
+//
+// Only the TOLERANT path pays that price. The literal path's END anchor keeps
+// first-hit-after-the-start and stays non-unique ON PURPOSE — an end bound's
+// job there is to be the next one, not the only one — and two of this
+// directory's real end anchors depend on exactly that:
+// `snapshot-runner-audience-prose.test.mjs`'s `"\n- **"` means "wherever the
+// next bullet starts", and `instrument-check-prose.test.mjs`'s `"**Exit 0 is
+// the only code"` names a sentence `run-team/SKILL.md` states twice, once bold
+// and once inside a blockquote. Neither callsite turns `emphasisTolerant` on,
+// so the guard above never sees them; an exactly-once literal-mode end bound
+// would refuse both while preventing no widening that exists today.
+//
+// Matching stays a literal `indexOf` over the stripped view, NOT `phrase()` as
+// `anchorAt` uses: #1492's own ticket measured that trade. `phrase()` is
+// `s.trim().split(/\s+/)`, which discards a leading newline — and `between`
+// anchors carry load-bearing ones, e.g. `fix-applier-correction-rules-prose
+// .test.mjs`'s `PROMPT_END`, `"\n**Put the standing CI facts"`: the leading
+// `\n` is what ties that anchor to the phrase's own line start rather than to
+// any mid-line occurrence of the same words. `phrase()`'s `.trim()` would
+// strip that newline before matching, silently loosening the anchor. A
+// tolerant mode built on `phrase()` would trade this family's false reds for
+// that false green. Emphasis tolerance and whitespace tolerance are separate
+// axes; this option moves only the first.
+//
+// The returned slice is raw bytes with `**` intact — `rawOffset` maps each
+// endpoint back and stops BEFORE the marker, so a tolerant slice keeps the
+// emphasis its caller goes on to compare.
+export function between(text, from, to, what, { emphasisTolerant = false } = {}) {
+  const haystack = emphasisTolerant ? unemphasized(text) : text;
+  const start = emphasisTolerant ? unemphasized(from) : from;
+  const stop = emphasisTolerant ? unemphasized(to) : to;
+  const at = haystack.indexOf(start);
   assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
+  if (emphasisTolerant) {
+    const hits = occurrenceCount(haystack, start);
+    assert.equal(
+      hits,
+      1,
+      `${what}: emphasis-tolerant slice anchor "${from}" occurs ${hits} times once \`**\` is ignored — the slice would start at the first and pull in what the literal anchor excluded; narrow the anchor or drop emphasisTolerant`,
+    );
+  }
+  const searchFrom = at + start.length;
+  const end = haystack.indexOf(stop, searchFrom);
   assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
+  if (emphasisTolerant) {
+    const hits = occurrenceCount(haystack.slice(searchFrom), stop);
+    assert.equal(
+      hits,
+      1,
+      `${what}: emphasis-tolerant slice end anchor "${to}" occurs ${hits} times after the start once \`**\` is ignored — the slice would end at the first and could drop or admit content the literal anchor did not; narrow the anchor or drop emphasisTolerant`,
+    );
+  }
+  return emphasisTolerant ? text.slice(rawOffset(text, at), rawOffset(text, end)) : text.slice(at, end);
 }
 
 // `\s+` between every word, never a literal space — prose this matches against
