@@ -387,6 +387,254 @@ test("the fallback's head check states the mismatch as a corrupted verification,
   );
 });
 
+// #1512. The fallback's head check read `gh pr view <pr> --json headRefOid` as
+// its SOLE comparison operand — the one field that lags the branch ref it is
+// meant to describe, which is why step 1's own poll was moved off it (#903)
+// and why the phase-1 dispatch site was moved off it (#1168). Both failure
+// directions are live at this site: a false `worktree-diverged` STOP on a
+// just-rebased worktree, and — the half that ships — a false EQUAL, because a
+// worktree unfetched since the rebase and a PR object lagging the rebase hold
+// the SAME pre-rebase sha, so the two stale values agree and the fallback
+// verifies a tree the remote no longer has.
+//
+// These pins hold WHICH SOURCE the check turns on, not that a comparison
+// exists. Measured: with the operand swapped, this file was 48/48 green on
+// both the pre-fix and post-fix doc — `rev-parse HEAD` survives the swap, the
+// `headRefOid` command survives in the block as the recorded diagnostic, and
+// every arm's wording is unchanged. That is the shape the pins above cannot
+// tell apart, and the reason these are mappings and bounded negatives rather
+// than presences.
+//
+// MUTATION RECORD — #1512, scratch-copy method (`cp -R plugin/` to a tmp dir,
+// mutate the copy, `node --test` the copy, read counts, discard; one mutant
+// per copy, so the real checkout is never the subject). 18 semantic mutants,
+// 9 controls, run against this file's 56 tests. 17 of 18 red, every red a
+// true positive naming the pin whose claim was actually lost:
+//
+// The `ls-remote` line deleted from the command block; the block's "NOT the
+// gate" comment reverted to the old one; the compare rule's re-admitting
+// clause in all three wordings (naming `headRefOid` with and without
+// "against", and naming "the PR object's head" with neither); the empty-read
+// clause rewritten to fall back to the PR object; the `Equal` arm rewritten
+// to accept either source; the one-re-read bound deleted; the refusal flipped
+// to "take the newer reading and proceed"; the `Equal`-is-unreachable clause
+// deleted; the fail-open clause deleted; the settle-window clause deleted;
+// the `rev-parse origin/<branch>` prohibition deleted; the arm-discriminator
+// paragraph deleted; the false-EQUAL clause deleted. Reverting the whole
+// block to its pre-#1512 form reds 7.
+//
+// THE SURVIVOR, recorded rather than patched — see the count guard's own
+// ceiling note: a re-admitting clause naming neither `headRefOid` nor
+// "against" ("the PR object's value is also fine to use here") passes both
+// counts, and is denied only by the block and the arms, which is where the
+// instruction is actually executed.
+//
+// Controls all stayed 56/56 green: the compare rule rewrapped at 80 columns,
+// the re-read paragraph at 70, the fail-open paragraph at 90 and the arm
+// discriminator at 75; the unpinned measurement sentence reworded with
+// different shas and a different git version; the unpinned "costing a wave"
+// tail and the unpinned re-read rationale reworded; the block's operand
+// comment reworded; and the out-of-scope `Worktree behind` arm reworded. The
+// pins refuse operand drift, not layout, and they do not reach the arm the
+// ticket put out of scope.
+
+// The runnable half. A revert deletes the `ls-remote` line from the block, and
+// the three-line block is the only place the operator is handed commands, so
+// this is the one pin a revert cannot route around by rewording prose. Bounded
+// to the block: `git ls-remote` recurs through step 1 above and `headRefOid`
+// recurs through the whole file.
+const headBlock = () =>
+  between(
+    DOC,
+    "git -C <worktree> rev-parse HEAD",
+    "**Compare the worktree head",
+    "run-merge-bot.md's fallback head-check command block",
+  );
+
+test("the fallback reads the branch ref, and marks the PR-object read as not the gate", () => {
+  assert.match(headBlock(), phrase("git ls-remote origin refs/heads/<branch> | cut -f1"));
+  // The demotion travels with the command, not only in prose three paragraphs
+  // down: a reader who runs the block and stops reading must still not take
+  // `headRefOid` for the verdict.
+  assert.match(headBlock(), phrase("gh pr view <pr> --json headRefOid -q .headRefOid"));
+  assert.match(headBlock(), phrase("NOT the gate"));
+});
+
+// The operand as a MAPPING — which source the worktree head is compared
+// AGAINST. The positive clause and the prohibition fail independently: a
+// mutant that names the ref while leaving `headRefOid` admissible reds on the
+// prohibition, one that drops the ref entirely reds on the mapping.
+//
+// `git rev-parse origin/<branch>` is the false fix waiting beside the real
+// one, and the reason it is pinned separately: a reader who learns only "not
+// the PR object" reaches for the local remote-tracking ref, which is the very
+// value a stale worktree was cut from — it agrees by construction and passes
+// every tree the check exists to catch. #1168 pinned the same prohibition at
+// the sibling site for the same reason.
+const compareRule = () =>
+  paragraph(DOC, "**Compare the worktree head", "run-merge-bot.md's fallback compare rule");
+
+test("the fallback compares against the branch ref, and forbids both cheaper operands", () => {
+  assert.match(compareRule(), phrase("Compare the worktree head against the branch REF"));
+  assert.match(
+    compareRule(),
+    phrase("never against `gh pr view <pr> --json headRefOid -q .headRefOid`"),
+  );
+  assert.match(compareRule(), phrase("Never `git rev-parse origin/<branch>` either"));
+  assert.match(compareRule(), phrase("agrees with it by construction"));
+  assert.match(compareRule(), phrase("never the operand this check turns on"));
+});
+
+// COUNT guard, and the ceiling on the presences above. Every assertion in
+// that test is a presence, so a mutant that keeps all five verbatim and
+// appends one clause re-admitting the PR object satisfies every one of them:
+// measured, "…never the operand this check turns on — though where the ref
+// read is awkward, comparing against `headRefOid` is acceptable." left this
+// file 55/55 green. #1168 measured three mutants of exactly this class
+// escaping its own literal negative at the sibling site, and answered with a
+// count; this is that answer, over the two tokens such a clause has to use.
+//
+// Both counts are the paragraph AS WRITTEN. `headRefOid` is 3, not 2 — the
+// prohibition spells the whole command, so `--json headRefOid -q .headRefOid`
+// is two of them, and "The `headRefOid` read stays" is the third. `against`
+// is 2: the mapping and the prohibition. A re-admitting clause has to add one
+// or the other, whichever way it is worded.
+//
+// THE CEILING, measured rather than assumed: a clause that names neither
+// token — "the PR object's head is also acceptable here" — passes both counts.
+// What denies it is not this test but the block and the arms: the compare
+// rule is prose, while `headBlock()` pins the commands the operator actually
+// runs and `arms()` pins the place the verdict is actually taken, and neither
+// admits the field. A doc mutated that way contradicts itself in one
+// paragraph and still routes the reader to the ref.
+test("no second operand is admitted beside the branch ref", () => {
+  assert.equal(
+    (compareRule().match(/headRefOid/g) ?? []).length,
+    3,
+    "the compare rule names headRefOid a fourth time — a re-admitting clause, under some wording the presences above all satisfy",
+  );
+  assert.equal(
+    (compareRule().match(/\bagainst\b/g) ?? []).length,
+    2,
+    "a third compared-against clause entered the compare rule — the operand is no longer the ref and nothing else",
+  );
+});
+
+// MAPPING guard, ceiling on the pin above. The prohibition is a presence pin,
+// so a mutant that keeps it verbatim and re-admits the field through a second
+// clause satisfies it — #1168 measured three such mutants escaping its own
+// literal `doesNotMatch` at the sibling site. Two bounded negatives close the
+// two places such a clause can live and still be obeyed.
+//
+// The empty-read clause is the first: "if the ref reads empty, use
+// `headRefOid` instead" is the exception that reinstates the whole defect,
+// and is exactly the mutant that escaped at the sibling site. This slice is
+// that clause alone, where the PR object has no legitimate business at all.
+const emptyReadClause = () =>
+  between(
+    DOC,
+    "**An empty ref read is neither equal nor a mismatch**",
+    "**Why the ref and not",
+    "run-merge-bot.md's fallback empty-ref-read clause",
+  );
+
+test("an unreadable ref refuses, and never falls back to the PR object", () => {
+  assert.match(emptyReadClause(), phrase("report the ref as unreadable and stop, `blocked`"));
+  assert.doesNotMatch(
+    emptyReadClause(),
+    /headRefOid/,
+    "the empty-ref-read clause hands the verdict to the PR object — the exception that reinstates the defect",
+  );
+});
+
+// The arms are the second place. They are where the verdict is actually
+// taken, so a `headRefOid` named inside one ("**Equal** — against the ref or
+// the PR head — → proceed") is the operand back, under a wording no literal
+// negative above covers. The arms name no source today and need none: the
+// paragraphs above resolve the operand before the reader reaches them.
+const arms = () =>
+  between(DOC, "- **Equal** → proceed.", "**Plain `git fetch origin` only", "run-merge-bot.md's fallback arms");
+
+test("no arm of the fallback names the PR object as a thing to compare against", () => {
+  assert.doesNotMatch(
+    arms(),
+    /headRefOid/,
+    "an arm names headRefOid — the verdict turns on the PR object again, whatever the paragraphs above say",
+  );
+  // Runs with the positives that make the negative mean something: a
+  // `doesNotMatch` alone is satisfied by arms that were deleted.
+  assert.match(arms(), phrase("**Equal** → proceed."));
+  assert.match(arms(), phrase("**Worktree ahead** → STOP"));
+  assert.match(arms(), phrase("**Worktree behind, or no worktree at all** → not a divergence"));
+});
+
+// The fail-open half, and the whole reason the OPERAND moved rather than the
+// verdict gaining a settle window. Without it a reader is left with the false
+// refusal alone — the cheap, visible half — and re-derives the settle-window
+// remedy #1168's own ticket proposed, which fires only where the two operands
+// disagree and so never reaches the pair that agrees. Pinned because that
+// re-derivation restores the hole while looking like a fix.
+//
+// THE CEILING: the measurement sentence beside these clauses is deliberately
+// unpinned — it is one run's reading at a sibling site, and re-measuring must
+// not turn a test red.
+const whyRef = () => paragraph(DOC, "**Why the ref and not", "run-merge-bot.md's fallback fail-open rationale");
+
+test("the fallback says the PR-object compare fails open too, and that a re-read cannot fix it", () => {
+  assert.match(whyRef(), phrase("both operands go stale in the SAME direction"));
+  assert.match(whyRef(), phrase("fails OPEN as readily as it fails closed"));
+  assert.match(whyRef(), phrase("the check reads **Equal**"));
+  assert.match(
+    whyRef(),
+    phrase("Re-reading `headRefOid` on a settle window does not reach that half at all"),
+  );
+});
+
+// The remedy for a mismatch and its bound, in one paragraph but four clauses
+// that fail independently:
+//
+//   - no re-read at all, and a ref that moved mid-verification is read once
+//     and acted on as a divergence;
+//   - no bound, and the same instruction reads as "fetch until it agrees" —
+//     the unbounded loop step 1 already had to be written out of once, and
+//     the shape this doc forbids by name elsewhere;
+//   - no refusal, and a head that moved during verification proceeds on an
+//     audit of a tree that is gone;
+//   - no `Equal`-is-unreachable clause, and the surviving mismatch can still
+//     be waved through as equal, which is #1512's own defect restored one
+//     paragraph later than where it was removed.
+const reRead = () => paragraph(DOC, "**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read");
+
+test("a mismatch is re-read exactly once, then refused rather than waited out", () => {
+  assert.match(reRead(), phrase("`git fetch origin` and read the ref once more"));
+  assert.match(reRead(), phrase("Bounded at one re-read, never a third"));
+  assert.match(reRead(), phrase("refuse: report `head-moved-after-label-#<pr>` and stop"));
+  assert.match(reRead(), phrase("Do not read a third time"));
+  assert.match(
+    reRead(),
+    phrase("**`Equal` is not among the outcomes a surviving mismatch can reach**"),
+  );
+});
+
+// The consequence of the operand swap that the swap alone does not settle.
+// Against `headRefOid` the stale-plus-lagging worktree read EQUAL and never
+// reached the arms; against the ref it reaches them, and the arms are labelled
+// ahead/behind — a linear vocabulary the case does not fit, because a rebase
+// orphans the pre-rebase head, so the ref does not carry the worktree's
+// commits BY SHA even though it carries every patch in them. Read literally,
+// "commits the ref lacks" sends a worktree holding no work of its own to the
+// STOP: the false refusal, re-entering through the arm labels after being
+// removed from the operand. The discriminator is `git cherry`, which this
+// step already established two paragraphs up, and pinning it is what keeps
+// the arms' unchanged behaviour actually reachable.
+const armRouting = () => paragraph(DOC, "**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator");
+
+test("which arm a surviving mismatch takes is decided by patch equivalence, not by the sha compare", () => {
+  assert.match(armRouting(), phrase("`git cherry origin/<branch> HEAD` from the worktree"));
+  assert.match(armRouting(), phrase("not the sha compare"));
+  assert.match(armRouting(), phrase("a `+` → ahead; no `+` → behind"));
+});
+
 // #1038's AC-4 is a property of the whole block, not of the two sentences that
 // carried the false claim: no sentence in the fallback may say a local commit
 // reaches the remote. The three positive pins cover the spans it was written
