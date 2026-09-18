@@ -434,9 +434,15 @@ test("the fallback's head check states the mismatch as a corrupted verification,
 // discriminator at 75; the unpinned measurement sentence reworded with
 // different shas and a different git version; the unpinned "costing a wave"
 // tail and the unpinned re-read rationale reworded; the block's operand
-// comment reworded; and the out-of-scope `Worktree behind` arm reworded. The
-// pins refuse operand drift, not layout, and they do not reach the arm the
-// ticket put out of scope.
+// comment reworded; and the out-of-scope `Worktree behind` arm's TRAILING
+// SENTENCE reworded, its bolded head left untouched — that is the mutant
+// that stayed green. Rewording the bolded head instead reds two tests this
+// record does not own: the `arms()` test above, which pins
+// "`**Worktree behind, or no worktree at all** → not a divergence`"
+// verbatim, and the pre-existing `stopArm()` slice below, whose end bound is
+// the literal string "- **Worktree behind". The pins refuse operand drift,
+// not layout, and a tail-only reword of that arm does not reach them —
+// its bolded head is owned by tests outside this record.
 
 // The runnable half. A revert deletes the `ls-remote` line from the block, and
 // the three-line block is the only place the operator is handed commands, so
