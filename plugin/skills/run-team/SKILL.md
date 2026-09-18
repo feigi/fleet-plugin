@@ -2921,8 +2921,8 @@ ruleset with no bypass actors, so a direct `git push origin main` is **refused**
 `! [remote rejected] main -> main (push declined due to repository rule
 violations)`, measured 2026-08-10 by a controller that tried exactly that at the
 end of a 7-PR run. A mid-run tooling fix goes through a PR like every other
-change, and that PR faces the same required checks — `rebase-check`, `check`,
-`validate-release-label` — so it carries a release label like anything else.
+change, and that PR faces every required check any other PR faces — the set
+`.github/rulesets/main.json` declares — so it carries a release label too.
 Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 ADR 0007 records the gate and why it has no exemption.
 

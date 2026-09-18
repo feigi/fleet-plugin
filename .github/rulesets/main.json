@@ -47,6 +47,22 @@
           {
             "context": "validate-release-label",
             "integration_id": 15368
+          },
+          {
+            "context": "validate-claude",
+            "integration_id": 15368
+          },
+          {
+            "context": "smoke-omp",
+            "integration_id": 15368
+          },
+          {
+            "context": "npm-name-gate",
+            "integration_id": 15368
+          },
+          {
+            "context": "install-and-smoke",
+            "integration_id": 15368
           }
         ]
       }

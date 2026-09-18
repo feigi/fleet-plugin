@@ -69,7 +69,7 @@ unless the live object matches. Every field below is a choice, not a default:
 
 | Field | Value | Why |
 |---|---|---|
-| `required_status_checks` | `rebase-check`, `check`, `validate-release-label` | `check` is the only thing between a red tree and `main`, kept unsplit. `validate-release-label` is required because `release.yml` already assumes it — it runs `if: always()` (`release-label.yml:68-70`) so it never skips and cannot deadlock a PR. `auto-label-bots` must stay **unrequired**: it is `if:`-gated on dependabot/renovate and skips on human PRs, and a required skipping check strands a PR forever |
+| `required_status_checks` | `rebase-check`, `check`, `validate-release-label`, `validate-claude`, `smoke-omp`, `npm-name-gate`, `install-and-smoke` | Every context a PR head publishes except `auto-label-bots`. The test is whether a context can *skip*, because a required check that skips strands the PR forever — and `auto-label-bots` is exactly that: `if:`-gated on dependabot/renovate (`release-label.yml:39-41`), so it skips on human PRs and must stay **unrequired**. Nothing else qualifies: the only job-level `if:` in `ci.yml` is `rebase-check`'s `github.event_name == 'pull_request'`, satisfied on every PR, and `validate-release-label` runs `if: always()` (`release-label.yml:68-70`). `check` is the suite, kept unsplit. `validate-claude`, `smoke-omp`, `npm-name-gate` and `install-and-smoke` are separate jobs on purpose (#1314, #1347, #1294) with their own real failure modes, not vestigial steps — `ci.yml:269` already calls `validate-claude` *"Blocking, every PR"*, which only a required context makes true. `validate-release-label` is required because `release.yml` already assumes it |
 | `strict_required_status_checks_policy` | `true` | Closes the stale-green hole at the merge button, where it cannot go stale. Free today because `merge-bot` is capped at 1: the bot is the only merger, so the candidate it just rebased is always at `main`'s tip. See guard 1 — this is the field that forecloses parallel merge-bots |
 | `allowed_merge_methods` | `["merge"]` | **Forced by code.** `prove-merge.sh:166` dies `has no second parent — not a merge commit` and exits 2; its three-leg proof (`:8-9`) requires the merge commit's second parent to *be* the rebased head. `run-merge-bot.md:246`: *"`--merge` (no-ff) is load-bearing, not stylistic."* Exit 2 means "could not evaluate", not "false", so a squash or fast-forward leaves the bot with no proof at all |
 | linear history | **not enabled** | Mutually exclusive with the row above: it forbids merge commits, and merge-only guarantees one per merge. Enabling both rejects every merge |
@@ -81,23 +81,26 @@ unless the live object matches. Every field below is a choice, not a default:
 
 `rebase-check` stays required even though `strict: true` subsumes its merge-base
 assertion, for two reasons: it also asserts **no merge commits in `base..HEAD`**
-(`ci.yml:64-68`), which no ruleset field expresses, and it prints the actionable
+(`ci.yml:67-71`), which no ruleset field expresses, and it prints the actionable
 `git fetch origin && git rebase origin/$BASE_REF` line that a bare merge-button
 refusal does not.
 
 `rebase-check-refresh.yml`, `.github/scripts/rerun-rebase-check.sh`, and
 `rerun-rebase-check.test.mjs` are **deleted**. Their sole purpose was flipping a
 stale green back to red so a behind PR could not merge; `strict: true` refuses
-that merge regardless of check colour, so a stale green is now inert. That removes
-315 lines, an `actions: write` grant, a 100-PR pagination cap, the unfixable rerun
+that merge regardless of check colour, so a stale green is now inert. Measured on
+this PR's diff, that removes 1105 lines — 315 of workflow YAML, 126 of shell, 664
+of test — an `actions: write` grant, a 100-PR pagination cap, the unfixable rerun
 race above, and the misdiagnosing error message.
 
 ## Why not GitHub's native merge queue
 
 It was considered and rejected; the fleet's own `merge-bot` is the queue of record
-(`ready-to-merge` label, `target: 1`, FIFO by PR number via `pr-overlap.mjs`'s
-`held-behind-#<lower>` hold rule, *"Each PR rebases exactly once, when it becomes
-the candidate"* — `run-team/SKILL.md`). Three blockers:
+(`ready-to-merge` label, `target: 1`, FIFO by PR number via the merge bot's
+`held-behind-#<lower>` hold rule — `run-merge-bot.md:34`, which consults
+`pr-overlap.mjs` for the overlap signal but owns the rule and the label itself —
+and *"Each PR rebases exactly once, when it becomes the candidate"*,
+`run-team/SKILL.md:2693`). Three blockers:
 
 1. Required checks **must** report on the `merge_group` event or the merge fails
    for want of a report. No workflow in this repo has a `merge_group` trigger.
@@ -136,15 +139,23 @@ re-run CI, reimposing serialization from the ruleset with wasted CI on top.
 - **Do not** reach for a `labeled` webhook as the remedy. Measured above: polling
   is ≤4% of the wait. The levers are parallelism and batching.
 
-**Guard 2 — GitHub releases land.** `release.yml` currently tags and publishes.
-When it also cuts GitHub releases, revisit the required contexts: a release job
-that can fail *after* a merge is the same shape of gap that
-`validate-release-label` was required to close.
+**Guard 2 — a release step whose failure is not retry-safe.** GitHub-release
+creation is not a future event to wait for: `release.yml` tags *and* cuts the
+release today (`Create tag (idempotent)`,
+`Create GitHub release (idempotent)`), on `pull_request: [closed]` with
+`merged == true` — entirely post-merge, so nothing about it is observable on a PR
+head and no required context could have gated it. Both steps are guarded by an
+existence check (`git ls-remote --tags --exit-code`, `gh release view`), so a
+failure costs a rerun rather than a corrupted release, and the job already
+comments the failure onto the PR. That is why neither warrants a required context
+now. What would: a post-merge step that is *not* idempotent on rerun, or one
+whose failure condition a PR head could have been checked against first.
 
-- **Input:** a `release` check-run appearing on PRs, or `release.yml` gaining a
-  step that can fail post-merge on a condition observable pre-merge.
+- **Input:** a `release.yml` step that cannot be safely re-run after a partial
+  failure, or one whose precondition is observable pre-merge.
 - **Trigger:** first such step landing on `main`.
-- **Then:** decide whether it becomes a required context, and record it here.
+- **Then:** decide whether its precondition becomes a required context, and
+  record it here.
 
 ## Consequences
 
@@ -152,7 +163,8 @@ that can fail *after* a merge is the same shape of gap that
   live repo by one command. A UI edit that silently fails to save — which happened
   twice while this was being settled — is now detectable rather than believed.
 - `main` cannot be pushed to directly by anyone. Mid-run tooling fixes go through
-  a PR, carry a release label, and face the same three required checks.
+  a PR, carry a release label, and face the same required checks the table above
+  lists.
   `run-team/SKILL.md`'s `## Fix the tooling mid-run` records this.
 - A behind PR is refused at the merge button rather than by a check that may be
   stale. The 30% of `main` advances that the refresh workflow failed to propagate
