@@ -107,8 +107,8 @@ NAME=no-undo-audit
 # exit 1 where the contract says 2).
 die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
 
-# THE RULE FOR EVERY STDERR WRITE IN THIS SCRIPT, and why each one below ends
-# in `|| :`. Exit 0 is safe, 1 is refused, 2 is unanswerable, and a caller
+# THE RULE FOR EVERY STDERR WRITE IN THIS SCRIPT, and why each one is
+# guarded. Exit 0 is safe, 1 is refused, 2 is unanswerable, and a caller
 # branches on which. A diagnostic answers nothing — it shows a human what the
 # run already determined — so its write must not reach `set -e`, which ends
 # the script on that write's own status. Both `printf` and `echo` exit 1 on a
@@ -117,19 +117,24 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
 # the one tool whose job is to say whether a rebase would eat a commit.
 # Measured before the fix — clean tree, stdout open, `2>&-`: exit 1 (#1514).
 #
-# `|| :` is the third piece of `render`'s guard below, used here on its own.
-# These sites have nothing to fall back TO: the line that could not be written
-# IS the message, so there is no second, shorter thing to say about it.
-# `render` needs its extra piece because a dropped LIST reads as an empty one
-# — a finding silently downgraded — while a dropped single line reads as
-# nothing at all, and the payload on stdout still carries every finding.
+# The guard is centralized, never hand-appended per site: `die` and `render`
+# carry it in a function body every caller inherits, and every other bare
+# diagnostic below calls `emit()` (defined after `render`), which does the
+# same — a future call site cannot add an unguarded `>&2` write without also
+# adding a new function to sidestep it. `|| :` is the third piece of
+# `render`'s guard, and it is what `emit()` carries on its own: these sites
+# have nothing to fall back TO, the line that could not be written IS the
+# message, so there is no second, shorter thing to say about it. `render`
+# needs its extra piece because a dropped LIST reads as an empty one — a
+# finding silently downgraded — while a dropped single line reads as nothing
+# at all, and the payload on stdout still carries every finding.
 #
-# The guard goes on the write itself, never on the surrounding statement: most
-# of these sit in `if`/`elif` chains or in a function whose later lines must
-# still run. It covers a write that FAILS, which is what a closed or full fd 2
-# produces. It does not cover a signal: a stderr that is a broken pipe kills
-# the process before any `||` is consulted, which is #1571 and needs a trap,
-# not a guard.
+# The guard goes on the write itself, never on the surrounding statement:
+# most call sites sit in `if`/`elif` chains or in a function whose later
+# lines must still run. It covers a write that FAILS, which is what a closed
+# or full fd 2 produces. It does not cover a signal: a stderr that is a
+# broken pipe kills the process before any `||` is consulted, which is #1571
+# and needs a trap, not a guard.
 
 # Every operator-facing render that pipes a captured value through an external
 # tool goes through here — bar the stash-diagnostic fold below, which folds
@@ -165,6 +170,14 @@ render() { # render <line-prefix> <text> <what-the-text-is>
     || printf '%s: could not render %s to stderr; the payload and the exit status stand\n' "$NAME" "$3" >&2 \
     || :
 }
+
+# Every plain diagnostic below writes one already-assembled line with no
+# external pipeline to fail on its own account — unlike `render`, which pipes
+# through `sed` and so needs its own fallback piece. Routed through one
+# function rather than a `|| :` hand-appended at each call site, so a future
+# site cannot add an unguarded write without also adding a new function to
+# sidestep this one.
+emit() { printf '%s\n' "$1" >&2 || :; }
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
@@ -441,7 +454,7 @@ git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
 # replays over may exist nowhere else. The trace line below echoes the
 # command as RUN, flag included, so a reader reproducing it by hand does not
 # reproduce the unsound form.
-printf '$ git -C %s status --porcelain -uall\n' "$wt" >&2 || :
+emit "\$ git -C $wt status --porcelain -uall"
 porcelain=$(git -C "$wt" status --porcelain -uall) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
@@ -449,7 +462,7 @@ if [ -n "$porcelain" ]; then
   render '    ' "$porcelain" "the uncommitted-work list"
 else
   clean=true
-  echo "    clean" >&2 || :
+  emit "    clean"
 fi
 
 # Repo-global across worktrees, and a rebase never consumes a pre-existing entry
@@ -683,7 +696,7 @@ if [ -n "$msg" ]; then
       || flat="(git said more, and folding it onto this line failed)"
     msg="$msg — $flat"
   fi
-  printf '%s\n' "$msg" >&2 || :
+  emit "$msg"
 elif [ "$stash_reflog_rc" -ne 0 ]; then
   stash=null
   # Its own sentence, and asked BEFORE the `-s` test the resolved path feeds:
@@ -693,7 +706,7 @@ elif [ "$stash_reflog_rc" -ne 0 ]; then
   # what the reflog CONTAINS — "still names entries no ref points at" — and
   # that is a claim about a file this state has not read; one sentence spanning
   # both states is the conflation the header rule forbids.
-  echo "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read" >&2 || :
+  emit "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read"
 elif [ -s "$stash_reflog" ]; then
   stash=null
   # Its own sentence, not the one above: there `refs/stash` is present and
@@ -701,9 +714,9 @@ elif [ -s "$stash_reflog" ]; then
   # would tell the operator "refs/stash is not absent" about the one state
   # whose whole shape is that it IS — then send them to `ls -l` on a file that
   # no longer exists. No `$diag`: git is silent here, empty list at rc 0.
-  echo "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at" >&2 || :
+  emit "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at"
 else
-  echo "    stash entries (repo-global, not gated): $stash" >&2 || :
+  emit "    stash entries (repo-global, not gated): $stash"
 fi
 
 # 2. Which files would conflict.
@@ -740,7 +753,7 @@ trap 'rm -f "$mt_out" "$ps_out"' EXIT
 # `mktemp` rather than a name derived from `$mt_out`, so a shared TMPDIR offers
 # no predictable name to plant a symlink on.
 ps_out=$(mktemp) || die "cannot create a temporary file"
-echo "\$ git merge-tree --write-tree --name-only -z $base_rev origin/$branch" >&2 || :
+emit "\$ git merge-tree --write-tree --name-only -z $base_rev origin/$branch"
 mt_rc=0
 git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "origin/$branch" >"$mt_out" || mt_rc=$?
 [ "$mt_rc" -le 1 ] && [ -s "$mt_out" ] \
@@ -810,7 +823,7 @@ esac
 if [ -n "$conflicts" ]; then
   render '    conflict: ' "$conflicts" "the conflicting-path list"
 else
-  echo "    no conflicting files" >&2 || :
+  emit "    no conflicting files"
 fi
 # `jarr`/`jarr_rewritten` return non-zero when a stage fails (#119), and a bare
 # `var=$(pipeline)` under `set -eu` would abort with the failing tool's own
@@ -828,7 +841,7 @@ at_risk=""
 if [ -n "$conflicts" ]; then
   fork=$(git -C "$wt" merge-base "$base_rev" "origin/$branch") \
     || die "git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat"
-  echo "\$ git log --oneline $fork..$base_rev -- <conflicting files>" >&2 || :
+  emit "\$ git log --oneline $fork..$base_rev -- <conflicting files>"
   # One pathspec per argument. Word-splitting `$conflicts` turned a path with a
   # space into two pathspecs that match nothing, and `git log` spends exit 0 on
   # a pathspec that matches nothing — so `2>/dev/null || true` was not even what
@@ -892,8 +905,8 @@ if [ "$clean" = true ]; then
   rc=0
 else
   rc=1
-  echo "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`," >&2 || :
-  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start." >&2 || :
+  emit "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`,"
+  emit "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start."
 fi
 
 # `$wt` is a filename, so it admits both `"` and `\`; git accepts `"` in a ref
@@ -954,8 +967,7 @@ add_field() {
   if [ -n "$why" ]; then
     ev=null
     rw=null
-    printf '%s: could not render the %s for %s as JSON (%s) — reported as null\n' \
-      "$NAME" "$1" "$branch" "$why" >&2 || :
+    emit "$NAME: could not render the $1 for $branch as JSON ($why) — reported as null"
   fi
   fields="${fields}\"$1\":$ev,\"$1Rewritten\":$rw,"
 }

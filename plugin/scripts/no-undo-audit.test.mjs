@@ -3150,30 +3150,80 @@ test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #
 // The sweep, and the only thing that keeps it swept. Every test above walks
 // ONE path: a clean tree, a dirty tree, a conflicted tree, a non-worktree.
 // The stash chain alone has four branches, `die` has thirty-odd call sites,
-// and no realistic fixture set visits all of them — so a new bare
-// `echo … >&2` added on a branch nothing exercises reintroduces the whole
-// bug silently. That is not hypothetical: it is exactly how #1160 shipped
-// four guarded writes and left thirteen unguarded siblings behind, which is
-// the ticket this test closes.
+// and no realistic fixture set visits all of them — so a future write that
+// bypasses `die`/`render`/`emit` and reaches fd 2 bare on a branch nothing
+// exercises reintroduces the whole bug silently, and no fixture would catch
+// it either.
+//
+// Only `render()`'s write carried failure protection before this PR (#1514).
+// #1160 guarded the FOLD that assembles the stash-diagnostic line against a
+// corrupting `tr`/`sed` exit status — a different hazard — and left every
+// stderr WRITE, `die`'s included, free to abort the run on a closed fd 2.
+// #1514 (this PR) is what guards those, and centralizes them behind `die`,
+// `render`, and the new `emit` so there is one function body to check per
+// guard, not a dozen call sites to keep in sync.
 //
 // The rule is structural, so it is asserted structurally rather than
 // sampled: a diagnostic decides nothing, so every statement that writes to
 // fd 2 must end its `||` chain in the no-op. `render()`'s spans three lines
 // and ends in `|| :` on the last, so continuations are joined before the
-// check; `die`'s carries `; exit 2; }` after the guard, which is the point
-// of it — the write must not consume the status the `exit` is there to set.
+// check; `die`'s and `emit`'s each carry more (`; exit 2; }`, `; }`) after
+// the guard, on the SAME joined line, separated by `;` rather than `||` —
+// so a line is split on top-level `;` first and each resulting statement's
+// own tail is checked, not just the line's last `>&2`. Quote-aware: a `;`
+// inside a quoted argument (render's own fallback message carries one) is
+// not a statement separator. Unaware of that, a line carrying two
+// independent `>&2`-writing statements — `echo "a" >&2; echo "b" >&2 || :`
+// — would report the whole line compliant off the LAST write's guard alone,
+// leaving the first invisible.
+function splitTopLevelStatements(line) {
+  const segments = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      cur += ch;
+      if (ch === "\\" && quote === '"' && i + 1 < line.length) {
+        i += 1;
+        cur += line[i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+    } else if (ch === ";") {
+      segments.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  segments.push(cur);
+  return segments;
+}
+
 test("no stderr write in the script can abort the run under errexit (#1514)", () => {
   const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
-  const writes = joined.filter((l) => !/^\s*#/.test(l) && l.includes(">&2"));
+  const writes = joined
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap(splitTopLevelStatements)
+    .filter((s) => s.includes(">&2"));
 
   // Without this the filter could silently match nothing — a regex typo, a
   // rename — and the assertion below would pass on an empty list, which is
-  // the shape a false green takes here.
-  assert.ok(writes.length >= 14,
-    `the sweep must find the writes it claims to check; found ${writes.length}`);
+  // the shape a false green takes here. The count is exact, not a floor:
+  // `die`, `render`, and `emit` are the only three places in the script
+  // allowed to touch fd 2 directly, so it can only ever be 3 — any other
+  // number means a bare write appeared outside all of them, or one vanished.
+  assert.equal(writes.length, 3,
+    `die, render, and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
 
-  const unguarded = writes.filter((l) => !/^\s*\|\|\s*:(\s|;|$)/.test(l.slice(l.lastIndexOf(">&2") + 3)));
-  assert.deepEqual(unguarded.map((l) => l.trim()), [],
+  const unguarded = writes.filter((s) => !/^\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
+  assert.deepEqual(unguarded.map((s) => s.trim()), [],
     "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :`");
 });
 
