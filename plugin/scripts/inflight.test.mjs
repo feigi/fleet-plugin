@@ -2814,19 +2814,20 @@ test("the credential helper's warm-up survives — deleting it would let a cold 
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
   assert.match(
     src,
-    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: 30_000 \}\);\s*^\s*const started = Date\.now\(\);/m,
-    "the helper must be warmed after it is written and configured and BEFORE the timed spawn — deleting that line reopens #1606, and the suite stays green on an idle machine while it does",
+    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: 30_000 \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
+    "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
   );
   // The arm's POSITION inside the helper body, not merely its presence. Below
-  // the marker write it would be dead code and the warm-up would create
-  // `helper-ran` itself: the vacuity assertion would then read as satisfied on
-  // a helper that never ran, and every run would pay a 30 s warm-up timing out
-  // against the helper's own `sleep 300`. That is ledger.test.mjs's GH_STUB
-  // lesson, which had to be learned once already.
+  // the marker write, the warm-up call itself would create `helper-ran` before
+  // any timed run ever executes (measured: a lone --fleet-warm invocation on
+  // the mutated order leaves the marker behind by itself): the vacuity
+  // assertion would then read as satisfied on a helper that never ran during
+  // the timed run. That is ledger.test.mjs's GH_STUB lesson, which had to be
+  // learned once already.
   assert.match(
     src,
-    /case " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'/,
-    "the --fleet-warm arm must sit ABOVE the marker write, or warming writes the marker itself and the vacuity guard above goes blind",
+    /^\s*writeFileSync\(helper,\s*^\s*`#!\/bin\/sh\\ncase " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'\\nsleep 300\\n`\);/m,
+    "the --fleet-warm arm must sit ABOVE the marker write, or warming writes the marker itself and the vacuity guard above goes blind — anchored at line starts under `/m` so a coincidental match elsewhere in the file cannot satisfy it",
   );
 });
 
