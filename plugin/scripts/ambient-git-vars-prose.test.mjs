@@ -29,6 +29,16 @@
 // instruments.test.mjs, no-undo-audit.test.mjs, reap.test.mjs,
 // release-ticket.test.mjs and worktree-audit.test.mjs, and eleven fixtures
 // across them go red when the corresponding half is deleted.
+//
+// Also not pinned, and stated rather than left to be noticed: the `.mjs`
+// scripts in this directory. The scan below is `.sh`-only and the detector is a
+// shell line, so a Node caller's hazard and its remedy — an env object built
+// for the child, since there is no shell to `unset` in — are both invisible
+// here, and "a NEW script cannot join the exposed set in silence" holds for
+// shell only. #1599 carries that census, with `ledger.mjs`'s default ledger
+// path measured as an exposed site; `fleet-state.mjs`'s own
+// `rev-parse --git-common-dir` call scrubs both variables and has a
+// behavioural fixture in fleet-heartbeat.test.mjs.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

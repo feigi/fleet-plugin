@@ -135,15 +135,39 @@ export function formatLines(rows) {
   return rows.map((r) => `${r.role.padEnd(w)} ${r.actual}/${r.target} → ${r.action}   (${r.detail})`);
 }
 
+// Does this tick ask the controller for anything?
+//
+// The heartbeat's back-off needs to know "was there nothing to do", and the
+// tempting shortcut — back off whenever the output is byte-identical to the
+// last tick — is WRONG in the one direction that matters. A tick printing
+// `DISPATCH 1` every five minutes because the controller has not acted on it is
+// byte-identical each time, and backing off there would stretch the interval
+// while work sat in the pool: #3's stall, reintroduced by the very thing added
+// to cure it. So identity decides whether to FOLD the output; only this
+// predicate decides whether to back off.
+//
+// DISPATCH and RE-SHORTLIST are the two actions naming work the controller can
+// do unattended. AT CAP, IDLE OK and HOLD are all "correctly doing nothing".
+// `SUGGEST /triage` is deliberately NOT actionable: it asks a maintainer to
+// tick tickets, and on the unattended overnight run this heartbeat exists for
+// there is nobody to ask — treating it as work would pin the interval at the
+// base all night for a request no one can answer. It still PRINTS, because the
+// fold is keyed on the output changing, so the suggestion is seen once.
+export function actionable(rows) {
+  return rows.some((r) => /^(DISPATCH|RE-SHORTLIST)/.test(r.action));
+}
+
 // --------------------------------------------------------------------------
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the network, or the pure half stops being unit-testable.
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
+import { statePath, readState, writeState } from "./fleet-state.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -170,6 +194,20 @@ const OPTIONS = {
   // go through the guard below, where a hand-passed default went round it.
   "implementer-cap": { type: "string", default: "2" },
   "reviewer-cap": { type: "string", default: "5" },
+  // The heartbeat's half of the contract. Both default, so the two shipped
+  // edge invocations need no new flags and their behaviour is unchanged.
+  //
+  // `--fold-unchanged` prints ONE line instead of three when this tick asks for
+  // nothing and says exactly what the last one said. That is what makes an
+  // unattended night affordable: ~26 wakes that each cost a line rather than a
+  // reconcile. It is opt-in because folding is wrong on an edge — a merge-side
+  // tick is read by a controller that just acted and needs the full rows.
+  "fold-unchanged": { type: "boolean", default: false },
+  // Path override, for tests. An empty value cannot be told from an absent one
+  // under parseArgs, and no path is legitimately empty, so empty resolves to
+  // the default — unlike `--merge-holds ""`, where the empty string had a
+  // plausible-but-wrong reading ("nothing is held") worth refusing.
+  state: { type: "string", default: "" },
 };
 
 // Why each caller-stated input has no default, quoted back at whoever forgot
@@ -277,6 +315,7 @@ function counts() {
     implLive: int("implementers"), reviewerLive: int("reviewers"), mergeBotLive: int("merge-bots"),
     pool: int("pool"), reviewsReady: int("reviews-ready"), mergeHolds: holds(),
     implCap: cap("implementer-cap"), reviewerCap: cap("reviewer-cap"),
+    fold: values["fold-unchanged"], state: values.state || statePath(NAME),
   };
 }
 
@@ -413,13 +452,34 @@ function supply() {
 }
 
 function main() {
-  const { mergeHolds, ...c } = counts();
+  const { mergeHolds, fold, state: path, ...c } = counts();
   // Both reads happen before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.
   const { mergeQueue, mergeHeld, mergeIgnored, reviewBacklog } = prState(mergeHolds);
-  for (const line of formatLines(reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supply() }))) {
-    console.log(line);
+  const rows = reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supply() });
+  const lines = formatLines(rows);
+
+  // The back-off streak and the fold digest, written on EVERY tick including
+  // the two merge-side edges. An edge tick that dispatched is the clearest
+  // possible "there is work here", so letting only heartbeat ticks reset the
+  // streak would leave a long interval armed straight after a busy wave.
+  //
+  // Digest, not the lines themselves: the file is read by a human when the beat
+  // misbehaves, and three padded rows per tick would bury the two numbers that
+  // explain the interval.
+  const prev = readState(path, NAME);
+  const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
+  const acts = actionable(rows);
+  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest });
+
+  // Fold only when BOTH hold: nothing to act on, and nothing new to say. Either
+  // one alone still prints in full — an unchanged `DISPATCH 1` is work going
+  // unclaimed, and a changed idle row is the pipeline moving.
+  if (fold && !acts && digest === prev.digest) {
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1}) — full rows on the next change`);
+    return;
   }
+  for (const line of lines) console.log(line);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
