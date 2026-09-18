@@ -80,7 +80,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, phrase } from "./prose-pin.mjs";
+import { anchorAt, phrase, unemphasized } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = "commands/review-and-fix.md";
@@ -104,19 +104,48 @@ const STEP4_FROM = "Under the fleet, do not hold this wait";
 const STEP4_TO = phrase("so push, then report to the controller a");
 const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 
-// Throws rather than widening at BOTH ends — `anchorAt` on a moved or
-// duplicated start anchor, the assert below on a moved end anchor. Silently
-// falling back to the whole document is the false green this bound exists to
-// deny, and the bound-integrity test at the bottom holds that claim.
+// Throws rather than widening at BOTH ends. The start half is `anchorAt`'s
+// own exactly-once count. The end half cannot be a bare exactly-once count
+// over the rest of the document: if step 4's own closing instruction is
+// reworded away, the LAST thing left matching `STEP4_TO` is whatever comes
+// after it — a single, unambiguous, and entirely wrong match, so a raw count
+// would see exactly 1 and wave it through.
+//
+// Bounded instead to step 4's own markdown list item — up to the next
+// ordered-list marker at column 0 (`\n5. `, never indented — the ACCEPT SIDE
+// reflow fixture below and C1 in the header both continue a wrapped line
+// with `\n` plus INDENT, so neither is mistaken for the next item). A decoy
+// ADDED on any later step, real closing instruction left untouched, can
+// never enter the count — the search never reaches past this item's own
+// boundary to find it. A decoy ADDED on step 4's own item, real closing
+// instruction left untouched, still trips the same exactly-once assert
+// `anchorAt` uses for the start.
+//
+// Not covered, by either end, and not a new gap this bound opens: rewording
+// the true anchor AWAY in the same edit that plants its exact replacement
+// text once, elsewhere, leaves exactly one match — indistinguishable from a
+// legitimate reflow-driven re-anchor. `anchorAt` has this same limitation on
+// the start side already; matching it on the end side is parity, not
+// exceeding what a phrase anchor can promise. Silently falling back to the
+// whole document, or binding past this slice's true end to an ADDED decoy
+// on a later step, is the false green this bound exists to deny, and the
+// bound-integrity test at the bottom holds every half of that claim.
 const dispatchPremise = (text = reviewAndFix()) => {
   const rest = text.slice(anchorAt(text, STEP4_FROM, WHAT));
-  const end = rest.search(STEP4_TO);
+  const nextItem = rest.search(/\n\d+\.\s/);
+  const item = nextItem === -1 ? rest : rest.slice(0, nextItem);
+  const hits = [...item.matchAll(new RegExp(STEP4_TO.source, "g"))];
   assert.notEqual(
-    end,
-    -1,
+    hits.length,
+    0,
     `${WHAT}: the instruction closing step 4's premise moved — re-anchor this test, never widen it to the whole file`,
   );
-  return rest.slice(0, end);
+  assert.equal(
+    hits.length,
+    1,
+    `${WHAT}: the instruction closing step 4's premise occurs ${hits.length} times inside step 4's own list item — a pin would bind the wrong copy; narrow it`,
+  );
+  return item.slice(0, hits[0].index);
 };
 
 // The gate, as ONE span: the dispatch, the report having arrived, and CI being
@@ -128,6 +157,17 @@ const GATE = "dispatches a finisher once your report has arrived and CI is green
 // is followed by "once", not "on".
 const REVERTED = "dispatches a finisher on green";
 
+// Deliberately RAW BYTES, never `unemphasized()` — unlike the whole-document
+// negative below. A `**` moved INTO this span (bolding part of the gate for
+// emphasis) reds this test on purpose: it matches the sibling pins'
+// strictness (see THE CEILING in the header) rather than exceeding OR
+// loosening it, and this file's own #1499 scope excludes migrating this span
+// pin onto an emphasis-tolerant helper. The negative below normalizes
+// emphasis for a different reason — it is a coverage backstop over the WHOLE
+// document, not a claim about this span's own bytes — so the two are not in
+// tension: one enforces exact wording where a fix-applier reads it, the
+// other refuses to let the pre-#1053 defect hide behind formatting anywhere
+// else.
 test("review-and-fix.md step 4 gates the finisher on the member's report AND CI, never on green alone", () => {
   assert.match(
     dispatchPremise(),
@@ -139,31 +179,39 @@ test("review-and-fix.md step 4 gates the finisher on the member's report AND CI,
 // The negative, deliberately at the WIDEST scope this file owns — the whole
 // document, not the slice. A copy of the pre-#1053 premise surviving anywhere in
 // the member-facing command is the defect back, whether or not it sits in step
-// 4. The positive companion on the same scope is what keeps this from passing
-// vacuously: alone, a `doesNotMatch` is satisfied by a document that has
-// degenerated to nothing, and this one would then pass while the sentence was
-// gone. The companion is deliberately the DISPATCH CLAUSE only, never the whole
-// gate — pinning the gate here too would red this test on every mutation that
-// drops a half, duplicating the span pin above and destroying the per-pin
-// discrimination the mutation evidence in the header reports. This test owns
-// exactly one claim: the pre-#1053 wording is not back.
+// 4 — and whether or not it is typed with `**` around part of it: bolding
+// "green" for emphasis changes nothing about what the sentence licenses, so
+// this check runs on `unemphasized(live)`, never on raw bytes (contrast the
+// span pin above, which is deliberately raw-byte strict — see THE CEILING).
+// The positive companion on the same normalized text is what keeps this from
+// passing vacuously: alone, a `doesNotMatch` is satisfied by a document that
+// has degenerated to nothing, and this one would then pass while the sentence
+// was gone. The companion is deliberately the DISPATCH CLAUSE only, never the
+// whole gate — pinning the gate here too would red this test on every
+// mutation that drops a half, duplicating the span pin above and destroying
+// the per-pin discrimination the mutation evidence in the header reports.
+// This test owns exactly one claim: the pre-#1053 wording is not back, under
+// any emphasis.
 test("no sentence anywhere in review-and-fix.md licenses a finisher on green alone", () => {
-  const live = reviewAndFix();
+  const live = unemphasized(reviewAndFix());
   assert.match(live, phrase("dispatches a finisher"), `${DOC} no longer says "dispatches a finisher" at all — the negative below would pass on a document that had lost the sentence entirely`);
   assert.doesNotMatch(
     live,
     phrase(REVERTED),
-    `${DOC} says "${REVERTED}" again — that is the #1053 defect verbatim. The implementer's own push fires the CI edge first for every PR, so green arrives before any review has returned and this wording dispatches a finisher into it.`,
+    `${DOC} says "${REVERTED}" again — that is the #1053 defect verbatim, whether or not it is typed with emphasis. The implementer's own push fires the CI edge first for every PR, so green arrives before any review has returned and this wording dispatches a finisher into it.`,
   );
 });
 
-// The slice is step 4's own sentence and cannot reach its neighbours. Without
-// this, a drifted end bound would let the gate pin above be satisfied from step
-// 5 or step 6 — both of which talk about green, labels and reporting — and the
-// pin would go on passing with step 4's premise reverted.
+// The slice is step 4's own sentence and cannot reach its neighbours below it.
+// Without this, a drifted end bound would let the gate pin above be satisfied
+// from step 5 or step 6 — both of which talk about green, labels and
+// reporting — and the pin would go on passing with step 4's premise reverted.
+// (No equivalent check runs backward into step 3: the slice starts AT step
+// 4's own anchor, so it can never reach step 3 regardless of how far the end
+// bound drifts forward — that assert would be unfalsifiable by construction,
+// never the guard the two below actually are.)
 test("the pinned span is bounded to step 4 — neither neighbouring step is inside it", () => {
   const slice = dispatchPremise();
-  assert.doesNotMatch(slice, phrase("Run `testCmd` before you commit"), `${WHAT}: the slice reaches back into step 3`);
   assert.doesNotMatch(slice, phrase("File each deferred finding"), `${WHAT}: the slice runs forward into step 5`);
   assert.doesNotMatch(slice, phrase("Diff-check green"), `${WHAT}: the slice runs forward into step 6`);
 });
@@ -196,9 +244,12 @@ test("a rewrapped step 4 is ACCEPTED — the gate pin refuses drift, not line br
 // criterion: if an anchor moves, this slicer must THROW — a slicer that fell
 // back to the whole document would leave the gate pin passing off step 6's
 // prose, which is the vacuous green every bound in this directory exists to
-// prevent. Both ends and both `anchorAt` failure directions are covered: a
-// start anchor that is gone, one that occurs twice (a restatement above the real
-// one would otherwise bind the pin to the wrong copy), and a moved end anchor.
+// prevent. Both ends get the SAME two failure directions: a start anchor that
+// is gone (`anchorAt`), one that occurs twice (a restatement above the real
+// one would otherwise bind the pin to the wrong copy), an end anchor that is
+// gone (moved), and one that occurs twice (a restatement below the real one
+// would otherwise bind the pin to the later copy, widening the slice into
+// whatever follows it — the shape measured in this file's own header fixes).
 //
 // Each fixture is cut with a `phrase()` REGEX, never a literal `replace()`, and
 // every one is asserted to have changed the document before it is believed.
@@ -230,5 +281,41 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
     () => dispatchPremise(cut(live, "so push, then report to the controller a", "so push and then report a", "moved end anchor")),
     /the instruction closing step 4's premise moved/,
     "a moved end anchor ran the slice past step 4 instead of throwing",
+  );
+  assert.throws(
+    () =>
+      dispatchPremise(
+        cut(
+          live,
+          STEP4_FROM,
+          `${STEP4_FROM} — so push, then report to the controller a decoy, restated further on`,
+          "duplicated end anchor onto step 4's own line",
+        ),
+      ),
+    /occurs 2 times/,
+    "a duplicated end anchor on step 4's own line bound the pin to one copy instead of throwing",
+  );
+  // The scenario a bare exactly-once count over the rest of the document
+  // would miss: step 4's real closing instruction reworded away, with the
+  // only remaining match sitting on a LATER line (step 5's). A count over
+  // the rest of the document sees exactly 1 hit and waves it through,
+  // silently binding the slice to the decoy and widening it into step 5.
+  // Bounding the search to step 4's own item excludes that decoy from the
+  // count entirely, so this still throws "moved" rather than silently
+  // widening. Both mutations go through `cut()`, never a literal
+  // `.replace()`: a literal target here breaks the same way the header
+  // already warns about the moment either step 4 or step 5 reflows.
+  assert.throws(
+    () =>
+      dispatchPremise(
+        cut(
+          cut(live, "so push, then report to the controller a", "so push and then report a", "moved end anchor"),
+          "File each deferred finding",
+          "so push, then report to the controller a decoy on step 5's own line. File each deferred finding",
+          "later-line decoy",
+        ),
+      ),
+    /the instruction closing step 4's premise moved/,
+    "a reworded end anchor with a same-text decoy on a LATER line silently widened the slice instead of throwing",
   );
 });
