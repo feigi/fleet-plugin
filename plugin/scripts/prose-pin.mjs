@@ -30,39 +30,46 @@ function occurrenceCount(haystack, needle) {
 // needs: its anchors are typed WITH `**` when the source is, so a document that
 // loses the emphasis is the common break.
 //
-// The START anchor must then resolve EXACTLY ONCE — the standard `anchorAt`
-// and `quoteBlock` already hold, and the price of tolerance here. Stripping
-// `**` can only ADD matches, so a tolerant start anchor can land EARLIER than
-// the literal one, on a text-identical phrase sitting in a different emphasis
-// state, and slice in everything the literal anchor correctly excluded. No
-// assertion inside the slice can see that: the pinned words are all present,
-// sourced from the wrong copy. It throws instead, for the reason a missing
-// anchor throws rather than widening to the whole file.
+// BOTH anchors must then resolve EXACTLY ONCE when tolerant — the standard
+// `anchorAt` and `quoteBlock` already hold for their one anchor, and the price
+// of tolerance here, paid at both ends alike (`occurrenceCount` below is
+// shared by both guards). Stripping `**` can only ADD matches to a search over
+// the stripped view, never remove one the literal anchor had, so a tolerant
+// anchor can resolve somewhere the literal one never could: on a text-identical
+// phrase sitting in a different emphasis state elsewhere in the document, or —
+// when an anchor literal itself carries a `*` run that does not collapse to a
+// clean `**`-pair count — on a shorter, less specific phrase the literal anchor
+// never matched at all, which can make a tolerant match genuinely WIDER than
+// the literal one, not merely earlier. Either direction is invisible to every
+// assertion inside the slice: at the START, the pinned words are all present,
+// sourced from the wrong copy; at the END, a slice that lands short silently
+// DELETES content, which can flip a `doesNotMatch` pin from correctly RED to
+// falsely GREEN — the same false-green class a wrong START does, just reached
+// from the other side. Both throw instead, for the reason a missing anchor
+// throws rather than widening to the whole file.
 //
-// The END anchor deliberately does NOT get that rule, and keeps first-hit-
-// after-the-start. The same "stripping only adds matches" fact runs the other
-// way at the end bound: a tolerant end anchor can only land EARLIER, never
-// later, so it cannot widen the slice — and an end bound's job is to be the
-// next one, not the only one. Measured across every `between` callsite in this
-// directory — no count written down, because a fresh count only resets the
-// same rot clock: no pair uses the same text at both ends, so the start rule
-// refuses nothing that exists, while two end anchors are non-unique ON PURPOSE
-// and are themselves in this option's defect class — `snapshot-runner-
-// audience-prose.test.mjs`'s `"\n- **"` means "wherever the next bullet
-// starts", and `instrument-check-prose.test.mjs`'s `"**Exit 0 is the only
-// code"` names a sentence `run-team/SKILL.md` states twice, once bold and once
-// inside a blockquote. An exactly-once end bound would refuse both while
-// preventing no widening.
+// Only the TOLERANT path pays that price. The literal path's END anchor keeps
+// first-hit-after-the-start and stays non-unique ON PURPOSE — an end bound's
+// job there is to be the next one, not the only one — and two of this
+// directory's real end anchors depend on exactly that:
+// `snapshot-runner-audience-prose.test.mjs`'s `"\n- **"` means "wherever the
+// next bullet starts", and `instrument-check-prose.test.mjs`'s `"**Exit 0 is
+// the only code"` names a sentence `run-team/SKILL.md` states twice, once bold
+// and once inside a blockquote. Neither callsite turns `emphasisTolerant` on,
+// so the guard above never sees them; an exactly-once literal-mode end bound
+// would refuse both while preventing no widening that exists today.
 //
 // Matching stays a literal `indexOf` over the stripped view, NOT `phrase()` as
 // `anchorAt` uses: #1492's own ticket measured that trade. `phrase()` is
-// `s.trim().split(/\s+/)`, which discards a leading newline, and `between`
-// anchors carry load-bearing ones — `fix-applier-correction-rules-prose
-// .test.mjs`'s `PROMPT_END` is `"\n**Put the standing CI facts"`, and that
-// file records that deleting the blank line leaves the suite green with the
-// clause gutted. A tolerant mode built on `phrase()` would trade this family's
-// false reds for that false green. Emphasis tolerance and whitespace tolerance
-// are separate axes; this option moves only the first.
+// `s.trim().split(/\s+/)`, which discards a leading newline — and `between`
+// anchors carry load-bearing ones, e.g. `fix-applier-correction-rules-prose
+// .test.mjs`'s `PROMPT_END`, `"\n**Put the standing CI facts"`: the leading
+// `\n` is what ties that anchor to the phrase's own line start rather than to
+// any mid-line occurrence of the same words. `phrase()`'s `.trim()` would
+// strip that newline before matching, silently loosening the anchor. A
+// tolerant mode built on `phrase()` would trade this family's false reds for
+// that false green. Emphasis tolerance and whitespace tolerance are separate
+// axes; this option moves only the first.
 //
 // The returned slice is raw bytes with `**` intact — `rawOffset` maps each
 // endpoint back and stops BEFORE the marker, so a tolerant slice keeps the
@@ -81,8 +88,17 @@ export function between(text, from, to, what, { emphasisTolerant = false } = {})
       `${what}: emphasis-tolerant slice anchor "${from}" occurs ${hits} times once \`**\` is ignored — the slice would start at the first and pull in what the literal anchor excluded; narrow the anchor or drop emphasisTolerant`,
     );
   }
-  const end = haystack.indexOf(stop, at + start.length);
+  const searchFrom = at + start.length;
+  const end = haystack.indexOf(stop, searchFrom);
   assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
+  if (emphasisTolerant) {
+    const hits = occurrenceCount(haystack.slice(searchFrom), stop);
+    assert.equal(
+      hits,
+      1,
+      `${what}: emphasis-tolerant slice end anchor "${to}" occurs ${hits} times after the start once \`**\` is ignored — the slice would end at the first and could drop or admit content the literal anchor did not; narrow the anchor or drop emphasisTolerant`,
+    );
+  }
   return emphasisTolerant ? text.slice(rawOffset(text, at), rawOffset(text, end)) : text.slice(at, end);
 }
 
