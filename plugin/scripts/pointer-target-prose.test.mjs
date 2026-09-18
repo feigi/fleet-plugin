@@ -107,11 +107,13 @@ for (const p of pointers) {
 // physical-line scan this replaced, reflowing this file with not one word
 // changed: at 80 columns the pointer list goes 5 names → 4, at 45 → 2, and
 // the pins for the names it loses do not fail, they stop existing. Targets go
-// the same way and one worse — three block-leading `**…**` spans stop being
-// targets because the wrap lands inside the emphasis, AND up to four NEW ones
-// appear (`skipped`, `default`, `run-binding`, `critical/important`) because
-// the wrap pushed a mid-paragraph bold to column 0. That last set is the
-// silent direction: a pointer resolving to a block the reflow invented.
+// the same way and vary more sharply by width, not a flat count — three
+// block-leading `**…**` spans stop being targets at 80 columns, six at 60,
+// and six again at 45, because the wrap lands inside the emphasis. At 45
+// columns alone, up to four NEW ones also appear (`skipped`, `default`,
+// `run-binding`, `critical/important`) because the wrap pushed a
+// mid-paragraph bold to column 0. That last set is the silent direction: a
+// pointer resolving to a block the reflow invented.
 //
 // Reflowed HERE rather than committed as a fixture: a checked-in rewrapped copy
 // rots away from the real document the moment someone edits one and not the
