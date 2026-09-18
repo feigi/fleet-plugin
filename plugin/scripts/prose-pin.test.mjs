@@ -470,8 +470,8 @@ test("lineAt answers the PHYSICAL line a hit in the joined view came from", () =
 test("logicalLines never joins a line the reader sees as a new block", () => {
   // Joining only ever ADDS matches, so every one of these is a potential
   // pointer clause invented out of two unrelated blocks. A heading, a list
-  // item, a blockquote, a table row and a thematic break each end the line
-  // above them on the page, so each must end it here.
+  // item, a blockquote, a table row and a thematic break each terminate their
+  // predecessor on the page, so each must terminate it here.
   for (const next of ["## Heading", "- item", "3. item", "> quoted", "| cell |", "---", "```js"]) {
     assert.equal(logicalLines(`see\n${next}`).text, `see\n${next}`, `joined a new block: ${next}`);
   }

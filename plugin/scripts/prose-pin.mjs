@@ -411,9 +411,9 @@ export function pairSlices(text, sectionFrom, sectionTo) {
 // a real block parser, so they join and the block collapses to one line. Fenced
 // code is modelled and never joined — scan code through a fence, not an indent.
 
-// Starts a new block, so it never continues the line above.
+// Starts a new block, so it never continues its predecessor.
 const BLOCK_START = /^ {0,3}(?:#{1,6}\s|[-*+](?:\s|$)|\d+[.)]\s|>|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
-// Complete in itself, so the line below never continues IT. Narrower than
+// Complete in itself, so nothing continues IT. Narrower than
 // BLOCK_START on purpose: a list item and a blockquote both take lazy
 // continuation lines, a heading and a thematic break take none.
 const BLOCK_END = /^ {0,3}(?:#{1,6}\s|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
