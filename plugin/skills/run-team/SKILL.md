@@ -1240,6 +1240,11 @@ merge bot, refilling a slot, re-verifying a SHA, filing a follow-up — all proc
 unconfirmed. Invoking the command was the opt-in. Two exceptions: **Phase 0's
 multi-select**, and **a judgement the evidence cannot settle**.
 
+- **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
+  below. A turn that ends on a drained queue is #3's stall itself: nothing
+  external will wake you, and the level-check you are one command away from
+  never runs. Listed first because it is the only event with no trigger —
+  every other row below arrives; this one is the absence of one.
 - **Implementer completes** → verify the SHA is reachable on the expected branch →
   enqueue for review → refill the slot (phase 1, then 2) with a new agent.
 - **Implementer bails before implementing** → demote by cause:
@@ -1393,10 +1398,52 @@ Why these two edges: a merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side
 drains to 0 and stays there — 0 implementers emit no completion event, so the
 refill edge is dead. Piggybacking the level-check onto events you are already
-handling is what makes that drain visible. **It is edge-triggered, so it does
-not cover a fully drained queue with no incoming events at all** — no members
-and no open PRs means nothing wakes you, and the periodic resync that would is
-not built (#3, deferred).
+handling is what makes that drain visible. **Both are still edges, so neither
+covers a fully drained queue**: no members and no open PRs is no event at all,
+and the reconcile goes unrun. That state is the heartbeat's (#357).
+
+**Beat when there is nothing to do, and never end your turn on a drained
+queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
+agent — measured twice, see **A member runs its test suite in the foreground**
+above, where `fix-pr-1184` backgrounded a suite plus a Monitor and sat idle for
+roughly two hours — and `run-merge-bot.md`'s CI gate states the general rule:
+"whatever wakes you is external and may never come". So hold the wait yourself,
+exactly the way that gate does:
+
+```bash
+~/.fleet/bin/fleet-run fleet-heartbeat.mjs \
+  [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240]
+```
+
+It blocks, then prints one line. Which line it is, is the whole protocol:
+
+- `… interval elapsed → restate your live counts and run fleet-tick` — the
+  level-check is due. Run the reconcile above **with `--fold-unchanged`** and
+  act on what it prints. Then arm the beat again.
+- `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
+  harness lets one command block for a whole interval (omp backgrounds one at
+  60s; a Claude Code shell timeout is shorter than a CI cycle, which is why the
+  CI gate tells you to re-issue `gh run watch`). Issue it again. That is still
+  one blocking call per turn, never an idle turn.
+
+The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
+so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
+not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage, a
+correction ticket a reviewer files — and that arrival emits no event either, so
+the ceiling is your worst-case latency for noticing it. Do not raise it past 30
+minutes.
+
+**The beat does not stop on idleness.** An empty pool and an empty supply are
+not a reason to end the run; they are the state a newly triaged ticket arrives
+into. The run ends when you drain it, when the budget goes, or when this
+context does — not because there was briefly nothing to do.
+
+**`--fold-unchanged` belongs to the heartbeat alone**, never to the two edges
+above. It prints one line instead of three when a tick asks for nothing AND says
+exactly what the last one said, which is what makes an unattended night
+affordable; an edge tick is read by a controller that just acted and needs the
+rows. An unchanged `DISPATCH` is never folded — unclaimed work always prints in
+full, because folding it would hide the stall behind this ticket's own remedy.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'

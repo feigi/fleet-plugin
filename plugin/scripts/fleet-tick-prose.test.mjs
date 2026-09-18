@@ -58,10 +58,14 @@ test("the reconcile block says what the two row-suppressing inputs mean", () => 
   assert.match(s, /moves no label/);
 });
 
-test("the reconcile block admits it is edge-triggered only", () => {
-  // The deferred heartbeat. A reader who takes this for the whole cure stops
-  // looking for the drained-queue case it cannot reach.
-  assert.match(reconcileBlock(), /edge-triggered, so it does\s+not cover a fully drained queue/);
+test("the reconcile block admits the edges miss a drained queue, and says whose case that is", () => {
+  // A reader who takes the two edges for the whole cure stops looking for the
+  // drained-queue case they cannot reach. Before #357 that case was deferred and
+  // the block said so; now it has an owner, and the pointer is the part that
+  // must not rot — an admission with nowhere to go is how #3 lost item 2.
+  const s = reconcileBlock();
+  assert.match(s, /neither\s+covers a fully drained queue/);
+  assert.match(s, /fleet-heartbeat\.mjs/);
 });
 
 // Both merge-side edges, each sliced to its own bullet — the shared vocabulary
@@ -161,4 +165,46 @@ test("the fold-in block says inherited PRs are queued before shortlisting, as or
   // The #590 tie-back is the reason the rule survives a narrowing pass: a PR
   // that is both unreviewable and uncounted is what strands the gate.
   assert.match(s, /unreviewable AND uncounted/);
+});
+
+// --------------------------------------------------------------------------
+// The heartbeat's prose — #357. It belongs in this file for the reason the
+// header gives: these pins exist because a reconcile nothing invokes is #3 with
+// an extra file, and on a drained queue the heartbeat is the ONLY thing that
+// invokes it. The slice is the standing instruction, ending where the CI-wait
+// instruction begins.
+const heartbeatBlock = () =>
+  section(RUN_TEAM, "**Beat when there is nothing to do", "**Own the CI waits.**", "run-team heartbeat block");
+
+test("the event loop tells the controller to arm the beat instead of ending its turn", () => {
+  // The entry point. Every word of the block below is unreachable if the loop
+  // never says to run it, which is exactly how item 2 of #3 went missing.
+  const bullet = section(RUN_TEAM, "- **Nothing to do right now**", "- **Implementer completes**",
+    "nothing-to-do event");
+  assert.match(bullet, /do not end your turn/);
+});
+
+test("the heartbeat block names the script and the re-issue protocol", () => {
+  const s = heartbeatBlock();
+  assert.match(s, /fleet-heartbeat\.mjs/);
+  // The partial-hold branch IS the mechanism on both harnesses: no harness lets
+  // one command block a whole interval, so a reader who stops at the first line
+  // ends the turn mid-interval and the beat dies there. Prose that names the
+  // script without the re-issue rule is a heartbeat with one beat.
+  assert.match(s, /re-issue this command now, do not end your turn/);
+  assert.match(s, /one blocking call per turn/);
+});
+
+test("the heartbeat block says why the ceiling is bounded", () => {
+  // Without the reason, 20 minutes reads as arbitrary and the next reader
+  // raises it to an hour — reintroducing #3's blindness at a slower rate, which
+  // is the one failure this design can still be tuned into.
+  assert.match(heartbeatBlock(), /supply grows from OUTSIDE the fleet/);
+  assert.match(heartbeatBlock(), /Do not raise it past 30\s+minutes/);
+});
+
+test("the heartbeat block forbids stopping on an idle queue", () => {
+  // The unattended-overnight ruling. A beat that ends when supply empties
+  // terminates the run at 01:00 and misses every ticket triaged after it.
+  assert.match(heartbeatBlock(), /does not stop on idleness/);
 });

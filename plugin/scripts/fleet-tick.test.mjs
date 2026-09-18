@@ -6,7 +6,7 @@
 // "simplification" that drops a row has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, unpairedFlags } from "./fleet-tick.mjs";
+import { reconcile, formatLines, unpairedFlags, actionable } from "./fleet-tick.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
@@ -223,7 +223,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
-const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
+// Every non-builtin fleet-tick.mjs imports, because runCli() below reruns the
+// script from a stub directory and an unlisted sibling is a module-not-found at
+// startup — exit 1, which is the code the candidates.mjs tests read as "queue
+// empty". Add a row here whenever the script gains an import.
+const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs"].map(
+  (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
+);
 
 // Answers both reads the tick makes: `gh pr list` for backlog/merge-queue, and
 // the `gh issue list --jq …` that candidates.mjs makes on its behalf. The issue
@@ -268,20 +274,25 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } 
   const issueFixture = join(dir, "issues.json");
   writeFileSync(prFixture, JSON.stringify(prs));
   writeFileSync(issueFixture, JSON.stringify(issues));
+  // Every case gets its own state file unless it names one. The tick writes the
+  // back-off streak on every successful run, and its default path resolves
+  // against the git common dir — so without this the suite would write the
+  // REPO's own `.fleet/heartbeat.json` and each test would inherit the previous
+  // test's streak and digest, making the fold cases order-dependent.
+  const stateArg = args.includes("--state") ? [] : ["--state", join(dir, "heartbeat.json")];
   // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
-  // means running a copy of the script out of the stub dir. It imports nothing
-  // but node builtins beyond die() from ./arg.mjs (#367), so that copy has to
-  // ride along too or the copy fails to resolve it at startup — an uncaught
-  // MODULE_NOT_FOUND, exit 1, exactly the collision this file's own die()
-  // tests below exist to catch.
+  // means running a copy of the script out of the stub dir — and every module
+  // the script imports has to ride along or the copy fails to resolve it at
+  // startup: an uncaught MODULE_NOT_FOUND, exit 1, exactly the collision this
+  // file's own die() tests below exist to catch. SIBLING_MODULES is that list.
   let script = SCRIPT;
   if (candidates !== undefined) {
     script = join(dir, "fleet-tick.mjs");
     writeFileSync(script, readFileSync(SCRIPT));
-    writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+    for (const [name, path] of SIBLING_MODULES) writeFileSync(join(dir, name), readFileSync(path));
     writeFileSync(join(dir, "candidates.mjs"), candidates);
   }
-  const r = spawnSync(process.execPath, [script, ...args], {
+  const r = spawnSync(process.execPath, [script, ...args, ...stateArg], {
     encoding: "utf8",
     env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`,
@@ -575,4 +586,117 @@ test("CLI: supply comes from candidates.mjs and drives the pool-0 branches", () 
   assert.equal(many.status, 0);
   assert.match(many.stdout, /supply=3/);
   assert.match(many.stdout, /^implementers\s+0\/2 → RE-SHORTLIST\s{2}/m);
+});
+
+// --------------------------------------------------------------------------
+// The heartbeat's half — #357. The tick is the only writer of the back-off
+// streak and the fold digest, so these pin the contract fleet-heartbeat.mjs
+// reads rather than the heartbeat's own arithmetic (that is its test's job).
+
+test("actionable: only DISPATCH and RE-SHORTLIST name work the controller can do", () => {
+  const row = (action) => [{ role: "implementers", actual: 0, target: 2, action, detail: "" }];
+  assert.equal(actionable(row("DISPATCH 1")), true);
+  assert.equal(actionable(row("DISPATCH merge-bot")), true);
+  assert.equal(actionable(row("RE-SHORTLIST")), true);
+  assert.equal(actionable(row("RE-SHORTLIST + SUGGEST /triage")), true);
+  assert.equal(actionable(row("AT CAP")), false);
+  assert.equal(actionable(row("IDLE OK")), false);
+  assert.equal(actionable(row("HOLD")), false);
+});
+
+test("actionable: `SUGGEST /triage` alone is not work — nobody is there to ask", () => {
+  // The deliberate call, and the one a reader is most likely to invert: this
+  // row asks a MAINTAINER to tick tickets. On the unattended overnight run the
+  // heartbeat exists for there is nobody to ask, so treating it as actionable
+  // would pin the interval at the base all night for a request no one can
+  // answer — the back-off would never engage in the one case it was added for.
+  const rows = [{ role: "implementers", actual: 0, target: 2, action: "SUGGEST /triage", detail: "" }];
+  assert.equal(actionable(rows), false);
+});
+
+test("actionable: one actionable row carries the whole tick", () => {
+  const rows = [
+    { role: "implementers", actual: 2, target: 2, action: "AT CAP", detail: "" },
+    { role: "reviewers", actual: 0, target: 5, action: "IDLE OK", detail: "" },
+    { role: "merge-bot", actual: 0, target: 1, action: "DISPATCH merge-bot", detail: "" },
+  ];
+  assert.equal(actionable(rows), true);
+});
+
+test("CLI: the quiet streak lengthens on an idle tick and resets on an actionable one", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-state-")));
+  const path = join(dir, "heartbeat.json");
+  // An idle tick: nothing queued, nothing in supply, no reviews in hand.
+  const idle = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none", "--state", path];
+
+  runCli(idle, { prs: [], issues: [] });
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 1);
+  runCli(idle, { prs: [], issues: [] });
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 2);
+
+  // Work appears. The streak must reset even though this tick arrived on the
+  // same path — an interval still armed at the ceiling after work lands is the
+  // stall #357 exists to end, just shorter.
+  runCli(["--implementers", "0", "--reviewers", "0", "--merge-bots", "0", "--pool", "1",
+    "--reviews-ready", "0", "--merge-holds", "none", "--state", path], { prs: [], issues: [issue(9)] });
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: --fold-unchanged folds a repeated idle tick to one line", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-")));
+  const path = join(dir, "heartbeat.json");
+  const idle = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none", "--fold-unchanged", "--state", path];
+
+  // First tick has nothing to compare against, so it prints in full.
+  const first = runCli(idle, { prs: [], issues: [] });
+  assert.equal(first.status, 0);
+  assert.equal(first.stdout.trim().split("\n").length, 3);
+
+  // Second is byte-identical and asks for nothing — this is what makes an
+  // overnight run affordable: a line, not a reconcile.
+  const second = runCli(idle, { prs: [], issues: [] });
+  assert.equal(second.status, 0);
+  const lines = second.stdout.trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^fleet-tick: unchanged, nothing to act on \(quiet=2\)/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: --fold-unchanged never folds an actionable tick, even an identical one", () => {
+  // The trap the actionable() predicate exists to avoid, and the reason the fold
+  // is not keyed on output identity alone. A tick printing `DISPATCH 1` every
+  // interval because the controller has not acted on it is identical each time;
+  // folding it would hide unclaimed work behind a one-line "nothing to act on",
+  // which is #3's stall wearing this ticket's own remedy as a disguise.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-act-")));
+  const path = join(dir, "heartbeat.json");
+  const args = [...LIVE, "--fold-unchanged", "--state", path];
+
+  const first = runCli(args, { prs: [], issues: [issue(9)] });
+  assert.match(first.stdout, /DISPATCH 1/);
+  const second = runCli(args, { prs: [], issues: [issue(9)] });
+  assert.equal(second.stdout, first.stdout);
+  assert.match(second.stdout, /DISPATCH 1/);
+  assert.doesNotMatch(second.stdout, /nothing to act on/);
+  // And the streak stayed at 0 throughout, so the heartbeat keeps beating at
+  // the base interval while the work is outstanding.
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: without --fold-unchanged a repeated idle tick still prints in full", () => {
+  // The two shipped merge-side edges pass no new flags, so their output must be
+  // exactly what it was before #357 — a folded edge tick would hand a
+  // controller that just acted a line instead of the rows it reads.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-nofold-")));
+  const path = join(dir, "heartbeat.json");
+  const idle = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none", "--state", path];
+  runCli(idle, { prs: [], issues: [] });
+  const second = runCli(idle, { prs: [], issues: [] });
+  assert.equal(second.stdout.trim().split("\n").length, 3);
+  rmSync(dir, { recursive: true, force: true });
 });
