@@ -95,9 +95,16 @@ Measured before ruling:
    the state a newly triaged ticket arrives into. The run ends on maintainer
    drain, budget, or context exhaustion.
 8. **One state file, one writer per key.** `.fleet/heartbeat.json`, resolved
-   against the git common dir like `ledger.mjs`'s ledger: `fleet-tick` owns
-   `quiet` and `digest`, `fleet-heartbeat` owns `elapsed`. A key both wrote
-   would need a lock neither is positioned to hold.
+   against the git common dir like `ledger.mjs`'s ledger — with `GIT_DIR` and
+   `GIT_WORK_TREE` scrubbed from that resolution, since an ambient one answers
+   for another repository and re-opens the per-environment split the common dir
+   closes: `fleet-tick` owns `quiet` and `digest`, `fleet-heartbeat` owns
+   `elapsed`. A key both wrote would need a lock neither is positioned to hold.
+   The heartbeat re-reads the file after its hold rather than writing the
+   snapshot it opened with: a hold is minutes long, `fleet-tick` runs on edges
+   that owe it nothing, and patching a stale snapshot back would revert the
+   other writer's keys — re-arming a long interval immediately after the busy
+   wave that had just reset it.
 
 ## Failure mode
 
@@ -115,8 +122,15 @@ against out-of-band scheduling for the *live-run* heartbeat; it does not
 pre-judge that question.
 
 Degraded reads all fail toward beating **more** often, never less: a missing or
-corrupt state file restarts at the base interval and says so, and a failed state
-write is reported and survived. Silence is never a state this script can be in —
+corrupt state file restarts at the base interval and says so, and only a
+missing one is silent — an unreadable file that exists is announced, because
+that one discards a real streak. A failed state WRITE is reported and survived,
+and survived means treated as a fire: the remainder is counted in the file, so
+without persistence every invocation would hold the same seconds and report the
+same remainder, and the interval would never complete at all. Beating too often
+is the harmless direction; never beating is the defect this ADR exists to close.
+
+Silence is never a state this script can be in —
 it prints one line on every invocation, because a heartbeat that printed nothing
 would be indistinguishable from a heartbeat that died, which is the exact
 "indistinguishable from a working one" the member-idle measurement names.

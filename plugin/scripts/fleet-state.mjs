@@ -33,7 +33,19 @@ import { dirname, join, resolve } from "node:path";
 // should move here and ledger.mjs should import it; two callers did not justify
 // reaching into a 982-line module and re-testing it.
 export function statePath(name) {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" });
+  // GIT_DIR and GIT_WORK_TREE scrubbed, never inherited: an ambient GIT_DIR
+  // answers `--git-common-dir` for a DIFFERENT repository, which relocates the
+  // ONE file this whole design rests on. It fails in exactly the direction the
+  // common-dir resolution exists to close — a private streak and a private
+  // elapsed total per environment — and it fails SILENTLY, because a resolved
+  // path inside another repo looks like any other resolved path. Same scrub
+  // run-merge-bot.md performs on the identical command in shell (`env -u
+  // GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir`); spelled as an
+  // env object here because there is no shell to spell it in.
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env });
   if (r.status !== 0 || !r.stdout.trim()) {
     // Announced, never silent: a cwd-relative fallback re-opens exactly the
     // per-worktree split this resolution exists to close.
@@ -48,15 +60,27 @@ export function statePath(name) {
 // interval — more frequent level checks, never fewer. Dying instead would stop
 // the heartbeat, and a stopped heartbeat is the defect.
 //
-// Absent is silent, because a fresh run legitimately has no file yet. Corrupt
-// is announced, because that one is a fault, and silence about a degraded read
-// is the failure class this whole ticket exists to close.
+// Absent is the ONLY silent case, because it is the only one that is not a
+// fault: a fresh run legitimately has no file yet. An unreadable file and a
+// corrupt one are both announced — each discards real state, and silence about
+// a degraded read is the failure class this whole ticket exists to close.
 export function readState(path, name) {
   const fresh = { quiet: 0, elapsed: 0, digest: "", rest: {} };
   let raw;
   try {
     raw = readFileSync(path, "utf8");
-  } catch {
+  } catch (e) {
+    // ENOENT is the only silent one, because it is the only one that is not a
+    // fault: a fresh run legitimately has no file yet. Every other errno is a
+    // file that EXISTS and could not be read — EACCES on a chmod'ed state
+    // file, EISDIR on a path something else claimed, EIO on a bad disk — and
+    // each of those discards a real back-off streak and a real elapsed total.
+    // Swallowing them with the same bare catch the absent case uses is a
+    // degraded read reported as a fresh run, which is the failure class this
+    // whole ticket exists to close.
+    if (e.code !== "ENOENT") {
+      console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
+    }
     return fresh;
   }
   let parsed;
@@ -73,11 +97,18 @@ export function readState(path, name) {
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
   const num = (v) => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0);
+  // `rest` is strictly what lies OUTSIDE the schema, which is what makes the
+  // patch write below a patch rather than a laundering step. A raw copy of
+  // quiet/elapsed/digest in here would be written straight back by whichever
+  // script does not own the key, so a junk value would survive every write
+  // that sanitized it in memory — validation that only ever holds inside one
+  // process is not validation of the file.
+  const { quiet, elapsed, digest, ...rest } = parsed;
   return {
-    quiet: num(parsed.quiet),
-    elapsed: num(parsed.elapsed),
-    digest: typeof parsed.digest === "string" ? parsed.digest : "",
-    rest: parsed,
+    quiet: num(quiet),
+    elapsed: num(elapsed),
+    digest: typeof digest === "string" ? digest : "",
+    rest,
   };
 }
 
@@ -86,15 +117,28 @@ export function readState(path, name) {
 // `digest` reads as "the output changed" on the next tick, which un-folds a
 // quiet night and silently undoes the cheap-per-wake half of the design.
 //
-// A failed write is reported and survived for the same reason a failed read is:
-// without persistence the interval restarts every hold, which beats more often,
-// not less.
+// A failed write is reported and SURVIVED, never fatal, for the same reason a
+// failed read is. But survived is not the same as ignored: it returns whether
+// the write landed, because the two cases call for different behaviour from
+// the caller and only the caller can act. An unpersisted `elapsed` means the
+// next invocation re-reads the same total, holds again and reports the same
+// remainder — an interval that can never complete — so fleet-heartbeat treats
+// a failed write as a fire instead of counting progress that nothing is
+// keeping.
 export function writeState(path, name, prev, patch) {
-  const next = { ...(prev.rest ?? {}), ...patch };
+  // Built from the VALIDATED view plus the fields outside the schema, never
+  // from the raw parse: see `rest` in readState above.
+  const next = {
+    ...(prev.rest ?? {}),
+    quiet: prev.quiet, elapsed: prev.elapsed, digest: prev.digest,
+    ...patch,
+  };
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+    return true;
   } catch (e) {
     console.error(`${name}: WARNING could not write ${path} (${e.message}) — back-off progress will not persist`);
+    return false;
   }
 }

@@ -261,7 +261,7 @@ const issue = (number) => ({
   number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "",
 });
 
-function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } = {}) {
+function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates, cwd, defaultState = false } = {}) {
   // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
   // placed under the unresolved path never runs its own main(), since
   // import.meta.url resolves the symlink and process.argv[1] does not. It exits
@@ -279,7 +279,12 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } 
   // against the git common dir — so without this the suite would write the
   // REPO's own `.fleet/heartbeat.json` and each test would inherit the previous
   // test's streak and digest, making the fold cases order-dependent.
-  const stateArg = args.includes("--state") ? [] : ["--state", join(dir, "heartbeat.json")];
+  //
+  // `defaultState` opts out, for the one case whose subject IS that resolution.
+  // It is safe there only because that case runs with a `cwd` inside a
+  // throwaway git repository, which is what the common dir then resolves to.
+  const stateArg = args.includes("--state") || defaultState
+    ? [] : ["--state", join(dir, "heartbeat.json")];
   // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
   // means running a copy of the script out of the stub dir — and every module
   // the script imports has to ride along or the copy fails to resolve it at
@@ -293,7 +298,7 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates } 
     writeFileSync(join(dir, "candidates.mjs"), candidates);
   }
   const r = spawnSync(process.execPath, [script, ...args, ...stateArg], {
-    encoding: "utf8",
+    cwd, encoding: "utf8",
     env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`,
       FIXTURE_PRS: prFixture, FIXTURE_ISSUES: issueFixture, ...extraEnv,
@@ -699,4 +704,71 @@ test("CLI: without --fold-unchanged a repeated idle tick still prints in full", 
   const second = runCli(idle, { prs: [], issues: [] });
   assert.equal(second.stdout.trim().split("\n").length, 3);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: --fold-unchanged does not fold when the ROWS change, even with nothing to act on", () => {
+  // The other half of the fold predicate, and the half every case above leaves
+  // untested: each repeats a byte-identical tick, so a digest that was constant
+  // — or computed over the wrong thing — folds correctly in all of them. Two
+  // non-actionable ticks whose printed rows DIFFER must print in full, or a
+  // pipeline that is moving reads as a night where nothing happened.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-differs-")));
+  const path = join(dir, "heartbeat.json");
+  const idle = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--fold-unchanged", "--state", path];
+
+  // Nothing queued at all: the merge-bot row is idle.
+  const first = runCli([...idle, "--merge-holds", "none"], { prs: [], issues: [] });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /^merge-bot\s+0\/1 → IDLE OK\b/m);
+  assert.equal(first.stdout.trim().split("\n").length, 3);
+
+  // A queued candidate, held behind a lower PR. Still nothing the controller
+  // can act on — a hold is not work — so `actionable()` is false either way and
+  // the digest is the only thing that can tell these two ticks apart.
+  const held = { prs: [pr(601, ["ready-to-merge"])], issues: [] };
+  const second = runCli([...idle, "--merge-holds", "601"], held);
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /^merge-bot\s+0\/1 → HOLD\b/m);
+  assert.equal(second.stdout.trim().split("\n").length, 3,
+    "the rows changed, so the tick must print them — the queue gaining a held candidate is the pipeline moving");
+  assert.doesNotMatch(second.stdout, /nothing to act on/);
+
+  // Control, because "printed in full" is also what a fold that never fires
+  // looks like: repeat that same tick and it does collapse.
+  const third = runCli([...idle, "--merge-holds", "601"], held);
+  assert.equal(third.stdout.trim().split("\n").length, 1);
+  assert.match(third.stdout, /^fleet-tick: unchanged, nothing to act on \(quiet=3\)/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: with no --state, and with an empty one, the tick resolves the run's shared default", () => {
+  // The path both shipped invocations use — neither passes --state — and the
+  // one this file's harness injects around on every other case, which is why
+  // nothing had exercised it. What it buys is ONE state file per run: a
+  // cwd-relative answer would give every member's worktree a private streak and
+  // a private digest, and the run's beat would be whichever worktree called
+  // last. `--state ""` is the shape an unset shell variable produces, and it is
+  // not a path, so it resolves to the same default rather than to `''`.
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-default-state-")));
+  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  const idle = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+    "--reviews-ready", "0", "--merge-holds", "none"];
+  const state = join(repo, ".fleet", "heartbeat.json");
+
+  const first = runCli(idle, { prs: [], issues: [], cwd: repo, defaultState: true });
+  assert.equal(first.status, 0, first.stderr);
+  // Never through the announced cwd-relative fallback: a case that resolved
+  // that way would be pinning the degradation while reading like it pinned the
+  // resolution.
+  assert.doesNotMatch(first.stderr, /WARNING/);
+  assert.equal(JSON.parse(readFileSync(state, "utf8")).quiet, 1);
+
+  // The streak it wrote is the streak the next run reads back — persistence,
+  // which is the half a "the file appeared" assertion would miss.
+  const second = runCli([...idle, "--state", ""], { prs: [], issues: [], cwd: repo });
+  assert.equal(second.status, 0, second.stderr);
+  assert.doesNotMatch(second.stderr, /WARNING/);
+  assert.equal(JSON.parse(readFileSync(state, "utf8")).quiet, 2);
+  rmSync(repo, { recursive: true, force: true });
 });

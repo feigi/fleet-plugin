@@ -103,7 +103,9 @@ const OPTIONS = {
 
 // State path, read and write all come from fleet-state.mjs, which owns the key
 // ownership rule this script depends on: it writes `elapsed` and nothing else,
-// so fleet-tick's `quiet` and `digest` survive every hold.
+// so fleet-tick's `quiet` and `digest` survive every hold. main() re-reads the
+// file after its hold to keep that true across the hold itself, and treats a
+// write that did not land as a fire rather than as progress.
 
 // A blocking sleep, not a poll loop. Atomics.wait on a SharedArrayBuffer parks
 // the thread; `while (Date.now() < end) {}` would burn a core for the whole
@@ -141,7 +143,7 @@ function args() {
   // runs backwards — min() would clamp every interval to the ceiling and the
   // base would never be honoured. Refuse rather than silently reinterpret.
   if (ceiling < base) die(`--ceiling (${ceiling}) is below --base (${base}) — the back-off would run backwards`);
-  return { base, ceiling, multiplier, hold, state: values.state ?? statePath(NAME) };
+  return { base, ceiling, multiplier, hold, state: values.state || statePath(NAME) };
 }
 
 function main() {
@@ -151,12 +153,29 @@ function main() {
   const held = heldThisCall({ elapsed: state.elapsed, target, hold });
 
   block(held);
-  const elapsed = state.elapsed + held;
-  const done = elapsed >= target;
+  // Re-read AFTER the hold, and patch THAT rather than the pre-hold snapshot.
+  // fleet-tick can run while this call is blocked — up to --hold seconds, 240
+  // by default — and it owns both keys this script must not touch. Writing the
+  // snapshot back reverts them: a busy wave that reset `quiet` to 0 would find
+  // the long interval re-armed the moment the hold ended, and a reverted
+  // `digest` reads as "the output changed" on the next tick, un-folding the
+  // quiet night the digest exists to fold. `elapsed` is still the only key
+  // this script writes; it is now read fresh rather than remembered across a
+  // hold long enough for the file to have moved underneath it.
+  const now = readState(path, NAME);
+  const elapsed = now.elapsed + held;
+  const reached = elapsed >= target;
   // Reset on fire, so the next interval starts from zero rather than from a
   // total that has already elapsed. Only `elapsed` is written — fleet-tick owns
   // `quiet` and `digest`, and fleet-state.mjs's patch write preserves them.
-  writeState(path, NAME, state, { elapsed: done ? 0 : elapsed });
+  const persisted = writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed });
+  // A failed write is itself a fire. With nothing persisting the remainder,
+  // every invocation reads the same elapsed total, holds the same seconds and
+  // prints the same remainder: the interval can never complete, so fleet-tick
+  // is never run at all — #357's own defect, reached through a line that reads
+  // like a working heartbeat. Beating too often is the harmless direction;
+  // never beating is the one this script exists to prevent.
+  const done = reached || !persisted;
 
   // One line either way, and never zero lines. Silence is the failure mode this
   // whole ticket is about: a heartbeat that printed nothing would be
@@ -164,6 +183,10 @@ function main() {
   // "indistinguishable from a working one" the member-idle measurement names.
   // The partial line says what to do next in the imperative, because the one
   // thing that must not happen here is the controller ending its turn.
+  //
+  // `quiet=` is the pre-hold streak, the one the interval was DERIVED from: a
+  // fresh streak printed beside a target computed from the old one would be two
+  // numbers that do not explain each other.
   console.log(done
     ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → restate your live counts and run fleet-tick`
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
