@@ -166,24 +166,53 @@ json_lib="$(dirname "$0")/json.sh"
 wt=$1
 branch=$2
 base=${BASE_REF:-origin/main}
-# Only a remote-tracking ref is accepted — the same accept-list
-# release-ticket.sh (#1320) and worktree-audit.sh (#1329) both carry.
-# Unlike worktree-audit.sh, which is audit-only and only ever prints a
-# report, this script GATES something consequential: the comment below (see
-# "the merge bot leans on this audit to authorize a REBASE") says a caller
-# uses this audit's exit status to decide whether to replay unpushed work.
-# A wrong BASE_REF here does not just make a report wrong, it can feed that
-# decision a false "clean" — the same blast radius release-ticket.sh (#1320)
-# restricted BASE_REF for, so this script restricts it too rather than
-# leaving it as permissive as an audit-only reader could afford. The
-# qualify step below unconditionally prepends `refs/remotes/` to whatever
-# $base is, so a spelling that used to resolve fine before this fix — a
-# bare `main`, a raw SHA, `HEAD`, `refs/heads/main` — would otherwise turn
-# into a ref nothing asked to exist, and die below with a message that
-# blames a guess for a qualification this script chose to make.
+# Only a remote-tracking ref is accepted — the accept-list release-ticket.sh:229
+# and reap.sh:156 carry, and the one this script had none of. worktree-audit.sh
+# is NOT a precedent for it: that script still measures the bare shorthand
+# (worktree-audit.sh:117 reads BASE_REF, :119 rev-parses `$base` and :211
+# rev-lists it), so the fix is not yet applied there — #1329 is where that half
+# is tracked, and it is closed with nothing in the tree to show for it. Being
+# audit-only is what lets worktree-audit.sh wait — it only ever prints a
+# report, while this script GATES something consequential: the comment below
+# (see "the merge bot leans on this audit to authorize a REBASE") says a caller
+# uses this audit's exit status to decide whether to replay unpushed work. A
+# wrong BASE_REF here does not just make a report wrong, it can feed that
+# decision a false "clean" — the blast radius release-ticket.sh restricted
+# BASE_REF for, so this script restricts it too rather than leaving it as
+# permissive as an audit-only reader could afford. The qualify step below
+# unconditionally prepends `refs/remotes/` to whatever $base is, so a spelling
+# that used to resolve fine before this fix — a bare `main`, a raw SHA, `HEAD`,
+# `refs/heads/main` — would otherwise turn into a ref nothing asked to exist,
+# and die below with a message that blames a guess for a qualification this
+# script chose to make.
+#
+# The die names the two spellings the list takes rather than calling them "a
+# remote-tracking ref", because the list is narrower than that phrase in one
+# direction and wider in the other: `refs/remotes/upstream/main` is accepted
+# and `upstream/main` is refused (both measured), so a second remote's
+# shorthand would otherwise be refused for not being something it is.
 case "$base" in
   origin/*|refs/remotes/*) ;;
-  *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
+  *) die "BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'";;
+esac
+
+# release-ticket.sh's SECOND guard — `*/"$branch") die` — is carried too, for
+# the reason release-ticket.sh:233 gives and not reap.sh:161's reason for
+# leaving it out. `origin/$branch` IS a remote-tracking ref, so the accept-list
+# above passes it and nothing else here refuses it, and every measurement below
+# then asks whether the branch conflicts with ITSELF: merge-tree reports no
+# conflicting files, the at-risk list stays empty, and the audit prints
+# `conflicts: []`, `atRisk: []` at exit 0 for a worktree whose branch really
+# does add/add-conflict with the real origin/main. Measured on a bare-origin
+# fixture: the same tree and the same commit report `conflicts: ["conflict.txt"]`
+# with one at-risk main commit when BASE_REF is unset, and the empty pair above
+# when it is `origin/<the audited branch>`. That is the false "clean" the
+# comment above says must not reach a rebase decision. reap.sh can leave the
+# guard out because its `fetch --prune` drops the stale refs that make the same
+# spelling vacuous there; this script fetches nothing — the only fetch it names
+# is the advice in the `origin/$branch does not resolve` die below.
+case "$base" in
+  */"$branch") die "BASE_REF must not name the audited branch, got '$base'";;
 esac
 
 # `origin/main` is a SHORTHAND, and git resolves a shorthand through its own
@@ -191,19 +220,24 @@ esac
 # refs/heads/<name>, refs/remotes/<name>, …), in which refs/remotes/origin/
 # main comes LAST. A local TAG or BRANCH literally named `origin/main`
 # outranks the real remote-tracking branch, so every measurement against
-# the bare shorthand below would answer about that ref's target instead —
-# silently, at rc 0, exactly the class release-ticket.sh (#1320) and
-# worktree-audit.sh (#1329) already found in the same default. Fix: qualify
-# to the full refs/remotes/ path, where there is nothing left to
+# the bare shorthand below would answer about that ref's target instead — at
+# rc 0, with git's own `warning: refname 'origin/main' is ambiguous.` on
+# stderr as the only tell (measured), which this script reads nothing of and
+# which an unattended caller has no one to read. The same class
+# release-ticket.sh:243 and reap.sh:174 already found in the same default.
+# Fix: qualify to the full refs/remotes/ path, where there is nothing left to
 # disambiguate, unless it is already qualified. The accept-list above is
 # what makes this qualify step safe rather than a guess — BASE_REF could
 # otherwise name a tag, a SHA or a local branch, leaving no prefix that is
 # always correct. `$base` itself stays unqualified in this script's `die`
 # text, where the shorthand spelling is what an operator expects to read;
-# the trace lines below use `$base_rev` instead, because this script's own
-# rule for those lines (see the `status --porcelain` trace above) is that
-# they echo the command AS RUN, and the command that runs is against
-# `$base_rev`.
+# where the two spellings can disagree the die names BOTH, so a refusal
+# earned by `refs/remotes/<x>` is not read as a refusal about `<x>` — a
+# local ref shadowing the shorthand makes "<x> does not resolve" false of
+# the very spelling the operator typed. The trace lines below use
+# `$base_rev` instead, because this script's own rule for those lines (see
+# the `status --porcelain` trace above) is that they echo the command AS
+# RUN, and the command that runs is against `$base_rev`.
 case "$base" in
   refs/remotes/*) base_rev=$base;;
   *) base_rev="refs/remotes/$base";;
@@ -337,7 +371,7 @@ else
     || die "$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one"
 fi
 
-git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
+git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve as $base_rev"
 # Left unchecked, merge-tree below fails silently and "no conflicting files" is
 # printed for a question that was never actually answered.
 #
@@ -762,7 +796,7 @@ conflicts_json=$(printf '%s' "$conflicts" | jarr) \
 at_risk=""
 if [ -n "$conflicts" ]; then
   fork=$(git -C "$wt" merge-base "$base_rev" "origin/$branch") \
-    || die "git merge-base failed for $base and origin/$branch — cannot tell what a resolution would eat"
+    || die "git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat"
   echo "\$ git log --oneline $fork..$base_rev -- <conflicting files>" >&2
   # One pathspec per argument. Word-splitting `$conflicts` turned a path with a
   # space into two pathspecs that match nothing, and `git log` spends exit 0 on

@@ -1888,14 +1888,17 @@ test("a BASE_REF that dereferences to a blob is unanswerable (2), never safe (0)
 });
 
 test("a local ref shadowing `origin/main` does not read a real add/add conflict as none (#1565)", (t) => {
-  // Same class release-ticket.sh (#1320) and worktree-audit.sh (#1329) already
-  // found in the same default: `origin/main` is a SHORTHAND, and git resolves
-  // a shorthand through its own disambiguation order (gitrevisions: refs/
-  // <name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>, …), in
-  // which refs/remotes/origin/main comes LAST. A local TAG literally named
-  // `origin/main` outranks the real remote-tracking branch, so `git
+  // Same class release-ticket.sh:243 and reap.sh:174 already found in the same
+  // default — worktree-audit.sh is not a carrier of this fix and still
+  // measures the bare shorthand. `origin/main` is a SHORTHAND, and git
+  // resolves a shorthand through its own disambiguation order (gitrevisions:
+  // refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>,
+  // …), in which refs/remotes/origin/main comes LAST. A local TAG literally
+  // named `origin/main` outranks the real remote-tracking branch, so `git
   // merge-tree` and `git merge-base`/`git log` against the bare shorthand
-  // below answer about the tag's target instead — silently, at rc 0.
+  // below answer about the tag's target instead, at rc 0 — git's own
+  // `warning: refname 'origin/main' is ambiguous.` on stderr is the only
+  // tell, and this script reads none of it.
   const path = "conflict.txt";
   const c = bareConflictRepo(t, path);
   // The tag points at the FORK point — one commit behind main's real tip —
@@ -1927,7 +1930,14 @@ test("every unanswerable precondition exits 2 and emits no payload", (t) => {
     ["not a git worktree", [plain, c.branch], ENV, /is not a git worktree/],
     ["branch never pushed", [c.w, "never-pushed"], ENV, /origin\/never-pushed does not resolve/],
     ["BASE_REF does not resolve", [c.w, c.branch], { ...ENV, BASE_REF: "origin/no-such-ref" }, /does not resolve/],
-    ["BASE_REF outside the remote-tracking namespace", [c.w, c.branch], { ...ENV, BASE_REF: "refs/heads/main" }, /BASE_REF must be a remote-tracking ref, got 'refs\/heads\/main'/],
+    ["BASE_REF outside the remote-tracking namespace", [c.w, c.branch], { ...ENV, BASE_REF: "refs/heads/main" }, /BASE_REF must be spelled origin\/<branch> or refs\/remotes\/<path>, got 'refs\/heads\/main'/],
+    // Both spellings of the audited branch, because both clear the accept-list
+    // and both make every measurement ask whether the branch conflicts with
+    // ITSELF — `conflicts: []`, `atRisk: []` at exit 0 on a worktree that
+    // really does conflict with origin/main. A guard narrowed to the shorthand
+    // would leave the qualified half of that reachable, so both are pinned.
+    ["BASE_REF names the audited branch", [c.w, c.branch], { ...ENV, BASE_REF: `origin/${c.branch}` }, new RegExp(`BASE_REF must not name the audited branch, got 'origin/${c.branch}'`)],
+    ["BASE_REF names the audited branch, qualified", [c.w, c.branch], { ...ENV, BASE_REF: `refs/remotes/origin/${c.branch}` }, new RegExp(`BASE_REF must not name the audited branch, got 'refs/remotes/origin/${c.branch}'`)],
   ];
 
   for (const [why, args, env, re] of cases) {
@@ -2224,6 +2234,12 @@ test("a RELATIVE back-pointer still passes, not read as another worktree's admin
 // which is what makes them land in the same guard as #189's spoof; both are
 // DIRTY, so a pass here is the audit actually answering (exit 1, `clean:false`)
 // rather than a refusal wearing a fail-safe exit code.
+//
+// Each audits its own checkout's feature branch rather than `main`: BASE_REF
+// defaults to `origin/main`, and the audited-branch guard refuses a BASE_REF
+// whose last component is the branch under audit, so `main` here would be
+// refused at exit 2 before either shape reached the linkage question these two
+// exist to ask.
 test("a submodule checkout is audited, not refused for carrying no back-pointer", (t) => {
   const c = repo(t);
   const sub = repo(t, "fix/2-sub", "no-undo-audit-sub-");
@@ -2231,7 +2247,7 @@ test("a submodule checkout is audited, not refused for carrying no back-pointer"
   const w = join(c.w, "sub");
   writeFileSync(join(w, "dirt.txt"), "uncommitted, inside a submodule\n");
 
-  const r = audit({ w, branch: "main" });
+  const r = audit({ w, branch: sub.branch });
   assert.equal(r.status, 1, `a dirty submodule must report dirty, not refuse; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.clean, false);
 });
@@ -2242,7 +2258,7 @@ test("a --separate-git-dir clone is audited, not refused for carrying no back-po
   execFileSync("git", ["clone", "-q", "--separate-git-dir", `${w}.git`, git(c.w, "remote", "get-url", "origin"), w], { env: ENV });
   writeFileSync(join(w, "dirt.txt"), "uncommitted, in a --separate-git-dir clone\n");
 
-  const r = audit({ w, branch: "main" });
+  const r = audit({ w, branch: c.branch });
   assert.equal(r.status, 1, `a dirty --separate-git-dir clone must report dirty, not refuse; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.clean, false);
 });
@@ -2478,7 +2494,7 @@ const nonZeroCell = () => {
  * does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), `BASE_REF` does not name a remote-tracking ref (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
 
 /**
  * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
@@ -2503,13 +2519,33 @@ const EXIT2_TAIL =
  * does the same thing about it, and so does one who meets either library
  * refusal. The phrases are the short load-bearing labels; their exact wording
  * is `EXIT2_ENUMERATION`'s job.
+ *
+ * The two BASE_REF clauses are named for a different reason than sharing:
+ * each represents exactly one refusal, and `BASE_REF_CLAUSES` below reads
+ * them again to pin that both operator-facing enumerations name them. Spelled
+ * inline they would sit in two places with no constant holding them together,
+ * which is the drift the rest of this block exists to stop.
  */
 const LIBRARY_CLAUSE = "`json.sh` missing, unreadable or failed to load";
 const LINKAGE_CLAUSE = "a worktree git does not answer for";
 const REF_CLAUSE = "a ref that does not resolve";
 const PROBE_CLAUSE = "a probe that could not run";
 const ESCAPE_CLAUSE = "a conflicting-path or at-risk array that could not be escaped (#119)";
-const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` does not name a remote-tracking ref (#1565)";
+const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565)";
+const AUDITED_BRANCH_CLAUSE = "`BASE_REF` names the audited branch (#1565)";
+
+/**
+ * Every clause representing a BASE_REF refusal, as a closed list.
+ *
+ * `plugin/commands/run-merge-bot.md` is the operator-facing doc for this
+ * script's only documented invocation, and its exit-2 enumeration is derived
+ * from nothing: the census below catches a cause the design-spec ROW goes
+ * silent about, and nothing caught one the COMMAND DOC goes silent about —
+ * #1565's own accept-list reached the row and not that doc, with the suite
+ * green. Asserted closed against the script's own messages, so a third
+ * BASE_REF refusal reds here until it is listed and named in both docs.
+ */
+const BASE_REF_CLAUSES = [BASE_REF_SHAPE_CLAUSE, AUDITED_BRANCH_CLAUSE];
 
 /**
  * Every `die` site in no-undo-audit.sh, bound to the phrase in the row that
@@ -2534,8 +2570,9 @@ const CAUSES = new Map([
   ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
   ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
-  ["BASE_REF must be a remote-tracking ref, got '$base'", BASE_REF_SHAPE_CLAUSE],
-  ["$base does not resolve", REF_CLAUSE],
+  ["BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'", BASE_REF_SHAPE_CLAUSE],
+  ["BASE_REF must not name the audited branch, got '$base'", AUDITED_BRANCH_CLAUSE],
+  ["$base does not resolve as $base_rev", REF_CLAUSE],
   ["origin/$branch does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
   ["git status failed in $wt — cannot tell a clean worktree from a dirty one", PROBE_CLAUSE],
   ["awk failed counting the stash entries — cannot report the stash count", PROBE_CLAUSE],
@@ -2544,7 +2581,7 @@ const CAUSES = new Map([
   ["could not read git merge-tree's output (python3) — cannot determine conflicts", PROBE_CLAUSE],
   ["a conflicting path contains a newline — cannot build a pathspec for it", "a conflicting path no pathspec can name"],
   ["could not escape the conflicting paths for $branch", ESCAPE_CLAUSE],
-  ["git merge-base failed for $base and origin/$branch — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["could not escape the at-risk commits for $branch", ESCAPE_CLAUSE],
@@ -2709,6 +2746,41 @@ test("the design spec's row states this script's exit-2 causes as a closed list,
   const from = cell.indexOf("exit 2 ");
   assert.equal(cell.slice(from, from + EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
   assert.equal(cell.slice(from + EXIT2_ENUMERATION.length), EXIT2_TAIL);
+});
+
+test("both operator-facing docs name every BASE_REF refusal this script can reach (#1565)", () => {
+  // The closed list, asserted against the script rather than trusted. Both
+  // directions: a BASE_REF `die` bound outside the list is a refusal the docs
+  // may be silent about, and a clause with no `die` behind it is one the docs
+  // claim while the script cannot reach it.
+  for (const [message, clause] of CAUSES) {
+    if (!message.includes("BASE_REF")) continue;
+    assert.ok(
+      BASE_REF_CLAUSES.includes(clause),
+      `\`die "${message}"\` is a BASE_REF refusal bound to "${clause}", which BASE_REF_CLAUSES does not carry — add it there and name it in both docs, or the command doc can stay silent about it with this suite green`,
+    );
+  }
+  assert.equal(
+    [...CAUSES.keys()].filter((m) => m.includes("BASE_REF")).length,
+    BASE_REF_CLAUSES.length,
+    "every clause in BASE_REF_CLAUSES must have a `die` behind it",
+  );
+
+  for (const rel of ["../commands/run-merge-bot.md", "../../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
+    const anchor = rel.endsWith("run-merge-bot.md")
+      ? (l) => l.includes("Exit **2**")
+      : (l) => l.startsWith("| `no-undo-audit.sh` |");
+    const line = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+      .split("\n").find(anchor);
+    assert.ok(line, `${rel} must still describe this script's exit-2 causes`);
+    for (const clause of BASE_REF_CLAUSES) {
+      assert.equal(
+        line.split(clause).length - 1,
+        1,
+        `${rel} must name "${clause}" exactly once.\nline: ${line}`,
+      );
+    }
+  }
 });
 
 // --- #119: the escaping library this script now sources rather than carries.
