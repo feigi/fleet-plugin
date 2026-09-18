@@ -309,9 +309,8 @@ function runCiState(scriptDir, pr) {
 // path, so a bare-key Set would let one channel's warning consume the other's
 // line for that file — a behaviour change, not a refactor. NUL joins them
 // because no channel name or path can hold one, so no two distinct (channel,
-// key) pairs can collide. A caller that passes an empty key gets one line per
-// process — whether it has nothing to key on, or had a key and chose to spend
-// only that one line.
+// key) pairs can collide. Every caller keys on a PR, a path, or the fault's
+// own message, so `key` is never empty.
 const warnedOnce = new Set();
 function warnOnce(channel, key, msg) {
   const k = `${channel}\0${key}`;

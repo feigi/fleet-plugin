@@ -985,12 +985,12 @@ test("#916: a damaged transcript beside an unreadable one reports both tallies",
   assert.equal(s.skipped, 1);
 });
 
-// The keyless caller. Every other gate keys on a PR or a path, so nothing else
-// in the suite drives warnOnce's empty key, and the folded-in spend-dir gate
-// would be collapsed untested. The failure it reports is the session directory
-// itself, which is why there is nothing to key on: a second tick cannot be a
-// different instance of it.
-test("the keyless spend-dir gate warns once per process, not once per tick", () => {
+// Repeat calls with the SAME dir object must stay quiet: gatherSpend being
+// called again on an unchanged fault is not a new fault. The test below this
+// one covers the complementary axis — two calls with DIFFERENT `dir.error`
+// values must both reach stderr, which only a message-keyed gate (not a
+// channel-keyed or empty-keyed one) can tell apart from this one.
+test("the no-spend-dir gate warns once per distinct fault, not once per tick", () => {
   const dir = { error: "no session directory under ~/.claude/projects for this cwd" };
   assert.equal(withStderr(() => gatherSpend({ dir })).length, 1, "tick 1 reports");
   assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 2 stays quiet");
@@ -1007,8 +1007,12 @@ test("the keyless spend-dir gate warns once per process, not once per tick", () 
 test("the no-spend-dir gate keys on the message, so a second, different fault also reaches stderr", () => {
   const a = { error: "no transcript dir for cwd /tmp/impl-1190-a (looked in /tmp/impl-1190-a/.claude/projects/x)" };
   const b = { error: "transcript lookup failed: EACCES: permission denied, scandir '/tmp/impl-1190-b'" };
-  assert.equal(withStderr(() => gatherSpend({ dir: a })).length, 1, "first fault reports");
-  assert.equal(withStderr(() => gatherSpend({ dir: b })).length, 1, "second, different fault also reports");
+  const first = withStderr(() => gatherSpend({ dir: a }));
+  assert.equal(first.length, 1, "first fault reports");
+  assert.match(first[0], /looked in \/tmp\/impl-1190-a/, "first fault's own message reaches stderr");
+  const second = withStderr(() => gatherSpend({ dir: b }));
+  assert.equal(second.length, 1, "second, different fault also reports");
+  assert.match(second[0], /EACCES: permission denied/, "second fault's own message reaches stderr");
   // Steady state is unchanged: the SAME fault repeating still costs one line
   // per process, not one per tick.
   assert.deepEqual(withStderr(() => gatherSpend({ dir: a })), [], "repeating the first fault stays quiet");
