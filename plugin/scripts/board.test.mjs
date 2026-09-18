@@ -203,24 +203,94 @@ test("gather: exit 1 is a verdict, not a failed read — it still overrides the 
   assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }).ci, "red");
 });
 
+// ── the salvage arm: an exit code alone never made a payload a verdict ───────
+//
+// #875. The gate reads the exit code because #262 retired "stdout is non-empty"
+// as the proxy for "the child answered". The exit code is the other half of
+// that same proxy: it says the child reached its own exit path, not that its
+// payload arrived whole. Measured against stubs shaped like ci-state.mjs,
+// `e.status !== 2 && out.trim()` accepted all four rows in this block — the two
+// cut-off ones and the two real verdicts alike — while parsing the salvaged
+// bytes separates them exactly, which is why the parse is the discriminator.
+//
+// The accept side first, and the reason the discriminator is a PARSE rather
+// than the exit status. no-ci is a REAL verdict that shares exit 1 — ci-state
+// only moves it to exit 0 under --declare-no-ci, which this call never passes —
+// and its `status` is null. So the other candidate remedy, "treat an abnormal
+// status the way exit 2 is treated", is not merely insufficient (the cut-off
+// row below exits 1 with no signal at all); tightened far enough to catch that
+// row it starts refusing THIS one, resurrecting a red for a PR that has no run
+// behind it any more. prev is "red" precisely so only a refusal could produce
+// it: the answer this tick owns is its own "unknown".
+const NO_CI_EXIT_1 = `import { writeSync } from "node:fs";
+writeSync(1, JSON.stringify({ pr: 42, status: null, verdict: "no-ci", reasons: ["no workflows configured"] }) + "\\n");
+process.exit(1);`;
+
+test("gather: a complete no-ci verdict at exit 1 is an answer, not a failed read — it is not carried forward (#875)", () => {
+  assert.equal(gatherCi({ ciStateBody: NO_CI_EXIT_1, prevCi: "red" }).ci, "unknown");
+});
+
+// The refuse side. One write, cut mid-JSON, under two dispositions: the bytes
+// are held apart from the exit code deliberately, because the bytes are all
+// these two rows share and the disposition is the whole difference between them
+// — exit 1 is the salvage arm this fix narrowed, exit 0 (further down, where
+// #605's wiring pin needs it) is the arm it left alone.
+const TRUNCATED_WRITE = `import { writeSync } from "node:fs";
+writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");`;
+const UNPARSEABLE_EXIT_1 = `${TRUNCATED_WRITE}
+process.exit(1);`;
+
+// prev="red" is the assertion: the payload is unusable, so this tick has no
+// reading of its own and #262's carry-forward is the entire point. Returning
+// the bytes anyway spends a PR's last-known red on an "unknown" nobody
+// measured — the regression the exit-code gate was added to prevent, arriving
+// through the gate itself. The stderr line has to name the PR and say the
+// payload was refused: "ci-state failed" alone cannot be told apart from the
+// read never having happened, and an operator looking at a carried-forward
+// value needs to know a payload arrived and was thrown away.
+test("gather: a payload cut mid-JSON at exit 1 is not a verdict — the previous CI value stands (#875)", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /parse/);
+});
+
+// The signal half of the same class, and its own row because `status` is null
+// here rather than a number: the diagnostic has to say the child was KILLED,
+// since "exit null" is not a thing an operator can act on, and a fix that
+// keyed only on nonzero exit codes would let this row through on a falsy
+// status. SIGKILL rather than SIGTERM so the stub cannot handle it and exit
+// cleanly instead.
+const KILLED_MID_PAYLOAD = `import { writeSync } from "node:fs";
+writeSync(1, '{"pr": 42, "status": "comp');
+process.kill(process.pid, "SIGKILL");`;
+
+test("gather: a signal-killed ci-state that wrote half a payload carries the previous value forward (#875)", () => {
+  const r = gatherCi({ ciStateBody: KILLED_MID_PAYLOAD, prevCi: "red" });
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /SIGKILL/);
+});
+
 // The end-to-end shape of #605, and the one test that can see the call site.
 // mapCi's warn keys on a PR number mapCi has no other use for, so the argument
 // exists only if gather() passes it: leave the call as `mapCi(out)` and every
 // in-process test above stays green while the real board prints a line naming
 // PR "undefined". Only driving gather() itself pins the wiring.
 //
-// A warning line ahead of a truncated body — stdout that is non-empty, is a
-// real exit-1 verdict by runCiState()'s rule, and still will not parse.
-const UNPARSEABLE_EXIT_1 = `import { writeSync } from "node:fs";
-writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");
-process.exit(1);`;
+// Exit 0 is the vehicle, and after #875 it is the only one left: runCiState()
+// returns stdout unconditionally when the child exits 0 — emptiness untested,
+// parseability untested — so a write cut mid-JSON on a GREEN verdict is the one
+// unparseable payload that still reaches mapCi. #875 narrowed the salvage arm
+// alone; what a child hands back on a successful exit stays mapCi's question.
+//
+// prev is "red" to state plainly what #875 did NOT change here: this return is
+// non-null, so gather()'s carry-forward arm is still not reached and the PR
+// still reverts to "unknown" for this tick.
+const UNPARSEABLE_EXIT_0 = `${TRUNCATED_WRITE}
+process.exit(0);`;
 
-// prev is "red" to state plainly what the fix does NOT change: the payload is
-// non-null, so gather()'s carry-forward arm is not reached and the PR still
-// reverts to "unknown" for this tick. #605's remedy is additive — the return
-// value is pinned, only the silence is the defect.
-test("gather: an unparseable verdict payload → unknown, with a stderr line naming the PR", () => {
-  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+test("gather: an unparseable payload at exit 0 → unknown, with a stderr line naming the PR", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_0, prevCi: "red" });
   assert.equal(r.ci, "unknown");
   assert.match(r.stderr, /PR 42/);
 });
