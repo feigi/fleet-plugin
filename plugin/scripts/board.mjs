@@ -309,9 +309,8 @@ function runCiState(scriptDir, pr) {
 // path, so a bare-key Set would let one channel's warning consume the other's
 // line for that file — a behaviour change, not a refactor. NUL joins them
 // because no channel name or path can hold one, so no two distinct (channel,
-// key) pairs can collide. A caller that passes an empty key gets one line per
-// process — whether it has nothing to key on, or had a key and chose to spend
-// only that one line.
+// key) pairs can collide. Every caller keys on a PR, a path, or the fault's
+// own message, so `key` is never empty.
 const warnedOnce = new Set();
 function warnOnce(channel, key, msg) {
   const k = `${channel}\0${key}`;
@@ -538,14 +537,21 @@ function readAgent(file, metaFile) {
   };
 }
 
-// The `no-spend-dir` gate warns at most once per process. `dir.error` is not
-// constant — findSubagentsDir words an unresolvable project dir differently
-// from a lookup that threw — so the empty key warnOnce documents is a CHOICE
-// here, not an absence of anything to key on. What it costs is only the repeat
-// stderr LINE: a fault that differs still reaches the browser on the tick it
-// happens, through the `{ error }` gatherSpend returns for it, which board.html
-// renders as the panel's text. The board gathers every ~15s and a line
-// repeating at that rate just trains the eye to ignore it.
+// The `no-spend-dir` gate warns at most once per process PER DISTINCT ERROR.
+// `dir.error` is not constant — findSubagentsDir words an unresolvable project
+// dir differently from a lookup that threw — so it is keyed on the message
+// itself, not the empty string this gate used to key on: an empty key
+// collapsed both wordings onto the one `no-spend-dir\0` slot, so whichever
+// fault landed first for a process consumed the slot and a later, genuinely
+// different fault never reached stderr again for the rest of the run. Keying
+// on `dir.error` fixes that without losing the steady-state behaviour: `cwd`
+// and `HOME` are fixed for the life of `serve`, so a repeating identical fault
+// still costs one line, not one per tick. Either way this gate only ever
+// controlled the repeated stderr LINE — a fault that differs still reaches the
+// browser on the tick it happens, through the `{ error }` gatherSpend returns
+// for it, which board.html renders as the panel's text. The board gathers
+// every ~15s and a line repeating at that rate just trains the eye to ignore
+// it.
 //
 // The `skips` gate is the same rule, per transcript: a file that is broken is
 // broken every tick, and at the default 15s interval three of them are 720 lines
@@ -585,9 +591,10 @@ function readAgent(file, metaFile) {
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
-    if (dir && dir.error) {
-      warnOnce("no-spend-dir", "", dir.error);
-      return { ok: false, error: dir.error };
+    const dirError = dir?.error;
+    if (dirError) {
+      warnOnce("no-spend-dir", dirError, dirError);
+      return { ok: false, error: dirError };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
 
