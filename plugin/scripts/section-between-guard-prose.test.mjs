@@ -29,10 +29,12 @@
 //   dispatch-block-pins-prose.test.mjs's `region()` and
 //   finisher-pin-race-prose.test.mjs's `causeBlock()` both return
 //   `SRC.slice(at + START.length, end)` — the start anchor STRIPPED, not
-//   kept. `member-prompt-prose.test.mjs`'s inlined `memberBlocks()` is the
-//   same divergence, cited in #753 itself: `between()` keeps the start
-//   anchor; these need it gone, and swapping in `between()` un-stripped
-//   changes their output.
+//   kept. `member-prompt-prose.test.mjs`'s inlined `memberBlocks()` was the
+//   same divergence when #753 cited it: `between()` keeps the start anchor;
+//   these need it gone, and swapping in `between()` un-stripped changes their
+//   output. #1465 rewrote `memberBlocks()` onto `anchorAt()`/`phrase()`, so it
+//   no longer has an `indexOf`/`assert.notEqual` shape at all and is excluded
+//   from this file's own detector by construction, not by this near-miss.
 //
 //   finisher-own-tree-prose.test.mjs's `between()` returns
 //   `flat(RUN_TEAM.slice(at, to))` — flattened before return, not a bare
