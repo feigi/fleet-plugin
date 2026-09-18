@@ -156,17 +156,26 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
 // the stub `gh` only has to feed the PR loop, since every other gh read in
 // gather() degrades through tryRun(). Out of process, because gather() reads
 // process.argv and would otherwise read the test runner's.
-function gatherCi({ ciStateBody, prevCi }) {
+//
+// `prs` and `ticks` default to the single PR and the single gather() every arm
+// below needs; the warn-once row is the one that raises them, because a gate
+// that spends one line per process and one that spends one per tick are
+// indistinguishable inside a single-tick, single-PR run.
+function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   const cwd = mkdtempSync(join(tmpdir(), "board-gather-"));
   const bin = mkdtempSync(join(tmpdir(), "board-gather-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), ciStateBody);
+  const rows = JSON.stringify(prs.map((n) => ({ number: n, state: "OPEN", labels: [], title: "t" })));
   writeFileSync(join(bin, "gh"),
-    '#!/bin/sh\ncase "$1 $2" in\n"pr list") echo \'[{"number":42,"state":"OPEN","labels":[],"title":"t"}]\' ;;\n*) exit 1 ;;\nesac\n');
+    `#!/bin/sh\ncase "$1 $2" in\n"pr list") echo '${rows}' ;;\n*) exit 1 ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
-  writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: [{ pr: 42, ci: prevCi }] }));
+  writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: prs.map((n) => ({ pr: n, ci: prevCi })) }));
+  // serve()'s shape, not a loop for its own sake: one process, gather() called
+  // again per tick, which is the only place a warn-once gate is observable.
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+    let r;
+    for (let i = 0; i < ${ticks}; i++) r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: ${JSON.stringify(join(cwd, "prev.json"))},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify(r.ci));`;
@@ -177,7 +186,8 @@ function gatherCi({ ciStateBody, prevCi }) {
   // stderr comes back too: gather() reports through it, and the PR number in a
   // mapCi warn is an argument the call site has to pass — see the unparseable
   // payload test below, which is the only one that can observe that wiring.
-  return { ci: JSON.parse(r.stdout.trim().split("\n").pop())[42], stderr: r.stderr };
+  const ci = JSON.parse(r.stdout.trim().split("\n").pop());
+  return { ci: ci[42], ciAll: ci, stderr: r.stderr };
 }
 
 // The regression itself. This payload is what ci-state.mjs emits on a quota
@@ -211,9 +221,13 @@ test("gather: exit 1 is a verdict, not a failed read — it still overrides the 
 // as the proxy for "the child answered". The exit code is the other half of
 // that same proxy: it says the child reached its own exit path, not that its
 // payload arrived whole. Measured against stubs shaped like ci-state.mjs,
-// `e.status !== 2 && out.trim()` accepted all four rows in this block — the two
-// cut-off ones and the two real verdicts alike — while parsing the salvaged
-// bytes separates them exactly, which is why the parse is the discriminator.
+// `e.status !== 2 && out.trim()` accepted all four rows that reach it —
+// not-green and no-ci, the real exit-1 verdicts, alongside the exit-1 write cut
+// mid-JSON and the signal kill mid-payload — while parsing the salvaged bytes
+// separates them exactly, which is why the parse is the discriminator. The
+// exit-0 row is not a fifth: this gate lives in runCiState()'s catch block and
+// a child that exits 0 never throws, so that row goes to mapCi without the
+// gate ever forming an opinion on it.
 //
 // The accept side first, and the reason the discriminator is a PARSE rather
 // than the exit status. no-ci is a REAL verdict that shares exit 1 — ci-state
@@ -271,6 +285,25 @@ test("gather: a signal-killed ci-state that wrote half a payload carries the pre
   const r = gatherCi({ ciStateBody: KILLED_MID_PAYLOAD, prevCi: "red" });
   assert.equal(r.ci, "red");
   assert.match(r.stderr, /SIGKILL/);
+});
+
+// The cost of the refusal line, which the single-tick rows above cannot see.
+// serve() re-gathers on a timer in ONE process, and a truncation has a cause
+// that outlives the tick that hit it, so an ungated line is spent again on
+// every tick for as long as the cause lasts — the flood mapCi's `ci-parse` pin
+// near the top of this file exists to prevent, arriving through the arm #875
+// added. Two PRs because the gate's key is the other half of it: keyed on its
+// channel alone, the first refused payload would silence every later PR's line
+// for the rest of the run, which is the silence the sibling gate was written
+// against. Both PRs still carry their previous value forward — the gate is
+// about what is SAID, never about what is read.
+test("gather: a refused salvage payload warns ONCE per PR across ticks, and a second PR is not masked", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red", prs: [42, 43], ticks: 3 });
+  assert.deepEqual(r.ciAll, { 42: "red", 43: "red" });
+  const refusals = r.stderr.split("\n").filter((l) => /will not parse/.test(l));
+  assert.equal(refusals.length, 2, `expected one line per PR, got ${JSON.stringify(refusals)}`);
+  assert.ok(refusals.some((l) => /--pr 42/.test(l)), r.stderr);
+  assert.ok(refusals.some((l) => /--pr 43/.test(l)), r.stderr);
 });
 
 // The end-to-end shape of #605, and the one test that can see the call site.

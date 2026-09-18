@@ -272,12 +272,31 @@ function runCiState(scriptDir, pr) {
     }
     // Its own line, not the one above: "failed" reads as "the child never
     // answered", and an operator looking at a carried-forward CI value needs to
-    // know a payload DID arrive and was thrown away, and why. `status` is null
-    // on a signal kill, where "exit null" would name nothing to act on.
+    // know a payload DID arrive and was thrown away, and why.
+    //
+    // `how` reads e.code first — the three-way ci-state.mjs already uses at its
+    // own child reads — because one cause of this shape is OURS: overrunning
+    // READ_OPTS.maxBuffer is enforced by node killing the child, and that
+    // arrives as signal SIGTERM carrying code ENOBUFS (measured). A
+    // signal-first `how` renders it "killed by SIGTERM", billing a cap this
+    // file sets to an outside killer and sending the operator after an OOM kill
+    // or a stray `kill -TERM`. The signal arm stays ahead of the exit arm
+    // behind it: `status` is null on a real signal kill, where "exit null"
+    // would name nothing to act on.
+    //
+    // Through the warn-once gate, keyed on the PR exactly as mapCi's
+    // `ci-parse` gate is and for the same reason: serve() re-gathers on a
+    // timer, so a payload truncated by a cause that persists is truncated
+    // again on every tick, and an ungated line spends one per PR per tick for
+    // as long as the cause lasts. Its own channel rather than `ci-parse`,
+    // because for any one payload the two are mutually exclusive — bytes
+    // refused here return null and never reach mapCi — so a shared channel
+    // would buy nothing and would let whichever arm a PR happened to take
+    // silence the other for the rest of the run.
     try { JSON.parse(out); }
     catch (pe) {
-      const how = e.signal ? `killed by ${e.signal}` : `exit ${e.status}`;
-      console.error(`${NAME}: ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
+      const how = e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
+      warnOnce("ci-salvage", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
       return null;
     }
     return out;
