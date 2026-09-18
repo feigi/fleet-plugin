@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript } from "./member-record.mjs";
+import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -646,7 +646,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         damaged += a.damaged;
         agents.push({
           label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
-          role: classifyRole(a.meta),
+          role: classifyRole(claudeRoleSignals(a.meta)),
           cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
         });
         toolTables.push(tools);
