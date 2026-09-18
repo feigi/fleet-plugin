@@ -702,12 +702,13 @@ count_registry() {
     # `ls`'s STATUS, not just its output: an entry we could not LIST is not an
     # empty one, and `2>/dev/null` hides the difference. An entry chmod'd 000
     # (unsearchable) OR 0111 (searchable, so an `-x` test passes it, but not
-    # readable) fails EACCES and prints exactly what a stray `mkdir` prints
-    # (measured: 2 listed, then 1, and an output-only skip counts 0 to match).
-    # Over-skip on either predicate and git has dropped the entry too, so the
-    # counts AGREE, no mismatch fires, and the probe answers `taken=false` for
-    # a ticket whose checkout is still on disk. Could not read it, so we cannot
-    # tell → count it and let the mismatch below fire. #697
+    # readable) fails EACCES and prints exactly what a stray `mkdir` prints.
+    # Over-skip on the missing `gitdir` or on the output alone, and git has
+    # dropped the entry too, so the counts AGREE (measured: 2 listed, then 1,
+    # and an output-only skip counts 0 to match), no mismatch fires, and the
+    # probe answers `taken=false` for a ticket whose checkout is still on disk.
+    # Could not read it, so we cannot tell → count it and let the mismatch
+    # below fire. #697
     if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
