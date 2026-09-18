@@ -2275,8 +2275,18 @@ for (const [cmd, args] of [["row", ["7", "impl-7 · class=routine"]], ["filed", 
 // `rev-parse` is the only argv either probe uses, so keying on it leaves every
 // other invocation instant and warmable. `/bin/sleep` absolute: PATH is this
 // fixture's own bin, which holds `git` and `gh` and nothing else.
+//
+// The stall RELEASES the captured pipes before it begins, and that detail is
+// what keeps a regression here loud. `exec`ing the sleep while it still holds
+// this probe's stdout leaves spawnSync reading an open pipe long after the
+// caller's own backstop has killed the run — measured on the unbounded script,
+// the backstop fired at 45 s and the call did not return for the sleep's full
+// 600, so removing the bound would look like a hung suite rather than a failed
+// assertion. Closed, an absent bound reds at the backstop instead. Same shape
+// inflight.test.mjs names: killing the named process is not enough while a
+// descendant still holds the stderr the caller is draining.
 const GIT_HANGS = `#!/bin/sh
-case " $* " in *" rev-parse "*) exec /bin/sleep 600 ;; esac
+case " $* " in *" rev-parse "*) exec /bin/sleep 600 >/dev/null 2>&1 ;; esac
 exit 0
 `;
 // Slow but WORKING, and the answer is real: `--show-toplevel`'s stdout becomes
