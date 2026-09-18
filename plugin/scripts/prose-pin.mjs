@@ -382,3 +382,94 @@ export function pairSlices(text, sectionFrom, sectionTo) {
   }
   return { claude, omp };
 }
+
+// A paragraph's physical line breaks, removed. `phrase()` holds this axis for
+// a pin that KNOWS the words it is looking for; this holds it for a pin that
+// DERIVES its subjects from the document. Those are different problems: a
+// literal you can pre-tolerate with `\s+`, but a scan like `see \*\*([^*\n]+)\*\*`
+// has to keep `\n` out of its own character classes to stay one clause, and a
+// generative regex cannot be made whitespace-tolerant and bounded at once.
+// #1609: rewrapping `review-and-fix.md`'s step 4 — pure reflow, not one word
+// changed — took that scan from 5 pointer names to 3, and the pins for the two
+// it lost stopped existing rather than failing. Three separate breaks, all the
+// same shape: the literal space in `see `, the literal space in the list
+// separator, and `\n` excluded from the name class. Tolerating them one at a
+// time in the regex is how the bound gets lost — move the WRAP, not the scan.
+//
+// The view, never the file: this returns a copy to scan, and `lineAt` maps a
+// hit in it back to the physical line a reader has to open. A pin reporting an
+// offset into the joined copy names a line that does not exist in the source.
+//
+// Joining only ADDS matches, so a pin cannot lose a hit to this — but `^` moves,
+// and that is the point in both directions. A `**Bold**` that a wrap happens to
+// push to column 0 mid-paragraph reads as block-leading to a `/^\*\*/m` scan
+// today, which is the mirror false GREEN: a pointer resolving to a target the
+// reflow invented. On the joined view it is mid-line again, where it belongs.
+//
+// What is NOT modelled: an indented (4-space) code block. Its second and later
+// lines are indistinguishable from a deeply-indented list continuation without
+// a real block parser, so they join and the block collapses to one line. Fenced
+// code is modelled and never joined — scan code through a fence, not an indent.
+
+// Starts a new block, so it never continues the line above.
+const BLOCK_START = /^ {0,3}(?:#{1,6}\s|[-*+](?:\s|$)|\d+[.)]\s|>|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
+// Complete in itself, so the line below never continues IT. Narrower than
+// BLOCK_START on purpose: a list item and a blockquote both take lazy
+// continuation lines, a heading and a thematic break take none.
+const BLOCK_END = /^ {0,3}(?:#{1,6}\s|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
+// Two trailing spaces or a trailing backslash is markdown's hard line break —
+// an authored break, not a wrap point, and removing it would change the render.
+const HARD_BREAK = /(?:[ \t]{2}|\\)$/;
+
+export function logicalLines(text) {
+  const src = text.split("\n");
+  const joins = new Array(src.length).fill(false);
+  let fenced = false;
+  for (let i = 0; i < src.length; i++) {
+    const fence = /^ {0,3}(?:```|~~~)/.test(src[i]);
+    joins[i] =
+      i > 0 &&
+      !fenced &&
+      !fence &&
+      /\S/.test(src[i - 1]) &&
+      /\S/.test(src[i]) &&
+      !HARD_BREAK.test(src[i - 1]) &&
+      !BLOCK_END.test(src[i - 1]) &&
+      !BLOCK_START.test(src[i]);
+    if (fence) fenced = !fenced;
+  }
+
+  const starts = new Array(src.length);
+  const out = [];
+  let offset = 0;
+  for (let i = 0; i < src.length; i++) {
+    // A wrap point is one inter-word space, so the indent the wrap introduced
+    // comes off and exactly one space goes back — `stripHashGutter`'s rejoin,
+    // one gutter shape fewer. The trailing trim is why that space is never two.
+    let line = joins[i] ? src[i].replace(/^[ \t]+/, "") : src[i];
+    if (joins[i + 1]) line = line.replace(/[ \t]+$/, "");
+    if (i > 0) {
+      const sep = joins[i] ? " " : "\n";
+      out.push(sep);
+      offset += sep.length;
+    }
+    starts[i] = offset;
+    out.push(line);
+    offset += line.length;
+  }
+
+  // Strictly increasing — an unjoined line contributes its own `\n` and a
+  // joined one is non-blank by construction — so this bisect has no ties to
+  // break and an offset inside line i answers i, never i+1.
+  const lineAt = (at) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= at) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+  return { text: out.join(""), lineAt };
+}
