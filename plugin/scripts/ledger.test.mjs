@@ -2253,3 +2253,163 @@ for (const [cmd, args] of [["row", ["7", "impl-7 · class=routine"]], ["filed", 
     assert.equal(existsSync(missing), true, "a bare write still creates the ledger it was given");
   });
 }
+
+// ---------------------------------------------------------------------------
+// #1199: what `check`'s children are bounded BY.
+//
+// The tracker query has carried a 20 s bound since #638 and the test above
+// pins it. The two `git` probes on either side of it carried NONE, and that
+// asymmetry is what this block closes. Measured on the unfixed script against
+// a `git` that answers and then never returns: `check` — the fleet's
+// pre-filing duplicate guard — was still running at 60 s with zero bytes on
+// stdout, where the identical shape on the `gh` side degrades at its own bound
+// and still prints a payload. One probe reached, no payload, no upper bound.
+//
+// These drive `git` rather than `gh`, so they build their own `bin/`: run()
+// symlinks the REAL git in on purpose (#155) and must keep doing so.
+// `LEDGER_GIT_TIMEOUT` buys a short budget instead of paying the default one
+// per case — the reason net_budget's override exists at all — and the one case
+// that has to prove the DEFAULT is a bound pays it in full.
+// ---------------------------------------------------------------------------
+
+// `rev-parse` is the only argv either probe uses, so keying on it leaves every
+// other invocation instant and warmable. `/bin/sleep` absolute: PATH is this
+// fixture's own bin, which holds `git` and `gh` and nothing else.
+const GIT_HANGS = `#!/bin/sh
+case " $* " in *" rev-parse "*) exec /bin/sleep 600 ;; esac
+exit 0
+`;
+// Slow but WORKING, and the answer is real: `--show-toplevel`'s stdout becomes
+// the cwd the tracker query is bound to, so it has to name a directory that
+// exists or gh dies of ENOENT and the accept case would pass for the wrong
+// reason.
+const gitSlow = (seconds, toplevel) => `#!/bin/sh
+case " $* " in
+  *" rev-parse "*) /bin/sleep ${seconds}; printf '%s\\n' '${toplevel}'; exit 0 ;;
+esac
+exit 0
+`;
+
+function gitFixture(t, gitBody) {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-gitprobe-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+
+  const gitPath = join(bin, "git");
+  writeFileSync(gitPath, gitBody.replace("__DIR__", dir));
+  chmodSync(gitPath, 0o755);
+  // Records that it was reached, so an accepted probe is told from a degraded
+  // one by something better than an exit code both of them share. The `--warm`
+  // arm is load-bearing, not defensive: without it the warm-up below writes
+  // the sentinel itself and every `ghRan: false` assertion here reads true —
+  // caught by these tests failing, which is the same pollution that makes
+  // warming run()'s own gh stub in place unsafe.
+  const ghSentinel = join(dir, "gh-ran");
+  const ghPath = join(bin, "gh");
+  writeFileSync(ghPath, `#!/bin/sh\ncase " $* " in *" --warm "*) exit 0 ;; esac\n: > '${ghSentinel}'\nprintf '[]\\n'\n`);
+  chmodSync(ghPath, 0o755);
+
+  // Pay both stubs' first-exec OS scan HERE, before anything bounded runs.
+  // That scan is the load-sensitive term #1199 measured: 148 ms on an idle
+  // machine, 8943 ms under five concurrent copies of this suite, against
+  // budgets of seconds. Left inside the bounded region it is indistinguishable
+  // from the stall these cases exist to detect, and the verdicts below would
+  // ride on machine load — #1099's finding, and its remedy.
+  for (const p of [gitPath, ghPath]) spawnSync(p, ["--warm"], { env: { PATH: bin }, timeout: 30_000 });
+
+  const env = { ...process.env, PATH: bin };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+
+  // `timeout` here is the CALLER's backstop and the detector for an absent
+  // bound: generous against every budget below, so a run held to it means the
+  // script stopped bounding its own child rather than that the box was slow.
+  // The same instrument inflight.test.mjs uses for its own bound.
+  return (subject, { extraEnv = {}, noFile = false } = {}) => {
+    const args = noFile ? ["check", subject] : ["--file", file, "check", subject];
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+      encoding: "utf8", cwd: dir, timeout: 45_000, env: { ...env, ...extraEnv },
+    });
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch { /* a degraded run still parses; a killed one does not */ }
+    return { ...r, json, ghRan: existsSync(ghSentinel) };
+  };
+}
+
+const PROBE_SUBJECT = "candidates mjs states the opposite of its code";
+
+test("a git that never answers the repository probe is bounded, not waited on (#1199)", (t) => {
+  const check = gitFixture(t, GIT_HANGS);
+  const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "2" } });
+
+  assert.equal(r.error, undefined,
+    `the run was held to the CALLER's backstop — the script's own bound on git is gone: ${JSON.stringify(r.error)}`);
+  assert.equal(r.status, 0, "a stalled probe degrades; it does not block the filing");
+  assert.ok(r.json, `a bounded run still emits its payload; got stdout ${JSON.stringify(r.stdout)}`);
+  assert.equal(r.json.tracker.ok, false);
+  assert.match(r.json.tracker.error, /ETIMEDOUT/,
+    "the bound has to name itself in the payload — this is the only copy of the cause");
+  assert.equal(r.ghRan, false,
+    "a probe that never resolved the repository must not go on to query the tracker against an unknown one");
+});
+
+// The sibling probe, and it is a different call site with a different degrade:
+// defaultLedgerPath() does not report an unchecked tracker, it falls back to a
+// cwd-relative ledger — the #155 worktree fail-open — so an unbounded hang
+// there wedges the run before a ledger is ever chosen.
+test("a git that never answers the ledger-path resolution is bounded too (#1199)", (t) => {
+  const check = gitFixture(t, GIT_HANGS);
+  const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "2" }, noFile: true });
+
+  assert.equal(r.error, undefined,
+    `the run was held to the CALLER's backstop — defaultLedgerPath()'s git is unbounded: ${JSON.stringify(r.error)}`);
+  assert.match(r.stderr, /could not resolve --git-common-dir/,
+    "the fallback must still announce itself; a silent degrade here is the guard failing open");
+});
+
+// The other half. Every case above is a probe the budget must CUT, and a bound
+// that cut everything would satisfy all of them while breaking every real run
+// on a loaded machine — which is the harm #1099 named when it refused to widen
+// a budget rather than stop spending it. This one feeds a probe that is slow
+// and CORRECT and must be accepted whole.
+test("a slow but working repository probe still reaches the tracker — the budget is not a stopwatch on success (#1199)", (t) => {
+  const check = gitFixture(t, gitSlow(3, "__DIR__"));
+  const r = check(PROBE_SUBJECT);
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r.error)}`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ghRan, true,
+    "a healthy probe, however slow, must still bind and run the tracker query");
+  assert.equal(r.json.tracker.ok, true, `the slow probe was treated as a failure: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /ETIMEDOUT/, "nothing was killed here, and nothing may claim it was");
+});
+
+// What makes the acceptance above meaningful rather than a budget so wide it
+// could never fire: the SAME probe, cut, once the budget is shortened under it.
+test("the same slow probe is cut once the budget is shortened below it (#1199)", (t) => {
+  const check = gitFixture(t, gitSlow(3, "__DIR__"));
+  const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "1" } });
+
+  assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r.error)}`);
+  assert.match(r.json.tracker.error, /ETIMEDOUT/, "a budget under the probe's own latency must fire");
+  assert.equal(r.ghRan, false, "and the tracker query must not run on a repository that was never resolved");
+});
+
+// The override's direction, which is the whole reason it is an override and not
+// a setting: net_budget's rule is that configuration may shorten a bound and
+// may never remove it. Costs the full default budget and cannot cost less —
+// the only observable that separates "the default stood" from "the override was
+// taken" is which of the two elapses, so this case has to let one of them.
+// Asserted categorically against the caller's backstop rather than against a
+// stopwatch, so the verdict does not ride on machine load.
+test("LEDGER_GIT_TIMEOUT cannot lengthen the bound, only shorten it (#1199)", (t) => {
+  const check = gitFixture(t, GIT_HANGS);
+  const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "600" } });
+
+  assert.equal(r.error, undefined,
+    `a 600 s override became the bound, so configuration can remove it: ${JSON.stringify(r.error)}`);
+  assert.match(r.json.tracker.error, /ETIMEDOUT/, "the default must still have fired");
+});
