@@ -366,10 +366,68 @@ keep() {
 # pipe `gp_raw=$( … )` reads — no separate pipe or file needed for it. Command
 # substitution runs in its own subshell (POSIX), so a plain variable set
 # inside — git's stdout, git's own $? — cannot escape it; only the TEXT
-# written there survives. `gp_sep` (a byte no porcelain line or ordinary
-# warning contains) marks where one piece ends and the next begins, so
-# `gp_raw` can be split apart with plain parameter expansion once it is back
-# in the real, top-level shell.
+# written there survives. `gp_sep` marks where one piece ends and the next
+# begins, so `gp_raw` can be split apart with plain parameter expansion once
+# it is back in the real, top-level shell.
+#
+# THE SEPARATOR IS SAFE BECAUSE OF WHAT GIT DOES, NOT BECAUSE OF WHAT 0x02
+# IS, and it is safe only for the commands this helper is currently pointed
+# at, by two DIFFERENT rules for two DIFFERENT groups. Three call sites below
+# read `status --porcelain` (`-uall`, or `-unormal --ignored`) and are safe
+# because git quotes PATHS; a fourth, added after this comment was first
+# written (#1413), reads `for-each-ref --format='%(refname)
+# %(upstream:track)'` and is safe for an unrelated reason — a REFNAME,
+# unlike a path, can never contain the byte at all. Nothing in the body
+# checks either invariant.
+#
+# The path-reading three: both halves of git's answer put a control byte in
+# a path beyond reach of the split, by two DIFFERENT rules — measured on git
+# 2.50.1 (Apple Git-155), against a file named `weird<0x02>file` and a
+# chmod-000 directory `dir<0x02>name`:
+#
+#   $gp_out: git C-quotes the path — `?? "weird\002file"`, a literal
+#   backslash-002 inside quotes, never the raw byte. This does NOT hang on
+#   `core.quotePath`, which only demotes bytes >= 0x80 out of "unusual";
+#   "git quotes unusual bytes" is therefore the wrong claim to rest on,
+#   since #614 measured that exact escape hatch for the HIGH-BIT class (see
+#   derive-testcmd.sh). Zero raw 0x02 out of `--porcelain -uall` and out of
+#   `--porcelain --ignored`, under core.quotePath true AND false.
+#
+#   $gp_err: git writes an unprintable byte in a path as `?` in its own
+#   diagnostics — `warning: could not open directory 'dir?name/'`. Zero raw
+#   0x02 there either.
+#
+# The ref-reading fourth: no PATH-quoting rule is doing the work, because no
+# quoting is needed — git refuses to CREATE the ref at all. Measured, git
+# 2.50.1 (Apple Git-155): `git branch "$(printf 'a\002b')"` fails outright —
+# `fatal: 'a?b' is not a valid branch name` — and so does `git update-ref
+# refs/heads/"$(printf 'a\002b')" HEAD` — `refusing to update ref with bad
+# name`. `%(refname)` and `%(upstream:track)` can only ever answer with
+# bytes that already survived `check-ref-format` on the way in, so a raw
+# 0x02 can never reach either field to begin with.
+#
+# SO DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT CARRIES NEITHER
+# GUARANTEE. It takes `git "$@"`, so the invariant is the CALLER's to keep
+# and nothing here catches a caller who drops it: a raw separator truncates
+# $gp_out at that byte and concatenates the rest of the real output onto
+# $gp_rc, which then reaches `return` as a non-numeric string (measured
+# against a stub git, PR #1209 review). It is one flag away from the path
+# group, not hypothetical — same git, same fixture: `status --porcelain
+# -uall -z` carries the raw 0x02 straight through, `-z` being the
+# machine-readable form that drops the quoting, and so does any command
+# emitting CONTENT rather than paths or refnames (`log --format=%s`, `show
+# <rev>:<path>`, both measured). The ref group has no equivalent flag —
+# `for-each-ref` cannot be asked to emit an unvalidated refname — so this
+# warning is really aimed at the path group and at any THIRD kind of call
+# site a future caller might add.
+#
+# Left unguarded anyway, deliberately (#1212): every call site is shaped
+# `if ! git_probe …; then keep …`, so a garbled $gp_rc can never come back 0
+# and so can never turn a KEEP into a REAP. For a script whose only costly
+# failure is deleting something it should have kept, that is the direction
+# that matters, and it already fails closed. A numeric guard on $gp_rc was
+# the competing remedy and was rejected: it buys loudness this failure mode
+# does not need.
 #
 # `if gp_o=$(...); then gp_rc=0; else gp_rc=$?; fi`, never a bare
 # `gp_o=$(...); gp_rc=$?`: under `set -e` a bare failing assignment aborts the
