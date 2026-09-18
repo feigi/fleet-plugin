@@ -33,7 +33,9 @@
 // the only thing in the suite that can see the mode this ticket changed.
 //
 // NOT pinned, deliberately: the corruption path itself. It is unreachable from
-// every existing caller — all of them `status --porcelain` variants — and a
+// every existing caller — three `status --porcelain` variants protected by
+// git's path-quoting, and a fourth (`for-each-ref`, #1413) protected because
+// a refname carrying the byte cannot exist in the first place — and a
 // test would have to stub `git` to reach it, pinning a hypothetical rather
 // than a behaviour. That is the ticket's own out-of-scope ruling, and the same
 // reason the competing `$gp_rc` numeric guard was rejected: every call site is
@@ -63,7 +65,9 @@
 // after a correct one to walk it back. They also say nothing about whether the
 // measurements in the comment are right — they pin that the comment
 // attributes the safety to git rather than to the byte, names the scope it
-// holds at, says the code does not check it, and warns the next caller off.
+// holds at, names each call-site group's OWN safety rule rather than one
+// rule for all of them, says the code does not check either invariant, and
+// warns the next caller off.
 //
 // Zero deps: `node --test plugin/scripts/gp-sep-invariant-prose.test.mjs`.
 
@@ -100,8 +104,8 @@ const PINS = [
     "the separator is safe because of what GIT does to a control byte in a path, which is the claim that actually holds",
   ],
   [
-    "says the code does not check it",
-    "Nothing in the body checks that",
+    "says the code does not check either invariant",
+    "Nothing in the body checks either invariant",
     "the one point both refuters agreed on: the invariant is asserted here and enforced nowhere",
   ],
   [
@@ -110,13 +114,18 @@ const PINS = [
     "an invariant with no stated scope is one a future caller inherits without knowing it exists",
   ],
   [
-    "names the commands that scope covers",
-    "every call site below reads `status --porcelain`",
-    "the boundary has to be checkable against a new caller's actual command, not left abstract",
+    "names the porcelain-reading call sites by an exact count, not by \"every\"",
+    "Three call sites below read `status --porcelain`",
+    "\"every call site\" was the false claim (#1601 review): a fourth call site, `for-each-ref`, was added by #1413 and does not read `status --porcelain` at all — the boundary has to name an exact, checkable count",
   ],
   [
-    "warns the next caller off output quoted differently",
-    "DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT IS NOT QUOTED THAT WAY",
+    "names the for-each-ref call site's different safety rule",
+    "a REFNAME, unlike a path, can never contain the byte at all",
+    "the fourth call site is safe for a reason that has nothing to do with git quoting a path — collapsing the two mechanisms into one claim is exactly how #1601's false \"every call site\" wording happened",
+  ],
+  [
+    "warns the next caller off output carrying neither guarantee",
+    "DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT CARRIES NEITHER GUARANTEE",
     "`git_probe` takes `git \"$@\"`, so the invariant is the caller's to keep and this warning is the only thing that tells them so",
   ],
   [

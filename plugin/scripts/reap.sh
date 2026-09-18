@@ -372,11 +372,18 @@ keep() {
 #
 # THE SEPARATOR IS SAFE BECAUSE OF WHAT GIT DOES, NOT BECAUSE OF WHAT 0x02
 # IS, and it is safe only for the commands this helper is currently pointed
-# at: every call site below reads `status --porcelain` (`-uall`, or
-# `-unormal --ignored`). Nothing in the body checks that. Both halves of
-# git's answer put a control byte in a path beyond reach of the split, by
-# two DIFFERENT rules — measured on git 2.50.1 (Apple Git-155), against a
-# file named `weird<0x02>file` and a chmod-000 directory `dir<0x02>name`:
+# at, by two DIFFERENT rules for two DIFFERENT groups. Three call sites below
+# read `status --porcelain` (`-uall`, or `-unormal --ignored`) and are safe
+# because git quotes PATHS; a fourth, added after this comment was first
+# written (#1413), reads `for-each-ref --format='%(refname)
+# %(upstream:track)'` and is safe for an unrelated reason — a REFNAME,
+# unlike a path, can never contain the byte at all. Nothing in the body
+# checks either invariant.
+#
+# The path-reading three: both halves of git's answer put a control byte in
+# a path beyond reach of the split, by two DIFFERENT rules — measured on git
+# 2.50.1 (Apple Git-155), against a file named `weird<0x02>file` and a
+# chmod-000 directory `dir<0x02>name`:
 #
 #   $gp_out: git C-quotes the path — `?? "weird\002file"`, a literal
 #   backslash-002 inside quotes, never the raw byte. This does NOT hang on
@@ -390,16 +397,29 @@ keep() {
 #   diagnostics — `warning: could not open directory 'dir?name/'`. Zero raw
 #   0x02 there either.
 #
-# SO DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT IS NOT QUOTED THAT
-# WAY. It takes `git "$@"`, so the invariant is the CALLER's to keep and
-# nothing here catches a caller who drops it: a raw separator truncates
+# The ref-reading fourth: no PATH-quoting rule is doing the work, because no
+# quoting is needed — git refuses to CREATE the ref at all. Measured, git
+# 2.50.1 (Apple Git-155): `git branch "$(printf 'a\002b')"` fails outright —
+# `fatal: 'a?b' is not a valid branch name` — and so does `git update-ref
+# refs/heads/"$(printf 'a\002b')" HEAD` — `refusing to update ref with bad
+# name`. `%(refname)` and `%(upstream:track)` can only ever answer with
+# bytes that already survived `check-ref-format` on the way in, so a raw
+# 0x02 can never reach either field to begin with.
+#
+# SO DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT CARRIES NEITHER
+# GUARANTEE. It takes `git "$@"`, so the invariant is the CALLER's to keep
+# and nothing here catches a caller who drops it: a raw separator truncates
 # $gp_out at that byte and concatenates the rest of the real output onto
 # $gp_rc, which then reaches `return` as a non-numeric string (measured
-# against a stub git, PR #1209 review). It is one flag away, not
-# hypothetical — same git, same fixture: `status --porcelain -uall -z`
-# carries the raw 0x02 straight through, `-z` being the machine-readable
-# form that drops the quoting, and so does any command emitting CONTENT
-# rather than paths (`log --format=%s`, `show <rev>:<path>`, both measured).
+# against a stub git, PR #1209 review). It is one flag away from the path
+# group, not hypothetical — same git, same fixture: `status --porcelain
+# -uall -z` carries the raw 0x02 straight through, `-z` being the
+# machine-readable form that drops the quoting, and so does any command
+# emitting CONTENT rather than paths or refnames (`log --format=%s`, `show
+# <rev>:<path>`, both measured). The ref group has no equivalent flag —
+# `for-each-ref` cannot be asked to emit an unvalidated refname — so this
+# warning is really aimed at the path group and at any THIRD kind of call
+# site a future caller might add.
 #
 # Left unguarded anyway, deliberately (#1212): every call site is shaped
 # `if ! git_probe …; then keep …`, so a garbled $gp_rc can never come back 0
