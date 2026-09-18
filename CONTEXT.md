@@ -75,6 +75,28 @@ refused. Reserved for that case — a run that refuses before removing anything 
 partially released, and neither is one that could not measure what it did.
 _Avoid_: half-released, incomplete release
 
+### Merge gate
+
+**Merge gate**:
+The repository **ruleset** on the default branch — its required contexts plus
+strict currency — and never the CI that feeds it: CI produces signals, the gate
+consumes them. Governed by ADR 0007, declared in `.github/rulesets/main.json`,
+and applied only by `.github/scripts/apply-ruleset.sh`, which proves the write by
+re-reading it. A claim about the gate sourced from anywhere else is unverified.
+_Avoid_: branch protection, protection rule, CI gate
+
+**Currency**:
+A branch whose merge-base with the base branch *is* the base tip. The property
+`rebase-check` measures and `strict_required_status_checks_policy` enforces at the
+merge button. Distinct from mergeability, which tolerates being behind.
+_Avoid_: up to date, fresh, rebased
+
+**Stale green**:
+A required check that passed against an older base tip and still reads green.
+Inert since ADR 0007 — the gate refuses the merge on currency directly, rather
+than waiting for a workflow to flip the colour back.
+_Avoid_: false green, cosmetic green
+
 ### Triage
 
 **Review deferral**:

@@ -1407,7 +1407,7 @@ test("an inherited GIT_DIR or GH_REPO cannot retarget the query away from the le
   //
   //   GH_REPO is read by gh BEFORE it consults git at all, so the bound cwd
   //   is simply ignored — and this repo's own
-  //   .github/workflows/rebase-check-refresh.yml exports it job-wide.
+  //   .github/workflows/release-label.yml exports it to every gh step.
   //
   // Either way the result is `ok: true` with `hits: []` on the wrong
   // tracker — #155 straight back through its own fix. Each assertion below

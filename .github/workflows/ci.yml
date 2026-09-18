@@ -23,13 +23,16 @@ defaults:
     shell: bash
 
 jobs:
-  # NOTE: this job's name is load-bearing. `rebase-check-refresh.yml` re-runs it
-  # when main advances, and the `rerun-rebase-check.sh` script it invokes locates
-  # the job by its `select(.name == "rebase-check")` lookup. Adding a
-  # `name:` key here (or renaming the job) makes that workflow match nothing —
-  # loudly, not silently: every behind PR counts as no-job and its
-  # `BEHIND>0 && RERAN==0` guard exits 1. Red with a per-PR reason, not a
-  # green that refreshed nothing.
+  # Currency is enforced TWICE over, deliberately. The `main` ruleset carries
+  # `strict_required_status_checks_policy` (ADR 0007), which refuses the merge
+  # button outright while a branch is behind — that is the gate, and it cannot
+  # go stale the way a check result can. This job stays required for the half a
+  # ruleset cannot express, the no-merge-commits assertion below, and for the
+  # actionable `git rebase origin/main` line a bare merge-button refusal does
+  # not print. The job name is no longer load-bearing for any other workflow:
+  # `rebase-check-refresh.yml` and `rerun-rebase-check.sh` re-ran this job by a
+  # `select(.name == "rebase-check")` lookup and were deleted with #164, because
+  # the stale green they existed to flip can no longer reach a merge.
   rebase-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -21,7 +21,7 @@
 // DELIBERATELY LEFT, both with their reason:
 //
 //   - Every `gh` call (claim-ticket.sh, drop-merged-label.sh, inflight.sh,
-//     release-ticket.sh, .github/scripts/rerun-rebase-check.sh). `gh` bounds
+//     release-ticket.sh, .github/scripts/apply-ruleset.sh). `gh` bounds
 //     itself: measured during the PR #332 review, `gh issue view` against a
 //     silent listener failed on its own at 10.0s with `net/http: TLS handshake
 //     timeout`. Wrapping it would buy a second bound over the first.
