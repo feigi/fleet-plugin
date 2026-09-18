@@ -681,7 +681,8 @@ function runCheck() {
     // repo and returned `{"ok":true,"hits":[],"verdict":"clean"}` — #155
     // verbatim, in the documented flow, no --file divergence needed. Not
     // hypothetical here either: this repo's own
-    // .github/workflows/rebase-check-refresh.yml exports GH_REPO job-wide.
+    // .github/workflows/release-label.yml exports GH_REPO to every step that
+    // shells out to gh.
     // Empty string is the documented fall-back-to-cwd value (measured — unset
     // and "" behave alike), so this composes with cwd rather than fighting it.
     //

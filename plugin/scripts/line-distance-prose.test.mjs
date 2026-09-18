@@ -124,7 +124,7 @@ test("no comment locates a construct by a line distance", () => {
 // file in any of these directories does not red the gate.
 test("the walk reaches the CI helpers and the workflow sources too", () => {
   const { files } = sweep(DIRS);
-  for (const f of ["rerun-rebase-check.sh", "review-pr.js"]) {
+  for (const f of ["apply-ruleset.sh", "review-pr.js"]) {
     assert.ok(files.includes(f), `not swept: ${f} — the walk opened ${files.length} files`);
   }
 });

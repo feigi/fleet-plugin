@@ -38,7 +38,7 @@ jobs:
             exit 1
           fi
           if [ -z "$SEGMENT" ] || [ "$SEGMENT" = "null" ]; then
-            echo "::error::merged PR #$PR has no release label — branch protection bypassed?"
+            echo "::error::merged PR #$PR has no release label. The required 'validate-release-label' check should have made that unreachable (ADR 0007), so suspect the gate before the PR — run .github/scripts/apply-ruleset.sh to check whether main's ruleset still names that context."
             exit 1
           fi
           echo "segment=$SEGMENT" >> "$GITHUB_OUTPUT"

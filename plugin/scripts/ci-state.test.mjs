@@ -158,10 +158,10 @@ jobs:
     steps:
       - run: echo hi
 `;
-const OTHER_WORKFLOW = `name: Refresh rebase-check
+const OTHER_WORKFLOW = `name: Release Label
 on: [push]
 jobs:
-  refresh:
+  label:
     runs-on: ubuntu-latest
     steps:
       - run: echo hi
@@ -188,7 +188,7 @@ test("workflow file discovered by name, not the hard-coded ci.yml path — repo 
   const r = run([], {
     repoFiles: {
       ".github/workflows/pipeline.yml": CI_WORKFLOW, // not named ci.yml
-      ".github/workflows/rebase-check-refresh.yml": OTHER_WORKFLOW, // sibling, different name — must not confuse discovery
+      ".github/workflows/release-label.yml": OTHER_WORKFLOW, // sibling, different name — must not confuse discovery
     },
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -272,13 +272,13 @@ test("workflow files present but none named CI: exit 2 naming them, never a decl
   for (const args of [[], ["--declare-no-ci"]]) {
     const r = run(args, {
       repoFiles: {
-        ".github/workflows/rebase-check-refresh.yml": OTHER_WORKFLOW,
-        ".github/workflows/release.yml": OTHER_WORKFLOW.replace("Refresh rebase-check", "Release"),
+        ".github/workflows/release-label.yml": OTHER_WORKFLOW,
+        ".github/workflows/release.yml": OTHER_WORKFLOW.replace("Release Label", "Release"),
       },
     });
     assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.match(r.stderr, /none named 'CI'/);
-    assert.match(r.stderr, /rebase-check-refresh\.yml/);
+    assert.match(r.stderr, /release-label\.yml/);
     // The false statement this replaced: "no workflows configured under
     // .github/workflows/" said of a directory full of workflows.
     assert.doesNotMatch(r.stderr, /no workflows configured/);
