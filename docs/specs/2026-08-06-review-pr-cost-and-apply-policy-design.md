@@ -74,7 +74,8 @@ is vendored third-party — outside the orchestration-only constraint from the
 
 ### 2. `selectDimensions` never reads the size numbers `diff-stats` computes
 
-`review-pr.js:169` trims by content type only — `docsOnly`, `hasSrc`, `hasTests`.
+The selector (`review-pr.js`, `function selectDimensions(all, stats)`) trims by
+content type only — `docsOnly`, `hasSrc`, `hasTests`.
 A single-file five-line source fix pays the same six-dimension fan-out as a
 400-line feature. `computeStats` already returns `files`, `loc` and a `profile`
 that distinguishes `single-file` and `small`; the selector never reads them.
@@ -113,13 +114,17 @@ growth, and nothing throttles it.
 
 The filing step does not record which dimension produced the finding, so the
 backlog cannot be attributed. The data exists and is discarded: `FINDINGS_SCHEMA`
-requires `dimension` (`review-pr.js:31`) and every returned finding carries it
-(`review-pr.js:304`, `:331`).
+requires `dimension` (`review-pr.js`,
+`required: ["dimension", "scope_searched", "findings", "test_run"]`) and every
+returned finding carries it (`review-pr.js`,
+`dimension: d.key, ...verdictFor(0, [])` on the 0-refuter path and
+`dimension: d.key, ...verdictFor(n, votes)` once the refuters vote).
 
 ### 4. Applied fixes are never reviewed, and nothing runs tests before the commit
 
 The review runs **once**, against a snapshot cut at the pre-fix HEAD
-(`git archive HEAD`, `review-pr.js:207`). The fix-applier then edits, commits,
+(`git archive HEAD` — `review-pr.js`, the snapshot prompt's
+`archive HEAD | tar -x -C "$SNAP"`). The fix-applier then edits, commits,
 pushes and exits. The finisher is "a fresh small agent, not the fix-applier
 resumed" (`run-team/SKILL.md`, same quoted words) whose duties are worktree
 audit, confirm deferrals filed, add `ready-to-merge`. Nothing re-reviews.
@@ -168,8 +173,9 @@ open-ended search.
 | types | `"sonnet"` | as above |
 
 `simplify` is deliberately **not** downgraded. It is the one dimension whose
-entire output is unverified by policy, and its own prompt (`review-pr.js:106`)
-states that a simplification changing observable behaviour is a defect — a
+entire output is unverified by policy, and its own prompt says
+"A simplification that changes observable behavior is a defect" (`review-pr.js`,
+the `simplify` entry in `DEFAULT_DIMENSIONS`) — a
 reasoning-heavy judgement, which is plausibly why the vendor pinned it.
 
 **Corrected after implementation (#221): the rule stated above is not the rule
@@ -191,7 +197,9 @@ carries the rule in force.
 Dispatch reads `model: A.specialistModel || d.model`. `undefined` inherits, so
 the no-override path is unchanged for the three dimensions that omit it.
 `args.specialistModel`, when set, applies to all six — that is what an override
-is for. Documented beside `verifierEffort` (`review-pr.js:148`).
+is for. Documented beside `verifierEffort` — a knob since removed along with
+`specialistModel` itself, both now recorded as "are GONE, not renamed"
+(`review-pr.js`, the comment under `const verifiers = A.verifiers`; #1349).
 
 ## Change 2 — size tier, composed with the content guards
 
@@ -338,8 +346,11 @@ The fleet is generic. The gate must neither depend on a repo-local hook nor
 bypass one.
 
 **Do not depend.** Step 3 becomes run-then-commit, using `testCmd` — already a
-workflow arg (`run-team/SKILL.md:287`), already defaulted (`review-pr.js:138`),
-already pinned by `review-pr-testcmd.test.mjs`. The fix-applier's prompt
+workflow arg (`run-team/SKILL.md:287`), no longer defaulted but DERIVED from the
+repo under review and refused outright when no derivation can be read
+("never fall back to a guess" — `review-pr.js`,
+`function resolveTestCmd(explicit, snap)`), already pinned by
+`review-pr-testcmd.test.mjs`. The fix-applier's prompt
 currently carries only the PR number, worktree path and findings
 (`run-team/SKILL.md:337-338`); `testCmd` is added to that payload.
 
@@ -369,7 +380,7 @@ and standalone paths — not only the suggestions Change 3 newly admits.
 - `:173`: correct "drop three dimensions" → four (#118). Note #118 cites this as `:143`, its line at that ticket's base commit.
 
 `skills/fleet/scripts/diff-stats.mjs`
-- `:105`: correct the fail-closed comment. An empty profile **widens** to all six (`review-pr.js:175`); it does not "trim a real production PR down to two specialists" (#118). The fail-closed behaviour itself is right and stays.
+- `:105`: correct the fail-closed comment. An empty profile **widens** to all six (`review-pr.js`, `selectDimensions`'s "Unknown, unparseable, or empty diff → the full set" guard); it does not "trim a real production PR down to two specialists" (#118). The fail-closed behaviour itself is right and stays.
 
 `skills/fleet/commands/review-and-fix.md`
 - `:7` (step 2): split the `suggestion` and `unverified` rules per Change 3.
@@ -460,7 +471,7 @@ Neither may be assumed. Both are cheap to measure.
 
 ## Out of scope
 
-- **#113** — `args.dimensions` key normalization. It touches the same override path (`review-pr.js:145`, `:261`); keep the diffs disjoint.
+- **#113** — `args.dimensions` key normalization. It touches the same override path (`review-pr.js`, `function resolveDimensions(override, all)` and its `const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS)` call site); keep the diffs disjoint.
 - Editing `pr-review-toolkit` agent frontmatter. Vendored third-party, and clobbered on plugin update.
 - Re-reviewing the fix commit. Change 4 gates it with tests; a second review pass is a separate decision, and the cost case against it is the point of this ticket.
 - Whether `suggestion` should auto-file at all when out of scope. Change 3 keeps the current behaviour for the out-of-scope branch; if the backlog stays large after attribution lands (Change 3, step 5), revisit with data.
