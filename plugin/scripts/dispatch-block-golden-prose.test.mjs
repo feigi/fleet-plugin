@@ -341,9 +341,10 @@ const REVIEWER_BLOCKS = [
     what: "the fix-applier prompt",
     opener: "You are ALREADY in worktree",
     golden: [
-      "You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The",
-      "review is done and these findings are its output — do not re-review, do not",
-      "dispatch specialists.",
+      "You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the",
+      "push destination below, given to you because a detached worktree cannot supply",
+      "it. Do NOT create another worktree. The review is done and these findings are",
+      "its output — do not re-review, do not dispatch specialists.",
       "",
       "Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3",
       "and 5 only**: split apply-now/defer, commit, push, file every deferral as its",
