@@ -484,7 +484,7 @@ test("logicalLines never joins a line the reader sees as a new block", () => {
   // pointer clause invented out of two unrelated blocks. A heading, a list
   // item, a blockquote, a table row and a thematic break each terminate their
   // predecessor on the page, so each must terminate it here.
-  for (const next of ["## Heading", "- item", "3. item", "> quoted", "| cell |", "---", "```js"]) {
+  for (const next of ["## Heading", "- item", "* item", "+ item", "3. item", "> quoted", "| cell |", "---", "```js"]) {
     assert.equal(logicalLines(`see\n${next}`).text, `see\n${next}`, `joined a new block: ${next}`);
   }
 });
@@ -497,6 +497,7 @@ test("logicalLines continues a list item but never a heading or a thematic break
   // the two sets either loses every list-item wrap or swallows the paragraph
   // under a heading into the heading itself.
   assert.equal(logicalLines("1. step see\n   **Target**").text, "1. step see **Target**");
+  assert.equal(logicalLines("- step see\n  **Target**").text, "- step see **Target**");
   assert.equal(logicalLines("> quoted see\n> more").text, "> quoted see\n> more");
   assert.equal(logicalLines("# Heading\nbody").text, "# Heading\nbody");
   assert.equal(logicalLines("---\ndescription: x").text, "---\ndescription: x");
