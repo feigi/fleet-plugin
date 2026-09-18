@@ -294,16 +294,16 @@ test("the rendered refuter prompt chains cd into the git command, never semicolo
   );
 });
 
-// Both halves, because they have OPPOSITE expected outcomes: a lone "equals your
+// Both halves, because they have OPPOSITE expected outcomes: a lone "resolves to your
 // scratch path" guard is unsatisfiable before `git init` — a fresh scratch dir
 // has no toplevel and exits 128 — and a guard that cannot pass on the clean path
 // gets ignored. Naming a path alone does not catch the observed failure either,
 // which was an agent BELIEVING it was already in scratch and being wrong.
-test("the rendered refuter prompt requires a toplevel assertion around git init/commit", () => {
+test("the rendered refuter prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+equal\s+your\s+scratch\s+path/s,
-    "the workflow's refuter prompt carries no toplevel assertion around a fixture's own git init/commit",
+    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path.{0,80}compare\s+resolved\s+forms.{0,60}realpath/s,
+    "the workflow's refuter prompt carries no toplevel assertion around a fixture's own git init/commit, or dropped the realpath remedy for macOS's /private vs /tmp symlink",
   );
 });
 
