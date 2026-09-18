@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, stripSlashGutter, pairSlices } from "./prose-pin.mjs";
+import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -420,4 +420,103 @@ test("quoteBlock throws when two blocks open on the identifier, rather than bind
     () => quoteBlock("> Read the issue first\n\n> Read the issue first, again", "Read the issue first", "the fixture"),
     /the fixture: 2 quote blocks open on "Read the issue first"/,
   );
+});
+
+// #1609. `logicalLines` exists for the pins that DERIVE their subjects from a
+// document rather than look for words they already know, and every fixture
+// below is a single-line scan of the shape that forced it —
+// `see \*\*([^*\n]+)\*\*`, whose literal space and `\n`-free class are both
+// load-bearing and both defeated by a wrap the reader cannot see.
+const SEE = /see \*\*([^*\n]+)\*\*/g;
+const names = (s) => [...s.matchAll(SEE)].map((m) => m[1]);
+
+test("logicalLines joins a paragraph's wrapped lines and stops at the paragraph bound", () => {
+  assert.deepEqual(names("see\n**Target**"), []);
+  assert.deepEqual(names(logicalLines("see\n**Target**").text), ["Target"]);
+  // The bound, and the false green losing it buys: a `see` ending one
+  // paragraph would bind the `**Bold**` opening the NEXT one, and the scan
+  // would report a pointer clause the document does not contain.
+  assert.equal(logicalLines("tail see\n\n**Other**").text, "tail see\n\n**Other**");
+});
+
+test("logicalLines rejoins on exactly one space, whatever indent and trailing space the wrap left", () => {
+  // Both trims matter to a literal-space scan and neither is visible in a
+  // rendered document: the continuation's indent on one side, the trailing
+  // whitespace an editor leaves behind on the other. Either one surviving
+  // puts two spaces after `see` and the clause stops matching.
+  assert.equal(logicalLines("see\n      **Target**").text, "see **Target**");
+  assert.equal(logicalLines("see \n**Target**").text, "see **Target**");
+  // A tab is whitespace an editor leaves, not markdown's hard break, so this
+  // joins — `HARD_BREAK` is two SPACES, and the test above it holds that half.
+  assert.equal(logicalLines("see \t\n\t **Target**").text, "see **Target**");
+});
+
+test("lineAt answers the PHYSICAL line a hit in the joined view came from", () => {
+  // The whole reason the joined text is returned with a mapper rather than
+  // alone: a pin that reports an offset into the joined copy names a line
+  // number no reader can open. One-based, like an editor and like `grep -n`.
+  const { text, lineAt } = logicalLines("# Heading\n\nfirst para\nwrapped on\nthree lines\n\nsee\n**Target**");
+  assert.equal(lineAt(text.indexOf("# Heading")), 1);
+  assert.equal(lineAt(text.indexOf("first para")), 3);
+  assert.equal(lineAt(text.indexOf("wrapped on")), 4);
+  assert.equal(lineAt(text.indexOf("three lines")), 5);
+  assert.equal(lineAt(text.indexOf("**Target**")), 8);
+  // The bisect's tie: an offset landing exactly ON a line's first character
+  // answers that line, never the one before or after it.
+  assert.equal(lineAt(0), 1);
+  assert.equal(lineAt(text.length - 1), 8);
+});
+
+test("logicalLines never joins a line the reader sees as a new block", () => {
+  // Joining only ever ADDS matches, so every one of these is a potential
+  // pointer clause invented out of two unrelated blocks. A heading, a list
+  // item, a blockquote, a table row and a thematic break each end the line
+  // above them on the page, so each must end it here.
+  for (const next of ["## Heading", "- item", "3. item", "> quoted", "| cell |", "---", "```js"]) {
+    assert.equal(logicalLines(`see\n${next}`).text, `see\n${next}`, `joined a new block: ${next}`);
+  }
+});
+
+test("logicalLines continues a list item but never a heading or a thematic break", () => {
+  // The asymmetry, and the reason there are two regexes rather than one. A
+  // list item and a blockquote take lazy continuation lines — that is where
+  // the #1609 pointers actually live, inside a wrapped numbered step — while
+  // a heading and a thematic break are complete on their own line. Collapsing
+  // the two sets either loses every list-item wrap or swallows the paragraph
+  // under a heading into the heading itself.
+  assert.equal(logicalLines("1. step see\n   **Target**").text, "1. step see **Target**");
+  assert.equal(logicalLines("> quoted see\n> more").text, "> quoted see\n> more");
+  assert.equal(logicalLines("# Heading\nbody").text, "# Heading\nbody");
+  assert.equal(logicalLines("---\ndescription: x").text, "---\ndescription: x");
+});
+
+test("logicalLines leaves fenced code exactly as written", () => {
+  // A wrap inside prose is not semantic; a line break inside code is. Joining
+  // a fenced block would hand any pin scanning code through this view a single
+  // line that no shell, and no reader, would recognise.
+  const fence = "prose see\n\n```sh\nfirst --flag\nsecond --flag\n```\n\nmore prose";
+  assert.equal(logicalLines(fence).text, fence);
+});
+
+test("logicalLines keeps an authored hard line break", () => {
+  // Two trailing spaces and a trailing backslash are markdown's line break —
+  // the author asked for it, so it is not a wrap point to undo.
+  assert.equal(logicalLines("see  \n**Target**").text, "see  \n**Target**");
+  assert.equal(logicalLines("see\\\n**Target**").text, "see\\\n**Target**");
+});
+
+test("logicalLines keeps a block-leading span at column 0 and takes a wrap-leading one off it", () => {
+  // The mirror direction, and the silent one. A `/^\*\*/m` scan means "leads a
+  // block", and on raw bytes a reflow that happens to push a mid-paragraph
+  // bold to column 0 mints a target the author never wrote — so a pointer
+  // resolves to a block the wrap invented and the pin passes for free.
+  const lead = /^\*\*([^*\n]+)\*\*/gm;
+  const wrapped = "a sentence ending here\n**Not A Block** but mid-paragraph prose";
+  assert.deepEqual([...wrapped.matchAll(lead)].map((m) => m[1]), ["Not A Block"]);
+  assert.deepEqual([...logicalLines(wrapped).text.matchAll(lead)].map((m) => m[1]), []);
+  // And the half that must still be ACCEPTED: a span that genuinely opens its
+  // block stays at column 0 even when the rest of that block is wrapped, so
+  // tightening `^` this way costs no real target.
+  const real = "**A Real Block** whose own paragraph\nwraps onto a second line";
+  assert.deepEqual([...logicalLines(real).text.matchAll(lead)].map((m) => m[1]), ["A Real Block"]);
 });

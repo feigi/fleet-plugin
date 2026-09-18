@@ -417,9 +417,12 @@ const BLOCK_START = /^ {0,3}(?:#{1,6}\s|[-*+](?:\s|$)|\d+[.)]\s|>|\||```|~~~|(?:
 // BLOCK_START on purpose: a list item and a blockquote both take lazy
 // continuation lines, a heading and a thematic break take none.
 const BLOCK_END = /^ {0,3}(?:#{1,6}\s|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
-// Two trailing spaces or a trailing backslash is markdown's hard line break —
-// an authored break, not a wrap point, and removing it would change the render.
-const HARD_BREAK = /(?:[ \t]{2}|\\)$/;
+// Two trailing SPACES or a trailing backslash is markdown's hard line break —
+// an authored break, not a wrap point, and removing it would change the
+// render. Spaces only, per CommonMark: a tab does not make one, and widening
+// this to `[ \t]{2}` refuses to join a line an editor left ending in a
+// space and a tab, which is the same false red one layer down.
+const HARD_BREAK = /(?: {2}|\\)$/;
 
 export function logicalLines(text) {
   const src = text.split("\n");
