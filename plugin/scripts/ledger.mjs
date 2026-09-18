@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { makeDie, isFlagLike, hasEqualsForm } from "./arg.mjs";
+import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 
 const NAME = "ledger";
 
@@ -56,13 +56,51 @@ function cause(...candidates) {
   return raw.length > CAUSE_MAX ? `…${raw.slice(-(CAUSE_MAX - 1))}` : raw;
 }
 
+// The budget every `git` child in this file gets, in milliseconds.
+//
+// Both git probes ran UNBOUNDED before #1199, while the `gh` query between
+// them carried 20 s. That asymmetry was the defect: measured with a `git` that
+// answers and then never returns, `check` — the fleet's pre-filing duplicate
+// guard — was still running at 60 s having written nothing at all to stdout,
+// where the same shape on the `gh` side degrades at its own bound and still
+// prints a payload. The author bounded `gh` precisely because a child can
+// stall; the two `git` children were left with no bound to reach.
+//
+// 10 s, and the number is chosen against the FALSE FAILURE rather than against
+// the stall — net_fetch_budget's rule in net.sh, applied to a local call.
+// These are `rev-parse` probes, not fetches: measured across five concurrent
+// copies of the whole suite (the fleet's own normal condition), both stayed at
+// p50 11-15 ms and max 24.7 ms, so this is ~400x the worst latency observed
+// under load. Generous on purpose, because a probe killed while HEALTHY does
+// not fail loudly here — defaultLedgerPath() degrades to a cwd-relative
+// ledger, which is the #155 worktree fail-open, and only warns. It also stays
+// under the `gh` bound beside it, so the tracker query remains the dominant
+// term in `check`'s worst case and that contract does not move.
+//
+// `LEDGER_GIT_TIMEOUT` is this script's OWN override, in seconds, and it can
+// only ever SHORTEN. The rule and the reasons for it are net_budget's, in
+// net.sh: a knob that could lengthen the bound is one more way for
+// configuration to remove it, and each script keeping its own variable is why
+// that helper takes the override's value rather than its name. A value that is
+// not a positive whole number below the default is not an error and not a
+// bound either — the default stands, in silence. isDigits() is arg.mjs's own
+// predicate, so the accepted spelling is the shell rule's `*[!0-9]*` and not a
+// second reading of it; net_budget's extra six-digit clause guards a shell
+// integer overflow that has no counterpart here, and the `<` below already
+// rejects every value that clause would have.
+function gitBudget(defaultSeconds, override) {
+  const seconds = isDigits(String(override ?? "")) ? Number(override) : 0;
+  return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
+}
+const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
+
 // There is ONE ledger per run, and it lives in the main checkout. Members run
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
 // exist — `check` then warns and reports every subject as safe to file, which
 // is precisely the duplicate-filing guard failing open. Resolve against the
 // git COMMON dir (shared by every worktree) rather than the cwd.
 function defaultLedgerPath() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" });
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS });
   if (r.status !== 0 || !r.stdout.trim()) {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
@@ -699,12 +737,16 @@ function runCheck() {
     // the missing directory instead reported every first `check` as not being
     // in a repository and dropped the tracker query outright.
     while (!existsSync(ledgerDir) && dirname(ledgerDir) !== ledgerDir) ledgerDir = dirname(ledgerDir);
-    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: gitEnv });
+    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: gitEnv, timeout: GIT_TIMEOUT_MS });
     if (repoCheck.status !== 0) {
       // More than one cause lands here: a ledger path genuinely outside any
       // repository, but also git missing entirely (spawn ENOENT, so `status`
       // is null and `null !== 0`), a dubious-ownership refusal, an unreadable
-      // `.git` gitfile. Do not name one of them — carry git's own reason,
+      // `.git` gitfile, and since #1199 a probe that overran GIT_TIMEOUT_MS —
+      // spawnSync reports that the same way ENOENT arrives, `status` null with
+      // the reason in `error.message`, so it needs no arm of its own and
+      // cause() names it (`spawnSync git ETIMEDOUT`) without this branch
+      // having to. Do not name one of them — carry git's own reason,
       // because this call leaves stdio at the default pipe, so git's stderr
       // reaches no terminal and this string is the only place the cause is
       // ever seen (the same call the gh catch below makes, #176). The CAUSE is
