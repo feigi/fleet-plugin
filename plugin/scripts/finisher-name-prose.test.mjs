@@ -100,7 +100,7 @@ test("classifyRole and parseMemberName accept the same finisher spellings", () =
   // their join key. #969 pinned the classifier against all five of these and
   // never imported the parser, so that narrowing passed the whole suite (#1072).
   //
-  // All five agentTypes below are in docs/metrics/member-outcomes.tsv verbatim,
+  // All five member names below are in docs/metrics/member-outcomes.tsv verbatim,
   // each booked to exactly the PR number its own name carries. The descriptions
   // deliberately carry no finisher word — the name has to carry the match, or
   // this passes for the wrong reason. The last is a retry suffix: the same
@@ -116,15 +116,15 @@ test("classifyRole and parseMemberName accept the same finisher spellings", () =
   // Compared as ONE table rather than asserted inside the loop: the first
   // disagreement would otherwise mask the rest, and a failure that names one
   // broken spelling when four broke reads as a smaller defect than it is.
-  const got = NAMES.map((type) => {
-    const { ticket, pr } = parseMemberName(type);
-    const role = classifyRole({ spawnDepth: 0, agentType: type, description: "Apply reviewer findings" });
-    return `${type}: role=${role} ticket=${JSON.stringify(ticket)} pr=${JSON.stringify(pr)}`;
+  const got = NAMES.map((name) => {
+    const { ticket, pr } = parseMemberName(name);
+    const role = classifyRole({ spawnDepth: 0, memberName: name, description: "Apply reviewer findings" });
+    return `${name}: role=${role} ticket=${JSON.stringify(ticket)} pr=${JSON.stringify(pr)}`;
   });
   // The expected PR is READ OUT OF the name, never restated beside it. "pr is
   // non-empty" is satisfied by a parser that books some other row's number, and
   // a restated column drifts into agreeing with whatever the parser now returns.
-  const want = NAMES.map((type) => `${type}: role=finisher ticket="" pr=${JSON.stringify(/(\d+)/.exec(type)[1])}`);
+  const want = NAMES.map((name) => `${name}: role=finisher ticket="" pr=${JSON.stringify(/(\d+)/.exec(name)[1])}`);
   assert.deepEqual(
     got,
     want,

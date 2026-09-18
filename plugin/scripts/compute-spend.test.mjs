@@ -113,9 +113,49 @@ test("the sizing pattern is anchored, so a specialist that mentions sizing stays
   assert.equal(classifyRole({ spawnDepth: 1, description: "Review PR 539 — check batch sizing logic" }), "specialist");
 });
 
-test("memory agents are classified before depth, so they never land in review spend", () => {
-  assert.equal(classifyRole({ agentType: "memory-proxy", description: "Save memory" }), "memory");
-  assert.equal(classifyRole({ agentType: "memory-housekeeper", spawnDepth: 0 }), "memory");
+test("the memory exclusion reads the recorded DEFINITION, so any member name books memory", () => {
+  // #1505. The exclusion used to test the one `agentType` parameter, which the
+  // Claude reader filled with the member's NAME — so the same dispatch
+  // (`memory-housekeeper`) booked three different roles depending on what it
+  // was called: `memory-housekeeper` memory, `housekeeper` other,
+  // `brain-housekeeping` specialist. Measured on the corpus that last one alone
+  // moved its session's review-spend headline 40.70% -> 62.37%.
+  // "brain-housekeeping" is the historical incident (#1505) and the only name
+  // of the four originally listed here that a mutation pass found load-bearing:
+  // it is the one whose NAME does not itself contain "memory-housekeeper", so
+  // it is the one that would slip to "specialist" if the exclusion ever read
+  // the member's NAME instead of its recorded DEFINITION.
+  assert.equal(
+    classifyRole({ agentDefinition: "memory-housekeeper", memberName: "brain-housekeeping", spawnDepth: 1, description: "Housekeep the brain" }),
+    "memory",
+  );
+  // Depth 1 above is the load-bearing half: the specialist rule is what caught
+  // `brain-housekeeping`, so this stays red if the exclusion moves below it.
+  assert.equal(classifyRole({ agentDefinition: "memory-proxy", memberName: "review-eval", spawnDepth: 2 }), "memory");
+});
+
+test("an untyped dispatch that recorded no definition still classifies by its NAME", () => {
+  // #1505's other half. A dispatch before typed agents existed records no
+  // definition at all — a closed category, not a hole — so the name is the only
+  // memory signal those members have. Measured over the sidecars on disk: three
+  // live members rest on this, and dropping it would put `memory-housekeeper`
+  // (named for its own definition, at depth 1) in the SPECIALIST bucket, which
+  // is the very defect #1505 reports.
+  assert.equal(classifyRole({ agentDefinition: "", memberName: "memory-proxy-session-review-2-3" }), "memory");
+  assert.equal(classifyRole({ agentDefinition: "", memberName: "memory-housekeeper", spawnDepth: 1 }), "memory");
+  // ...and it is still not a guess: a name carrying no memory agent falls
+  // through to the ordinary signals rather than being read as memory-adjacent.
+  assert.equal(classifyRole({ agentDefinition: "", memberName: "impl-1505", description: "Implement ticket 1505" }), "implementer");
+});
+
+test("a memory agent named only in the dispatch PROSE does not book memory", () => {
+  // The false-positive half, and the reason `desc` is excluded from the
+  // exclusion's input: every memory-adjacent fleet member's own prompt names
+  // the memory agents, so blending prose would book the lot of them memory and
+  // quietly drain the buckets anyone reads.
+  assert.equal(classifyRole({ description: "Relay the finding to memory-proxy, then finish PR 563" }), "finisher");
+  assert.equal(classifyRole({ memberName: "fix-pr-1505", description: "Fix PR 1505 — memory-housekeeper writes the wrong scope" }), "reviewer");
+  assert.equal(classifyRole({ description: "Ask memory-housekeeper about it", spawnDepth: 1 }), "specialist");
 });
 
 test("depth-0 fleet roles come off the controller's naming convention", () => {
@@ -127,20 +167,20 @@ test("depth-0 fleet roles come off the controller's naming convention", () => {
   assert.equal(classifyRole({ spawnDepth: 0, description: "something else entirely" }), "other");
 });
 
-test("finish-<n> agentType classifies as finisher — a historical spelling that must stay classifiable", () => {
+test("finish-<n> member names classify as finisher — a historical spelling that must stay classifiable", () => {
   // `finisher-pr-<n>` is the canonical finisher name (#326); `finish-<n>` is a
   // spelling earlier runs actually dispatched and recorded runs still have to
-  // classify. The match has to come off the agentType, not the literal words
+  // classify. The match has to come off the member NAME, not the literal words
   // "finish pr" or "finisher": the description deliberately does NOT start with
   // `finish-`, so an implementation keying on `description` alone fails here.
-  assert.equal(classifyRole({ agentType: "finish-436", description: "Apply reviewer findings for PR 436" }), "finisher");
+  assert.equal(classifyRole({ memberName: "finish-436", description: "Apply reviewer findings for PR 436" }), "finisher");
   // ...and the `^` has to be a real anchor: `finish-` mid-string is not a
   // finisher. Without this, dropping the anchor leaves the case above green.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Rework the finish-label docs" }), "other");
   // A two-ticket finisher was dispatched as `finish-<n>-<m>`, so the pattern has
   // to match on the prefix rather than on a `finish-<digits>` shape. Its
   // description carries no finisher word either, for the same reason as above.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "finish-424-425", description: "Apply reviewer findings for PR 424 and 425" }), "finisher");
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: "finish-424-425", description: "Apply reviewer findings for PR 424 and 425" }), "finisher");
 });
 
 test("missing meta never throws — a transcript with no sibling .meta.json still counts", () => {
@@ -148,10 +188,13 @@ test("missing meta never throws — a transcript with no sibling .meta.json stil
   assert.equal(classifyRole({}), "other");
 });
 
-test("implementers classify off agentType, which is where `impl-` actually appears", () => {
-  // `^impl-` is anchored against `${agentType} ${description}`, so it only ever
-  // fires via the type. Pin that coupling — the description alone never matches.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "impl-332", description: "whatever" }), "implementer");
+test("implementers classify off the member NAME, which is where `impl-` actually appears", () => {
+  // `^impl-` is anchored against `${memberName} ${description}`, so it only ever
+  // fires via the name. Pin that coupling — the description alone never matches.
+  // It is the NAME and not the definition on purpose: `impl-332` is what the
+  // controller called the member, never an agent definition that exists (#1505).
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: "impl-332", description: "whatever" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "impl-332", description: "whatever" }), "other");
 });
 
 test("the omp review fan-out classifies off its agent DEFINITION — depth cannot reach it there", () => {
@@ -164,28 +207,42 @@ test("the omp review fan-out classifies off its agent DEFINITION — depth canno
   // `fleet-review-*` rows sit at depth 0, and one definition
   // (`fleet-review-verifier`) split across four buckets — 211 other, 172
   // reviewer, 20 finisher, 2 merge-bot — on nothing but prompt wording.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-verifier", description: "Refute finding unv1 on PR 1353" }), "specialist");
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-correctness", description: "Review PR 1353 correctness" }), "specialist");
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-review-snapshot", description: "Cut the snapshot for PR 1353" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-verifier", description: "Refute finding unv1 on PR 1353" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-correctness", description: "Review PR 1353 correctness" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-snapshot", description: "Cut the snapshot for PR 1353" }), "specialist");
   // A dispatch may write the `fleet-ctl:`-prefixed spelling (run-team's Phase 2
   // does) even though every sidecar on disk records the bare name — the same
   // tolerance member-outcomes.tsv's own pair query is written with.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-ctl:fleet-review-tests", description: "whatever" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-review-tests", description: "whatever" }), "specialist");
+  // And the definition is the ONLY thing these two branches read: a member
+  // merely NAMED after a review definition was not dispatched as one (#1505).
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-review-verifier", description: "whatever" }), "other");
+  // The bare-name case above cannot catch a blend regression: an empty `def`
+  // puts a SPACE, not a `:`, in front of a bare member name, so `(^|:)` fails
+  // either way and the assertion passes whether the branch reads `def` alone
+  // or the `${def} ${name}` blend. The `fleet-ctl:`-prefixed spelling above
+  // is what discriminates when used as the NAME instead of the DEFINITION:
+  // blending puts its own `:` in front of `fleet-review-`, so a branch that
+  // reads the blend wrongly matches and returns "specialist" here, while the
+  // real `def`-only branch still returns "other" (measured: reverting to the
+  // blend keeps the rest of this suite green).
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-ctl:fleet-review-tests", description: "whatever" }), "other");
 });
 
-test("a definition name in the dispatch PROSE is not a dispatch — the fleet branches read `type` alone", () => {
+test("a definition name in the dispatch PROSE is not a dispatch — the fleet branches read `def` alone", () => {
   // The false-positive half. Every fleet member's own prompt says what it is, so
   // these names appear in description text constantly; matching the
-  // `${agentType} ${description}` blend would book a finisher that merely
+  // `${memberName} ${description}` blend would book a finisher that merely
   // mentions the review fan-out as one of its specialists.
   //
   // The cases below are written in the `fleet-ctl:`-PREFIXED spelling on
   // purpose. A prose mention in the bare spelling cannot reach either pattern
-  // anyway — `hay` starts with a space when `type` is blank, so neither `^` nor
-  // `:` sits in front of it — which means a bare-name test passes even against a
-  // `hay`-matching implementation and proves nothing. The prefixed spelling is
-  // the one every dispatch instruction in run-team's own prose is written in, so
-  // it is both the realistic prose shape and the one that discriminates.
+  // anyway — `hay` starts with a space when `memberName` is blank, so neither
+  // `^` nor `:` sits in front of it — which means a bare-name test passes even
+  // against a `hay`-matching implementation and proves nothing. The prefixed
+  // spelling is the one every dispatch instruction in run-team's own prose is
+  // written in, so it is both the realistic prose shape and the one that
+  // discriminates.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Relay the report to fleet-ctl:fleet-review-verifier" }), "other");
   assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-ctl:fleet-implementer" }), "other");
   // And the control that must stay GREEN: prose-only input still classifies by
@@ -194,13 +251,13 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
 });
 
 test("the fleet implementer definitions classify as implementer — `^impl-` cannot reach an omp row", () => {
-  // `^impl-` is anchored at the start of `${agentType} ${description}`, so it
+  // `^impl-` is anchored at the start of `${memberName} ${description}`, so it
   // only ever fires through a Claude member NAME (`impl-332`). readOmpMember
-  // never hands the AgentId to classifyRole — it is parsed only for
-  // parseMemberName's ticket/pr (member-record.mjs:554-555), by design, not
-  // passed as a role signal — so the definition is the only implementer
-  // signal a definition-dispatched omp member has. That does not close the
-  // gap for every omp member: one dispatched under the default `task`
+  // never hands the AgentId to classifyRole — it leaves `memberName` unset and
+  // parses the stem only for parseMemberName's ticket/pr, by design, because a
+  // generated CamelCase word pair names nothing — so the definition is the only
+  // implementer signal a definition-dispatched omp member has. That does not
+  // close the gap for every omp member: one dispatched under the default `task`
   // definition (`fix-pr-<n>`, `merge-bot-<n>`, `impl-<n>`) carries no
   // definition signal either and still falls through to the description
   // patterns below; reaching those is a separate change, left to a
@@ -208,13 +265,13 @@ test("the fleet implementer definitions classify as implementer — `^impl-` can
   // fleet-implementer/-alt rows split 73 other, 7 merge-bot, 5 finisher,
   // 5 reviewer, none of them implementer, while the same definition booked
   // implementer on all 109 Claude rows.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-ctl:fleet-implementer-alt", description: "whatever" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-implementer-alt", description: "whatever" }), "implementer");
   // EXACT, unlike the review prefix above: the alternate-tier pairing is closed
   // at these two names, so a third `fleet-implementer-`-prefixed definition is a
   // deliberate addition and not something to classify in advance.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "fleet-implementer-probe", description: "whatever" }), "other");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-probe", description: "whatever" }), "other");
 });
 
 test("depth still outranks the definition — a fleet member's own fan-out is not another implementer", () => {
@@ -222,10 +279,10 @@ test("depth still outranks the definition — a fleet member's own fan-out is no
   // implementer dispatched is the specialist it structurally is rather than
   // inheriting its parent's definition. Move either branch above the depth
   // check and this goes red.
-  assert.equal(classifyRole({ spawnDepth: 1, agentType: "fleet-implementer", description: "whatever" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 1, agentDefinition: "fleet-implementer", description: "whatever" }), "specialist");
   // And memory still outranks both, which is the rule that keeps memory-system
   // work out of review spend.
-  assert.equal(classifyRole({ spawnDepth: 0, agentType: "memory-proxy", description: "Review PR 1353 correctness" }), "memory");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "memory-proxy", description: "Review PR 1353 correctness" }), "memory");
 });
 
 test("a role outside ROLE_ORDER is still reported, so percentages sum to 100", () => {

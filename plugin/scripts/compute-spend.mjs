@@ -16,6 +16,22 @@
 // run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`,
 // `finisher-pr-<n>`, `merge-bot-<n>`).
 //
+// TWO IDENTITY SIGNALS, NEVER ONE (#1505). `agentDefinition` is the agent
+// DEFINITION the dispatch recorded — `memory-housekeeper`, `fleet-implementer`,
+// `fleet-review-verifier` — and `""` when it recorded none. `memberName` is
+// what the member was CALLED (`impl-387`, `brain-housekeeping`), `""` for an
+// unnamed dispatch. They used to arrive as ONE `agentType` parameter,
+// documented as "the DISPATCH's identity for the member", which the two
+// harness readers satisfied with different kinds of value — omp's the
+// definition, Claude's the name — so every rule below silently read whichever
+// its own harness happened to supply, and no rule could state which it meant.
+// That ambiguity is what booked a memory-system member dispatched as
+// `memory-housekeeper` but NAMED `brain-housekeeping` into the specialist
+// bucket, moving its session's review-spend headline by 22 points (#1505).
+// Each rule now names the signal it actually means and both readers fill both
+// parameters from the same kind of value, so the asymmetry cannot come back by
+// one reader being taught something the other was not.
+//
 // The finisher branch below also matches member names run-team does NOT fix.
 // `finisher-pr-<n>` is the canonical spelling and the only one the naming list
 // authorises; `finish-<n>`, `finish-pr-<n>` and `finisher-<n>` are spellings
@@ -23,16 +39,29 @@
 // with that history, NOT drift to be cleaned up: drop one and a member named
 // that way books as "other" whenever its description does not happen to say
 // "finish pr" too, moving the headline for runs already recorded.
-// member-outcomes.mjs matches the same four names, and its comment carries the
+// member-record.mjs matches the same four names, and its comment carries the
 // measurement (#326).
-export function classifyRole(meta) {
-  const type = String(meta?.agentType ?? "");
-  const desc = String(meta?.description ?? "");
-  const hay = `${type} ${desc}`.toLowerCase();
+export function classifyRole(signals) {
+  const def = String(signals?.agentDefinition ?? "");
+  const name = String(signals?.memberName ?? "");
+  const desc = String(signals?.description ?? "");
 
   // Not fleet work at all — the memory system. Before everything else so it can
   // never land in review spend.
-  if (/memory-proxy|memory-housekeeper/.test(type)) return "memory";
+  //
+  // Reads the member's IDENTITY — the recorded definition and the name — and
+  // never `hay`. The definition is the authoritative half and the whole of
+  // #1505: a dispatch that recorded `memory-housekeeper` books memory whatever
+  // it called the member, so the eleven rows that shared one definition across
+  // three buckets collapse to one. The NAME stays a signal beside it because a
+  // missing definition is a real category here rather than a hole — an untyped
+  // dispatch records none at all, which is every Claude member before
+  // 2026-08-28 — and the memory members named `memory-proxy-session-review-2-3`
+  // have nothing else to be classified on; drop it and they fall to "other",
+  // which is the same defect wearing the other shoe. `desc` is excluded on
+  // purpose: every memory-adjacent fleet member's own prompt says
+  // "memory-proxy" somewhere, so blending the prose would book them all memory.
+  if (/memory-proxy|memory-housekeeper/.test(`${def} ${name}`)) return "memory";
 
   // `spawnDepth` does NOT mean "review specialist". Only NAMED team members are
   // depth 0; every UNNAMED agent the controller dispatches directly — the phase-0
@@ -46,7 +75,7 @@ export function classifyRole(meta) {
   // Everything else at depth ≥ 1 is a reviewer's fan-out. This must stay AHEAD of
   // the member patterns below: specialists are named things like "Review PR 539
   // correctness", which would otherwise book half the fan-out as reviewer spend.
-  if (Number(meta?.spawnDepth ?? 0) >= 1) return "specialist";
+  if (Number(signals?.spawnDepth ?? 0) >= 1) return "specialist";
 
   // Then the agent DEFINITION a dispatch named, for the members whose role the
   // two signals above cannot reach. omp is where that happens: its review path
@@ -59,12 +88,12 @@ export function classifyRole(meta) {
   // split across four buckets on nothing but prompt wording: 211 other, 172
   // reviewer, 20 finisher, 2 merge-bot (#1486).
   //
-  // Matched against `type` ALONE, never the `hay` blend the patterns below use:
-  // a fleet member's own dispatch prompt says what it is, so these names occur
-  // in description prose constantly, and a member that merely mentions a
-  // definition was not dispatched as one. `(^|:)` tolerates the
-  // `fleet-ctl:`-prefixed spelling a dispatch may write where the sidecar
-  // records the bare name — the same allowance member-outcomes.tsv's own
+  // Matched against `def` ALONE — never the member's name, and never the `hay`
+  // blend the patterns below use. A fleet member's own dispatch prompt says what
+  // it is, so these names occur in description prose constantly, and a member
+  // that merely mentions a definition was not dispatched as one. `(^|:)`
+  // tolerates the `fleet-ctl:`-prefixed spelling a dispatch may write where the
+  // sidecar records the bare name — the same allowance member-outcomes.tsv's own
   // deliberate-pair query is written with.
   //
   // The review side is a PREFIX and the implementer side is EXACT, deliberately:
@@ -72,9 +101,10 @@ export function classifyRole(meta) {
   // a dimension added tomorrow must not silently fall back to prose, while the
   // implementer definitions are closed at two by the alternate-tier pairing that
   // depends on exactly those two names existing.
-  if (/(^|:)fleet-review-/.test(type)) return "specialist";
-  if (/(^|:)fleet-implementer(-alt)?$/.test(type)) return "implementer";
+  if (/(^|:)fleet-review-/.test(def)) return "specialist";
+  if (/(^|:)fleet-implementer(-alt)?$/.test(def)) return "implementer";
 
+  const hay = `${name} ${desc}`.toLowerCase();
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
   // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss

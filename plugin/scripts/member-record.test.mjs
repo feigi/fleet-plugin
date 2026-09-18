@@ -6,7 +6,7 @@ import { join, dirname } from "node:path";
 
 import {
   encodeClaudeProjectDir, encodeOmpProjectDir,
-  readClaudeMember, readClaudeSession,
+  readClaudeMember, readClaudeSession, claudeRoleSignals,
   readOmpMember, readOmpSession, foldOmpTranscript,
   readMembers,
 } from "./member-record.mjs";
@@ -273,6 +273,76 @@ test("readOmpMember: role comes off session_init's `agent`, the identity the row
     assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
   ];
   assert.equal(readOmpMember(impl.join("\n"), "/fake/path.jsonl", "InstallVerifySearch", 0).role, "implementer");
+});
+
+test("both readers fill classifyRole's `agentDefinition` from the dispatch record, so the memory exclusion cannot re-diverge per harness (#1505)", () => {
+  // #1505's defect was ONE parameter carrying two meanings: the omp reader
+  // passed the agent DEFINITION, the Claude reader handed over its whole sidecar
+  // whose `agentType` is the member's NAME. So the memory exclusion — the branch
+  // whose own comment says memory work must "never land in review spend" —
+  // decided on a definition here and on a name there, and one
+  // `memory-housekeeper` dispatch booked memory, other or specialist purely by
+  // what the member was called. Measured on the corpus: 14 such rows across
+  // three buckets, one of them `specialist`, moving its session's review-spend
+  // headline by 22 points.
+  //
+  // BOTH halves are asserted in ONE table on purpose. The failure mode is the
+  // two readers DISAGREEING, and split across two tests a fix to one side passes
+  // while the other stays broken — which is precisely how this survived #1486's
+  // fix to the omp side.
+  //
+  // The member is named `brain-housekeeping` on both sides deliberately: it
+  // carries no memory word, so a reader still classifying off the name reds
+  // here. spawnDepth 1 is load-bearing too — it makes the fall-through land in
+  // `specialist`, the bucket the review-spend headline actually reads.
+  const claudeLine = JSON.stringify({
+    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-09-10T07:14:12.147Z",
+    message: { id: "m1", model: "claude-opus-5", usage: { cache_creation_input_tokens: 66782, output_tokens: 1 } },
+  });
+  const claudeRec = readClaudeMember(claudeLine, {
+    name: "brain-housekeeping", agentType: "brain-housekeeping",
+    customAgentType: "memory-housekeeper", description: "Housekeep the brain", spawnDepth: 1,
+  });
+  const ompLines = [
+    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
+    sessionInitEvt("Housekeep the brain", "anthropic/claude-opus-5", "memory-housekeeper"),
+    assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 66782, totalTokens: 2 }),
+  ];
+  const ompRec = readOmpMember(ompLines.join("\n"), "/fake/path.jsonl", "BrainHousekeeping", 1);
+  assert.deepEqual(
+    { claude: claudeRec.role, omp: ompRec.role },
+    { claude: "memory", omp: "memory" },
+    "a memory-system dispatch must book memory on BOTH harnesses whatever the member was named",
+  );
+});
+
+test("claudeRoleSignals: the definition is customAgentType, else agentType unless that merely echoes the name (#1505)", () => {
+  // The Claude sidecar's `agentType` is ambiguous AT SOURCE, and this is the one
+  // place that resolves it. Measured over all 4,574 sidecars on disk:
+  //   3,587 name no member  -> `agentType` IS the definition
+  //     849 name one and repeat it in `agentType` -> no definition recorded
+  //     138 name one and record the definition in `customAgentType`
+  //      16 name one AND carry a different `agentType` -> that is a definition
+  //
+  // Two mutations this must survive, both of which look like simplifications:
+  // reading `agentType` as the definition unconditionally makes 849 member names
+  // masquerade as definitions (`impl-580` becomes an agent that never existed);
+  // reading only `customAgentType` strips the definition off 3,587 rows,
+  // including every memory-system member dispatched before typed agents existed
+  // — which is #1505's own bug pointing the other way.
+  const def = (meta) => claudeRoleSignals(meta).agentDefinition;
+  assert.equal(def({ agentType: "memory-proxy", spawnDepth: 1 }), "memory-proxy");
+  assert.equal(def({ name: "impl-580", agentType: "impl-580", spawnDepth: 0 }), "");
+  assert.equal(def({ name: "impl-580", agentType: "impl-580", customAgentType: "fleet-implementer-alt" }), "fleet-implementer-alt");
+  assert.equal(def({ name: "housekeeper-startup", agentType: "memory-housekeeper" }), "memory-housekeeper");
+  // The name is reported separately and is never folded into the definition —
+  // that conflation is the whole of #1505.
+  assert.equal(claudeRoleSignals({ name: "impl-580", agentType: "impl-580" }).memberName, "impl-580");
+  assert.equal(claudeRoleSignals({ agentType: "memory-proxy" }).memberName, "");
+  // A sidecar board.mjs rejected as unusable degrades to no signal at all,
+  // rather than throwing on the way to a role.
+  assert.deepEqual(claudeRoleSignals({}), { agentDefinition: "", memberName: "", description: undefined, spawnDepth: undefined });
+  assert.equal(claudeRoleSignals(undefined).agentDefinition, "");
 });
 
 test("readOmpMember: the agent definition is a role signal in its own right, so a task-less dispatch still classifies", () => {

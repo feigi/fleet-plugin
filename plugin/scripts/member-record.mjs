@@ -331,6 +331,49 @@ export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
   };
 }
 
+// The role signals a Claude dispatch sidecar carries, in the shape
+// classifyRole's contract names (#1505). Exported because board.mjs's live
+// panel classifies from the same sidecar and must read it the same way — one
+// definition of "what did this dispatch record", not two that can drift.
+//
+// `agentType` IS AMBIGUOUS AT SOURCE, and that is the whole reason this
+// function exists. Measured over all 4,574 sidecars on disk: 3,587 name no
+// member, and for those `agentType` is the agent DEFINITION (`memory-proxy`,
+// `general-purpose`, `pr-review-toolkit:code-reviewer`); 849 name one and
+// repeat that name in `agentType`, recording no definition at all; 138 name
+// one and record the definition in `customAgentType`. So the definition is
+// `customAgentType` when the dispatch wrote one, and otherwise `agentType`
+// EXCEPT where it merely echoes the name — which is the untyped dispatch's
+// closed "no definition recorded" category, not a hole to guess at. Reading
+// `agentType` as the definition unconditionally would make 849 member names
+// masquerade as definitions; reading only `customAgentType` would strip the
+// definition off 3,587 rows, including every memory-system member dispatched
+// before typed agents existed, which is the bug #1505 reports in reverse.
+// The 16 sidecars that name a member AND carry a different `agentType`
+// (`housekeeper-startup` dispatched as `memory-housekeeper`, the `fork`
+// dispatches) are real definitions and land on the right side of this rule.
+//
+// Deliberately NOT the same value as the record's `subagent_type` column
+// below, which stays `customAgentType` alone: that column answers #1066's
+// question — did this dispatch deliberately name a definition through the
+// typed-dispatch mechanism, the only thing that can mark an alternate-tier
+// pair — and its blank is a closed category the corpus header and the pairing
+// query both depend on. This function answers a different question, "which
+// agent definition produced this member", for which an unnamed dispatch's
+// `agentType` is a perfectly good answer. Two questions, two answers; do not
+// collapse them.
+export function claudeRoleSignals(meta) {
+  const name = typeof meta?.name === "string" ? meta.name : "";
+  const type = typeof meta?.agentType === "string" ? meta.agentType : "";
+  const custom = typeof meta?.customAgentType === "string" ? meta.customAgentType : "";
+  return {
+    agentDefinition: custom || (type === name ? "" : type),
+    memberName: name,
+    description: meta?.description,
+    spawnDepth: meta?.spawnDepth,
+  };
+}
+
 // One member record from one Claude transcript + its meta.json. `cost` is
 // always null here — Claude Code transcripts carry no dollar figure and no
 // pricing table exists in this repo to derive one; `torn` rides along for
@@ -344,7 +387,7 @@ export function readClaudeMember(jsonlText, meta, filePath = "<transcript>") {
   const { ticket, pr } = parseMemberName(member);
   return {
     harness: "claude",
-    role: classifyRole(meta), member,
+    role: classifyRole(claudeRoleSignals(meta)), member,
     model: folded.model,
     // Never blank — a Claude member whose transcript carries no `d.effort`
     // (haiku models, which have no effort control at all) is a genuine hole,
@@ -555,18 +598,25 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // default like "other", which only makes sense where a real dispatch record
 // (Claude's meta.json) backs it.
 //
-// `agent` reaches classifyRole as its `agentType` (#1486). It is the same
-// value the `subagent_type` column below already records, and withholding it
-// here made classifyRole's FIRST branch — the one whose comment says
-// memory-system work must "never land in review spend" — structurally
+// `agent` reaches classifyRole as its `agentDefinition` (#1486, #1505). It is
+// the same value the `subagent_type` column below already records, and
+// withholding it here made classifyRole's FIRST branch — the one whose comment
+// says memory-system work must "never land in review spend" — structurally
 // unreachable from this harness, leaving every omp row's role decided by
 // dispatch-prompt prose alone. Measured 2026-09-16 before the fix: 50
 // omp/memory-proxy rows, not one of them `role=memory`, and a single
 // definition (`fleet-review-verifier`) split across four buckets on nothing
-// but how each prompt happened to read. It is passed as `agentType` rather
-// than under a name of its own because classifyRole's contract is the
-// DISPATCH's identity for the member, which is what this field is; Claude's
-// reader fills the same parameter from its own sidecar.
+// but how each prompt happened to read.
+//
+// It went in as `agentType` until #1505, when that parameter turned out to be
+// the Claude reader's NAME — one parameter, two meanings, so the memory
+// exclusion decided on a definition here and on a name there. The parameter it
+// fills now says which of the two it is, and `memberName` is left unset
+// because the AgentId genuinely is not one: a generated CamelCase word pair
+// names nothing the classifier can read. An omp member that chose a real name
+// (`impl-<n>`, `merge-bot-<n>`) still cannot reach the name patterns — that is
+// #1506's gap, deliberately untouched here, and passing the AgentId to close
+// it would put generated words where names belong.
 export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const folded = foldOmpTranscript(jsonlText, filePath);
   if (!folded.model) return null; // no assistant turn — not a real member transcript
@@ -574,7 +624,7 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const { ticket, pr } = parseMemberName(member);
   const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string";
   const role = hasRoleSignal
-    ? classifyRole({ agentType: folded.agent ?? "", description: folded.task ?? "", spawnDepth })
+    ? classifyRole({ agentDefinition: folded.agent, description: folded.task, spawnDepth })
     : "-";
   return {
     harness: "omp",
