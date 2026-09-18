@@ -996,6 +996,25 @@ test("the keyless spend-dir gate warns once per process, not once per tick", () 
   assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 2 stays quiet");
 });
 
+// #1190: the gate used to key on the empty string, so its composite key was
+// the constant `no-spend-dir\0` regardless of `dir.error`'s text. The FIRST
+// spend-dir fault in a process consumed that slot, and a later fault with a
+// genuinely different message never reached stderr for the rest of the run.
+// The test above binds one `dir` object and calls twice, which discriminates
+// once-per-process from once-per-tick but is silent on this axis — both the
+// empty key and a message key pass it. This one calls with two DIFFERENT
+// `dir.error` values, which only a message key can tell apart.
+test("the no-spend-dir gate keys on the message, so a second, different fault also reaches stderr", () => {
+  const a = { error: "no transcript dir for cwd /tmp/impl-1190-a (looked in /tmp/impl-1190-a/.claude/projects/x)" };
+  const b = { error: "transcript lookup failed: EACCES: permission denied, scandir '/tmp/impl-1190-b'" };
+  assert.equal(withStderr(() => gatherSpend({ dir: a })).length, 1, "first fault reports");
+  assert.equal(withStderr(() => gatherSpend({ dir: b })).length, 1, "second, different fault also reports");
+  // Steady state is unchanged: the SAME fault repeating still costs one line
+  // per process, not one per tick.
+  assert.deepEqual(withStderr(() => gatherSpend({ dir: a })), [], "repeating the first fault stays quiet");
+  assert.deepEqual(withStderr(() => gatherSpend({ dir: b })), [], "repeating the second fault stays quiet");
+});
+
 test("an unreadable dir reports an error rather than posing as an empty run", () => {
   // The distinction that hid the path bug: a hidden panel meant both "nothing
   // yet" and "this is broken", so the broken case never surfaced.

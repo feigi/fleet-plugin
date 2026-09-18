@@ -538,14 +538,21 @@ function readAgent(file, metaFile) {
   };
 }
 
-// The `no-spend-dir` gate warns at most once per process. `dir.error` is not
-// constant — findSubagentsDir words an unresolvable project dir differently
-// from a lookup that threw — so the empty key warnOnce documents is a CHOICE
-// here, not an absence of anything to key on. What it costs is only the repeat
-// stderr LINE: a fault that differs still reaches the browser on the tick it
-// happens, through the `{ error }` gatherSpend returns for it, which board.html
-// renders as the panel's text. The board gathers every ~15s and a line
-// repeating at that rate just trains the eye to ignore it.
+// The `no-spend-dir` gate warns at most once per process PER DISTINCT ERROR.
+// `dir.error` is not constant — findSubagentsDir words an unresolvable project
+// dir differently from a lookup that threw — so it is keyed on the message
+// itself, not the empty string this gate used to key on: an empty key
+// collapsed both wordings onto the one `no-spend-dir\0` slot, so whichever
+// fault landed first for a process consumed the slot and a later, genuinely
+// different fault never reached stderr again for the rest of the run. Keying
+// on `dir.error` fixes that without losing the steady-state behaviour: `cwd`
+// and `HOME` are fixed for the life of `serve`, so a repeating identical fault
+// still costs one line, not one per tick. Either way this gate only ever
+// controlled the repeated stderr LINE — a fault that differs still reaches the
+// browser on the tick it happens, through the `{ error }` gatherSpend returns
+// for it, which board.html renders as the panel's text. The board gathers
+// every ~15s and a line repeating at that rate just trains the eye to ignore
+// it.
 //
 // The `skips` gate is the same rule, per transcript: a file that is broken is
 // broken every tick, and at the default 15s interval three of them are 720 lines
@@ -586,7 +593,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
     if (dir && dir.error) {
-      warnOnce("no-spend-dir", "", dir.error);
+      warnOnce("no-spend-dir", dir.error, dir.error);
       return { ok: false, error: dir.error };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
