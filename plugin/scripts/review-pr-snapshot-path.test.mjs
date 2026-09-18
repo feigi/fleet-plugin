@@ -405,11 +405,12 @@ test("the snapshot log line says when the head check was skipped", () => {
     /SKIPPED/,
     "an empty ref read prints as a blank rather than naming the skip — the compare skipped and the log says it ran",
   );
-  // #1513 left `prHead` reported but no longer compared, so this line is the
-  // ONLY record of it anywhere in a run — and its disagreement with the ref is
-  // the PR-object desync `run-merge-bot.md`'s step 1 hands to a controller.
-  // Dropping it from the line loses the fact silently, with the refusal and the
-  // skip both still behaving exactly as they do here.
+  // #1513 left `prHead` reported but no longer compared. This line records it
+  // first; the no-diff diagnostic below repeats it when the diff is rejected,
+  // but nothing downstream compares it against the ref to detect the desync
+  // itself — the PR-object desync `run-merge-bot.md`'s step 1 hands to a
+  // controller. Dropping it from this line loses the fact silently, with the
+  // refusal and the skip both still behaving exactly as they do here.
   const desynced = say({
     path: SNAP,
     head: "deadbee",

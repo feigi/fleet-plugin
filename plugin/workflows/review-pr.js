@@ -1295,8 +1295,10 @@ if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 // `prHead` is printed beside it, raw, and never as a verdict — so it keeps `??`,
 // whose fallback is a value rather than a claim about whether a check ran. It
 // stopped being the compare's operand in #1513, and the two values disagreeing
-// is the PR-object desync `run-merge-bot.md`'s step 1 hands to a controller — a
-// fact this log is now the only record of, since nothing downstream reads it.
+// is the PR-object desync `run-merge-bot.md`'s step 1 hands to a controller —
+// a fact this log records first; the no-diff diagnostic below repeats it when
+// the diff is rejected, but nothing downstream compares the two values to
+// detect the desync itself.
 log(`snapshot ${snap.head} at ${snap.path} — branch ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
 
 // The measurement environment, beside the tree it measures. Logged rather than
