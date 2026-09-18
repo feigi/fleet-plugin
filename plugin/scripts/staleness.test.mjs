@@ -550,6 +550,24 @@ test("verdict() falls through to the could-not-check downgrade within a bound wh
 // named here rather than left a bare literal in an assertion.
 const PIPE_BUFFER_BYTES = 65536;
 
+// The other side of this fixture's window, and the one that only bites off
+// this machine. The needle reaches the script as a single argv item, and
+// Linux caps ONE argv item at MAX_ARG_STRLEN — 32 pages, so 131072 bytes on
+// a 4 KiB-page kernel, which is what CI runs on. Past it execve refuses the
+// whole spawn with E2BIG. darwin caps only the total (~1 MiB ARG_MAX) and has
+// no per-argument cap at all, which is why a needle sized against this
+// machine alone passes here and reds on CI. `git log -S` takes the same
+// needle as its own argv item, so the cap binds the grandchild too.
+//
+// Same name and number as ledger.test.mjs's own constant, which carries the
+// measurement: that file hit this exact wall and records that the refusal is
+// not a truncation — spawnSync comes back with a null status, reading like
+// the very defect its tests exist to catch. It stays under the cap by
+// splitting its payload across several argv elements; that is not available
+// here, because `--gone` takes the needle as one value, so this fixture sizes
+// the single element instead.
+const ARG_STRLEN_MAX = 131_072;
+
 // ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
 //
 // The retry-cap test above only proves the loop gives up in time against a
@@ -572,9 +590,13 @@ const PIPE_BUFFER_BYTES = 65536;
 // exactly this for fd 2). Once fd 1 is non-blocking, a payload past one pipe
 // buffer (PIPE_BUFFER_BYTES above) SHORT-WRITES rather than blocking — a
 // `--gone` needle is echoed verbatim into the JSON payload's own `needle`
-// field, so a needle far past one buffer is a deterministic way to force
-// that payload over the cliff without needing a git history fixture to make
-// it that large.
+// field, so sizing the needle past one buffer forces that payload over the
+// cliff without needing a git history fixture to make it that large. The
+// needle therefore has to sit in a WINDOW, not merely be big: past
+// PIPE_BUFFER_BYTES so the write short-writes, and under
+// ARG_STRLEN_MAX so execve accepts it. Both ends are asserted below,
+// because overshooting the upper end does not fail as a short-write bug —
+// the spawn never happens at all.
 //
 // Neither the fixture's size nor fd 1's non-blocking state shows up in the
 // delivered bytes, so both are ASSERTED here rather than assumed. Measured
@@ -609,7 +631,7 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   t.after(() => rmSync(scriptDir, { recursive: true, force: true }));
   writeFileSync(join(scriptDir, "arg.mjs"), readFileSync(fileURLToPath(new URL("./arg.mjs", import.meta.url))));
   writeFileSync(join(scriptDir, "staleness.mjs"), readFileSync(SCRIPT));
-  const needle = "y".repeat(200_000);
+  const needle = "y".repeat(100_000);
   const firstWrite = join(scriptDir, "first-write.json");
   writeFileSync(join(scriptDir, "run.mjs"), [
     'import { writeFileSync, writeSync } from "node:fs";',
@@ -639,13 +661,29 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     encoding: null,
     maxBuffer: 8 * 1024 * 1024,
   });
+  // Before anything reads the captured streams: a spawn execve refused
+  // returns no `output` at all, so `r.stdout`/`r.stderr` are undefined and a
+  // diagnostic that formats them throws a TypeError over the top of the real
+  // cause. Measured — an over-long argv gives `error.code` E2BIG with
+  // `status` null, and `r.stderr.toString()` on that result throws
+  // "Cannot read properties of undefined".
+  assert.equal(
+    r.error,
+    undefined,
+    `the fixture never ran — spawnSync refused it (${r.error?.code}); an argv item past ARG_STRLEN_MAX is the way this test earns that`,
+  );
   assert.equal(r.status, 2, `expected the unknown verdict's exit code: stderr=${r.stderr.toString()}`);
-  // Guarded on the needle the fixture sends, not on the bytes that arrived: a
-  // truncated payload is itself about one buffer long, so a guard over the
-  // captured stdout would fire on a real defect and blame the fixture for it.
+  // Both ends of the needle's window, guarded on the needle the fixture sends
+  // rather than on the bytes that arrived: a truncated payload is itself about
+  // one buffer long, so a guard over the captured stdout would fire on a real
+  // defect and blame the fixture for it.
   assert.ok(
     needle.length > PIPE_BUFFER_BYTES,
     `fixture no longer outgrows the pipe buffer (${needle.length}-byte needle), so this test would pass without proving anything`,
+  );
+  assert.ok(
+    needle.length < ARG_STRLEN_MAX,
+    `a ${needle.length}-byte needle is too long to survive execve as one argv item on a 4 KiB-page Linux kernel, so this fixture would refuse to spawn on CI while passing here`,
   );
   const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
   assert.ok(
