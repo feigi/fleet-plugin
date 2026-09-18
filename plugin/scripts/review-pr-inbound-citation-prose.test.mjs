@@ -68,7 +68,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, between, paragraph } from "./prose-pin.mjs";
+import { anchorAt, between, paragraph, runAbove } from "./prose-pin.mjs";
 
 const PLUGIN = join(import.meta.dirname, "..");
 const ROOT = join(PLUGIN, "..");
@@ -92,8 +92,15 @@ const prose = (s) => s.replace(/\s+/g, " ");
 // below one. Empty is a failure, never an empty slice: a slice that found no
 // comment compares a fragment against "" and reports the fragment missing,
 // which names the wrong fault — the anchor is what moved.
+//
+// The above-run bound is `runAbove`, shared (#1604): three files had copied
+// that same regex, and the copy is what lets one of them lose a guard the
+// others keep. `runAbove` deliberately returns "" rather than throwing, so the
+// throw below — this file's own, naming the citation it is about — stays this
+// file's. The below-run has no second consumer anywhere, so it stays local
+// until one lands rather than being extracted on speculation.
 function commentAbove(text, anchor, what) {
-  const run = (text.slice(0, anchorAt(text, anchor, what)).match(/(?:[ \t]*\/\/[^\n]*\n)+$/) ?? [""])[0];
+  const run = runAbove(text, anchor, what, "//");
   assert.notEqual(run, "", `${what}: nothing but code sits above \`${anchor}\` — the comment block this citation names is gone, not merely reworded`);
   return code(run);
 }

@@ -102,10 +102,15 @@ export function between(text, from, to, what, { emphasisTolerant = false } = {})
   return emphasisTolerant ? text.slice(rawOffset(text, at), rawOffset(text, end)) : text.slice(at, end);
 }
 
+// Regex metacharacters escaped so a caller's literal stays a literal. One
+// definition because both consumers below take arbitrary caller text — a
+// second copy of this class is how the two drift apart.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // `\s+` between every word, never a literal space — prose this matches against
 // is often hard-wrapped, so any inter-word space in the source may be a
 // newline plus indent. Regex metacharacters in the phrase are escaped first.
-export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
+export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join("\\s+"));
 
 // The paragraph carrying a rule, and no more of the document than that. A
 // positive regex matched over a whole file is satisfiable from OUTSIDE the
@@ -172,9 +177,10 @@ function rawOffset(text, unemphasizedOffset) {
 // not. A missing anchor throws rather than widening, for `paragraph`'s reason.
 //
 // Split out of `paragraph` rather than left inside it because a slice whose END
-// bound is not a blank line needs the same guarantee and must not copy it: the
-// source site in `quiet-payload-prose.test.mjs` anchors on a declaration and
-// takes the `//` comment block ABOVE it, bounded by code at both ends.
+// bound is not a blank line needs the same guarantee and must not copy it:
+// `runAbove` below anchors on a declaration and takes the comment block ABOVE
+// it, bounded by code at both ends, and imports this half rather than
+// re-deriving it.
 // `emphasisTolerant` is opt-in and off by default: most anchors here are
 // typed WITH `**` when the source is (see e.g. `ancestry-check-position-prose
 // .test.mjs`), so matching against `unemphasized(text)` unconditionally would
@@ -188,6 +194,55 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
   assert.notEqual(hits.length, 0, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
   assert.equal(hits.length, 1, `${what}: slice anchor "${anchor}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`);
   return emphasisTolerant ? rawOffset(text, hits[0].index) : hits[0].index;
+}
+
+// The comment run immediately ABOVE a declaration, gutter intact, bounded by
+// CODE at both ends. The bound `paragraph` cannot give a SOURCE file: there the
+// blank line after a comment block sits below the code the block documents, so
+// a blank-line slice runs past the prose into live code and a decoy pasted
+// there takes the pin green (measured #695). Anchoring on the declaration
+// instead puts code at both ends, so no edit to the prose the slice holds can
+// move either bound — which is the whole reason a pin over source prose gets to
+// be a slice at all rather than a search of the file.
+//
+// `marker` is the gutter literal (`#` for shell, `//` for `.mjs`), matched only
+// as a line's FIRST token after indent: a `//` inside a string on a code line
+// does not extend the run, which is what keeps "bounded by code" true rather
+// than merely stated. It is escaped, so a `*` continuation gutter cannot turn
+// the run into `.*` and swallow every line above the anchor. No
+// `emphasisTolerant` pass-through, unlike `paragraph`: `**` is markdown
+// emphasis, and every anchor this bound takes is a declaration in source.
+//
+// Returns "" rather than throwing when nothing but code sits above the anchor,
+// because its callers diagnose that differently and both are right:
+// `gp-sep-invariant-prose.test.mjs` slices at module load and wants the empty
+// case as a NAMED test rather than an import-time crash, while
+// `review-pr-inbound-citation-prose.test.mjs` asserts non-empty on the spot.
+// The exactly-once half is not the caller's and is not optional: it is
+// `anchorAt`'s, so a second copy of the anchored declaration reds here instead
+// of silently binding the pin to whichever copy comes first.
+//
+// The one thing this closes that all three hand-rolled copies had open: an
+// INDENTED anchor. Each copy ended its run at `$`, so a declaration inside a
+// function body — the text above it ending in the anchor's own indent, not a
+// newline — matched nothing and handed back "" with the comment sitting right
+// there, which reads as "the block is gone" and names the wrong fault. The
+// tolerated gap is `[ \t]*` and nothing else, so it cannot widen: no code can
+// hide in horizontal whitespace, the run itself is still returned without that
+// indent, and all three migrated anchors sit at column 0 today, so the bytes
+// they get back are unchanged.
+//
+// The single definition of this bound in this directory (#1604), for
+// `paragraph`'s reason and after its history: three pins hand-rolled this same
+// regex locally first, each carrying its own chance of dropping a guard. A pin
+// needing this bound imports it — a local copy is the defect, not a style
+// choice. NOT the mirror shape: the run BELOW an anchor
+// (`review-pr-inbound-citation-prose.test.mjs`'s `commentBelow`) has one
+// consumer and so no duplicate to close.
+export function runAbove(text, anchor, what, marker) {
+  const above = text.slice(0, anchorAt(text, anchor, what));
+  const run = above.match(new RegExp(`(?:^|\\n)((?:[ \\t]*${escapeRe(marker)}[^\\n]*\\n)+)[ \\t]*$`));
+  return run ? run[1] : "";
 }
 
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
