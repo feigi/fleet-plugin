@@ -591,9 +591,10 @@ function readAgent(file, metaFile) {
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
     dir = dir ?? findSubagentsDir();
-    if (dir && dir.error) {
-      warnOnce("no-spend-dir", dir.error, dir.error);
-      return { ok: false, error: dir.error };
+    const dirError = dir?.error;
+    if (dirError) {
+      warnOnce("no-spend-dir", dirError, dirError);
+      return { ok: false, error: dirError };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
 
