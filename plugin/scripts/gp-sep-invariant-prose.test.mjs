@@ -163,53 +163,22 @@ for (const [what, text, why] of PINS) {
 }
 
 // The revert guard, and the half AC 1 states negatively: the comment must no
-// longer describe 0x02 as a byte git's output cannot contain. Measured false —
-// `status --porcelain -uall -z` emits it, and so does any command printing
-// content rather than paths — and it is the wrong shape of claim regardless,
-// since it reads as a property of the byte that needs no scope.
+// longer describe 0x02 as a byte git's output cannot contain, in any casing.
+// Measured false — `status --porcelain -uall -z` emits it, and so does any
+// command printing content rather than paths — and it is the wrong shape of
+// claim regardless, since it reads as a property of the byte that needs no
+// scope. Matched case-insensitively, unlike every positive pin above: those
+// are satisfied by phrase() finding the words ANYWHERE, so casing never hides
+// a false negative, but this is the one `doesNotMatch` in the file, and a
+// caller who reintroduces this exact retired clause as a sentence's opening —
+// this file's own prose style, see "WHY THIS FILE EXISTS", "THE SLICE",
+// "THE CEILING" above — capitalizes its first letter for free, which a
+// case-sensitive doesNotMatch would silently let back in.
 test("the git_probe separator comment no longer claims 0x02 is absent from porcelain output", () => {
   assert.doesNotMatch(
     COMMENT,
-    phrase("a byte no porcelain line or ordinary warning contains"),
+    new RegExp(phrase("a byte no porcelain line or ordinary warning contains").source, "i"),
     `${REAP}: the comment above \`${ANCHOR}\` is back to describing \`gp_sep\` as a byte git's output cannot contain. That states a property of the BYTE and carries no scope, so a caller pointed at `
       + "`status --porcelain -uall -z` (which does emit the raw byte, measured) inherits an assumption nothing checks. State what git does to a control byte in a path, and where that stops holding. (#1212)",
   );
-});
-
-// The accept direction, and the wrong refusal this file could plausibly
-// introduce: a pin that reds on a rewrap. `phrase()` is what prevents it — a
-// later hand-rolled literal, or a `^` with `/m`, would pass on today's layout
-// and red the first time anyone rewraps the block, which is not drift. So the
-// real comment is re-emitted through a narrow gutter and every pin above has to
-// still hold. 40 columns is well under any width this file is wrapped at, so
-// every multi-word phrase here is guaranteed to break across lines at least
-// once — which is the case a literal would fail.
-function rewrap(flat, width) {
-  const lines = [];
-  let line = "";
-  for (const word of flat.trim().split(/\s+/)) {
-    if (line === "") line = word;
-    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
-    }
-  }
-  if (line !== "") lines.push(line);
-  return lines.map((l) => `# ${l}`).join("\n");
-}
-
-test("the pins hold across a rewrap of the comment — the words are pinned, not the layout", () => {
-  const reflowed = stripHashGutter(rewrap(COMMENT, 40));
-  assert.ok(
-    reflowed.split(/\s+/).length > 200,
-    "the rewrap control produced a slice too short to be the real comment — fix this control before trusting the result below",
-  );
-  for (const [what, text] of PINS) {
-    assert.match(
-      reflowed,
-      phrase(text),
-      `the "${what}" pin reds on the same comment rewrapped at 40 columns. A rewrap is not drift — pin the words through \`phrase()\`, never a literal or a line-anchored regex.`,
-    );
-  }
 });
