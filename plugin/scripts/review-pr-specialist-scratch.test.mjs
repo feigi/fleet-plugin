@@ -123,7 +123,7 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 });
 
 // The second rule. Both halves, because they have OPPOSITE expected outcomes: a
-// lone "equals your scratch path" guard is unsatisfiable before `git init` — a
+// lone "resolves to your scratch path" guard is unsatisfiable before `git init` — a
 // fresh scratch dir has no toplevel and exits 128 — and a guard that cannot pass
 // on the clean path gets ignored. Naming a path alone does not catch the
 // observed failure either, which was an agent BELIEVING it was already in
