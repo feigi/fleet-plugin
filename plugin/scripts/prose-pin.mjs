@@ -2,12 +2,29 @@ import assert from "node:assert/strict";
 
 // Bound at BOTH ends: an unbounded end lets a later, unrelated occurrence of the
 // same phrase satisfy the assertion with the real clause deleted.
-export function between(text, from, to, what) {
-  const at = text.indexOf(from);
+//
+// `emphasisTolerant` mirrors the option `anchorAt` and `quoteBlock` already
+// carry — same name, same default of off — and reuses their `unemphasized`/
+// `rawOffset` pair rather than carrying a second stripper. On, BOTH the anchors
+// and the document are read through `unemphasized`, so `**` may be removed,
+// added, narrowed, widened, or moved to another word boundary anywhere inside
+// an anchor without moving the slice. Stripping the ANCHOR too is what
+// `anchorAt`'s own tolerant mode does not do, and is the direction this family
+// needs: its anchors are typed WITH `**` when the source is, so a document that
+// loses the emphasis is the common break.
+//
+// The returned slice is raw bytes with `**` intact — `rawOffset` maps each
+// endpoint back and stops BEFORE the marker, so a tolerant slice keeps the
+// emphasis its caller goes on to compare.
+export function between(text, from, to, what, { emphasisTolerant = false } = {}) {
+  const haystack = emphasisTolerant ? unemphasized(text) : text;
+  const start = emphasisTolerant ? unemphasized(from) : from;
+  const stop = emphasisTolerant ? unemphasized(to) : to;
+  const at = haystack.indexOf(start);
   assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
-  const end = text.indexOf(to, at + from.length);
+  const end = haystack.indexOf(stop, at + start.length);
   assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
-  return text.slice(at, end);
+  return emphasisTolerant ? text.slice(rawOffset(text, at), rawOffset(text, end)) : text.slice(at, end);
 }
 
 // `\s+` between every word, never a literal space — prose this matches against

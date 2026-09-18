@@ -42,6 +42,33 @@ test("between throws when the end anchor exists only BEFORE the start anchor", (
   assert.throws(() => between("zzSTARTzz", "START", "END", "the fixture"), /no longer contains "END" after "START"/);
 });
 
+// #1492. The anchor-pair primitive's emphasis-tolerant mode, mirroring the one
+// `anchorAt` and `quoteBlock` already carry. Every move below is
+// meaning-preserving in the rendered document, and every one of them reds a
+// literal `indexOf` anchor — the whole defect class this option closes. The
+// anchor is typed WITH `**` here on purpose: that is how the population writes
+// them, and it is the direction `anchorAt`'s own tolerant mode does not cover,
+// since it strips only the document.
+// Each row states the WHOLE slice it expects, byte for byte, rather than
+// matching a phrase inside it. Two contracts ride on that: the bounds moved to
+// the right places, and the returned bytes still carry whatever `**` the
+// document has — a tolerant anchor locates, it never rewrites what the caller
+// gets back. A `phrase()` match inside the slice would see neither, and would
+// pass against a slice that had silently swallowed `pad`.
+const MOVES = [
+  ["emphasis removed", "pad\n\nstart here — the rule.\n\nEND", "start here — the rule.\n\n"],
+  ["emphasis narrowed to one word", "pad\n\n**start** here — the rule.\n\nEND", "**start** here — the rule.\n\n"],
+  ["emphasis widened past the anchor", "pad\n\n**start here — the** rule.\n\nEND", "**start here — the** rule.\n\n"],
+  ["emphasis moved to another word boundary", "pad\n\nstart **here** — the rule.\n\nEND", "start **here** — the rule.\n\n"],
+  ["emphasis unchanged", "pad\n\n**start here** — the rule.\n\nEND", "**start here** — the rule.\n\n"],
+];
+
+for (const [move, doc, expected] of MOVES) {
+  test(`between with emphasisTolerant still finds its anchor when ${move}`, () => {
+    assert.equal(between(doc, "**start here**", "END", "the fixture", { emphasisTolerant: true }), expected);
+  });
+}
+
 // `\s+` between words, never a literal space: the prose these match against is
 // hard-wrapped, so any inter-word space in the source may be a newline plus
 // indent. Replacing the join with " " passes a single-line fixture and fails
