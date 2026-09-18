@@ -467,6 +467,18 @@ test("lineAt answers the PHYSICAL line a hit in the joined view came from", () =
   assert.equal(lineAt(text.length - 1), 8);
 });
 
+test("lineAt throws on an offset outside the joined view, rather than clamping it", () => {
+  // A clamp returns a plausible-looking WRONG line number for a caller's own
+  // bug — the same silent-wide-match failure `between`, `anchorAt` and
+  // `quoteBlock` all refuse elsewhere in this file, by throwing instead of
+  // guessing. `lineAt` only ever receives an offset a match on `text`
+  // actually produced, so anything outside `[0, text.length)` is a defect
+  // at the call site, not a document to open.
+  const { lineAt } = logicalLines("a\nb\nc");
+  assert.throws(() => lineAt(-5), /out of range/);
+  assert.throws(() => lineAt(9999), /out of range/);
+});
+
 test("logicalLines never joins a line the reader sees as a new block", () => {
   // Joining only ever ADDS matches, so every one of these is a potential
   // pointer clause invented out of two unrelated blocks. A heading, a list

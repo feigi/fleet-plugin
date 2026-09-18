@@ -464,7 +464,13 @@ export function logicalLines(text) {
   // Strictly increasing — an unjoined line contributes its own `\n` and a
   // joined one is non-blank by construction — so this bisect has no ties to
   // break and an offset inside line i answers i, never i+1.
+  const joined = out.join("");
   const lineAt = (at) => {
+    assert.equal(
+      at >= 0 && at < joined.length,
+      true,
+      `logicalLines().lineAt(${at}) out of range: the joined view is ${joined.length} bytes — a valid offset comes from a match against \`text\`, never a caller's own guess`,
+    );
     let lo = 0;
     let hi = starts.length - 1;
     while (lo < hi) {
@@ -474,5 +480,5 @@ export function logicalLines(text) {
     }
     return lo + 1;
   };
-  return { text: out.join(""), lineAt };
+  return { text: joined, lineAt };
 }
