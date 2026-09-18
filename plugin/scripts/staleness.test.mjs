@@ -544,6 +544,12 @@ test("verdict() falls through to the could-not-check downgrade within a bound wh
   );
 });
 
+// One pipe buffer, the cliff this test's fixture has to stay above.
+// ci-state.test.mjs measured the same number for the same reason and holds
+// its own copy; this suite's helpers have no shared home for it, so it is
+// named here rather than left a bare literal in an assertion.
+const PIPE_BUFFER_BYTES = 65536;
+
 // ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
 //
 // The retry-cap test above only proves the loop gives up in time against a
@@ -564,32 +570,69 @@ test("verdict() falls through to the could-not-check downgrade within a bound wh
 // lazily initialises Node's stream object for fd 1, and that initialisation
 // is what puts a pipe fd into O_NONBLOCK (ci-state.mjs's own vlog relies on
 // exactly this for fd 2). Once fd 1 is non-blocking, a payload past one pipe
-// buffer (65536 bytes, measured, ci-state.test.mjs's PIPE_BUFFER_BYTES)
-// SHORT-WRITES rather than blocking — a `--gone` needle is echoed verbatim
-// into the JSON payload's own `needle` field, so a 200,000-byte needle is a
-// deterministic way to force that payload past one buffer without needing a
-// git history fixture to make it that large.
+// buffer (PIPE_BUFFER_BYTES above) SHORT-WRITES rather than blocking — a
+// `--gone` needle is echoed verbatim into the JSON payload's own `needle`
+// field, so a needle far past one buffer is a deterministic way to force
+// that payload over the cliff without needing a git history fixture to make
+// it that large.
 //
-// The needle is real to git, not just a value die()'s own writeSync sees: an
-// unmatched pathspec-scale string is still walked by `git log -S`, so this
-// exercises the "gone" not-found path, not a stub. The verdict's own prose
-// (`why`) is not pinned here — this file's header already says why not — so
-// the assertion is round-trip fidelity instead: a truncated write lands mid
-// `needle`, which is not valid JSON at all (measured: reverting the loop
-// makes `JSON.parse` throw on the payload this test's fixture produces).
+// Neither the fixture's size nor fd 1's non-blocking state shows up in the
+// delivered bytes, so both are ASSERTED here rather than assumed. Measured
+// on die()'s companion fixture: with the stream left uninitialised, one
+// write takes the whole payload and the collapsed-loop mutant passes. So the
+// wrapper records what its own first write to fd 1 returned and the test
+// asserts it came back SHORT, the same standard ci-state.test.mjs holds its
+// pipe fixtures to when it asserts they still outgrow the buffer.
+//
+// The needle is real to git, not just a value verdict()'s own writeSync
+// sees: an unmatched pathspec-scale string is still walked by `git log -S`,
+// so this exercises the "gone" not-found path, not a stub — and THAT is
+// asserted rather than merely documented, because the walk-found-nothing
+// branch and the `git log -S`-failed branch both answer `unknown` at this
+// exit code with the needle echoed back. Only the walk-found-nothing answer
+// carries `found` and `bytes`; staleness.mjs's failed-walk downgrade passes
+// no extra fields at all. `bytes` is the size of the blob origin/main holds
+// at the asked-for path, derived from the fixture's own origin below rather
+// than written as a literal, so changing what repo() commits cannot leave
+// the number behind.
+//
+// The verdict's own prose (`why`) is not pinned here — this file's header
+// already says why not — so the delivery assertion is round-trip fidelity
+// instead: a truncated write lands mid `needle`, which is not valid JSON at
+// all (measured: reverting the loop makes `JSON.parse` throw on the payload
+// this test's fixture produces).
 test("verdict() resumes from a genuine short write and delivers the full payload, not just the first pipe buffer", (t) => {
   const w = repo(t);
   const scriptDir = mkdtempSync(join(tmpdir(), "staleness-short-"));
+  // repo(t) reaps its own tree; this dir holds the script copies and the
+  // wrapper, and had nothing reaping it.
+  t.after(() => rmSync(scriptDir, { recursive: true, force: true }));
   writeFileSync(join(scriptDir, "arg.mjs"), readFileSync(fileURLToPath(new URL("./arg.mjs", import.meta.url))));
   writeFileSync(join(scriptDir, "staleness.mjs"), readFileSync(SCRIPT));
+  const needle = "y".repeat(200_000);
+  const firstWrite = join(scriptDir, "first-write.json");
   writeFileSync(join(scriptDir, "run.mjs"), [
+    'import { writeFileSync, writeSync } from "node:fs";',
     '// Lazily touching fd 1 through console.log puts it in O_NONBLOCK.',
     'console.log("");',
+    '// Measure that state before staleness.mjs runs instead of trusting it:',
+    '// with fd 1 non-blocking this comes back SHORT, and with fd 1 blocking',
+    '// it takes every byte in this one call. EAGAIN is recorded as 0 — a',
+    '// blocking fd never raises it. The unwritten remainder is deliberately',
+    '// never retried, so stdout is the newline console.log printed, exactly',
+    "// the recorded count of filler, then verdict()'s own payload.",
+    `const filler = Buffer.alloc(${needle.length}, 0x70);`,
+    "let firstWriteBytes;",
+    "try {",
+    "  firstWriteBytes = writeSync(1, filler);",
+    "} catch (e) {",
+    '  firstWriteBytes = e.code === "EAGAIN" ? 0 : -1;',
+    "}",
+    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes }));`,
     'await import("./staleness.mjs");',
     "",
   ].join("\n"));
 
-  const needle = "y".repeat(200_000);
   const r = spawnSync(process.execPath, [join(scriptDir, "run.mjs"), "--path", "src.mjs", "--gone", needle], {
     cwd: w,
     env: ENV,
@@ -597,11 +640,24 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     maxBuffer: 8 * 1024 * 1024,
   });
   assert.equal(r.status, 2, `expected the unknown verdict's exit code: stderr=${r.stderr.toString()}`);
-  // console.log("") contributed the leading byte; the JSON payload follows.
+  // Guarded on the needle the fixture sends, not on the bytes that arrived: a
+  // truncated payload is itself about one buffer long, so a guard over the
+  // captured stdout would fire on a real defect and blame the fixture for it.
+  assert.ok(
+    needle.length > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer (${needle.length}-byte needle), so this test would pass without proving anything`,
+  );
+  const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
+  assert.ok(
+    firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
+    `fd 1 took all ${payloadBytes} bytes in one write, so nothing short-wrote and a collapsed loop would pass this test too (first write returned ${firstWriteBytes})`,
+  );
+  // console.log("") contributed the leading byte, then the filler that
+  // landed; the JSON payload follows both.
   assert.equal(r.stdout[0], 10, "console.log(\"\")'s own newline is missing from the front of stdout");
   let payload;
   assert.doesNotThrow(
-    () => (payload = JSON.parse(r.stdout.subarray(1).toString("utf8"))),
+    () => (payload = JSON.parse(r.stdout.subarray(1 + firstWriteBytes).toString("utf8"))),
     `verdict()'s payload is not valid JSON — a short write landed mid-needle: ${r.stdout.length} bytes captured`,
   );
   assert.equal(payload.verdict, "unknown");
@@ -611,4 +667,16 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     `needle arrived truncated: got ${payload.needle.length} bytes, sent ${needle.length}`,
   );
   assert.equal(payload.needle, needle);
+  // The walk ran and came back empty, rather than the `git log -S` call
+  // failing into the same verdict: only the empty-walk answer carries these.
+  assert.equal(
+    payload.found,
+    false,
+    "the --gone needle must be absent from the current file for this to be the not-found path",
+  );
+  assert.equal(
+    payload.bytes,
+    Number(git(w, "cat-file", "-s", "origin/main:src.mjs")),
+    "`bytes` must be the size of the blob origin/main holds at the asked-for path — the failed-walk downgrade carries no `bytes` at all",
+  );
 });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { readFileSync, writeFileSync, mkdtempSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, existsSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -189,12 +189,22 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
   );
 });
 
+// One pipe buffer, the cliff this test and its staleness.mjs counterpart both
+// have to stay above. ci-state.test.mjs measured the same number for the same
+// reason and holds its own copy; this suite's helpers have no shared home for
+// it, so it is named here rather than left a bare literal in an assertion.
+const PIPE_BUFFER_BYTES = 65536;
+
 // ── #1548: die()'s writeSync loop delivers the FULL message, EXECUTED ────
 //
 // The retry-cap test above only proves the loop gives up in time against a
 // pipe that never drains at all; it says nothing about what a loop that DOES
-// keep draining actually delivers. #889's source-shape pin (candidates.mjs's
-// die() regex) has the same gap: a mutant that collapses the whole while loop
+// keep draining actually delivers. #889's source-shape pin has the same gap,
+// and it is not candidates.mjs that holds it: the pin lives in
+// candidates.test.mjs and matches arg.mjs's own source, read through that
+// file's ARG_MODULE. candidates.mjs only CALLS die() — makeDie(NAME) moved
+// the shape out of it in #367, as the comment sitting beside that pin in
+// candidates.test.mjs records. A mutant that collapses the whole while loop
 // to one bare `writeSync(2, buf)` still matches a pin anchored on the try
 // block's shape, and a short write from that single call would silently
 // truncate the message with nothing here to catch it.
@@ -205,42 +215,87 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
 // mechanism ci-state.mjs's own vlog relies on (ci-state.mjs, "Initialising a
 // stream for an fd ... puts that fd in O_NONBLOCK"). Once fd 2 is
 // non-blocking, a single writeSync of a buffer larger than one pipe buffer
-// (measured at 65536 bytes on this OS, ci-state.test.mjs's PIPE_BUFFER_BYTES)
-// SHORT-WRITES rather than blocking until spawnSync's reader drains it —
-// measured here at exactly one buffer plus the byte `console.error("")`
-// itself contributed, zero variance over repeated runs.
+// SHORT-WRITES rather than blocking until spawnSync's reader drains it.
+//
+// Neither half of that precondition shows up in the delivered bytes, so both
+// are ASSERTED here rather than assumed. A fixture that stopped outgrowing
+// one pipe buffer, a Node release that initialises streams blocking, or a
+// maintainer swapping `console.error("")` for a direct `writeSync(2, "\n")`
+// would each retire this pin silently — measured against that last shape,
+// one write took the whole payload and the collapsed-loop mutant passed. So
+// the fixture records what its own first write returned and the test asserts
+// it came back SHORT, the same standard ci-state.test.mjs holds its pipe
+// fixtures to when it asserts they still outgrow the buffer.
 //
 // die()'s own catch swallows the message but never the exit code, so exit 2
 // is not what discriminates the loop from a bare call — both reach it. What
 // discriminates them is whether every byte after the first short write ever
 // arrives: a bare call stops at the first short write, the loop resumes from
 // writeSync's own return value until the buffer is empty or the retry cap
-// gives up, and spawnSync's default draining is fast enough that the cap
-// (200 retries * 1ms) is never the limiting factor here (measured).
-test("die() resumes from a genuine short write and delivers the full message, not just the first pipe buffer", () => {
+// gives up, and spawnSync's default draining is fast enough that the cap is
+// never the limiting factor here (measured: every run delivered the message
+// whole).
+test("die() resumes from a genuine short write and delivers the full message, not just the first pipe buffer", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "arg-die-short-"));
+  // The fixture embeds the message, so this is the largest dir this file
+  // creates; reaped here the way staleness.test.mjs reaps its own repos.
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   const msg = "x".repeat(200_000);
+  // die()'s own write, whole: its leading newline, the bound name, the message.
+  const expected = Buffer.from(`\nprobe: ${msg}\n`);
+  const firstWrite = join(dir, "first-write.json");
   writeFileSync(join(dir, "run.mjs"), [
+    'import { writeFileSync, writeSync } from "node:fs";',
     'import { makeDie } from "./arg.mjs";',
     '// Lazily touching fd 2 through console.error puts it in O_NONBLOCK.',
     'console.error("");',
+    '// Measure that state before die() runs instead of trusting it: with fd 2',
+    '// non-blocking this comes back SHORT, and with fd 2 blocking it takes',
+    '// every byte in this one call. EAGAIN is recorded as 0 — a blocking fd',
+    '// never raises it. The unwritten remainder is deliberately never retried,',
+    '// so stderr is the newline console.error printed, exactly the recorded',
+    "// count of filler, then die()'s own write and nothing else.",
+    `const filler = Buffer.alloc(${expected.length}, 0x70);`,
+    "let firstWriteBytes;",
+    "try {",
+    "  firstWriteBytes = writeSync(2, filler);",
+    "} catch (e) {",
+    '  firstWriteBytes = e.code === "EAGAIN" ? 0 : -1;',
+    "}",
+    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes }));`,
     `makeDie("probe")(${JSON.stringify(msg)});`,
     "",
   ].join("\n"));
 
   const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
   assert.equal(r.status, 2, `die() must still exit 2: stderr had ${r.stderr?.length} bytes`);
-  // The leading byte is console.error("")'s own newline; die()'s message
-  // follows it whole, or not at all. 200,000 x's is well past the 65536-byte
-  // pipe buffer (measured), so a bare `writeSync(2, buf)` with no loop
-  // delivers only one buffer's worth and stops there (measured: 65537 bytes,
-  // reverting the loop reproduces exactly this) — the assertion below is
-  // false on that shape and true only once every retried write lands.
-  const expected = Buffer.concat([Buffer.from("\n"), Buffer.from(`\nprobe: ${msg}\n`)]);
+  // Guarded on the size of the write die() has to make, not on the bytes that
+  // arrived: a truncated delivery is itself about one buffer long, so a guard
+  // over the captured stderr would fire on a real defect and blame the
+  // fixture for it — the trap ci-state.test.mjs documents above its own
+  // stderr-completeness pin.
   assert.ok(
-    r.stderr.equals(expected),
-    `die() dropped bytes across a short write: got ${r.stderr.length}, expected ${expected.length}`,
+    expected.length > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer (${expected.length} bytes), so this test would pass without proving anything`,
+  );
+  const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
+  assert.ok(
+    firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
+    `fd 2 took all ${payloadBytes} bytes in one write, so nothing short-wrote and a collapsed loop would pass this test too (first write returned ${firstWriteBytes})`,
+  );
+  // Reverting the loop to one bare writeSync leaves die()'s own write stopped
+  // at its first short write (measured: one pipe buffer's worth arrived in
+  // place of the whole message), so this is false on that shape and true only
+  // once every retried write lands.
+  assert.ok(
+    r.stderr.subarray(1 + firstWriteBytes).equals(expected),
+    `die() dropped bytes across a short write: got ${r.stderr.length - 1 - firstWriteBytes}, expected ${expected.length}`,
+  );
+  assert.equal(
+    r.stderr.length,
+    1 + firstWriteBytes + expected.length,
+    `stderr must be the newline console.error printed, the filler that landed, then die()'s message and nothing else`,
   );
 });
 
