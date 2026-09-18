@@ -93,12 +93,15 @@ const prose = (s) => s.replace(/\s+/g, " ");
 // comment compares a fragment against "" and reports the fragment missing,
 // which names the wrong fault — the anchor is what moved.
 //
-// The above-run bound is `runAbove`, shared (#1604): three files had copied
-// that same regex, and the copy is what lets one of them lose a guard the
-// others keep. `runAbove` deliberately returns "" rather than throwing, so the
-// throw below — this file's own, naming the citation it is about — stays this
-// file's. The below-run has no second consumer anywhere, so it stays local
-// until one lands rather than being extracted on speculation.
+// The above-run bound is `runAbove`, shared (#1604) rather than a fourth
+// hand-rolled copy: three files had copied that same regex, and every
+// independent copy was its own chance to drift from the other two — the
+// generic copy-drift risk this extraction closes, not a specific guard any
+// one copy is known to have dropped in practice. `runAbove` deliberately
+// returns "" rather than throwing, so the throw below — this file's own,
+// naming the citation it is about — stays this file's. The below-run has no
+// second consumer anywhere, so it stays local until one lands rather than
+// being extracted on speculation.
 function commentAbove(text, anchor, what) {
   const run = runAbove(text, anchor, what, "//");
   assert.notEqual(run, "", `${what}: nothing but code sits above \`${anchor}\` — the comment block this citation names is gone, not merely reworded`);

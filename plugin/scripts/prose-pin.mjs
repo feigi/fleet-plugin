@@ -240,6 +240,7 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // (`review-pr-inbound-citation-prose.test.mjs`'s `commentBelow`) has one
 // consumer and so no duplicate to close.
 export function runAbove(text, anchor, what, marker) {
+  assert.ok(marker, `${what}: runAbove needs a non-empty marker — empty matches every line above the anchor instead of just the comment block`);
   const above = text.slice(0, anchorAt(text, anchor, what));
   const run = above.match(new RegExp(`(?:^|\\n)((?:[ \\t]*${escapeRe(marker)}[^\\n]*\\n)+)[ \\t]*$`));
   return run ? run[1] : "";

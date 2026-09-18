@@ -384,12 +384,23 @@ test("runAbove accepts an indented `#` run below an indented anchor", () => {
 
 // Empty, never a throw: `gp-sep-invariant-prose.test.mjs` slices at module load
 // and names the empty case in a test of its own, which an import-time throw
-// would pre-empt. Both shapes here return "" — plain code, and code carrying
-// the marker MID-LINE, which is the one that would quietly swallow a line and
-// a decoy in it if the gutter were matched anywhere but at a line's start.
+// would pre-empt. Three shapes here return "" — plain code, code carrying
+// the marker MID-LINE (which is the one that would quietly swallow a line and
+// a decoy in it if the gutter were matched anywhere but at a line's start),
+// and a comment block separated from the anchor by a blank line: the `$`
+// bound is `[ \t]*$`, not `\s*$`, so a blank line between the block and the
+// declaration is not adjacency and the block is not adopted.
 test('runAbove returns "" when nothing but code sits above the anchor', () => {
   assert.equal(runAbove("const other = 1;\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
   assert.equal(runAbove('// a decoy\nconst u = "http://x";\nconst TARGET = 2;\n', "const TARGET", "the fixture", "//"), "");
+  assert.equal(runAbove("// the doc block\n\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
+});
+
+// The other half of the run's start bound: `(?:^|\n)` also matches at the
+// absolute start of the sliced text, for a comment block with nothing above
+// it — not just mid-document, preceded by a newline.
+test("runAbove takes a comment block that starts at the beginning of the text", () => {
+  assert.equal(runAbove("// only comment\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "// only comment\n");
 });
 
 // The half `anchorAt` owns, asserted through this caller because a slicer that
@@ -401,13 +412,24 @@ test("runAbove throws when the anchor matches twice, rather than taking the comm
   );
 });
 
-// The marker is a LITERAL. Unescaped, the `*` of a `/* ... */` continuation
-// gutter — the next gutter shape this repo is likely to meet, per
-// `stripSlashGutter`'s own note — is a quantifier, and the run is then
-// whatever the engine makes of it rather than the block above the anchor.
+// The marker is a LITERAL. Unescaped, a `+` gutter is a quantifier with
+// nothing to repeat, and the RegExp constructor throws rather than handing
+// back the block above the anchor. This pins marker-escaping only —
+// `runAbove` has no `/* ... */` block-comment dialect; every live gutter in
+// this repo is `#` or `//`.
 test("runAbove escapes the marker, so a gutter carrying a regex metacharacter still matches literally", () => {
-  const src = "const other = 1;\n * the block\n * still it\nconst TARGET = 2;\n";
-  assert.equal(runAbove(src, "const TARGET", "the fixture", "*"), " * the block\n * still it\n");
+  const src = "const other = 1;\n+ the block\n+ still it\nconst TARGET = 2;\n";
+  assert.equal(runAbove(src, "const TARGET", "the fixture", "+"), "+ the block\n+ still it\n");
+});
+
+// An empty marker is not a narrower gutter — it is no gutter at all, and the
+// regex above would match every line above the anchor, comment or not. That
+// silent total widening is worse than a throw, so runAbove refuses it up front.
+test("runAbove throws on an empty marker, rather than silently matching every line above the anchor", () => {
+  assert.throws(
+    () => runAbove("some prose line\nanother arbitrary line\nconst TARGET = 2;\n", "const TARGET", "the fixture", ""),
+    /the fixture: runAbove needs a non-empty marker/,
+  );
 });
 
 // `quoteBlocks` and `quoteBlock` are the bound a whole-block golden fixture
