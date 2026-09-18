@@ -1665,9 +1665,9 @@ member, it has no row in **Failure handling**. Retry once; still failing →
 hand-dispatch the fallback reviewer below and record in the ledger which path ran.
 
 **Then dispatch a fix-applier** — one named member per PR, `fix-pr-<pr#>`, never
-the PR's implementer. Its prompt carries the PR number, the worktree abs path, the same `testCmd` you
-passed the workflow, and the returned `survived` / `unverified` findings
-verbatim, plus:
+the PR's implementer. Its prompt carries the PR number, the worktree abs path,
+the PR's branch, the same `testCmd` you passed the workflow, and the returned
+`survived` / `unverified` findings verbatim, plus:
 
 **Verbatim means every one, not the ones you rank.** On the workflow path you are
 the *only* copy a member can reach — `agent()` returned the findings into the
@@ -1782,9 +1782,20 @@ workflow args and `review-pr.js` now DERIVES it from the repo under review
 can't; the fix-applier has no such fallback, so substituting `<testCmd>` with
 nothing leaves it no gate at all.
 
-> You are ALREADY in worktree `<abs-path>`. Do NOT create another worktree. The
-> review is done and these findings are its output — do not re-review, do not
-> dispatch specialists.
+**Where `<branch>` comes from:** the PR's head branch —
+`gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
+the worktree from. Substitute it exactly as you substitute `<testCmd>`, because
+the member cannot read it off git: phase 1 creates an already-open PR's worktree
+with `--detach`, and there `git branch --show-current` prints nothing and exits 0
+(measured 2026-09-18, git 2.50.1), so `git push origin
+"HEAD:$(git branch --show-current)"` exits 128 on `fatal: invalid refspec
+'HEAD:'`. Left unsubstituted, the push that prompt ends on has no destination at
+all.
+
+> You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
+> push destination below, given to you because a detached worktree cannot supply
+> it. Do NOT create another worktree. The review is done and these findings are
+> its output — do not re-review, do not dispatch specialists.
 >
 > Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 > and 5 only**: split apply-now/defer, commit, push, file every deferral as its
@@ -1984,10 +1995,10 @@ nothing leaves it no gate at all.
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-> index, `git push` prints `Everything up-to-date`, and you report `no-op, HEAD
-> unchanged at <sha>` in place of a new SHA. Say it explicitly — silence there is
-> indistinguishable from a member that died. Never manufacture a commit to make
-> CI fire.
+> index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you
+> report `no-op, HEAD unchanged at <sha>` in place of a new SHA. Say it
+> explicitly — silence there is indistinguishable from a member that died. Never
+> manufacture a commit to make CI fire.
 
 **Put the standing CI facts in that prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per member per

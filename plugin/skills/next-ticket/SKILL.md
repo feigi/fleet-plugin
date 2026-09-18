@@ -97,6 +97,17 @@ Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
 
+**In a detached worktree, push by refspec.** `run-team`'s runbook re-creates an
+already-open PR's worktree with `git worktree add --detach <path> origin/<branch>`,
+and a member sent into one is on `## HEAD (no branch)`, where the push above exits
+1 — `error: The destination you provided is not a full refname`. The flag is not
+the cause, so no `-u`/force combination reaches it: the unqualified `HEAD`
+destination is, and plain `git push origin HEAD` fails the same way while a bare
+`git push` exits 128 (`fatal: You are not currently on a branch`). Name the branch
+instead — `git push --force-with-lease origin HEAD:<branch>` (measured 2026-09-18,
+git 2.50.1: exit 0). A worktree `claim-ticket.sh` claimed is on its branch, where
+the push above is the correct one.
+
 `--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits. On a re-push the force is load-bearing: stop and report the denial, never retry with a plain `--force`; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
 
 `Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.

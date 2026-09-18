@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section } from "./prose-pin.mjs";
+import { between as section, phrase, stripQuoteGutter } from "./prose-pin.mjs";
 // The board's real parser, imported rather than re-described: the doc example
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
@@ -489,6 +489,72 @@ test("the fix commit is gated on a test run, in both files", () => {
     "the fix-applier prompt no longer carries testCmd",
   );
   assert.match(prompt, /never `--no-verify`/i, "the fix-applier prompt no longer forbids --no-verify");
+});
+
+// #1133. The push form is that ticket's whole subject, and it is TWO texts that
+// have to agree: review-and-fix.md step 3 is the command the fix-applier runs,
+// run-team's prompt is the block the controller pastes, and either one reverted
+// to a bare `git push` hands a member in a detached worktree a command
+// that cannot push at all. Measured 2026-09-18 in a scratch clone (git 2.50.1,
+// `git worktree add --detach <path> origin/<branch>`, the runbook's own form):
+// a bare `git push` exits 128 `fatal: You are not currently on a branch`; every
+// push whose destination is `HEAD` exits 1 `not a full refname`, with `-u`,
+// without it, and forced; `git push origin HEAD:<branch>` exits 0 and on a
+// second run prints `Everything up-to-date`.
+//
+// Why this is not left to the golden fixture in
+// `dispatch-block-golden-prose.test.mjs`: that fixture mirrors the prompt's
+// bytes, so it reds when the prompt and the fixture DISAGREE and cannot red
+// when both are reverted together — which is what reverting this ticket does.
+// Nothing covered review-and-fix.md's copy at all. So the assertions here are
+// semantic, and they are what a revert has to get past.
+test("the fix commit pushes by refspec, in both files, to a branch the prompt binds", () => {
+  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
+  // The prompt's gutter is stripped before matching, never the command doc's:
+  // `phrase`'s `\s+` joins do not span a `>`, so every pinned span below would
+  // red on the prompt's wrap points rather than on its meaning — a false red on
+  // a pure reflow, which is how a pin gets deleted by the next editor.
+  // `review-and-fix.md` carries no gutter and needs no stripping.
+  const prompt = () => stripQuoteGutter(fixApplierPrompt());
+  // Per file, and each against its own narrow slice: a file-wide match is
+  // satisfied by the sibling copy of this command elsewhere in the same
+  // document, which is the failure mode every pin above is sliced against.
+  for (const [label, slice] of [["review-and-fix step 3", step3], ["the fix-applier prompt", prompt()]]) {
+    assert.match(
+      slice,
+      phrase("git push origin HEAD:<branch>"),
+      `${label} no longer names the refspec push — a bare push exits 128 in the detached worktree this path runs from, so the member is left with no command that works`,
+    );
+  }
+  // The CAUSE, not the flag. `git push origin HEAD` fails identically with no
+  // `-u` anywhere in it, so prose that blames the flag leaves the form a reader
+  // who half-remembers git's own hint reaches for unnamed, and reads as though
+  // dropping `-u` were the fix.
+  assert.match(
+    step3,
+    phrase("destination is `HEAD` rather than a full or branch refname"),
+    "review-and-fix step 3 blames a flag for the detached-push failure again — the cause is the unqualified `HEAD` destination, and every spelling of it fails the same way",
+  );
+  // The operand has to be BOUND in the block that spends it, or the member is
+  // handed a literal `<branch>` and nothing in the worktree can supply one:
+  // detached, `git branch --show-current` prints nothing and exits 0, so
+  // `git push origin "HEAD:$(git branch --show-current)"` exits 128 on
+  // `fatal: invalid refspec 'HEAD:'`. Same failure as `<testCmd>` reaching the
+  // member unsubstituted, and pinned the same way: once in the prompt that
+  // spends the operand, once in the lead-in that carries it.
+  assert.match(
+    prompt(),
+    phrase("whose PR branch is `<branch>`"),
+    "the fix-applier prompt no longer binds `<branch>` yet still pushes to it — the operand it spends is introduced nowhere in the block, and a detached worktree cannot supply one",
+  );
+  // Pinned to the carry list itself, not to a bare mention of the branch: the
+  // lead-in already names `the PR's implementer` two clauses earlier, so a
+  // looser phrase would be satisfied with the controller's duty deleted.
+  assert.match(
+    fixApplierLeadIn(),
+    phrase("the worktree abs path, the PR's branch"),
+    "the controller no longer carries the PR's branch into the fix-applier's prompt — `<branch>` reaches the member unsubstituted",
+  );
 });
 
 test("the fix-applier lead-in relays every finding, on a premise that is true", () => {
