@@ -51,7 +51,7 @@ test("usableDiff rejects a diff that would lie about the snapshot", () => {
     "0-byte diff — `gh pr diff` exits 1 and still leaves the file",
   );
   // The one guard where ABSENT and 0 mean the same thing, against the rule the
-  // prHead clause follows. Deliberate: the count is not a cross-check, it is the
+  // refHead clause follows. Deliberate: the count is not a cross-check, it is the
   // only thing that rules out that 0-byte file, so an unreported count leaves
   // "usable" a guess. Pinned because it reads like the inversion bug.
   assert.equal(
@@ -60,45 +60,79 @@ test("usableDiff rejects a diff that would lie about the snapshot", () => {
     "diffLines absent — no count means the 0-byte case cannot be ruled out",
   );
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, prHead: "bbb" }),
+    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "bbb" }),
     null,
-    "prHead present and unequal — the diff describes another commit",
+    "refHead present and unequal — the diff describes another commit",
   );
 });
 
-// The inversion this guard is most likely to get wrong. `gh pr view` can fail
-// while `gh pr diff` succeeded; dropping a good diff over a MISSING cross-check
-// lets absent input narrow coverage — the `=== true` guards in
-// `selectDimensions`, inverted.
-test("usableDiff accepts when prHead is absent or matching", () => {
+// #1513, the OPERAND. `prHead` is the PR object's `headRefOid`, which LAGS a ref
+// move: `gh pr update-branch --rebase` returns rc=0 and that field sits on the
+// pre-rebase sha for minutes (~2 min in one wave, ~84s in the next, measured in
+// `run-merge-bot.md`'s step 1). A snapshot cut from the rebased tree inside that
+// window matches the branch ref exactly and the old compare threw its diff away.
+// The ref answers "is this tree the PR's head"; `headRefOid` answers "has
+// GitHub's PR object caught up", which is a different question and not this one.
+test("usableDiff judges against the branch ref, not the lagging PR object", () => {
+  const rebased = "62ba798" + "0".repeat(33);
+  const stale = "c774756" + "0".repeat(33);
+  assert.equal(
+    usableDiff({ runRoot: ROOT, head: rebased, diffPath: "/s/pr.diff", diffLines: 40, refHead: rebased, prHead: stale }),
+    `${ROOT}/pr.diff`,
+    "a tree matching the branch ref lost its diff because the PR object had not caught up yet",
+  );
+  // The half that keeps the guard worth having, and the direction #1168
+  // measured: a worktree cut from a stale remote-tracking ref leaves BOTH the
+  // tree and the PR object on the superseded sha, so a `prHead` compare reads
+  // EQUAL and passes exactly the tree this guard exists to refuse.
+  assert.equal(
+    usableDiff({ runRoot: ROOT, head: stale, diffPath: "/s/pr.diff", diffLines: 40, refHead: rebased, prHead: stale }),
+    null,
+    "a tree matching only the lagging PR object is accepted — #1168's false pass, reintroduced here",
+  );
+});
+
+// The inversion this guard is most likely to get wrong. The `ls-remote` read can
+// fail on its own — and a fork PR has no `refs/heads/<branch>` on `origin` at
+// all — so dropping a good diff over a MISSING cross-check lets absent input
+// narrow coverage: the `=== true` guards in `selectDimensions`, inverted.
+test("usableDiff accepts when refHead is absent or matching", () => {
   assert.equal(
     usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }),
     `${ROOT}/pr.diff`,
-    "missing prHead must not suppress an otherwise good diff",
+    "missing refHead must not suppress an otherwise good diff",
   );
   assert.equal(
-    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, prHead: "aaa" }),
+    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "aaa" }),
     `${ROOT}/pr.diff`,
   );
-  // `prHead` is 40 chars from `gh`; `head` is whatever the snapshot agent
-  // relayed for "the HEAD sha", which an agent may abbreviate. Under a raw
+  // A present and MISMATCHING `prHead` must not disqualify either. It is not an
+  // operand any more, and re-admitting it as a second one — under any wording —
+  // is #1513 back.
+  assert.equal(
+    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "aaa", prHead: "zzz" }),
+    `${ROOT}/pr.diff`,
+    "the PR object's head is still being consulted — a lagging headRefOid costs the diff again",
+  );
+  // `refHead` is 40 chars from `git ls-remote`; `head` is whatever the snapshot
+  // agent relayed for "the HEAD sha", which an agent may abbreviate. Under a raw
   // `!==` these two matching shas compare unequal and the good diff is dropped.
   // Both directions, because either side can be the short one.
   const full = "a".repeat(40);
   assert.equal(
-    usableDiff({ runRoot: ROOT, head: full.slice(0, 7), diffPath: "/s/pr.diff", diffLines: 40, prHead: full }),
+    usableDiff({ runRoot: ROOT, head: full.slice(0, 7), diffPath: "/s/pr.diff", diffLines: 40, refHead: full }),
     `${ROOT}/pr.diff`,
-    "abbreviated head against the full prHead is the same commit, not a divergence",
+    "abbreviated head against the full refHead is the same commit, not a divergence",
   );
   assert.equal(
-    usableDiff({ runRoot: ROOT, head: full, diffPath: "/s/pr.diff", diffLines: 40, prHead: full.slice(0, 7) }),
+    usableDiff({ runRoot: ROOT, head: full, diffPath: "/s/pr.diff", diffLines: 40, refHead: full.slice(0, 7) }),
     `${ROOT}/pr.diff`,
     "and the same the other way round",
   );
   // The prefix tolerance must not swallow the case it exists beside: a genuinely
   // different sha still reds, at short length too.
   assert.equal(
-    usableDiff({ head: "abc1234", diffPath: "/s/pr.diff", diffLines: 40, prHead: "abd" + "9".repeat(37) }),
+    usableDiff({ head: "abc1234", diffPath: "/s/pr.diff", diffLines: 40, refHead: "abd" + "9".repeat(37) }),
     null,
     "a different sha stays disqualifying however short the compare",
   );
@@ -224,12 +258,20 @@ test("readRules does not claim closure over a list gh truncated", () => {
 // captured" is then false in the one way that matters — the specialist can find
 // the file and has been given no reason not to trust it.
 test("readRules names a rejected diff rather than denying a file that exists", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 500, prHead: "bbb", head: "aaa" });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 500, refHead: "bbb", head: "aaa" });
   assert.doesNotMatch(out, /No diff file was captured/, "the diff file exists — the redirect always creates it");
   assert.match(out, /REJECTED/);
   assert.match(out, /\/s\/pr\.diff/, "the rejected file is not named, so the specialist cannot know which one to skip");
   assert.match(out, /Do not read it/);
-  assert.match(out, /describes\s+commit\s+bbb/, "the rejection reason is not carried, only the rejection");
+  // `refHead`, not `prHead`: the rejection turned on the branch ref (#1513), so
+  // naming the PR object's head here would attribute the refusal to a value
+  // nothing compared — and would render `undefined` on the routine shape where
+  // `ls-remote` answered and `gh pr view` did not.
+  assert.match(
+    out,
+    /describes\s+the\s+PR's\s+branch\s+at\s+bbb/,
+    "the rejection reason is not carried, only the rejection",
+  );
   // And the file list inherits the defect the diff was rejected FOR: it comes
   // from `gh pr view <pr> --json files`, which describes that same rejected
   // commit. Dropping the diff for the wrong tree and then serving that tree's
@@ -317,7 +359,7 @@ test("every branch carries the bounding rule", () => {
 const slice = (from, to) => between(CODE, from, to, "review-pr.js");
 
 // The snapshot schema's `additionalProperties: false` REJECTS an undeclared
-// field, so a prompt that asks for these three while the schema omits them
+// field, so a prompt that asks for these four while the schema omits them
 // silently yields nothing. Both halves have to be pinned or the feature
 // disconnects in one token.
 test("the snapshot agent asks for the diff facts AND declares them in its schema", () => {
@@ -336,6 +378,22 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     /gh pr view \$\{pr\} --json headRefOid -q \.headRefOid/,
     "no PR head to cross-check against the snapshot's",
   );
+  // #1513: the read the caller actually compares the snapshot against. It sits
+  // BESIDE the `headRefOid` read above — that field is still reported, and its
+  // disagreement with this one is the PR-object desync a controller adjudicates
+  // — so the two commands are pinned separately, and each on its own command
+  // line rather than on a word ("ls-remote", "headRefName") the surrounding
+  // prose also carries.
+  assert.match(
+    snapshot,
+    /branch=\$\(gh pr view \$\{pr\} --json headRefName -q \.headRefName\)/,
+    "no branch-name read — `refs/heads/$branch` then names no ref and every refHead read comes back empty",
+  );
+  assert.match(
+    snapshot,
+    /git -C \$\{worktree\} ls-remote origin "refs\/heads\/\$branch" \| cut -f1/,
+    "no ref read — the head compare is back on the PR object's lagging headRefOid (#1513)",
+  );
   assert.match(snapshot, /wc -l < "?\$RUN"?\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
   // Scoped to the `properties` object, not the whole schema. Declaring a field
   // ANYWHERE else — beside `required`, in the options bag — leaves it undeclared
@@ -344,7 +402,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // `properties` in the source, so this end-anchor excludes it. (Dead text is
   // already handled globally by CODE.)
   const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
-  for (const field of ["diffPath", "diffLines", "prHead"]) {
+  for (const field of ["diffPath", "diffLines", "refHead", "prHead"]) {
     assert.match(
       props,
       new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
@@ -354,7 +412,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // Declared beside them, but not one of them: `pathVerified` and
   // `repoVerified` belong to `required`, not to the gh-failure set, so they are
   // pinned on their own rather than folded into the loop above — whose comment,
-  // and the one below, both read "these three". Only `required` membership was
+  // and the one below, both read "these four". Only `required` membership was
   // pinned when `pathVerified` was added (#140); `additionalProperties: false`
   // is what makes the DECLARATION mandatory too, for every field this schema
   // carries. `repoError` is optional by design — a verified snapshot has
@@ -381,7 +439,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
   // Measured: deleting this paragraph outright left this file at 12 pass, 0
   // fail. The commands still run, the schema still accepts the fields, and
-  // nothing tells the agent to report any of them, so all three come back
+  // nothing tells the agent to report any of them, so all four come back
   // omitted, `usableDiff` returns null on every run forever, and the feature
   // degrades to branch 2 under a green suite. `\s+` spans the line wraps so a
   // reflow of the same sentences stays green; the words are what is pinned.
@@ -400,6 +458,18 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       // back to a path two reviews in one session share.
       `Report\\s+${B}diffPath${B}\\s+=\\s+the\\s+SNAPSHOT_RUN_ROOT\\s+value\\s+with\\s+'/pr\\.diff'\\s+appended,\\s+ONLY\\s+if\\s+'gh pr diff'\\s+exited\\s+0`,
       "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
+    ],
+    [
+      `${B}refHead${B}\\s+=\\s+the\\s+sha\\s+the\\s+'ls-remote'\\s+line\\s+printed`,
+      "refHead's value is not bound to the ls-remote read — the command runs and nothing tells the agent to report what it printed (#1513)",
+    ],
+    [
+      // An empty string reported as `refHead` is FALSY, so the compare skips on
+      // it exactly as it does on an absent field — but the run log's `??` does
+      // not catch it, so the skip prints as a blank instead of naming itself.
+      // A failed or fork-PR ref read has to come back as no field at all.
+      `Omit\\s+${B}refHead${B}\\s+when\\s+'ls-remote'\\s+exited\\s+non-zero\\s+or\\s+printed\\s+nothing`,
+      "a failed or empty ref read is not told to omit the field — the head check then skips without saying so",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
     [`${B}diffLines${B}\\s+=\\s+the\\s+wc\\s+-l\\s+count`, "diffLines' value is not bound to the wc -l count"],
@@ -528,7 +598,7 @@ test("the declared-exactly-once guard accepts the benign repeats of a name", () 
 test("the no-diff log reports the raw fields, not a guard it did not measure", () => {
   const m = CODE.match(/^log\(\n\s*usable[\s\S]*?^\);$/m);
   assert.ok(m, "the diff-decision log line is gone — `usableDiff` returning null forever is then invisible");
-  for (const field of ["diffPath", "diffLines", "prHead"]) {
+  for (const field of ["diffPath", "diffLines", "refHead", "prHead"]) {
     assert.match(
       m[0],
       new RegExp(`${field}=\\$\\{snap\\.${field}`),
