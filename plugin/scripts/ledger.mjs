@@ -73,9 +73,15 @@ function cause(...candidates) {
 // p50 11-15 ms and max 24.7 ms, so this is ~400x the worst latency observed
 // under load. Generous on purpose, because a probe killed while HEALTHY does
 // not fail loudly here — defaultLedgerPath() degrades to a cwd-relative
-// ledger, which is the #155 worktree fail-open, and only warns. It also stays
-// under the `gh` bound beside it, so the tracker query remains the dominant
-// term in `check`'s worst case and that contract does not move.
+// ledger and only warns (a pre-existing fallback #155 leaves alone, not
+// something it introduces). It also stays under the `gh` bound beside it —
+// though "dominant" overstates that relationship: a normal invocation
+// without `--file` pays this same budget TWICE in sequence, once here and
+// once more in repoCheck() below, before ever reaching `gh` at all. At
+// default settings that TIES `gh`'s own 20 s bound when both probes stall,
+// and can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when only one stalls and
+// `gh` still runs (measured). `check`'s worst case is the sum of whichever
+// of the three children actually stall, not a single fixed term.
 //
 // `LEDGER_GIT_TIMEOUT` is this script's OWN override, in seconds, and it can
 // only ever SHORTEN. The rule and the reasons for it are net_budget's, in
@@ -89,7 +95,7 @@ function cause(...candidates) {
 // integer overflow that has no counterpart here, and the `<` below already
 // rejects every value that clause would have.
 function gitBudget(defaultSeconds, override) {
-  const seconds = isDigits(String(override ?? "")) ? Number(override) : 0;
+  const seconds = isDigits(String(override)) ? Number(override) : 0;
   return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
 }
 const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
@@ -105,8 +111,13 @@ function defaultLedgerPath() {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
     // member reads a cwd-local ledger, not the run's), so say so rather than
-    // degrading the duplicate-filing guard in silence.
-    console.error(`${NAME}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
+    // degrading the duplicate-filing guard in silence. Since #1199 this probe
+    // is bounded too, and an ETIMEDOUT stall prints byte-identical stderr to
+    // an instant "not a repository" failure without naming which — the
+    // sibling probe in runCheck() already names it via cause(); match that
+    // shape here rather than leaving this one generic.
+    const why = cause(r.error && r.error.message, r.stderr);
+    console.error(`${NAME}: WARNING could not resolve --git-common-dir${why ? `: ${why}` : ""}; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
     return ".fleet/ledger.md";
   }
   return join(dirname(resolve(r.stdout.trim())), ".fleet", "ledger.md");
