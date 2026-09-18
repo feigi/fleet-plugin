@@ -1984,10 +1984,10 @@ nothing leaves it no gate at all.
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers, and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-> index, `git push` prints `Everything up-to-date`, and you report `no-op, HEAD
-> unchanged at <sha>` in place of a new SHA. Say it explicitly — silence there is
-> indistinguishable from a member that died. Never manufacture a commit to make
-> CI fire.
+> index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you
+> report `no-op, HEAD unchanged at <sha>` in place of a new SHA. Say it
+> explicitly — silence there is indistinguishable from a member that died. Never
+> manufacture a commit to make CI fire.
 
 **Put the standing CI facts in that prompt, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per member per
