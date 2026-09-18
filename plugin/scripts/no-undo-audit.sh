@@ -98,7 +98,38 @@ unset GIT_DIR GIT_WORK_TREE
 NAME=no-undo-audit
 # `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
 # caller-supplied path, and this is the one place they all route through.
-die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
+#
+# `|| :` on the WRITE, not around the call: `die`'s whole job is to reach
+# exit 2, and `set -e` reads the printf's status before `exit` is ever
+# reached. With fd 2 closed that status is 1 — REFUSED on this script — so
+# every unanswerable question blamed the worktree instead of saying it could
+# not be answered (#1514, measured: a path that is not a worktree, `2>&-`,
+# exit 1 where the contract says 2).
+die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
+
+# THE RULE FOR EVERY STDERR WRITE IN THIS SCRIPT, and why each one below ends
+# in `|| :`. Exit 0 is safe, 1 is refused, 2 is unanswerable, and a caller
+# branches on which. A diagnostic answers nothing — it shows a human what the
+# run already determined — so its write must not reach `set -e`, which ends
+# the script on that write's own status. Both `printf` and `echo` exit 1 on a
+# failed write, and 1 out of here is the dirty-worktree refusal: with fd 2
+# closed, a clean tree came back "commit the worktree before rebasing", from
+# the one tool whose job is to say whether a rebase would eat a commit.
+# Measured before the fix — clean tree, stdout open, `2>&-`: exit 1 (#1514).
+#
+# `|| :` is the third piece of `render`'s guard below, used here on its own.
+# These sites have nothing to fall back TO: the line that could not be written
+# IS the message, so there is no second, shorter thing to say about it.
+# `render` needs its extra piece because a dropped LIST reads as an empty one
+# — a finding silently downgraded — while a dropped single line reads as
+# nothing at all, and the payload on stdout still carries every finding.
+#
+# The guard goes on the write itself, never on the surrounding statement: most
+# of these sit in `if`/`elif` chains or in a function whose later lines must
+# still run. It covers a write that FAILS, which is what a closed or full fd 2
+# produces. It does not cover a signal: a stderr that is a broken pipe kills
+# the process before any `||` is consulted, which is #1571 and needs a trap,
+# not a guard.
 
 # Every operator-facing render that pipes a captured value through an external
 # tool goes through here — bar the stash-diagnostic fold below, which folds
@@ -410,7 +441,7 @@ git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
 # replays over may exist nowhere else. The trace line below echoes the
 # command as RUN, flag included, so a reader reproducing it by hand does not
 # reproduce the unsound form.
-printf '$ git -C %s status --porcelain -uall\n' "$wt" >&2
+printf '$ git -C %s status --porcelain -uall\n' "$wt" >&2 || :
 porcelain=$(git -C "$wt" status --porcelain -uall) \
   || die "git status failed in $wt — cannot tell a clean worktree from a dirty one"
 if [ -n "$porcelain" ]; then
@@ -418,7 +449,7 @@ if [ -n "$porcelain" ]; then
   render '    ' "$porcelain" "the uncommitted-work list"
 else
   clean=true
-  echo "    clean" >&2
+  echo "    clean" >&2 || :
 fi
 
 # Repo-global across worktrees, and a rebase never consumes a pre-existing entry
@@ -652,7 +683,7 @@ if [ -n "$msg" ]; then
       || flat="(git said more, and folding it onto this line failed)"
     msg="$msg — $flat"
   fi
-  printf '%s\n' "$msg" >&2
+  printf '%s\n' "$msg" >&2 || :
 elif [ "$stash_reflog_rc" -ne 0 ]; then
   stash=null
   # Its own sentence, and asked BEFORE the `-s` test the resolved path feeds:
@@ -662,7 +693,7 @@ elif [ "$stash_reflog_rc" -ne 0 ]; then
   # what the reflog CONTAINS — "still names entries no ref points at" — and
   # that is a claim about a file this state has not read; one sentence spanning
   # both states is the conflation the header rule forbids.
-  echo "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read" >&2
+  echo "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read" >&2 || :
 elif [ -s "$stash_reflog" ]; then
   stash=null
   # Its own sentence, not the one above: there `refs/stash` is present and
@@ -670,9 +701,9 @@ elif [ -s "$stash_reflog" ]; then
   # would tell the operator "refs/stash is not absent" about the one state
   # whose whole shape is that it IS — then send them to `ls -l` on a file that
   # no longer exists. No `$diag`: git is silent here, empty list at rc 0.
-  echo "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at" >&2
+  echo "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at" >&2 || :
 else
-  echo "    stash entries (repo-global, not gated): $stash" >&2
+  echo "    stash entries (repo-global, not gated): $stash" >&2 || :
 fi
 
 # 2. Which files would conflict.
@@ -709,7 +740,7 @@ trap 'rm -f "$mt_out" "$ps_out"' EXIT
 # `mktemp` rather than a name derived from `$mt_out`, so a shared TMPDIR offers
 # no predictable name to plant a symlink on.
 ps_out=$(mktemp) || die "cannot create a temporary file"
-echo "\$ git merge-tree --write-tree --name-only -z $base_rev origin/$branch" >&2
+echo "\$ git merge-tree --write-tree --name-only -z $base_rev origin/$branch" >&2 || :
 mt_rc=0
 git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "origin/$branch" >"$mt_out" || mt_rc=$?
 [ "$mt_rc" -le 1 ] && [ -s "$mt_out" ] \
@@ -779,7 +810,7 @@ esac
 if [ -n "$conflicts" ]; then
   render '    conflict: ' "$conflicts" "the conflicting-path list"
 else
-  echo "    no conflicting files" >&2
+  echo "    no conflicting files" >&2 || :
 fi
 # `jarr`/`jarr_rewritten` return non-zero when a stage fails (#119), and a bare
 # `var=$(pipeline)` under `set -eu` would abort with the failing tool's own
@@ -797,7 +828,7 @@ at_risk=""
 if [ -n "$conflicts" ]; then
   fork=$(git -C "$wt" merge-base "$base_rev" "origin/$branch") \
     || die "git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat"
-  echo "\$ git log --oneline $fork..$base_rev -- <conflicting files>" >&2
+  echo "\$ git log --oneline $fork..$base_rev -- <conflicting files>" >&2 || :
   # One pathspec per argument. Word-splitting `$conflicts` turned a path with a
   # space into two pathspecs that match nothing, and `git log` spends exit 0 on
   # a pathspec that matches nothing — so `2>/dev/null || true` was not even what
@@ -861,8 +892,8 @@ if [ "$clean" = true ]; then
   rc=0
 else
   rc=1
-  echo "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`," >&2
-  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start." >&2
+  echo "$NAME: REFUSED — commit the worktree before rebasing. Never \`git clean\`," >&2 || :
+  echo "  \`git checkout .\`, \`git reset --hard\` or \`git stash\` to make a rebase start." >&2 || :
 fi
 
 # `$wt` is a filename, so it admits both `"` and `\`; git accepts `"` in a ref
@@ -924,7 +955,7 @@ add_field() {
     ev=null
     rw=null
     printf '%s: could not render the %s for %s as JSON (%s) — reported as null\n' \
-      "$NAME" "$1" "$branch" "$why" >&2
+      "$NAME" "$1" "$branch" "$why" >&2 || :
   fi
   fields="${fields}\"$1\":$ev,\"$1Rewritten\":$rw,"
 }
