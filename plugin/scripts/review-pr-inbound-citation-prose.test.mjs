@@ -53,12 +53,14 @@
 // the surrounding claim is TRUE — that the item is still open, that the rule is
 // still retired — and it cannot: those are judgements about the source, and the
 // spec bullet above was wrong about one of them for months while its line number
-// was merely stale. It also covers the three documents named below and no
-// others; a fourth document citing review-pr.js by line is not caught here,
-// and neither are the citations the 2026-08-06 spec keeps into OTHER files
-// (`run-team/SKILL.md:287`, `diff-stats.mjs:76-82`, `review-and-fix.md:7`, and
-// the bare `:NNN` self-references in its own Edits changelist) — #1188 scoped
-// itself to `review-pr.js:NNN` and left that sibling class to a follow-up.
+// was merely stale. It also covers only the documents named below; another
+// document citing review-pr.js by line is not caught here, and neither is any
+// `<file>:NNN` citation the 2026-08-06 spec keeps into a file OTHER than
+// review-pr.js, nor the bare `:NNN` self-references in its own Edits
+// changelist — #1188 scoped itself to `review-pr.js:NNN` and left that sibling
+// class to a follow-up. Named as a class and not by its members on purpose: an
+// enumeration here reads as the whole of what is uncovered, and the document
+// gaining one sibling citation is enough to make it a lie.
 //
 // This file names every source by path and globs nothing, so its own text is not
 // in the corpus and cannot satisfy the pins it carries.
@@ -211,10 +213,24 @@ for (const { label, doc, docSlice, quote, target, names, block, fragment } of SI
 // carried NINE bare `review-pr.js:NNN` refs. Read against the current tree —
 // which is how that document's citations actually get read, whatever its front
 // matter says about resolving them at `8a84402` — eight landed on unrelated
-// code (`DEFAULT_DIMENSIONS` `agentType` entries, `test_run`'s description,
+// code (`DEFAULT_DIMENSIONS` `agentType` entries, `evidence`'s description,
 // `readRules` comments) while `:31` was still accurate, so nothing could be
 // batch-shifted either. All nine are quoted-fragment anchors now, and the ban
 // above covers that document too.
+//
+// The set below is NOT only those nine. Two review-pr.js citations in the same
+// document never carried a line number, so #1188's `:NNN` sweep never reached
+// them: the "is a FAILED run, not a pass" rule, and the comment above the
+// `DEFAULT_DIMENSIONS` declaration. Being content-anchored already is not being
+// checked — a phrase reworded out of the source is #1130's second failure, and
+// it reads as verified right up until someone greps it — so both are pinned
+// here too, or exactly the rot this file exists to stop stays reachable,
+// silently, in the document it was extended to cover. A row below holds the
+// source half of each — the fragment, occurring exactly once in review-pr.js —
+// and the citing half is held apart from it, because what the document spells
+// is not the fragment: one of them names a comment and quotes nothing out of
+// it, and the other's fragment is a rule the document also restates in its own
+// voice.
 //
 // The ban alone stays green on an anchor that resolves to NOTHING, and that is
 // a measured failure rather than a hypothetical: 4323514 fixed a parenthetical
@@ -246,6 +262,7 @@ const SPEC_0806_ANCHORS = [
   "const verifiers = A.verifiers",
   "never fall back to a guess",
   "function resolveTestCmd(explicit, snap)",
+  "is a FAILED run, not a pass",
   "Unknown, unparseable, or empty diff → the full set",
   "function resolveDimensions(override, all)",
   "const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS)",
@@ -258,7 +275,7 @@ test("the 2026-08-06 spec's review-pr.js anchors resolve, uniquely and unwrapped
   for (const fragment of SPEC_0806_ANCHORS) {
     assert.ok(
       prose(doc).includes(fragment),
-      `${SPEC_0806} no longer quotes ${JSON.stringify(fragment)}, one of the anchors #1188 gave its review-pr.js citations. A citation reworded out of its fragment has no resolvable half left, so re-anchor both sides together — or drop this row if the citation itself is gone.`,
+      `${SPEC_0806} no longer quotes ${JSON.stringify(fragment)}, one of the anchors its review-pr.js citations resolve through. A citation reworded out of its fragment has no resolvable half left, so re-anchor both sides together — or drop this row if the citation itself is gone.`,
     );
     assert.ok(
       lines.some((l) => l.includes(fragment)),
@@ -268,9 +285,46 @@ test("the 2026-08-06 spec's review-pr.js anchors resolve, uniquely and unwrapped
     assert.equal(
       hits,
       1,
-      `${SOURCE}: ${JSON.stringify(fragment)} occurs ${hits} times, not once. ${SPEC_0806} quotes it as the anchor for one of the citations #1188 re-anchored, so that citation now resolves to ${hits === 0 ? "nothing — the source was reworded and the recorded quote stopped matching, #1130's own failure" : "more than one place, which is a coin flip and not a locator"}. Update the document's quotation in the same commit as the source.`,
+      `${SOURCE}: ${JSON.stringify(fragment)} occurs ${hits} times, not once. ${SPEC_0806} quotes it as the anchor for one of its review-pr.js citations, so that citation now resolves to ${hits === 0 ? "nothing — the source was reworded and the recorded quote stopped matching, #1130's own failure" : "more than one place, which is a coin flip and not a locator"}. Update the document's quotation in the same commit as the source.`,
     );
   }
+});
+
+// The citing half of those two. A row above is satisfied by its fragment
+// WHEREVER the document carries it, and this document carries the FAILED-run
+// rule twice — once as the citation into review-pr.js, once restated in its own
+// voice on the next line. Measured: with only the row, rewording the CITATION
+// left this file green on the restatement, which is the original defect back
+// with a pin sitting over it. So the row holds the source half and this holds
+// the citing half — the form the document spells the citation in, which must
+// occur exactly once: zero means it was reworded away, and more than one means
+// a pin here binds whichever copy comes first while the other rots.
+//
+// `DEFAULT_DIMENSIONS`'s citation gets no row at all, because it names a
+// comment without quoting a phrase out of it and the fragment half does not
+// exist. What it resolves through is the declaration and the comment above it,
+// and `commentAbove` asserts both: `anchorAt` refuses a declaration occurring
+// other than exactly once, and an empty `//` run fails rather than returning a
+// slice every fragment "matches". Whether that comment still carries the rule
+// the spec says it carries is THE CEILING above, not this.
+const SPEC_0806_CITATIONS = [
+  `the "is a FAILED run, not a pass" rule`,
+  "`review-pr.js`'s comment above `DEFAULT_DIMENSIONS`",
+];
+
+test("the 2026-08-06 spec still spells the citations its pre-#1188 anchors hang on", () => {
+  const doc = prose(readRoot(SPEC_0806));
+  for (const citation of SPEC_0806_CITATIONS) {
+    const hits = doc.split(citation).length - 1;
+    assert.equal(
+      hits,
+      1,
+      `${SPEC_0806}: the citation ${JSON.stringify(citation)} occurs ${hits} times, not once. ${hits === 0 ? "It was reworded out of the form its anchor hangs on, and the anchor above can stay green on a copy of that fragment the document carries elsewhere — so re-anchor both sides together, or drop this row along with the citation if it is gone" : "A pin here would bind whichever copy comes first and leave the other free to rot, which is the coin flip the per-anchor uniqueness rule exists to refuse"}.`,
+    );
+  }
+  // Asserts both halves and throws on either. The returned comment text is not
+  // compared against anything, because the document quotes none of it.
+  commentAbove(readPlugin(SOURCE), "const DEFAULT_DIMENSIONS = [", SOURCE);
 });
 
 // The mode the ban is meant to see, fed to it verbatim. Row 1 is the exact
