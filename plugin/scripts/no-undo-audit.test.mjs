@@ -2303,6 +2303,80 @@ test("a payload that cannot be written is unanswerable (2), never a refusal (1)"
     `the write failure must name itself on stderr; got ${JSON.stringify(r.stderr)}`);
 });
 
+// --- #1514: the same question asked of the OTHER stream, and the direction
+// that is strictly worse. A caller whose stdout is gone gets no payload and
+// an honest 2, above. A caller whose stderr was gone got a complete payload
+// saying `"clean":true` AND an exit 1 stacked on top of it — REFUSED, from
+// the one tool whose job is to say whether a rebase would eat a commit, about
+// a tree that had already been measured safe on the same run.
+//
+// The cause was the whole class, not one site: `set -e` reads a failed
+// `echo`'s status, 1 out of this script is the dirty-worktree refusal, and
+// every bare `>&2` diagnostic outside `render()` was an unguarded command.
+// The run died on the FIRST of them — the status-command header, before git
+// had been asked anything — so the verdict was fabricated by a stream that
+// answers no part of the question. Measured on this exact fixture before the
+// fix: exit 1.
+test("a diagnostic stream that cannot be written is never a refusal (#1514)", (t) => {
+  const c = repo(t);
+
+  // node cannot hand a child a closed fd 2 either, so sh closes it after the
+  // fork — the same shape the closed-stdout test above uses on fd 1.
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0, `got ${r.status}; 1 would claim a clean worktree is dirty on the strength of a stream that measured nothing`);
+  // Losing the diagnostics is not losing the answer: the payload is the
+  // audit's actual output and it is unaffected by fd 2. Without this the
+  // status assertion above would also pass on a script that exited 0 early.
+  assert.equal(JSON.parse(r.stdout).clean, true,
+    `the verdict must still be delivered in full; got ${JSON.stringify(r.stdout)}`);
+});
+
+// The other half of the pair, and the one that keeps the fix from being a
+// blanket `exit 0`: `|| :` must swallow the WRITE, never the verdict. This
+// tree really is dirty, the answer really is 1, and it has to survive having
+// nowhere to print the refusal — the two-line REFUSED message is itself two
+// of the newly guarded sites, and they sit after `rc=1` is already set.
+test("a genuinely refused worktree still refuses (1) with stderr closed (#1514)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 1, `uncommitted work must still refuse with no stderr to say so on; got ${r.status}`);
+  assert.equal(JSON.parse(r.stdout).clean, false,
+    `and the refusal must still carry the payload that justifies it; got ${JSON.stringify(r.stdout)}`);
+});
+
+// `die` is the third outcome and was the worst of the three: its whole body
+// is a write to fd 2 followed by `exit 2`, and `set -e` took the write's
+// status before the `exit` was ever reached. So every unanswerable question —
+// 30-odd `|| die` sites — came back 1 with stderr closed, telling an operator
+// to commit a worktree the run had never managed to look at. Exit 2's own
+// rule still holds here: no payload, because a payload is an answer.
+test("an unanswerable question with stderr closed exits 2, never 1 (#1514)", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-notarepo`;
+  mkdirSync(notARepo);
+
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, notARepo, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 2, `a non-worktree is unanswerable however unwritable stderr is; got ${r.status}`);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload — a payload is an answer");
+});
+
 test("a modified tracked file refuses, like an untracked one", (t) => {
   const c = repo(t);
   writeFileSync(join(c.w, "f.txt"), "edited in place, committed nowhere\n");
@@ -2614,9 +2688,13 @@ const SITES_PER_MESSAGE = new Map([["cannot create a temporary file", 2]]);
  */
 function dieSites() {
   const src = readFileSync(SCRIPT, "utf8");
+  // Re-derived for #1514, which added `|| :` to the write. The premise this
+  // anchor protects — that `die` reaches `exit 2` — is what the guard now
+  // makes true: before it, `set -e` took the printf's own status and an
+  // unwritable stderr turned every cause counted below into an exit 1.
   assert.match(
     src,
-    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2; exit 2; \}$/m,
+    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2 \|\| :; exit 2; \}$/m,
     "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
   );
   const sites = src
@@ -3021,14 +3099,26 @@ test("a porcelain render that cannot reach stderr still refuses WITH its payload
 
 // render()'s trailing `|| :` is what stands between an aborted audit and a
 // caller whose stderr is completely gone — both the primary write AND its own
-// one-line fallback disclaimer fail. Extracted by function name rather than
-// duplicated, so this measures render() itself and not a copy that could
-// drift from it. Exercised standalone, not through the full script: every
-// OTHER bare `>&2` write in no-undo-audit.sh (the plain diagnostic echoes
-// beside each render, e.g. the status-command header and the `clean`/
-// `stash entries` lines) is unguarded too, and a closed fd 2 applied to the
-// whole process aborts on the first of those — a real, pre-existing gap, but
-// outside render()'s own contract and outside this PR's three findings.
+// one-line fallback disclaimer fail, so the guard's third piece is the only
+// one left to catch it. The two cases above reach that state through a `sed`
+// shim on PATH; this one reaches it the way a real caller does, by closing
+// fd 2 on the whole process.
+//
+// That end-to-end shape was unreachable until #1514, and this test used to
+// extract `render()` by name and run it standalone for exactly that reason:
+// every OTHER bare `>&2` write in the script was unguarded too, so a closed
+// fd 2 aborted the run on the first of them — the status-command header,
+// before git had been asked anything — and #1160's guard was dead code to
+// any test that closed fd 2 for real. The standalone extraction went with
+// the gap it existed to work around: this run drives the same three-piece
+// guard through the same function, twice, inside the script that owns it.
+//
+// The PAYLOAD is the proof it got there, and it has to be, because a run
+// with no stderr has no other way to report. `conflicts[]` and `atRisk[]`
+// are rendered by two separate `render()` calls and then carried to stdout,
+// so a non-empty pair says both renders failed, neither decided anything,
+// and the run continued past each — an exit 0 alone would also be produced
+// by a script that bailed out early with an empty payload.
 //
 // Neither of the stronger signals finding 2 raised fits this script without
 // breaking an invariant already established and tested elsewhere: `exec`-ing
@@ -3039,20 +3129,102 @@ test("a porcelain render that cannot reach stderr still refuses WITH its payload
 // says a render "answers nothing and so must reach no exit at all". Pinning
 // the accepted tradeoff (the JSON payload already carries what every render
 // only duplicates onto stderr) rather than changing it.
-test("a render whose fallback disclaimer ALSO cannot reach stderr still returns cleanly", (t) => {
-  const renderSrc = readFileSync(SCRIPT, "utf8").match(/^render\(\) \{[\s\S]*?\n\}\n/m)?.[0];
-  assert.ok(renderSrc, "no-undo-audit.sh must still define render() for this test to extract it");
+test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #1514)", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
 
-  const r = spawnSync("sh", ["-c", `
-    set -eu
-    NAME=no-undo-audit
-    ${renderSrc}
-    render '    ' 'a line no caller will ever see' 'the thing' 2>&-
-  `], { encoding: "utf8" });
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
 
   assert.equal(r.status, 0,
-    `both the primary write and its own fallback disclaimer failing must not reach the caller's exit status; got ${r.status} ${r.stderr}`);
-  assert.equal(r.stdout, "", "render writes only to stderr; a closed fd 2 must not leak anything onto stdout instead");
+    `the worktree is clean and was measured clean — 1 is a render deciding the verdict and 2 is a question this run could answer; got ${r.status}`);
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.conflicts, ["boom-conflict.txt"],
+    "the conflicting-path render sits between the status header and this field — an empty list means the run never got past it");
+  assert.deepEqual(json.atRisk.map((l) => l.replace(/^\S+ /, "")), ["MAIN COMMIT AT RISK"],
+    "and the at-risk render is downstream of the first, so this is what says the run continued past a second failed one");
+});
+
+// The sweep, and the only thing that keeps it swept. Every test above walks
+// ONE path: a clean tree, a dirty tree, a conflicted tree, a non-worktree.
+// The stash chain alone has four branches, `die` has thirty-odd call sites,
+// and no realistic fixture set visits all of them — so a future write that
+// bypasses `die`/`render`/`emit` and reaches fd 2 bare on a branch nothing
+// exercises reintroduces the whole bug silently, and no fixture would catch
+// it either.
+//
+// Only `render()`'s write carried failure protection before this PR (#1514).
+// #1160 guarded the FOLD that assembles the stash-diagnostic line against a
+// corrupting `tr`/`sed` exit status — a different hazard — and left every
+// stderr WRITE, `die`'s included, free to abort the run on a closed fd 2.
+// #1514 (this PR) is what guards those, and centralizes them behind `die`,
+// `render`, and the new `emit` so there is one function body to check per
+// guard, not a dozen call sites to keep in sync.
+//
+// The rule is structural, so it is asserted structurally rather than
+// sampled: a diagnostic decides nothing, so every statement that writes to
+// fd 2 must end its `||` chain in the no-op. `render()`'s spans three lines
+// and ends in `|| :` on the last, so continuations are joined before the
+// check; `die`'s and `emit`'s each carry more (`; exit 2; }`, `; }`) after
+// the guard, on the SAME joined line, separated by `;` rather than `||` —
+// so a line is split on top-level `;` first and each resulting statement's
+// own tail is checked, not just the line's last `>&2`. Quote-aware: a `;`
+// inside a quoted argument (render's own fallback message carries one) is
+// not a statement separator. Unaware of that, a line carrying two
+// independent `>&2`-writing statements — `echo "a" >&2; echo "b" >&2 || :`
+// — would report the whole line compliant off the LAST write's guard alone,
+// leaving the first invisible.
+function splitTopLevelStatements(line) {
+  const segments = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      cur += ch;
+      if (ch === "\\" && quote === '"' && i + 1 < line.length) {
+        i += 1;
+        cur += line[i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+    } else if (ch === ";") {
+      segments.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  segments.push(cur);
+  return segments;
+}
+
+test("no stderr write in the script can abort the run under errexit (#1514)", () => {
+  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
+  const writes = joined
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap(splitTopLevelStatements)
+    .filter((s) => s.includes(">&2"));
+
+  // Without this the filter could silently match nothing — a regex typo, a
+  // rename — and the assertion below would pass on an empty list, which is
+  // the shape a false green takes here. The count is exact, not a floor:
+  // `die`, `render`, and `emit` are the only three places in the script
+  // allowed to touch fd 2 directly, so it can only ever be 3 — any other
+  // number means a bare write appeared outside all of them, or one vanished.
+  assert.equal(writes.length, 3,
+    `die, render, and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
+
+  const unguarded = writes.filter((s) => !/^\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
+  assert.deepEqual(unguarded.map((s) => s.trim()), [],
+    "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :`");
 });
 
 /**
