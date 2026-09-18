@@ -568,13 +568,15 @@ const PIPE_BUFFER_BYTES = 65536;
 // the single element instead.
 const ARG_STRLEN_MAX = 131_072;
 
-// Past any pipe capacity a kernel hands an unprivileged process: Linux's
-// fs.pipe-max-size defaults to 1 MiB and caps what F_SETPIPE_SZ will grant,
-// so a non-blocking pipe CANNOT swallow a write this size whole. That is what
-// makes it a discriminator rather than merely a bigger fixture — on a
-// platform where even this completes in one call, the fd is BLOCKING, not
-// roomy, and verdict()'s retry loop is unreachable there by any fixture size.
-const BLOCKING_PROBE_BYTES = 2 * 1024 * 1024;
+// The probe that reveals how much fd 1 will take in ONE call, asked large
+// enough that the answer is the ceiling rather than the request: past any
+// pipe capacity a kernel hands an unprivileged process (Linux's
+// fs.pipe-max-size defaults to 1 MiB and caps what F_SETPIPE_SZ grants) and
+// an order of magnitude past the largest single transfer this repo has
+// measured on a draining reader. A platform that takes even this whole has a
+// ceiling far above anything an argv item could reach, which the disposition
+// below treats the same as a blocking fd — neither is reachable by resizing.
+const CEILING_PROBE_BYTES = 2 * 1024 * 1024;
 
 // ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
 //
@@ -606,28 +608,47 @@ const BLOCKING_PROBE_BYTES = 2 * 1024 * 1024;
 // because overshooting the upper end does not fail as a short-write bug —
 // the spawn never happens at all.
 //
-// Neither the fixture's size nor fd 1's non-blocking state shows up in the
-// delivered bytes, so neither is assumed. The size is asserted outright.
-// The fd state is MEASURED and reported by the wrapper, because it is not
-// portable: fd 1 short-writes on darwin and, measured across two CI runs,
-// does not on Linux, where one call takes the whole payload — while the same
-// move on fd 2 in die()'s companion fixture short-writes on both. So the
-// wrapper forces the flag rather than inferring it from console.log's side
-// effect, then reports what its own writes actually did, and the disposition
-// at the end of the test says how much that bought:
+// Neither the fixture's size nor what fd 1 does with a large write shows up
+// in the delivered bytes, so neither is assumed. The size is asserted
+// outright. The write behaviour is MEASURED and reported by the wrapper,
+// because the premise "a payload past one pipe buffer short-writes" is FALSE
+// on Linux and only holds on darwin.
 //
-//   - first write SHORT      -> the loop resumed for real; the delivery
-//                               assertions are the kill for a collapsed loop
-//   - one call, probe short  -> the fd is non-blocking and this pipe just
-//                               holds more than the payload, so the fixture
-//                               is too small: RED, naming that
-//   - one call, probe whole  -> the fd is blocking; no fixture size reaches
-//                               the loop here, so this is recorded as the
-//                               coverage hole it is rather than asserted
+// What a single non-blocking write to a pipe transfers is not the pipe's
+// capacity. spawnSync's reader drains concurrently, and Linux's pipe_write
+// keeps filling slots as the reader frees them, returning only once it finds
+// the pipe full — so the ceiling is a RACE against the reader, not a
+// constant. Measured on this repo's CI runner: 146176 bytes in one call.
+// board-cli.test.mjs's own 100-run ubuntu measurement independently reports
+// the same 146176 for one console.error write, and a RANGE of 146239-182783
+// for the looped build — the spread is the race. darwin instead returns at
+// one buffer and short-writes reliably, which is why this reads as portable
+// from here and is not.
 //
-// Asserting the last case is what reddened CI twice on a correct build. A
-// silent version of it is how #1548 came to exist, so it is reported, not
-// dropped.
+// That ceiling being variable is survivable. That it exceeds ARG_STRLEN_MAX
+// is not: the payload is grown through the needle, the needle is ONE argv
+// item, and an item past that cap cannot be spawned at all. So on that
+// runner NO needle size both outgrows a single write and survives execve —
+// the two constraints have no overlap, and picking a bigger number cannot
+// fix it. The disposition at the end of the test therefore turns on whether
+// a usable size EXISTS rather than on which mechanism is in play:
+//
+//   - first write SHORT            -> the loop resumed for real; the delivery
+//                                     assertions are the kill for a
+//                                     collapsed loop
+//   - ceiling below ARG_STRLEN_MAX -> a larger needle WOULD short-write and
+//                                     this fixture is simply too small: RED,
+//                                     naming the size that would work
+//   - ceiling at or above it       -> no admissible needle can reach the
+//                                     loop here, so this is recorded as the
+//                                     coverage hole it is rather than
+//                                     asserted (#1578)
+//
+// The middle case is the one worth keeping hard: it is the only one a fixture
+// edit can fix, so it is the only one where a red tells anyone to do
+// something. Asserting the last case is what reddened CI three times against
+// a correct build. A silent version of it is how #1548 came to exist, so it
+// is reported, not dropped.
 //
 // The needle is real to git, not just a value verdict()'s own writeSync
 // sees: an unmatched pathspec-scale string is still walked by `git log -S`,
@@ -654,7 +675,7 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   t.after(() => rmSync(scriptDir, { recursive: true, force: true }));
   writeFileSync(join(scriptDir, "arg.mjs"), readFileSync(fileURLToPath(new URL("./arg.mjs", import.meta.url))));
   writeFileSync(join(scriptDir, "staleness.mjs"), readFileSync(SCRIPT));
-  const needle = "y".repeat(100_000);
+  const needle = "y".repeat(120_000);
   const firstWrite = join(scriptDir, "first-write.json");
   writeFileSync(join(scriptDir, "run.mjs"), [
     'import { writeFileSync, writeSync } from "node:fs";',
@@ -692,16 +713,16 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     "// grants unprivileged, separates them — a non-blocking pipe cannot",
     "// swallow it, a blocking fd takes it all. Left unrun when the first",
     "// write already short-wrote, so a platform that behaves pays nothing.",
-    "let blockingProbeBytes = null;",
+    "let ceilingProbeBytes = null;",
     "if (firstWriteBytes >= filler.length) {",
-    `  const wide = Buffer.alloc(${BLOCKING_PROBE_BYTES}, 0x71);`,
+    `  const wide = Buffer.alloc(${CEILING_PROBE_BYTES}, 0x71);`,
     "  try {",
-    "    blockingProbeBytes = writeSync(1, wide);",
+    "    ceilingProbeBytes = writeSync(1, wide);",
     "  } catch (e) {",
-    '    blockingProbeBytes = e.code === "EAGAIN" ? 0 : -1;',
+    '    ceilingProbeBytes = e.code === "EAGAIN" ? 0 : -1;',
     "  }",
     "}",
-    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes, blockingProbeBytes, forcedNonBlocking }));`,
+    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes, ceilingProbeBytes, forcedNonBlocking }));`,
     'await import("./staleness.mjs");',
     "",
   ].join("\n"));
@@ -736,7 +757,7 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     needle.length < ARG_STRLEN_MAX,
     `a ${needle.length}-byte needle is too long to survive execve as one argv item on a 4 KiB-page Linux kernel, so this fixture would refuse to spawn on CI while passing here`,
   );
-  const { payloadBytes, firstWriteBytes, blockingProbeBytes, forcedNonBlocking } = JSON.parse(
+  const { payloadBytes, firstWriteBytes, ceilingProbeBytes, forcedNonBlocking } = JSON.parse(
     readFileSync(firstWrite, "utf8"),
   );
   assert.ok(
@@ -745,7 +766,7 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   );
   // Everything the probes put on the pipe precedes the payload, and every
   // count is reported by the fixture rather than assumed here.
-  const beforePayload = 1 + firstWriteBytes + (blockingProbeBytes > 0 ? blockingProbeBytes : 0);
+  const beforePayload = 1 + firstWriteBytes + (ceilingProbeBytes > 0 ? ceilingProbeBytes : 0);
   // console.log("") contributed the leading byte, then whatever probe bytes
   // landed; the JSON payload follows all of it.
   assert.equal(r.stdout[0], 10, "console.log(\"\")'s own newline is missing from the front of stdout");
@@ -776,20 +797,32 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   // Last, because it decides how much the assertions above actually proved.
   // A short first write means the retry loop really resumed, so they are a
   // kill for the collapsed-loop mutant. One call taking the whole payload
-  // means they are not — and the two causes of that are not equally
-  // acceptable, so they are told apart rather than lumped together.
+  // means they are not, and the only question that then matters is whether
+  // any ADMISSIBLE needle would have done better — a red nobody can act on
+  // is worse than a recorded measurement.
   if (firstWriteBytes < payloadBytes) return;
+  // The largest single transfer this platform was seen to make. The probe is
+  // what reveals it once the payload-sized write failed to.
+  const writeCeiling = Math.max(firstWriteBytes, ceilingProbeBytes > 0 ? ceilingProbeBytes : 0);
+  // A needle has to outgrow that ceiling to short-write AND stay under
+  // ARG_STRLEN_MAX to be spawnable at all. Where the ceiling leaves room, a
+  // bigger needle is a real fix and this fixture is genuinely too small, so
+  // this stays hard and names the size that would work.
   assert.ok(
-    blockingProbeBytes >= BLOCKING_PROBE_BYTES,
-    `fd 1 swallowed the whole ${payloadBytes}-byte payload yet short-wrote a ${BLOCKING_PROBE_BYTES}-byte probe at ${blockingProbeBytes}, so the fd IS non-blocking and this pipe simply holds more than the payload — PIPE_BUFFER_BYTES understates this platform and the fixture is too small to reach the loop`,
+    writeCeiling >= ARG_STRLEN_MAX,
+    `fd 1 took all ${payloadBytes} bytes at once but stops at ${writeCeiling} for a ${CEILING_PROBE_BYTES}-byte ask, so a needle over ${writeCeiling} would short-write and still spawn (the cap is ${ARG_STRLEN_MAX}) — this fixture is too small, raise the needle`,
   );
-  // The remaining case: the fd is blocking, so no fixture size reaches the
-  // loop here and a hard assertion would only red a correct build. Recorded
-  // instead, with the numbers, because this is a real coverage hole and a
-  // silent one is how #1548 came to exist in the first place. #1578 tracks
-  // closing it, and this message is the evidence that ticket asks a reader
-  // to collect from a CI run.
+  // The remaining case, and the one no fixture edit reaches: the ceiling is
+  // at or above the largest needle execve will accept, so the two constraints
+  // have no overlap here. Recorded with the numbers rather than asserted,
+  // because this is a real coverage hole and a silent one is how #1548 came
+  // to exist. #1578 tracks closing it, and this message is the evidence that
+  // ticket asks a reader to collect from a CI run.
   t.diagnostic(
-    `verdict()'s retry loop was NOT exercised (#1578): fd 1 took all ${payloadBytes} bytes in one call and also took a ${BLOCKING_PROBE_BYTES}-byte probe whole, so it is blocking here (forcing it non-blocking ${forcedNonBlocking ? "reported success but did not take effect" : "was not available"}). The delivery assertions above still hold, but on this platform they do not discriminate a collapsed loop. Measured on this repo's Linux CI runner during PR #1568's review; darwin short-writes the same fixture, and die()'s companion fixture short-writes on fd 2 on both.`,
+    `verdict()'s retry loop was NOT exercised (#1578): fd 1 took all ${payloadBytes} bytes in one call and stops only at ${writeCeiling}, which is at or past the ${ARG_STRLEN_MAX}-byte argv cap, so no needle can both outgrow one write and be spawned here. ${
+      ceilingProbeBytes >= CEILING_PROBE_BYTES
+        ? "The fd is blocking — it took the whole probe."
+        : "The fd is non-blocking; the ceiling is the drain race against spawnSync's reader, not a pipe capacity."
+    } Forcing the flag ${forcedNonBlocking ? "was available" : "was not available"}. The delivery assertions above still hold, but on this platform they do not discriminate a collapsed loop. darwin short-writes this same fixture, and die()'s companion fixture short-writes on fd 2 on both.`,
   );
 });
