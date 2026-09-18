@@ -113,11 +113,6 @@ test("the sizing pattern is anchored, so a specialist that mentions sizing stays
   assert.equal(classifyRole({ spawnDepth: 1, description: "Review PR 539 — check batch sizing logic" }), "specialist");
 });
 
-test("memory agents are classified before depth, so they never land in review spend", () => {
-  assert.equal(classifyRole({ agentDefinition: "memory-proxy", description: "Save memory" }), "memory");
-  assert.equal(classifyRole({ agentDefinition: "memory-housekeeper", spawnDepth: 0 }), "memory");
-});
-
 test("the memory exclusion reads the recorded DEFINITION, so any member name books memory", () => {
   // #1505. The exclusion used to test the one `agentType` parameter, which the
   // Claude reader filled with the member's NAME — so the same dispatch
@@ -125,13 +120,15 @@ test("the memory exclusion reads the recorded DEFINITION, so any member name boo
   // was called: `memory-housekeeper` memory, `housekeeper` other,
   // `brain-housekeeping` specialist. Measured on the corpus that last one alone
   // moved its session's review-spend headline 40.70% -> 62.37%.
-  for (const memberName of ["brain-housekeeping", "housekeeper", "memory-housekeeper", "anything-at-all"]) {
-    assert.equal(
-      classifyRole({ agentDefinition: "memory-housekeeper", memberName, spawnDepth: 1, description: "Housekeep the brain" }),
-      "memory",
-      `a memory-housekeeper dispatch named ${memberName} must book memory`,
-    );
-  }
+  // "brain-housekeeping" is the historical incident (#1505) and the only name
+  // of the four originally listed here that a mutation pass found load-bearing:
+  // it is the one whose NAME does not itself contain "memory-housekeeper", so
+  // it is the one that would slip to "specialist" if the exclusion ever read
+  // the member's NAME instead of its recorded DEFINITION.
+  assert.equal(
+    classifyRole({ agentDefinition: "memory-housekeeper", memberName: "brain-housekeeping", spawnDepth: 1, description: "Housekeep the brain" }),
+    "memory",
+  );
   // Depth 1 above is the load-bearing half: the specialist rule is what caught
   // `brain-housekeeping`, so this stays red if the exclusion moves below it.
   assert.equal(classifyRole({ agentDefinition: "memory-proxy", memberName: "review-eval", spawnDepth: 2 }), "memory");
@@ -220,6 +217,16 @@ test("the omp review fan-out classifies off its agent DEFINITION — depth canno
   // And the definition is the ONLY thing these two branches read: a member
   // merely NAMED after a review definition was not dispatched as one (#1505).
   assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-review-verifier", description: "whatever" }), "other");
+  // The bare-name case above cannot catch a blend regression: an empty `def`
+  // puts a SPACE, not a `:`, in front of a bare member name, so `(^|:)` fails
+  // either way and the assertion passes whether the branch reads `def` alone
+  // or the `${def} ${name}` blend. The `fleet-ctl:`-prefixed spelling above
+  // is what discriminates when used as the NAME instead of the DEFINITION:
+  // blending puts its own `:` in front of `fleet-review-`, so a branch that
+  // reads the blend wrongly matches and returns "specialist" here, while the
+  // real `def`-only branch still returns "other" (measured: reverting to the
+  // blend keeps the rest of this suite green).
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-ctl:fleet-review-tests", description: "whatever" }), "other");
 });
 
 test("a definition name in the dispatch PROSE is not a dispatch — the fleet branches read `def` alone", () => {

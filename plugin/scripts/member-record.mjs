@@ -624,7 +624,7 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const { ticket, pr } = parseMemberName(member);
   const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string";
   const role = hasRoleSignal
-    ? classifyRole({ agentDefinition: folded.agent ?? "", description: folded.task ?? "", spawnDepth })
+    ? classifyRole({ agentDefinition: folded.agent, description: folded.task, spawnDepth })
     : "-";
   return {
     harness: "omp",

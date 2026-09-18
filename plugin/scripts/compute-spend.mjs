@@ -39,13 +39,12 @@
 // with that history, NOT drift to be cleaned up: drop one and a member named
 // that way books as "other" whenever its description does not happen to say
 // "finish pr" too, moving the headline for runs already recorded.
-// member-outcomes.mjs matches the same four names, and its comment carries the
+// member-record.mjs matches the same four names, and its comment carries the
 // measurement (#326).
 export function classifyRole(signals) {
   const def = String(signals?.agentDefinition ?? "");
   const name = String(signals?.memberName ?? "");
   const desc = String(signals?.description ?? "");
-  const hay = `${name} ${desc}`.toLowerCase();
 
   // Not fleet work at all — the memory system. Before everything else so it can
   // never land in review spend.
@@ -105,6 +104,7 @@ export function classifyRole(signals) {
   if (/(^|:)fleet-review-/.test(def)) return "specialist";
   if (/(^|:)fleet-implementer(-alt)?$/.test(def)) return "implementer";
 
+  const hay = `${name} ${desc}`.toLowerCase();
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
   // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
