@@ -37,10 +37,14 @@ import { fileURLToPath } from "node:url";
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
 // What ci-state.mjs emits on a quota refusal: a payload at exit 2, which
-// runCiState reads as "no answer" and is the ONLY way into the carry-forward
-// arm (board.test.mjs's RATE_LIMITED_EXIT_2 pins that reading). Without it
-// every ci value comes from mapCi and the previous board is never consulted, so
-// an empty carry-forward would be indistinguishable from a consulted one.
+// runCiState reads as "no answer" (board.test.mjs's RATE_LIMITED_EXIT_2 pins
+// that reading). Some route into the carry-forward arm is what these tests
+// need, not this one in particular — since #875 a salvaged payload that will
+// not parse reaches it too — and a payload at exit 2 is the route with the
+// least of its own machinery: one write and one exit code, no truncation to
+// stage. Without SOME such route every ci value comes from mapCi and the
+// previous board is never consulted, so an empty carry-forward would be
+// indistinguishable from a consulted one.
 const CI_READ_FAILS = `import { writeSync } from "node:fs";
 writeSync(1, JSON.stringify({ pr: 42, verdict: "rate-limited", reasons: ["quota"] }) + "\\n");
 process.exit(2);`;

@@ -44,11 +44,13 @@ test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped
 // A non-empty payload that will not parse is a THIRD state, and the return
 // value cannot carry it: "unknown" is pinned above and stays pinned — a false
 // red is worse than no verdict — so the distinction leaves through stderr or
-// not at all. runCiState() hands this payload straight here by design: at any
-// exit but 2, non-empty stdout is a real verdict, so a truncated pipe write or
-// a warning line printed ahead of the JSON reaches mapCi looking exactly like a
-// PR whose first run has not started, and that PR's red-ci flag — the top of
-// the attention strip — stays down with nothing said.
+// not at all. runCiState() still hands this payload straight here from its
+// EXIT-0 arm, which returns stdout whatever it holds (#875 narrowed only the
+// salvage arm, where bytes that will not parse are now a failed read), so a
+// write cut mid-JSON on a green verdict or a warning line printed ahead of the
+// JSON reaches mapCi looking exactly like a PR whose first run has not started,
+// and that PR's red-ci flag — the top of the attention strip — stays down with
+// nothing said.
 test("mapCi: an unparseable payload → unknown, and says so on stderr, naming the PR", () => {
   let v;
   const errs = withStderr(() => { v = mapCi("not json", 6051); });
