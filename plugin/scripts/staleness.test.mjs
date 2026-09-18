@@ -786,8 +786,10 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   // The remaining case: the fd is blocking, so no fixture size reaches the
   // loop here and a hard assertion would only red a correct build. Recorded
   // instead, with the numbers, because this is a real coverage hole and a
-  // silent one is how #1548 came to exist in the first place.
+  // silent one is how #1548 came to exist in the first place. #1578 tracks
+  // closing it, and this message is the evidence that ticket asks a reader
+  // to collect from a CI run.
   t.diagnostic(
-    `verdict()'s retry loop was NOT exercised: fd 1 took all ${payloadBytes} bytes in one call and also took a ${BLOCKING_PROBE_BYTES}-byte probe whole, so it is blocking here (forcing it non-blocking ${forcedNonBlocking ? "reported success but did not take effect" : "was not available"}). The delivery assertions above still hold, but on this platform they do not discriminate a collapsed loop. Measured on this repo's Linux CI runner during PR #1568's review; darwin short-writes the same fixture, and die()'s companion fixture short-writes on fd 2 on both.`,
+    `verdict()'s retry loop was NOT exercised (#1578): fd 1 took all ${payloadBytes} bytes in one call and also took a ${BLOCKING_PROBE_BYTES}-byte probe whole, so it is blocking here (forcing it non-blocking ${forcedNonBlocking ? "reported success but did not take effect" : "was not available"}). The delivery assertions above still hold, but on this platform they do not discriminate a collapsed loop. Measured on this repo's Linux CI runner during PR #1568's review; darwin short-writes the same fixture, and die()'s companion fixture short-writes on fd 2 on both.`,
   );
 });
