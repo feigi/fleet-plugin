@@ -102,11 +102,11 @@ for (const [name, getPrompt] of [
     );
   });
 
-  test(`${name}: refuter prompt requires a toplevel assertion around git init/commit`, () => {
+  test(`${name}: refuter prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink`, () => {
     assert.match(
       getPrompt(),
-      /`git\s+rev-parse\s+--show-toplevel`.{0,40}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,40}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,40}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path/s,
-      "no toplevel assertion around git init/commit — the observed failure is the agent BELIEVING it is already in scratch and being wrong, which naming a path alone does not catch. Both halves are pinned because they have OPPOSITE expected outcomes: a single `resolves to your scratch path` guard is unsatisfiable before `git init` (a fresh scratch dir has no toplevel and exits 128), and a guard that cannot pass on the clean path gets ignored",
+      /`git\s+rev-parse\s+--show-toplevel`.{0,40}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,40}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,40}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path.{0,80}compare\s+resolved\s+forms.{0,60}realpath/s,
+      "no toplevel assertion around git init/commit, or the realpath remedy for macOS's /private/tmp symlink is gone — the observed failure is the agent BELIEVING it is already in scratch and being wrong, which naming a path alone does not catch. Both halves are pinned because they have OPPOSITE expected outcomes: a single `resolves to your scratch path` guard is unsatisfiable before `git init` (a fresh scratch dir has no toplevel and exits 128), and a guard that cannot pass on the clean path gets ignored",
     );
   });
 }
