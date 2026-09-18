@@ -1,5 +1,22 @@
 import assert from "node:assert/strict";
 
+// How many times `needle` occurs in `haystack`, overlaps included — two
+// overlapping hits are two places a slice could start, which is exactly the
+// ambiguity the caller below refuses. A count, not the offsets: the caller
+// needs only "more than one" and the number to say so with. Cursor-bounded
+// rather than chained off the previous hit, so an anchor that strips to ""
+// terminates instead of spinning on `indexOf("", i)`'s clamped return.
+function occurrenceCount(haystack, needle) {
+  let n = 0;
+  for (let i = 0; i <= haystack.length; ) {
+    const hit = haystack.indexOf(needle, i);
+    if (hit === -1) break;
+    n += 1;
+    i = hit + 1;
+  }
+  return n;
+}
+
 // Bound at BOTH ends: an unbounded end lets a later, unrelated occurrence of the
 // same phrase satisfy the assertion with the real clause deleted.
 //
@@ -13,6 +30,40 @@ import assert from "node:assert/strict";
 // needs: its anchors are typed WITH `**` when the source is, so a document that
 // loses the emphasis is the common break.
 //
+// The START anchor must then resolve EXACTLY ONCE — the standard `anchorAt`
+// and `quoteBlock` already hold, and the price of tolerance here. Stripping
+// `**` can only ADD matches, so a tolerant start anchor can land EARLIER than
+// the literal one, on a text-identical phrase sitting in a different emphasis
+// state, and slice in everything the literal anchor correctly excluded. No
+// assertion inside the slice can see that: the pinned words are all present,
+// sourced from the wrong copy. It throws instead, for the reason a missing
+// anchor throws rather than widening to the whole file.
+//
+// The END anchor deliberately does NOT get that rule, and keeps first-hit-
+// after-the-start. The same "stripping only adds matches" fact runs the other
+// way at the end bound: a tolerant end anchor can only land EARLIER, never
+// later, so it cannot widen the slice — and an end bound's job is to be the
+// next one, not the only one. Measured across every `between` callsite in this
+// directory — no count written down, because a fresh count only resets the
+// same rot clock: no pair uses the same text at both ends, so the start rule
+// refuses nothing that exists, while two end anchors are non-unique ON PURPOSE
+// and are themselves in this option's defect class — `snapshot-runner-
+// audience-prose.test.mjs`'s `"\n- **"` means "wherever the next bullet
+// starts", and `instrument-check-prose.test.mjs`'s `"**Exit 0 is the only
+// code"` names a sentence `run-team/SKILL.md` states twice, once bold and once
+// inside a blockquote. An exactly-once end bound would refuse both while
+// preventing no widening.
+//
+// Matching stays a literal `indexOf` over the stripped view, NOT `phrase()` as
+// `anchorAt` uses: #1492's own ticket measured that trade. `phrase()` is
+// `s.trim().split(/\s+/)`, which discards a leading newline, and `between`
+// anchors carry load-bearing ones — `fix-applier-correction-rules-prose
+// .test.mjs`'s `PROMPT_END` is `"\n**Put the standing CI facts"`, and that
+// file records that deleting the blank line leaves the suite green with the
+// clause gutted. A tolerant mode built on `phrase()` would trade this family's
+// false reds for that false green. Emphasis tolerance and whitespace tolerance
+// are separate axes; this option moves only the first.
+//
 // The returned slice is raw bytes with `**` intact — `rawOffset` maps each
 // endpoint back and stops BEFORE the marker, so a tolerant slice keeps the
 // emphasis its caller goes on to compare.
@@ -22,6 +73,14 @@ export function between(text, from, to, what, { emphasisTolerant = false } = {})
   const stop = emphasisTolerant ? unemphasized(to) : to;
   const at = haystack.indexOf(start);
   assert.notEqual(at, -1, `${what} no longer contains "${from}" — update this test`);
+  if (emphasisTolerant) {
+    const hits = occurrenceCount(haystack, start);
+    assert.equal(
+      hits,
+      1,
+      `${what}: emphasis-tolerant slice anchor "${from}" occurs ${hits} times once \`**\` is ignored — the slice would start at the first and pull in what the literal anchor excluded; narrow the anchor or drop emphasisTolerant`,
+    );
+  }
   const end = haystack.indexOf(stop, at + start.length);
   assert.notEqual(end, -1, `${what} no longer contains "${to}" after "${from}" — update this test`);
   return emphasisTolerant ? text.slice(rawOffset(text, at), rawOffset(text, end)) : text.slice(at, end);
