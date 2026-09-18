@@ -44,11 +44,13 @@ test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped
 // A non-empty payload that will not parse is a THIRD state, and the return
 // value cannot carry it: "unknown" is pinned above and stays pinned — a false
 // red is worse than no verdict — so the distinction leaves through stderr or
-// not at all. runCiState() hands this payload straight here by design: at any
-// exit but 2, non-empty stdout is a real verdict, so a truncated pipe write or
-// a warning line printed ahead of the JSON reaches mapCi looking exactly like a
-// PR whose first run has not started, and that PR's red-ci flag — the top of
-// the attention strip — stays down with nothing said.
+// not at all. runCiState() still hands this payload straight here from its
+// EXIT-0 arm, which returns stdout whatever it holds (#875 narrowed only the
+// salvage arm, where bytes that will not parse are now a failed read), so a
+// write cut mid-JSON on a green verdict or a warning line printed ahead of the
+// JSON reaches mapCi looking exactly like a PR whose first run has not started,
+// and that PR's red-ci flag — the top of the attention strip — stays down with
+// nothing said.
 test("mapCi: an unparseable payload → unknown, and says so on stderr, naming the PR", () => {
   let v;
   const errs = withStderr(() => { v = mapCi("not json", 6051); });
@@ -154,17 +156,26 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
 // the stub `gh` only has to feed the PR loop, since every other gh read in
 // gather() degrades through tryRun(). Out of process, because gather() reads
 // process.argv and would otherwise read the test runner's.
-function gatherCi({ ciStateBody, prevCi }) {
+//
+// `prs` and `ticks` default to the single PR and the single gather() every arm
+// below needs; the warn-once row is the one that raises them, because a gate
+// that spends one line per process and one that spends one per tick are
+// indistinguishable inside a single-tick, single-PR run.
+function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   const cwd = mkdtempSync(join(tmpdir(), "board-gather-"));
   const bin = mkdtempSync(join(tmpdir(), "board-gather-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), ciStateBody);
+  const rows = JSON.stringify(prs.map((n) => ({ number: n, state: "OPEN", labels: [], title: "t" })));
   writeFileSync(join(bin, "gh"),
-    '#!/bin/sh\ncase "$1 $2" in\n"pr list") echo \'[{"number":42,"state":"OPEN","labels":[],"title":"t"}]\' ;;\n*) exit 1 ;;\nesac\n');
+    `#!/bin/sh\ncase "$1 $2" in\n"pr list") echo '${rows}' ;;\n*) exit 1 ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
-  writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: [{ pr: 42, ci: prevCi }] }));
+  writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: prs.map((n) => ({ pr: n, ci: prevCi })) }));
+  // serve()'s shape, not a loop for its own sake: one process, gather() called
+  // again per tick, which is the only place a warn-once gate is observable.
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+    let r;
+    for (let i = 0; i < ${ticks}; i++) r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: ${JSON.stringify(join(cwd, "prev.json"))},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify(r.ci));`;
@@ -175,7 +186,8 @@ function gatherCi({ ciStateBody, prevCi }) {
   // stderr comes back too: gather() reports through it, and the PR number in a
   // mapCi warn is an argument the call site has to pass — see the unparseable
   // payload test below, which is the only one that can observe that wiring.
-  return { ci: JSON.parse(r.stdout.trim().split("\n").pop())[42], stderr: r.stderr };
+  const ci = JSON.parse(r.stdout.trim().split("\n").pop());
+  return { ci: ci[42], ciAll: ci, stderr: r.stderr };
 }
 
 // The regression itself. This payload is what ci-state.mjs emits on a quota
@@ -203,24 +215,117 @@ test("gather: exit 1 is a verdict, not a failed read — it still overrides the 
   assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }).ci, "red");
 });
 
+// ── the salvage arm: an exit code alone never made a payload a verdict ───────
+//
+// #875. The gate reads the exit code because #262 retired "stdout is non-empty"
+// as the proxy for "the child answered". The exit code is the other half of
+// that same proxy: it says the child reached its own exit path, not that its
+// payload arrived whole. Measured against stubs shaped like ci-state.mjs,
+// `e.status !== 2 && out.trim()` accepted all four rows that reach it —
+// not-green and no-ci, the real exit-1 verdicts, alongside the exit-1 write cut
+// mid-JSON and the signal kill mid-payload — while parsing the salvaged bytes
+// separates them exactly, which is why the parse is the discriminator. The
+// exit-0 row is not a fifth: this gate lives in runCiState()'s catch block and
+// a child that exits 0 never throws, so that row goes to mapCi without the
+// gate ever forming an opinion on it.
+//
+// The accept side first, and the reason the discriminator is a PARSE rather
+// than the exit status. no-ci is a REAL verdict that shares exit 1 — ci-state
+// only moves it to exit 0 under --declare-no-ci, which this call never passes —
+// and its `status` is null. So the other candidate remedy, "treat an abnormal
+// status the way exit 2 is treated", is not merely insufficient (the cut-off
+// row below exits 1 with no signal at all); tightened far enough to catch that
+// row it starts refusing THIS one, resurrecting a red for a PR that has no run
+// behind it any more. prev is "red" precisely so only a refusal could produce
+// it: the answer this tick owns is its own "unknown".
+const NO_CI_EXIT_1 = `import { writeSync } from "node:fs";
+writeSync(1, JSON.stringify({ pr: 42, status: null, verdict: "no-ci", reasons: ["no workflows configured"] }) + "\\n");
+process.exit(1);`;
+
+test("gather: a complete no-ci verdict at exit 1 is an answer, not a failed read — it is not carried forward (#875)", () => {
+  assert.equal(gatherCi({ ciStateBody: NO_CI_EXIT_1, prevCi: "red" }).ci, "unknown");
+});
+
+// The refuse side. One write, cut mid-JSON, under two dispositions: the bytes
+// are held apart from the exit code deliberately, because the bytes are all
+// these two rows share and the disposition is the whole difference between them
+// — exit 1 is the salvage arm this fix narrowed, exit 0 (further down, where
+// #605's wiring pin needs it) is the arm it left alone.
+const TRUNCATED_WRITE = `import { writeSync } from "node:fs";
+writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");`;
+const UNPARSEABLE_EXIT_1 = `${TRUNCATED_WRITE}
+process.exit(1);`;
+
+// prev="red" is the assertion: the payload is unusable, so this tick has no
+// reading of its own and #262's carry-forward is the entire point. Returning
+// the bytes anyway spends a PR's last-known red on an "unknown" nobody
+// measured — the regression the exit-code gate was added to prevent, arriving
+// through the gate itself. The stderr line has to name the PR and say the
+// payload was refused: "ci-state failed" alone cannot be told apart from the
+// read never having happened, and an operator looking at a carried-forward
+// value needs to know a payload arrived and was thrown away.
+test("gather: a payload cut mid-JSON at exit 1 is not a verdict — the previous CI value stands (#875)", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /parse/);
+});
+
+// The signal half of the same class, and its own row because `status` is null
+// here rather than a number: the diagnostic has to say the child was KILLED,
+// since "exit null" is not a thing an operator can act on, and a fix that
+// keyed only on nonzero exit codes would let this row through on a falsy
+// status. SIGKILL rather than SIGTERM so the stub cannot handle it and exit
+// cleanly instead.
+const KILLED_MID_PAYLOAD = `import { writeSync } from "node:fs";
+writeSync(1, '{"pr": 42, "status": "comp');
+process.kill(process.pid, "SIGKILL");`;
+
+test("gather: a signal-killed ci-state that wrote half a payload carries the previous value forward (#875)", () => {
+  const r = gatherCi({ ciStateBody: KILLED_MID_PAYLOAD, prevCi: "red" });
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /SIGKILL/);
+});
+
+// The cost of the refusal line, which the single-tick rows above cannot see.
+// serve() re-gathers on a timer in ONE process, and a truncation has a cause
+// that outlives the tick that hit it, so an ungated line is spent again on
+// every tick for as long as the cause lasts — the flood mapCi's `ci-parse` pin
+// near the top of this file exists to prevent, arriving through the arm #875
+// added. Two PRs because the gate's key is the other half of it: keyed on its
+// channel alone, the first refused payload would silence every later PR's line
+// for the rest of the run, which is the silence the sibling gate was written
+// against. Both PRs still carry their previous value forward — the gate is
+// about what is SAID, never about what is read.
+test("gather: a refused salvage payload warns ONCE per PR across ticks, and a second PR is not masked", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red", prs: [42, 43], ticks: 3 });
+  assert.deepEqual(r.ciAll, { 42: "red", 43: "red" });
+  const refusals = r.stderr.split("\n").filter((l) => /will not parse/.test(l));
+  assert.equal(refusals.length, 2, `expected one line per PR, got ${JSON.stringify(refusals)}`);
+  assert.ok(refusals.some((l) => /--pr 42/.test(l)), r.stderr);
+  assert.ok(refusals.some((l) => /--pr 43/.test(l)), r.stderr);
+});
+
 // The end-to-end shape of #605, and the one test that can see the call site.
 // mapCi's warn keys on a PR number mapCi has no other use for, so the argument
 // exists only if gather() passes it: leave the call as `mapCi(out)` and every
 // in-process test above stays green while the real board prints a line naming
 // PR "undefined". Only driving gather() itself pins the wiring.
 //
-// A warning line ahead of a truncated body — stdout that is non-empty, is a
-// real exit-1 verdict by runCiState()'s rule, and still will not parse.
-const UNPARSEABLE_EXIT_1 = `import { writeSync } from "node:fs";
-writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");
-process.exit(1);`;
+// Exit 0 is the vehicle, and after #875 it is the only one left: runCiState()
+// returns stdout unconditionally when the child exits 0 — emptiness untested,
+// parseability untested — so a write cut mid-JSON on a GREEN verdict is the one
+// unparseable payload that still reaches mapCi. #875 narrowed the salvage arm
+// alone; what a child hands back on a successful exit stays mapCi's question.
+//
+// prev is "red" to state plainly what #875 did NOT change here: this return is
+// non-null, so gather()'s carry-forward arm is still not reached and the PR
+// still reverts to "unknown" for this tick.
+const UNPARSEABLE_EXIT_0 = `${TRUNCATED_WRITE}
+process.exit(0);`;
 
-// prev is "red" to state plainly what the fix does NOT change: the payload is
-// non-null, so gather()'s carry-forward arm is not reached and the PR still
-// reverts to "unknown" for this tick. #605's remedy is additive — the return
-// value is pinned, only the silence is the defect.
-test("gather: an unparseable verdict payload → unknown, with a stderr line naming the PR", () => {
-  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+test("gather: an unparseable payload at exit 0 → unknown, with a stderr line naming the PR", () => {
+  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_0, prevCi: "red" });
   assert.equal(r.ci, "unknown");
   assert.match(r.stderr, /PR 42/);
 });

@@ -240,14 +240,66 @@ function labelsOf(row) {
 // which only a null return reaches — was skipped, overwriting a PR's
 // last-known-good CI state during a blip that clears itself. Exit 2 means the
 // question could not be answered, whatever the script printed while saying so.
+//
+// The exit code is not sufficient on its own either (#875), for the symmetric
+// reason: it reports that the child reached its own exit path, never that its
+// payload arrived whole. `e.status !== 2` is also true of a signal kill, where
+// `status` is null, and of a write cut mid-JSON at exit 1 — emit() over in
+// ci-state.mjs abandons a short write it cannot retry, which keeps the exit
+// code intact while losing the tail of the line. Those bytes were returned AS a
+// verdict, mapCi could not parse them, and the non-null return skipped the very
+// carry-forward #262 added: the #262 regression re-entering through the gate
+// built to stop it. So both halves have to hold — a non-2 exit AND bytes that
+// parse.
+//
+// The parse is the discriminator rather than "any abnormal termination", the
+// other candidate, because only the parse gets both directions right. It
+// catches the cut-off exit-1 write, which carries status 1 and no signal at all
+// (measured), and it goes on ACCEPTING a complete payload from a child killed
+// after writing it, as well as no-ci — a real exit-1 verdict whose own `status`
+// field is null, so a status-shaped guard tightened far enough to catch a
+// truncation starts refusing it and resurrects a red for a PR with no run
+// behind it. Wholeness is the only question asked here; SHAPE stays mapCi's,
+// which is total over every payload that parses.
 function runCiState(scriptDir, pr) {
   try {
     return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], READ_OPTS);
   } catch (e) {
     const out = e.stdout ? e.stdout.toString() : "";
-    if (e.status !== 2 && out.trim()) return out;
-    console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
-    return null;
+    if (e.status === 2 || !out.trim()) {
+      console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
+      return null;
+    }
+    // Its own line, not the one above: "failed" reads as "the child never
+    // answered", and an operator looking at a carried-forward CI value needs to
+    // know a payload DID arrive and was thrown away, and why.
+    //
+    // `how` reads e.code first — the three-way ci-state.mjs already uses at its
+    // own child reads — because one cause of this shape is OURS: overrunning
+    // READ_OPTS.maxBuffer is enforced by node killing the child, and that
+    // arrives as signal SIGTERM carrying code ENOBUFS (measured). A
+    // signal-first `how` renders it "killed by SIGTERM", billing a cap this
+    // file sets to an outside killer and sending the operator after an OOM kill
+    // or a stray `kill -TERM`. The signal arm stays ahead of the exit arm
+    // behind it: `status` is null on a real signal kill, where "exit null"
+    // would name nothing to act on.
+    //
+    // Through the warn-once gate, keyed on the PR exactly as mapCi's
+    // `ci-parse` gate is and for the same reason: serve() re-gathers on a
+    // timer, so a payload truncated by a cause that persists is truncated
+    // again on every tick, and an ungated line spends one per PR per tick for
+    // as long as the cause lasts. Its own channel rather than `ci-parse`,
+    // because for any one payload the two are mutually exclusive — bytes
+    // refused here return null and never reach mapCi — so a shared channel
+    // would buy nothing and would let whichever arm a PR happened to take
+    // silence the other for the rest of the run.
+    try { JSON.parse(out); }
+    catch (pe) {
+      const how = e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
+      warnOnce("ci-salvage", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
+      return null;
+    }
+    return out;
   }
 }
 
@@ -294,13 +346,15 @@ export function mapCi(ciJson, pr) {
   // A payload that will not parse is a THIRD state, and the return value cannot
   // carry it: "unknown" is what the regression gate pins, since a false red is
   // worse than no verdict. So the distinction leaves through stderr or not at
-  // all. runCiState() routes such a payload straight here by design — at any
-  // exit but 2, non-empty stdout is a real verdict, and at exit 0 stdout comes
-  // back whatever it holds — so a truncated write, a warning line printed ahead
-  // of the JSON, or a lost write reads exactly like a PR whose first run has not
-  // started, and that PR's red-ci flag, the top of the attention strip, stays
-  // down. gather()'s carry-forward does not catch it either: that arm needs a
-  // null return, and neither of these payloads is null.
+  // all. Since #875 runCiState()'s SALVAGE arm no longer routes such a payload
+  // here — bytes that will not parse are a failed read there, and reach
+  // gather()'s carry-forward — but exit 0 still does, because stdout comes back
+  // whatever it holds, emptiness and parseability alike untested. So a write cut
+  // mid-JSON on a green verdict, a warning line printed ahead of the JSON, or a
+  // lost write still reads exactly like a PR whose first run has not started,
+  // and that PR's red-ci flag, the top of the attention strip, stays down.
+  // gather()'s carry-forward does not catch that one either: that arm needs a
+  // null return, and a successful read's stdout is never null.
   try { d = JSON.parse(ciJson); }
   catch (e) {
     warnOnce("ci-parse", pr, `PR ${pr} ci-state payload is not JSON (${e.message}); reading its CI as unknown, so its red-ci flag stays down`);
