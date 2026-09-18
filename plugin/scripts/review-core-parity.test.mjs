@@ -25,17 +25,21 @@ const CODE = stripComments(SOURCE);
 test("usableDiff agrees on both sides", () => {
   const prFn = lift(CODE, "usableDiff", "snap");
   const fixtures = [
-    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", prHead: "abc123def" },
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", refHead: "abc123def" },
     { runRoot: "/s/pr7/run-ab", diffPath: undefined, diffLines: 12, head: "abc123" },
     { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0, head: "abc123" },
-    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 5, head: "abc123", prHead: "zzzzzz" },
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 5, head: "abc123", refHead: "zzzzzz" },
+    // #1513's shape: the ref matches the tree and the PR object lags it. Rows
+    // carrying only `prHead` cannot cover this — the field is inert on both
+    // sides now, so they agree by both skipping the compare.
+    { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 5, head: "abc123", refHead: "abc123def", prHead: "zzzzzz" },
   ];
   for (const f of fixtures) assert.equal(core.usableDiff(f), prFn(f), JSON.stringify(f));
 });
 
 test("readRules agrees on both sides", () => {
   const prFn = lift(CODE, "readRules", "diffPath, stats, snap");
-  const snap = { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", prHead: "abc123def" };
+  const snap = { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 12, head: "abc123", refHead: "abc123def", prHead: "c774756" };
   const LIST = { paths: [{ path: "a.js", loc: 5 }, { path: "b.js", loc: 3 }] };
   const fixtures = [
     // A usable diff — the "read it first" branch.
@@ -59,7 +63,7 @@ test("readRules agrees on both sides", () => {
     [null, LIST, { ...snap, diffPath: "/s/pr7/run-ab/pr.diff", diffLines: 0 }],
     // Unmeasured: `wc -l` failed, so no count came back at all. Spelled out
     // rather than spread, so `diffLines` is genuinely absent.
-    [null, LIST, { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", head: "abc123", prHead: "abc123def" }],
+    [null, LIST, { runRoot: "/s/pr7/run-ab", diffPath: "/s/pr7/run-ab/pr.diff", head: "abc123", refHead: "abc123def" }],
     // Nothing at all — no diff, no file list.
     [null, null, { ...snap, diffPath: undefined }],
   ];
@@ -112,6 +116,13 @@ test("snapshotMissing agrees on both sides", () => {
     { head: "abc", runRoot: ROOT, pathVerified: true },
     { path: SNAP, runRoot: ROOT, pathVerified: true },
     { path: SNAP, head: "abc", runRoot: "/somewhere/else", pathVerified: true },
+    // The head compare, which no row above reaches: every one of them omits the
+    // operand entirely, so both copies agree by both skipping it. #1513 moved
+    // that operand off `prHead`, and a copy left on the old field would still
+    // pass every row above.
+    { path: SNAP, head: "abc", runRoot: ROOT, pathVerified: true, refHead: "abcdef0" },
+    { path: SNAP, head: "abc", runRoot: ROOT, pathVerified: true, refHead: "zzz" },
+    { path: SNAP, head: "abc", runRoot: ROOT, pathVerified: true, refHead: "abcdef0", prHead: "zzz" },
   ];
   for (const f of fixtures) assert.equal(core.snapshotMissing(f, PREFIX), prFn(f, PREFIX), JSON.stringify(f));
 });

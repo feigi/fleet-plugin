@@ -159,6 +159,7 @@ export const SNAPSHOT_SCHEMA = {
     diffStats: { type: "string" },
     diffPath: { type: "string" },
     diffLines: { type: "integer" },
+    refHead: { type: "string" },
     prHead: { type: "string" },
     testCmd: { type: "string" },
     testCmdError: { type: "string" },
@@ -229,13 +230,13 @@ export const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure", "comment
 export function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
-  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead)) return null;
+  if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead)) return null;
   return `${snap.runRoot}/pr.diff`;
 }
 
 export function readRules(diffPath, stats, snap) {
   const rejected = !diffPath && snap && snap.diffPath ? snap.diffPath : null;
-  const skew = !!(rejected && snap.diffLines && snap.prHead);
+  const skew = !!(rejected && snap.diffLines && snap.refHead);
   const listed = stats && stats.paths ? stats.paths.length : 0;
   const header =
     stats && stats.truncated
@@ -254,7 +255,7 @@ change you are reviewing, and the snapshot around it is context.`
           rejected
             ? `A diff was captured at ${rejected} and REJECTED — ${
                 skew
-                  ? `it describes commit ${snap.prHead}, not this snapshot`
+                  ? `it describes the PR's branch at ${snap.refHead}, not this snapshot`
                   : snap.diffLines === 0
                     ? "it is empty"
                     : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
@@ -375,8 +376,8 @@ export function snapshotMissing(snap, runRootPrefix) {
     return `the snapshot at ${snap.path} climbs out of ${snap.runRoot} with a \`..\` segment — the prefix says nothing about where it resolves`;
   if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
-  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
-    return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is ${snap.prHead} — refusing to review a commit that is not the PR`;
+  if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead))
+    return `the tree at ${snap.path} is at ${snap.head}, and the PR's branch ref is at ${snap.refHead} — refusing to review a commit that is not the PR`;
   return null;
 }
 
@@ -605,18 +606,22 @@ destination path carries only the short form. The byte-identity spot check this
 step used to ask for is superseded by the tree-hash compare above, which settles
 every file in the tree rather than a couple of them. Do not modify ${worktree}.
 
-Then capture the PR's diff for the specialists, plus the two facts the caller
+Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
+    branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
+    git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1
     gh pr view ${pr} --json headRefOid -q .headRefOid
     wc -l < "$RUN"/pr.diff
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
-if 'gh pr diff' exited 0. Report \`prHead\` = the headRefOid and \`diffLines\` =
-the wc -l count. Do not judge whether the diff is usable, and do not withhold
-one field because another failed: report what you got and let the caller
-decide.
+if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'ls-remote' line
+printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Omit
+\`refHead\` when 'ls-remote' failed or printed nothing: an empty read is neither
+a match nor a mismatch. Do not judge whether the diff is usable, and do not
+withhold one field because another failed: report what you got and let the
+caller decide.
 
 Then derive this repository's own test command — FLEET_HARNESS is set
 explicitly because this machine carries both harnesses' registries for this
@@ -638,21 +643,22 @@ Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value and \`path\` = the SNAPSHOT_DES
 value, both copied verbatim — do not reconstruct either. Report the HEAD sha,
 and — in \`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
-are ever required — diffStats, diffPath, diffLines and prHead are each omitted
-independently when their command failed, and repoError only accompanies a false
-repoVerified.`,
+are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
+omitted independently when their command failed, and repoError only accompanies
+a false repoVerified.`,
     { label: "snapshot", phase: "Snapshot", agentType: "fleet-review-snapshot", schema: SNAPSHOT_SCHEMA },
   );
 
   if (snap) {
     if (typeof snap.head === "string") snap.head = snap.head.trim().toLowerCase();
+    if (typeof snap.refHead === "string") snap.refHead = snap.refHead.trim().toLowerCase();
     if (typeof snap.prHead === "string") snap.prHead = snap.prHead.trim().toLowerCase();
   }
 
   const missingReason = snapshotMissing(snap, runRootPrefix);
   if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
-  log(`snapshot ${snap.head} at ${snap.path} — PR head ${snap.prHead ?? "(absent): head check SKIPPED"}`);
+  log(`snapshot ${snap.head} at ${snap.path} — branch ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
   log(environmentNote(snap));
 
   const testCmd = resolveTestCmd(A.testCmd, snap);
@@ -662,7 +668,7 @@ repoVerified.`,
   log(
     usable
       ? `diff ${usable} (${snap.diffLines} lines)`
-      : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
+      : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} refHead=${snap.refHead ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
   );
 
   let stats = null;

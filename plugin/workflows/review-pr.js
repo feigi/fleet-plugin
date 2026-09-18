@@ -204,25 +204,41 @@ const DEFAULT_DIMENSIONS = [
 // Every clause is a MEASURED failure, not a hypothetical. `gh pr diff 999999`
 // exits 1 and still leaves a 0-byte file, which a specialist reads as "this PR
 // changed nothing" — the silent green of `tests 0`. And local HEAD can differ
-// from the PR's headRefOid (ac110b5 vs 482e523, observed), which hands a
-// specialist a diff describing a tree it is not reading.
+// from the PR's head (ac110b5 vs 482e523, observed), which hands a specialist a
+// diff describing a tree it is not reading.
 //
-// The head compare is prefix-tolerant in BOTH directions. `prHead` is 40 chars
-// from `gh`, but `head` is relayed by an agent asked for "the HEAD sha" — an
-// abbreviated but matching sha would compare unequal under `!==` and drop a
-// perfectly good diff.
+// The operand is `refHead` — `git ls-remote origin refs/heads/<branch> | cut
+// -f1`, the branch ref itself — and NEVER `prHead`, the PR object's
+// `headRefOid`. That field LAGS a ref move: measured twice in one run on
+// 2026-09-01, `gh pr update-branch --rebase` returned `rc=0` and `headRefOid`
+// sat on the pre-rebase sha for ~2 min in one wave and ~84s in the next (see
+// `run-merge-bot.md`'s step 1). A snapshot cut from the rebased tree inside
+// that window is CORRECT, and this predicate refused its diff anyway (#1513) —
+// #1168's mechanism with the sign flipped, a false REFUSAL where the
+// worktree-dispatch verify took a false pass. `prHead` is still reported and
+// still logged: a `headRefOid` that disagrees with the ref is the PR-object
+// desync a controller adjudicates, a fact to carry rather than the operand this
+// decision turns on — the rule `run-team/SKILL.md`'s phase 1 states for the
+// same compare.
 //
-// A MISSING prHead is deliberately not disqualifying: `gh pr view` can fail
-// while `gh pr diff` succeeded, and dropping a good diff over an absent
-// cross-check would let missing input narrow coverage — the inversion the
-// `=== true` guards in `selectDimensions` exist to prevent. `diffLines` is the
-// deliberate EXCEPTION: absent and 0 are treated alike, because the count is not
-// a cross-check but the only measurement that rules out the 0-byte file above.
-// Without it, "usable" would be a guess.
+// The head compare is prefix-tolerant in BOTH directions. `refHead` is 40 chars
+// from `ls-remote`, but `head` is relayed by an agent asked for "the HEAD sha"
+// — an abbreviated but matching sha would compare unequal under `!==` and drop
+// a perfectly good diff.
+//
+// A MISSING refHead is deliberately not disqualifying: the `ls-remote` read can
+// fail, and a fork PR has no `refs/heads/<branch>` on `origin` at all, so an
+// empty read is neither a match nor a mismatch — the rule `run-team/SKILL.md`'s
+// phase-1 compare and `run-merge-bot.md`'s `[ -n "$pre" ]` both follow.
+// Dropping a good diff over an absent cross-check would let missing input narrow
+// coverage — the inversion the `=== true` guards in `selectDimensions` exist to
+// prevent. `diffLines` is the deliberate EXCEPTION: absent and 0 are treated
+// alike, because the count is not a cross-check but the only measurement that
+// rules out the 0-byte file above. Without it, "usable" would be a guess.
 function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
-  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead)) return null;
+  if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead)) return null;
   // Rebuilt from the checked `runRoot`, not read off `diffPath`. The redirect
   // that wrote it is `> "$RUN"/pr.diff` in the snapshot block, so the path is
   // the caller's to derive; what the agent's field decides is whether the
@@ -275,7 +291,7 @@ function readRules(diffPath, stats, snap) {
   // "and no others" is the same error with the evidence removed.
   //
   // #532 narrowed this to a pure-function property: `snapshotMissing` now
-  // REFUSES a snapshot whose head is not the PR head, and it runs before
+  // REFUSES a snapshot whose head is not the branch ref's, and it runs before
   // anything reaches here, so `skew` cannot be true in this workflow's own
   // path — a rejection with `diffPath` and `diffLines` both present is exactly
   // the head mismatch that already threw. It stays because `readRules` is a
@@ -283,7 +299,7 @@ function readRules(diffPath, stats, snap) {
   // fires: deleting it would remove behaviour the tests measure to buy nothing.
   // Re-derive that before relying on either reading — it is true only while the
   // refusal above stays unconditional.
-  const skew = !!(rejected && snap.diffLines && snap.prHead);
+  const skew = !!(rejected && snap.diffLines && snap.refHead);
   // Three headers, one list. `exactly ... and no others` is a CLOSURE claim, and
   // it is only true when the list is both complete and about this tree.
   // `stats.truncated` is set by diff-stats.mjs where the cap is visible: `gh pr
@@ -317,7 +333,7 @@ commit — treat the list as approximate:`
   // because every call site passes `readRules(usableDiff(snap), stats, snap)`,
   // so a rejection is always `usableDiff`'s, and the falsy counts it refuses on
   // are exactly a measured 0 and an omitted field. A hand-made call carrying a
-  // truthy count with no `prHead` reaches the never-reported clause and reads
+  // truthy count with no `refHead` reaches the never-reported clause and reads
   // wrong — `usableDiff` accepts that shape, so nothing in this workflow can
   // produce it, and inventing a reason for it would mint the kind of claim this
   // fix removes.
@@ -329,7 +345,7 @@ change you are reviewing, and the snapshot around it is context.`
           rejected
             ? `A diff was captured at ${rejected} and REJECTED — ${
                 skew
-                  ? `it describes commit ${snap.prHead}, not this snapshot`
+                  ? `it describes the PR's branch at ${snap.refHead}, not this snapshot`
                   : snap.diffLines === 0
                     ? "it is empty"
                     : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
@@ -915,21 +931,35 @@ commit must still carry.
 Report \`head\` = the full sha 'git -C ${worktree} rev-parse HEAD' prints; the
 destination path carries only the short form.
 
-Then capture the PR's diff for the specialists, plus the two facts the caller
+Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
+    branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
+    git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1
     gh pr view ${pr} --json headRefOid -q .headRefOid
     wc -l < "$RUN"/pr.diff
+
+The 'ls-remote' line is the one the caller compares this snapshot against, and
+it reads the branch REF rather than the PR object because \`headRefOid\` lags a
+ref move: a rebase that has already landed leaves that field on the pre-rebase
+sha for minutes (\`run-merge-bot.md\`'s step 1 measured ~2 min and ~84s), so a
+compare against it refuses the diff of a snapshot that is correct. Both reads go
+back — their disagreement is the PR-object desync a controller adjudicates, and
+it is a fact to report rather than one to resolve here.
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0 — note it writes an empty file on failure, so a file
 existing is not success. The caller rebuilds that path from \`runRoot\` rather
 than reading yours, so what this field decides is whether the capture succeeded
 at all: omitting it on failure is what matters, not its exact spelling. Report
-\`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Do not judge
-whether the diff is usable, and do not withhold one field because another
-failed: report what you got and let the caller decide.
+\`refHead\` = the sha the 'ls-remote' line printed, \`prHead\` = the headRefOid
+and \`diffLines\` = the wc -l count. Omit \`refHead\` when 'ls-remote' exited
+non-zero or printed nothing — an empty read is neither a match nor a mismatch
+(a fork PR has no 'refs/heads/<branch>' on origin at all), so report no field
+rather than an empty string. Do not judge whether the diff is usable, and do not
+withhold one field because another failed: report what you got and let the
+caller decide.
 
 Then derive this repository's own test command — reusing the SAME inference
 claim-ticket.sh runs at claim time, refusal included, so nothing here
@@ -959,9 +989,9 @@ sha, and — in \`diffStats\` — the
 SINGLE-LINE JSON object diff-stats.mjs prints to STDOUT, copied verbatim as one
 string (do not re-key it, do not infer its fields). If diff-stats.mjs errors,
 omit diffStats entirely. Only runRoot, path, head, pathVerified and repoVerified
-are ever required — diffStats, diffPath, diffLines and prHead are each omitted
-independently when their command failed, and repoError only accompanies a false
-repoVerified. Do not modify ${worktree}.`,
+are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
+omitted independently when their command failed, and repoError only accompanies
+a false repoVerified. Do not modify ${worktree}.`,
   { label: "snapshot", phase: "Snapshot", agentType: "fleet-ctl:fleet-review-snapshot", schema: {
       type: "object",
       additionalProperties: false,
@@ -1006,13 +1036,29 @@ repoVerified. Do not modify ${worktree}.`,
         // fails JSON.parse and widens to the full set, instead of silently
         // flipping one field and trimming real coverage.
         diffStats: { type: "string" },
-        // All three optional, and each omitted independently. `gh` reaches the
-        // network and can fail — no auth, PR deleted, rate limit — and a
-        // required field would abort a review that is otherwise fully runnable.
-        // `usableDiff()` is what decides whether they add up to a usable diff;
-        // the agent only transports them.
+        // All four optional, and each omitted independently. `gh` and
+        // `ls-remote` reach the network and can fail — no auth, PR deleted,
+        // rate limit, unreachable origin — and a required field would abort a
+        // review that is otherwise fully runnable. `usableDiff()` is what
+        // decides whether they add up to a usable diff; the agent only
+        // transports them.
         diffPath: { type: "string" },
         diffLines: { type: "integer" },
+        // `git ls-remote origin refs/heads/<branch> | cut -f1` — the branch ref
+        // itself, and the operand both head compares turn on (#1513). Additive
+        // beside `prHead` rather than a replacement for it: the PR object's head
+        // is still reported and still logged, because a `headRefOid` that
+        // disagrees with the ref is a fact about GitHub's own lag, not about
+        // this tree.
+        //
+        // The branch NAME still comes from the PR object, and that read can
+        // fail too — but it degrades to absent rather than to wrong, which is
+        // why the pattern is spelled with the `refs/heads/` prefix. MEASURED
+        // against this repo's origin (git 2.50.1): an empty `$branch` makes the
+        // pattern `refs/heads/`, which tail-matches on a component boundary and
+        // so matches NOTHING — 0 lines, exit 0. A bare `$branch` pattern would
+        // have matched every head and handed `cut -f1` a list.
+        refHead: { type: "string" },
         prHead: { type: "string" },
         // Derived by this agent running derive-testcmd.sh against the repo
         // under review — reusing claim-ticket.sh's own entrypoint inference
@@ -1084,13 +1130,13 @@ repoVerified. Do not modify ${worktree}.`,
 // helper could not be lifted out of this file by the tests that pin it, and
 // `lift()` evaluates one declaration standalone. The copies are pinned to each
 // other in review-pr-snapshot-path.test.mjs rather than to the comparison's own
-// text: that pin anchors on the `if (snap.prHead && ` guard head and captures
+// text: that pin anchors on the `if (snap.refHead && ` guard head and captures
 // whatever comparison follows, so a change made to one side and not the other
 // reds, while a semantics-preserving rewrite of both stays green. Rewrite this
 // comparison — but rewrite BOTH.
 //
 // What it adds is the CONSEQUENCE, which is the half that was missing. The
-// comparison already existed, in `usableDiff`, where a mismatching `prHead`
+// comparison already existed, in `usableDiff`, where a mismatching head
 // cost the review its diff and nothing else — so a review handed a tree that
 // was not the PR ran to completion on the fallback read rules and returned
 // findings about code the PR does not contain. Measured: a carried-over
@@ -1101,13 +1147,20 @@ repoVerified. Do not modify ${worktree}.`,
 // diff drop stays where it is: it is the narrower guard and it is still correct
 // for any caller that reaches it.
 //
-// A MISSING `prHead` is deliberately still not disqualifying, for the reason
-// `usableDiff`'s own comment gives — `gh pr view` can fail on its own — and the
-// stakes here are higher, since absent input would now cancel a whole runnable
-// review instead of narrowing one. Absent and mismatching are different cases.
+// A MISSING `refHead` is deliberately still not disqualifying, for the reason
+// `usableDiff`'s own comment gives — the `ls-remote` read can fail, and a fork
+// PR has no `refs/heads/<branch>` on `origin` at all — and the stakes here are
+// higher, since absent input would now cancel a whole runnable review instead
+// of narrowing one. Absent and mismatching are different cases.
 // The prefix tolerance is load-bearing for the same reason: `head` is relayed
 // by an agent asked for "the HEAD sha" and may be abbreviated, and under a raw
 // `!==` an abbreviated MATCH would refuse the review outright.
+//
+// The OPERAND moved with `usableDiff`'s (#1513), and this copy is the one that
+// made it urgent: the refusal runs FIRST, so a `headRefOid` still sitting on a
+// pre-rebase sha cancelled the whole review of a correct tree rather than
+// merely costing it a diff. Same mechanism, the expensive half.
+//
 // Split into three branches (#539): the single message below used to cover a
 // dead agent (it died, or the harness exhausted structured-output retries —
 // see the `required:` comment inside `FINDINGS_SCHEMA` above for the measured
@@ -1134,8 +1187,8 @@ function snapshotMissing(snap, runRootPrefix) {
     return `the snapshot at ${snap.path} climbs out of ${snap.runRoot} with a \`..\` segment — the prefix says nothing about where it resolves`;
   if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
-  if (snap.prHead && !snap.prHead.startsWith(snap.head) && !snap.head.startsWith(snap.prHead))
-    return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is ${snap.prHead} — refusing to review a commit that is not the PR`;
+  if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead))
+    return `the tree at ${snap.path} is at ${snap.head}, and the PR's branch ref is at ${snap.refHead} — refusing to review a commit that is not the PR`;
   return null;
 }
 
@@ -1188,16 +1241,24 @@ validation of the tree: its counts are snapshot-measured, and a failure in it
 cannot be told apart from a regression.`;
 }
 
-// Neither sha is normalized on the way here. `prHead` is 40 lowercase hex from
-// `gh pr view --json headRefOid`; `head` is whatever an agent asked for "the
-// HEAD sha" relayed, and `git rev-parse` prints a trailing newline. Under the
-// refusal below an unnormalized `head` no longer costs a diff — it cancels the
-// whole review, and the refusal message then names two shas that look
+// No sha is normalized on the way here. `refHead` is 40 lowercase hex from
+// `git ls-remote origin refs/heads/<branch> | cut -f1` and `prHead` the same
+// from `gh pr view --json headRefOid`; `head` is whatever an agent asked for
+// "the HEAD sha" relayed, and `git rev-parse` prints a trailing newline. Under
+// the refusal below an unnormalized `head` no longer costs a diff — it cancels
+// the whole review, and the refusal message then names two shas that look
 // identical, which reads as a wrong-commit worktree rather than the relay
-// artifact it is. Measured: `head` of `"9e8ee3d\n"` against a 40-char `prHead`
-// starting `9e8ee3d` refuses, and so does a leading space; a trailing newline
-// survives only when `prHead` happens to be a prefix of `head`, so the
-// tolerance the comment below claims is partly accidental.
+// artifact it is. Measured: `head` of `"9e8ee3d\n"` against a 40-char compare
+// operand starting `9e8ee3d` refuses, and so does a leading space; a trailing
+// newline survives only when the operand happens to be a prefix of `head`, so
+// the tolerance the comment below claims is partly accidental.
+//
+// `refHead` joins the pass because it BECAME that operand (#1513): it reaches
+// this object through the same agent relay as `head`, so it carries the same
+// whitespace risk, and an untrimmed operand refuses for the relay rather than
+// for the tree. `prHead` keeps its own pass even though nothing compares it any
+// more — it is still printed in the run log below, where an embedded newline
+// breaks the line it is printed on.
 //
 // Normalized ONCE here rather than inside either copy of the compare: the two
 // copies stay byte-identical for the pin in review-pr-snapshot-path.test.mjs,
@@ -1207,21 +1268,38 @@ cannot be told apart from a regression.`;
 // left to `snapshotMissing`'s own first guard, which names it.
 if (snap) {
   if (typeof snap.head === "string") snap.head = snap.head.trim().toLowerCase();
+  if (typeof snap.refHead === "string") snap.refHead = snap.refHead.trim().toLowerCase();
   if (typeof snap.prHead === "string") snap.prHead = snap.prHead.trim().toLowerCase();
 }
 
 const missingReason = snapshotMissing(snap, runRootPrefix);
 if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
-// `prHead` is named here even when it is absent. The head compare in
-// `snapshotMissing` is guarded on `snap.prHead &&`, so a failed `gh pr view`
+// `refHead` is named here even when it is absent. The head compare in
+// `snapshotMissing` is guarded on `snap.refHead &&`, so a failed `ls-remote`
 // skips the #532 refusal — deliberately, see the comment above it — and the run
 // log is then byte-identical to one where the two heads were compared and
 // matched. Measured: both cases printed `snapshot <head> at <path>` and nothing
 // else. The skip is the whole difference between a backstopped review and an
 // unbackstopped one, so it is said rather than left to be inferred from a field
 // this line never printed.
-log(`snapshot ${snap.head} at ${snap.path} — PR head ${snap.prHead ?? "(absent): head check SKIPPED"}`);
+//
+// `||`, not `??`, on that fallback alone: the guard it reports on tests
+// TRUTHINESS, so an EMPTY `refHead` — `ls-remote` exiting 0 with no matching
+// ref, which the prompt asks the agent to omit rather than report, but cannot
+// enforce — skips the compare exactly as an absent one does. Under `??` that
+// run printed `branch ref  — PR head …` and the skip went unnamed, which is the
+// same "a read that failed and a read that found nothing are indistinguishable"
+// defect the diff-decision log's own comment records for `diffLines`.
+//
+// `prHead` is printed beside it, raw, and never as a verdict — so it keeps `??`,
+// whose fallback is a value rather than a claim about whether a check ran. It
+// stopped being the compare's operand in #1513, and the two values disagreeing
+// is the PR-object desync `run-merge-bot.md`'s step 1 hands to a controller —
+// a fact this log records first; the no-diff diagnostic below repeats it when
+// the diff is rejected, but nothing downstream compares the two values to
+// detect the desync itself.
+log(`snapshot ${snap.head} at ${snap.path} — branch ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
 
 // The measurement environment, beside the tree it measures. Logged rather than
 // left to the payload alone so a run log read on its own still says which
@@ -1243,7 +1321,7 @@ log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
 // that is a finding about the fleet's ordering, report it". Neither is
 // observable from a log that never mentions the diff.
 //
-// It prints the three RAW inputs rather than naming the guard that fired. A
+// It prints the four RAW inputs rather than naming the guard that fired. A
 // clause chain mirroring `usableDiff` states a measurement that was never taken:
 // `!snap.diffLines` is true when the field is ABSENT, and it printed `diff is 0
 // lines` — so a run where `gh pr diff` returned 500 real lines and only `wc -l`
@@ -1260,7 +1338,7 @@ const usable = usableDiff(snap);
 log(
   usable
     ? `diff ${usable} (${snap.diffLines} lines)`
-    : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
+    : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} refHead=${snap.refHead ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
 );
 
 // Parse the diff-stats blob the snapshot agent carried back. A parse failure —
