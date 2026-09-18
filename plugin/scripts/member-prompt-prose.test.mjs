@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { anchorAt, phrase, stripQuoteGutter } from "./prose-pin.mjs";
 
 // #172. A fleet member learns what it is, and what to run, only from the blocks
 // run-team phase 2 carries VERBATIM. Everything else in that section is
@@ -34,6 +35,22 @@ import { join } from "node:path";
 // rule went missing, and the one thing a golden cannot express — the ACCEPT
 // side of `sizing-a-ticket`'s own conditioning, which lives in another file
 // entirely (see the last test below).
+//
+// #1465. Every multi-word pin below goes through `phrase()`, and so do the two
+// slice anchors. A pin carrying a hardcoded single space reds on a pure rewrap
+// of the runbook — no wording changed, no rule weakened — and that red is worse
+// than a missing pin, because it teaches its reader that this suite reds for no
+// reason. Measured before the conversion, against copies of both source files
+// reflowed with the gutter preserved: at 55 columns 4 of these 6 tests red, and
+// at 45 the START anchor's own `indexOf` misses, so 5 of them throw out of
+// `memberBlocks()` without reaching a pin at all. The wrap width only samples
+// which pin happens to fire, so the conversion is the whole file's, not the
+// three phrases a rewrap was first seen to break.
+//
+// `phrase()`'s `\s+` cannot cross the `>` gutter that a wrap inside these
+// blocks leaves behind, so the phrase pins match `memberProse()` — the region
+// with the gutter stripped. `memberBlocks()` keeps the raw bytes for the first
+// test, the one place the gutter is the subject rather than an obstacle.
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
@@ -41,16 +58,23 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 const START = "and each of these verbatim:";
 const END = "Each rule in the enumerate-and-declare block";
 
-// Inlined rather than importing prose-pin.mjs's between(): between() keeps
-// the start anchor, and this slice needs it stripped (memberBlocks() strips
-// via `at + START.length`) — not a drop-in.
+const WHAT = "run-team/SKILL.md phase 2's member-prompt region";
+
+// Inlined rather than importing prose-pin.mjs's between(): between() keeps the
+// start anchor, and this slice needs it stripped — not a drop-in. The anchors
+// go through `anchorAt`, which matches them via `phrase()` and asserts each
+// occurs exactly once, so a rewrapped anchor line still binds and a second copy
+// still throws. END is searched in the remainder, which is also what keeps it
+// after START.
 function memberBlocks() {
-  const at = RUN_TEAM.indexOf(START);
-  assert.notEqual(at, -1, `phase 2's verbatim-blocks intro ('${START}') moved — update this test`);
-  const end = RUN_TEAM.indexOf(END, at);
-  assert.notEqual(end, -1, `the rationale anchor ('${END}') moved — update this test`);
-  return RUN_TEAM.slice(at + START.length, end);
+  const region = RUN_TEAM.slice(anchorAt(RUN_TEAM, START, WHAT));
+  // `anchorAt` matched this same pattern at the region's first byte, so the
+  // match is at index 0 and its length is the intro's width as wrapped today.
+  const [intro] = phrase(START).exec(region);
+  return region.slice(intro.length, anchorAt(region, END, WHAT));
 }
+
+const memberProse = () => stripQuoteGutter(memberBlocks());
 
 test("every member-facing rule sits inside a quote block, where the controller carries it verbatim", () => {
   const lines = memberBlocks().split("\n").filter((l) => l.trim() !== "");
@@ -68,34 +92,34 @@ test("every member-facing rule sits inside a quote block, where the controller c
 });
 
 test("the member is told it is unattended, in text it receives verbatim", () => {
-  const blocks = memberBlocks();
+  const prose = memberProse();
 
   // Without this, `sizing-a-ticket:18`'s `**Fleet member on heavy:**` condition
   // cannot fire. The only prior signal was the incidental word "controller".
   assert.match(
-    blocks,
-    /\*\*You are an unattended fleet member\.\*\*/,
+    prose,
+    phrase("**You are an unattended fleet member.**"),
     "no block tells the member it is an unattended fleet member — the sizing skill's fleet branch cannot fire",
   );
   assert.match(
-    blocks,
-    /No maintainer is reachable/,
+    prose,
+    phrase("No maintainer is reachable"),
     "the member is not told a maintainer is unreachable, so it can still read a gated skill as worth waiting on",
   );
 });
 
 test("the sizing instruction reaches the member verbatim, on either row", () => {
-  const blocks = memberBlocks();
-  assert.match(blocks, /Run `sizing-a-ticket`/, "the sizing instruction is no longer in a verbatim block");
+  const prose = memberProse();
+  assert.match(prose, phrase("Run `sizing-a-ticket`"), "the sizing instruction is no longer in a verbatim block");
   assert.match(
-    blocks,
-    /\*\*either row\*\*/,
+    prose,
+    phrase("**either row**"),
     "the member is not told both rows are workable, so a heavy row reads as a reason to bail",
   );
 });
 
 test("the handoff names its destination, and a light-row member cannot read it as the heavy-row entry", () => {
-  const blocks = memberBlocks();
+  const prose = memberProse();
 
   // `next-ticket` steps 1-5 are selection and claiming; step 6 is the sizing run.
   // The pre-fix text said "the member starts there" with no antecedent, and two
@@ -104,30 +128,32 @@ test("the handoff names its destination, and a light-row member cannot read it a
   // BOTH stay green when the two numbers are swapped, and a member reading that
   // runs the PR steps at the sizing checkpoint and vice versa.
   assert.match(
-    blocks,
-    /`next-ticket` \*\*step 6\*\*, which is that sizing run/,
+    prose,
+    phrase("`next-ticket` **step 6**, which is that sizing run"),
     "step 6 is no longer bound to the sizing run — its destination is a pronoun again, or the number now names another step",
   );
   // The wrong binding, and the one that bites: the nearest place-like phrase was
   // the heavy-row entry point, which would send a LIGHT-row member to plan-writing.
+  // Stays a literal regex — one token, so there is no inter-word space for a
+  // wrap to land in and nothing for `phrase()` to tolerate.
   assert.doesNotMatch(
-    blocks,
+    prose,
     /superpowers:writing-plans/,
     "the member prompt names the heavy-row entry point, which a light-row member would follow",
   );
 });
 
 test("the PR handoff reaches the member verbatim, including what it must never do", () => {
-  const blocks = memberBlocks();
+  const prose = memberProse();
   assert.match(
-    blocks,
-    /`next-ticket` \*\*step 7\*\*: rebase, re-run tests, push/,
+    prose,
+    phrase("`next-ticket` **step 7**: rebase, re-run tests, push"),
     "step 7 is no longer bound to the rebase/push/PR action — the PR step is not carried verbatim, or the number now names another step",
   );
-  assert.match(blocks, /`Closes #N`/, "the member is not told to close its issue from the PR body");
+  assert.match(prose, phrase("`Closes #N`"), "the member is not told to close its issue from the PR body");
   assert.match(
-    blocks,
-    /Never apply `ready-to-merge`, never merge/,
+    prose,
+    phrase("Never apply `ready-to-merge`, never merge"),
     "the two prohibitions the member must never learn by paraphrase are no longer in the block",
   );
 });
@@ -138,12 +164,12 @@ test("the sizing skill stays conditioned — a solo session still runs the inter
   // because it correctly serves solo sessions, which do have a user to approve.
   assert.match(
     SIZING,
-    /\*\*Fleet member on heavy: enter at `superpowers:writing-plans`\.\*\*/,
+    phrase("**Fleet member on heavy: enter at `superpowers:writing-plans`.**"),
     "the fleet heavy-row entry is no longer conditioned — solo sessions now skip brainstorming too",
   );
   assert.match(
     SIZING,
-    /Solo session has a user: run full path/,
+    phrase("Solo session has a user: run full path"),
     "a solo session no longer runs the full interactive path",
   );
 });
