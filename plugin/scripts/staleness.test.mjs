@@ -568,6 +568,14 @@ const PIPE_BUFFER_BYTES = 65536;
 // the single element instead.
 const ARG_STRLEN_MAX = 131_072;
 
+// Past any pipe capacity a kernel hands an unprivileged process: Linux's
+// fs.pipe-max-size defaults to 1 MiB and caps what F_SETPIPE_SZ will grant,
+// so a non-blocking pipe CANNOT swallow a write this size whole. That is what
+// makes it a discriminator rather than merely a bigger fixture — on a
+// platform where even this completes in one call, the fd is BLOCKING, not
+// roomy, and verdict()'s retry loop is unreachable there by any fixture size.
+const BLOCKING_PROBE_BYTES = 2 * 1024 * 1024;
+
 // ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
 //
 // The retry-cap test above only proves the loop gives up in time against a
@@ -599,12 +607,27 @@ const ARG_STRLEN_MAX = 131_072;
 // the spawn never happens at all.
 //
 // Neither the fixture's size nor fd 1's non-blocking state shows up in the
-// delivered bytes, so both are ASSERTED here rather than assumed. Measured
-// on die()'s companion fixture: with the stream left uninitialised, one
-// write takes the whole payload and the collapsed-loop mutant passes. So the
-// wrapper records what its own first write to fd 1 returned and the test
-// asserts it came back SHORT, the same standard ci-state.test.mjs holds its
-// pipe fixtures to when it asserts they still outgrow the buffer.
+// delivered bytes, so neither is assumed. The size is asserted outright.
+// The fd state is MEASURED and reported by the wrapper, because it is not
+// portable: fd 1 short-writes on darwin and, measured across two CI runs,
+// does not on Linux, where one call takes the whole payload — while the same
+// move on fd 2 in die()'s companion fixture short-writes on both. So the
+// wrapper forces the flag rather than inferring it from console.log's side
+// effect, then reports what its own writes actually did, and the disposition
+// at the end of the test says how much that bought:
+//
+//   - first write SHORT      -> the loop resumed for real; the delivery
+//                               assertions are the kill for a collapsed loop
+//   - one call, probe short  -> the fd is non-blocking and this pipe just
+//                               holds more than the payload, so the fixture
+//                               is too small: RED, naming that
+//   - one call, probe whole  -> the fd is blocking; no fixture size reaches
+//                               the loop here, so this is recorded as the
+//                               coverage hole it is rather than asserted
+//
+// Asserting the last case is what reddened CI twice on a correct build. A
+// silent version of it is how #1548 came to exist, so it is reported, not
+// dropped.
 //
 // The needle is real to git, not just a value verdict()'s own writeSync
 // sees: an unmatched pathspec-scale string is still walked by `git log -S`,
@@ -635,14 +658,27 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   const firstWrite = join(scriptDir, "first-write.json");
   writeFileSync(join(scriptDir, "run.mjs"), [
     'import { writeFileSync, writeSync } from "node:fs";',
-    '// Lazily touching fd 1 through console.log puts it in O_NONBLOCK.',
+    '// Lazily touching fd 1 through console.log builds the stream object, and',
+    '// on darwin that is what puts the pipe fd in O_NONBLOCK. Measured on this',
+    "// repo's Linux CI across two runs, it does NOT do so for fd 1 there,",
+    '// while the same move on fd 2 in die() companion fixture does. So the',
+    '// flag is FORCED here rather than inferred from the side effect: libuv',
+    '// exposes it on the stream handle, and a Node that stops exposing it',
+    '// leaves the probes below to report the truth instead of guessing.',
     'console.log("");',
-    '// Measure that state before staleness.mjs runs instead of trusting it:',
-    '// with fd 1 non-blocking this comes back SHORT, and with fd 1 blocking',
-    '// it takes every byte in this one call. EAGAIN is recorded as 0 — a',
-    '// blocking fd never raises it. The unwritten remainder is deliberately',
-    '// never retried, so stdout is the newline console.log printed, exactly',
-    "// the recorded count of filler, then verdict()'s own payload.",
+    "let forcedNonBlocking = null;",
+    "try {",
+    "  process.stdout._handle.setBlocking(false);",
+    "  forcedNonBlocking = true;",
+    "} catch {",
+    "  forcedNonBlocking = false;",
+    "}",
+    '// Measure the resulting state before staleness.mjs runs instead of',
+    '// trusting it: with fd 1 non-blocking this comes back SHORT, and with fd',
+    '// 1 blocking it takes every byte in this one call. EAGAIN is recorded as',
+    '// 0 — a blocking fd never raises it. The unwritten remainder is',
+    '// deliberately never retried, so stdout is the newline console.log',
+    "// printed, exactly the recorded counts below, then verdict()'s payload.",
     `const filler = Buffer.alloc(${needle.length}, 0x70);`,
     "let firstWriteBytes;",
     "try {",
@@ -650,7 +686,22 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     "} catch (e) {",
     '  firstWriteBytes = e.code === "EAGAIN" ? 0 : -1;',
     "}",
-    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes }));`,
+    "// One call taking the whole payload has two very different causes, and",
+    "// the payload alone cannot tell them apart: a BLOCKING fd, or a pipe",
+    "// roomier than the payload. One more write, past any capacity a kernel",
+    "// grants unprivileged, separates them — a non-blocking pipe cannot",
+    "// swallow it, a blocking fd takes it all. Left unrun when the first",
+    "// write already short-wrote, so a platform that behaves pays nothing.",
+    "let blockingProbeBytes = null;",
+    "if (firstWriteBytes >= filler.length) {",
+    `  const wide = Buffer.alloc(${BLOCKING_PROBE_BYTES}, 0x71);`,
+    "  try {",
+    "    blockingProbeBytes = writeSync(1, wide);",
+    "  } catch (e) {",
+    '    blockingProbeBytes = e.code === "EAGAIN" ? 0 : -1;',
+    "  }",
+    "}",
+    `writeFileSync(${JSON.stringify(firstWrite)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes, blockingProbeBytes, forcedNonBlocking }));`,
     'await import("./staleness.mjs");',
     "",
   ].join("\n"));
@@ -685,17 +736,22 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     needle.length < ARG_STRLEN_MAX,
     `a ${needle.length}-byte needle is too long to survive execve as one argv item on a 4 KiB-page Linux kernel, so this fixture would refuse to spawn on CI while passing here`,
   );
-  const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
-  assert.ok(
-    firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
-    `fd 1 took all ${payloadBytes} bytes in one write, so nothing short-wrote and a collapsed loop would pass this test too (first write returned ${firstWriteBytes})`,
+  const { payloadBytes, firstWriteBytes, blockingProbeBytes, forcedNonBlocking } = JSON.parse(
+    readFileSync(firstWrite, "utf8"),
   );
-  // console.log("") contributed the leading byte, then the filler that
-  // landed; the JSON payload follows both.
+  assert.ok(
+    firstWriteBytes >= 0,
+    `the fixture's own probe write to fd 1 failed before verdict() ever ran (it returned ${firstWriteBytes})`,
+  );
+  // Everything the probes put on the pipe precedes the payload, and every
+  // count is reported by the fixture rather than assumed here.
+  const beforePayload = 1 + firstWriteBytes + (blockingProbeBytes > 0 ? blockingProbeBytes : 0);
+  // console.log("") contributed the leading byte, then whatever probe bytes
+  // landed; the JSON payload follows all of it.
   assert.equal(r.stdout[0], 10, "console.log(\"\")'s own newline is missing from the front of stdout");
   let payload;
   assert.doesNotThrow(
-    () => (payload = JSON.parse(r.stdout.subarray(1 + firstWriteBytes).toString("utf8"))),
+    () => (payload = JSON.parse(r.stdout.subarray(beforePayload).toString("utf8"))),
     `verdict()'s payload is not valid JSON — a short write landed mid-needle: ${r.stdout.length} bytes captured`,
   );
   assert.equal(payload.verdict, "unknown");
@@ -716,5 +772,22 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     payload.bytes,
     Number(git(w, "cat-file", "-s", "origin/main:src.mjs")),
     "`bytes` must be the size of the blob origin/main holds at the asked-for path — the failed-walk downgrade carries no `bytes` at all",
+  );
+  // Last, because it decides how much the assertions above actually proved.
+  // A short first write means the retry loop really resumed, so they are a
+  // kill for the collapsed-loop mutant. One call taking the whole payload
+  // means they are not — and the two causes of that are not equally
+  // acceptable, so they are told apart rather than lumped together.
+  if (firstWriteBytes < payloadBytes) return;
+  assert.ok(
+    blockingProbeBytes >= BLOCKING_PROBE_BYTES,
+    `fd 1 swallowed the whole ${payloadBytes}-byte payload yet short-wrote a ${BLOCKING_PROBE_BYTES}-byte probe at ${blockingProbeBytes}, so the fd IS non-blocking and this pipe simply holds more than the payload — PIPE_BUFFER_BYTES understates this platform and the fixture is too small to reach the loop`,
+  );
+  // The remaining case: the fd is blocking, so no fixture size reaches the
+  // loop here and a hard assertion would only red a correct build. Recorded
+  // instead, with the numbers, because this is a real coverage hole and a
+  // silent one is how #1548 came to exist in the first place.
+  t.diagnostic(
+    `verdict()'s retry loop was NOT exercised: fd 1 took all ${payloadBytes} bytes in one call and also took a ${BLOCKING_PROBE_BYTES}-byte probe whole, so it is blocking here (forcing it non-blocking ${forcedNonBlocking ? "reported success but did not take effect" : "was not available"}). The delivery assertions above still hold, but on this platform they do not discriminate a collapsed loop. Measured on this repo's Linux CI runner during PR #1568's review; darwin short-writes the same fixture, and die()'s companion fixture short-writes on fd 2 on both.`,
   );
 });
