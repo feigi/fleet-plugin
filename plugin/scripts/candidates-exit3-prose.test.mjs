@@ -18,8 +18,8 @@
 // over a bounded slice. Text spliced INSIDE a pinned phrase reddens them; a
 // whole new sentence appended after one, carving out an exception, does not.
 // A reflow (line wraps, `**bold**` moved) stays green by design. The
-// declared-code scan carries a second ceiling of its own, stated at
-// `declaredNonZeroCodes`.
+// declared-code scan carries a second ceiling of its own, explained in the
+// comment above `scriptHeader` and implemented at `codesIn`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -156,19 +156,32 @@ function scriptHeader() {
   return src.slice(0, src.indexOf("\nimport "));
 }
 
-function codesIn(headerText) {
+// `codesIn` is a pure extractor: it runs on the real header (via
+// `declaredNonZeroCodes`, below) AND on synthetic reflow/fixture text the
+// tests below construct by hand. Its three "update this test" guards only
+// make sense against the FIRST source — fired against a fixture, they would
+// blame `candidates.mjs` for a break the fixture (or this file's own
+// transform pipeline) introduced. `scanCodes` does the shared computation;
+// only `declaredNonZeroCodes` — the one caller reading the real file — turns
+// a bad scan into an "update this test" guard.
+function scanCodes(headerText) {
   const prose = logicalLines(stripSlashGutter(headerText)).text;
   const at = prose.indexOf("Exit-code contract");
-  assert.notEqual(at, -1, "candidates.mjs' header no longer states an `Exit-code contract` — update this test");
-  const codes = [...prose.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
-  assert.ok(codes.includes("0"), "candidates.mjs' exit-code contract no longer declares 0 — update this test");
+  const codes = at === -1 ? [] : [...prose.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
   const nonZero = [...new Set(codes)].filter((c) => c !== "0");
-  assert.ok(nonZero.length > 0, "candidates.mjs' exit-code contract declares no non-zero code — update this test");
-  return nonZero;
+  return { at, codes, nonZero };
+}
+
+function codesIn(headerText) {
+  return scanCodes(headerText).nonZero;
 }
 
 function declaredNonZeroCodes() {
-  return codesIn(scriptHeader());
+  const { at, codes, nonZero } = scanCodes(scriptHeader());
+  assert.notEqual(at, -1, "candidates.mjs' header no longer states an `Exit-code contract` — update this test");
+  assert.ok(codes.includes("0"), "candidates.mjs' exit-code contract no longer declares 0 — update this test");
+  assert.ok(nonZero.length > 0, "candidates.mjs' exit-code contract declares no non-zero code — update this test");
+  return nonZero;
 }
 
 test("every non-zero code the script declares is named by the documents a consumer reads", () => {
@@ -226,6 +239,22 @@ const reflow = (text, cols) => {
 // a DIFFERENT code under the physical-line scan this file replaced: 27 drops
 // both 1 and 3, 33 drops 2 alone, 56 drops 3 alone. One width alone measures
 // one accident of where the breaks landed.
+//
+// LIVENESS: `assert.deepEqual` below only proves `codesIn` survives the
+// rewrap — nothing here proves the rewrap still SPLITS a `N = ` pair. A
+// future reword of the header's exit-code sentence could stop wrapping
+// mid-pair at all three widths and every assertion below would still pass,
+// pinning nothing. `oldStyleCodesIn` is the physical-line-only scan this
+// file replaced (no gutter strip, no join); asserting its result is a
+// STRICT subset of the full declared set is the same measurement the
+// comment above states in prose, turned into a check that reddens the day
+// it stops holding.
+const oldStyleCodesIn = (headerText) => {
+  const at = headerText.indexOf("Exit-code contract");
+  const codes = at === -1 ? [] : [...headerText.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
+  return [...new Set(codes)].filter((c) => c !== "0");
+};
+
 for (const cols of [27, 33, 56]) {
   test(`a pure reflow of candidates.mjs' header at ${cols} columns changes no declared exit code`, () => {
     const before = scriptHeader();
@@ -236,10 +265,38 @@ for (const cols of [27, 33, 56]) {
       before.replace(/\s+/g, " ").trim(),
       "the reflow fixture changed the header's words, so the comparison below would prove nothing",
     );
+    const declared = declaredNonZeroCodes();
+    const stale = oldStyleCodesIn(rewrapped);
+    assert.ok(
+      stale.length < declared.length && stale.every((c) => declared.includes(c)),
+      `reflowing at ${cols} columns no longer splits any \`N = \` pair onto two physical lines (the old scan still finds every code) — this pin is vacuous at this width and no longer exercises the hazard \`logicalLines\` exists to survive.`,
+    );
     assert.deepEqual(
       codesIn(rewrapped),
-      declaredNonZeroCodes(),
+      declared,
       `rewrapping candidates.mjs' header at ${cols} columns changes which non-zero exit codes this file finds — the scan is reading physical lines again, so an author who reflows the header silently drops coverage for whichever code the wrap split, with the guard above still passing.`,
     );
   });
 }
+
+// #1619's OTHER half. The fix is TWO steps — stripSlashGutter THEN
+// logicalLines — but the three pins above only ever exercise logicalLines:
+// this file's `reflow` helper never reprints a `// ` gutter on a line it
+// wraps, so at every width tested (27/33/56, and every width from 20 to 80,
+// measured) the header's own line breaks never land a continuation line's
+// leading `// ` between a digit and its `= `. Dropping stripSlashGutter
+// alone — `codesIn` calling `logicalLines(headerText).text` straight,
+// keeping logicalLines — passes every test above unchanged (measured: 12/12
+// green). A real rewrap of a `//` comment block DOES reprint the gutter on
+// each new line, and this fixture is built to land the break exactly where
+// that matters: the authored line ends on a bare `3`, and the next line
+// opens with `// = `, so a scan that joins lines without first stripping
+// that gutter inserts `// ` between the code and its `= `, right where
+// `codesIn`'s regex needs one plain space.
+test("codesIn still finds a code whose comment-line break falls right before its `= `", () => {
+  const fixture = [
+    "// Exit-code contract: 0 = ok, 1 = degraded, 2 = broken, 3",
+    "// = every row removed by the filter.",
+  ].join("\n");
+  assert.deepEqual(codesIn(fixture), ["1", "2", "3"]);
+});
