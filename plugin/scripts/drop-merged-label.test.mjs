@@ -386,3 +386,95 @@ test("a grep scan failure over commit messages halts loudly, never read as commi
   assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")),
     "an unscanned commit history must never be treated as having resolved to zero issues");
 });
+
+// The digit-extraction step that turns a matched commit line into a bare
+// issue number is guarded the same way, so a broken extraction halts with
+// this script's own branded die() message instead of raw, unbranded grep
+// stderr and no diagnosis of which step failed.
+test("a grep scan failure extracting issue numbers from matched commit text halts loudly with a branded die() message", (t) => {
+  const s = stub(t);
+  const bin = grepFailShim(t, "-Eo");
+  const base = s.env({ CLOSES: "", COMMITS: "Closes #1512" });
+  const { code, stderr } = run(9, { apply: true, env: { ...base, PATH: `${bin}:${base.PATH}` } });
+  assert.equal(code, 2, "a swallowed extraction failure must not read as success (exit 0)");
+  assert.match(stderr, /drop-merged-label: could not extract issue numbers from PR #9's matched commit text \(grep exited 2\)/);
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")),
+    "an unextracted commit match must never be treated as resolving to zero issues");
+});
+
+// #1543's own discipline, generalized to the LAST step of the scan: unioning
+// `$issues` and `$commit_issues` used to run a bare `grep | sort`, and
+// command substitution reports only the LAST pipe stage's exit status —
+// `sort`'s own rc 0 silently masked a grep 2+ break, reading exactly like
+// the PR closing zero issues even though the union scan itself never ran.
+// A keyword-free COMMITS means the earlier commit-message scan (its own,
+// already-guarded grep) legitimately returns rc 1 and skips straight past
+// the digit-extraction grep, so this is the ONLY grep call the union step
+// reaches — isolating the exact call this fix guards.
+test("a grep scan failure in the final issue-number union halts loudly, never silently unions to zero issues", (t) => {
+  const s = stub(t);
+  const bin = grepFailShim(t, "-Eo");
+  const base = s.env({ CLOSES: "41", COMMITS: "Related to #99, see also #100 for background" });
+  const { code, stderr } = run(9, { apply: true, env: { ...base, PATH: `${bin}:${base.PATH}` } });
+  assert.equal(code, 2, "a swallowed union failure would read as the PR closing zero issues (exit 0)");
+  assert.match(stderr, /could not union PR #9's closing issues \(grep exited 2\)/);
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")),
+    "issue #41 already carrying in-progress must never be silently skipped because the union step broke");
+});
+
+// The keyword regex used to have no boundary before it, so it matched
+// "fix"/"close(d)" as a bare SUBSTRING of an unrelated word. Each of these
+// three commit lines contains one of the keyword strings glued to a longer
+// word with no non-word character in front of it, so none of them may close
+// anything.
+test("a keyword regex requires a word boundary — 'bugfix', 'prefix', and 'unclosed' as substrings do not trigger a close", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({
+      CLOSES: "",
+      COMMITS: "chore: bugfix #77 rolled forward\n\nrefactor: prefix #88 handling\n\nnote: left unclosed #99 for later",
+    }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+});
+
+// The boundary fix must not regress a real keyword that follows punctuation
+// or a space mid-line (not just one that opens the line) — the alternation's
+// `[^[:alnum:]_]` branch, not only its `^` branch.
+test("a real close keyword preceded by punctuation, not just line-start, still closes", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES: "", COMMITS: "See other work; closes #77 too", LABELS_77: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [{ issue: 77, hadLabel: true, removed: true }]);
+});
+
+// #121's defect class: a bare zero-padded digit string flowed unnormalized
+// into the JSON payload as an illegal leading-zero JSON number. Verified by
+// actually parsing the script's stdout as JSON (run()'s own JSON.parse),
+// exactly like this file's other JSON-payload-validity assertions.
+test("a zero-padded commit-message issue number normalizes to a valid JSON integer", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES: "", COMMITS: "Closes #007", LABELS_7: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [{ issue: 7, hadLabel: true, removed: true }]);
+});
+
+test("a zero-padded commit-message reference dedupes against the same issue named by closingIssuesReferences", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES: "7", COMMITS: "Closes #007", LABELS_7: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [{ issue: 7, hadLabel: true, removed: true }]);
+  const viewsOf7 = s.calls().filter((c) => c === "issue view 7 --json labels --jq .labels[].name");
+  assert.equal(viewsOf7.length, 1, "'007' and '7' name the same issue and must be looked up once, not twice");
+});

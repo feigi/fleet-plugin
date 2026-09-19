@@ -66,18 +66,47 @@ fi
 # keyword anywhere in any commit) must read as zero commit-closed issues,
 # never conflated with rc 2+ (the scan itself broke), which must halt loudly
 # instead of silently behaving like "commits close nothing".
-if matched=$(printf '%s\n' "$commit_text" | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*#[0-9]+'); then
+# The leading `(^|[^[:alnum:]_])` requires a non-word character (or line
+# start) immediately before the keyword, so "bugfix #77" or "prefix #88"
+# never read as closing #77/#88 just because "fix" is a substring of a
+# larger word — only a real close/fix/resolve keyword counts.
+if matched=$(printf '%s\n' "$commit_text" | grep -Eio '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*#[0-9]+'); then
   commit_grep_rc=0
 else
   commit_grep_rc=$?
 fi
 case $commit_grep_rc in
-  0) commit_issues=$(printf '%s\n' "$matched" | grep -Eo '[0-9]+') ;;
+  0)
+    if commit_issues=$(printf '%s\n' "$matched" | grep -Eo '[0-9]+'); then
+      commit_num_rc=0
+    else
+      commit_num_rc=$?
+    fi
+    [ "$commit_num_rc" = 0 ] || die "could not extract issue numbers from PR #$pr's matched commit text (grep exited $commit_num_rc)"
+    ;;
   1) commit_issues="" ;;
   *) die "could not scan PR #$pr's commit messages for issue closes (grep exited $commit_grep_rc)" ;;
 esac
 
-issues=$(printf '%s\n%s\n' "$issues" "$commit_issues" | grep -Eo '[0-9]+' | sort -n -u)
+# Union both signals through the SAME three-outcome discipline, never a bare
+# `grep | sort`: command substitution reports only the LAST pipe stage's
+# exit status, so `sort`'s own rc 0 would otherwise mask a grep 2+ break
+# entirely — the exact "commits close nothing" misreading #1543 already
+# guards against elsewhere in this file. `awk '{print $0+0}'` strips any
+# leading zeros (#121's defect class) before the final sort, so a
+# commit-message "#007" reaches the JSON payload below as the bare,
+# valid-JSON integer `7` — and correctly dedupes against a plain `7` named
+# by the other signal.
+if union=$(printf '%s\n%s\n' "$issues" "$commit_issues" | grep -Eo '[0-9]+'); then
+  union_rc=0
+else
+  union_rc=$?
+fi
+case $union_rc in
+  0) issues=$(printf '%s\n' "$union" | awk '{print $0+0}' | sort -n -u) ;;
+  1) issues="" ;;
+  *) die "could not union PR #$pr's closing issues (grep exited $union_rc)" ;;
+esac
 
 if [ -z "$issues" ]; then
   echo "$NAME: PR #$pr closes no issues — nothing to drop" >&2
