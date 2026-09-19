@@ -1,10 +1,13 @@
-// #1561. PR #1082 (as #1084/#1530) added two directory-safety rules to
+// #1561. PR #1082 (#496) added two directory-safety rules to
 // `workflows/review-pr.js`'s refuter prompt — chain the directory change into
 // the command, and bracket a fixture's own git with `git rev-parse
-// --show-toplevel` — and PR #1559 (#1550) mirrored them into `review-core.js`'s
-// own SPECIALIST prompt (review-core-specialist-scratch.test.mjs pins that
-// copy). `review-core.js` carries a THIRD copy of the same rules' target risk
-// in its own REFUTER prompt — "Verify against the snapshot ... by RUNNING
+// --show-toplevel`. PR #1530 (#1084) separately added them to
+// `workflows/review-pr.js`'s own SPECIALIST prompt
+// (review-pr-specialist-scratch.test.mjs pins that copy), and PR #1559
+// (#1550) mirrored them into `review-core.js`'s own SPECIALIST prompt
+// (review-core-specialist-scratch.test.mjs pins that copy). `review-core.js`
+// carries a THIRD copy of the same rules' target risk in its own REFUTER
+// prompt — "Verify against the snapshot ... by RUNNING
 // something — compile it, run the test, apply the mutation" orders exactly
 // the git-touching work the two rules exist to make safe — and carried
 // neither rule, naming only a scratch path.
