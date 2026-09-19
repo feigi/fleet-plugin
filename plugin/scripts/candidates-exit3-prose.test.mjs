@@ -24,7 +24,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, logicalLines, phrase, stripSlashGutter } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
@@ -138,16 +138,37 @@ test("the spec's preamble states the further-code property instead of naming one
 // Guarded at each step and called from a test body, never run at module scope:
 // an unguarded index here fails at IMPORT, taking the unrelated tests in this
 // file down with it and naming nothing as the thing to look at.
-function declaredNonZeroCodes() {
+//
+// #1619: `codesIn` runs the header through `stripSlashGutter` then
+// `logicalLines` before this regex ever sees it — same fix shape as #1609's
+// `pointer-target-prose.test.mjs`. `\b(\d) = ` is a single inter-word space
+// on each side, and a raw physical-line scan turns that space into a
+// newline the instant a reflow wraps the header between the digit and `=`,
+// or between `=` and the word after it. Measured against the scan this
+// replaced, reflowing this exact header with not one word changed: at 27
+// columns both 1 and 3 drop from the derived list, at 33 columns 2 drops
+// alone, at 56 columns 3 drops alone — in every case with the coverage
+// assertion below still PASSING, because a code this scan never finds is a
+// code that loop never checks. Worse than #1609's own symptom: that one
+// reddened loudly; this one stays green over a real coverage gap.
+function scriptHeader() {
   const src = read("scripts", "candidates.mjs");
-  const header = src.slice(0, src.indexOf("\nimport "));
-  const at = header.indexOf("Exit-code contract");
+  return src.slice(0, src.indexOf("\nimport "));
+}
+
+function codesIn(headerText) {
+  const prose = logicalLines(stripSlashGutter(headerText)).text;
+  const at = prose.indexOf("Exit-code contract");
   assert.notEqual(at, -1, "candidates.mjs' header no longer states an `Exit-code contract` — update this test");
-  const codes = [...header.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
+  const codes = [...prose.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
   assert.ok(codes.includes("0"), "candidates.mjs' exit-code contract no longer declares 0 — update this test");
   const nonZero = [...new Set(codes)].filter((c) => c !== "0");
   assert.ok(nonZero.length > 0, "candidates.mjs' exit-code contract declares no non-zero code — update this test");
   return nonZero;
+}
+
+function declaredNonZeroCodes() {
+  return codesIn(scriptHeader());
 }
 
 test("every non-zero code the script declares is named by the documents a consumer reads", () => {
@@ -170,3 +191,55 @@ test("every non-zero code the script declares is named by the documents a consum
     }
   }
 });
+
+// #1619, the pin the test above could not carry. It reads the header as
+// checked in — one physical line per sentence — so it never notices that
+// `codesIn`'s regex is `\n`-hostile by necessity. Same convention as
+// `pointer-target-prose.test.mjs`'s #1609 reflow pin: reflowed HERE, never
+// committed as a fixture, because a checked-in rewrapped copy rots away from
+// `candidates.mjs`'s real header the moment one changes and not the other.
+const reflow = (text, cols) => {
+  const out = [];
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^ {0,3}(?:```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced || line.length <= cols || /(?:[ \t]{2}|\\)$/.test(line)) {
+      out.push(line);
+      continue;
+    }
+    const lead = line.match(/^[ \t]*/)[0];
+    const indent = " ".repeat(line.match(/^(?:[ \t]*(?:[-*+]|\d+[.)])[ \t]+|[ \t]*)/)[0].length);
+    const words = line.slice(lead.length).split(" ").filter(Boolean);
+    let cur = lead + (words.shift() ?? "");
+    for (const word of words) {
+      if (`${cur} ${word}`.length > cols) {
+        out.push(cur);
+        cur = indent + word;
+      } else cur = `${cur} ${word}`;
+    }
+    out.push(cur);
+  }
+  return out.join("\n");
+};
+
+// Three widths, each measured against `candidates.mjs`'s real header to lose
+// a DIFFERENT code under the physical-line scan this file replaced: 27 drops
+// both 1 and 3, 33 drops 2 alone, 56 drops 3 alone. One width alone measures
+// one accident of where the breaks landed.
+for (const cols of [27, 33, 56]) {
+  test(`a pure reflow of candidates.mjs' header at ${cols} columns changes no declared exit code`, () => {
+    const before = scriptHeader();
+    const rewrapped = reflow(before, cols);
+    assert.notEqual(rewrapped, before, `reflow at ${cols} columns changed nothing — this pin is not exercising a rewrap`);
+    assert.equal(
+      rewrapped.replace(/\s+/g, " ").trim(),
+      before.replace(/\s+/g, " ").trim(),
+      "the reflow fixture changed the header's words, so the comparison below would prove nothing",
+    );
+    assert.deepEqual(
+      codesIn(rewrapped),
+      declaredNonZeroCodes(),
+      `rewrapping candidates.mjs' header at ${cols} columns changes which non-zero exit codes this file finds — the scan is reading physical lines again, so an author who reflows the header silently drops coverage for whichever code the wrap split, with the guard above still passing.`,
+    );
+  });
+}
