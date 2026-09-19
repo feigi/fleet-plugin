@@ -5,13 +5,16 @@ import { stripComments } from "./strip-comments.mjs";
 
 // #1552. The extract-then-compile idiom — read a workflow's source, strip its
 // comments so a block-commented call cannot render as live text, find a
-// template literal's start/end anchors via prose-pin.mjs's `between()`, trim
-// its wrapping backticks, and compile it with `new Function` — existed
-// verbatim in three test files (review-pr-specialist-scratch.test.mjs,
-// review-pr-refuter-scratch.test.mjs, injection-control-prose.test.mjs), each
-// around a different anchor pair. Only the extraction MACHINERY moves here;
-// the prompt RULE PROSE itself stays inline in review-pr.js/review-core.js
-// per #496's brief against a shared source for the rules themselves.
+// template literal's start/end anchors, trim its wrapping backticks, and
+// compile it with `new Function` — existed independently in three test files
+// (review-pr-specialist-scratch.test.mjs, review-pr-refuter-scratch.test.mjs,
+// injection-control-prose.test.mjs), each around a different anchor pair. One
+// of the three (review-pr-specialist-scratch.test.mjs) already delegated the
+// anchor-finding half to prose-pin.mjs's `between()`; the other two
+// reimplemented the same `indexOf`/`assert.notEqual` pair by hand. Only the
+// extraction MACHINERY moves here; the prompt RULE PROSE itself stays inline
+// in review-pr.js/review-core.js per #496's brief against a shared source for
+// the rules themselves.
 const REPO = join(import.meta.dirname, "..");
 
 // `file` is relative to the plugin root (e.g. "workflows/review-pr.js").
