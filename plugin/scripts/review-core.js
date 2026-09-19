@@ -748,6 +748,15 @@ claim.`,
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
 the test, apply the mutation. Do not reason your way to agreement.
 
+Chain the directory change into the command, \`cd "$D" && git …\`, never
+\`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
+checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
+before \`git init\` it must NOT resolve to the repository, and a fresh scratch
+dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
+before any \`git commit\` it must resolve to your scratch path — compare
+resolved forms (\`realpath\`), since \`--show-toplevel\` can report
+\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+
 A failure injection with no positive control has produced NO result, never a
 negative one. Before you read an injected fault — an env var, an argv word, a
 mutant — as having had no effect, prove the injection reached the child: one run
