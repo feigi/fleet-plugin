@@ -518,6 +518,36 @@ test("gather: a malformed element inside labels is dropped, not the whole row", 
   assert.deepEqual(r.issues[0].labels, ["keep"]);
 });
 
+// #1331: candidates.mjs's EXCLUDE negates all five wayfinder:* labels so a
+// wayfinder ticket never enters the DISPATCH scan regardless of triage role,
+// but this cockpit's own pool query carried no such exclusion — a
+// ready-for-agent wayfinder ticket (#1293's shape) showed as an
+// undispatchable POOL card, inflating the operator's read of available work.
+// Pinned against the actual `gh issue list` invocation, not a stubbed
+// response, because the bug was in the QUERY sent to gh, not in how gather()
+// processes what gh sends back.
+test("gather: pool query excludes wayfinder:* labels, like candidates.mjs's dispatch scan", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-wayfinder-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-wayfinder-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-wayfinder-scripts-"));
+  const argvFile = join(cwd, "issue-list-argv.txt");
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(bin, "gh"),
+    `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo "$*" > ${JSON.stringify(argvFile)}; echo '[]' ;;\n"pr list") echo '[]' ;;\n*) exit 1 ;;\nesac\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+             prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const argv = readFileSync(argvFile, "utf8");
+  for (const label of ["wayfinder:map", "wayfinder:research", "wayfinder:prototype", "wayfinder:grilling", "wayfinder:task"])
+    assert.match(argv, new RegExp(`-label:${label}(?:\\s|$)`));
+  assert.match(argv, /label:"ready-for-agent"/);
+});
+
 test("createBoardServer serves board.json and the page", async () => {
   const dir = mkdtempSync(join(tmpdir(), "board-"));
   writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));

@@ -798,7 +798,26 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
     ? { ...parsedLedger, state: "read" }
     : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };
 
-  const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
+  // Mirrors candidates.mjs's wayfinder:* exclusion (see its own EXCLUDE
+  // comment for why these five are separate `-label:` clauses rather than a
+  // `wayfinder:*` wildcard — GitHub's search has no such wildcard). A
+  // wayfinder:* ticket is documentation-only regardless of its triage role
+  // (#1331): candidates.mjs's dispatch scan never surfaces one even carrying
+  // `ready-for-agent`, so this cockpit's POOL column must not either, or an
+  // undispatchable ticket inflates the operator's read of available work.
+  //
+  // Only the wayfinder:* clauses are duplicated here, not candidates.mjs's
+  // whole EXCLUDE constant: EXCLUDE also drops in-progress/onhold/wontfix/
+  // needs-triage/needs-info tickets from the DISPATCH scan, but those labels
+  // describe tickets this cockpit's POOL column should keep showing — an
+  // in-progress or onhold ticket with no ledger row yet is still real,
+  // visible work, unlike a wayfinder ticket which can never be dispatched at
+  // all. Reusing the whole list would silently hide those from the operator
+  // too, trading one under-count for a different one.
+  const WAYFINDER_EXCLUDE =
+    "-label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task";
+  const issuesJson = tryRun("gh", ["issue", "list",
+    "--search", `${WAYFINDER_EXCLUDE} label:"ready-for-agent"`,
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
   // title: falls back to the same `#<number>` placeholder titleFor() already
   // uses for an issue it cannot find at all (compute-board.mjs). An unrowed
