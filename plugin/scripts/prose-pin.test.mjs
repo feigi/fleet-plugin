@@ -383,7 +383,7 @@ test("runAbove accepts an indented `#` run below an indented anchor", () => {
 });
 
 // #1622: the mirror of the indented-anchor case above, but on the SAME line
-// as the anchor rather than the lines below it. `const TARGET` anchors inside
+// as the anchor rather than beneath it. `const TARGET` anchors inside
 // `export const TARGET = 2;`, so the text ending right before the anchor is
 // `"...export "` — not whitespace — and the old `[ \t]*$` tail could not
 // match, handing back "" with the comment sitting right there. The expected
@@ -392,6 +392,27 @@ test("runAbove accepts an indented `#` run below an indented anchor", () => {
 test("runAbove accepts a same-line keyword prefix before the anchor", () => {
   const src = "// doc\n// still\nexport const TARGET = 2;\n";
   assert.equal(runAbove(src, "const TARGET", "the fixture", "//"), "// doc\n// still\n");
+});
+
+// #1622: the tail bound's keyword-chain tolerance is `)*$`, not `)?$` — the
+// PR's own rationale names multi-keyword prefixes like `export default async
+// function` and `export abstract class` as the intended case, not just a
+// single modifier. A narrowed quantifier that only tolerated one token would
+// still pass the single-keyword fixture above while silently regressing
+// this one.
+test("runAbove accepts a same-line chain of multiple keyword prefixes", () => {
+  const src = "// doc\n// still\nexport default async function TARGET() {}\n";
+  assert.equal(runAbove(src, "TARGET", "the fixture", "//"), "// doc\n// still\n");
+});
+
+// #1622: `DECLARATION_PREFIX_KEYWORDS` is a closed, bounded list, not
+// arbitrary text tolerated before the anchor. A same-line token that is not
+// one of the declaration/modifier keywords must still refuse the run, or
+// the guard this PR advertises is unenforced and any prefix would slip
+// through.
+test("runAbove refuses a same-line prefix that is not a declaration keyword", () => {
+  const src = "// doc\n// still\nsomeCode TARGET = 2;\n";
+  assert.equal(runAbove(src, "TARGET", "the fixture", "//"), "");
 });
 
 // Empty, never a throw: `gp-sep-invariant-prose.test.mjs` slices at module load
