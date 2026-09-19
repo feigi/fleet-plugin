@@ -232,6 +232,21 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // indent, and all three migrated anchors sit at column 0 today, so the bytes
 // they get back are unchanged.
 //
+// #1622: a SAME-LINE keyword prefix needed the same fix as the indent did.
+// `export const TARGET` anchored on `const TARGET` left `"export "` — not
+// whitespace — at the tail, so `[ \t]*$` could not match either, and the run
+// above came back "" while the comment sat right there, the identical wrong
+// fault the indent fix closed. The gap this bound now also tolerates is
+// `DECLARATION_PREFIX_KEYWORDS`, a fixed, closed list of the JS/TS keywords
+// that legally sit between a comment block and the declaration keyword an
+// anchor starts with (`export`, `default`, `async`, visibility and
+// modifier keywords, …) — never arbitrary text. Each tolerated token must
+// still be followed by more whitespace before the next token or the anchor,
+// so the widening cannot reach past the anchor's own line: a decoy code line
+// sitting between the comment block and the anchor still breaks the run,
+// because that line does not end in `\n` followed only by keywords and
+// whitespace up to the anchor.
+//
 // The single definition of this bound in this directory (#1604), for
 // `paragraph`'s reason and after its history: three pins hand-rolled this same
 // regex locally first, each carrying its own chance of dropping a guard. A pin
@@ -239,10 +254,23 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // choice. NOT the mirror shape: the run BELOW an anchor
 // (`review-pr-inbound-citation-prose.test.mjs`'s `commentBelow`) has one
 // consumer and so no duplicate to close.
+
+// The closed list `runAbove`'s tail bound tolerates between the comment block
+// and the anchor's own declaration keyword. Deliberately narrow: modifiers
+// and the declaration keywords themselves, nothing that could also open a
+// statement a comment block should not be glued to (no `if`, `for`, `return`,
+// …). Case-sensitive and matched as whole identifier tokens only (surrounded
+// by mandatory whitespace), so it cannot partially match inside a longer
+// identifier.
+const DECLARATION_PREFIX_KEYWORDS =
+  "export|default|async|function|class|const|let|var|public|private|protected|static|readonly|abstract|declare|override|get|set";
+
 export function runAbove(text, anchor, what, marker) {
   assert.ok(marker, `${what}: runAbove needs a non-empty marker — empty matches every line above the anchor instead of just the comment block`);
   const above = text.slice(0, anchorAt(text, anchor, what));
-  const run = above.match(new RegExp(`(?:^|\\n)((?:[ \\t]*${escapeRe(marker)}[^\\n]*\\n)+)[ \\t]*$`));
+  const run = above.match(
+    new RegExp(`(?:^|\\n)((?:[ \\t]*${escapeRe(marker)}[^\\n]*\\n)+)[ \\t]*(?:(?:${DECLARATION_PREFIX_KEYWORDS})[ \\t]+)*$`),
+  );
   return run ? run[1] : "";
 }
 

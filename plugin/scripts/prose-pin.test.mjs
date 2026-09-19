@@ -382,6 +382,18 @@ test("runAbove accepts an indented `#` run below an indented anchor", () => {
   assert.equal(runAbove(sh, "gp_sep=$(printf '\\002')", "the fixture", "#"), "  # the note\n  # and its second line\n");
 });
 
+// #1622: the mirror of the indented-anchor case above, but on the SAME line
+// as the anchor rather than the lines below it. `const TARGET` anchors inside
+// `export const TARGET = 2;`, so the text ending right before the anchor is
+// `"...export "` — not whitespace — and the old `[ \t]*$` tail could not
+// match, handing back "" with the comment sitting right there. The expected
+// value pins the fix: the keyword prefix is tolerated, never returned as
+// part of the run.
+test("runAbove accepts a same-line keyword prefix before the anchor", () => {
+  const src = "// doc\n// still\nexport const TARGET = 2;\n";
+  assert.equal(runAbove(src, "const TARGET", "the fixture", "//"), "// doc\n// still\n");
+});
+
 // Empty, never a throw: `gp-sep-invariant-prose.test.mjs` slices at module load
 // and names the empty case in a test of its own, which an import-time throw
 // would pre-empt. Three shapes here return "" — plain code, code carrying
