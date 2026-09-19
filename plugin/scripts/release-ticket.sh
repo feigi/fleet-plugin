@@ -471,17 +471,67 @@ count_linked
 # `wt_listing` (measured on inflight.sh's copy while it was still
 # registered-only, the same shape of window: 1.99% -> 0.00% at 2 mutations/s,
 # 56.6% -> 1.29% saturated). A genuinely dropped entry is a standing state, not
-# a moment, so it survives the recount and still refuses.
+# a moment, so it survives every recount below and still refuses.
+#
+# The order is kept the same as the original pair for THIS argument's sake —
+# it lets the invariant above carry over instead of being re-derived for a
+# different order — not because a different order would be wrong. Verified
+# directly (#1424): swapping the recount to `count_linked` first then
+# `count_registry` still passes all four tests below (the two single-mutation
+# absorptions and the two #1408 regression cases) unchanged. Both functions
+# only read — neither writes anything the other observes — so whichever runs
+# first merely trades which of the two symmetric windows (before the first
+# call, between the two, after the second) a same-shaped mutation would need
+# to land in; it does not change whether the pair converges. Nothing below
+# depends on this order for correctness; it is kept fixed only so this
+# comment's own reasoning stays about one order instead of two.
 #
 # The unreadable-registry case above is unaffected: `count_registry`'s own
-# `[ -r ] && [ -x ]` guard on $wtroot dies the same way on either call, before
-# the recount is ever reached. The cannot-read-inside case is NOT unaffected
+# `[ -r ] && [ -x ]` guard on $wtroot dies the same way on every call, before
+# any recount is ever reached. The cannot-read-inside case is NOT unaffected
 # the same way — an entry inside $wtroot that `ls -A` cannot read is counted as
-# registered rather than dying (above), so a stale one survives the recount
+# registered rather than dying (above), so a stale one survives every recount
 # too, but what fires on it is the mismatch below, not `count_registry` itself:
 # a different guard, a different exit code, under "the listing is incomplete" —
 # a cause that is not actually what happened.
-[ "$linked" -eq "$registered" ] || { count_registry; count_linked; }
+#
+# The recount pair above is itself two reads at two different instants, not
+# one atomic read: a THIRD sibling mutation landing between the recount's own
+# `count_registry` and `count_linked` calls escapes the single-recount
+# invariant the same way a second mutation once escaped the original pair,
+# and mislabels the same benign race under one of the two `die`s below (#1424,
+# deferred from #1408's own review). Verified directly with a shim landing a
+# first mutation ahead of the initial listing and a second squarely inside the
+# recount's own gap: the wrong-direction message reproduced against this
+# script before the loop below existed.
+#
+# Closing that for good needs a single atomic snapshot of the registry and
+# git's listing together, and this repo has no primitive for one: git exposes
+# no combined read, and building one would mean a lock held not just here but
+# in every other script that mutates the registry (claim-ticket.sh, reap.sh,
+# and any other `git worktree add`/`remove` caller in the fleet) — a
+# repo-wide locking protocol this script has no authority to impose on
+# siblings it does not control, for a window that already needs three
+# precisely-timed mutations landing in gaps with no subprocess call in them at
+# all. Disproportionate, so not attempted.
+#
+# What IS cheap: recounting more than once. Each additional pass demands one
+# MORE precisely-timed sibling mutation to defeat, compounding against the
+# same mutation being both willing and able to land in an ever-later gap
+# within this one invocation — while a genuine corruption is a standing
+# state, not a moment, and still survives every pass and still refuses once
+# the loop below runs out. `recount_tries` bounds it at one more attempt than
+# #1408 already took (closing the specific #1424 residual without turning
+# this into the open-ended chase the issue itself calls out) rather than a
+# measured constant — sustained real churn settling in two extra reads is not
+# something this fixture can measure a percentage for, unlike the numbers
+# above.
+recount_tries=2
+while [ "$linked" -ne "$registered" ] && [ "$recount_tries" -gt 0 ]; do
+  count_registry
+  count_linked
+  recount_tries=$((recount_tries - 1))
+done
 if [ "$linked" -lt "$registered" ]; then
   die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
 elif [ "$linked" -gt "$registered" ]; then

@@ -3763,6 +3763,99 @@ test("a SECOND mutation inside the recount's own window still names the correct 
 // through `twoMutationShim` at the same time, and nothing today asserts that
 // combination still refuses for the right reason.
 
+/**
+ * Like `twoMutationShim` above, but for the recount's OWN internal window:
+ * the gap between the recount's `count_registry` call and its `count_linked`
+ * call (#1424, deferred from #1408's own review). `mutationA` fires ahead of
+ * the FIRST `worktree list --porcelain -z` call, mirroring
+ * `registryRaceShim`'s own single mutation — it is what puts `linked` and
+ * `registered` out of agreement in the first place, since without it there is
+ * nothing for the recount below to even attempt. `mutationB` fires ahead of
+ * the SECOND `worktree list --porcelain -z` call: the one inside the
+ * recount's own `count_linked`, reached only after the recount's
+ * `count_registry` has already re-scanned. Landing there is landing
+ * precisely in the gap #1424 names — narrower than `twoMutationShim`'s own,
+ * since nothing shells out to another process between those two calls. Two
+ * shots, gated independently the same way `twoMutationShim` gates its one:
+ * release-ticket.sh's own delete calls shell out to git too, and a shim that
+ * kept firing on every later listing would never let the run converge.
+ */
+function threeMutationShim(r, mutationA, mutationB) {
+  const firedA = join(r.w, "..", "bin", "three-mutation-fired-a");
+  const firedB = join(r.w, "..", "bin", "three-mutation-fired-b");
+  gitShim(
+    r,
+    `case "$*" in
+  "worktree list --porcelain -z")
+    if [ ! -e '${firedA}' ]; then
+      : > '${firedA}'
+      ${mutationA}
+    elif [ ! -e '${firedB}' ]; then
+      : > '${firedB}'
+      ${mutationB}
+    fi ;;
+esac`,
+  );
+  return { firedA, firedB };
+}
+
+test("a THIRD mutation inside the recount's OWN window still converges, add then add then add (#1424)", (t) => {
+  // mutationA creates the initial mismatch (the #694 window, same shape as
+  // registryRaceShim's own); mutationB lands inside the recount's own gap
+  // between count_registry and count_linked — the #1424 window this ticket
+  // names, narrower than the one #1408 closed. Before the bounded retry loop
+  // this landed, this reproduced the wrong-direction "registry read missed
+  // entries" die for what is really three ordinary concurrent adds; the
+  // loop's second pass now converges on the fully-settled state instead.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const siblingA = join(r.w, "..", "sibling-a-three");
+  const siblingB = join(r.w, "..", "sibling-b-three");
+  const { firedA, firedB } = threeMutationShim(
+    r,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingA}' HEAD >/dev/null 2>&1`,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(firedA), "the shim fired: the first mutation really landed");
+  assert.ok(existsSync(firedB), "the shim fired: the second mutation really landed inside the recount's own gap");
+  assert.equal(existsSync(siblingA), true, "fixture: the first add really landed");
+  assert.equal(existsSync(siblingB), true, "fixture: the second add really landed inside the recount's own window");
+  assert.equal(code, 0, `three concurrent adds straddling both windows must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "the wrong direction must never be reported for three benign adds");
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the second recount pass absorbed it");
+  assert.equal(json.released, true);
+});
+
+test("a THIRD mutation inside the recount's OWN window still converges, remove then add then add (#1424)", (t) => {
+  // Same two windows, the opposite-looking mutation first: a pre-existing
+  // sibling REMOVED to create the initial mismatch, then a different sibling
+  // ADDED inside the recount's own gap. Mirrors the #1408 pair's own
+  // remove-then-add case one window in.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const pre = claim(r.w, 77, "other-claim");
+  const siblingB = join(r.w, "..", "sibling-b-three-mix");
+  const { firedA, firedB } = threeMutationShim(
+    r,
+    `'${REAL_GIT}' worktree remove --force '${pre.wt}' >/dev/null 2>&1`,
+    `'${REAL_GIT}' worktree add -q --detach '${siblingB}' HEAD >/dev/null 2>&1`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.ok(existsSync(firedA), "the shim fired: the remove really landed");
+  assert.ok(existsSync(firedB), "the shim fired: the add really landed inside the recount's own gap");
+  assert.equal(existsSync(pre.wt), false, "fixture: the remove really landed");
+  assert.equal(existsSync(siblingB), true, "fixture: the add really landed inside the recount's own window");
+  assert.equal(code, 0, `a remove and an add straddling both windows must not abort a releasable claim: ${stderr}`);
+  assert.doesNotMatch(stderr, /the listing is incomplete/,
+    "the wrong direction must never be reported when every mutation is benign");
+  assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the second recount pass absorbed it");
+  assert.equal(json.released, true);
+});
+
 test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", (t) => {
   // The counter is a stage like any other. It used to be
   // `grep -c '^worktree ' || true`, and that `|| true` was not optional:
