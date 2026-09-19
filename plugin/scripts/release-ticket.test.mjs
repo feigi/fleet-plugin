@@ -1003,7 +1003,7 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
 
   const remedy = json.blockers[0].replace(/^[\s\S]*— /, "").replace(/, then prune or remove it$/, "");
   assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
-  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8" });
+  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
   assert.ok(
     !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
@@ -1014,19 +1014,22 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
 test("the locked-stray unlock hint survives a plain space in the worktree path (#1537)", (t) => {
   // Sibling defect to #1554, same hint, a narrower trigger: a bare space needs
   // no embedded quote to break the pasted command — `git worktree unlock` reads
-  // an unquoted path as two arguments split on the space, and everything past
-  // the first component is silently dropped instead of being refused outright.
+  // an unquoted path with a space as two separate arguments, so git refuses
+  // outright at rc 129 with a bare `usage: git worktree unlock <worktree>` line
+  // that names neither the path nor the reason — a pasted remedy that simply
+  // cannot run, in contrast to #1554's embedded quote, which silently runs
+  // against a wrong, truncated path instead of refusing at all.
   // shquote wraps the whole path in single quotes unconditionally, so it must
   // cover this case for free; pinned separately because a fix aimed only at
   // `'`-escaping (checking for a literal quote before quoting) would pass
   // #1554 while still breaking here.
   //
   // The space goes into the checkout root, not the slug: git refuses a space in
-  // a ref name (measured, git 2.50.1, `fatal: ... not a valid ref name`), so the
-  // branch this fixture needs cannot carry one — but nothing about a worktree
-  // DIRECTORY name requires it, and the root the claim's `.worktrees` entry
-  // hangs off is exactly the piece production sees vary this way (a member's
-  // checkout under `~/dev/My Project`).
+  // a branch name (measured, git 2.50.1, `fatal: '...' is not a valid branch
+  // name`), so the branch this fixture needs cannot carry one — but nothing
+  // about a worktree DIRECTORY name requires it, and the root the claim's
+  // `.worktrees` entry hangs off is exactly the piece production sees vary
+  // this way (a member's checkout under `~/dev/My Project`).
   const r = repo(t, "w s");
   const c = claim(r.w, 9, "release-ticket");
   git(c.wt, "checkout", "-q", "--detach", "HEAD");
@@ -1040,7 +1043,7 @@ test("the locked-stray unlock hint survives a plain space in the worktree path (
 
   const remedy = json.blockers[0].replace(/^[\s\S]*— /, "").replace(/, then prune or remove it$/, "");
   assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
-  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8" });
+  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
   assert.ok(
     !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
