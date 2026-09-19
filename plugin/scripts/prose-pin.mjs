@@ -172,8 +172,16 @@ export function paragraph(text, anchor, what, options) {
 // choice.
 export function betweenPhrases(text, from, to, what, { bound } = {}) {
   const rest = text.slice(anchorAt(text, from, what));
-  const boundEnd = bound ? rest.search(bound) : -1;
-  const scope = boundEnd === -1 ? rest : rest.slice(0, boundEnd);
+  let scope = rest;
+  if (bound) {
+    const boundEnd = rest.search(bound);
+    assert.notEqual(
+      boundEnd,
+      -1,
+      `${what}: end bound no longer matches after "${from}" — re-anchor this test, never widen it to the whole document`,
+    );
+    scope = rest.slice(0, boundEnd);
+  }
   const hits = [...scope.matchAll(new RegExp(phrase(to).source, "g"))];
   assert.notEqual(
     hits.length,
@@ -183,7 +191,9 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
   assert.equal(
     hits.length,
     1,
-    `${what}: slice end anchor "${to}" occurs ${hits.length} times inside the bound — a pin would bind the wrong copy; narrow the anchor`,
+    bound
+      ? `${what}: slice end anchor "${to}" occurs ${hits.length} times inside the bound — a pin would bind the wrong copy; narrow the anchor`
+      : `${what}: slice end anchor "${to}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`,
   );
   return scope.slice(0, hits[0].index);
 }

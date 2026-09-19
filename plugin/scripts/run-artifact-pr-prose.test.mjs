@@ -57,7 +57,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, phrase } from "./prose-pin.mjs";
+import { anchorAt, betweenPhrases, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -68,9 +68,11 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // the next unrelated paragraph. This is deliberate and it is the second thing
 // this file got wrong. Anchoring each rule on its OWN bolded lead, the obvious
 // shape, puts the slice anchor inside the text every deletion fixture replaces:
-// `anchorAt` then THROWS on the mutant instead of the pin reddening, which is
-// not a pin discriminating, it is the harness losing its footing — and a thrown
-// anchor reads as "re-anchor this test" to whoever next deletes the rule.
+// `betweenPhrases` (extracted #1611 from a hand-rolled copy of this same
+// anchor-to-bound-slice pattern in `finisher-dispatch-premise-prose.test.mjs`)
+// THROWS on the mutant instead of the pin reddening, which is not a pin
+// discriminating, it is the harness losing its footing — and a thrown anchor
+// reads as "re-anchor this test" to whoever next deletes the rule.
 //
 // Both bounds go through `phrase`, so a reflow of either cannot move them, and
 // both are proven single-hit:
@@ -82,15 +84,14 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // judgement — the "branch name is dropped" and "split rule is deleted" fixtures
 // below each red exactly one pin, which is what proves the two rules are pinned
 // separately inside a shared bound.
+//
+// No `bound` option: unbounded, the same reach this slice always had — the
+// only change from the hand-rolled version is the exactly-once end-guard
+// `betweenPhrases` adds for free, so a duplicated restatement of the end
+// phrase now throws instead of silently binding the first copy.
 const ARTIFACT_FROM = "Both files are the run's own artifacts and neither commits itself";
-const ARTIFACT_TO = phrase("**Why not decide inside one run.**");
-const artifactRules = (text = RUN_TEAM) => {
-  const what = "run-team artifact-PR rules";
-  const rest = text.slice(anchorAt(text, ARTIFACT_FROM, what));
-  const end = rest.search(ARTIFACT_TO);
-  assert.notEqual(end, -1, `${what}: the paragraph after the artifact-PR rules moved — re-anchor this test, never widen it to the whole file`);
-  return rest.slice(0, end);
-};
+const ARTIFACT_TO = "**Why not decide inside one run.**";
+const artifactRules = (text = RUN_TEAM) => betweenPhrases(text, ARTIFACT_FROM, ARTIFACT_TO, "run-team artifact-PR rules");
 
 // Rule 3's bullet under `## Invariants`, bounded at the next top-level list
 // item. Not `paragraph`: the bullets are adjacent, so a blank-line bound would

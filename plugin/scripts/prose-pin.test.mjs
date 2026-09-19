@@ -367,9 +367,20 @@ test("betweenPhrases throws when the to phrase no longer occurs after the from a
   );
 });
 
-test("betweenPhrases throws when the to phrase occurs more than once inside the bound, rather than binding the wrong copy", () => {
+test("betweenPhrases throws when the to phrase occurs more than once, rather than binding the wrong copy", () => {
   assert.throws(
     () => betweenPhrases("START here.\nCUT it once.\nCUT it twice.\n", "START here", "CUT it", "the fixture"),
+    /the fixture: slice end anchor "CUT it" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
+  );
+});
+
+// Same duplicate, but with a `bound` supplied — the message names the bound
+// here because the caller gave one; the unbounded test above must NOT, or a
+// bound-scoped failure and a whole-document failure read identically.
+test("betweenPhrases throws when the to phrase occurs more than once inside the bound, naming the bound in the message", () => {
+  const doc = "START here.\nCUT it once.\nCUT it twice.\n---\nafter the bound.\n";
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
     /the fixture: slice end anchor "CUT it" occurs 2 times inside the bound — a pin would bind the wrong copy; narrow the anchor/,
   );
 });
@@ -388,6 +399,34 @@ test("betweenPhrases: a bound stops the search there, rather than reaching a lat
   assert.equal(
     betweenPhrases(doc, "START here", "CUT it", "the fixture"),
     "START here.\nreal middle before bound.\n---\n",
+  );
+});
+
+// A `bound` that never matches the remaining text is a caller error, not an
+// invitation to fall back to an unbounded search — that fallback is exactly
+// the false green `bound` exists to prevent: a `to` reworded away could still
+// be satisfied by an unrelated LATER decoy once the search reopens the whole
+// document. This fixture's only `to` copy sits BEFORE where the bound would
+// have been, so the old unbounded fallback would find it and return silently;
+// the fix must throw instead, before ever searching for `to`.
+test("betweenPhrases throws when the bound never matches, rather than silently searching the whole document", () => {
+  const doc = "START here.\nCUT it once.\n";
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    /the fixture: end bound no longer matches after "START here" — re-anchor this test, never widen it to the whole document/,
+  );
+});
+
+// The "occurs more than once" assert is scoped to `bound`, not the whole rest
+// of the document: a restatement of `to` PAST the bound must not count, or a
+// pin could never pass once any later, unrelated copy of the same phrase
+// exists anywhere below it. This fixture has exactly one `to` inside the
+// bound and a second, decoy copy after it.
+test("betweenPhrases does not count a `to` phrase restated past the bound as a duplicate", () => {
+  const doc = "START here.\nCUT it once.\n---\nCUT it again, but after the bound.\n";
+  assert.equal(
+    betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    "START here.\n",
   );
 });
 
