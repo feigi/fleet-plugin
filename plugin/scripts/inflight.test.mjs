@@ -83,7 +83,7 @@ const REAL_TR = execFileSync("/bin/sh", ["-c", "command -v tr"], { encoding: "ut
 // which one breaks is the whole difference between "the PR answer is unknown"
 // and "the diagnostic tally is unknown".
 const REAL_PYTHON3 = execFileSync("/bin/sh", ["-c", "command -v python3"], { encoding: "utf8" }).trim();
-// Same reason, for the one case that shims `git` itself: the shim has to hand
+// Same reason, for any case that shims `git` itself: the shim has to hand
 // off to the real binary, and calling `git` from inside it would find the shim.
 const REAL_GIT = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 // Same reason once more, for the one case that shims `head`. Probe 3's refs
@@ -95,8 +95,9 @@ const REAL_HEAD = execFileSync("/bin/sh", ["-c", "command -v head"], { encoding:
 /**
  * Writes a `git` shim into `bin`, `body` first, falling through to the real
  * binary. Same shape as release-ticket.test.mjs's `gitShim` — factored out
- * here for the same reason: four sites hand-rolling shebang + `exec REAL_GIT`
- * + a separate `chmodSync` is the duplication, not the shim itself.
+ * here for the same reason: hand-rolling shebang + `exec REAL_GIT` + a
+ * separate `chmodSync` at every site that shims `git` is the duplication,
+ * not the shim itself.
  */
 function gitShim(bin, body) {
   writeFileSync(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
