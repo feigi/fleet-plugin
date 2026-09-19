@@ -6,16 +6,18 @@ Ticket #211, widened during brainstorm. No commit count or head SHA here — a
 status line cannot name the commit that writes it, and the last one was stale the
 moment it landed. `git log 8a84402..` is the answer that stays true.
 
-All line references below were measured at `8a84402` and address the files as
-they stood there — not pointers into the current tree. Resolve one with
-`git show "8a84402:<path>" | sed -n '<N>p'`; keep the quotes when you paste that
-template — unquoted, zsh reads the literal `<path>` placeholder as a redirection
-and dies with a parse error before git ever runs. Once a real path is
-substituted in, this literal-ref template behaves identically quoted or
-unquoted — and so does a ref held in a variable, identically broken: zsh
-reads the `:<path>` suffix as a history modifier inside double quotes as
-well as outside, so quoting is not what fixes that one. Brace it —
-`git show "${SHA}:<path>"`.
+The `<file>:NNN` line references below — every one outside
+`workflows/review-pr.js`, whose citations PR #1581 re-anchored to quoted
+fragments that resolve against the current tree instead — were measured at
+`8a84402` and address the files as they stood there — not pointers into the
+current tree. Resolve one with `git show "8a84402:<path>" | sed -n '<N>p'`;
+keep the quotes when you paste that template — unquoted, zsh reads the
+literal `<path>` placeholder as a redirection and dies with a parse error
+before git ever runs. Once a real path is substituted in, this literal-ref
+template behaves identically quoted or unquoted — and so does a ref held in
+a variable, identically broken: zsh reads the `:<path>` suffix as a history
+modifier inside double quotes as well as outside, so quoting is not what
+fixes that one. Brace it — `git show "${SHA}:<path>"`.
 
 One change and one correction were made after implementation, both recorded
 below. The change: the size tier keeps `comments` on any small diff that touches
@@ -38,7 +40,9 @@ Artifacts: `workflows/review-pr.js`,
 `skills/fleet/scripts/select-dimensions.test.mjs` (new)
 (repo `feigi/claude-config`)
 
-Base: `8a84402`. All line references verified against that commit.
+Base: `8a84402`. Line references outside `review-pr.js` are verified against
+that commit; `review-pr.js` citations are quoted-fragment anchors, verified
+against the current tree instead (PR #1581).
 
 Closes #211 and #118. Coordinates with #113.
 
