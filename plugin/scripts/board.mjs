@@ -262,11 +262,12 @@ function labelsOf(row) {
 // behind it. Wholeness is the only question asked here; SHAPE stays mapCi's,
 // which is total over every payload that parses.
 function runCiState(scriptDir, pr) {
+  let out;
   try {
-    return execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], READ_OPTS);
+    out = execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], READ_OPTS);
   } catch (e) {
-    const out = e.stdout ? e.stdout.toString() : "";
-    if (e.status === 2 || !out.trim()) {
+    const errOut = e.stdout ? e.stdout.toString() : "";
+    if (e.status === 2 || !errOut.trim()) {
       console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
       return null;
     }
@@ -288,19 +289,50 @@ function runCiState(scriptDir, pr) {
     // `ci-parse` gate is and for the same reason: serve() re-gathers on a
     // timer, so a payload truncated by a cause that persists is truncated
     // again on every tick, and an ungated line spends one per PR per tick for
-    // as long as the cause lasts. Its own channel rather than `ci-parse`,
-    // because for any one payload the two are mutually exclusive — bytes
-    // refused here return null and never reach mapCi — so a shared channel
-    // would buy nothing and would let whichever arm a PR happened to take
-    // silence the other for the rest of the run.
-    try { JSON.parse(out); }
+    // as long as the cause lasts. Its own channel, `ci-salvage-nonzero`,
+    // distinct from both `ci-parse` and the exit-0 guard's `ci-salvage-exit0`
+    // below: for any one payload the three are mutually exclusive — bytes
+    // refused here return null and never reach mapCi — so a channel shared
+    // between any two of them would buy nothing, and would let whichever arm
+    // a PR happened to hit FIRST silence a later, structurally different
+    // failure on another arm for the rest of the run — measured: driving the
+    // same PR through this arm then the exit-0 guard below printed only the
+    // first tick's warning until the channels were split.
+    try { JSON.parse(errOut); }
     catch (pe) {
       const how = e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
-      warnOnce("ci-salvage", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
+      warnOnce("ci-salvage-nonzero", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
       return null;
     }
-    return out;
+    return errOut;
   }
+  // #1593: exit 0 was never covered by any of the checks above — they only run
+  // once execFileSync throws, and a child that exits 0 does not throw. So the
+  // same write cut mid-JSON that the catch block above salvages at exit 1 rode
+  // straight through here and into mapCi at exit 0, where an unparseable
+  // string maps to "unknown" and gather()'s carry-forward — which only a null
+  // return reaches — was skipped, discarding the PR's last-known CI value
+  // exactly as #262 did before the exit-2 case was fixed. Same parse check,
+  // same null return as the catch block above — but its OWN channel,
+  // `ci-salvage-exit0`, not the catch block's `ci-salvage-nonzero`: a
+  // zero-exit child does not get a looser contract than a non-zero one, and
+  // the two arms are structurally different failures that must not silence
+  // each other (see the channel-split comment above).
+  //
+  // Emptiness is checked before the parse, and gets its own wording: an empty
+  // `out` is not a corrupted payload, it is no payload at all — "left a
+  // payload that will not parse" is a true diagnosis of truncated JSON and a
+  // false one of a child that printed nothing, the same distinction the
+  // empty/status-2 branch above draws for a non-zero exit.
+  try { JSON.parse(out); }
+  catch (pe) {
+    const msg = out.trim()
+      ? `ci-state --pr ${pr} (exit 0) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`
+      : `ci-state --pr ${pr} (exit 0) never answered; carrying the previous CI value forward rather than reading this as a verdict`;
+    warnOnce("ci-salvage-exit0", pr, msg);
+    return null;
+  }
+  return out;
 }
 
 // Every warn-once gate in this file routes through here. The stored key is the
@@ -333,27 +365,28 @@ function warnOnce(channel, key, msg) {
 // has no field to identify itself by, and "some PR's CI payload was garbage" is
 // not actionable. The caller has the number in hand.
 export function mapCi(ciJson, pr) {
-  // A NULL payload, which is a failed read runCiState() has already reported on
-  // stderr. Warning again here would report one failure twice. Null strictly,
-  // not falsiness: an EMPTY payload is not that case. runCiState() returns
-  // stdout unconditionally at exit 0, emptiness untested, so a lost stdout write
-  // on a green verdict arrives here as "" with nothing yet said about it — and a
-  // `!ciJson` guard would swallow it as though it had been reported. It falls
-  // through to the parse below instead, which is where it earns its line.
+  // A NULL payload, which is a failed read runCiState() has already reported
+  // on stderr. Warning again here would report one failure twice. Null
+  // strictly, not falsiness: an EMPTY payload is not that case. Since #1593
+  // runCiState() parse-checks its exit-0 return too, so its own callers never
+  // hand this an empty string any more — but mapCi() is exported and total
+  // over any caller, not just this file's, so a `!ciJson` guard that swallowed
+  // "" as though it had been reported would still be wrong. It falls through
+  // to the parse below instead, which is where it earns its line.
   if (ciJson == null) return "unknown";
   let d;
   // A payload that will not parse is a THIRD state, and the return value cannot
   // carry it: "unknown" is what the regression gate pins, since a false red is
   // worse than no verdict. So the distinction leaves through stderr or not at
-  // all. Since #875 runCiState()'s SALVAGE arm no longer routes such a payload
-  // here — bytes that will not parse are a failed read there, and reach
-  // gather()'s carry-forward — but exit 0 still does, because stdout comes back
-  // whatever it holds, emptiness and parseability alike untested. So a write cut
-  // mid-JSON on a green verdict, a warning line printed ahead of the JSON, or a
-  // lost write still reads exactly like a PR whose first run has not started,
-  // and that PR's red-ci flag, the top of the attention strip, stays down.
-  // gather()'s carry-forward does not catch that one either: that arm needs a
-  // null return, and a successful read's stdout is never null.
+  // all. #875 closed this for runCiState()'s catch block (a payload that will
+  // not parse there is a failed read, reaching gather()'s carry-forward);
+  // #1593 closed it for the exit-0 arm the same way (see runCiState() above),
+  // so a write cut mid-JSON no longer reaches mapCi from gather() on EITHER
+  // arm — a lost write now reads as a failed read there too, and that PR's
+  // last-known CI value stands instead of reverting to "unknown". This catch
+  // stays live regardless: mapCi() is exported and total over any string
+  // handed to it, parseable or not, and its own tests drive it directly
+  // without going through runCiState() at all.
   try { d = JSON.parse(ciJson); }
   catch (e) {
     warnOnce("ci-parse", pr, `PR ${pr} ci-state payload is not JSON (${e.message}); reading its CI as unknown, so its red-ci flag stays down`);
