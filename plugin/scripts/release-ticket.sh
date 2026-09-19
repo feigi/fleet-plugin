@@ -1520,7 +1520,7 @@ if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2
   [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label in-progress" >&2
   [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
-  [ "$has_branch" = true ] && echo "    would: git branch -D $branch" >&2
+  [ "$has_branch" = true ] && echo "    would: git update-ref -d refs/heads/$branch <its current tip>" >&2
 else
   # Label LAST. The two local deletes are the ones that refuse — that refusal is
   # the dirty check recomputed by git at the moment of the delete, so it is
@@ -1549,38 +1549,69 @@ else
   fi
 
   if [ "$has_branch" = true ]; then
-    # Recount at the delete, because `-D` carries no opinion of its own. The
-    # precondition block ran before the `gh issue view` above, so a commit
-    # landing in this worktree across that call reaches the delete having been
-    # measured by nothing — destroyed at exit 0 with "released":true and an
-    # empty blockers list. `-d` used to refuse that ("not fully merged"); the
-    # recount narrows that window rather than closing it, because it is its own
-    # git invocation: a commit landing in the milliseconds between this count
-    # and the `git branch -D` below is still force-deleted at exit 0. Closing it
-    # would take a compare-and-swap on the SHA counted here (`git update-ref -d
-    # refs/heads/$branch $tip`), which does not carry `-D`'s own refusal on a
-    # branch checked out in a registered worktree — trading this window for that
-    # gap, deliberately not taken. Measured against $base, not local HEAD, so it
-    # answers the safety question without reintroducing the staleness `-d` fails
-    # on (#760). The `git cherry` half is deliberately not recounted: a commit
-    # that landed in the window is ahead of $base by construction, and one
-    # cherry would mark `-` is patch-equivalent to something already upstream.
-    n=$(git rev-list --count "$base_rev..refs/heads/$branch") ||
+    # Recount at the delete, because a delete call carries no opinion of its
+    # own here any more than `-D` used to. `tip` is read ONCE, before the
+    # recount and before the delete, and every measurement below reads off
+    # that frozen SHA rather than the mutable ref: the recount counts commits
+    # reachable from $tip, not from refs/heads/$branch, so nothing that
+    # happens after this line can move what the recount already answered.
+    # The delete then closes on $tip too — `git update-ref -d
+    # refs/heads/$branch $tip` refuses unless the ref STILL equals $tip at
+    # that exact moment. That is the compare-and-swap `git branch -D` could
+    # not offer: `-D` deletes whatever the ref currently holds, so a commit
+    # landing between the old recount and the old call — both here, plus the
+    # milliseconds `-D` itself needed to run — was still force-deleted at
+    # exit 0. Reading $tip first and comparing everything against it,
+    # including the delete, turns "recount, then hope nothing moved before
+    # the call" into "delete only if nothing moved". Measured against $base,
+    # not local HEAD, so it answers the safety question without
+    # reintroducing the staleness `-d` fails on (#760). The `git cherry` half
+    # is deliberately not recounted: a commit that landed in the window is
+    # ahead of $base by construction, and one cherry would mark `-` is
+    # patch-equivalent to something already upstream.
+    tip=$(git rev-parse --verify "refs/heads/$branch") ||
+      halt "cannot read $branch's tip at the delete"
+    n=$(git rev-list --count "$base_rev..$tip") ||
       halt "cannot recount commits on $branch against $base at the delete"
     [ "$n" -eq 0 ] ||
       halt "$branch gained $n commit(s) since the checks — not deleted"
 
-    # -D, authorized by the `ahead` and `git cherry` guards above, that recount,
-    # and nothing else. reap.sh authorizes its own [gone] deletes with `git
-    # cherry` ALONE — not this pairing. `-d` measures against HEAD and the
-    # branch's upstream, and a claim has no upstream until its first push
-    # (claim-ticket.sh passes --no-track, #760), so `-d` falls back to local
-    # HEAD alone and refuses a pristine claim whenever local main is behind
-    # origin/main — half-releasing it: worktree deleted, branch stranded,
-    # in-progress still on the issue. Measured.
-    echo "\$ git branch -D $branch" >&2
-    if ! err=$(git branch -D "$branch" 2>&1); then
-      halt "git branch -D refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"
+    # What the CAS does not give back: `git update-ref` is ref-only plumbing
+    # and, unlike `-D`, consults no worktree at all — so the one guard the CAS
+    # trades away is `-D`'s own delete-time refusal on a branch checked out
+    # anywhere, main checkout included. Replaced here with the same listing
+    # lookup the script already runs to compute `$wt` above (and the
+    # main-checkout guard beside it), re-read fresh rather than trusted from
+    # that early scan: both of those answered this question before the `gh
+    # issue view` call, and a `git worktree add` for this exact branch
+    # landing after that scan and before this line checks it out somewhere
+    # neither one ever saw. This still leaves its own, smaller,
+    # check-then-act window between the re-read below and the `update-ref`
+    # call itself — narrower than the one it replaces, for the same reason
+    # the recount above narrows rather than closes: it is a separate git
+    # invocation, and nothing here can ask `update-ref` to verify it
+    # atomically with the delete the way `-D` verified its own.
+    wt_list_before_cas=$wt_list
+    wt_listing || halt "cannot re-read the worktree list to check $branch before the delete: $wt_err"
+    cas_wt=$(printf '%s\n' "$wt_list" |
+             awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w; exit}')
+    wt_list=$wt_list_before_cas
+    [ -z "$cas_wt" ] ||
+      halt "$branch is checked out in worktree $cas_wt — not deleted"
+
+    # update-ref, authorized by the `ahead` and `git cherry` guards above,
+    # this recount, and the worktree check above — and carrying its own
+    # compare-and-swap on $tip on top, which `-D` never had. reap.sh
+    # authorizes its own [gone] deletes with `git cherry` ALONE — not this
+    # pairing. `-d` measures against HEAD and the branch's upstream, and a
+    # claim has no upstream until its first push (claim-ticket.sh passes
+    # --no-track, #760), so `-d` falls back to local HEAD alone and refuses a
+    # pristine claim whenever local main is behind origin/main —
+    # half-releasing it: worktree deleted, branch stranded, in-progress still
+    # on the issue. Measured.
+    echo "\$ git update-ref -d refs/heads/$branch $tip" >&2
+    if ! err=$(git update-ref -d "refs/heads/$branch" "$tip" 2>&1); then
+      halt "git update-ref -d refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
     done_branch=true
   fi
