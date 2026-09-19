@@ -370,6 +370,18 @@ test("`skipped` is not `passed`: a skipped job is not-green, exit 1", () => {
   assert.match(r.payload.reasons.join("; "), /job check is skipped, not success/);
 });
 
+// gh's REAL shape for an in-progress job is conclusion:"" (empty string),
+// never null — the same shape #1566 fixed in rank()'s tie-break. `??`
+// only falls through on null/undefined, so `j.conclusion ?? j.status`
+// would print the unreadable "job check is , not success" instead of
+// naming the job's actual status.
+test("in-progress job (conclusion \"\") not success: reason names the status, not an empty string", () => {
+  const r = notGreen({ jobs: [{ name: "check", status: "in_progress", conclusion: "" }] });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /job check is in_progress, not success/);
+});
+
 // The fifth reasons.push site in this arm — the one the "one negative case
 // each" comment above missed (#930). It fires before notGreen's override even
 // applies: matching.length === 0 short-circuits past the run-view read

@@ -638,7 +638,12 @@ if (noCi) {
     // `skipped` is NOT `passed`. When the currency check fails, the heavy suites
     // report skipped — they did not execute.
     for (const j of jobs) {
-      if (j.conclusion !== "success") reasons.push(`job ${j.name} is ${j.conclusion ?? j.status}, not success`);
+      // `??` only falls through on null/undefined; gh reports an empty
+      // string `""` for an in-progress job's conclusion (same shape as the
+      // rank() tie-break bug this file fixed for #1566), so `??` alone
+      // would print the unreadable "job check is , not success". `||`
+      // treats the empty string as absent too and falls through to status.
+      if (j.conclusion !== "success") reasons.push(`job ${j.name} is ${j.conclusion || j.status}, not success`);
     }
   }
 }
