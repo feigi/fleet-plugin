@@ -44,13 +44,16 @@ test("mapCi: no-ci verdict past the status gate → unknown, not silently mapped
 // A non-empty payload that will not parse is a THIRD state, and the return
 // value cannot carry it: "unknown" is pinned above and stays pinned — a false
 // red is worse than no verdict — so the distinction leaves through stderr or
-// not at all. runCiState() still hands this payload straight here from its
-// EXIT-0 arm, which returns stdout whatever it holds (#875 narrowed only the
-// salvage arm, where bytes that will not parse are now a failed read), so a
-// write cut mid-JSON on a green verdict or a warning line printed ahead of the
-// JSON reaches mapCi looking exactly like a PR whose first run has not started,
-// and that PR's red-ci flag — the top of the attention strip — stays down with
-// nothing said.
+// not at all. Before #1593 runCiState()'s EXIT-0 arm handed a payload like
+// this straight through untested, so a write cut mid-JSON on a green verdict
+// reached mapCi looking exactly like a PR whose first run has not started,
+// and that PR's red-ci flag — the top of the attention strip — stayed down
+// with nothing said. #1593 closed that arm the same way #875 closed the
+// non-zero one: an unparseable exit-0 payload is now a failed read, refused
+// by runCiState() itself and never handed to mapCi at all. This test still
+// earns its line because mapCi() is exported and total over any string a
+// caller hands it, not just this file's own runCiState()/gather() wiring —
+// see the direct-call comment below the gatherCi() driver.
 test("mapCi: an unparseable payload → unknown, and says so on stderr, naming the PR", () => {
   let v;
   const errs = withStderr(() => { v = mapCi("not json", 6051); });
@@ -70,14 +73,22 @@ test("mapCi: an absent payload (null) → unknown, silently — runCiState alrea
   assert.deepEqual(errs, []);
 });
 
-// The other half of that split, and the whole reason the guard above tests null
-// rather than falsiness. An EMPTY payload is a failed read that nobody reported:
-// runCiState() returns stdout unconditionally at exit 0, emptiness untested, so
-// a lost stdout write on a green verdict comes back as "" and reaches here
-// having said nothing. A `!ciJson` guard cannot tell that from the null above
-// and answers "unknown" in silence — the same disappearance #605 exists to end,
-// one arm over from the arm it fixed. This test is the only thing separating the
-// two guards: the pair above and below it both pass under either guard.
+// The other half of that split, and the whole reason the guard above tests
+// null rather than falsiness. An EMPTY payload used to be a failed read that
+// nobody reported: before #1593, runCiState() returned stdout unconditionally
+// at exit 0, emptiness untested, so a lost stdout write on a green verdict
+// came back as "" and reached here having said nothing. A `!ciJson` guard
+// cannot tell that from the null above and answers "unknown" in silence — the
+// same disappearance #605 exists to end, one arm over from the arm it fixed.
+// #1593 closed that path too: runCiState()'s exit-0 guard now parse-checks
+// `out` before emptiness even gets here (JSON.parse("") throws), refuses it
+// as a failed read, and says so on stderr with its own wording ("never
+// answered" — see the gather()-level test for that below), so this exact
+// disappearance can no longer happen through the real call site. This test
+// pins mapCi()'s own contract for that input regardless — a `!ciJson` guard
+// swallowing "" as though it had been reported would still be wrong for any
+// OTHER caller of an exported function — and is the only thing separating the
+// two guards below: the pair above and below it both pass under either guard.
 test("mapCi: an empty payload → unknown, and says so — a lost write is not an absent one", () => {
   let v;
   const errs = withStderr(() => { v = mapCi("", 6056); });
@@ -183,9 +194,15 @@ function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // stderr comes back too: gather() reports through it, and the PR number in a
-  // mapCi warn is an argument the call site has to pass — see the unparseable
-  // payload test below, which is the only one that can observe that wiring.
+  // stderr comes back too: gather() reports through it. mapCi's own
+  // PR-in-the-warn-text wiring is no longer observable from here, though:
+  // since #1593 runCiState() only ever hands mapCi an already-parseable
+  // payload, so mapCi's JSON.parse catch — the only code that reads its `pr`
+  // argument — can never fire through this call site. That argument's
+  // presence at the real call site is pinned as source text instead (see the
+  // #605 test below); what IS observable here is runCiState()'s own two
+  // salvage arms, each carrying the PR and exit disposition in its own
+  // stderr line.
   const ci = JSON.parse(r.stdout.trim().split("\n").pop());
   return { ci: ci[42], ciAll: ci, stderr: r.stderr };
 }
@@ -316,9 +333,12 @@ test("gather: a refused salvage payload warns ONCE per PR across ticks, and a se
 // prevent, surviving on the one arm #875 left alone. This used to be #605's
 // wiring pin too (the only vehicle that reached mapCi's PR-keyed warn through
 // gather() rather than a direct unit call) — that vehicle is gone now that
-// runCiState() salvages both arms, so the assertion below moves to the new
-// gate instead: same truncated write (TRUNCATED_WRITE), same PR, only the
-// exit code and the expected outcome differ from the exit-1 test above.
+// runCiState() salvages both arms: mapCi is never called at all on this path
+// any more, so the assertion below pins the carry-forward outcome #1593 fixes,
+// not the #605 wiring. The #605 pin itself is restored separately, as a
+// source-text assertion (see the test after this one) — the only way left to
+// catch the PR argument being dropped from a call that can no longer be
+// driven to observably differ by argument alone.
 const UNPARSEABLE_EXIT_0 = `${TRUNCATED_WRITE}
 process.exit(0);`;
 
@@ -328,6 +348,59 @@ test("gather: a payload cut mid-JSON at exit 0 is not a verdict either — the p
   assert.match(r.stderr, /--pr 42/);
   assert.match(r.stderr, /exit 0/);
   assert.match(r.stderr, /parse/);
+});
+
+// #1593, empty half: an empty payload at exit 0 is not a corrupted one — the
+// child never answered at all — and "left a payload that will not parse" is
+// the wrong diagnosis for it, the same distinction the empty/status-2 branch
+// draws for a non-zero exit (see runCiState()). Measured before this fix: an
+// empty `out` at exit 0 fell into the same JSON.parse catch as truncated
+// bytes and got the same "left a payload that will not parse" wording, even
+// though nothing arrived to leave.
+const EMPTY_EXIT_0 = `process.exit(0);`;
+test("gather: an empty payload at exit 0 says the child never answered, not that it left unparseable bytes", () => {
+  const r = gatherCi({ ciStateBody: EMPTY_EXIT_0, prevCi: "red" });
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /exit 0/);
+  assert.match(r.stderr, /never answered/);
+  assert.doesNotMatch(r.stderr, /will not parse/);
+});
+
+// #605, restored: runCiState() now guarantees mapCi only ever receives an
+// already-parseable payload from this call site (#1593 closed the exit-0 gap
+// #875 had left mapCi's own parse-catch to cover), so mapCi's JSON.parse catch
+// — the only code that reads its `pr` argument — can never fire through
+// gather(), and no assertion on gather()'s board output can any longer tell
+// `mapCi(out, p.number)` apart from `mapCi(out)`. A source-text pin is the
+// only remaining way to catch that argument being dropped by accident.
+test("gather: the real call site still hands mapCi the PR number, not just the payload (#605)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.match(src, /\bmapCi\(out, p\.number\)/);
+});
+
+// The channel-collision regression: runCiState()'s two salvage arms — the
+// catch block's non-zero-exit gate and #1593's exit-0 gate — used to share the
+// SAME warnOnce channel ("ci-salvage"), keyed only on the PR. That let a PR
+// that hit one arm on an early tick silence a later, structurally different
+// failure on the OTHER arm for the rest of the run: no stderr line, no other
+// signal. Driven here with a stateful stub that answers exit-1-truncated on
+// its first invocation and exit-0-truncated on its second, for the SAME PR —
+// both warnings must print.
+test("gather: a PR that hits the exit-1 salvage then the exit-0 guard gets BOTH warnings, not just the first", () => {
+  const markerDir = mkdtempSync(join(tmpdir(), "board-dualarm-"));
+  const marker = join(markerDir, "tick");
+  const DUAL_ARM = `import { writeSync, existsSync, writeFileSync } from "node:fs";
+const marker = ${JSON.stringify(marker)};
+const first = !existsSync(marker);
+if (first) writeFileSync(marker, "1");
+writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");
+process.exit(first ? 1 : 0);`;
+  const r = gatherCi({ ciStateBody: DUAL_ARM, prevCi: "red", ticks: 2 });
+  assert.equal(r.ci, "red", "both arms are refusals; the carry-forward value must survive both ticks");
+  assert.match(r.stderr, /\(exit 1\) left a payload that will not parse/, "tick 1's salvage warning must print");
+  assert.match(r.stderr, /\(exit 0\) left a payload that will not parse/,
+    "tick 2's exit-0 warning must print too, not be swallowed by a shared channel");
 });
 
 // #786: `gh issue list`/`gh pr list` rows had no per-row shape guard. A row

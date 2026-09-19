@@ -289,15 +289,19 @@ function runCiState(scriptDir, pr) {
     // `ci-parse` gate is and for the same reason: serve() re-gathers on a
     // timer, so a payload truncated by a cause that persists is truncated
     // again on every tick, and an ungated line spends one per PR per tick for
-    // as long as the cause lasts. Its own channel rather than `ci-parse`,
-    // because for any one payload the two are mutually exclusive — bytes
-    // refused here return null and never reach mapCi — so a shared channel
-    // would buy nothing and would let whichever arm a PR happened to take
-    // silence the other for the rest of the run.
+    // as long as the cause lasts. Its own channel, `ci-salvage-nonzero`,
+    // distinct from both `ci-parse` and the exit-0 guard's `ci-salvage-exit0`
+    // below: for any one payload the three are mutually exclusive — bytes
+    // refused here return null and never reach mapCi — so a channel shared
+    // between any two of them would buy nothing, and would let whichever arm
+    // a PR happened to hit FIRST silence a later, structurally different
+    // failure on another arm for the rest of the run — measured: driving the
+    // same PR through this arm then the exit-0 guard below printed only the
+    // first tick's warning until the channels were split.
     try { JSON.parse(errOut); }
     catch (pe) {
       const how = e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
-      warnOnce("ci-salvage", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
+      warnOnce("ci-salvage-nonzero", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
       return null;
     }
     return errOut;
@@ -309,11 +313,23 @@ function runCiState(scriptDir, pr) {
   // string maps to "unknown" and gather()'s carry-forward — which only a null
   // return reaches — was skipped, discarding the PR's last-known CI value
   // exactly as #262 did before the exit-2 case was fixed. Same parse check,
-  // same "ci-salvage" channel, same null return as the catch block: a
-  // zero-exit child does not get a looser contract than a non-zero one.
+  // same null return as the catch block above — but its OWN channel,
+  // `ci-salvage-exit0`, not the catch block's `ci-salvage-nonzero`: a
+  // zero-exit child does not get a looser contract than a non-zero one, and
+  // the two arms are structurally different failures that must not silence
+  // each other (see the channel-split comment above).
+  //
+  // Emptiness is checked before the parse, and gets its own wording: an empty
+  // `out` is not a corrupted payload, it is no payload at all — "left a
+  // payload that will not parse" is a true diagnosis of truncated JSON and a
+  // false one of a child that printed nothing, the same distinction the
+  // empty/status-2 branch above draws for a non-zero exit.
   try { JSON.parse(out); }
   catch (pe) {
-    warnOnce("ci-salvage", pr, `ci-state --pr ${pr} (exit 0) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
+    const msg = out.trim()
+      ? `ci-state --pr ${pr} (exit 0) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`
+      : `ci-state --pr ${pr} (exit 0) never answered; carrying the previous CI value forward rather than reading this as a verdict`;
+    warnOnce("ci-salvage-exit0", pr, msg);
     return null;
   }
   return out;
