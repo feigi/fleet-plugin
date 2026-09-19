@@ -575,12 +575,36 @@ if [ -e "$refsdir" ]; then
   # extensions absent from BSD find. `-type d` alone is not enough either: a
   # subdirectory at 400 is readable enough for find to enter and exit 0 while
   # `for-each-ref` still drops the branch, so the permission has to be tested
-  # rather than inferred from find's status. That status is unusable anyway —
-  # find exits 1 on the very permission-denied descent that IS the detection —
-  # so the guard reads head's status, the one thing here that failing means
-  # a crash rather than a finding.
-  bad=$(find "$refsdir" -type d ! \( -exec test -r {} \; -a -exec test -x {} \; \) -print 2>/dev/null | head -1) ||
-    { add_unknown "local" "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"; return 1; }
+  # rather than inferred from find's status alone — find exits 1 on the very
+  # permission-denied descent that IS the detection, so a hit in `$bad`
+  # alongside a nonzero status is the finding, not a crash.
+  #
+  # find's status still has to be read, though — just not off the pipeline
+  # that used to end in `head -1`. This script sets no `pipefail`, so `$?`
+  # after `cmd | head -1` reports only `head`'s, and `head` exits 0 whether
+  # find printed a permission-denied hit or never ran at all (missing binary,
+  # a failed exec, any other swallowed crash) — both leave `$bad` empty, both
+  # used to read as a clean tree (#1448, reproduced by shimming `find` on
+  # PATH to `exit 127`). find's own status is read off the bare command
+  # substitution instead, with nothing piped after it, so nothing that runs
+  # after it can stand in for it again.
+  #
+  # `head`'s own status is kept too, not discarded — a `head` that cannot run
+  # (crashed, missing) is the same class of failure, and was the one failure
+  # this guard could already see before #1448 (pinned below at "a
+  # refs-subdirectory walk whose `head` cannot run is unknown, never free").
+  # Reading both separately,
+  # rather than trusting whichever one the pipeline's single status happens to
+  # expose, is what closes the first gap without reopening the second.
+  find_rc=0
+  find_out=$(find "$refsdir" -type d ! \( -exec test -r {} \; -a -exec test -x {} \; \) -print 2>/dev/null) ||
+    find_rc=$?
+  head_rc=0
+  bad=$(printf '%s\n' "$find_out" | head -1) || head_rc=$?
+  if { [ -z "$bad" ] && [ "$find_rc" -ne 0 ]; } || [ "$head_rc" -ne 0 ]; then
+    add_unknown "local" "could not test the refs directories under $refsdir, so whether #$n has a local branch is unknown"
+    return 1
+  fi
   [ -z "$bad" ] ||
     { add_unknown "local" "refs directory $bad could not be read — whether #$n has a local branch is unknown"; return 1; }
 fi
