@@ -254,7 +254,7 @@ esac
 # comment above says must not reach a rebase decision. reap.sh can leave the
 # guard out because its `fetch --prune` drops the stale refs that make the same
 # spelling vacuous there; this script fetches nothing — the only fetch it names
-# is the advice in the `origin/$branch does not resolve` die below.
+# is the advice in the `$branch_rev does not resolve` die below.
 case "$base" in
   */"$branch") die "BASE_REF must not name the audited branch, got '$base'";;
 esac
@@ -301,16 +301,6 @@ esac
 # itself a `refs/remotes/...` path, so there is nothing already-qualified to
 # detect.
 branch_rev="refs/remotes/origin/$branch"
-
-# Where the two spellings can disagree, this script's own rule — the
-# `$base_rev` rev-parse guard and merge-base die above — is that the die
-# names both: a refusal earned by the qualified ref must not be misread as a
-# refusal of the bare shorthand a local ref shadows into resolving instead.
-# The rev-parse guard below and the merge-base die under it follow that rule
-# for the identical reason. `git merge-tree`'s own die does not gain
-# `$branch_rev`: by the time it can fire, both `$base_rev` and `$branch_rev`
-# have already survived their own `rev-parse --verify`, so a merge-tree
-# failure there is not a spelling question either die could get wrong.
 
 [ -d "$wt" ] || die "worktree $wt does not exist"
 # "Can git operate here" is NOT "is this the tree it answers about", and only
@@ -453,7 +443,7 @@ git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not re
 # not. --verify stays: without it a name that matches a FILE resolves, prints
 # the path and exits 0, and the guard passes something that is not a ref.
 git -C "$wt" rev-parse --verify "$branch_rev" >/dev/null \
-  || die "origin/$branch does not resolve as $branch_rev — run 'git fetch origin' and retry"
+  || die "$branch_rev does not resolve — run 'git fetch origin' and retry"
 
 # 1. Uncommitted work. This may exist nowhere else on disk. `|| true` here would
 #    turn a failed `status` into empty output and print "clean" over a dirty
@@ -783,6 +773,11 @@ mt_rc=0
 git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "$branch_rev" >"$mt_out" || mt_rc=$?
 [ "$mt_rc" -le 1 ] && [ -s "$mt_out" ] \
   || die "git merge-tree could not answer (exit $mt_rc) against origin/$branch — cannot determine conflicts"
+# This die does not gain `$branch_rev` the way the rev-parse guard above and
+# the merge-base die below do: by the time it can fire, both `$base_rev` and
+# `$branch_rev` have already survived their own `rev-parse --verify`, so a
+# merge-tree failure here is not a spelling question either of those dies
+# could get wrong.
 
 # --name-only output is: tree OID, then (if conflicted) the conflicted-file
 # list, then an EMPTY record, then prose ("Auto-merging ...", "CONFLICT ...").
@@ -865,7 +860,7 @@ conflicts_json=$(printf '%s' "$conflicts" | jarr) \
 at_risk=""
 if [ -n "$conflicts" ]; then
   fork=$(git -C "$wt" merge-base "$base_rev" "$branch_rev") \
-    || die "git merge-base failed for $base ($base_rev) and origin/$branch ($branch_rev) — cannot tell what a resolution would eat"
+    || die "git merge-base failed for $base ($base_rev) and $branch_rev — cannot tell what a resolution would eat"
   emit "\$ git log --oneline $fork..$base_rev -- <conflicting files>"
   # One pathspec per argument. Word-splitting `$conflicts` turned a path with a
   # space into two pathspecs that match nothing, and `git log` spends exit 0 on

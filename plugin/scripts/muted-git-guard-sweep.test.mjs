@@ -413,7 +413,7 @@ const SITES = [
   // cannot fire.
   {
     script: "no-undo-audit.sh", args: ["@WT@", "never-pushed"], env: {}, names: "origin/never-pushed",
-    remedy: /does not resolve as refs\/remotes\/origin\/never-pushed — run 'git fetch origin' and retry/,
+    remedy: /refs\/remotes\/origin\/never-pushed does not resolve — run 'git fetch origin' and retry/,
   },
 ];
 
