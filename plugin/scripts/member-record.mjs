@@ -584,19 +584,21 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // name the way Claude's meta.json does, so `ticket`/`pr` extraction runs
 // against it directly.
 //
-// `role` is NEVER guessed off the bare AgentId — a generated CamelCase word
-// pair names nothing classifyRole can read. THREE REAL signals exist instead:
+// `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
+// word pair names nothing classifyRole can read. FOUR real signals exist:
 // `session_init.agent` (the agent DEFINITION the dispatch named),
-// `session_init.task` (the dispatch prompt, when present) and `spawnDepth`
-// (the transcript's own nesting depth, supplied by readOmpSession from the
-// walk — a fact about where the file lives, not a guess about what it is).
-// Depth matters on its own: classifyRole checks depth BEFORE any text match,
-// specifically so a nested member whose task happens to read like a
-// reviewer's ("Review PR 1353 correctness") still books as the fan-out
-// specialist it structurally is, not a reviewer. None present
-// yields `"-"` — the same visible-hole spelling as `thinking`, never a
-// default like "other", which only makes sense where a real dispatch record
-// (Claude's meta.json) backs it.
+// `session_init.task` (the dispatch prompt, when present), `spawnDepth` (the
+// transcript's own nesting depth, supplied by readOmpSession from the walk —
+// a fact about where the file lives, not a guess about what it is), and —
+// per #1506's ruling below — the AgentId itself, handed to classifyRole as
+// `memberName` exactly the way `claudeRoleSignals` already hands over
+// `meta.name` unconditionally. Depth matters on its own: classifyRole checks
+// depth BEFORE any text match, specifically so a nested member whose task
+// happens to read like a reviewer's ("Review PR 1353 correctness") still
+// books as the fan-out specialist it structurally is, not a reviewer. None
+// present yields `"-"` — the same visible-hole spelling as `thinking`, never
+// a default like "other", which only makes sense where a real dispatch
+// record (Claude's meta.json) backs it.
 //
 // `agent` reaches classifyRole as its `agentDefinition` (#1486, #1505). It is
 // the same value the `subagent_type` column below already records, and
@@ -610,21 +612,51 @@ export function foldOmpTranscript(jsonlText, filePath) {
 //
 // It went in as `agentType` until #1505, when that parameter turned out to be
 // the Claude reader's NAME — one parameter, two meanings, so the memory
-// exclusion decided on a definition here and on a name there. The parameter it
-// fills now says which of the two it is, and `memberName` is left unset
-// because the AgentId genuinely is not one: a generated CamelCase word pair
-// names nothing the classifier can read. An omp member that chose a real name
-// (`impl-<n>`, `merge-bot-<n>`) still cannot reach the name patterns — that is
-// #1506's gap, deliberately untouched here, and passing the AgentId to close
-// it would put generated words where names belong.
+// exclusion decided on a definition here and on a name there. The parameter
+// it fills now says which of the two it is.
+//
+// #1506's gap: `memberName` used to be left unset here on the theory that the
+// AgentId genuinely is not a name — a generated CamelCase word pair
+// (`InstallVerifySearch`) names nothing the classifier can read. True for the
+// ordinary case, but false for members dispatched under run-team's own naming
+// convention: `impl-<n>`, `fix-pr-<n>`, `finisher-<n>`, `finish-<n>`,
+// `review-pr-<n>` and `merge-bot-<n>` ARE the dispatch name — exactly why
+// `parseMemberName` runs against this same stem below. Those members are
+// dispatched under the generic default `task` definition (`folded.agent` is
+// `undefined`), so the definition-based fix above cannot reach them, and they
+// fall through to prose classification of `folded.task` alone. Measured
+// against docs/metrics/member-outcomes.tsv (#1506): 478 omp rows carry such
+// an AgentId, 52 of them booked `other` for want of this signal (`fix-pr-*`
+// members whose dispatch prompt never happens to say "fix pr").
+//
+// RULED: pass the AgentId unconditionally, same as Claude's reader passes
+// `meta.name` unconditionally — NOT gated on looking name-shaped first. Every
+// name-driven branch in classifyRole is hyphen-anchored (`^impl-`,
+// `review-pr-`, `fix-pr-`, `^finish-`) or a multi-word phrase ("implement
+// ticket", "review pr"), so a stray generated word pair cannot coincidentally
+// satisfy one; the one bare-word pattern, `finisher`, already carries the
+// same risk on Claude's side today and has not fired on the 4,574 sidecars
+// measured for #1505. `OMP_CANONICAL_STEM_RE` below exists only to widen
+// `hasRoleSignal` itself: a canonically-named member whose transcript
+// predates #1343 (no `session_init` line at all, so neither `task` nor
+// `agent` exist) still holds a readable identity and must not fall back to
+// the "-" hole. Measured 2026-09-16: zero such rows on disk today, but the
+// gate exists so the design does not assume that stays true forever.
+//
+// REJECTED: dispatching these roles under real agent definitions instead
+// (the issue's other named approach) — a controller/dispatch-convention
+// change, out of scope for a classifier fix, and unlike this one it cannot
+// repair the 478 historical rows already on disk.
+const OMP_CANONICAL_STEM_RE = /^(?:impl|fix-pr|finisher|finish|review-pr|merge-bot)-/;
 export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const folded = foldOmpTranscript(jsonlText, filePath);
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
   const { ticket, pr } = parseMemberName(member);
-  const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string";
+  const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string"
+    || OMP_CANONICAL_STEM_RE.test(member);
   const role = hasRoleSignal
-    ? classifyRole({ agentDefinition: folded.agent, description: folded.task, spawnDepth })
+    ? classifyRole({ agentDefinition: folded.agent, memberName: member, description: folded.task, spawnDepth })
     : "-";
   return {
     harness: "omp",

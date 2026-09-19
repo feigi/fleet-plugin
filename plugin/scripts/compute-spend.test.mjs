@@ -250,21 +250,24 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
   assert.equal(classifyRole({ spawnDepth: 0, description: "Apply fleet-review-verifier findings, then finish PR 563" }), "finisher");
 });
 
-test("the fleet implementer definitions classify as implementer — `^impl-` cannot reach an omp row", () => {
-  // `^impl-` is anchored at the start of `${memberName} ${description}`, so it
-  // only ever fires through a Claude member NAME (`impl-332`). readOmpMember
-  // never hands the AgentId to classifyRole — it leaves `memberName` unset and
-  // parses the stem only for parseMemberName's ticket/pr, by design, because a
-  // generated CamelCase word pair names nothing — so the definition is the only
-  // implementer signal a definition-dispatched omp member has. That does not
-  // close the gap for every omp member: one dispatched under the default `task`
-  // definition (`fix-pr-<n>`, `merge-bot-<n>`, `impl-<n>`) carries no
-  // definition signal either and still falls through to the description
-  // patterns below; reaching those is a separate change, left to a
-  // follow-up ticket. Measured 2026-09-16 before this branch: 90 omp
-  // fleet-implementer/-alt rows split 73 other, 7 merge-bot, 5 finisher,
-  // 5 reviewer, none of them implementer, while the same definition booked
-  // implementer on all 109 Claude rows.
+test("the fleet implementer definitions classify as implementer, independent of the `^impl-` name pattern", () => {
+  // `agentDefinition`-based classification (`fleet-implementer(-alt)`) is
+  // checked BEFORE the `^impl-` name/description pattern below it, so it must
+  // not depend on a Claude-shaped member name to fire — this pin exercises
+  // classifyRole directly, on `agentDefinition` alone, so it stays green
+  // whatever either reader hands `memberName`.
+  //
+  // Historically this was the ONLY implementer signal an omp member had:
+  // before #1486, `agentDefinition` did not reach classifyRole from omp at
+  // all, and before #1506, `memberName` did not either — readOmpMember left
+  // it unset on the theory that the AgentId is a generated CamelCase word
+  // pair naming nothing. #1506 closed that: a canonically-named omp member
+  // (`impl-<n>`) now reaches `^impl-` too, through `memberName`, exactly like
+  // this branch already reaches it through `agentDefinition`. Measured
+  // 2026-09-16 before #1486's branch: 90 omp fleet-implementer/-alt rows
+  // split 73 other, 7 merge-bot, 5 finisher, 5 reviewer, none of them
+  // implementer, while the same definition booked implementer on all 109
+  // Claude rows.
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-implementer-alt", description: "whatever" }), "implementer");
