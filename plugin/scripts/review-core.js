@@ -310,7 +310,9 @@ export function selectDimensions(all, stats) {
   if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
   if (stats.hasSrc === false) {
     const keepsSilentFailure =
-      SIZE_TIER_PROFILES.has(stats.profile) || (stats.profile === "tests-only" && stats.hasConfig === true);
+      SIZE_TIER_PROFILES.has(stats.profile) ||
+      (stats.profile === "tests-only" && stats.hasConfig === true) ||
+      (stats.profile === "production" && stats.hasTests === false && stats.hasConfig === true);
     dims = dims.filter(
       (d) => d.key !== "types" && d.key !== "simplify" && (d.key !== "silent-failure" || keepsSilentFailure),
     );

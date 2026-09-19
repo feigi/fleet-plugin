@@ -202,19 +202,42 @@ test("a small config-only diff keeps the silent-failure floor", () => {
   );
 });
 
-// The floor's own boundary, and the half a widening test cannot pin: OUTSIDE the
-// size tier the hasSrc guard still drops silent-failure. Five config files at 50
-// loc profile `production`, so nothing re-admits it. Without this the fix reads
-// as "hasSrc no longer gates silent-failure at all", which is not what shipped.
-test("a large config-only diff still drops silent-failure — the floor is the size tier's, not a repeal", () => {
-  const keys = dimensionKeys([
+// The floor's own former boundary. OUTSIDE the size tier the hasSrc guard used
+// to drop silent-failure again — five config files at 50 loc profile
+// `production`, and neither #236's floor (SIZE_TIER_PROFILES) nor #739's
+// `tests-only` arm reached it, so growing a config-only diff past the tier
+// LOST the specialist a smaller diff of that SAME KIND kept: non-monotonic on
+// #236's own motivating class, the sibling gap #1285 closed alongside #739.
+// Fixed by a third `keepsSilentFailure` arm gated on `hasTests === false`: a
+// config-only diff keeps silent-failure regardless of size, the same way a
+// config+test diff already does via #739.
+test("a large config-only diff keeps the silent-failure floor even past the size tier (#1285)", () => {
+  const files = [
     f(".github/workflows/a.yml", 6, 4),
     f(".github/workflows/b.yml", 6, 4),
     f(".github/workflows/c.yml", 6, 4),
     f("tsconfig.json", 6, 4),
     f("package.json", 6, 4),
-  ]);
-  assert.deepEqual(keys, ["correctness", "comments"]);
+  ];
+  assert.equal(computeStats(files).profile, "production");
+  assert.deepEqual(dimensionKeys(files), ["correctness", "silent-failure", "comments"]);
+});
+
+// #1285's own reproduction, mirrored on #739's own test shape below: a
+// config-only diff UNDER the size tier keeps silent-failure (`small`), and
+// adding a SECOND config file that pushes `loc` past the tier into
+// `production` must not subtract it. Crossing into a larger, more-scrutinized
+// profile can only ADD scrutiny, never remove a specialist a smaller diff of
+// the same kind already had — the monotonicity property this file's
+// dimension-selection logic exists to guarantee.
+test("a second config file that crosses the size tier into production does not drop silent-failure", () => {
+  const underTier = [f(".github/workflows/ci.yml", 3, 2), f("tsconfig.json", 3, 2)];
+  assert.equal(computeStats(underTier).profile, "small");
+  assert.deepEqual(dimensionKeys(underTier), ["correctness", "silent-failure", "comments"]);
+
+  const crossesTier = [...underTier, f("package.json", 30, 10)];
+  assert.equal(computeStats(crossesTier).profile, "production");
+  assert.deepEqual(dimensionKeys(crossesTier), ["correctness", "silent-failure", "comments"]);
 });
 
 // #739. `tests-only` is assigned AHEAD of `single-file`/`small` in computeStats'

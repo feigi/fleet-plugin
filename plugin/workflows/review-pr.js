@@ -636,13 +636,31 @@ function selectDimensions(all, stats) {
   // `ci.yml` alone kept the hunter, `ci.yml` + one test file SUBTRACTED it, and
   // adding a file to a diff removed a specialist. `hasConfig` is what keeps that
   // widening off a PURE test diff, which has nothing for the hunter and keeps the
-  // old behaviour. Deliberately not size-gated as well: a big config+test diff
-  // gets the hunter where the config-only `production` diff beside it does not,
-  // which is the safe asymmetry — the alternative re-breaks monotonicity to buy
-  // back a symmetry nothing needs.
+  // old behaviour.
+  //
+  // #1285 is #739's sibling on the other axis. #739 fixed a diff GAINING a test
+  // file; this is a diff that stays the same KIND — config-only, no src, no
+  // tests — and grows past the size tier itself. `ci.yml` alone is `single-file`,
+  // which SIZE_TIER_PROFILES already keeps; a second config file whose `loc`
+  // crosses the tier reclassifies the identical kind of diff as `production` and,
+  // without a third arm, still dropped silent-failure — the same diff, grown
+  // bigger, LOSING a specialist a smaller diff of the same kind kept. The
+  // "deliberately not size-gated" call this comment used to make about the
+  // config+test class does not extend here: `production` and `single-file`/
+  // `small` are the same shape of diff at different sizes when there is no test
+  // file, not different kinds, so the tier crossing must not be the thing that
+  // removes coverage. The third arm is gated on `hasTests === false`, mirroring
+  // `tests-only`'s carve-out from the other side, and checks `hasConfig === true`
+  // even though `hasSrc === false` + `profile === "production"` + `hasTests ===
+  // false` cannot occur with `hasConfig === false` (docsOnly returned above, and
+  // computeStats' else-if chain would have assigned `tests-only` had `hasTests`
+  // been true) — the same defend-the-invariant reason the `tests-only` arm checks
+  // it explicitly instead of trusting the proof.
   if (stats.hasSrc === false) {
     const keepsSilentFailure =
-      SIZE_TIER_PROFILES.has(stats.profile) || (stats.profile === "tests-only" && stats.hasConfig === true);
+      SIZE_TIER_PROFILES.has(stats.profile) ||
+      (stats.profile === "tests-only" && stats.hasConfig === true) ||
+      (stats.profile === "production" && stats.hasTests === false && stats.hasConfig === true);
     dims = dims.filter(
       (d) => d.key !== "types" && d.key !== "simplify" && (d.key !== "silent-failure" || keepsSilentFailure),
     );
@@ -654,12 +672,13 @@ function selectDimensions(all, stats) {
   // negation; `types`/`simplify` are not in `SIZE_TIER_DIMS`; `comments` and
   // `correctness` are never removed above). `silent-failure` on a no-src diff was
   // the single case where the two forms differed, and it is now deliberately the
-  // floor. #739's second floor arm does not reopen the gap, and for a reason that
-  // is NOT the first arm's: `tests-only` is disjoint from SIZE_TIER_PROFILES by
-  // construction — computeStats' else-if chain assigns exactly one profile — so
-  // that arm can only fire on a run where this filter does not execute at all.
-  // Kept as a filter regardless: it is the form that stays correct without
-  // re-proving that equivalence every time a guard is added above.
+  // floor. Neither #739's `tests-only` arm nor #1285's `production` arm reopens
+  // that gap, and for a reason that is NOT the first arm's: both profiles are
+  // disjoint from SIZE_TIER_PROFILES by construction — computeStats' else-if
+  // chain assigns exactly one profile — so those arms can only fire on a run
+  // where this filter does not execute at all. Kept as a filter regardless: it
+  // is the form that stays correct without re-proving that equivalence every
+  // time a guard is added above.
   //
   // `comments` sits in SIZE_TIER_DIMS unconditionally (#218). It used to be
   // carved in here on `stats.kinds?.docs !== 0` — a FILE test, not a prose test,
