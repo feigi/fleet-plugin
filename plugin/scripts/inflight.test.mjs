@@ -1837,18 +1837,16 @@ test("probe 3: a git common directory that could not be resolved is unknown, nev
   assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
 });
 
-test("probe 3: a refs-subdirectory walk that could not run is unknown, never free", (t) => {
+test("probe 3: a refs-subdirectory walk whose `head` cannot run is unknown, never free", (t) => {
   const { repo, env, bin } = fixture(t, 77, {});
 
   // `head`, not `find`. The script runs `set -eu` with no `pipefail`, so
-  // `bad=$(find … | head -1)` carries HEAD's status alone; find's is
-  // deliberately unread, because find exits 1 on the very permission-denied
-  // descent that IS this walk's detection. This case pins head's own
-  // exit-code failure — the one failure the guard actually observes. It does
-  // NOT cover a `find` that cannot run at all (crashed, missing, `exit 127`):
-  // head then reads an empty pipe and exits 0 on its own, so `$bad` comes back
-  // empty and the guard reads that as "no unreadable subdirectory" instead —
-  // a different, narrower gap this case does not pin (tracked separately).
+  // before #1448 `bad=$(find … | head -1)` carried HEAD's status alone;
+  // find's was read off a separate, unpiped command substitution once #1448
+  // fixed that (the next test pins the gap that left open — a `find` that
+  // cannot run at all). This case is the other half: `head` itself failing,
+  // which the fix keeps observing on its own via `head_rc` rather than
+  // dropping now that find's status no longer has to stand in for it.
   //
   // Selected by the first argument for the reason the git shims are, and
   // `head -1` is the only `head` the script runs.
@@ -1865,6 +1863,34 @@ test("probe 3: a refs-subdirectory walk that could not run is unknown, never fre
   // cover this one: there the walk RAN and returned a finding, here it did not
   // run at all, and the two arrive at the same empty `$bad` from opposite
   // directions.
+  const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
+  assert.match(r.stderr,
+    /could not test the refs directories under \S+\/refs\/heads, so whether #77 has a local branch is unknown/);
+  assert.doesNotMatch(r.stderr, /no local branch or worktree/,
+    "a walk that could not run never reports 'no'");
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.hits, []);
+  assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
+});
+
+test("probe 3: a refs-subdirectory find that cannot run at all is unknown, never free", (t) => {
+  const { repo, env, bin } = fixture(t, 77, {});
+
+  // `find` itself, not `head` — the previous case's shim. `exit 127` is the
+  // shell's own code for "command not found", the shape a missing binary or a
+  // PATH shadow actually takes, and the reproduction this ticket names (#1448).
+  // Before the fix, `bad=$(find … | head -1)` carried only `head`'s status —
+  // this script sets no `pipefail` — and `head` exits 0 reading an empty pipe
+  // whether `find` printed a permission-denied hit or never ran at all, so a
+  // crashed `find` and a clean tree left the same empty `$bad` and were
+  // indistinguishable at the guard below.
+  writeFileSync(join(bin, "find"), "#!/bin/sh\nexit 127\n");
+  chmodSync(join(bin, "find"), 0o755);
+
+  // Measured before the fix: exit 0, `taken:false`, `unknown:[]`, "no local
+  // branch or worktree for #77" — a `find` that never ran reported a definite
+  // absence about refs it never actually walked.
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr,
