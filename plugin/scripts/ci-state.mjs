@@ -545,17 +545,26 @@ if (noCi) {
     if (byCreatedAt !== 0) return byCreatedAt;
     // `status` is the run's LIFECYCLE (queued/in_progress/completed) and is
     // NOT the outcome — a cancelled run reports status:"completed",
-    // conclusion:"cancelled", same as a successful one. Ranking on status
-    // here (as an earlier draft of this fix did) could never actually prefer
-    // a completed-and-successful run over a completed-but-cancelled sibling,
-    // because both share status:"completed". Rank on `conclusion` instead.
+    // conclusion:"cancelled", same as a successful one. Ranking a completed
+    // run's success against its cancellation on status here (as an earlier
+    // draft of this fix did) could never actually prefer the successful one
+    // over the cancelled sibling, because both share status:"completed".
+    // Rank a completed run's outcome on `conclusion` instead — see below
+    // for why the still-running middle tier ranks on `status` instead.
     const rank = (r) => {
       if (r.conclusion === "success" || r.conclusion === "skipped") return 0;
-      // Still running: no conclusion yet and not yet completed. Neither a
-      // proven win nor a proven loss, so it sits between a settled success
-      // and a settled failure/cancellation rather than being ranked as
-      // either extreme.
-      if (r.conclusion === null && r.status !== "completed") return 1;
+      // Still running: no conclusion yet. `status` is this run's lifecycle
+      // field (queued/in_progress/completed) and is authoritative for "not
+      // done yet" — checked alone, not paired with a conclusion check.
+      // An earlier version additionally required `r.conclusion === null`,
+      // but live `gh run list --json conclusion` reports an empty string
+      // `""` for a non-completed run, never `null` (#1566) — that extra
+      // check silently never matched, so a still-running run fell through
+      // to the bottom tier below, indistinguishable from a failed/
+      // cancelled one. `status !== "completed"` alone is both sufficient
+      // (only a completed run has a real conclusion to rank on) and
+      // immune to whichever falsy shape gh chooses for "no conclusion yet".
+      if (r.status !== "completed") return 1;
       return 2;
     };
     const byConclusion = rank(x) - rank(y);

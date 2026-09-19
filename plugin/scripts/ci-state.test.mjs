@@ -489,6 +489,32 @@ test("untied path: a newer non-completed run still beats an older completed one 
   assert.doesNotMatch(r.stderr, /run selection tie-break/, "createdAt differs here, so no tie-break note should fire");
 });
 
+// --- #1566: rank()'s middle tier must match live gh data --------------------
+// `gh run list --json conclusion` reports an empty string `""` for a
+// non-completed run, never `null`. An earlier version of rank()'s middle
+// tier required `r.conclusion === null`, so it silently never matched real
+// data and a still-running run fell into the SAME bottom tier as a
+// failed/cancelled one, losing an exact-createdAt tie it should win.
+test("two runs share head SHA and createdAt to the second, one in-progress (conclusion \"\") one cancelled: the in-progress run wins the tie-break, not the cancelled one", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  // In-progress listed with the LOWER databaseId: under the pre-fix bug both
+  // runs fall to the bottom tier (conclusion:"" never matches `=== null`),
+  // so the final databaseId tie-break picks the cancelled run (higher id) —
+  // the wrong winner. Only the fixed middle tier makes the in-progress run
+  // win despite its lower id.
+  const inProgress = { databaseId: 1, headSha: PR_HEAD, status: "in_progress", conclusion: "", event: "pull_request", createdAt };
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "completed", conclusion: "cancelled", event: "pull_request", createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([cancelled, inProgress]),
+    runView: JSON.stringify({ jobs: [{ name: "check", status: "in_progress", conclusion: "" }], attempt: 1, status: "in_progress", conclusion: "", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.equal(r.payload.runId, inProgress.databaseId, "still-running (conclusion \"\") must outrank a settled cancelled run in the tie-break, not lose to it on databaseId");
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${inProgress.databaseId} \\(in_progress/\\) over #${cancelled.databaseId} \\(completed/cancelled\\)`));
+});
+
 // --- #169: a flag given with no value must die, never read as absent -------
 // `base`/`workflow`/`workflow-file` all read via `arg(name) || default`, so a
 // trailing flag previously fell straight through to the DEFAULT — the caller
