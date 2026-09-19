@@ -54,14 +54,7 @@
 // TOLD, never where it actually writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { stripComments } from "./strip-comments.mjs";
-import { between } from "./prose-pin.mjs";
-
-const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
-const CODE = stripComments(SOURCE);
+import { promptRenderer } from "./prompt-renderer.mjs";
 
 const TEMPLATE_START = "`Review PR #${pr} (branch ${branch}) for: ";
 const TEMPLATE_END = "label: `review:";
@@ -73,17 +66,16 @@ const TEMPLATE_END = "label: `review:";
 // a ReferenceError instead.
 const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "testCmd", "readRules", "usableDiff", "environmentNote"];
 
-// `between` owns the bounded-slice extraction (and both failure messages);
-// only the backtick trim below is specific to a template literal and stays
-// here.
-const SLICE = between(
-  CODE,
-  TEMPLATE_START,
-  TEMPLATE_END,
-  "review-pr.js's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
-);
-
-const RENDER = new Function(...SCOPE, "return `" + SLICE.slice(1, SLICE.lastIndexOf("`")) + "`");
+// prompt-renderer.mjs owns the bounded-slice extraction (and both failure
+// messages, via prose-pin.mjs's `between()`), the backtick trim, and the
+// compile.
+const RENDER = promptRenderer({
+  file: "workflows/review-pr.js",
+  start: TEMPLATE_START,
+  end: TEMPLATE_END,
+  scope: SCOPE,
+  what: "review-pr.js's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
+});
 
 // One specialist's prompt. Every argument is fixed: these pins are about what
 // the prompt SAYS, not about how it varies, so nothing here needs to.

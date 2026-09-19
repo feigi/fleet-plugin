@@ -36,18 +36,14 @@
 // what a refuter is TOLD, never where it actually writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { stripComments } from "./strip-comments.mjs";
+import { promptRenderer, workflowCode } from "./prompt-renderer.mjs";
 
-const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
-
-// Extraction runs against CODE, not SOURCE. A block-commented `agent(...)` call
-// still contains the whole template, so extracting from raw source would render
-// dead text and report every criterion satisfied — the vacuity class
-// strip-comments.mjs was written for, measured twice on this exact file.
-const CODE = stripComments(SOURCE);
+// Extraction runs against CODE, not SOURCE. A block-commented `agent(...)`
+// call still contains the whole template, so extracting from raw source
+// would render dead text and report every criterion satisfied — the
+// vacuity class strip-comments.mjs was written for, measured twice on this
+// exact file.
+const CODE = workflowCode("workflows/review-pr.js");
 
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
@@ -68,21 +64,16 @@ const TEMPLATE_END = "{ label: `verify:";
 // throws a ReferenceError rather than dropping a paragraph silently.
 const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"];
 
-function refuterTemplate() {
-  const start = CODE.indexOf(TEMPLATE_START);
-  assert.notEqual(
-    start,
-    -1,
-    "review-pr.js no longer builds a refuter prompt opening `Try to REFUTE this finding from PR #` — " +
-      "either it was renamed, or the whole verify fan-out is commented out. Update this test, or restore the prompt.",
-  );
-  const end = CODE.indexOf(TEMPLATE_END, start);
-  assert.notEqual(end, -1, "the refuter agent() call no longer carries a `verify:` label after its prompt — update this test");
-  const slice = CODE.slice(start, end);
-  return slice.slice(1, slice.lastIndexOf("`"));
-}
-
-const RENDER = new Function(...SCOPE, "return `" + refuterTemplate() + "`");
+// prompt-renderer.mjs owns the bounded-slice extraction (and both failure
+// messages, via prose-pin.mjs's `between()`), the backtick trim, and the
+// compile.
+const RENDER = promptRenderer({
+  file: "workflows/review-pr.js",
+  start: TEMPLATE_START,
+  end: TEMPLATE_END,
+  scope: SCOPE,
+  what: "review-pr.js's refuter prompt (opening `Try to REFUTE this finding from PR #`, labelled `verify:`)",
+});
 
 // One refuter's prompt. `finding` and `lens` are the two fan-out indices; every
 // other argument is fixed, so any difference between two renders is caused by
