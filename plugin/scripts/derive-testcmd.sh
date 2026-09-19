@@ -173,7 +173,19 @@ fi
 # lets grep's own failure reach this refusal indistinguishable from a repo
 # that genuinely carries no test files, handing claim-ticket.sh and
 # review-pr.js's snapshot agent the wrong cause for a listing nothing
-# actually read. #1543
+# actually read. #1543, independently reported as #1230, whose two open
+# questions this fix already settles: the grep-died arm below exits 1 like
+# every other refusal in this script — `die` enforces that unconditionally,
+# so there is no separate code to carve out for it — and claim-ticket.sh
+# does NOT duplicate this scan; it shells out to this very script for the
+# same decision (see its own comment above `script_dir=$(dirname -- "$0")`)
+# rather than reimplementing the logic, so this fix already covers that
+# caller too. claim-ticket.sh does carry a differently-shaped instance of
+# the same failure class in its generated `agent-test` runner (a
+# `grep -E … | sed …` step gated on output emptiness rather than a captured
+# exit status) — that one trades against byte-safety constraints this file
+# does not have (#582, #600) and is tracked as its own issue rather than
+# folded in here.
 if printf '%s\n' "$files" | grep -qE "$testfile_re"; then tf_rc=0; else tf_rc=$?; fi
 case $tf_rc in
   0) echo "node --test" ;;
