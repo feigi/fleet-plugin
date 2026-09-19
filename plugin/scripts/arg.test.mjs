@@ -29,10 +29,14 @@ const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 //     the full suite stays green for six of the seven (measured — only
 //     candidates is covered, by its own `/^candidates: …/m` assertions).
 //
-// The SHAPE makeDie() itself must have (try/catch around writeSync) is pinned
-// in candidates.test.mjs, next to the EAGAIN race that motivates it. This file
-// pins that every consumer actually reaches it — a source text-lift pin tests
-// a COPY, so the call site is what makes the lifted shape load-bearing.
+// The SHAPE makeDie() itself must have — the try around the write, with
+// process.exit(2) unconditionally after it — is pinned in candidates.test.mjs,
+// next to the EAGAIN race that motivates it. The write LOOP it delegates to is
+// arg.mjs's writeAll(), pinned and EXECUTED once further down this file
+// (#1549); until then it was hand-copied into three scripts and its regex into
+// three test files. This file pins that every consumer actually reaches die()
+// — a source text-lift pin tests a COPY, so the call site is what makes the
+// lifted shape load-bearing.
 //
 // Line-anchored under /m where an anchor helps, but deliberately WITHOUT `$`
 // terminators: a trailing comment on a pinned line is a legitimate edit and
@@ -296,6 +300,132 @@ test("die() resumes from a genuine short write and delivers the full message, no
     r.stderr.length,
     1 + firstWriteBytes + expected.length,
     `stderr must be the newline console.error printed, the filler that landed, then die()'s message and nothing else`,
+  );
+});
+
+// ── #1549: writeAll(), the one loop the three callers now share ──────────
+//
+// die() here, staleness.mjs's verdict() and ci-state.mjs's verdict writes each
+// hand-rolled this loop, held in step by a comment reading "mirrors emit()"
+// and by nothing executable — and they HAD already drifted: emit() was the one
+// that never grew #889's retry cap, so the copy nobody re-read was the copy
+// that could hang. The loop is arg.mjs's writeAll() now, pinned ONCE here at
+// its definition rather than as three near-identical regexes in three files.
+//
+// The shape pin and the two executed tests below are not redundant. The pin
+// cannot see what the loop DELIVERS. The executed tests cannot see a loop
+// rewritten behaviourally-identically but hand-copied back into a caller,
+// which is the regression this ticket exists to prevent.
+test("writeAll()'s loop consumes writeSync's return value and caps its EAGAIN retry — the single definition the three callers share", () => {
+  const source = stripComments(readFileSync(ARG_MODULE, "utf8"));
+  // Names the FILE when writeAll is renamed or deleted: the regex alone would
+  // then fail as an opaque match-against-undefined. The same standard
+  // ci-state.test.mjs holds its own pin to.
+  assert.equal(
+    source.match(/^\s*export function writeAll\(/gm)?.length,
+    1,
+    "arg.mjs declares writeAll() more than once, or not at all — every caller's write loop is meant to be this one definition",
+  );
+  assert.match(
+    source,
+    /^\s*export function writeAll\(fd, text\) \{\s*^\s*let buf = Buffer\.from\(text\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(fd, buf\)\);/m,
+  );
+  // The cap and the wait, which the fragment above stops short of — #889's
+  // whole content, and the clause emit() was missing before #1549 merged the
+  // three copies. Measured: collapsing the loop to a bare `writeSync(fd,
+  // Buffer.from(text))` reds the regex above while leaving candidates.test.mjs's
+  // die() wiring pin GREEN, and hoisting die()'s template out of its try reds
+  // that one while leaving these green — the two pins discriminate different
+  // defects and neither substitutes for the other.
+  assert.match(
+    source,
+    /^\s*if \(e\.code !== "EAGAIN" \|\| \+\+retries > MAX_EAGAIN_RETRIES\) return false;\s*^\s*Atomics\.wait\(IDLE, 0, 0, 1\);/m,
+  );
+});
+
+// The half that a suite feeding this function only FAILING fds can never pin:
+// what writeAll must ACCEPT. Its false return is a positive claim that bytes
+// were lost, and staleness.mjs's verdict() turns that claim straight into a
+// could-not-check downgrade and exit 2 — so a writeAll that answered false
+// after a merely SHORT write would convert healthy verdicts into failures on
+// exactly the saturated-pipe caller the loop was written for. A short write is
+// the ordinary case on a non-blocking fd, not an error, and nothing else in
+// this suite says so: every other test here asserts the BYTES arrive, which a
+// loop returning a wrong `false` would still satisfy.
+//
+// Same deterministic fixture as the die() short-write test above — console.error
+// puts fd 2 in O_NONBLOCK, and the first write's own return value is recorded
+// to prove the fd really did short-write rather than take everything at once.
+test("writeAll() returns true and delivers every byte across a genuine short write — the case it must never refuse", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-short-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  const payload = "w".repeat(200_000);
+  const expected = Buffer.from(payload);
+  const result = join(dir, "result.json");
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { writeFileSync, writeSync } from "node:fs";',
+    'import { writeAll } from "./arg.mjs";',
+    '// Lazily touching fd 2 through console.error puts it in O_NONBLOCK.',
+    'console.error("");',
+    `const filler = Buffer.alloc(${expected.length}, 0x70);`,
+    "let firstWriteBytes;",
+    "try {",
+    "  firstWriteBytes = writeSync(2, filler);",
+    "} catch (e) {",
+    '  firstWriteBytes = e.code === "EAGAIN" ? 0 : -1;',
+    "}",
+    `const ok = writeAll(2, ${JSON.stringify(payload)});`,
+    `writeFileSync(${JSON.stringify(result)}, JSON.stringify({ payloadBytes: filler.length, firstWriteBytes, ok }));`,
+    "",
+  ].join("\n"));
+
+  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(r.status, 0, `the probe itself failed: ${r.stderr?.subarray(0, 400)}`);
+  assert.ok(
+    expected.length > PIPE_BUFFER_BYTES,
+    `fixture no longer outgrows the pipe buffer (${expected.length} bytes), so this test would pass without proving anything`,
+  );
+  const { payloadBytes, firstWriteBytes, ok } = JSON.parse(readFileSync(result, "utf8"));
+  assert.ok(
+    firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
+    `fd 2 took all ${payloadBytes} bytes in one write, so nothing short-wrote and this proves nothing about resuming (first write returned ${firstWriteBytes})`,
+  );
+  assert.equal(
+    ok,
+    true,
+    "writeAll reported a lost write after a survivable short write — verdict() would downgrade a healthy verdict to could-not-check on this",
+  );
+  assert.ok(
+    r.stderr.subarray(1 + firstWriteBytes).equals(expected),
+    `writeAll dropped bytes across a short write: got ${r.stderr.length - 1 - firstWriteBytes}, expected ${expected.length}`,
+  );
+});
+
+// The other direction, and the one verdict()'s downgrade is actually built on:
+// a write that is genuinely lost has to come back false, or a caller that
+// promised "a failed write is a could-not-check" silently reports success.
+test("writeAll() returns false when the write is genuinely lost, not merely delayed", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-lost-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { closeSync } from "node:fs";',
+    'import { writeAll } from "./arg.mjs";',
+    "// fd 2 closed, so writeSync throws EBADF — a non-EAGAIN errno, the shape",
+    "// that loses the bytes outright rather than the one worth waiting out.",
+    "closeSync(2);",
+    'const ok = writeAll(2, "this cannot land");',
+    "process.stdout.write(JSON.stringify({ ok }));",
+    "",
+  ].join("\n"));
+
+  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: "utf8" });
+  assert.equal(r.status, 0, `the probe itself failed: ${r.stdout}`);
+  assert.deepEqual(
+    JSON.parse(r.stdout),
+    { ok: false },
+    "writeAll must report a lost write rather than swallow it — verdict()'s could-not-check downgrade is built on this return",
   );
 });
 

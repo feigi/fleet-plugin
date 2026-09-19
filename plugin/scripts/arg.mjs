@@ -1,6 +1,8 @@
 // Shared CLI-boundary helpers for the fleet scripts: die(), arg(), numArg(),
-// has(), sweep(), stray(), and the three refusal rules
-// isFlagLike()/hasEqualsForm()/isDigits().
+// has(), sweep(), stray(), the three refusal rules
+// isFlagLike()/hasEqualsForm()/isDigits(), and writeAll() — the short-write
+// and EAGAIN retry loop every script's own stdout/stderr write routes
+// through (#1549).
 // #367: was five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
@@ -83,6 +85,63 @@
 
 import { writeSync } from "node:fs";
 
+// #1549: ONE write-retry loop, not three. Resuming a short write and waiting
+// out an EAGAIN are properties of the FD, not of any one caller, so die()
+// below, ci-state.mjs's verdict writes and staleness.mjs's verdict() all
+// route through writeAll() instead of each hand-rolling the same
+// while/try/subarray. They were three independent copies held in step by a
+// comment reading "mirrors emit()" and by nothing executable — which is
+// exactly how one of them (ci-state.mjs's emit()) stayed the only one with no
+// retry cap at all. board.mjs's fault() is the fourth site and is #1547's to
+// move, not this file's.
+const MAX_EAGAIN_RETRIES = 200;
+
+// Shared across every retry: Atomics.wait never writes or notifies it, so one
+// instance times out exactly as a fresh one would, without allocating a
+// SharedArrayBuffer on every EAGAIN.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
+// Writes every byte of `text` to `fd`, or reports that it could not.
+//
+// A single writeSync fails two ways against a pipe whose reader has left it
+// full — the state an fd reaches once a stream has been initialised on it
+// (console.error does that to fd 2) and enough output is queued behind it. It
+// either SHORT-WRITES, returning the count it managed and throwing nothing at
+// all, silently truncating with no diagnostic for a catch to see (#885/#889);
+// or it throws EAGAIN. So this resumes from writeSync's own return value
+// until the buffer is empty, and reads EAGAIN as "momentarily full", waiting
+// 1ms for the reader rather than treating it as failure. The wait is what
+// keeps that retry from spinning: against a reader asleep three seconds, a
+// bare `continue` burned a full core for the whole stall where the 1ms wait
+// burned almost none, both delivering the same bytes.
+//
+// The EAGAIN retry is CAPPED (#889). Uncapped, a reader that stays open but
+// never drains — not merely a slow one — spins here forever, and every caller
+// is one whose whole job is to finish and report an exit code, so an
+// indefinite hang trades that guarantee away. Past the cap this gives up on
+// the BYTES rather than on the process.
+//
+// Returns true when the whole of `text` landed, false when bytes were lost —
+// to a non-EAGAIN errno, or to the cap. What that costs is the caller's to
+// decide, and the callers genuinely differ: die() exits 2 either way,
+// staleness.mjs's verdict() downgrades to could-not-check, ci-state.mjs
+// carries on to its own exit code. The one thing none of them may do is
+// mistake a short write for a complete one, which is what a bare writeSync
+// leaves every one of them doing.
+export function writeAll(fd, text) {
+  let buf = Buffer.from(text);
+  let retries = 0;
+  while (buf.length) {
+    try {
+      buf = buf.subarray(writeSync(fd, buf));
+    } catch (e) {
+      if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) return false;
+      Atomics.wait(IDLE, 0, 0, 1);
+    }
+  }
+  return true;
+}
+
 // die() is writeSync, not console.error (#176/#328/#363). On a pipe,
 // process.stderr.write is ASYNC and process.exit() discards whatever is
 // still queued — a large forwarded child stderr (gh's own) eats the refusal
@@ -95,41 +154,19 @@ import { writeSync } from "node:fs";
 // Every reader of these refusals, tests included, matches them
 // line-anchored; without the leading newline they silently stop matching
 // under exactly the large-stderr failure writeSync exists to survive.
-//
-// The write itself can still fail, two ways. Once enough forwarded stderr
-// is already queued on a pipe, this fd is non-blocking, and a single call
-// either short-writes — returns the count it managed and throws nothing at
-// all, silently truncating the refusal with no diagnostic (#889, the same
-// class ci-state.mjs's emit() had before #885) — or throws EAGAIN outright.
-// Uncaught, EAGAIN skips process.exit(2) below and the process falls
-// through to Node's default exit 1 — inverting the caller's own exit-code
-// contract (#299/#328). The loop below mirrors emit() (#885): it resumes a
-// short write where writeSync left off, and retries EAGAIN after a 1ms
-// Atomics.wait, capped at MAX_EAGAIN_RETRIES so a reader that never drains
-// still reaches process.exit(2) instead of hanging forever; the outer try
-// covers msg's own string coercion too, so a throwing msg can never skip
-// the exit code either.
-const MAX_EAGAIN_RETRIES = 200;
-
-// Shared across every retry: Atomics.wait never writes or notifies it, so one
-// instance times out exactly as a fresh one would, without allocating a
-// SharedArrayBuffer on every EAGAIN.
-const IDLE = new Int32Array(new SharedArrayBuffer(4));
-
 export function makeDie(name) {
   return function die(msg) {
+    // The try covers the TEMPLATE as well as the write, and that is the whole
+    // of its job: uncaught, a throwing msg — or anything escaping writeAll —
+    // skips process.exit(2) and drops the process to Node's default exit 1,
+    // inverting the caller's own exit-code contract (#299/#328). Hoisting the
+    // string out to writeAll's argument list reintroduces precisely that,
+    // which is why the pin in candidates.test.mjs requires it to sit inside.
+    // writeAll's false return is ignored on purpose, and says no more than
+    // this function always promised: the message may be lost, the exit code
+    // may not.
     try {
-      let buf = Buffer.from(`\n${name}: ${msg}\n`);
-      let retries = 0;
-      while (buf.length) {
-        try {
-          buf = buf.subarray(writeSync(2, buf));
-        } catch (e) {
-          // Message may be lost; the exit code below must not be.
-          if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) break;
-          Atomics.wait(IDLE, 0, 0, 1);
-        }
-      }
+      writeAll(2, `\n${name}: ${msg}\n`);
     } catch {
       // Message (or its own construction) may be lost; the exit code below must not be.
     }
