@@ -642,7 +642,7 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # Enumerate what landed, name the compensating action, still emit the receipt.
 #
 # WHAT LANDED decides the headline, never the call site: the first mutation
-# attempted — the worktree removal when there is one, `git branch -D` when the
+# attempted — the worktree removal when there is one, `git update-ref -d` when
 # registration is already cleared — refuses with nothing landed, and announcing
 # a partial release over that overstates exactly the state this script exists to
 # report precisely. A partial release is a refusal that followed a successful
@@ -650,7 +650,7 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # preconditions, which means nothing was ATTEMPTED.
 #
 # The two are NOT a matched pair, and one evenly-shaped detail line asserted
-# that they were. `git branch -D` updates a ref, which lands or does not, so a
+# that they were. `git update-ref -d` updates a ref, which lands or does not, so a
 # boolean call log answers for it completely. `git worktree remove` has TWO
 # effects and drops them in order: it deletes the registration before the
 # directory and does not put the registration back when the directory delete
@@ -1579,22 +1579,36 @@ else
     # What the CAS does not give back: `git update-ref` is ref-only plumbing
     # and, unlike `-D`, consults no worktree at all — so the one guard the CAS
     # trades away is `-D`'s own delete-time refusal on a branch checked out
-    # anywhere, main checkout included. Replaced here with the same listing
-    # lookup the script already runs to compute `$wt` above (and the
-    # main-checkout guard beside it), re-read fresh rather than trusted from
-    # that early scan: both of those answered this question before the `gh
-    # issue view` call, and a `git worktree add` for this exact branch
-    # landing after that scan and before this line checks it out somewhere
-    # neither one ever saw. This still leaves its own, smaller,
-    # check-then-act window between the re-read below and the `update-ref`
-    # call itself — narrower than the one it replaces, for the same reason
-    # the recount above narrows rather than closes: it is a separate git
-    # invocation, and nothing here can ask `update-ref` to verify it
-    # atomically with the delete the way `-D` verified its own.
+    # anywhere. Replaced here with the same listing lookup the script already
+    # runs to compute `$wt` above (and the main-checkout guard beside it),
+    # re-read fresh rather than trusted from that early scan: both of those
+    # answered this question before the `gh issue view` call, and a `git
+    # worktree add` for this exact branch landing after that scan and before
+    # this line checks it out somewhere neither one ever saw. This still
+    # leaves its own, smaller, check-then-act window between the re-read below
+    # and the `update-ref` call itself — narrower than the one it replaces,
+    # for the same reason the recount above narrows rather than closes: it is
+    # a separate git invocation, and nothing here can ask `update-ref` to
+    # verify it atomically with the delete the way `-D` verified its own.
+    #
+    # Narrower still in WHAT it looks for, not just WHEN: `$2==b` below only
+    # matches a worktree's `branch refs/heads/…` line, and `git worktree list
+    # --porcelain` prints no such line for a worktree whose HEAD is detached —
+    # `detached` instead. A worktree mid `rebase -i` stopped at an `edit` step,
+    # or mid `git bisect`, has this branch checked out for the run's duration
+    # with HEAD sitting exactly there (measured: a sibling worktree stopped
+    # mid-rebase makes `-D` refuse "used by worktree"; this listing-based
+    # check misses it entirely and lets the delete through). Closing that
+    # needs reading each worktree's rebase/bisect admin state —
+    # `rebase-merge/head-name`, `rebase-apply/head-name`, `BISECT_START` — not
+    # the porcelain listing alone, and is left open here rather than reached
+    # for: the same judgment call as the check-then-act window above,
+    # narrowed rather than closed.
     wt_list_before_cas=$wt_list
     wt_listing || halt "cannot re-read the worktree list to check $branch before the delete: $wt_err"
     cas_wt=$(printf '%s\n' "$wt_list" |
-             awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w; exit}')
+             awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w; exit}') ||
+      halt "could not check whether $branch is checked out before the delete"
     wt_list=$wt_list_before_cas
     [ -z "$cas_wt" ] ||
       halt "$branch is checked out in worktree $cas_wt — not deleted"

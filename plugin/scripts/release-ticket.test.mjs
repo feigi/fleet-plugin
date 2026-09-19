@@ -2239,7 +2239,7 @@ test("the script carries no escape hatch", () => {
     .join("\n");
   assert.doesNotMatch(src, /--force/);
   // Match on a NORMALIZED line, not the source text — the same four evasions
-  // #1080 measured against the old `-D` collector apply here unchanged:
+  // #1333 measured against the old `-D` collector apply here unchanged:
   // quoted flags (`git branch "-D" "$x"`), spacing (`git  branch   -D`), and a
   // combined short-flag cluster (`-fd`, `-df`, `-Df`) that matches neither an
   // exact `-D\b` nor `--force`. Strip what the shell strips — quote
@@ -2265,6 +2265,13 @@ test("the script carries no escape hatch", () => {
   // bare `git update-ref -d refs/heads/$branch` with no oldvalue argument
   // deletes just as unconditionally as `-D` did, and the collector alone
   // cannot tell that call from the CAS.
+  // `git update-ref --stdin` is a different way to delete a ref entirely —
+  // fed `delete refs/heads/$branch\n` on stdin, it spells neither `-d` nor
+  // `--delete` and so is invisible to the collector below, the same way
+  // `-D`'s own cluster spellings needed enumerating for it. Banned flat
+  // instead, the same way `--force` is above: there is no batch-mode form of
+  // this call authorized anywhere in the script.
+  assert.doesNotMatch(src, /git update-ref[^\n]*--stdin/, "no batch-mode update-ref: it can delete a ref the collector below cannot see");
   const CAS_RE = /\bgit update-ref (?:-d|--delete)\b/;
   const casDeletes = src
     .split("\n")
@@ -2312,8 +2319,8 @@ test("the script carries no escape hatch", () => {
   // scan taken before the `gh issue view` call earlier in the run.
   assert.match(
     src,
-    /wt_listing \|\| halt[\s\S]{0,400}?awk -v b="refs\/heads\/\$branch"[\s\S]{0,120}?\[ -z "\$cas_wt" \] \|\|\s*\n\s*halt/,
-    "and an explicit checked-out-worktree guard stands immediately before the CAS delete",
+    /wt_listing \|\| halt[\s\S]{0,400}?awk -v b="refs\/heads\/\$branch"[\s\S]{0,150}?\) \|\|\s*\n\s*halt[\s\S]{0,200}?\[ -z "\$cas_wt" \] \|\|\s*\n\s*halt/,
+    "and an explicit checked-out-worktree guard, itself guarded against a failed lookup, stands immediately before the CAS delete",
   );
 });
 
@@ -2504,6 +2511,39 @@ fi`,
     artefacts(r, c),
     { dir: false, worktree: true, branch: true },
     "the branch and the worktree that now holds it both survive; only this claim's original directory is gone",
+  );
+});
+
+test("a CAS worktree-check LOOKUP that could not run halts mid-release, never silently completes", (t) => {
+  // Every other lookup over `$wt_list` in this script is guarded with
+  // `|| die`/`|| halt` — this one, computing `cas_wt` just above the delete,
+  // was the sole exception. Unguarded, an awk failure here would abort under
+  // `set -eu` AFTER `git worktree remove` already landed, with 0 bytes on
+  // stdout and no `release-ticket:` line on stderr at all: a silent
+  // half-released state, worse than the loud HALTED this halt() now gives.
+  // `$2==b{print w; exit}` is this program's own body: the earlier `$wt`
+  // lookup shares `$2==b` but pairs it with `&&n>1{print w}`, no `; exit}`,
+  // so only this lookup fails (`grep -cF` confirms the string is unique).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "$2==b{print w; exit}");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not a silent set -eu abort");
+  assert.equal(json.released, false, "halt's own receipt carries released:false");
+  assert.match(
+    stderr,
+    /#9 PARTIALLY RELEASED — could not check whether fix\/9-release-ticket is checked out before the delete/,
+    "the worktree removal already landed by the time this lookup runs, so halt must say so",
+  );
+  assert.ok(
+    stderr.includes("is Released — registration and directory both gone"),
+    `the worktree report line confirms the removal really did land first: ${stderr}`,
+  );
+  assert.deepEqual(
+    artefacts(r, c),
+    { dir: false, worktree: false, branch: true },
+    "the worktree really did go; the branch must survive an unanswerable check rather than being force-deleted blind",
   );
 });
 
