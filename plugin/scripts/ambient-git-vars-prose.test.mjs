@@ -35,10 +35,14 @@
 // shell line, so a Node caller's hazard and its remedy — an env object built
 // for the child, since there is no shell to `unset` in — are both invisible
 // here, and "a NEW script cannot join the exposed set in silence" holds for
-// shell only. #1599 carries that census, with `ledger.mjs`'s default ledger
-// path measured as an exposed site; `fleet-state.mjs`'s own
-// `rev-parse --git-common-dir` call scrubs both variables and has a
-// behavioural fixture in fleet-heartbeat.test.mjs.
+// shell only. `ambient-git-vars-mjs-prose.test.mjs` carries that census
+// (#1599): `ledger.mjs`'s default ledger path was the one measured-exposed
+// site, and every one of the six uncensused `.mjs` git callers now routes
+// through `git-env.mjs`'s `gitEnv()` helper or is recorded there by name,
+// the way `EXEMPT` above records a `.sh` script's own settled measurement.
+// `fleet-state.mjs`'s own `rev-parse --git-common-dir` call scrubs both
+// variables inline (predating that helper) and has a behavioural fixture in
+// fleet-heartbeat.test.mjs.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

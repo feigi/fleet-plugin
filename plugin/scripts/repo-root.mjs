@@ -97,6 +97,7 @@
 // Zero deps: `node --test plugin/scripts/repo-root.test.mjs`.
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { gitEnv } from "./git-env.mjs";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -175,10 +176,25 @@ export function ownPluginName() {
  * whatever repository the WORKING DIRECTORY belongs to, not the repository
  * nearest the pathspec itself (measured: from an unrelated cwd, the same
  * absolute path is reported "outside repository at <that other repo>").
+ *
+ * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR answers
+ * for a DIFFERENT repository regardless of `cwd` — `ls-files
+ * --error-unmatch` on a path this file's OWN repository genuinely tracks
+ * then exits 1 "did not match any file(s) known to git", a false negative
+ * that sends `assertOwnRoot` below into refusing a root this plugin's own
+ * git ACTUALLY tracks.
+ *
+ * GIT_WORK_TREE scrubbed too, and NOT inert here despite being inert for
+ * `trackedShellScripts`' relative glob below — `path` here is always
+ * `realpathSync`'d, i.e. absolute, and git resolves an absolute pathspec
+ * against the WORK TREE. Measured: an ambient GIT_WORK_TREE naming a
+ * different repository turns this call into `fatal: <path> is outside
+ * repository at <ambient path>`, exit 128 — the same false-negative
+ * consequence as the GIT_DIR case above, by a different route.
  */
 function isTrackedBy(root, path) {
   const r = spawnSync("git", ["ls-files", "--error-unmatch", "--", path],
-    { cwd: root, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+    { cwd: root, encoding: "utf8", env: gitEnv({ LC_ALL: "C" }) });
   return r.status === 0;
 }
 
@@ -271,8 +287,14 @@ function dotGitAtOrAbove(cwd) {
  * answer sailed straight through.
  */
 export function repoRoot(cwd) {
+  // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): measured from a
+  // subdirectory of a real working tree (the realistic shape — `cwd` here is
+  // wherever the calling script happens to live, rarely the root itself) —
+  // an ambient GIT_DIR alone answers `--show-toplevel` with `cwd` ITSELF, not
+  // the tree's real root, and an ambient GIT_WORK_TREE alone answers with
+  // that ambient path outright. Both are silently wrong, at exit 0.
   const r = spawnSync("git", ["rev-parse", "--show-toplevel"],
-    { cwd, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+    { cwd, encoding: "utf8", env: gitEnv({ LC_ALL: "C" }) });
   if (r.status === 0) {
     const root = r.stdout.trim();
     assertOwnRoot(root);
@@ -320,6 +342,15 @@ export function skipWithoutRepo(root, subject) {
  * An empty result from a real root is a legitimate answer from a repository
  * that has no shell scripts, and the caller's non-vacuity guard is what judges
  * it.
+ *
+ * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR silently
+ * substitutes a DIFFERENT repository's tracked `*.sh` list for `root`'s own
+ * — the caller's non-vacuity guard cannot see this, since the wrong list is
+ * routinely non-empty. GIT_WORK_TREE is inert here (measured) for a reason
+ * specific to THIS call rather than transferable from `isTrackedBy` above:
+ * the pathspec here is the relative glob `*.sh`, never `realpathSync`'d, so
+ * there is no absolute path for an ambient work tree to reject as outside
+ * itself.
  */
 export function trackedShellScripts(root) {
   if (typeof root !== "string") {
@@ -328,6 +359,6 @@ export function trackedShellScripts(root) {
       + "an absent working tree is a skip for the caller to make, not an empty list to iterate",
     );
   }
-  return execFileSync("git", ["ls-files", "*.sh"], { cwd: root, encoding: "utf8" })
+  return execFileSync("git", ["ls-files", "*.sh"], { cwd: root, encoding: "utf8", env: gitEnv() })
     .split("\n").filter(Boolean);
 }

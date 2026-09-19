@@ -142,6 +142,52 @@ test("a --gone string a commit removed is fixed, and names the commit that remov
   assert.equal(r.json.subject, "fix it in passing");
 });
 
+// #1599: git()'s single spawn primitive — every git call in this file routes
+// through it — passed no env at all before this fix, and #1020's own census
+// could not see it — its scan is `.sh`-only. Measured directly: an ambient
+// GIT_DIR or GIT_WORK_TREE (a git hook, `rebase --exec`, `bisect run`)
+// corrupts this file's answer in its own distinct way, silently.
+test("rev-parse: an inherited GIT_WORK_TREE must not substitute a foreign repo root, turning a fixed ticket unknown", (t) => {
+  const w = repo(t);
+  const sha = commitFile(w, "src.mjs", "const keep = 1;\nfunction decodeArgs() {}\n", "add the guard");
+  push(w);
+  const other = mkdtempSync(join(tmpdir(), "staleness-other-"));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", other], { env: ENV });
+
+  // Unscrubbed, `git rev-parse --show-toplevel` answers with the AMBIENT
+  // GIT_WORK_TREE outright, regardless of the real cwd (`w`) — so `root`
+  // becomes `other`, every pathspec below resolves against a directory that
+  // does not track `src.mjs` at all, and a ticket that IS fixed reports as
+  // untracked/unknown instead.
+  const r = probe(w, ["--path", "src.mjs", "--present", "decodeArgs"], { ...ENV, GIT_WORK_TREE: other });
+  assert.equal(r.code, 1, `expected fixed (exit 1), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "fixed");
+  assert.equal(r.json.commit, sha);
+});
+
+test("ls-tree/log -S: an inherited GIT_DIR must not substitute a foreign repository's origin/main for this repository's own", (t) => {
+  const w = repo(t);
+  const sha = commitFile(w, "src.mjs", "const keep = 1;\nfunction decodeArgs() {}\n", "add the guard");
+  push(w);
+  const other = mkdtempSync(join(tmpdir(), "staleness-other-"));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", other], { env: ENV });
+
+  // `w` IS the toplevel already (no subdirectory involved), so GIT_DIR alone
+  // leaves the rev-parse call above unaffected (measured) and this isolates
+  // the SECOND-through-FOURTH calls: `-C root ls-tree/cat-file/log -S`.
+  // Unscrubbed, GIT_DIR still outranks the explicit `-C root` — measured,
+  // `ls-tree origin/main` under this ambient GIT_DIR reads the OTHER
+  // (unrelated, ref-less) repository's object database instead and fails to
+  // resolve `origin/main` at all, which downgrades a fixed ticket to
+  // could-not-check rather than citing its real commit.
+  const r = probe(w, ["--path", "src.mjs", "--present", "decodeArgs"], { ...ENV, GIT_DIR: join(other, ".git") });
+  assert.equal(r.code, 1, `expected fixed (exit 1), got ${r.code}: ${r.stderr}`);
+  assert.equal(r.json.verdict, "fixed");
+  assert.equal(r.json.commit, sha, "the citation must come from THIS repository's origin/main, never the ambient one's");
+});
+
 // MUST STILL OFFER, and this is the positive control. Absent from the current
 // file is the same output whether the fix landed or the probe was pointed at a
 // spelling this file never used — so absent-AND-never-here is unknown, never
@@ -674,6 +720,7 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   // wrapper, and had nothing reaping it.
   t.after(() => rmSync(scriptDir, { recursive: true, force: true }));
   writeFileSync(join(scriptDir, "arg.mjs"), readFileSync(fileURLToPath(new URL("./arg.mjs", import.meta.url))));
+  writeFileSync(join(scriptDir, "git-env.mjs"), readFileSync(fileURLToPath(new URL("./git-env.mjs", import.meta.url))));
   writeFileSync(join(scriptDir, "staleness.mjs"), readFileSync(SCRIPT));
   const needle = "y".repeat(120_000);
   const firstWrite = join(scriptDir, "first-write.json");

@@ -36,6 +36,7 @@ case "$1 $2" in
   "pr view") [ -f "$PR_VIEW_FILE" ] && cat "$PR_VIEW_FILE" || fail ;;
   "run list") [ -f "$RUN_LIST_FILE" ] && cat "$RUN_LIST_FILE" || fail ;;
   "run view") [ -f "$RUN_VIEW_FILE" ] && cat "$RUN_VIEW_FILE" || fail ;;
+  "repo view") [ -f "$REPO_VIEW_FILE" ] && cat "$REPO_VIEW_FILE" || fail ;;
   *) fail ;;
 esac
 `;
@@ -71,13 +72,15 @@ const RUN_VIEW = JSON.stringify({
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, git = true } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, git = true, origin = null, repoView = null, spawnEnv = {} } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so a fixture that reaches discovery has to be a real repo.
-  // No remote is added: the behind-count block still degrades to null as
-  // before.
+  // No remote is added by default: the behind-count block still degrades to
+  // null as before. `origin` opts a fixture in, for the behind-count block's
+  // own tests.
   if (git) spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
+  if (origin !== null) spawnSync("git", ["remote", "add", "origin", origin], { cwd: repoDir, stdio: "ignore" });
   const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
   for (const [rel, content] of Object.entries(repoFiles)) {
     const full = join(repoDir, rel);
@@ -105,6 +108,11 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
     PR_VIEW_FILE: fixtureFile("pr-view.json", prView),
     RUN_LIST_FILE: fixtureFile("run-list.json", runList),
     RUN_VIEW_FILE: fixtureFile("run-view.json", runView),
+    REPO_VIEW_FILE: fixtureFile("repo-view.json", repoView),
+    // Last, so a test can deliberately put back a var #1599's scrub in
+    // tryRun() removes — that is the whole point of the ambient GIT_DIR/
+    // GIT_WORK_TREE tests below.
+    ...spawnEnv,
   };
   const restore = [];
   for (const rel of unreadable) {
@@ -305,6 +313,65 @@ test("discovery is anchored to the repo root, not the cwd — a subdirectory ans
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.payload.verdict, "green");
+});
+
+// #1599: tryRun()'s single spawn primitive (used for both this script's git
+// AND gh calls) passed no env at all before this fix, and #1020's own census
+// could not see either of its two git call sites — its scan is `.sh`-only.
+// Measured directly: an ambient GIT_DIR or GIT_WORK_TREE (a git hook,
+// `rebase --exec`, `bisect run`) corrupts each call in its own distinct way,
+// silently, at exit 0.
+test("workflowsPath()'s rev-parse: an inherited GIT_WORK_TREE must not substitute a foreign toplevel for the caller's own repo root", () => {
+  const other = mkdtempSync(join(tmpdir(), "ci-state-other-"));
+  spawnSync("git", ["init", "-q", other], { stdio: "ignore" });
+  try {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      // A subdirectory, the realistic shape: workflowsPath() never receives
+      // a repo root as an argument, it derives one from wherever the process
+      // happens to be running — measured, unscrubbed, an ambient
+      // GIT_WORK_TREE answers `--show-toplevel` with the AMBIENT path
+      // outright regardless of the real cwd, which then sends discovery
+      // looking for `.github/workflows` in a directory that is not this
+      // repository at all.
+      cwd: "scripts",
+      spawnEnv: { GIT_WORK_TREE: other },
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.payload.verdict, "green",
+      "an ambient GIT_WORK_TREE must not relocate workflow discovery into a foreign directory that has no .github/workflows");
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("the behind-count probe: an inherited GIT_DIR must not bind gh's --hostname to another repository's origin", () => {
+  // The real repository's own origin, and the OTHER (ambient) repository's —
+  // deliberately different hosts, so the logged `--hostname` argument tells
+  // the two apart unambiguously. `gh repo view` is stubbed to answer for the
+  // real repository regardless (it consults no git state at all), so the
+  // only way the wrong host can reach the logged `gh api` call is through
+  // `git remote get-url origin` answering for the ambient repository instead
+  // of the real one — measured, unscrubbed, that is exactly what an ambient
+  // GIT_DIR does.
+  const other = mkdtempSync(join(tmpdir(), "ci-state-other-"));
+  spawnSync("git", ["init", "-q", other], { stdio: "ignore" });
+  spawnSync("git", ["remote", "add", "origin", "https://ghe-other.example/other/other-repo.git"], { cwd: other, stdio: "ignore" });
+  try {
+    const r = run([], {
+      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+      origin: "https://ghe-real.example/acme/real-repo.git",
+      repoView: JSON.stringify({ nameWithOwner: "acme/real-repo" }),
+      spawnEnv: { GIT_DIR: join(other, ".git") },
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.log, /api --hostname ghe-real\.example /,
+      "an ambient GIT_DIR must not substitute the OTHER repository's origin host for this repository's own");
+    assert.doesNotMatch(r.log, /ghe-other\.example/,
+      `the ambient repository's host must never reach gh at all, and the log reads: ${r.log}`);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
 });
 
 // expectedJobs() refuses on the assumption its derivation rests on, and that

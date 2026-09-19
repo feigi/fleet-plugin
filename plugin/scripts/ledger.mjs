@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
+import { gitEnv } from "./git-env.mjs";
 
 const NAME = "ledger";
 
@@ -106,7 +107,16 @@ const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
 // is precisely the duplicate-filing guard failing open. Resolve against the
 // git COMMON dir (shared by every worktree) rather than the cwd.
 function defaultLedgerPath() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS });
+  // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): unlike the tracker-query
+  // probe below in this same file, this call passed no env at all until now.
+  // An ambient GIT_DIR answers `--git-common-dir` for a DIFFERENT repository,
+  // so the ONE ledger every run's duplicate-filing guard reads gets resolved
+  // underneath THAT repository instead of the caller's own — measured
+  // directly against a checkout of this repo: `GIT_DIR=/tmp/other/.git node
+  // ledger.mjs row 357 "…"` wrote `/tmp/other/.fleet/ledger.md`, silently, at
+  // exit 0, and `check` then reads whatever ledger (or absence of one) lives
+  // there and reports every subject safe to file.
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
   if (r.status !== 0 || !r.stdout.trim()) {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a

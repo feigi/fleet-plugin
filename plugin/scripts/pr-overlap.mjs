@@ -12,6 +12,7 @@
 // degrades to `proseUnrun` rather than taking the other three down with it.
 
 import { execFileSync } from "node:child_process";
+import { gitEnv } from "./git-env.mjs";
 import { basename, dirname, extname } from "node:path";
 import { makeDie, makeNumArg, makeSweep, makeStray } from "./arg.mjs";
 
@@ -182,7 +183,15 @@ function trackedBasenameCounts() {
   try {
     // -z: a basename count must not be wrong about a path git would otherwise
     // quote. maxBuffer explicitly, for the reason diffOf() states below.
-    const out = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    //
+    // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): measured, an ambient
+    // GIT_DIR answers for a DIFFERENT repository regardless of `cwd`,
+    // silently, at exit 0 — the count this guard's verdict is based on then
+    // comes from whichever repository the ambient variable names, and a
+    // basename genuinely unique in the caller's own tree reads as ambiguous
+    // (or the reverse), dropping — or wrongly keeping — a citation's bare
+    // basename token below.
+    const out = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: gitEnv() });
     const counts = new Map();
     const paths = new Set();
     for (const f of out.split("\0")) {
