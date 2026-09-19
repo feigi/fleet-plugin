@@ -685,7 +685,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         toolTables.push(tools);
       } catch (e) {
         skipped++;
-        warnOnce("skips", file, `skipping ${f}: ${e.message}`);
+        warnOnce("skips", file, `skipping ${file}: ${e.message}`);
       }
     }
     if (!agents.length) return skipped ? { ok: false, error: `all ${skipped} transcripts unreadable` } : null;
