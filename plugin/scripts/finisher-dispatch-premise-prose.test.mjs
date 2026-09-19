@@ -82,7 +82,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, phrase, unemphasized } from "./prose-pin.mjs";
+import { betweenPhrases, phrase, unemphasized } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = "commands/review-and-fix.md";
@@ -98,12 +98,12 @@ const reviewAndFix = () => readFileSync(join(REPO, ...DOC.split("/")), "utf8");
 // OUTSIDE every mutation above by construction — a mutant that rewrote a bound
 // would make `anchorAt` throw instead of the pin reddening, which is the harness
 // losing its footing rather than a pin discriminating. Both go through
-// `phrase()` (`anchorAt` does it for the start, `STEP4_TO` for the end), so a
-// reflow moves neither, and both are single-hit in this file:
+// `phrase()` (`anchorAt` does it for the start, `betweenPhrases` for the
+// end), so a reflow moves neither, and both are single-hit in this file:
 //   grep -cF "Under the fleet, do not hold this wait"     → 1
 //   grep -cF "so push, then report to the controller a"    → 1
 const STEP4_FROM = "Under the fleet, do not hold this wait";
-const STEP4_TO = phrase("so push, then report to the controller a");
+const STEP4_TO = "so push, then report to the controller a";
 const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 
 // Throws rather than widening at BOTH ends. The start half is `anchorAt`'s
@@ -120,8 +120,8 @@ const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 // ADDED on any later step, real closing instruction left untouched, can
 // never enter the count — the search never reaches past this item's own
 // boundary to find it. A decoy ADDED on step 4's own item, real closing
-// instruction left untouched, still trips the same exactly-once assert
-// `anchorAt` uses for the start.
+// instruction left untouched, still trips the same exactly-once check
+// `betweenPhrases` uses for the end (mirroring `anchorAt`'s for the start).
 //
 // Not covered, by either end, and not a new gap this bound opens: rewording
 // the true anchor AWAY in the same edit that plants its exact replacement
@@ -132,23 +132,8 @@ const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 // whole document, or binding past this slice's true end to an ADDED decoy
 // on a later step, is the false green this bound exists to deny, and the
 // bound-integrity test at the bottom holds every half of that claim.
-const dispatchPremise = (text = reviewAndFix()) => {
-  const rest = text.slice(anchorAt(text, STEP4_FROM, WHAT));
-  const nextItem = rest.search(/\n\d+\.\s/);
-  const item = nextItem === -1 ? rest : rest.slice(0, nextItem);
-  const hits = [...item.matchAll(new RegExp(STEP4_TO.source, "g"))];
-  assert.notEqual(
-    hits.length,
-    0,
-    `${WHAT}: the instruction closing step 4's premise moved — re-anchor this test, never widen it to the whole file`,
-  );
-  assert.equal(
-    hits.length,
-    1,
-    `${WHAT}: the instruction closing step 4's premise occurs ${hits.length} times inside step 4's own list item — a pin would bind the wrong copy; narrow it`,
-  );
-  return item.slice(0, hits[0].index);
-};
+const dispatchPremise = (text = reviewAndFix()) =>
+  betweenPhrases(text, STEP4_FROM, STEP4_TO, WHAT, { bound: /\n\d+\.\s/ });
 
 // The gate, as ONE span: the dispatch, the report having arrived, and CI being
 // green, in the order and with the conjunction the corrected prose uses.
@@ -281,7 +266,7 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
   );
   assert.throws(
     () => dispatchPremise(cut(live, "so push, then report to the controller a", "so push and then report a", "moved end anchor")),
-    /the instruction closing step 4's premise moved/,
+    /slice end anchor .* moved — re-anchor this test, never widen it/,
     "a moved end anchor ran the slice past step 4 instead of throwing",
   );
   assert.throws(
@@ -317,7 +302,7 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
           "later-line decoy",
         ),
       ),
-    /the instruction closing step 4's premise moved/,
+    /slice end anchor .* moved — re-anchor this test, never widen it/,
     "a reworded end anchor with a same-text decoy on a LATER line silently widened the slice instead of throwing",
   );
 });
