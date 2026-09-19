@@ -253,15 +253,18 @@ test("an unborn HEAD names the listing failure too", () => {
   assert.doesNotMatch(err, /pass vacuously/);
 });
 
-// #1543. Same defect class PR #1519 fixed in reap.sh's grep_probe: `grep -q`
-// has THREE outcomes and the `if … grep -qE …; then … else … fi` guarding
-// this refusal used to have room for only two — rc 0 a line matched, rc 1
-// none did, rc 2+ the scan itself broke — so grep's OWN failure fell into the
-// same arm as a genuine no-match and this script reported a repo as having no
-// test files when it had never actually looked. The shim below always fails
-// as grep does when it gives up scanning (rc 2, a diagnostic on stderr), so
-// this proves the two causes now read distinctly rather than pinning a
-// specific corrupt-input trigger.
+// #1543, independently reported as #1230. Same defect class PR #1519 fixed
+// in reap.sh's grep_probe: `grep -q` has THREE outcomes and the
+// `if … grep -qE …; then … else … fi` guarding this refusal used to have
+// room for only two — rc 0 a line matched, rc 1 none did, rc 2+ the scan
+// itself broke — so grep's OWN failure fell into the same arm as a genuine
+// no-match and this script reported a repo as having no test files when it
+// had never actually looked. #1230 left the grep-died arm's exit code open;
+// it exits 1 below like every other refusal here, per this script's
+// documented exit-1-only contract. The shim below always fails as grep does
+// when it gives up scanning (rc 2, a diagnostic on stderr), so this proves
+// the two causes now read distinctly rather than pinning a specific
+// corrupt-input trigger.
 function grepScanFailShim(t) {
   const bin = mkdtempSync(join(tmpdir(), "derive-testcmd-grep-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
@@ -269,7 +272,7 @@ function grepScanFailShim(t) {
   return bin;
 }
 
-test("a grep scan failure over the file listing refuses distinctly from a genuine no-match (#1543)", (t) => {
+test("a grep scan failure over the file listing refuses distinctly from a genuine no-match (#1230, #1543)", (t) => {
   const dir = repo({ "t.test.mjs": PASSES });
   const bin = grepScanFailShim(t);
   const r = derive(dir, "HEAD", { ...process.env, PATH: `${bin}:${process.env.PATH}` });
