@@ -1918,6 +1918,80 @@ test("a local ref shadowing `origin/main` does not read a real add/add conflict 
   assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "must measure the at-risk commit list against refs/remotes/origin/main, not the shadowing tag");
 });
 
+test("a local ref shadowing `origin/$branch` does not read a real add/add conflict as none (#1576)", (t) => {
+  // The branch-side twin of the test above. #1565 qualified only the base
+  // side into $base_rev; the branch side stayed the bare `origin/$branch`
+  // shorthand, so the identical false safe was still reachable by shadowing
+  // the BRANCH's name instead of the base's. A local TAG literally named
+  // `origin/<branch>` outranks the real remote-tracking branch in git's own
+  // disambiguation order (refs/tags/<name> before refs/remotes/<name>), so
+  // `git merge-tree` and `git merge-base` against the bare shorthand below
+  // would answer about the tag's target instead, at rc 0.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  // The tag points at the branch's PRIOR commit — one commit behind the
+  // branch's real tip, before it added `path` — rather than at the branch's
+  // real tip. A merge-tree probe against the tag then sees main's ADD of
+  // `path` against a branch state that never touched `path` at all: a clean
+  // merge, not the add/add conflict this fixture exists to carry.
+  const fork = git(c.w, "rev-parse", `${c.branch}~1`);
+  git(c.w, "tag", `origin/${c.branch}`, fork);
+  assert.equal(
+    git(c.w, "rev-parse", `origin/${c.branch}`),
+    fork,
+    "fixture: the shorthand now resolves to the branch's prior commit, not its real tip",
+  );
+  assert.notEqual(
+    git(c.w, "rev-parse", `refs/remotes/origin/${c.branch}`),
+    fork,
+    "fixture: the real upstream is still the branch's later commit",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "must measure the merge-tree probe against refs/remotes/origin/$branch, not the shadowing tag");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "must measure the at-risk commit list against refs/remotes/origin/$branch, not the shadowing tag");
+});
+
+test("a local ref shadowing `origin/$branch` does not skew the merge-base call's at-risk range (#1576)", (t) => {
+  // The test above proves only that the merge-tree call reads
+  // refs/remotes/origin/$branch, not the shadowing tag: reverting just the
+  // merge-base call's `$branch_rev` argument back to the bare `origin/$branch`
+  // leaves it green, because merge-tree already used the qualified ref there
+  // and the shadowing tag it plants happens to share the real branch's own
+  // fork point with main. This fixture instead points the shadowing tag at
+  // main's OWN tip, so a merge-base computed against the tag collapses the
+  // at-risk range to nothing (`git merge-base main main` == main, so `git log
+  // main..main` is empty) while a merge-base against the real
+  // refs/remotes/origin/$branch still returns the true fork point and a
+  // non-empty at-risk list — the exact false "clean" #1576 exists to close.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  const mainTip = git(c.w, "rev-parse", "refs/remotes/origin/main");
+  git(c.w, "tag", `origin/${c.branch}`, mainTip);
+  assert.equal(
+    git(c.w, "rev-parse", `origin/${c.branch}`),
+    mainTip,
+    "fixture: the shorthand now resolves to main's own tip, not the branch",
+  );
+  assert.notEqual(
+    git(c.w, "rev-parse", `refs/remotes/origin/${c.branch}`),
+    mainTip,
+    "fixture: the real upstream is still the branch's own tip",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the merge-tree call already reads refs/remotes/origin/$branch — unaffected by this fixture");
+  assert.deepEqual(
+    subjects(r),
+    ["MAIN COMMIT AT RISK"],
+    "must compute the merge-base against refs/remotes/origin/$branch, not the shadowing tag — a merge-base against the tag collapses the at-risk range to nothing",
+  );
+});
+
 test("every unanswerable precondition exits 2 and emits no payload", (t) => {
   const c = repo(t);
   const plain = mkdtempSync(join(tmpdir(), "no-undo-audit-plain-"));
@@ -2647,7 +2721,7 @@ const CAUSES = new Map([
   ["BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'", BASE_REF_SHAPE_CLAUSE],
   ["BASE_REF must not name the audited branch, got '$base'", AUDITED_BRANCH_CLAUSE],
   ["$base does not resolve as $base_rev", REF_CLAUSE],
-  ["origin/$branch does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
+  ["$branch_rev does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
   ["git status failed in $wt — cannot tell a clean worktree from a dirty one", PROBE_CLAUSE],
   ["awk failed counting the stash entries — cannot report the stash count", PROBE_CLAUSE],
   ["cannot create a temporary file", PROBE_CLAUSE],
@@ -2655,7 +2729,7 @@ const CAUSES = new Map([
   ["could not read git merge-tree's output (python3) — cannot determine conflicts", PROBE_CLAUSE],
   ["a conflicting path contains a newline — cannot build a pathspec for it", "a conflicting path no pathspec can name"],
   ["could not escape the conflicting paths for $branch", ESCAPE_CLAUSE],
-  ["git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["git merge-base failed for $base ($base_rev) and $branch_rev — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat", PROBE_CLAUSE],
   ["could not escape the at-risk commits for $branch", ESCAPE_CLAUSE],

@@ -254,7 +254,7 @@ esac
 # comment above says must not reach a rebase decision. reap.sh can leave the
 # guard out because its `fetch --prune` drops the stale refs that make the same
 # spelling vacuous there; this script fetches nothing — the only fetch it names
-# is the advice in the `origin/$branch does not resolve` die below.
+# is the advice in the `$branch_rev does not resolve` die below.
 case "$base" in
   */"$branch") die "BASE_REF must not name the audited branch, got '$base'";;
 esac
@@ -286,6 +286,21 @@ case "$base" in
   refs/remotes/*) base_rev=$base;;
   *) base_rev="refs/remotes/$base";;
 esac
+
+# `$branch` is argv — the script's own second positional (`no-undo-audit.sh
+# <worktree> <branch>`) — not an operator-typed ref spelling the way BASE_REF
+# is. BASE_REF earned an accept-list before it earned a qualify step because
+# qualifying an arbitrary spelling was a guess: a bare `main`, a SHA or `HEAD`
+# all resolved fine unqualified, and prepending `refs/remotes/` to any of
+# those would have manufactured a ref nothing asked for. `$branch` carries
+# none of that ambiguity — every site below has only ever meant "the branch
+# named `$branch` in the `origin` remote", so there is no second shape a
+# caller could have meant and no guess an accept-list would be needed to make
+# safe first. The qualify step is unconditional too, unlike base_rev's
+# two-armed case: `$branch` is a bare short name off the usage line, never
+# itself a `refs/remotes/...` path, so there is nothing already-qualified to
+# detect.
+branch_rev="refs/remotes/origin/$branch"
 
 [ -d "$wt" ] || die "worktree $wt does not exist"
 # "Can git operate here" is NOT "is this the tree it answers about", and only
@@ -427,8 +442,8 @@ git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not re
 # next move whichever fired, so an action survives where the cause list could
 # not. --verify stays: without it a name that matches a FILE resolves, prints
 # the path and exits 0, and the guard passes something that is not a ref.
-git -C "$wt" rev-parse --verify "origin/$branch" >/dev/null \
-  || die "origin/$branch does not resolve — run 'git fetch origin' and retry"
+git -C "$wt" rev-parse --verify "$branch_rev" >/dev/null \
+  || die "$branch_rev does not resolve — run 'git fetch origin' and retry"
 
 # 1. Uncommitted work. This may exist nowhere else on disk. `|| true` here would
 #    turn a failed `status` into empty output and print "clean" over a dirty
@@ -753,11 +768,16 @@ trap 'rm -f "$mt_out" "$ps_out"' EXIT
 # `mktemp` rather than a name derived from `$mt_out`, so a shared TMPDIR offers
 # no predictable name to plant a symlink on.
 ps_out=$(mktemp) || die "cannot create a temporary file"
-emit "\$ git merge-tree --write-tree --name-only -z $base_rev origin/$branch"
+emit "\$ git merge-tree --write-tree --name-only -z $base_rev $branch_rev"
 mt_rc=0
-git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "origin/$branch" >"$mt_out" || mt_rc=$?
+git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "$branch_rev" >"$mt_out" || mt_rc=$?
 [ "$mt_rc" -le 1 ] && [ -s "$mt_out" ] \
   || die "git merge-tree could not answer (exit $mt_rc) against origin/$branch — cannot determine conflicts"
+# This die does not gain `$branch_rev` the way the rev-parse guard above and
+# the merge-base die below do: by the time it can fire, both `$base_rev` and
+# `$branch_rev` have already survived their own `rev-parse --verify`, so a
+# merge-tree failure here is not a spelling question either of those dies
+# could get wrong.
 
 # --name-only output is: tree OID, then (if conflicted) the conflicted-file
 # list, then an EMPTY record, then prose ("Auto-merging ...", "CONFLICT ...").
@@ -839,8 +859,8 @@ conflicts_json=$(printf '%s' "$conflicts" | jarr) \
 #    careless resolution deletes — read them before resolving, not after.
 at_risk=""
 if [ -n "$conflicts" ]; then
-  fork=$(git -C "$wt" merge-base "$base_rev" "origin/$branch") \
-    || die "git merge-base failed for $base ($base_rev) and origin/$branch — cannot tell what a resolution would eat"
+  fork=$(git -C "$wt" merge-base "$base_rev" "$branch_rev") \
+    || die "git merge-base failed for $base ($base_rev) and $branch_rev — cannot tell what a resolution would eat"
   emit "\$ git log --oneline $fork..$base_rev -- <conflicting files>"
   # One pathspec per argument. Word-splitting `$conflicts` turned a path with a
   # space into two pathspecs that match nothing, and `git log` spends exit 0 on
