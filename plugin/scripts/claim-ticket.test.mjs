@@ -674,6 +674,90 @@ test("runner: a directory with no test files refuses instead of exiting 0", () =
   assert.match(r.stderr, /no test files under empty/);
 });
 
+// #1628: grep's and sed's own exit codes used to go unread in the
+// directory-scan pipe — only whether `$files` ended up non-empty was
+// checked — so a scan failure inside either tool (rc 2+, distinct from
+// grep's normal rc-1 "no match") read through the emptiness test above as
+// an indistinguishable "no test files", even though real test files sit
+// right there. Stubbing `grep` itself to die outright (rc 2) is the
+// cleanest reproduction of a scan tool breaking mid-run, and must be
+// reported as ITS failure, not folded into the empty-directory message.
+test("runner: a grep failure mid-scan is reported distinctly from an empty result", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-grepfail-"));
+  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not scan for test files under t \(grep exited 2\)/);
+  assert.doesNotMatch(r.stderr, /no test files under/);
+});
+
+// The other half: sed sits downstream of grep in the same pipe, and its own
+// rc was just as unread. Stubbing `sed` alone (grep runs for real, matches
+// `t`'s two files, then hands them to the dying stub) isolates sed's status
+// from grep's — the failure must still name sed, not grep or "no test files".
+test("runner: a sed failure mid-scan is reported distinctly from an empty result", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-sedfail-"));
+  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not scan for test files under t \(sed exited 2\)/);
+  assert.doesNotMatch(r.stderr, /no test files under/);
+});
+
+// BSD sed (this machine's actual /usr/bin/sed) exits rc 1 for EVERY error it
+// reports — illegal byte sequence, malformed regex, missing file — there is
+// no BSD sed error path that ever reaches rc 2+. A guard that tolerated
+// `sed_rc -le 1` (mirroring grep's real "no match is rc 1" case) could NEVER
+// catch a genuine BSD sed failure: the stub below reproduces that exact
+// shape — always exit 1, the way real BSD sed does on a bad invocation —
+// and must still be reported as a sed failure, not silently folded into "no
+// test files" the way an unread rc would. (Reverting the guard to
+// `-le 1` reproduces the pre-fix bug: this test goes green on silence,
+// asserting `no test files under t` instead of a reported sed failure.)
+test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-match analog", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-sedrc1-"));
+  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not scan for test files under t \(sed exited 1\)/);
+  assert.doesNotMatch(r.stderr, /no test files under/);
+});
+
+// grep's rc 1 ("no match") must NOT be swept into the same failure this pins
+// above — that is the genuinely-empty case the pre-existing "no test files"
+// test (above) already covers end to end. This is the narrower unit-level
+// half: a stub that always exits 1, never touching `find` or the real test
+// files, pins that a bare "no match" alone still reaches the ORIGINAL
+// "no test files" message, not the new "grep exited" one.
+test("runner: grep's plain no-match rc still reads as no test files, not a grep failure", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-grepnomatch-"));
+  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /no test files under t/);
+  assert.doesNotMatch(r.stderr, /grep exited/);
+});
+
 test("runner: a file argument still works", () => {
   const r = apply(SUITE).run("t/a.test.mjs");
   assert.equal(r.status, 0, r.stdout + r.stderr);

@@ -810,10 +810,37 @@ for arg do
     # so the fleet's OWN locale fixtures — which need a UTF-8 ambient locale to
     # discriminate — would go green with their scripts' pins deleted. The pin
     # belongs to these two commands, not to the suite they discover.
-    files=\$(printf '%s\n' "\$found" | LC_ALL=C grep -E '$testfile_re' | LC_ALL=C sed 's/\[/[[]/g')
+    # grep's and sed's own exit codes were never read here — only whether
+    # \$files ended up non-empty — so a scan failure inside either (rc 2+: an
+    # OOM'd grep, an interpreter that chokes on the input) read through the
+    # emptiness check below exactly like a worktree with no test files. Same
+    # defect class #1543 fixed in derive-testcmd.sh's \`tf_rc\`, but a
+    # DIFFERENT shape: a command substitution reports only its LAST
+    # command's exit status, so piping grep straight into sed threw grep's
+    # own rc away unread — one substitution can carry only one tool's status
+    # out, so grep and sed each need to be the last command in their OWN
+    # substitution to be read at all. Splitting the pipe there does not
+    # change \$files: the same LC_ALL=C-pinned grep and sed above still run
+    # on the same bytes (#582, #600), just with grep's matched lines landing
+    # in \$grepped between them instead of flowing straight through one pipe.
+    grepped=\$(printf '%s\n' "\$found" | LC_ALL=C grep -E '$testfile_re')
+    grep_rc=\$?
+    # rc 1 is grep's normal "no line matched", and — per the corrupt-byte
+    # comment above — also this file's own accepted signature for a line
+    # grep silently dropped. Neither is a tool failure; only 2+ is.
+    [ "\$grep_rc" -le 1 ] || { printf 'agent-test: could not scan for test files under %s (grep exited %s)\n' "\$arg" "\$grep_rc" >&2; exit 1; }
+    files=\$(printf '%s\n' "\$grepped" | LC_ALL=C sed 's/\[/[[]/g')
+    sed_rc=\$?
+    # Unlike grep, sed has no legitimate non-zero outcome to tolerate here:
+    # the LC_ALL=C pin above already keeps sed from ever seeing the
+    # illegal-byte case BSD sed would otherwise raise on this input, and sed
+    # has no rc-1 "no match" analog to grep's — any non-zero rc reaching
+    # here is a genuine tool failure, not an accepted outcome.
+    [ "\$sed_rc" -eq 0 ] || { printf 'agent-test: could not scan for test files under %s (sed exited %s)\n' "\$arg" "\$sed_rc" >&2; exit 1; }
     # No \`set -e\` in this runner, and that is load-bearing: grep exits 1 on no
-    # match, so under -e the shell would abort here and the refusal below would
-    # never print. Read a status you care about explicitly, as find does above.
+    # match, so under -e the shell would abort here (both above and in the
+    # emptiness check below) and none of these refusals would ever print.
+    # Read every status you care about explicitly, as find does above.
     [ -n "\$files" ] || { printf 'agent-test: no test files under %s\n' "\$arg" >&2; exit 1; }
     # Even where find now succeeds, node's own \`--test\` CLI still cannot
     # take what it just found: measured directly (node v26.8.1 here; CI's
