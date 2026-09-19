@@ -503,7 +503,7 @@ test("a second --gone -- <value> refuses, rather than overwriting the first", (t
   assert.match(r.stderr, /unknown flag --/);
 });
 
-// ── #889: verdict()'s writeSync must consume its own return value ────────
+// ── #889/#1549: verdict() routes its write through arg.mjs's writeAll() ──
 //
 // A single writeSync call can short-write on a non-blocking pipe: it returns
 // the count it actually wrote and throws nothing at all, so a `try`/`catch`
@@ -516,30 +516,38 @@ test("a second --gone -- <value> refuses, rather than overwriting the first", (t
 // here rather than dropped as unreachable. Racing a reader into that
 // non-blocking state is what the NOT-PINNED comment above verdict() already
 // refuses to do for the pipe-closed case, so this is a deterministic
-// source-shape pin instead, the same technique candidates.test.mjs uses for
-// arg.mjs's die() (search that file for "Each fragment anchored at a line
-// start" for the anchoring rationale this pin reuses verbatim).
+// source-shape pin instead.
 //
-// A body that still calls writeSync once and discards the count — `try {
-// writeSync(1, ...) } catch { die(...) }` — satisfies a pin that stops at
-// `try {`, so this one requires the loop that resumes from writeSync's own
-// return value, mirroring ci-state.mjs's emit() (#885). #889 also capped the
-// retry (see below), which is why `retries` now sits between the try and the
-// buffer it counts against.
-test("verdict()'s writeSync consumes its own return value in a loop, not just a bare call", () => {
+// #1549: the LOOP is no longer here to pin. It was one of three hand-mirrored
+// copies and now lives once in arg.mjs's writeAll(), whose shape and
+// behaviour are pinned and EXECUTED in arg.test.mjs. This file used to carry
+// a near-copy of that same regex, differing from the other two only in head
+// line and fd. What is pinned here instead is what stays verdict()'s OWN —
+// the three things a caller of writeAll has to get right:
+//   - the write goes through writeAll on fd 1, not a re-inlined writeSync;
+//   - the payload's CONSTRUCTION sits inside the try, so a circular `extra`
+//     or a throwing toJSON downgrades instead of escaping verdict() uncaught;
+//   - the false return is actually READ, so a lost verdict becomes
+//     could-not-check rather than being reported as a delivered one.
+// Measured: a mutant for each of those three reds this pin, and none of them
+// reds arg.test.mjs's writeAll pins — the two files pin different halves, and
+// neither alone catches both defects.
+test("verdict() writes through writeAll() and downgrades on its false return, rather than re-inlining the loop", () => {
   assert.match(
     stripComments(readFileSync(SCRIPT, "utf8")),
-    /^\s*try \{\s*^\s*let retries = 0;\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(1, buf\)\);/m,
+    /^\s*let ok = false;\s*^\s*try \{\s*^\s*ok = writeAll\(1, `\$\{JSON\.stringify\(\{[^`]*\)\}\\n`\);\s*^\s*\} catch \{\s*^\s*\}\s*^\s*if \(!ok\) die\("the verdict could not be written/m,
   );
 });
 
-// verdict()'s EAGAIN retry loop had the same #889 gap as die()'s: no cap, so
-// a stdout reader that stays open but never drains left writeSync throwing
+// verdict()'s EAGAIN retry had the same #889 gap as die()'s: no cap, so a
+// stdout reader that stays open but never drains left writeSync throwing
 // EAGAIN forever and the "a failed write is a could-not-check" downgrade this
 // function's own comment promises — the whole reason it writeSyncs instead of
-// console.log — never ran. MAX_EAGAIN_RETRIES bounds it: past the cap the
-// loop re-throws, the outer catch calls die(), and the process still exits 2
-// with the could-not-check refusal on stderr.
+// console.log — never ran. The cap lives in writeAll() now (#1549): past
+// MAX_EAGAIN_RETRIES it returns false, verdict()'s `if (!ok)` calls die(), and
+// the process still exits 2 with the could-not-check refusal on stderr. This
+// test is untouched by that move and still measures the whole path end to
+// end, which is what makes the extraction safe rather than merely tidy.
 //
 // Reproduced with a real non-blocking pipe, not a mock: fcntl sets O_NONBLOCK
 // on the write end before the child ever touches it, so the OS — not a stub
