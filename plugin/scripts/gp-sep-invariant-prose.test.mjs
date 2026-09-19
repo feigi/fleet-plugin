@@ -75,7 +75,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, phrase, stripHashGutter } from "./prose-pin.mjs";
+import { phrase, runAbove, stripHashGutter } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const REAP = "scripts/reap.sh";
@@ -87,10 +87,14 @@ const ANCHOR = "gp_sep=$(printf '\\002')";
 // The `#` run immediately above the anchor, gutter stripped and flattened to a
 // single line: a wrapped comment breaks a sentence at the `# ` gutter, which
 // `phrase()`'s `\s+` does not span.
-function separatorComment(text) {
-  const above = text.slice(0, anchorAt(text, ANCHOR, REAP));
-  return stripHashGutter((above.match(/(?:[ \t]*#[^\n]*\n)+$/) ?? [""])[0]);
-}
+//
+// The shared bound, not a local copy of it (#1604). `runAbove` owns the slice —
+// the exactly-once anchor through `anchorAt`, and the run matched only where a
+// `#` is a line's first token, so the bound is code at both ends rather than a
+// blank line that would run past the comment into the script. Only the gutter
+// strip is this file's: the `//` consumers of the same bound compare raw bytes
+// and must not have it.
+const separatorComment = (text) => stripHashGutter(runAbove(text, ANCHOR, REAP, "#"));
 
 const COMMENT = separatorComment(SOURCE);
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
+import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -343,13 +343,93 @@ test("paragraph returns the remainder when the rule's block ends the document", 
 
 // `anchorAt` returns the offset where the anchor STARTS, not where it ends.
 // `paragraph` slices forward from it, so either offset would look right there;
-// `quiet-payload-prose`'s source site slices BACKWARD from it to take the `//`
-// block above a declaration, and there the two are a whole anchor apart. Written
-// here rather than left to that consumer, per this file's own header: a guard with
-// no dedicated test is a guard nobody is pinning, and a consumer can stop needing
-// the contract it happens to pin today.
+// `runAbove` slices BACKWARD from it to take the comment block above a
+// declaration, and there the two are a whole anchor apart — an end offset
+// would leave the anchor's own bytes at the tail of the slice, where they stop
+// the `$`-bound run from matching and hand back "" on a comment that is
+// present. Written here rather than left to either consumer, per this file's
+// own header: a guard with no dedicated test is a guard nobody is pinning, and
+// a consumer can stop needing the contract it happens to pin today.
 test("anchorAt returns the offset where the anchor starts, not where it ends", () => {
   assert.equal(anchorAt("pad\n\nTHE RULE says X.", "THE RULE", "the fixture"), 5);
+});
+
+// `runAbove` is the backward bound, for source files where `paragraph`'s blank
+// line is the wrong cut: in source the blank line after a comment block sits
+// BELOW the code the block documents, so a blank-line slice runs past the
+// prose into live code. Its own two halves, each with its own false green. The
+// bound: a run that did not stop at code would take an earlier comment block,
+// or the code between, and a decoy in either satisfies the pin. The anchor:
+// routed through `anchorAt`, so a restated declaration reds rather than
+// handing back the comment above the wrong copy. Three consumer files
+// hand-rolled this before #1604 and one of them is a `#` gutter, so the marker
+// is a parameter and both dialects are exercised here.
+test("runAbove takes the run immediately above the anchor, not an earlier one", () => {
+  const src = "// a decoy block\nconst other = 1;\n// the real block\n// still it\nconst TARGET = 2;\n";
+  assert.equal(runAbove(src, "const TARGET", "the fixture", "//"), "// the real block\n// still it\n");
+});
+
+// The ACCEPT side: a run this bound must not refuse. Shell gutter, indented
+// run, an anchor carrying regex metacharacters — `reap.sh`'s own
+// `gp_sep=$(printf '\002')`, which reaches the match only because `anchorAt`
+// routes it through `phrase()` — and an INDENTED ANCHOR, the case every
+// hand-rolled copy refused before #1604: their run ended at `$`, so text
+// ending in the declaration's own indent matched nothing and the caller was
+// told the comment was gone. The expected value pins the other half of that
+// fix: the indent is tolerated, never returned as part of the run.
+test("runAbove accepts an indented `#` run below an indented anchor", () => {
+  const sh = "setup() {\n  # the note\n  # and its second line\n  gp_sep=$(printf '\\002')\n}\n";
+  assert.equal(runAbove(sh, "gp_sep=$(printf '\\002')", "the fixture", "#"), "  # the note\n  # and its second line\n");
+});
+
+// Empty, never a throw: `gp-sep-invariant-prose.test.mjs` slices at module load
+// and names the empty case in a test of its own, which an import-time throw
+// would pre-empt. Three shapes here return "" — plain code, code carrying
+// the marker MID-LINE (which is the one that would quietly swallow a line and
+// a decoy in it if the gutter were matched anywhere but at a line's start),
+// and a comment block separated from the anchor by a blank line: the `$`
+// bound is `[ \t]*$`, not `\s*$`, so a blank line between the block and the
+// declaration is not adjacency and the block is not adopted.
+test('runAbove returns "" when nothing but code sits above the anchor', () => {
+  assert.equal(runAbove("const other = 1;\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
+  assert.equal(runAbove('// a decoy\nconst u = "http://x";\nconst TARGET = 2;\n', "const TARGET", "the fixture", "//"), "");
+  assert.equal(runAbove("// the doc block\n\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
+});
+
+// The other half of the run's start bound: `(?:^|\n)` also matches at the
+// absolute start of the sliced text, for a comment block with nothing above
+// it — not just mid-document, preceded by a newline.
+test("runAbove takes a comment block that starts at the beginning of the text", () => {
+  assert.equal(runAbove("// only comment\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "// only comment\n");
+});
+
+// The half `anchorAt` owns, asserted through this caller because a slicer that
+// took the FIRST hit would look right on every fixture above.
+test("runAbove throws when the anchor matches twice, rather than taking the comment above the wrong copy", () => {
+  assert.throws(
+    () => runAbove("// the real block\nconst TARGET = 2;\n\n// a restatement\nconst TARGET = 3;\n", "const TARGET", "the fixture", "//"),
+    /the fixture: slice anchor "const TARGET" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
+  );
+});
+
+// The marker is a LITERAL. Unescaped, a `+` gutter is a quantifier with
+// nothing to repeat, and the RegExp constructor throws rather than handing
+// back the block above the anchor. This pins marker-escaping only —
+// `runAbove` has no `/* ... */` block-comment dialect; every live gutter in
+// this repo is `#` or `//`.
+test("runAbove escapes the marker, so a gutter carrying a regex metacharacter still matches literally", () => {
+  const src = "const other = 1;\n+ the block\n+ still it\nconst TARGET = 2;\n";
+  assert.equal(runAbove(src, "const TARGET", "the fixture", "+"), "+ the block\n+ still it\n");
+});
+
+// An empty marker is not a narrower gutter — it is no gutter at all, and the
+// regex above would match every line above the anchor, comment or not. That
+// silent total widening is worse than a throw, so runAbove refuses it up front.
+test("runAbove throws on an empty marker, rather than silently matching every line above the anchor", () => {
+  assert.throws(
+    () => runAbove("some prose line\nanother arbitrary line\nconst TARGET = 2;\n", "const TARGET", "the fixture", ""),
+    /the fixture: runAbove needs a non-empty marker/,
+  );
 });
 
 // `quoteBlocks` and `quoteBlock` are the bound a whole-block golden fixture

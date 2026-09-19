@@ -102,7 +102,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, paragraph } from "./prose-pin.mjs";
+import { paragraph, runAbove } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -148,13 +148,15 @@ test("the dropped-field list is still readable out of ci-state.mjs", () => {
 // the anchor is the declaration BELOW the block, and the slice is the run of
 // `//` lines above it — code at both ends, so no edit to the prose it holds can
 // move either bound, where a blank-line bound would run past the end of the
-// comment into that code (the false green measured in #695). It takes the anchor
-// through `anchorAt` all the same, so the uniqueness half is shared rather than
-// copied for the sake of an end bound that differs.
+// comment into that code (the false green measured in #695).
+//
+// That bound is `runAbove`, shared (#1604) rather than hand-rolled here, so the
+// uniqueness half comes WITH it — `anchorAt` under the same roof — instead of
+// being copied for the sake of an end bound that differs.
 function siteSlice(name, anchor) {
   const text = read(name);
   if (!name.endsWith(".mjs")) return paragraph(text, anchor, name);
-  return (text.slice(0, anchorAt(text, anchor, name)).match(/(?:[ \t]*\/\/[^\n]*\n)+$/) ?? [""])[0];
+  return runAbove(text, anchor, name, "//");
 }
 
 // The `--quiet` sentence, from its `drops` to the end of that sentence. The
