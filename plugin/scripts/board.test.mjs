@@ -225,9 +225,10 @@ test("gather: exit 1 is a verdict, not a failed read — it still overrides the 
 // not-green and no-ci, the real exit-1 verdicts, alongside the exit-1 write cut
 // mid-JSON and the signal kill mid-payload — while parsing the salvaged bytes
 // separates them exactly, which is why the parse is the discriminator. The
-// exit-0 row is not a fifth: this gate lives in runCiState()'s catch block and
-// a child that exits 0 never throws, so that row goes to mapCi without the
-// gate ever forming an opinion on it.
+// exit-0 row is not a fifth here: this gate lives in runCiState()'s catch
+// block, and a child that exits 0 never throws into it. Since #1593 exit 0
+// gets the mirroring check on runCiState()'s success path instead (see the
+// UNPARSEABLE_EXIT_0 test below) — a second gate, not this one widened.
 //
 // The accept side first, and the reason the discriminator is a PARSE rather
 // than the exit status. no-ci is a REAL verdict that shares exit 1 — ci-state
@@ -249,8 +250,8 @@ test("gather: a complete no-ci verdict at exit 1 is an answer, not a failed read
 // The refuse side. One write, cut mid-JSON, under two dispositions: the bytes
 // are held apart from the exit code deliberately, because the bytes are all
 // these two rows share and the disposition is the whole difference between them
-// — exit 1 is the salvage arm this fix narrowed, exit 0 (further down, where
-// #605's wiring pin needs it) is the arm it left alone.
+// — exit 1 is the salvage arm #875 narrowed; exit 0 (further down) got the
+// same narrowing from #1593, closing the arm #875 had deliberately left alone.
 const TRUNCATED_WRITE = `import { writeSync } from "node:fs";
 writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");`;
 const UNPARSEABLE_EXIT_1 = `${TRUNCATED_WRITE}
@@ -306,28 +307,27 @@ test("gather: a refused salvage payload warns ONCE per PR across ticks, and a se
   assert.ok(refusals.some((l) => /--pr 43/.test(l)), r.stderr);
 });
 
-// The end-to-end shape of #605, and the one test that can see the call site.
-// mapCi's warn keys on a PR number mapCi has no other use for, so the argument
-// exists only if gather() passes it: leave the call as `mapCi(out)` and every
-// in-process test above stays green while the real board prints a line naming
-// PR "undefined". Only driving gather() itself pins the wiring.
-//
-// Exit 0 is the vehicle, and after #875 it is the only one left: runCiState()
-// returns stdout unconditionally when the child exits 0 — emptiness untested,
-// parseability untested — so a write cut mid-JSON on a GREEN verdict is the one
-// unparseable payload that still reaches mapCi. #875 narrowed the salvage arm
-// alone; what a child hands back on a successful exit stays mapCi's question.
-//
-// prev is "red" to state plainly what #875 did NOT change here: this return is
-// non-null, so gather()'s carry-forward arm is still not reached and the PR
-// still reverts to "unknown" for this tick.
+// #1593. Before this fix, exit 0 was the one arm #875 had deliberately left
+// alone: runCiState() returned stdout unconditionally on a successful exit —
+// emptiness untested, parseability untested — so this same truncated write,
+// delivered at exit 0 instead of exit 1, was the one unparseable payload that
+// still reached mapCi, which mapped it to "unknown" and discarded the PR's
+// last-known CI value — the #262 regression the salvage gate exists to
+// prevent, surviving on the one arm #875 left alone. This used to be #605's
+// wiring pin too (the only vehicle that reached mapCi's PR-keyed warn through
+// gather() rather than a direct unit call) — that vehicle is gone now that
+// runCiState() salvages both arms, so the assertion below moves to the new
+// gate instead: same truncated write (TRUNCATED_WRITE), same PR, only the
+// exit code and the expected outcome differ from the exit-1 test above.
 const UNPARSEABLE_EXIT_0 = `${TRUNCATED_WRITE}
 process.exit(0);`;
 
-test("gather: an unparseable payload at exit 0 → unknown, with a stderr line naming the PR", () => {
+test("gather: a payload cut mid-JSON at exit 0 is not a verdict either — the previous CI value stands (#1593)", () => {
   const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_0, prevCi: "red" });
-  assert.equal(r.ci, "unknown");
-  assert.match(r.stderr, /PR 42/);
+  assert.equal(r.ci, "red");
+  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /exit 0/);
+  assert.match(r.stderr, /parse/);
 });
 
 // #786: `gh issue list`/`gh pr list` rows had no per-row shape guard. A row
