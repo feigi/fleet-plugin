@@ -7,11 +7,16 @@ status line cannot name the commit that writes it, and the last one was stale th
 moment it landed. `git log 8a84402..` is the answer that stays true.
 
 The `<file>:NNN` line references below — every one outside
-`workflows/review-pr.js`, whose citations PR #1581 re-anchored to quoted
-fragments that resolve against the current tree instead — were measured at
-`8a84402` and address the files as they stood there — not pointers into the
-current tree. Resolve one with `git show "8a84402:<path>" | sed -n '<N>p'`;
-keep the quotes when you paste that template — unquoted, zsh reads the
+`workflows/review-pr.js`'s prose citations, which PR #1581 re-anchored to
+quoted fragments that resolve against the current tree instead, and every
+one in its own Edits changelist's bare `:NNN` self-references, which PR
+#1581 deliberately left pointing at `8a84402` as a record of what was
+edited there — were measured at `8a84402` and address the files as they
+stood there — not pointers into the current tree. Resolve one with `git
+show "8a84402:<path>" | sed -n '<N>p'`; a range like `:337-338` needs
+`sed -n '337,338p'` instead — sed's own range separator is a comma, not
+the hyphen this doc cites ranges with. Keep the quotes when you paste
+either template — unquoted, zsh reads the
 literal `<path>` placeholder as a redirection and dies with a parse error
 before git ever runs. Once a real path is substituted in, this literal-ref
 template behaves identically quoted or unquoted — and so does a ref held in
@@ -40,9 +45,10 @@ Artifacts: `workflows/review-pr.js`,
 `skills/fleet/scripts/select-dimensions.test.mjs` (new)
 (repo `feigi/claude-config`)
 
-Base: `8a84402`. Line references outside `review-pr.js` are verified against
-that commit; `review-pr.js` citations are quoted-fragment anchors, verified
-against the current tree instead (PR #1581).
+Base: `8a84402`. Line references outside `review-pr.js`'s prose citations —
+plus its own Edits changelist's bare `:NNN` self-references — are verified
+against that commit; `review-pr.js`'s prose citations are quoted-fragment
+anchors, verified against the current tree instead (PR #1581).
 
 Closes #211 and #118. Coordinates with #113.
 

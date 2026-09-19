@@ -356,3 +356,18 @@ test("the ban fires on the citation #1188 removed, and spares the siblings it le
     "the ban above now claims the sibling `<other-file>:NNN` citations the 2026-08-06 spec still carries. They are the same defect class and deliberately out of #1188's scope; widening the ban means converting them in the same change, not reddening a document nobody has fixed yet.",
   );
 });
+
+// #1595/#1632 narrowed this paragraph's exclusion to `workflows/review-pr.js`
+// wholesale, which wrongly implied the Edits changelist's own bare `:NNN`
+// self-references (filed under a `workflows/review-pr.js` heading, but never
+// re-anchored by PR #1581) resolve against the current tree too. Pin all
+// three citation classes together in one exact-span assertion — the join
+// between them is the claim, not any single class read in isolation.
+test("the 2026-08-06 spec's front-matter resolution paragraph names all three citation classes", () => {
+  const graf = prose(paragraph(readRoot(SPEC_0806), "Base: `8a84402`. Line references", SPEC_0806));
+  assert.match(
+    graf,
+    /Line references outside `review-pr\.js`'s prose citations — plus its own Edits changelist's bare `:NNN` self-references — are verified against that commit; `review-pr\.js`'s prose citations are quoted-fragment anchors, verified against the current tree instead \(PR #1581\)\./,
+    `${SPEC_0806}: the front-matter resolution paragraph no longer names all three citation classes it governs — review-pr.js's prose citations (current tree, PR #1581), its own Edits changelist's bare :NNN self-references (still 8a84402, left there deliberately as a record of what was edited), and everything else (8a84402). #1632 drew a binary review-pr.js/not-review-pr.js line that wrongly implied the Edits changelist's own bare :NNN self-references — filed under a workflows/review-pr.js heading — resolve against the current tree too.`,
+  );
+});
