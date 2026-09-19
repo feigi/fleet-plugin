@@ -650,8 +650,8 @@ fi
 # The worktree registry's check is a different shape from the one above, on
 # purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
 # than a second invented convention — but the two copies diverged from there
-# and have since converged back on behaviour, the remaining difference being
-# plumbing, not what the recount does (below). Three of the four items that
+# and have converged on most of that ground, but not all of it — see the
+# recount below for what still differs. Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
 # direction split — were ported to that copy by #395; the recount was the last
 # of the four, ported by #694. That copy's skip reading only `ls`'s output,
@@ -667,7 +667,11 @@ fi
 # copies now re-take the pair, this one through the `count_linked` below. The
 # mechanism under it is still each script's own — that copy reads the listing
 # through worktree.sh's `wt_listing`, this one through the single EXIT trap's
-# `$wtfile` — which is a difference in plumbing, not in what the recount does.
+# `$wtfile` — a difference in plumbing, same as before. What is no longer true
+# is that the recount ITSELF is: #1424 bounds release-ticket.sh's copy at up
+# to two recount passes (`recount_tries`) to close a residual third-mutation
+# race window that this script's own still-single-pass recount does not
+# close.
 #
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
@@ -885,7 +889,10 @@ count_linked || return 1
 # `linked -lt registered` branch instead — the direction the comment below
 # calls out by name as sending an operator hunting a permissions fault that
 # is not there. `count_registry` first, `count_linked` second, mirrors
-# release-ticket.sh:484 for the same reason.
+# release-ticket.sh's own recount ordering (count_registry before
+# count_linked) — kept fixed for the reason that copy's own comment gives:
+# not because a different order would be wrong, but so the reasoning above
+# stays about one order instead of two.
 #
 # `&&`, not `;`, between the two: `count_registry` reports an unreadable
 # registry through `add_unknown` and a non-zero return, and under `;` the

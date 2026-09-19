@@ -673,7 +673,7 @@ exec ${realSed} "$@"
 // produces. Measured, downgrading its `|| die` to a message-preserving warning
 // left this whole file green.
 //
-// `halt()`'s own `jstr` escape, release-ticket.sh:651, is the same class of
+// `halt()`'s own `jstr` escape (the `blocker_j` assignment) is the same class of
 // defect on the halt/blocker path — seen, not missed: ticket #896 scoped it
 // out as a different code path, not exercised by this file's matrix.
 //
