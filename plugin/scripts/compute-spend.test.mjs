@@ -167,6 +167,30 @@ test("depth-0 fleet roles come off the controller's naming convention", () => {
   assert.equal(classifyRole({ spawnDepth: 0, description: "something else entirely" }), "other");
 });
 
+test("the NAME wins over an earlier-checked prose keyword — the fixed branch order must not let description hijack a name-resolved role (#1506)", () => {
+  // Blending `${memberName} ${description}` into one haystack before running
+  // classifyRole's fixed-order branches (implementer -> reviewer -> finisher
+  // -> merge-bot) let a member's own free-text description satisfy an
+  // EARLIER branch than the one its canonical NAME would hit, hijacking the
+  // classification. Measured live: `finisher-1380` described as "Fix PR 1380
+  // review findings." matched the reviewer branch on "review" in the prose
+  // before the finisher branch ever saw the name; `merge-bot-12` described
+  // with "...review findings" misread the same way as finisher. The name
+  // must be checked alone, ahead of the blend.
+  assert.equal(
+    classifyRole({ memberName: "finisher-1380", description: "Fix PR 1380 review findings." }),
+    "finisher",
+  );
+  assert.equal(
+    classifyRole({ memberName: "merge-bot-12", description: "Finish PR 1420, apply the review findings" }),
+    "merge-bot",
+  );
+  // Control: a member with NO canonical name still falls through to the
+  // prose blend exactly as before — this fix only reorders, it does not
+  // remove the description-only fallback.
+  assert.equal(classifyRole({ description: "Fix PR 1380 review findings." }), "reviewer");
+});
+
 test("finish-<n> member names classify as finisher — a historical spelling that must stay classifiable", () => {
   // `finisher-pr-<n>` is the canonical finisher name (#326); `finish-<n>` is a
   // spelling earlier runs actually dispatched and recorded runs still have to

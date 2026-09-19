@@ -39,7 +39,7 @@
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, basename, dirname, relative, isAbsolute, resolve, sep } from "node:path";
 
-import { classifyRole } from "./compute-spend.mjs";
+import { classifyRole, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
 
 // ---------------------------------------------------------------------------
 // cwd encoders — one per harness, because the rules are structurally
@@ -512,10 +512,12 @@ function assertNotClaudeShaped(d, filePath) {
 //
 // `session_init.task` is carried through as the closest thing omp has to
 // Claude's `meta.description` — there is no dispatch sidecar on this side at
-// all. readOmpMember below only uses it, together with the transcript's own
-// nesting depth, as a REAL classifyRole() signal; it is never matched
-// against the bare agent id, which is a generated word pair and names
-// nothing.
+// all. readOmpMember below uses it, together with the transcript's own
+// nesting depth AND the AgentId itself, as REAL classifyRole() signals. A
+// canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
+// `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
+// `memberName`, per #1506; only a non-canonical AgentId — a generated word
+// pair that names nothing — is still never matched.
 //
 // `resolvedModelIdentity` (#1345) is `session_init`'s OWN field, written at
 // DISPATCH — before the member's first assistant turn exists, which is what
@@ -626,8 +628,9 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // `undefined`), so the definition-based fix above cannot reach them, and they
 // fall through to prose classification of `folded.task` alone. Measured
 // against docs/metrics/member-outcomes.tsv (#1506): 478 omp rows carry such
-// an AgentId, 52 of them booked `other` for want of this signal (`fix-pr-*`
-// members whose dispatch prompt never happens to say "fix pr").
+// an AgentId, 52 of them booked `other` for want of this signal — 31
+// `fix-pr-*`, 9 `impl-*` and 12 `merge-bot-*` members whose dispatch prompt
+// never happens to name the role.
 //
 // RULED: pass the AgentId unconditionally, same as Claude's reader passes
 // `meta.name` unconditionally — NOT gated on looking name-shaped first. Every
@@ -641,13 +644,15 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // predates #1343 (no `session_init` line at all, so neither `task` nor
 // `agent` exist) still holds a readable identity and must not fall back to
 // the "-" hole. Measured 2026-09-16: zero such rows on disk today, but the
-// gate exists so the design does not assume that stays true forever.
+// gate exists so the design does not assume that stays true forever. Built
+// from `CANONICAL_MEMBER_NAME_PREFIXES` (compute-spend.mjs) rather than its
+// own copy of the prefix list, so the two cannot drift apart.
 //
 // REJECTED: dispatching these roles under real agent definitions instead
 // (the issue's other named approach) — a controller/dispatch-convention
 // change, out of scope for a classifier fix, and unlike this one it cannot
 // repair the 478 historical rows already on disk.
-const OMP_CANONICAL_STEM_RE = /^(?:impl|fix-pr|finisher|finish|review-pr|merge-bot)-/;
+const OMP_CANONICAL_STEM_RE = new RegExp(`^(?:${CANONICAL_MEMBER_NAME_PREFIXES})-`);
 export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   const folded = foldOmpTranscript(jsonlText, filePath);
   if (!folded.model) return null; // no assistant turn — not a real member transcript

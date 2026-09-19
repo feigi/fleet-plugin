@@ -104,7 +104,35 @@ export function classifyRole(signals) {
   if (/(^|:)fleet-review-/.test(def)) return "specialist";
   if (/(^|:)fleet-implementer(-alt)?$/.test(def)) return "implementer";
 
+  // The dispatch NAME is checked alone, in this same fixed order, before the
+  // prose blend below ever runs (#1506). Both readers now hand a canonical
+  // omp/run-team name (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`, `finish-<n>`,
+  // `review-pr-<n>`, `merge-bot-<n>`) straight through as `memberName`, and
+  // that name is a MORE PRECISE signal than the member's own free-text
+  // description — concatenating them into one `hay` before matching let a
+  // description's prose out-rank the name whenever the fixed branch order
+  // happened to check an earlier pattern the prose satisfied first. Measured
+  // live: `finisher-1380` described as "Fix PR 1380 review findings." matched
+  // the reviewer branch on "review" in the prose before the finisher branch
+  // ever saw the name that actually says what the member is; `merge-bot-12`
+  // described with "...review findings" misread the same way as finisher.
+  // Matching the name alone first, and only falling through to the blend when
+  // the name resolves nothing, restores the name's priority without
+  // disturbing the description-only fallback the tests above still need.
+  const byName = roleFromNamePatterns(name.toLowerCase());
+  if (byName) return byName;
+
   const hay = `${name} ${desc}`.toLowerCase();
+  return roleFromNamePatterns(hay) ?? "other";
+}
+
+// The four name-driven branches, shared by both the name-alone pass above and
+// the description-inclusive fallback: same patterns, same fixed order
+// (implementer -> reviewer -> finisher -> merge-bot), just a different
+// haystack. Returns `null`, never "other", so the caller can fall through to
+// the next haystack instead of committing to "other" the moment the name
+// alone resolves nothing.
+function roleFromNamePatterns(hay) {
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
   // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
@@ -113,8 +141,18 @@ export function classifyRole(signals) {
   if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
   if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
-  return "other";
+  return null;
 }
+
+// The same 5 run-team-fixed dispatch-name prefixes the branches above match,
+// as a bare regex-alternation SOURCE STRING (not a compiled RegExp) — so
+// member-record.mjs's OMP_CANONICAL_STEM_RE can build its own `-`-suffixed,
+// anchored pattern from this one list instead of independently retyping it.
+// The two encode the same run-team naming convention and must not drift
+// apart the way two hand-copied lists eventually do. `finish(?:er)?`
+// collapses the `finisher`/`finish` pair into the shape
+// `roleFromNamePatterns`'s own bare-word check already uses.
+export const CANONICAL_MEMBER_NAME_PREFIXES = "impl|fix-pr|finish(?:er)?|review-pr|merge-bot";
 
 // Seeds the rollup buckets and breaks ties in the report, which is otherwise
 // sorted by spend — so this is not the order the UI shows. Review roles lead so

@@ -383,21 +383,23 @@ test("readOmpMember: role is `-`, never a guess off the bare AgentId, when neith
 test("readOmpMember: a canonically-named AgentId is itself a role signal under the default `task` definition (#1506)", () => {
   // `fix-pr-1380`, `merge-bot-5`, `impl-1049` and friends are dispatched
   // under run-team's default `task` definition — `session_init.agent` is
-  // absent, exactly like #1502's gap — but the AgentId itself IS the
-  // dispatch name (run-team's own naming convention), so it must reach
-  // classifyRole as `memberName` and win a real classification even when the
-  // dispatch prompt's own prose says nothing role-shaped.
-  const noKeywords = () => [
+  // absent. That is a different gap from #1502's: #1502 fixed a forwarding
+  // bug where an EXISTING `folded.agent` value wasn't reaching classifyRole;
+  // here `session_init.agent` was never recorded at all. But the AgentId
+  // itself IS the dispatch name (run-team's own naming convention), so it
+  // must reach classifyRole as `memberName` and win a real classification
+  // even when the dispatch prompt's own prose says nothing role-shaped.
+  const noKeywords = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
     sessionInitEvt("Apply the requested patch set and open a PR.", "anthropic/claude-sonnet-5"),
     assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 12 }),
   ].join("\n");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "fix-pr-1380", 0).role, "reviewer");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "review-pr-42", 0).role, "reviewer");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "finisher-99", 0).role, "finisher");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "finish-7", 0).role, "finisher");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "impl-1049", 0).role, "implementer");
-  assert.equal(readOmpMember(noKeywords(), "/fake/path.jsonl", "merge-bot-5", 0).role, "merge-bot");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "fix-pr-1380", 0).role, "reviewer");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "review-pr-42", 0).role, "reviewer");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "finisher-99", 0).role, "finisher");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "finish-7", 0).role, "finisher");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "impl-1049", 0).role, "implementer");
+  assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "merge-bot-5", 0).role, "merge-bot");
 });
 
 test("readOmpMember: a canonically-named AgentId still classifies with no session_init line at all — the stem widens `hasRoleSignal` itself (#1506)", () => {
@@ -408,16 +410,16 @@ test("readOmpMember: a canonically-named AgentId still classifies with no sessio
   // so a mutant that drops a prefix from the gate fails here even though the
   // memberName-reaches-classifyRole test above cannot see it (that fixture's
   // `session_init.task` already satisfies `hasRoleSignal` on its own).
-  const bare = () => [
+  const bare = [
     sessionEvt("/Users/chris/dev/fleet-plugin"),
     assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 12 }),
   ].join("\n");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "fix-pr-1516", 0).role, "reviewer");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "review-pr-77", 0).role, "reviewer");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "finisher-3", 0).role, "finisher");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "finish-3", 0).role, "finisher");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "impl-1516", 0).role, "implementer");
-  assert.equal(readOmpMember(bare(), "/fake/path.jsonl", "merge-bot-3", 0).role, "merge-bot");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "fix-pr-1516", 0).role, "reviewer");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "review-pr-77", 0).role, "reviewer");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "finisher-3", 0).role, "finisher");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "finish-3", 0).role, "finisher");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "impl-1516", 0).role, "implementer");
+  assert.equal(readOmpMember(bare, "/fake/path.jsonl", "merge-bot-3", 0).role, "merge-bot");
 });
 
 test("readOmpMember: a real agent definition still wins over a coincidentally name-shaped AgentId (#1506)", () => {
