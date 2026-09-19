@@ -43,12 +43,15 @@ the trade this record refuses.
 
 ## Not covered by this refusal
 
-The helper's own shape. `grep_probe()` copies the fd-dup-plus-separator splice from
-`git_probe()`, which needs it for three return values; the grep probe discards stdout and
-needs two, and a command substitution already carries an exit status. Simplifying that is
-#1544, is `ready-for-agent`, and is *orthogonal* to this record: it keeps probe-and-report
-and keeps all five fixtures passing unchanged. Refusing the design change here is not a
-refusal to touch the helper.
+The helper's own shape. `grep_probe()` used to copy the fd-dup-plus-separator splice
+from `git_probe()`, which needs it for three return values; the grep probe discarded
+stdout and needed only two, and a command substitution already carries an exit status.
+Simplifying that was #1544, now implemented (in the PR that shipped this doc update):
+`grep_probe()` captures only `$gq_err` via command substitution and reports its own
+exit status directly, with no fd-dup or `$gp_sep` splice left in it. That simplification
+was and remains *orthogonal* to this record: it kept probe-and-report and kept all five
+fixtures passing unchanged. Refusing the design change here was never a refusal to touch
+the helper.
 
 ## What would reopen this
 
