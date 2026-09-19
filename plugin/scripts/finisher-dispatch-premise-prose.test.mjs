@@ -61,13 +61,15 @@
 // quoted copy of today's line — the property that makes it a reflow control and
 // not a second fixture to keep in sync.
 //
-// C1 also reddens ONE pin outside this file — `pointer-target-prose.test.mjs`'s
-// "every pointer clause in the document is still recognised", which extracts
-// `see **…**` clauses per physical line and finds 3 instead of 5 once step 4
-// wraps. That is pre-existing brittleness in another file's pin, not fallout
-// from this one: with this file deleted, the same rewrap reds the same single
-// test (measured, 598/599). Not touched here — #1499 scopes this ticket to the
-// third site's guard and explicitly out of migrating anything else.
+// C1 used to also redden ONE pin outside this file — `pointer-target-prose.
+// test.mjs`'s "every pointer clause in the document is still recognised",
+// which extracted `see **…**` clauses per PHYSICAL line and found 3 instead
+// of 5 once step 4 wraps. That was pre-existing brittleness in another
+// file's pin, not fallout from this one, and #1609 is what closed it: that
+// pin's scan now reads the document's LOGICAL lines, so the same C1 rewrap
+// no longer loses any pointer (measured on this branch: 5 before and after).
+// Nothing here needed to change — #1499 scoped this ticket to the third
+// site's guard and explicitly out of migrating anything else.
 //
 // THE CEILING: a prose pin. It proves the two-condition gate is STATED where a
 // fix-applier reads it, bounded to the step that states it. It cannot prove a
