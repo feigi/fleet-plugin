@@ -191,6 +191,28 @@ test("the NAME wins over an earlier-checked prose keyword — the fixed branch o
   assert.equal(classifyRole({ description: "Fix PR 1380 review findings." }), "reviewer");
 });
 
+test("resolve-pr-<n> books review spend, off the real dispatched name (#1250)", () => {
+  // Real recorded rows, both previously "other" for want of a name match:
+  // `resolve-pr-1232` ("Resolve conflict on PR 1232", session caf66206) and
+  // `resolve-pr-1310` ("Rebase and resolve conflicts for PR #1310", session
+  // 28488458). Descriptions deliberately carry no other review word, so the
+  // NAME has to carry the match, the same discipline the finisher spellings
+  // above are held to.
+  assert.equal(classifyRole({ memberName: "resolve-pr-1232", description: "Resolve conflict on PR 1232" }), "reviewer");
+  assert.equal(classifyRole({ memberName: "resolve-pr-1310", description: "Rebase and resolve conflicts for PR #1310" }), "reviewer");
+  // The bare prose form ("resolve pr" with no name carrying the PR number)
+  // is deliberately NOT matched: neither real cited description above
+  // contains it adjacently ("resolve conflict on pr", "resolve conflicts
+  // for pr" — never "resolve pr" together), so it would be untested reach.
+  // Matching it ahead of the finisher check below would let an unrelated
+  // finisher's description that happens to mention "resolve" near "pr"
+  // hijack its classification away from its own name.
+  assert.equal(classifyRole({ memberName: "finisher-pr-436", description: "Resolve PR conflicts left by review findings" }), "finisher");
+  // It must not be swept into merge-bot: this member's number is a PR, never
+  // a wave, and merge-bot orchestrates a wave's PRs rather than resolving one.
+  assert.equal(classifyRole({ memberName: "merge-bot-8", description: "Merge wave 8" }), "merge-bot");
+});
+
 test("finish-<n> member names classify as finisher — a historical spelling that must stay classifiable", () => {
   // `finisher-pr-<n>` is the canonical finisher name (#326); `finish-<n>` is a
   // spelling earlier runs actually dispatched and recorded runs still have to

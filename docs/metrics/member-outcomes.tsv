@@ -1310,19 +1310,19 @@
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	-	__advisor	claude-fable-5-1				12053535	312615	102391	1419	__advisor	omp	
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	specialist	ext-correctness	claude-opus-5	high			12996	142	432	2	ext-correctness	omp	fleet-review-correctness
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	memory	fetch-install-memories	claude-haiku-4-5				34299	4911	230	4	fetch-install-memories	omp	memory-proxy
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1380	claude-sonnet-5	high		1380	41888	3174	466	9	finisher-1380	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1382	claude-sonnet-5	high		1382	54608	7259	1138	26	finisher-1382	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1383	claude-sonnet-5	high		1383	100362	6646	1580	19	finisher-1383	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1384	claude-sonnet-5	high		1384	34438	5057	551	15	finisher-1384	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1380	claude-sonnet-5	high		1380	41888	3174	466	9	finisher-1380	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1382	claude-sonnet-5	high		1382	54608	7259	1138	26	finisher-1382	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1383	claude-sonnet-5	high		1383	100362	6646	1580	19	finisher-1383	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1384	claude-sonnet-5	high		1384	34438	5057	551	15	finisher-1384	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1385	claude-sonnet-5	high		1385	24922	4385	502	13	finisher-1385	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1386	claude-sonnet-5	high		1386	22177	3197	471	6	finisher-1386	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1386-retry	claude-sonnet-5	high			19221	1871	452	5	finisher-1386-retry	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1387	claude-sonnet-5	high		1387	37335	7331	1090	23	finisher-1387	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1388	claude-sonnet-5	high		1388	28351	5960	501	16	finisher-1388	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1387	claude-sonnet-5	high		1387	37335	7331	1090	23	finisher-1387	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1388	claude-sonnet-5	high		1388	28351	5960	501	16	finisher-1388	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1388-retry	claude-sonnet-5	high			17249	1049	446	6	finisher-1388-retry	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1389	claude-sonnet-5	high		1389	21044	2125	454	5	finisher-1389	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1390	claude-sonnet-5	high		1390	43904	2557	469	6	finisher-1390	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	reviewer	finisher-1391	claude-sonnet-5	high		1391	56075	14682	720	32	finisher-1391	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1391	claude-sonnet-5	high		1391	56075	14682	720	32	finisher-1391	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1392	claude-sonnet-5	high		1392	25280	3320	468	8	finisher-1392	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1393	claude-sonnet-5	high		1393	34505	5163	522	13	finisher-1393	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	finisher-1394	claude-sonnet-5	high		1394	22087	4179	514	15	finisher-1394	omp	task
@@ -1388,19 +1388,19 @@
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	memory	memfetch	claude-haiku-4-5	low			54168	14434	643	8	memfetch	omp	memory-proxy
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	memory	memfetch2	claude-haiku-4-5	low			29781	2781	471	3	memfetch2	omp	memory-proxy
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-1	claude-sonnet-5	high			82322	12403	1213	38	merge-bot-1	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-10	claude-sonnet-5	high			47395	5093	572	14	merge-bot-10	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-11	claude-sonnet-5	high			47493	6019	537	17	merge-bot-11	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-12	claude-sonnet-5	high			74108	6852	839	17	merge-bot-12	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-13	claude-sonnet-5	high			37607	4713	519	13	merge-bot-13	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-14	claude-sonnet-5	high			45903	4872	496	13	merge-bot-14	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-10	claude-sonnet-5	high			47395	5093	572	14	merge-bot-10	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-11	claude-sonnet-5	high			47493	6019	537	17	merge-bot-11	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-12	claude-sonnet-5	high			74108	6852	839	17	merge-bot-12	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-13	claude-sonnet-5	high			37607	4713	519	13	merge-bot-13	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-14	claude-sonnet-5	high			45903	4872	496	13	merge-bot-14	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-2	claude-sonnet-5	high			129306	13852	1663	42	merge-bot-2	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-3	claude-sonnet-5	high			90602	23157	2351	70	merge-bot-3	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-3	claude-sonnet-5	high			90602	23157	2351	70	merge-bot-3	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-4	claude-sonnet-5	high			158348	14586	1638	43	merge-bot-4	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-5	claude-sonnet-5	high			96625	9498	1205	28	merge-bot-5	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-6	claude-sonnet-5	high			84533	10367	1191	32	merge-bot-6	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-7	claude-sonnet-5	high			59546	6068	554	15	merge-bot-7	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-8	claude-sonnet-5	high			82216	10676	617	21	merge-bot-8	omp	task
-2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	finisher	merge-bot-9	claude-sonnet-5	high			82285	11226	886	24	merge-bot-9	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-6	claude-sonnet-5	high			84533	10367	1191	32	merge-bot-6	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-7	claude-sonnet-5	high			59546	6068	554	15	merge-bot-7	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-8	claude-sonnet-5	high			82216	10676	617	21	merge-bot-8	omp	task
+2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	merge-bot	merge-bot-9	claude-sonnet-5	high			82285	11226	886	24	merge-bot-9	omp	task
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	specialist	model-check-eval-agent	claude-sonnet-5	high			33358	100	430	2	model-check-eval-agent	omp	fleet-review-correctness
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	other	ov-effort	claude-opus-5	low			11188	101	426	1	ov-effort	omp	tierprobe-sel
 2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55	2026-09-11	other	ov-haiku	claude-opus-5	low			12467	51	429	2	ov-haiku	omp	tierprobe-sel
@@ -1919,7 +1919,7 @@
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	reviewer	Review-pr-1471	claude-sonnet-5	high			197509	36268	1213	54	Review-pr-1471	omp	task
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	-	__advisor	claude-fable-5-1				10868753	171618	113098	1051	__advisor	omp	
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	finisher	finisher-pr-1425	claude-haiku-4-5			1425	54965	5616	1115	18	finisher-pr-1425	omp	sonic
-2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	reviewer	finisher-pr-1426	claude-haiku-4-5	low		1426	46591	3383	885	11	finisher-pr-1426	omp	sonic
+2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	finisher	finisher-pr-1426	claude-haiku-4-5	low		1426	46591	3383	885	11	finisher-pr-1426	omp	sonic
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	finisher	finisher-pr-1427	claude-haiku-4-5	low		1427	67526	4791	637	16	finisher-pr-1427	omp	sonic
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	finisher	finisher-pr-1428	claude-haiku-4-5	low		1428	184898	14372	881	57	finisher-pr-1428	omp	sonic
 2026-09-11T09-12-25-754Z_01a08fbd-579a-77d3-991b-b80e489f2c19	2026-09-12	finisher	finisher-pr-1431	claude-haiku-4-5	low		1431	40783	5042	614	20	finisher-pr-1431	omp	sonic
@@ -2297,13 +2297,13 @@
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1528	claude-sonnet-5	high		1528	35071	6007	957	22	finisher-pr-1528	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1529	claude-sonnet-5	high		1529	44434	7010	933	27	finisher-pr-1529	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1530	claude-sonnet-5	high		1530	37447	8000	956	25	finisher-pr-1530	omp	task
-2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	reviewer	finisher-pr-1531	claude-sonnet-5	high		1531	84760	20302	1425	39	finisher-pr-1531	omp	task
+2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1531	claude-sonnet-5	high		1531	84760	20302	1425	39	finisher-pr-1531	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1535	claude-sonnet-5	high		1535	114310	13391	1212	38	finisher-pr-1535	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1536	claude-sonnet-5	high		1536	25540	4591	1100	18	finisher-pr-1536	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1536-cycle	claude-sonnet-5	high			30197	6573	2210	24	finisher-pr-1536-cycle	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1538	claude-sonnet-5	high		1538	24763	5394	1143	20	finisher-pr-1538	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1539	claude-sonnet-5	high		1539	48956	8445	1190	24	finisher-pr-1539	omp	task
-2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	reviewer	finisher-pr-1540	claude-sonnet-5	high		1540	37574	8826	1004	30	finisher-pr-1540	omp	task
+2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1540	claude-sonnet-5	high		1540	37574	8826	1004	30	finisher-pr-1540	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1541	claude-sonnet-5	high		1541	34171	5948	669	19	finisher-pr-1541	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1542	claude-sonnet-5	high		1542	45481	5782	1135	22	finisher-pr-1542	omp	task
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	finisher	finisher-pr-1558	claude-sonnet-5	high		1558	41710	4177	935	16	finisher-pr-1558	omp	task
@@ -3314,15 +3314,15 @@
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	specialist	verifytypes-7	claude-sonnet-5	low			16657	1080	444	3	verifytypes-7	omp	fleet-review-verifier
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	specialist	verifytypes-8	claude-sonnet-5	low			26321	4818	521	12	verifytypes-8	omp	fleet-review-verifier
 2026-09-15T14-40-07-175Z_01a0a582-ca07-7421-acd4-e4713d1a552d	2026-09-17	specialist	verifytypes-9	claude-sonnet-5	low			28693	4023	470	11	verifytypes-9	omp	fleet-review-verifier
-2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	reviewer	FinisherPr1567b	claude-haiku-4-5				106806	19955	1178	115	FinisherPr1567b	omp	sonic
-2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	reviewer	FinisherPr1568	claude-haiku-4-5				62324	15529	906	85	FinisherPr1568	omp	sonic
+2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1567b	claude-haiku-4-5				106806	19955	1178	115	FinisherPr1567b	omp	sonic
+2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1568	claude-haiku-4-5				62324	15529	906	85	FinisherPr1568	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1568b	claude-haiku-4-5				101643	17473	1126	81	FinisherPr1568b	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1568c	claude-haiku-4-5				98934	16879	1140	81	FinisherPr1568c	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1568d	claude-haiku-4-5				168226	11522	1533	55	FinisherPr1568d	omp	sonic
-2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	reviewer	FinisherPr1569	claude-haiku-4-5				92407	8723	818	41	FinisherPr1569	omp	sonic
+2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1569	claude-haiku-4-5				92407	8723	818	41	FinisherPr1569	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1574	claude-haiku-4-5				80092	21506	1384	136	FinisherPr1574	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1580	claude-haiku-4-5				56345	7797	770	39	FinisherPr1580	omp	sonic
-2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	reviewer	FinisherPr1581	claude-haiku-4-5	xhigh			100615	15565	1041	91	FinisherPr1581	omp	sonic
+2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1581	claude-haiku-4-5	xhigh			100615	15565	1041	91	FinisherPr1581	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	finisher	FinisherPr1592	claude-haiku-4-5				94239	7257	717	31	FinisherPr1592	omp	sonic
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	implementer	FinisherPr1598	claude-opus-5	xhigh			76525	20691	865	22	FinisherPr1598	omp	fleet-implementer
 2026-09-18T06-44-48-800Z_01a0b342-b620-747d-ad66-d367a6c4e29a	2026-09-18	implementer	FinisherPr1598b	claude-opus-5	xhigh			59104	17659	1150	34	FinisherPr1598b	omp	fleet-implementer
@@ -3496,6 +3496,7 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	memory	SaveCollisionFrequency	claude-haiku-4-5	low			26327	3551	471	6	SaveCollisionFrequency	omp	memory-proxy
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	memory	SaveDepScanGap	claude-haiku-4-5	low			29226	3518	473	7	SaveDepScanGap	omp	memory-proxy
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	memory	SaveTierCheckTiming	claude-haiku-4-5	low			47570	2976	473	6	SaveTierCheckTiming	omp	memory-proxy
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	conflictresolve1636	claude-sonnet-5	high			146538	15292	283	58	conflictresolve1636	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fix-pr-1600	claude-sonnet-5	high		1600	64004	13644	756	35	fix-pr-1600	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fix-pr-1600/fix-pr-1600.CompetentStork	claude-sonnet-5	high			44391	3958	512	9	fix-pr-1600/fix-pr-1600.CompetentStork	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fix-pr-1601	claude-sonnet-5	high		1601	161664	58819	2302	89	fix-pr-1601	omp	task
@@ -3524,6 +3525,31 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1620/fixapplier1620.RefuteC	claude-haiku-4-5	xhigh			45825	8515	540	13	fixapplier1620/fixapplier1620.RefuteC	omp	scout
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1621	claude-sonnet-5	high			113670	27749	1226	55	fixapplier1621	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1621/fixapplier1621.RefuteCommentClaims	claude-sonnet-5	high			38082	6844	493	9	fixapplier1621/fixapplier1621.RefuteCommentClaims	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1623	claude-sonnet-5	high			115214	34467	1519	59	fixapplier1623	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1623/fixapplier1623.RefuteA	claude-haiku-4-5	xhigh			51717	16143	619	15	fixapplier1623/fixapplier1623.RefuteA	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1623/fixapplier1623.RefuteB	claude-haiku-4-5				56354	18752	613	12	fixapplier1623/fixapplier1623.RefuteB	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1623/fixapplier1623.RefuteC	claude-haiku-4-5	xhigh			51571	7557	528	9	fixapplier1623/fixapplier1623.RefuteC	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1624	claude-sonnet-5	high			86678	35461	1272	52	fixapplier1624	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1625	claude-sonnet-5	high			37219	8929	1554	40	fixapplier1625	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1626	claude-sonnet-5	high			207618	52835	1336	63	fixapplier1626	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1627	claude-sonnet-5	high			106611	40437	1413	70	fixapplier1627	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1630	claude-sonnet-5	high			30774	5666	1369	24	fixapplier1630	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1631	claude-sonnet-5	high			173942	52599	1398	113	fixapplier1631	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fixapplier1632	claude-sonnet-5	high			189105	49379	1426	67	fixapplier1632	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1632/fixapplier1632.RefuteDiffStatsOmission	claude-haiku-4-5	xhigh			169627	16524	682	40	fixapplier1632/fixapplier1632.RefuteDiffStatsOmission	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1632/fixapplier1632.RefuteRangeCitations	claude-haiku-4-5				57654	14131	703	28	fixapplier1632/fixapplier1632.RefuteRangeCitations	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fixapplier1633	claude-sonnet-5	high			231549	66435	2309	143	fixapplier1633	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1634	claude-sonnet-5	high			184595	48365	1661	63	fixapplier1634	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1634/fixapplier1634.RefuteLineDistanceClaim	claude-haiku-4-5	xhigh			74653	18111	770	34	fixapplier1634/fixapplier1634.RefuteLineDistanceClaim	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1635	claude-sonnet-5	high			53736	4325	1142	21	fixapplier1635	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fixapplier1636	claude-sonnet-5	high			213456	31555	1058	66	fixapplier1636	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	fixapplier1637	claude-sonnet-5	high			117096	40693	1295	55	fixapplier1637	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1637/fixapplier1637.RefuteA	claude-haiku-4-5				59713	14712	646	16	fixapplier1637/fixapplier1637.RefuteA	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1637/fixapplier1637.RefuteB	claude-haiku-4-5	medium			57988	11541	601	17	fixapplier1637/fixapplier1637.RefuteB	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1637/fixapplier1637.RefuteC	claude-haiku-4-5				34575	7981	543	10	fixapplier1637/fixapplier1637.RefuteC	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	fixapplier1637/fixapplier1637.RefuteD	claude-haiku-4-5	xhigh			54141	8112	535	17	fixapplier1637/fixapplier1637.RefuteD	omp	scout
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	fixapplier1638	claude-sonnet-5	high			61769	13177	183	19	fixapplier1638	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	healthprobe	claude-sonnet-5	high			13960	84	428	2	healthprobe	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	implementer	impl-1190	claude-opus-5	xhigh	1190		0	0	8	1	impl-1190	omp	fleet-implementer
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	implementer	impl-1190-2	claude-opus-5	xhigh			20611	1682	31	5	impl-1190-2	omp	fleet-implementer
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	implementer	impl-1190b	claude-sonnet-5	xhigh			54728	21577	772	37	impl-1190b	omp	fleet-implementer-alt
@@ -3547,15 +3573,22 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	implementer	impl-1606	claude-opus-5	xhigh	1606		175548	96039	4358	115	impl-1606	omp	fleet-implementer
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	implementer	impl-1609	claude-opus-5	xhigh	1609		158195	82594	2421	103	impl-1609	omp	fleet-implementer
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1230	claude-sonnet-5	high			88155	34432	987	52	impl1230	omp	task
-2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1506	claude-sonnet-5	high			169562	51071	548	73	impl1506	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1250	claude-sonnet-5	high			159319	44248	1174	86	impl1250	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1311	claude-sonnet-5	high			61166	23670	979	39	impl1311	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1422	claude-sonnet-5	high			92759	35736	1158	44	impl1422	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1506	claude-sonnet-5	high			224010	73457	1527	117	impl1506	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1544	claude-sonnet-5	high			57118	19034	998	43	impl1544	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1552	claude-sonnet-5	high			109589	25187	893	37	impl1552	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1554	claude-sonnet-5	high			115936	57766	1684	77	impl1554	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1561	claude-sonnet-5	high			112174	35074	1094	64	impl1561	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1566	claude-sonnet-5	high			56589	17578	1267	52	impl1566	omp	task
-2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1576	claude-sonnet-5	high			149301	33206	955	54	impl1576	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1576	claude-sonnet-5	high			157541	38703	1542	62	impl1576	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1593	claude-sonnet-5	high			142686	52501	1376	51	impl1593	omp	task
-2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1595	claude-sonnet-5	high			79558	12932	524	31	impl1595	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	impl1595	claude-sonnet-5	high			92700	21369	1418	54	impl1595	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1599	claude-sonnet-5	high			495986	168936	4091	216	impl1599	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1617	claude-sonnet-5	high			110105	47418	1436	67	impl1617	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1619	claude-sonnet-5	high			137114	48022	1416	68	impl1619	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	other	impl1628	claude-sonnet-5	high			191853	33488	1113	62	impl1628	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-1	claude-sonnet-5	high			105793	18545	711	21	merge-bot-1	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-10	claude-sonnet-5	high			98742	10634	566	26	merge-bot-10	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-11	claude-sonnet-5	high			157418	19299	1215	36	merge-bot-11	omp	task
@@ -3564,13 +3597,25 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-3	claude-sonnet-5	high			109132	12954	596	25	merge-bot-3	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-4	claude-sonnet-5	high			219563	52466	1994	83	merge-bot-4	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-5	claude-sonnet-5	high			154275	16716	1115	37	merge-bot-5	omp	task
-2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	finisher	merge-bot-6	claude-sonnet-5	high			261501	28725	1006	56	merge-bot-6	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-6	claude-sonnet-5	high			261501	28725	1006	56	merge-bot-6	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-7	claude-sonnet-5	high			143024	14394	1057	34	merge-bot-7	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-8	claude-sonnet-5	high			251434	25855	1192	56	merge-bot-8	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	merge-bot-9	claude-sonnet-5	high			145739	13516	1027	34	merge-bot-9	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1618	claude-sonnet-5	high			165824	24295	873	41	mergebot1618	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1620	claude-sonnet-5	high			109692	15827	766	23	mergebot1620	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1620b	claude-sonnet-5	high			138284	13042	594	26	mergebot1620b	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1621	claude-sonnet-5	high			86834	23527	1208	43	mergebot1621	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1623	claude-sonnet-5	high			159061	28276	1282	45	mergebot1623	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1624	claude-sonnet-5	high			128798	20552	682	35	mergebot1624	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1625	claude-sonnet-5	high			131124	10671	669	26	mergebot1625	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1626	claude-sonnet-5	high			102658	16759	790	33	mergebot1626	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1627	claude-sonnet-5	high			146044	16805	659	40	mergebot1627	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1629	claude-sonnet-5	high			118645	11813	607	21	mergebot1629	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1630	claude-sonnet-5	high			87219	21046	865	36	mergebot1630	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1631	claude-sonnet-5	high			152011	24506	859	41	mergebot1631	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	reviewer	mergebot1632	claude-sonnet-5	high			121011	16513	846	28	mergebot1632	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1633	claude-sonnet-5	high			91690	20402	674	33	mergebot1633	omp	task
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	merge-bot	mergebot1634	claude-sonnet-5	high			97989	17502	761	37	mergebot1634	omp	task
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments	claude-sonnet-5	medium			51418	6969	1284	25	reviewcomments	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-10	claude-sonnet-5	medium			153543	17641	1341	39	reviewcomments-10	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-11	claude-sonnet-5	medium			98407	27593	1438	61	reviewcomments-11	omp	fleet-review-comments
@@ -3578,8 +3623,24 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-13	claude-sonnet-5	medium			97164	34472	1053	46	reviewcomments-13	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-14	claude-sonnet-5	medium			92904	19870	1339	46	reviewcomments-14	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-15	claude-sonnet-5	medium			61039	12134	888	35	reviewcomments-15	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-16	claude-sonnet-5	medium			89485	22361	991	47	reviewcomments-16	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-17	claude-sonnet-5	medium			74508	21339	903	29	reviewcomments-17	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-18	claude-sonnet-5	medium			54521	13322	1213	35	reviewcomments-18	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-19	claude-sonnet-5	medium			66645	29457	964	29	reviewcomments-19	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-2	claude-sonnet-5	medium			78440	13046	959	32	reviewcomments-2	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-20	claude-sonnet-5	medium			68252	17717	1149	34	reviewcomments-20	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-21	claude-sonnet-5	medium			105630	12954	1040	38	reviewcomments-21	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-22	claude-sonnet-5	medium			67062	11927	816	29	reviewcomments-22	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-23	claude-sonnet-5	medium			60063	17039	1078	37	reviewcomments-23	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-24	claude-sonnet-5	medium			113032	18340	1532	55	reviewcomments-24	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-25	claude-sonnet-5	medium			156265	29040	1316	53	reviewcomments-25	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-26	claude-sonnet-5	medium			64546	15403	843	26	reviewcomments-26	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-27	claude-sonnet-5	medium			130866	14866	1041	35	reviewcomments-27	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-28	claude-sonnet-5	medium			44996	8149	1267	27	reviewcomments-28	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-29	claude-sonnet-5	medium			143883	18154	1380	53	reviewcomments-29	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-3	claude-sonnet-5	medium			37618	10269	827	21	reviewcomments-3	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-30	claude-sonnet-5	medium			153132	23946	1416	58	reviewcomments-30	omp	fleet-review-comments
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-31	claude-sonnet-5	medium			112938	19627	1231	32	reviewcomments-31	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-4	claude-sonnet-5	medium			76009	16886	275	32	reviewcomments-4	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-5	claude-sonnet-5	medium			108437	29625	1246	51	reviewcomments-5	omp	fleet-review-comments
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcomments-6	claude-sonnet-5	medium			66193	18802	973	28	reviewcomments-6	omp	fleet-review-comments
@@ -3593,8 +3654,24 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-13	claude-opus-5	high			93489	39546	1225	39	reviewcorrectness-13	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-14	claude-opus-5	high			107365	32829	1283	50	reviewcorrectness-14	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-15	claude-opus-5	high			70466	38934	1153	51	reviewcorrectness-15	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-16	claude-opus-5	high			77576	25936	902	36	reviewcorrectness-16	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-17	claude-opus-5	high			63345	23335	972	35	reviewcorrectness-17	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-18	claude-opus-5	high			51718	14117	1221	33	reviewcorrectness-18	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-19	claude-opus-5	high			47584	19721	820	23	reviewcorrectness-19	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-2	claude-opus-5	high			87067	32917	1300	56	reviewcorrectness-2	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-20	claude-opus-5	high			95082	37383	1764	54	reviewcorrectness-20	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-21	claude-opus-5	high			110650	37438	1314	57	reviewcorrectness-21	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-22	claude-opus-5	high			70510	34459	1036	36	reviewcorrectness-22	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-23	claude-opus-5	high			113562	29115	984	40	reviewcorrectness-23	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-24	claude-opus-5	high			110518	28077	1733	51	reviewcorrectness-24	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-25	claude-opus-5	high			130731	33560	1245	65	reviewcorrectness-25	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-26	claude-opus-5	high			71493	26716	869	35	reviewcorrectness-26	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-27	claude-opus-5	high			57937	24934	1384	33	reviewcorrectness-27	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-28	claude-opus-5	high			77361	21971	1401	38	reviewcorrectness-28	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-29	claude-opus-5	high			73790	23436	1420	36	reviewcorrectness-29	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-3	claude-opus-5	high			89737	21302	990	31	reviewcorrectness-3	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-30	claude-opus-5	high			124034	34655	1408	64	reviewcorrectness-30	omp	fleet-review-correctness
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-31	claude-opus-5	high			95979	27422	1260	47	reviewcorrectness-31	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-4	claude-opus-5	high			86751	12029	275	20	reviewcorrectness-4	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-5	claude-opus-5	high			124734	32364	1838	47	reviewcorrectness-5	omp	fleet-review-correctness
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewcorrectness-6	claude-opus-5	high			80471	30368	929	29	reviewcorrectness-6	omp	fleet-review-correctness
@@ -3604,7 +3681,18 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure	claude-sonnet-5	high			57339	7522	861	22	reviewsilent-failure	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-10	claude-sonnet-5	high			50633	11091	1239	27	reviewsilent-failure-10	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-11	claude-sonnet-5	high			86339	18617	1584	51	reviewsilent-failure-11	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-12	claude-sonnet-5	high			47556	6513	1209	20	reviewsilent-failure-12	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-13	claude-sonnet-5	high			42022	13106	1496	35	reviewsilent-failure-13	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-14	claude-sonnet-5	high			50261	5760	1010	24	reviewsilent-failure-14	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-15	claude-sonnet-5	high			109543	19161	1382	48	reviewsilent-failure-15	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-16	claude-sonnet-5	high			106284	16633	1507	50	reviewsilent-failure-16	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-17	claude-sonnet-5	high			104732	5992	891	22	reviewsilent-failure-17	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-18	claude-sonnet-5	high			119799	35826	1414	46	reviewsilent-failure-18	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-19	claude-sonnet-5	high			66590	9778	1310	36	reviewsilent-failure-19	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-2	claude-sonnet-5	high			52482	11861	1324	32	reviewsilent-failure-2	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-20	claude-sonnet-5	high			111680	18668	1490	35	reviewsilent-failure-20	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-21	claude-sonnet-5	high			150623	15678	1408	47	reviewsilent-failure-21	omp	fleet-review-silent-failure
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-22	claude-sonnet-5	high			100605	13359	998	39	reviewsilent-failure-22	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-3	claude-sonnet-5	high			26104	5577	1038	20	reviewsilent-failure-3	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-4	claude-sonnet-5	high			62026	5538	275	23	reviewsilent-failure-4	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-5	claude-sonnet-5	high			148990	27789	1551	64	reviewsilent-failure-5	omp	fleet-review-silent-failure
@@ -3614,7 +3702,17 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsilent-failure-9	claude-sonnet-5	high			188661	28788	1187	51	reviewsilent-failure-9	omp	fleet-review-silent-failure
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify	claude-opus-5	high			68604	22430	1290	38	reviewsimplify	omp	fleet-review-simplify
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-10	claude-opus-5	high			92187	22712	1664	48	reviewsimplify-10	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-11	claude-opus-5	high			59256	21783	1266	41	reviewsimplify-11	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-12	claude-opus-5	high			42737	14704	1585	38	reviewsimplify-12	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-13	claude-opus-5	high			75406	22921	1478	57	reviewsimplify-13	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-14	claude-opus-5	high			58215	23618	1358	37	reviewsimplify-14	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-15	claude-opus-5	high			113614	21849	1234	39	reviewsimplify-15	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-16	claude-opus-5	high			62209	26373	1338	46	reviewsimplify-16	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-17	claude-opus-5	high			55973	19671	1231	30	reviewsimplify-17	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-18	claude-opus-5	high			79303	24548	1420	29	reviewsimplify-18	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-19	claude-opus-5	high			132766	32573	1386	62	reviewsimplify-19	omp	fleet-review-simplify
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-2	claude-opus-5	high			73935	28990	1313	38	reviewsimplify-2	omp	fleet-review-simplify
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-20	claude-opus-5	high			80299	23286	1241	35	reviewsimplify-20	omp	fleet-review-simplify
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-3	claude-opus-5	high			69307	10251	275	19	reviewsimplify-3	omp	fleet-review-simplify
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-4	claude-opus-5	high			78389	19239	1282	29	reviewsimplify-4	omp	fleet-review-simplify
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewsimplify-5	claude-opus-5	high			162318	34289	1387	67	reviewsimplify-5	omp	fleet-review-simplify
@@ -3628,7 +3726,21 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-12	claude-sonnet-5	medium			72482	22434	1035	58	reviewtests-12	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-13	claude-sonnet-5	medium			119238	21380	957	41	reviewtests-13	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-14	claude-sonnet-5	medium			40021	10959	698	27	reviewtests-14	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-15	claude-sonnet-5	medium			92686	15017	867	29	reviewtests-15	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-16	claude-sonnet-5	medium			25683	6436	628	13	reviewtests-16	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-17	claude-sonnet-5	medium			45004	19070	737	27	reviewtests-17	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-18	claude-sonnet-5	medium			76605	15672	1227	34	reviewtests-18	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-19	claude-sonnet-5	medium			96294	12866	1016	42	reviewtests-19	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-2	claude-sonnet-5	medium			60376	13436	786	28	reviewtests-2	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-20	claude-sonnet-5	medium			74880	22690	934	46	reviewtests-20	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-21	claude-sonnet-5	medium			131596	25632	1890	67	reviewtests-21	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-22	claude-sonnet-5	medium			132222	16538	839	42	reviewtests-22	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-23	claude-sonnet-5	medium			72641	20532	829	34	reviewtests-23	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-24	claude-sonnet-5	medium			116345	23567	1526	60	reviewtests-24	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-25	claude-sonnet-5	medium			36405	9490	1320	42	reviewtests-25	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-26	claude-sonnet-5	medium			48553	10566	1477	29	reviewtests-26	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-27	claude-sonnet-5	medium			204122	29604	1350	90	reviewtests-27	omp	fleet-review-tests
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-28	claude-sonnet-5	medium			85591	19577	997	36	reviewtests-28	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-3	claude-sonnet-5	medium			62481	4479	275	21	reviewtests-3	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-4	claude-sonnet-5	medium			120198	30401	1098	69	reviewtests-4	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-5	claude-sonnet-5	medium			129539	21316	1109	64	reviewtests-5	omp	fleet-review-tests
@@ -3638,7 +3750,17 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtests-9	claude-sonnet-5	medium			91668	21518	849	44	reviewtests-9	omp	fleet-review-tests
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes	claude-sonnet-5	medium			46829	5148	1273	25	reviewtypes	omp	fleet-review-types
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-10	claude-sonnet-5	medium			56691	8675	809	19	reviewtypes-10	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-11	claude-sonnet-5	medium			21163	3249	917	16	reviewtypes-11	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-12	claude-sonnet-5	medium			45227	14394	1448	38	reviewtypes-12	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-13	claude-sonnet-5	medium			46497	8439	1027	31	reviewtypes-13	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-14	claude-sonnet-5	medium			37702	6446	1335	25	reviewtypes-14	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-15	claude-sonnet-5	medium			116203	13517	930	29	reviewtypes-15	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-16	claude-sonnet-5	medium			135092	15558	1222	34	reviewtypes-16	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-17	claude-sonnet-5	medium			26490	6208	1009	23	reviewtypes-17	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-18	claude-sonnet-5	medium			35278	5450	840	18	reviewtypes-18	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-19	claude-sonnet-5	medium			108518	14808	1435	31	reviewtypes-19	omp	fleet-review-types
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-2	claude-sonnet-5	medium			34544	5258	772	16	reviewtypes-2	omp	fleet-review-types
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-20	claude-sonnet-5	medium			79023	10630	1004	28	reviewtypes-20	omp	fleet-review-types
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-3	claude-sonnet-5	medium			52478	6109	275	18	reviewtypes-3	omp	fleet-review-types
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-4	claude-sonnet-5	medium			71052	13248	1231	35	reviewtypes-4	omp	fleet-review-types
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	reviewtypes-5	claude-sonnet-5	medium			42864	7203	777	20	reviewtypes-5	omp	fleet-review-types
@@ -3653,10 +3775,49 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-13	claude-haiku-4-5	low			29165	2992	475	10	snapshot-13	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-14	claude-haiku-4-5	low			16164	3510	464	9	snapshot-14	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-15	claude-haiku-4-5	low			15481	3472	484	11	snapshot-15	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-16	claude-haiku-4-5	low			13902	3076	457	7	snapshot-16	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-17	claude-haiku-4-5	low			28500	3324	464	6	snapshot-17	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-18	claude-haiku-4-5	low			28266	3057	465	8	snapshot-18	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-19	claude-haiku-4-5	low			28501	3241	465	6	snapshot-19	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-2	claude-haiku-4-5	low			14930	3034	458	7	snapshot-2	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-20	claude-haiku-4-5	low			32137	4428	487	16	snapshot-20	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-21	claude-haiku-4-5	low			28367	3283	464	6	snapshot-21	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-22	claude-haiku-4-5	low			28147	2860	457	7	snapshot-22	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-23	claude-haiku-4-5	low			29003	3394	467	8	snapshot-23	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-24	claude-haiku-4-5	low			29927	3766	471	10	snapshot-24	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-25	claude-haiku-4-5	low			28966	3589	469	9	snapshot-25	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-26	claude-haiku-4-5	low			13837	2946	468	6	snapshot-26	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-27	claude-haiku-4-5	low			14820	3114	474	7	snapshot-27	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-28	claude-haiku-4-5	low			14030	3315	466	7	snapshot-28	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-29	claude-haiku-4-5	low			15496	4372	473	12	snapshot-29	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-3	claude-haiku-4-5	low			15044	3112	469	9	snapshot-3	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-30	claude-haiku-4-5	low			14581	2859	462	6	snapshot-30	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-31	claude-haiku-4-5	low			26674	3594	467	6	snapshot-31	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-32	claude-haiku-4-5	low			13942	2869	457	6	snapshot-32	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-33	claude-haiku-4-5	low			15125	3973	476	17	snapshot-33	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-34	claude-haiku-4-5	low			13869	3018	464	8	snapshot-34	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-35	claude-haiku-4-5	low			14849	3161	459	6	snapshot-35	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-36	claude-haiku-4-5	low			14870	3015	460	6	snapshot-36	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-37	claude-haiku-4-5	low			15320	3489	466	6	snapshot-37	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-38	claude-haiku-4-5	low			15360	3260	492	10	snapshot-38	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-39	claude-haiku-4-5	low			26740	3870	476	11	snapshot-39	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-4	claude-haiku-4-5	low			14265	2642	452	6	snapshot-4	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-40	claude-haiku-4-5	low			17110	3562	463	7	snapshot-40	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-41	claude-haiku-4-5	low			14736	3004	458	7	snapshot-41	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-42	claude-haiku-4-5	low			15112	3488	467	8	snapshot-42	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-43	claude-haiku-4-5	low			19460	3491	462	7	snapshot-43	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-44	claude-haiku-4-5	low			15854	3754	468	14	snapshot-44	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-45	claude-haiku-4-5	low			15206	3300	470	10	snapshot-45	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-46	claude-haiku-4-5	low			15303	3256	457	5	snapshot-46	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-47	claude-haiku-4-5	low			14780	2983	466	7	snapshot-47	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-48	claude-haiku-4-5	low			15788	3278	458	7	snapshot-48	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-49	claude-haiku-4-5	low			15127	3503	477	6	snapshot-49	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-5	claude-haiku-4-5	low			20667	4063	482	8	snapshot-5	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-50	claude-haiku-4-5	low			27895	2816	455	5	snapshot-50	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-51	claude-haiku-4-5	low			28225	3101	464	7	snapshot-51	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-52	claude-haiku-4-5	low			28980	3202	455	5	snapshot-52	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-53	claude-haiku-4-5	low			15790	3662	47	11	snapshot-53	omp	fleet-review-snapshot
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-54	claude-haiku-4-5	low			14918	2980	47	8	snapshot-54	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-6	claude-haiku-4-5	low			14471	2789	463	5	snapshot-6	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-7	claude-haiku-4-5	low			14936	3155	467	7	snapshot-7	omp	fleet-review-snapshot
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	snapshot-8	claude-haiku-4-5	low			14603	2848	459	6	snapshot-8	omp	fleet-review-snapshot
@@ -3676,8 +3837,26 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-20	claude-sonnet-5	low			25047	4386	467	10	verifycomments-20	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-21	claude-sonnet-5	low			24868	2866	457	10	verifycomments-21	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-22	claude-sonnet-5	low			30849	4697	470	9	verifycomments-22	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-23	claude-sonnet-5	low			37373	1828	449	4	verifycomments-23	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-24	claude-sonnet-5	low			37987	1760	451	4	verifycomments-24	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-25	claude-sonnet-5	low			23886	4742	491	10	verifycomments-25	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-26	claude-sonnet-5	low			22757	4173	482	7	verifycomments-26	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-27	claude-sonnet-5	low			19137	2012	456	5	verifycomments-27	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-28	claude-sonnet-5	low			16860	1407	438	5	verifycomments-28	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-29	claude-sonnet-5	low			20053	1581	451	4	verifycomments-29	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-3	claude-sonnet-5	low			21098	2286	452	6	verifycomments-3	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-30	claude-sonnet-5	low			19501	2125	460	6	verifycomments-30	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-31	claude-sonnet-5	low			24631	4162	495	10	verifycomments-31	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-32	claude-sonnet-5	low			16803	1226	441	3	verifycomments-32	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-33	claude-sonnet-5	low			17498	3300	478	9	verifycomments-33	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-34	claude-sonnet-5	low			23114	4893	506	15	verifycomments-34	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-35	claude-sonnet-5	low			16686	1092	437	3	verifycomments-35	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-36	claude-sonnet-5	low			19935	2179	473	6	verifycomments-36	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-37	claude-sonnet-5	low			29404	3039	481	7	verifycomments-37	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-38	claude-sonnet-5	low			20370	1686	445	5	verifycomments-38	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-39	claude-sonnet-5	low			25184	3473	457	6	verifycomments-39	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-4	claude-sonnet-5	low			17664	1336	440	4	verifycomments-4	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-40	claude-sonnet-5	low			24955	3070	47	7	verifycomments-40	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-5	claude-sonnet-5	low			19775	2002	458	6	verifycomments-5	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-6	claude-sonnet-5	low			17531	1446	441	4	verifycomments-6	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycomments-7	claude-sonnet-5	low			17731	1349	445	3	verifycomments-7	omp	fleet-review-verifier
@@ -3711,18 +3890,66 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-32	claude-sonnet-5	low			19473	2052	459	7	verifycorrectness-32	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-33	claude-sonnet-5	low			22000	3138	468	10	verifycorrectness-33	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-34	claude-sonnet-5	low			22351	3273	490	12	verifycorrectness-34	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-35	claude-sonnet-5	low			19241	2087	446	5	verifycorrectness-35	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-36	claude-sonnet-5	low			18356	1633	448	3	verifycorrectness-36	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-37	claude-sonnet-5	low			17787	1379	440	4	verifycorrectness-37	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-38	claude-sonnet-5	low			18766	1831	606	7	verifycorrectness-38	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-39	claude-sonnet-5	low			16908	1350	440	3	verifycorrectness-39	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-4	claude-sonnet-5	low			22139	4297	705	16	verifycorrectness-4	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-40	claude-sonnet-5	low			22147	3534	465	10	verifycorrectness-40	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-41	claude-sonnet-5	low			17872	1905	446	4	verifycorrectness-41	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-42	claude-sonnet-5	low			21611	3543	464	6	verifycorrectness-42	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-43	claude-sonnet-5	low			17641	2039	460	7	verifycorrectness-43	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-44	claude-sonnet-5	low			19040	2528	463	6	verifycorrectness-44	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-45	claude-sonnet-5	low			21097	3044	455	8	verifycorrectness-45	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-46	claude-sonnet-5	low			17856	1159	441	3	verifycorrectness-46	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-47	claude-sonnet-5	low			22745	4593	497	11	verifycorrectness-47	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-48	claude-sonnet-5	low			35115	5972	522	12	verifycorrectness-48	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-49	claude-sonnet-5	low			33306	6287	531	17	verifycorrectness-49	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-5	claude-sonnet-5	low			16687	974	441	3	verifycorrectness-5	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-50	claude-sonnet-5	low			21258	2972	464	6	verifycorrectness-50	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-51	claude-sonnet-5	low			33238	7832	504	11	verifycorrectness-51	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-52	claude-sonnet-5	low			34687	6237	488	11	verifycorrectness-52	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-53	claude-sonnet-5	low			20034	2873	514	9	verifycorrectness-53	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-54	claude-sonnet-5	low			18957	2345	508	7	verifycorrectness-54	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-55	claude-sonnet-5	low			45650	6728	538	20	verifycorrectness-55	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-56	claude-sonnet-5	low			23769	3416	474	7	verifycorrectness-56	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-57	claude-sonnet-5	low			16787	1538	446	3	verifycorrectness-57	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-58	claude-sonnet-5	low			37938	8784	701	20	verifycorrectness-58	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-59	claude-sonnet-5	low			21120	3331	461	7	verifycorrectness-59	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-6	claude-sonnet-5	low			17696	1636	448	4	verifycorrectness-6	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-60	claude-sonnet-5	low			21000	3670	462	7	verifycorrectness-60	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-61	claude-sonnet-5	low			17679	1389	457	4	verifycorrectness-61	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-62	claude-sonnet-5	low			19539	2309	451	6	verifycorrectness-62	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-63	claude-sonnet-5	low			28613	6200	514	15	verifycorrectness-63	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-64	claude-sonnet-5	low			16378	1208	437	3	verifycorrectness-64	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-65	claude-sonnet-5	low			20989	3422	462	6	verifycorrectness-65	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-66	claude-sonnet-5	low			20914	2900	500	9	verifycorrectness-66	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-67	claude-sonnet-5	low			22441	4410	467	7	verifycorrectness-67	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-68	claude-sonnet-5	low			19453	2470	476	8	verifycorrectness-68	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-69	claude-sonnet-5	low			28271	4808	483	10	verifycorrectness-69	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-7	claude-sonnet-5	low			21165	3002	528	9	verifycorrectness-7	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-70	claude-sonnet-5	low			27002	4860	508	10	verifycorrectness-70	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-71	claude-sonnet-5	low			32075	3204	459	9	verifycorrectness-71	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-72	claude-sonnet-5	low			19561	1977	466	6	verifycorrectness-72	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-73	claude-sonnet-5	low			20173	2636	464	7	verifycorrectness-73	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-74	claude-sonnet-5	low			20719	1920	460	6	verifycorrectness-74	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-75	claude-sonnet-5	low			22572	3075	34	10	verifycorrectness-75	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-76	claude-sonnet-5	low			20667	3405	51	8	verifycorrectness-76	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-8	claude-sonnet-5	low			25500	4300	546	11	verifycorrectness-8	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifycorrectness-9	claude-sonnet-5	low			25620	2752	495	10	verifycorrectness-9	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure	claude-sonnet-5	low			22782	2454	466	5	verifysilent-failure	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-10	claude-sonnet-5	low			21913	3817	470	8	verifysilent-failure-10	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-11	claude-sonnet-5	low			27308	4954	494	11	verifysilent-failure-11	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-12	claude-sonnet-5	low			27573	5148	495	12	verifysilent-failure-12	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-2	claude-sonnet-5	low			21323	2208	463	6	verifysilent-failure-2	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-3	claude-sonnet-5	low			21122	3067	585	13	verifysilent-failure-3	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-4	claude-sonnet-5	low			20341	2510	526	9	verifysilent-failure-4	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-5	claude-sonnet-5	low			23437	2580	465	7	verifysilent-failure-5	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-6	claude-sonnet-5	low			31129	6805	524	13	verifysilent-failure-6	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-7	claude-sonnet-5	low			20724	2954	455	4	verifysilent-failure-7	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-8	claude-sonnet-5	low			23101	4315	468	10	verifysilent-failure-8	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifysilent-failure-9	claude-sonnet-5	low			20789	3157	457	8	verifysilent-failure-9	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests	claude-sonnet-5	low			42108	3103	459	10	verifytests	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-10	claude-sonnet-5	low			31877	7311	499	20	verifytests-10	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-11	claude-sonnet-5	low			26863	7656	539	15	verifytests-11	omp	fleet-review-verifier
@@ -3731,8 +3958,24 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-14	claude-sonnet-5	low			18309	2801	468	7	verifytests-14	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-15	claude-sonnet-5	low			22013	2632	463	7	verifytests-15	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-16	claude-sonnet-5	low			20198	3392	458	10	verifytests-16	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-17	claude-sonnet-5	low			24530	3614	464	12	verifytests-17	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-18	claude-sonnet-5	low			23231	3201	456	9	verifytests-18	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-19	claude-sonnet-5	low			20204	3501	458	8	verifytests-19	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-2	claude-sonnet-5	low			38895	2176	465	7	verifytests-2	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-20	claude-sonnet-5	low			19919	3480	473	10	verifytests-20	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-21	claude-sonnet-5	low			17793	1688	449	5	verifytests-21	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-22	claude-sonnet-5	low			20892	2581	451	8	verifytests-22	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-23	claude-sonnet-5	low			17431	1732	443	5	verifytests-23	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-24	claude-sonnet-5	low			16775	1146	438	3	verifytests-24	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-25	claude-sonnet-5	low			20430	2141	459	8	verifytests-25	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-26	claude-sonnet-5	low			18832	1999	446	7	verifytests-26	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-27	claude-sonnet-5	low			20808	1889	447	6	verifytests-27	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-28	claude-sonnet-5	low			21058	2796	470	9	verifytests-28	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-29	claude-sonnet-5	low			19032	2618	449	8	verifytests-29	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-3	claude-sonnet-5	low			23082	4299	538	14	verifytests-3	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-30	claude-sonnet-5	low			17742	2070	450	5	verifytests-30	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-31	claude-sonnet-5	low			37124	2879	462	5	verifytests-31	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-32	claude-sonnet-5	low			20318	3497	471	6	verifytests-32	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-4	claude-sonnet-5	low			22255	2467	489	9	verifytests-4	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-5	claude-sonnet-5	low			19023	2504	472	8	verifytests-5	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-6	claude-sonnet-5	low			38784	3060	461	9	verifytests-6	omp	fleet-review-verifier
@@ -3740,11 +3983,15 @@
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-8	claude-sonnet-5	low			20585	4897	586	14	verifytests-8	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytests-9	claude-sonnet-5	low			37380	8222	549	19	verifytests-9	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes	claude-sonnet-5	low			21015	4095	484	9	verifytypes	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-10	claude-sonnet-5	low			17521	1640	443	5	verifytypes-10	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-2	claude-sonnet-5	low			23092	3868	470	11	verifytypes-2	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-3	claude-sonnet-5	low			29631	5917	705	17	verifytypes-3	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-4	claude-sonnet-5	low			22659	2514	466	6	verifytypes-4	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-5	claude-sonnet-5	low			20905	2268	450	7	verifytypes-5	omp	fleet-review-verifier
 2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-6	claude-sonnet-5	low			21147	1911	465	7	verifytypes-6	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-7	claude-sonnet-5	low			25234	3368	456	7	verifytypes-7	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-8	claude-sonnet-5	low			31461	2961	457	9	verifytypes-8	omp	fleet-review-verifier
+2026-09-18T15-04-10-915Z_01a0b50b-e5a3-76ce-9591-42b8312f5408	2026-09-19	specialist	verifytypes-9	claude-sonnet-5	low			17163	1138	441	3	verifytypes-9	omp	fleet-review-verifier
 20349c08-0f80-4c27-af01-48cab13faa48	2026-08-28	specialist	general-purpose	claude-opus-5	high			75924	8097	571	27	agent-a12fed5eda8a3b37b	claude	
 20349c08-0f80-4c27-af01-48cab13faa48	2026-08-28	specialist	general-purpose	claude-opus-5	high			88047	6926	412	20	agent-a26ddbf0c4065aacd	claude	
 20349c08-0f80-4c27-af01-48cab13faa48	2026-08-28	specialist	general-purpose	claude-opus-5	high			36347	2675	135	8	agent-a3df27980523629ac	claude	
@@ -4223,7 +4470,7 @@
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	implementer	impl-797	claude-opus-5	high	797		82423	21557	1166	30	agent-aimpl-797-751a16b296e676be	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	merge-bot	merge-bot-1-2	claude-opus-5	high			48558	686	16	3	agent-amerge-bot-1-2-9e67e58b19c57d03	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	merge-bot	merge-bot-1	claude-haiku-4-5-20251001				55603	638	103	11	agent-amerge-bot-1-3f421e8e45cd5609	claude	
-28488458-cedc-4303-84c7-35d809e43896	2026-09-09	other	resolve-pr-1310	claude-opus-5	high			44471	5008	316	19	agent-aresolve-pr-1310-49ca2f33bc5874d0	claude	
+28488458-cedc-4303-84c7-35d809e43896	2026-09-09	reviewer	resolve-pr-1310	claude-opus-5	high		1310	44471	5008	316	19	agent-aresolve-pr-1310-49ca2f33bc5874d0	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	pr-review-toolkit:comment-analyzer	claude-sonnet-5	high			145524	23695	825	88	workflows/wf_13c6eaf8-239/agent-a31230f0607a48e0d	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			144830	9247	979	33	workflows/wf_13c6eaf8-239/agent-a35d910dbdc1a7173	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	workflow-subagent	claude-haiku-4-5-20251001				33852	2953	38	5	workflows/wf_13c6eaf8-239/agent-aae3cc1424c9ca9d1	claude	
@@ -8825,7 +9072,7 @@ caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-5	claude-opu
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-6	claude-opus-5	high			60455	2497	265	18	agent-amerge-bot-6-6a31e49b1d935928	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-7	claude-opus-5	high			63867	6744	520	23	agent-amerge-bot-7-9f9d910a07463b4f	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-8	claude-opus-5	high			58014	5160	211	18	agent-amerge-bot-8-682f45d2f3604e8f	claude	
-caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	other	resolve-pr-1232	claude-opus-5	high			86784	13952	586	35	agent-aresolve-pr-1232-4d2d23d071167d1b	claude	
+caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	reviewer	resolve-pr-1232	claude-opus-5	high		1232	86784	13952	586	35	agent-aresolve-pr-1232-4d2d23d071167d1b	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-opus-5	low			22438	432	55	5	workflows/wf_52c394c9-057/agent-a010dbcbd109677df	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-opus-5	low			46025	1011	69	6	workflows/wf_52c394c9-057/agent-a1201ba132684e3a6	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-haiku-4-5-20251001				32721	192	54	14	workflows/wf_52c394c9-057/agent-a1e089fd2a2d48561	claude	

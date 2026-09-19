@@ -138,7 +138,29 @@ function roleFromNamePatterns(hay) {
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
-  if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
+  //
+  // `resolve-pr-<n>` joins the same bucket (#1250): it is a controller
+  // dispatch against an ALREADY-OPEN PR, not new ticket work — measured
+  // meta.json descriptions "Resolve conflict on PR 1232" and "Rebase and
+  // resolve conflicts for PR #1310", the same rebase/conflict-resolver shape
+  // `run-team/SKILL.md` calls "a rebase-resolver" sent into an open PR's
+  // worktree. It carries no ticket, no wave number and no new-work verb —
+  // only a PR number — so it is remediation on that PR's path to merge,
+  // exactly the category `fix-pr-<n>`'s applier already occupies here. It is
+  // NOT `merge-bot`: that bucket's number is a WAVE, never a PR, and merge-bot
+  // orchestrates a wave's PRs rather than resolving one directly.
+  //
+  // Only the NAME form `resolve-pr-` joins the alternation, deliberately
+  // narrower than the `review pr`/`fix pr` prose forms beside it: the two
+  // real meta.json descriptions above ("Resolve conflict on PR 1232",
+  // "Rebase and resolve conflicts for PR #1310") never contain the bare
+  // words "resolve pr" adjacently, so a `resolve pr` prose alternative would
+  // be untested reach rather than a measured pattern — and "resolve" is
+  // common enough in unrelated prose (a finisher applying reviewer
+  // "resolve"-shaped findings against "pr" work) that adding it ahead of the
+  // finisher/merge-bot checks below risked hijacking their classification on
+  // words alone, with no real row to justify it.
+  if (/review pr|review-pr-|fix pr|fix-pr-|resolve-pr-/.test(hay)) return "reviewer";
   if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return null;
