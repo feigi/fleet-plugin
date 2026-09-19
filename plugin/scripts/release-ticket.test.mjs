@@ -1824,8 +1824,8 @@ test("the entry search treats a regex metacharacter in the path as a character (
 });
 
 test("a LOCKED stray with a corrupt HEAD still names the unlock", (t) => {
-  // Arm precedence between the top two, which nothing else reaches. The one
-  // other locked-stray fixture leaves HEAD readable and `rmSync`s the
+  // Arm precedence between the top two, which nothing else reaches. The two
+  // other locked-stray fixtures leave HEAD readable and `rmSync` the
   // directory, so `unresolved_head` is false there and the ordering is never
   // exercised; hoisting the HEAD arm above `locked` reds only the GONE test,
   // because that mutation jumps `gone` as well. Measured: gating the lock arm
