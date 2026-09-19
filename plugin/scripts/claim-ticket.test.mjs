@@ -714,6 +714,30 @@ test("runner: a sed failure mid-scan is reported distinctly from an empty result
   assert.doesNotMatch(r.stderr, /no test files under/);
 });
 
+// BSD sed (this machine's actual /usr/bin/sed) exits rc 1 for EVERY error it
+// reports — illegal byte sequence, malformed regex, missing file — there is
+// no BSD sed error path that ever reaches rc 2+. A guard that tolerated
+// `sed_rc -le 1` (mirroring grep's real "no match is rc 1" case) could NEVER
+// catch a genuine BSD sed failure: the stub below reproduces that exact
+// shape — always exit 1, the way real BSD sed does on a bad invocation —
+// and must still be reported as a sed failure, not silently folded into "no
+// test files" the way an unread rc would. (Reverting the guard to
+// `-le 1` reproduces the pre-fix bug: this test goes green on silence,
+// asserting `no test files under t` instead of a reported sed failure.)
+test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-match analog", () => {
+  const a = apply(SUITE);
+  const bin = mkdtempSync(join(tmpdir(), "claim-sedrc1-"));
+  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
+    cwd: a.wt,
+    encoding: "utf8",
+    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
+  });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not scan for test files under t \(sed exited 1\)/);
+  assert.doesNotMatch(r.stderr, /no test files under/);
+});
+
 // grep's rc 1 ("no match") must NOT be swept into the same failure this pins
 // above — that is the genuinely-empty case the pre-existing "no test files"
 // test (above) already covers end to end. This is the narrower unit-level
