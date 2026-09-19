@@ -23,8 +23,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readF
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createServer } from "node:net";
+import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
+const THIS_FILE = import.meta.filename;
 
 // The stub shells out to jq. Without it every `gh issue view` would fail and
 // the suite would report exit 2 everywhere — which reads as a real red but
@@ -2737,9 +2739,48 @@ test("probe 2: a credential helper that never answers is bounded like any other 
   const { repo, env } = fixture(t, 8, { origin: "none" });
   git(repo, env, "remote", "add", "origin", `http://127.0.0.1:${port}/x/y.git`);
   const helper = join(repo, "mute-helper.sh");
-  writeFileSync(helper, "#!/bin/sh\nsleep 300\n");
+  // Written by the helper's FIRST line, so its existence is the one thing that
+  // separates this case from the vacuous one its comment above describes. See
+  // the assertion at the bottom for why that is not decoration here.
+  const helperRan = join(repo, "helper-ran");
+  // The `--fleet-warm` arm sits above the marker for the reason ledger.test.mjs
+  // records at its own GH_STUB: warming without it would let the warm-up write
+  // the marker itself, and the assertion below — the only thing standing
+  // between this case and the vacuity it already regressed into once — would
+  // read as satisfied on a helper that never ran. git passes a credential
+  // helper its operation and nothing else (measured, git 2.50.1: argv is
+  // exactly `get`), so no real invocation can take the arm.
+  writeFileSync(helper,
+    `#!/bin/sh\ncase " $* " in *" --fleet-warm "*) exit 0 ;; esac\n: > '${helperRan}'\nsleep 300\n`);
   chmodSync(helper, 0o755);
   git(repo, env, "config", "credential.helper", helper);
+
+  // Pay this helper's first-exec OS scan HERE, before the timed spawn, so it is
+  // spent outside the 5 s budget the watchdog kills the fetch at — #1199's
+  // finding and #1099's ruling on the remedy, reached again from a different
+  // file and a different collision (#1606).
+  //
+  // Measured on this case: the first execution of the freshly written helper
+  // costs ~2.5 s on an idle machine and 5.5-12.9 s under five concurrent copies
+  // of this suite, the fleet's normal condition, while a second execution stays
+  // at ~4 ms either way. The budget is 5 s. So unwarmed the scan never finished
+  // inside it, and the helper was killed mid-scan having executed NONE of its
+  // own lines — `helper-ran` absent in 15 of 15 runs, quiet and loaded alike.
+  //
+  // That is not the reported flake, it is worse and it is deterministic: with
+  // the helper never reaching `sleep 300`, nothing in the case stalled on a
+  // credential at all and it re-tested "an http origin that never answers" —
+  // exactly the vacuity the comment above says moving the 401 out of process
+  // had already fixed once. The 401 does arrive and git does spawn the helper;
+  // what never happened is the helper running. Warmed: 14 of 14 runs reach it,
+  // it really stalls, and net_kill_tree really reaps it (no survivor, and the
+  // caller's stdio closes within 1 ms of the script's own exit).
+  //
+  // Warming, not a longer bound: the 30 s backstop is 5x the observed run and
+  // raising it would only widen the window a helper can hide in. Warming, not a
+  // shared helper, because credential.helper takes a path and the per-case temp
+  // root is what keeps these fixtures isolated.
+  spawnSync(helper, ["--fleet-warm"], { timeout: 30_000 });
 
   const started = Date.now();
   const r = spawnSync("sh", [SCRIPT, "8"],
@@ -2747,9 +2788,47 @@ test("probe 2: a credential helper that never answers is bounded like any other 
 
   assert.equal(r.error, undefined,
     `the caller was held to its own backstop — the helper outlived the fetch still holding stderr, which is exactly what killing the fetch alone would leave: ${JSON.stringify(r)}`);
+  // Before the three assertions below, because all three pass vacuously on a
+  // helper that never ran: an http origin nothing answers reaches the same exit
+  // 2 and the same wording through git's own transport, with the credential
+  // path never entered. This is what makes the case about a CREDENTIAL helper.
+  assert.equal(existsSync(helperRan), true,
+    "the helper never executed a line, so nothing here stalled on a credential and the case degenerated into `an http origin that never answers` — which http.lowSpeedTime bounds on its own");
   assert.ok(Date.now() - started < 30_000, "must terminate on its own bound, not the test's backstop");
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr, /did not finish within/);
+});
+
+// The other half of the case above, and it needs a different technique. The
+// `helper-ran` assertion is what catches the vacuity UNDER LOAD, where the
+// scan runs 5.5-12.9 s and never fits the 5 s budget; it does not catch it on
+// an idle machine, where the scan is ~2.5 s and the helper squeezes in warmed
+// or not. Measured: deleting the warm-up line leaves this file green, 1 pass /
+// 0 fail, on a quiet host — the exact hole #1199 hit, and its remedy is the
+// same one ledger.test.mjs, arg.mjs's die() and candidates.mjs's EXCLUDE use.
+//
+// So the SHAPE is pinned as well, read back through stripComments() so a
+// comment alone cannot satisfy it, and anchored at line starts under `/m` so an
+// unrelated line inserted between the steps cannot still match.
+test("the credential helper's warm-up survives — deleting it would let a cold exec scan empty the case again (structural pin, #1606)", () => {
+  const src = stripComments(readFileSync(THIS_FILE, "utf8"));
+  assert.match(
+    src,
+    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: 30_000 \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
+    "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
+  );
+  // The arm's POSITION inside the helper body, not merely its presence. Below
+  // the marker write, the warm-up call itself would create `helper-ran` before
+  // any timed run ever executes (measured: a lone --fleet-warm invocation on
+  // the mutated order leaves the marker behind by itself): the vacuity
+  // assertion would then read as satisfied on a helper that never ran during
+  // the timed run. That is ledger.test.mjs's GH_STUB lesson, which had to be
+  // learned once already.
+  assert.match(
+    src,
+    /^\s*writeFileSync\(helper,\s*^\s*`#!\/bin\/sh\\ncase " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'\\nsleep 300\\n`\);/m,
+    "the --fleet-warm arm must sit ABOVE the marker write, or warming writes the marker itself and the vacuity guard above goes blind — anchored at line starts under `/m` so a coincidental match elsewhere in the file cannot satisfy it",
+  );
 });
 
 test("the euid-0 guard does not fire on a normal run, and the modes it guards really deny (#184, #660)", (t) => {
