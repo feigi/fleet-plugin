@@ -44,7 +44,19 @@ const DIRS = [
   fileURLToPath(new URL("../workflows/", import.meta.url)),
 ];
 
-const COUNT = "(?:one|two|three|four|five|six|seven|eight|nine|ten|a\\s+few|several|\\d+)";
+// #1311: COUNT only enumerated single numeral words, so a compound count
+// ("two-hundred-lines-above") broke the COUNT-lines adjacency — "two"
+// matched COUNT, but the next token was "hundred", not "lines". MULTIPLIER
+// lets a numeral word (or "a couple") take an optional hundred/thousand
+// suffix without touching the required numeral-immediately-before-"lines"
+// adjacency that keeps bare temporal "before"/"after" out of this arm.
+// Measured against the whole tree before landing (#1311): zero new hits —
+// the pre-existing whole-tree matches are either out of this gate's scope
+// (markdown/tsv prose, a different gate's job per the header above) or
+// JSDoc `/**`-style lines this gate's `//`-only MARKER never reads, so the
+// widening was not shown to buy any false positive here.
+const MULTIPLIER = "(?:\\s+(?:hundred|thousand))?";
+const COUNT = `(?:(?:one|two|three|four|five|six|seven|eight|nine|ten)${MULTIPLIER}|a\\s+few|a\\s+couple${MULTIPLIER}|several|\\d+${MULTIPLIER})`;
 // The bare form takes no numeral, so it needs its own arm. Narrower direction
 // set on purpose: "the-line-up" is not English, and widening it buys nothing
 // while risking prose that never pointed at a line.
@@ -159,6 +171,19 @@ test("the bare form reds however it is spelled", () => {
   }
 });
 
+// #1311's planted evasion and its near relatives: a numeral word carrying a
+// hundred/thousand multiplier, still immediately before "lines" + WHERE.
+test("the counted arm reds for compound numerals", () => {
+  const red = {
+    "two hundred": [`# and it must not be re-asserted ${["two", "hundred", "lines", "above"].join(" ")} it`, "#"],
+    "a couple hundred": [`// drifted ${["a", "couple", "hundred", "lines", "below"].join(" ")} the call`, "//"],
+    "three thousand": [`# moved ${["three", "thousand", "lines", "earlier"].join(" ")} in the file`, "#"],
+  };
+  for (const [name, [src, marker]] of Object.entries(red)) {
+    assert.equal(hitsIn(src, marker).length, 1, `missed the compound numeral form: ${name}`);
+  }
+});
+
 // Each case carries its own marker, like the red table above. Asserting a
 // `#` source under the `//` marker cannot fail: no marker means no comment
 // block, so the assertion holds whatever the pattern does — six of twelve here
@@ -175,6 +200,11 @@ test("the widened gate still refuses to fire on the out-of-class forms", () => {
     // Temporal before/after, the prose the counted arm's widening had to stay
     // clear of: a direction word with no count and no line is not a position.
     "a temporal direction word": ["# it ran before the fetch landed", "#"],
+    // A multiplier with no "lines" adjacent: guards against a widening that
+    // dropped the numeral-immediately-before-"lines" requirement instead of
+    // adding an optional suffix to it (the shape #1301's review measured
+    // producing false positives on unrelated temporal prose).
+    "a compound count with no line word": ["# it took a couple hundred milliseconds before the fetch landed", "#"],
   };
   for (const [name, [src, marker]] of Object.entries(green)) {
     assert.deepEqual(hitsIn(src, marker), [], `false positive: ${name}`);
