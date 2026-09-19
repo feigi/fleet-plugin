@@ -49,6 +49,14 @@ case "$1 $2" in
         [ "\${CLOSES_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
         [ -z "\${CLOSES:-}" ] || printf '%s\\n' \${CLOSES}
         ;;
+      *"--json commits --jq"*)
+        [ "\${COMMITS_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
+        # Quoted, unlike CLOSES above: commit text carries real spaces
+        # ("Closes #1512") that unquoted word-splitting would scatter across
+        # separate printf lines and break the keyword+number adjacency the
+        # script's own scan depends on.
+        [ -z "\${COMMITS:-}" ] || printf '%s\\n' "\${COMMITS}"
+        ;;
       *) echo "gh: unstubbed pr view call: $*" >&2; exit 1 ;;
     esac
     ;;
@@ -206,16 +214,25 @@ test("a failed label read is reported, never swallowed", (t) => {
 // used to fold into `had=false`, reading exactly like the "already clear"
 // case two tests up and letting a merged ticket keep the label with nothing
 // reported.
-function grepScanFailShim(t) {
+// Generalized over a `trigger` substring so the same shim can target either
+// this script's label scan (`-qx`) or its #1617 commit-message scan
+// (`-Eio`) in isolation — passthrough to the real `grep` for every other
+// invocation, so only the targeted call site ever sees the simulated break.
+function grepFailShim(t, trigger) {
   const bin = mkdtempSync(join(tmpdir(), "drop-merged-label-grep-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "grep"), `#!/bin/sh\necho "grep: illegal byte sequence" >&2\nexit 2\n`, { mode: 0o755 });
+  const realGrep = execFileSync("/bin/sh", ["-c", "command -v grep"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(bin, "grep"),
+    `#!/bin/sh\ncase "$*" in\n  *${trigger}*) echo "grep: illegal byte sequence" >&2; exit 2 ;;\nesac\nexec ${realGrep} "$@"\n`,
+    { mode: 0o755 },
+  );
   return bin;
 }
 
 test("a grep scan failure over an issue's labels is reported failed, never read as already clear", (t) => {
   const s = stub(t);
-  const bin = grepScanFailShim(t);
+  const bin = grepFailShim(t, "-qx");
   const base = s.env({ CLOSES: "41", LABELS_41: "in-progress" });
   const { code, json } = run(9, { apply: true, env: { ...base, PATH: `${bin}:${base.PATH}` } });
   assert.equal(code, 1, "a swallowed scan failure would read as success (exit 0)");
@@ -274,4 +291,98 @@ test("the label this script drops is the exact one candidates.mjs excludes on", 
   const { code } = run(9, { apply: true, env: s.env({ CLOSES: "41", LABELS_41: "in-progress" }) });
   assert.equal(code, 0);
   assert.ok(s.calls().includes("issue edit 41 --remove-label in-progress"));
+});
+
+// #1617. `closingIssuesReferences` reflects `Closes #N` syntax only when it
+// lives in the PR's own title/body. PR #1614 (ticket #1512) had an EMPTY PR
+// body but a commit message (`52a68b4`) carrying `Closes #1512` — GitHub's
+// real merge-time closer honored it and closed #1512, but this script read
+// back an empty `closingIssuesReferences` array and left `in-progress`
+// stuck. This reproduces that exact shape.
+test("PR #1614's exact shape: an empty closingIssuesReferences with a commit-message-only Closes #N still drops the label", (t) => {
+  const s = stub(t);
+  const { code, json } = run(1614, {
+    apply: true,
+    env: s.env({
+      CLOSES: "",
+      COMMITS: "fix(run-merge-bot): verify the fallback worktree against the branch ref\n\nCloses #1512",
+      LABELS_1512: "in-progress ready-for-agent",
+    }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [{ issue: 1512, hadLabel: true, removed: true }]);
+  assert.ok(s.calls().includes("issue edit 1512 --remove-label in-progress"));
+});
+
+test("commit-message scan recognizes every close/fix/resolve keyword form, case-insensitively", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({
+      CLOSES: "",
+      COMMITS: "Fixes #10\n\nsome body text\n\nresolved #20\n\nRESOLVES #30",
+      LABELS_10: "in-progress",
+      LABELS_20: "in-progress",
+      LABELS_30: "in-progress",
+    }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [
+    { issue: 10, hadLabel: true, removed: true },
+    { issue: 20, hadLabel: true, removed: true },
+    { issue: 30, hadLabel: true, removed: true },
+  ]);
+});
+
+test("a commit message merely mentioning an issue without a close keyword does not close it", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES: "", COMMITS: "Related to #99, see also #100 for background" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+});
+
+test("closingIssuesReferences and a commit-message reference union, without processing a shared issue twice", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({
+      CLOSES: "41",
+      COMMITS: "Closes #41\n\nCloses #55",
+      LABELS_41: "in-progress",
+      LABELS_55: "in-progress",
+    }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [
+    { issue: 41, hadLabel: true, removed: true },
+    { issue: 55, hadLabel: true, removed: true },
+  ]);
+  const viewsOf41 = s.calls().filter((c) => c === "issue view 41 --json labels --jq .labels[].name");
+  assert.equal(viewsOf41.length, 1, "an issue named by both signals must be looked up once, not once per signal");
+});
+
+test("the commit-message query failing after a confirmed merge still halts", (t) => {
+  const s = stub(t);
+  const { code, stderr } = run(9, { env: s.env({ CLOSES: "", COMMITS_FAIL: "1" }) });
+  assert.equal(code, 2);
+  assert.match(stderr, /cannot scan its commit messages for issue closes/);
+});
+
+// Same discipline as #1543's label-scan fix, applied to the new commit scan:
+// rc 1 (no keyword anywhere) is zero commit-closed issues, but rc 2+ (the
+// scan itself broke) must halt loudly, never silently read as "commits close
+// nothing" — a swallowed break here would look exactly like the previous
+// test's `Related to #99` case even though the scan never actually ran.
+test("a grep scan failure over commit messages halts loudly, never read as commits closing nothing", (t) => {
+  const s = stub(t);
+  const bin = grepFailShim(t, "-Eio");
+  const base = s.env({ CLOSES: "", COMMITS: "Closes #1512" });
+  const { code, stderr } = run(9, { apply: true, env: { ...base, PATH: `${bin}:${base.PATH}` } });
+  assert.equal(code, 2, "a swallowed scan failure would read as a clean no-op (exit 0)");
+  assert.match(stderr, /could not scan PR #9's commit messages for issue closes \(grep exited 2\)/);
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")),
+    "an unscanned commit history must never be treated as having resolved to zero issues");
 });

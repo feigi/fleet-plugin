@@ -10,9 +10,14 @@
 # number and the fact of completion are known together, so only a PROVEN merge
 # triggers this — never reap (branches, not tickets), never a repo automation
 # (no attribution). Call this from run-merge-bot.md's step 4, after
-# prove-merge.sh, never before: `closingIssuesReferences` reflects `Closes #N`
-# syntax regardless of merge state, and the claim has not ended until the
-# merge lands.
+# prove-merge.sh, never before: the claim has not ended until the merge lands.
+#
+# #1617: `closingIssuesReferences` reflects `Closes #N` syntax in the PR's own
+# title/body, but NOT a commit-message-only reference — GitHub's real
+# merge-time closer honors the latter (confirmed via the issue's own
+# timeline), this field never does, even after the merge. This script unions
+# both signals (see the commit-message scan below) so a real close is never
+# missed just because the keyword only ever lived in a commit message.
 #
 # Dry-run by default; --apply mutates the tracker. Exit 0 done (or dry run),
 # 1 one or more removals failed — REPORT THIS, never swallow it: a merged
@@ -46,6 +51,33 @@ echo "\$ gh pr view $pr --json closingIssuesReferences --jq '.closingIssuesRefer
 if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); then
   die "gh pr view $pr failed — cannot read which issues it closes"
 fi
+
+# #1617: the query above misses a commit-message-only close. Scan every
+# commit's own headline+body for the same close/fix/resolve keyword forms
+# GitHub's real closer recognizes, and union the result into `$issues` — the
+# set of issues this PR is proven to close, so the check below acts on
+# either signal.
+echo "\$ gh pr view $pr --json commits --jq '[.commits[]|(.messageHeadline//\"\")+\"\\n\"+(.messageBody//\"\")]|join(\"\\n\")'" >&2
+if ! commit_text=$(gh pr view "$pr" --json commits --jq '[.commits[] | (.messageHeadline // "") + "\n" + (.messageBody // "")] | join("\n")'); then
+  die "gh pr view $pr failed — cannot scan its commit messages for issue closes"
+fi
+
+# Same three-outcome discipline as the label scan below (#1543): rc 1 (no
+# keyword anywhere in any commit) must read as zero commit-closed issues,
+# never conflated with rc 2+ (the scan itself broke), which must halt loudly
+# instead of silently behaving like "commits close nothing".
+if matched=$(printf '%s\n' "$commit_text" | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*#[0-9]+'); then
+  commit_grep_rc=0
+else
+  commit_grep_rc=$?
+fi
+case $commit_grep_rc in
+  0) commit_issues=$(printf '%s\n' "$matched" | grep -Eo '[0-9]+') ;;
+  1) commit_issues="" ;;
+  *) die "could not scan PR #$pr's commit messages for issue closes (grep exited $commit_grep_rc)" ;;
+esac
+
+issues=$(printf '%s\n%s\n' "$issues" "$commit_issues" | grep -Eo '[0-9]+' | sort -n -u)
 
 if [ -z "$issues" ]; then
   echo "$NAME: PR #$pr closes no issues — nothing to drop" >&2
