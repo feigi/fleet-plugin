@@ -2219,68 +2219,77 @@ test("the script carries no escape hatch", () => {
   // makes commit-commands:clean_gone unusable here, and the one a future edit
   // would reach for the first time a precondition refuses. Still banned flat.
   //
-  // `git branch -D` used to be banned flat beside it, on the same reasoning:
-  // it deletes commits that exist nowhere else. Since #760 a claim carries no
-  // upstream until its first push, so `-d` compares against local HEAD alone
-  // and refuses a pristine claim whenever local `main` is behind
-  // `origin/main` — half-releasing it. So the ban is narrowed rather than
-  // dropped: ONE `-D`, and only with the guards that make its premise false.
-  // `ahead` and `git cherry` both measure against `$base`, a remote-tracking
-  // ref, and both block at exit 1 before any delete, so a commit existing
-  // nowhere else cannot reach the call. A second `-D`, or this one with either
-  // guard removed, is still the edit this test exists to catch.
+  // `git branch -D` used to be the one authorized destructive call here, kept
+  // narrow by the guards that made its premise false (`ahead` and `git
+  // cherry`, both against `$base`, both blocking before any delete). #1325
+  // replaced it outright with `git update-ref -d refs/heads/$branch $tip`: a
+  // compare-and-swap on the SHA the delete-time recount itself reads, which
+  // closes the window a plain recount-then-`-D` left open — a commit landing
+  // between the recount and the call was still force-deleted at exit 0,
+  // because `-D` deletes whatever the ref currently holds and carries no
+  // memory of what it counted. `update-ref -d`'s oldvalue argument refuses
+  // instead when the ref has moved off what was counted.
+  //
+  // `git branch`'s own delete flag is now banned FLAT, the same way
+  // `--force` is: there is no guarded, narrow form of it left to authorize,
+  // because the CAS replaced the call entirely rather than joining it.
   const src = readFileSync(fileURLToPath(new URL("./release-ticket.sh", import.meta.url)), "utf8")
     .split("\n")
     .filter((l) => !l.trimStart().startsWith("#"))
     .join("\n");
   assert.doesNotMatch(src, /--force/);
-  // Counted on the bare command, in whatever syntax surrounds it: an added
-  // `git branch -D "$b"` as a plain statement is not a command substitution,
-  // so a `$(…)`-anchored count scored it as zero and let it through. What
-  // separates a call from a mention is the mention's `echo`/`printf`/`halt`
-  // prefix — the dry-run plan, the echoed command and the halt message all
-  // name the one call rather than being it. That wrapper has to be the
-  // command the `-D` actually belongs to, not merely a word earlier on the
-  // line: `echo x && git branch -D "$stray"` is a real second delete, and a
-  // prefix-wide match excused the whole line. So cut the prefix at the last
-  // separator and require the wrapper at the head of what remains — the
-  // dry-run plan's own `[ … ] && echo` mention still lands there.
-  //
-  // Match on a NORMALIZED line, not the source text. Four evasions of this
-  // one detector have now shipped past it. The third was pure spelling:
-  // `git branch "-D" "$x"` is the same command the shell runs and `/\bgit
-  // branch -D\b/` does not see it at all, so the line was never even
-  // collected (measured: a real unguarded second delete, count still 1).
-  // The fourth, filed as #1333, was a different spelling of the same flag:
-  // `git branch -fd "$x"` (and `-df`, `-Df`) deletes exactly like `-D` but
-  // matches neither the exact `-D\b` collector nor the separate `--force`
-  // check, because a combined short-flag cluster is neither one (measured:
-  // an unguarded `-fd` delete left this file green). Enumerating spellings
-  // is what lost all four rounds, so strip what the shell strips — quote
+  // Match on a NORMALIZED line, not the source text — the same four evasions
+  // #1333 measured against the old `-D` collector apply here unchanged:
+  // quoted flags (`git branch "-D" "$x"`), spacing (`git  branch   -D`), and a
+  // combined short-flag cluster (`-fd`, `-df`, `-Df`) that matches neither an
+  // exact `-D\b` nor `--force`. Strip what the shell strips — quote
   // characters and runs of whitespace — and match a short-flag CLUSTER
   // carrying `d`, `D`, or `f` in any position, not one exact flag string.
-  // That covers `'-D'`, `-"D"`, `git  branch   -D`, `-fd`, `-df` and `-Df`
-  // in the same stroke. `|` joins `;`/`&&`/`||` in the separator set for the
-  // same reason: a delete reached through a pipe was excused by a wrapper
-  // that heads a different command.
-  //
-  // Normalization is for FINDING the call; the audited-form assertion below
-  // still reads the raw source line, so the one authorized call must be
-  // written exactly as it is written today.
   const norm = (l) => l.replace(/['"]/g, "").replace(/\s+/g, " ");
-  const CALL_RE = /\bgit branch (?:-[A-Za-z]*[dDf][A-Za-z]*|--delete|--force)\b/;
-  const forceDeletes = src
+  const BRANCH_DELETE_RE = /\bgit branch (?:-[A-Za-z]*[dDf][A-Za-z]*|--delete)\b/;
+  assert.ok(
+    !src.split("\n").some((l) => BRANCH_DELETE_RE.test(norm(l))),
+    "git branch's own delete flag must not appear anywhere: the CAS below replaced it, it did not join it",
+  );
+  assert.doesNotMatch(src.replace(/['"]/g, "").replace(/[^\S\n]+/g, " "), /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
+
+  // The sole authorized destructive call, collected the same way the old `-D`
+  // pin collected it: counted on the bare command in whatever syntax
+  // surrounds it, a call separated from a mention by the mention's
+  // `echo`/`printf`/`halt`/`die`/`block` prefix cut at the last separator
+  // (`;`, `&&`, `||`, `|`), so the dry-run plan's own mention of the command
+  // is excused but a real second delete reached through any of those is not.
+  // `-d`/`--delete` is `update-ref`'s own exact flag with none of `-D`'s
+  // cluster ambiguity, so the collector need not enumerate spellings here —
+  // but the audited-form assertion below still reads the raw line, because a
+  // bare `git update-ref -d refs/heads/$branch` with no oldvalue argument
+  // deletes just as unconditionally as `-D` did, and the collector alone
+  // cannot tell that call from the CAS.
+  // `git update-ref --stdin` is a different way to delete a ref entirely —
+  // fed `delete refs/heads/$branch\n` on stdin, it spells neither `-d` nor
+  // `--delete` and so is invisible to the collector below, the same way
+  // `-D`'s own cluster spellings needed enumerating for it. Banned flat
+  // instead, the same way `--force` is above: there is no batch-mode form of
+  // this call authorized anywhere in the script.
+  assert.doesNotMatch(src, /git update-ref[^\n]*--stdin/, "no batch-mode update-ref: it can delete a ref the collector below cannot see");
+  const CAS_RE = /\bgit update-ref (?:-d|--delete)\b/;
+  const casDeletes = src
     .split("\n")
     .map((l) => ({ raw: l, n: norm(l) }))
-    .filter(({ n }) => CALL_RE.test(n))
-    .filter(({ n }) => !/^\s*(echo|printf|halt|die|block)\b/.test(n.slice(0, n.match(CALL_RE).index).split(/&&|[;|]/).pop()));
-  assert.equal(forceDeletes.length, 1, "exactly one authorized force-delete");
-  assert.match(forceDeletes[0].raw, /\$\(git branch -D "\$branch" 2>&1\)/, "and it has the audited form");
-  assert.doesNotMatch(src.replace(/['"]/g, "").replace(/[^\S\n]+/g, " "), /\bgit branch -d\b/, "and no -d, which refuses on a stale local main");
-  // The recount standing in for `-d`'s own delete-time refusal. Without it a
-  // commit landing across the `gh issue view` between the guards and the
-  // delete is destroyed at exit 0 with "released":true. It narrows that window
-  // rather than closing it — see the delete site's comment.
+    .filter(({ n }) => CAS_RE.test(n))
+    .filter(({ n }) => !/^\s*(echo|printf|halt|die|block)\b/.test(n.slice(0, n.match(CAS_RE).index).split(/&&|[;|]/).pop()));
+  assert.equal(casDeletes.length, 1, "exactly one authorized CAS delete");
+  assert.match(
+    casDeletes[0].raw,
+    /\$\(git update-ref -d "refs\/heads\/\$branch" "\$tip" 2>&1\)/,
+    "and it carries the oldvalue that makes it a compare-and-swap rather than an unconditional delete",
+  );
+
+  // The recount standing in for `-d`'s own delete-time refusal, now measured
+  // against $tip — a SHA frozen before the recount runs — rather than the
+  // mutable ref: the CAS above only closes the window if nothing after the
+  // recount can move what it counted, and counting against the live ref name
+  // here would leave that reopened even with the CAS in place below.
   //
   // The comparison, not just the assignment. A pin that only asserts the
   // recount EXISTS is satisfied by a recount nothing reads — `n` computed and
@@ -2289,8 +2298,8 @@ test("the script carries no escape hatch", () => {
   // same expression.
   assert.match(
     src,
-    /n=\$\(git rev-list --count "\$base_rev\.\.refs\/heads\/\$branch"\)[\s\S]{0,200}?\[ "\$n" -eq 0 \] \|\|\s*\n\s*halt/,
-    "and the delete-time recount stands, with the zero comparison that enforces it",
+    /tip=\$\(git rev-parse --verify "refs\/heads\/\$branch"\)[\s\S]{0,200}?n=\$\(git rev-list --count "\$base_rev\.\.\$tip"\)[\s\S]{0,200}?\[ "\$n" -eq 0 \] \|\|\s*\n\s*halt/,
+    "and the delete-time recount stands, measured against the frozen tip, with the zero comparison that enforces it",
   );
   assert.match(src, /ahead=\$\(git rev-list --count "\$base_rev\.\.refs\/heads\/\$branch"\)/, "the ahead guard authorizes it");
   assert.match(src, /cherry=\$\(git cherry "\$base_rev" "refs\/heads\/\$branch"\)/, "and so does the cherry guard");
@@ -2302,6 +2311,17 @@ test("the script carries no escape hatch", () => {
   // the guard, and a revert to `"$base.."` here is the edit this pins.
   assert.doesNotMatch(src, /git rev-list --count "\$base\./, "no guard measures against the ambiguous shorthand");
   assert.doesNotMatch(src, /git cherry "\$base"/, "and neither does cherry");
+
+  // The guard `update-ref` cannot offer on its own: it is ref-only plumbing
+  // and consults no worktree, so `-D`'s delete-time refusal on a branch
+  // checked out anywhere is replaced with an explicit re-read of the
+  // worktree listing, immediately before the CAS, rather than trusting the
+  // scan taken before the `gh issue view` call earlier in the run.
+  assert.match(
+    src,
+    /wt_listing \|\| halt[\s\S]{0,400}?awk -v b="refs\/heads\/\$branch"[\s\S]{0,150}?\) \|\|\s*\n\s*halt[\s\S]{0,200}?\[ -z "\$cas_wt" \] \|\|\s*\n\s*halt/,
+    "and an explicit checked-out-worktree guard, itself guarded against a failed lookup, stands immediately before the CAS delete",
+  );
 });
 
 test("usage errors exit 2", (t) => {
@@ -2401,6 +2421,132 @@ test("a commit landing in the check-then-act window is not deleted", (t) => {
   );
 });
 
+test("the CAS refuses a branch that gained a commit after its tip was read", (t) => {
+  // #1325: a plain recount-then-`git branch -D` recounts against the mutable
+  // ref and then deletes whatever the ref currently holds, so a commit
+  // landing between the recount and the call — or during `-D`'s own, separate
+  // invocation — was still force-deleted at exit 0. `git update-ref -d
+  // refs/heads/$branch $tip` closes that: $tip is read once, the recount and
+  // the delete both measure against that frozen SHA, and the delete itself
+  // refuses unless the ref still equals it at that exact moment.
+  //
+  // The shim lands a commit in the one place nothing else in this script can
+  // reach: immediately after its own `git rev-parse --verify
+  // refs/heads/$branch` hands back $tip, simulating a sibling agent pushing
+  // to the branch in that instant. The worktree is removed by hand first so
+  // the run reaches the branch delete directly, isolating the SHA race from
+  // the (separately guarded) worktree-removal step ahead of it.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
+
+  gitShim(
+    r,
+    `if [ "$1 $2 $3" = "rev-parse --verify refs/heads/${c.branch}" ]; then
+  out=$('${REAL_GIT}' "$@")
+  rc=$?
+  printf '%s\\n' "$out"
+  if [ $rc -eq 0 ]; then
+    tree=$('${REAL_GIT}' -C '${r.w}' rev-parse "$out^{tree}") &&
+      newc=$('${REAL_GIT}' -C '${r.w}' commit-tree "$tree" -p "$out" -m race) &&
+      '${REAL_GIT}' -C '${r.w}' update-ref refs/heads/${c.branch} "$newc"
+  fi
+  exit $rc
+fi`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.match(stderr, /#9 HALTED mid-release — nothing landed: git update-ref -d refused fix\/9-release-ticket/);
+  assert.match(
+    stderr,
+    /cannot lock ref 'refs\/heads\/fix\/9-release-ticket'/,
+    "git's own compare-and-swap refusal, quoted rather than reworded",
+  );
+  assert.equal(json.released, false);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: true }, "the branch, and the race commit on it, must survive");
+  assert.equal(
+    git(r.w, "log", "-1", "--format=%s", `refs/heads/${c.branch}`),
+    "race",
+    "the commit that landed in the window is still the branch's tip",
+  );
+});
+
+test("a branch checked out in a registered worktree at the delete is still refused", (t) => {
+  // `git update-ref` is ref-only plumbing: unlike `-D`, it consults no
+  // worktree at all, so the CAS above trades away `-D`'s own delete-time
+  // refusal on a branch checked out anywhere. #1325 replaces it with an
+  // explicit re-read of the worktree listing immediately before the delete,
+  // rather than trusting `$wt` (computed once, before the `gh issue view`
+  // call) — because a `git worktree add` for this exact branch landing after
+  // that scan and after this claim's OWN worktree is removed checks it out
+  // somewhere neither `$wt` nor `-D` would ever have seen coming from there.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const raceWt = join(r.w, "..", "race-wt");
+
+  gitShim(
+    r,
+    `if [ "$1 $2" = "worktree remove" ]; then
+  '${REAL_GIT}' "$@"
+  rc=$?
+  # A sibling checking the same branch out elsewhere the instant this claim's
+  # own worktree is gone — the only moment git allows it, since a branch
+  # cannot be checked out twice at once.
+  [ $rc -eq 0 ] && '${REAL_GIT}' -C '${r.w}' worktree add -q '${raceWt}' '${c.branch}'
+  exit $rc
+fi`,
+  );
+  const wt = release(r, c, { apply: false }).json.worktree;
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2);
+  assert.match(stderr, /#9 PARTIALLY RELEASED — fix\/9-release-ticket is checked out in worktree \S*race-wt — not deleted/);
+  assert.ok(
+    stderr.includes(`worktree ${wt} is Released — registration and directory both gone`),
+    `this claim's own worktree removal really did land first: ${stderr}`,
+  );
+  assert.equal(json.released, false);
+  assert.deepEqual(
+    artefacts(r, c),
+    { dir: false, worktree: true, branch: true },
+    "the branch and the worktree that now holds it both survive; only this claim's original directory is gone",
+  );
+});
+
+test("a CAS worktree-check LOOKUP that could not run halts mid-release, never silently completes", (t) => {
+  // Every other lookup over `$wt_list` in this script is guarded with
+  // `|| die`/`|| halt` — this one, computing `cas_wt` just above the delete,
+  // was the sole exception. Unguarded, an awk failure here would abort under
+  // `set -eu` AFTER `git worktree remove` already landed, with 0 bytes on
+  // stdout and no `release-ticket:` line on stderr at all: a silent
+  // half-released state, worse than the loud HALTED this halt() now gives.
+  // `$2==b{print w; exit}` is this program's own body: the earlier `$wt`
+  // lookup shares `$2==b` but pairs it with `&&n>1{print w}`, no `; exit}`,
+  // so only this lookup fails (`grep -cF` confirms the string is unique).
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  awkShim(r, "$2==b{print w; exit}");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, "unanswerable is exit 2, not a silent set -eu abort");
+  assert.equal(json.released, false, "halt's own receipt carries released:false");
+  assert.match(
+    stderr,
+    /#9 PARTIALLY RELEASED — could not check whether fix\/9-release-ticket is checked out before the delete/,
+    "the worktree removal already landed by the time this lookup runs, so halt must say so",
+  );
+  assert.ok(
+    stderr.includes("is Released — registration and directory both gone"),
+    `the worktree report line confirms the removal really did land first: ${stderr}`,
+  );
+  assert.deepEqual(
+    artefacts(r, c),
+    { dir: false, worktree: false, branch: true },
+    "the worktree really did go; the branch must survive an unanswerable check rather than being force-deleted blind",
+  );
+});
+
 test("BASE_REF must not name the claim's own branch", (t) => {
   // The hole the remote-tracking accept-list above does not close: `origin/$branch`
   // IS a remote-tracking ref and passes it. A stale remote-tracking ref left by a
@@ -2471,8 +2617,8 @@ test("a tracker that fails after both deletes still emits a receipt", (t) => {
   // caller cannot reconstruct by looking, and the one it must not guess at.
   // `die` printed prose and exited before every printf, so stdout was empty
   // exactly there. Of the other two halt() sites, the worktree removal is
-  // reached with nothing deleted and `git branch -D` with the worktree already
-  // gone — which is why this one is the only PARTIALLY RELEASED naming both.
+  // reached with nothing deleted and `git update-ref -d` with the worktree
+  // already gone — which is why this one is the only PARTIALLY RELEASED naming both.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
 
@@ -2513,7 +2659,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // The measured outcome, not the exit code: the shim refuses before real git
   // runs, so the registration and the directory really are both still there and
   // `Unreleased` is what the probe finds. The half that is a call log still
-  // reads as one — the line is deliberately uneven, because `git branch -D`
+  // reads as one — the line is deliberately uneven, because `git update-ref -d`
   // lands atomically and `git worktree remove` does not.
   assert.ok(
     none.stderr.includes(`worktree ${wt} is Unreleased — registration and directory both still present`),
@@ -2535,11 +2681,11 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   // release takes, the other being both deletes landing and the label edit
   // refusing, pinned by the tracker case above. Runs second on purpose: it
   // consumes the worktree the case above left standing. Keyed on what landed
-  // and not on the call site, since this same `git branch -D` refusal is
+  // and not on the call site, since this same `git update-ref -d` refusal is
   // reached with nothing removed on a claim that has no worktree.
-  const partial = release(r, c, { env: { GIT_FAIL: "branch -D" } });
+  const partial = release(r, c, { env: { GIT_FAIL: "update-ref -d" } });
   assert.equal(partial.code, 2);
-  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git branch -D refused/);
+  assert.match(partial.stderr, /#9 PARTIALLY RELEASED — git update-ref -d refused/);
   assert.ok(
     partial.stderr.includes(`worktree ${wt} is Released — registration and directory both gone`),
     `a removal that returned 0 really did both deletes: ${partial.stderr}`,
@@ -2548,7 +2694,7 @@ test("the halt headline names what landed: nothing at all, or a partial release"
   assert.equal(
     partial.out,
     receipt(
-      "git branch -D refused fix/9-release-ticket: refused by the git shim" +
+      "git update-ref -d refused fix/9-release-ticket: refused by the git shim" +
         ` — worktree ${wt} is Released — registration and directory both gone`,
     ),
   );
@@ -2559,7 +2705,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   // The two cases above leave the design's central claim unpinned: both reach
   // `git worktree remove` first, so keying the headline on the CALL SITE passes
   // them. A claim whose worktree was removed by hand separates the two — the
-  // removal is skipped entirely, so `git branch -D` halts with nothing landed,
+  // removal is skipped entirely, so `git update-ref -d` halts with nothing landed,
   // and the branch delete then halts with a branch gone and no worktree ever
   // touched. Without this the (false, true) row of the table is unreachable
   // too, and dropping `done_branch` from the condition survives the suite.
@@ -2570,9 +2716,9 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   execFileSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV });
 
   // Call site says "the branch delete refused"; what landed says nothing did.
-  const none = release(r, c, { env: { GIT_FAIL: "branch -D" } });
+  const none = release(r, c, { env: { GIT_FAIL: "update-ref -d" } });
   assert.equal(none.code, 2);
-  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git branch -D refused/);
+  assert.match(none.stderr, /#9 HALTED mid-release — nothing landed: git update-ref -d refused/);
   assert.doesNotMatch(none.stderr, /PARTIALLY/, "the same call site as the partial case above, and nothing landed");
   assert.match(none.stderr, /branch deleted: false, in-progress: still on the issue/, "the detail line agrees");
   // No worktree line at all. `Unreleased` means registration and directory both
@@ -2582,7 +2728,7 @@ test("the headline is keyed on what landed, not on which call site halted", (t) 
   assert.equal(
     none.out,
     '{"issue":9,"branch":"fix/9-release-ticket","branchRewritten":false,"worktree":"","worktreeRewritten":false,"label":true,' +
-      '"released":false,"applied":true,"blockers":["git branch -D refused fix/9-release-ticket: ' +
+      '"released":false,"applied":true,"blockers":["git update-ref -d refused fix/9-release-ticket: ' +
       'refused by the git shim"]}\n',
     "an empty worktree field, and the receipt still whole",
   );
@@ -4214,7 +4360,7 @@ test("an ambient GIT_DIR does not aim the release at another repository (#427)",
   // A second clone of the same origin, carrying a branch of the claim's exact
   // name, is what makes that damage legible: with only GIT_WORK_TREE unset,
   // discovery follows the ambient GIT_DIR, the script finds the claim's branch
-  // name over THERE, and `git branch -D` — no `-C` either — deletes it in the
+  // name over THERE, and `git update-ref -d` — no `-C` either — deletes it in the
   // wrong repository while reporting `released: true` and leaving this
   // repository's own directory, worktree and branch all standing. Measured:
   // both of the last two assertions go red under that mutation, and either
