@@ -1116,8 +1116,17 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   # `.worktrees` is a collision an operator should look at whoever owns it, and
   # releasing would delete the claim's branch while this tree stands. Wording
   # only — the match and the verdict are unchanged.
+  # The unlock command below is the one other pasted remedy in this chain that
+  # takes `$stray` as an argument — `git worktree prune` and `release it by
+  # hand` name no path — so it is the one other arm `shquote` must cover for
+  # the same reason #1100 covered the entry search: an embedded `'` closes the
+  # quote this hint has no quote of its own to reopen, and the operator is
+  # handed a command that runs against a truncated, different path instead of
+  # being refused outright. (#1554)
+  shquote "$stray"
+  stray_shq=$shq
   if locked "$stray"; then
-    block "worktree $stray $stray_own and is locked — git worktree unlock $stray, then prune or remove it"
+    block "worktree $stray $stray_own and is locked — git worktree unlock $stray_shq, then prune or remove it"
   elif gone "$stray"; then
     block "worktree $stray $stray_own and its directory is gone — git worktree prune to clear the registration"
   elif unresolved_head "$stray"; then

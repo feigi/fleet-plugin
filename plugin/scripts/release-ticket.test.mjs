@@ -979,6 +979,38 @@ test("a LOCKED stray worktree names the unlock, not a prune git silently skips",
   );
 });
 
+test("the locked-stray unlock hint survives a literal ' in the worktree path (#1554)", (t) => {
+  // Sibling defect to #1100: the entry-search hint got routed through
+  // `shquote`, but this arm's unlock hint — two arms above it in the same
+  // if/elif chain — still interpolated `$stray` bare. An embedded `'` closes
+  // the quote this hint has no quote of its own to reopen, so the shell
+  // reading the pasted command silently drops both quote characters instead
+  // of refusing to parse — the operator's `git worktree unlock` runs against
+  // a truncated, different path and fails at rc 128 with nothing to explain
+  // why. Pinned by RUNNING the emitted command against the real worktree, the
+  // same discipline the entry-search fixture uses (#1100): a text match
+  // cannot tell a correctly quoted path from a silently broken one.
+  const r = repo(t, "w'q");
+  const c = claim(r.w, 9, "release'ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree unlock/);
+
+  const remedy = json.blockers[0].replace(/^[\s\S]*— /, "").replace(/, then prune or remove it$/, "");
+  assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
+  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8" });
+
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
+    `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
+  );
+});
+
 test("a stray worktree the script may not stat keeps the hand-release remedy", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is gone and for one inside a prefix we may
