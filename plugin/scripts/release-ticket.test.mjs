@@ -1011,6 +1011,43 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
   );
 });
 
+test("the locked-stray unlock hint survives a plain space in the worktree path (#1537)", (t) => {
+  // Sibling defect to #1554, same hint, a narrower trigger: a bare space needs
+  // no embedded quote to break the pasted command — `git worktree unlock` reads
+  // an unquoted path as two arguments split on the space, and everything past
+  // the first component is silently dropped instead of being refused outright.
+  // shquote wraps the whole path in single quotes unconditionally, so it must
+  // cover this case for free; pinned separately because a fix aimed only at
+  // `'`-escaping (checking for a literal quote before quoting) would pass
+  // #1554 while still breaking here.
+  //
+  // The space goes into the checkout root, not the slug: git refuses a space in
+  // a ref name (measured, git 2.50.1, `fatal: ... not a valid ref name`), so the
+  // branch this fixture needs cannot carry one — but nothing about a worktree
+  // DIRECTORY name requires it, and the root the claim's `.worktrees` entry
+  // hangs off is exactly the piece production sees vary this way (a member's
+  // checkout under `~/dev/My Project`).
+  const r = repo(t, "w s");
+  const c = claim(r.w, 9, "release-ticket");
+  git(c.wt, "checkout", "-q", "--detach", "HEAD");
+  git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
+  rmSync(c.wt, { recursive: true, force: true });
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 1, stderr);
+  assert.equal(json.blockers.length, 1, `nothing is committed or pushed, so only the stray worktree can fire: ${json.blockers}`);
+  assert.match(json.blockers[0], /git worktree unlock/);
+
+  const remedy = json.blockers[0].replace(/^[\s\S]*— /, "").replace(/, then prune or remove it$/, "");
+  assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
+  execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8" });
+
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
+    `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
+  );
+});
+
 test("a stray worktree the script may not stat keeps the hand-release remedy", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is gone and for one inside a prefix we may
