@@ -370,6 +370,18 @@ test("`skipped` is not `passed`: a skipped job is not-green, exit 1", () => {
   assert.match(r.payload.reasons.join("; "), /job check is skipped, not success/);
 });
 
+// gh's REAL shape for an in-progress job is conclusion:"" (empty string),
+// never null — the same shape #1566 fixed in rank()'s tie-break. `??`
+// only falls through on null/undefined, so `j.conclusion ?? j.status`
+// would print the unreadable "job check is , not success" instead of
+// naming the job's actual status.
+test("in-progress job (conclusion \"\") not success: reason names the status, not an empty string", () => {
+  const r = notGreen({ jobs: [{ name: "check", status: "in_progress", conclusion: "" }] });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.match(r.payload.reasons.join("; "), /job check is in_progress, not success/);
+});
+
 // The fifth reasons.push site in this arm — the one the "one negative case
 // each" comment above missed (#930). It fires before notGreen's override even
 // applies: matching.length === 0 short-circuits past the run-view read
@@ -487,6 +499,32 @@ test("untied path: a newer non-completed run still beats an older completed one 
   assert.equal(r.payload.verdict, "not-green");
   assert.equal(r.payload.runId, newer.databaseId, "recency stays primary: a newer in-progress run must still beat an older completed one when createdAt is NOT tied");
   assert.doesNotMatch(r.stderr, /run selection tie-break/, "createdAt differs here, so no tie-break note should fire");
+});
+
+// --- #1566: rank()'s middle tier must match live gh data --------------------
+// `gh run list --json conclusion` reports an empty string `""` for a
+// non-completed run, never `null`. An earlier version of rank()'s middle
+// tier required `r.conclusion === null`, so it silently never matched real
+// data and a still-running run fell into the SAME bottom tier as a
+// failed/cancelled one, losing an exact-createdAt tie it should win.
+test("two runs share head SHA and createdAt to the second, one in-progress (conclusion \"\") one cancelled: the in-progress run wins the tie-break, not the cancelled one", () => {
+  const createdAt = "2026-03-01T10:00:00Z";
+  // In-progress listed with the LOWER databaseId: under the pre-fix bug both
+  // runs fall to the bottom tier (conclusion:"" never matches `=== null`),
+  // so the final databaseId tie-break picks the cancelled run (higher id) —
+  // the wrong winner. Only the fixed middle tier makes the in-progress run
+  // win despite its lower id.
+  const inProgress = { databaseId: 1, headSha: PR_HEAD, status: "in_progress", conclusion: "", event: "pull_request", createdAt };
+  const cancelled = { databaseId: 2, headSha: PR_HEAD, status: "completed", conclusion: "cancelled", event: "pull_request", createdAt };
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    runList: JSON.stringify([cancelled, inProgress]),
+    runView: JSON.stringify({ jobs: [{ name: "check", status: "in_progress", conclusion: "" }], attempt: 1, status: "in_progress", conclusion: "", headSha: PR_HEAD }),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.payload.verdict, "not-green");
+  assert.equal(r.payload.runId, inProgress.databaseId, "still-running (conclusion \"\") must outrank a settled cancelled run in the tie-break, not lose to it on databaseId");
+  assert.match(r.stderr, new RegExp(`run selection tie-break.*chose #${inProgress.databaseId} \\(in_progress/\\) over #${cancelled.databaseId} \\(completed/cancelled\\)`));
 });
 
 // --- #169: a flag given with no value must die, never read as absent -------
