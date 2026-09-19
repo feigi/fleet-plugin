@@ -529,20 +529,43 @@ gp_why() {
 # differs — the cherry checks must keep, the registry re-reads have nothing
 # left to protect and only a reason to get right.
 #
-# grep's stderr is kept, for #625's reason at `git_probe` above: a probe that
-# dies naming no cause reaches an operator as a bare refusal. Same fd3 dup into
-# the same pipe the substitution reads, same `$gp_sep` split once the text is
-# back in the real shell, and for the same reason — a plain variable set inside
-# a command substitution cannot escape its subshell, only the TEXT written
-# there survives. The `if …; then gq_r=0; else gq_r=$?; fi` shape is
-# `git_probe`'s too, and load-bearing for the same measured reason: under
-# `set -e` a bare `gq_r=$?` after a failing command never runs.
+# Unlike `git_probe` above, this needs no fd3 dup and no `$gp_sep` splice:
+# `git_probe` smuggles TWO values (git's stdout `$gp_o` and its rc `$gp_rc`)
+# out through one command substitution's single text channel, so it has to
+# encode both into that text and split them back apart. `grep -q` never has a
+# stdout worth keeping — `-q` promises silence there, enforced below by
+# `>/dev/null` — so this function only ever has ONE value to carry out of the
+# subshell as text, grep's stderr, and the command substitution's own return
+# value already IS that text: `gq_err=$(...)` needs no separator to unpack.
 #
-# `>/dev/null` after `2>&3`, in that order: grep's stdout is the same pipe the
-# separator is written to. `-q` promises silence there, so this guards a
-# promise rather than an observation — cheap, and what it forecloses is a
-# spliced `$gq_raw` that would make every rc in this function unreadable at
-# once.
+# grep's own rc rides out a second, cheaper channel that `git_probe` cannot
+# use: making the `grep -q` pipeline the LAST command run inside the command
+# substitution means the substitution's own exit status — what `$?` reads
+# immediately after the assignment — already IS grep's rc, with nothing
+# encoded and nothing to decode. `git_probe` cannot do this because it still
+# needs `$gp_o` out as text too, and a command substitution's exit status and
+# its captured text both come from the SAME last command, so the moment
+# something runs after grep to print a value, that later command's own exit
+# status overwrites grep's. Grep's stderr is kept for #625's reason at
+# `git_probe` above — a probe that dies naming no cause reaches an operator as
+# a bare refusal — but keeping it costs nothing here: it IS the command
+# substitution's text, not a second thing smuggled alongside the rc.
+#
+# `if gq_err=$(...); then gq_rc=0; else gq_rc=$?; fi`, never a bare
+# `gq_err=$(...); gq_rc=$?`: under `set -e` a bare failing assignment would
+# abort the function before `gq_rc=$?` ever ran, the same measured reason
+# `git_probe` above takes the same shape (PR #1068 review). A command
+# substitution used as an `if`'s condition is exempt from `set -e` by POSIX
+# definition, so `gq_rc=$?` always runs whether grep matched, didn't match, or
+# broke.
+#
+# `2>&1 >/dev/null` inside the substitution, in that exact order: `2>&1`
+# first points fd 2 at fd 1's CURRENT target, which at that moment is the
+# pipe the command substitution reads back into `$gq_err` — only THEN does
+# `>/dev/null` retarget fd 1 alone, leaving fd 2 still pointed at the capture
+# pipe. Reversed, `>/dev/null 2>&1` would duplicate an fd 2 that already
+# points at `/dev/null`, and grep's stderr would vanish along with its
+# promised-silent stdout, leaving `gp_why "$gq_err"` nothing to report.
 #
 # `-e "$gq_pat"`, never a bare `$gq_pat`: `grep --` is not portable, and a
 # pattern read as a flag is the shape that makes a guard match nothing and
@@ -552,30 +575,15 @@ gp_why() {
 # pattern keeps a fixed, non-optional slot no flag list can shift it out of:
 # #730 measured what a positional argument does when a flag is inserted ahead
 # of it.
-#
-# `%%"$gp_sep"*` for `$gq_err` and `##*"$gp_sep"*` for `$gq_rc` split at
-# OPPOSITE ends on purpose: `$gq_err` is grep's stderr, arbitrary bytes this
-# function does not control, and could itself contain a byte matching
-# `$gp_sep` — a `#*"$gp_sep"` split on the shortest match would then read
-# everything after that stray byte, including the real trailing separator, as
-# part of `$gq_rc`, handing `[ "$gq_rc" -le 1 ]` a non-numeric string and
-# leaking a raw shell diagnostic. Splitting `$gq_rc` on the LAST occurrence
-# instead reaches past any such stray byte to the one separator this function
-# itself appended, so a corrupted rc field cannot happen — a corrupted
-# `$gq_err` still can, and is truncated at the stray byte, but the verdict
-# stays numeric and this function still fails closed either way.
 grep_probe() {
   gq_hay=$1
   gq_pat=$2
   shift 2
-  gq_raw=$(
-    {
-      if printf '%s\n' "$gq_hay" | grep -q "$@" -e "$gq_pat" 2>&3 >/dev/null; then gq_r=0; else gq_r=$?; fi
-      printf '%s' "$gp_sep$gq_r"
-    } 3>&1
-  )
-  gq_err=${gq_raw%%"$gp_sep"*}
-  gq_rc=${gq_raw##*"$gp_sep"}
+  if gq_err=$(printf '%s\n' "$gq_hay" | grep -q "$@" -e "$gq_pat" 2>&1 >/dev/null); then
+    gq_rc=0
+  else
+    gq_rc=$?
+  fi
   [ "$gq_rc" -le 1 ]
 }
 
