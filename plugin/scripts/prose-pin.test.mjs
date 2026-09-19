@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
+import { anchorAt, between, betweenPhrases, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -339,6 +339,95 @@ test("paragraph throws when its anchor moved, rather than widening to the whole 
 // A document with no blank line at all is one paragraph, not a failure.
 test("paragraph returns the remainder when the rule's block ends the document", () => {
   assert.equal(paragraph("x\n\nTHE RULE ends here.", "THE RULE", "the fixture"), "THE RULE ends here.");
+});
+
+// `betweenPhrases`'s two halves are `paragraph`'s bound (an `anchorAt` start)
+// and a phrase end instead of a blank line — so it has `paragraph`'s anchor
+// false green (a moved or duplicated `from`) plus a matching pair on `to`:
+// unbounded, a `to` reworded away and restated later silently widens the
+// slice into whatever follows; duplicated inside `bound`, the slice binds
+// the wrong copy. Extracted (#1611) from `finisher-dispatch-premise-prose
+// .test.mjs`'s hand-rolled `dispatchPremise`.
+test("betweenPhrases returns the slice bounded by a phrase start and a phrase end, from inclusive, to exclusive", () => {
+  const doc = "intro\nSTART here.\nmiddle text spans\n   two lines.\nCUT it here.\nmore after.\n";
+  assert.equal(betweenPhrases(doc, "START here", "CUT it", "the fixture"), "START here.\nmiddle text spans\n   two lines.\n");
+});
+
+test("betweenPhrases throws when the from anchor moved, rather than widening to the whole file", () => {
+  assert.throws(
+    () => betweenPhrases("no anchors here", "START here", "CUT it", "the fixture"),
+    /the fixture: slice anchor "START here" moved — re-anchor this test, never widen it to the whole file/,
+  );
+});
+
+test("betweenPhrases throws when the to phrase no longer occurs after the from anchor", () => {
+  assert.throws(
+    () => betweenPhrases("START here.\nno closing phrase follows.\n", "START here", "CUT it", "the fixture"),
+    /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
+  );
+});
+
+test("betweenPhrases throws when the to phrase occurs more than once, rather than binding the wrong copy", () => {
+  assert.throws(
+    () => betweenPhrases("START here.\nCUT it once.\nCUT it twice.\n", "START here", "CUT it", "the fixture"),
+    /the fixture: slice end anchor "CUT it" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
+  );
+});
+
+// Same duplicate, but with a `bound` supplied — the message names the bound
+// here because the caller gave one; the unbounded test above must NOT, or a
+// bound-scoped failure and a whole-document failure read identically.
+test("betweenPhrases throws when the to phrase occurs more than once inside the bound, naming the bound in the message", () => {
+  const doc = "START here.\nCUT it once.\nCUT it twice.\n---\nafter the bound.\n";
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    /the fixture: slice end anchor "CUT it" occurs 2 times inside the bound — a pin would bind the wrong copy; narrow the anchor/,
+  );
+});
+
+// `bound` exists so a `to` reworded away cannot silently resolve to a LATER,
+// unrelated copy past a structural boundary — the same false green `between`'s
+// own header describes for an unbounded end anchor. Unbounded, this fixture's
+// only copy of `to` sits past the boundary and the slice silently widens past
+// it; bounded, that copy falls outside the search and the throw fires instead.
+test("betweenPhrases: a bound stops the search there, rather than reaching a later copy of `to`", () => {
+  const doc = "START here.\nreal middle before bound.\n---\nCUT it after the bound.\n";
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
+  );
+  assert.equal(
+    betweenPhrases(doc, "START here", "CUT it", "the fixture"),
+    "START here.\nreal middle before bound.\n---\n",
+  );
+});
+
+// A `bound` that never matches the remaining text is a caller error, not an
+// invitation to fall back to an unbounded search — that fallback is exactly
+// the false green `bound` exists to prevent: a `to` reworded away could still
+// be satisfied by an unrelated LATER decoy once the search reopens the whole
+// document. This fixture's only `to` copy sits BEFORE where the bound would
+// have been, so the old unbounded fallback would find it and return silently;
+// the fix must throw instead, before ever searching for `to`.
+test("betweenPhrases throws when the bound never matches, rather than silently searching the whole document", () => {
+  const doc = "START here.\nCUT it once.\n";
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    /the fixture: end bound no longer matches after "START here" — re-anchor this test, never widen it to the whole document/,
+  );
+});
+
+// The "occurs more than once" assert is scoped to `bound`, not the whole rest
+// of the document: a restatement of `to` PAST the bound must not count, or a
+// pin could never pass once any later, unrelated copy of the same phrase
+// exists anywhere below it. This fixture has exactly one `to` inside the
+// bound and a second, decoy copy after it.
+test("betweenPhrases does not count a `to` phrase restated past the bound as a duplicate", () => {
+  const doc = "START here.\nCUT it once.\n---\nCUT it again, but after the bound.\n";
+  assert.equal(
+    betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    "START here.\n",
+  );
 });
 
 // `anchorAt` returns the offset where the anchor STARTS, not where it ends.

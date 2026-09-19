@@ -145,6 +145,59 @@ export function paragraph(text, anchor, what, options) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
+// A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
+// phrase instead of the next blank line. `from` is `anchorAt`'s own
+// exactly-once anchor; `to` is a phrase asserted exactly once inside the
+// optional `bound` — a regex searched for in the text after `from`, so the
+// search for `to` stops there rather than reaching the end of the document.
+// Without `bound`, `to` is searched over the rest of the document, the same
+// reach as an unbounded `between`.
+//
+// `bound` exists for the reason `between`'s own header gives for its literal
+// end anchor, applied to a phrase search instead of `indexOf`: an unbounded
+// search for `to` is satisfiable from a LATER, unrelated occurrence once the
+// true `to` is reworded away, silently widening the slice into whatever
+// follows. A `bound` that excludes any such later occurrence turns that
+// silent widening into a throw: the exactly-once assert below then sees
+// zero hits inside the bound, never one from past it.
+//
+// `to`'s "occurs more than once" assert is scoped to `bound` too, not the
+// whole rest of the document — a restatement of `to` PAST the bound must
+// not count, or a pin could never pass once any later, unrelated copy of
+// the same phrase exists anywhere below it.
+//
+// Extracted (#1611) from `finisher-dispatch-premise-prose.test.mjs`'s
+// `dispatchPremise`, which hand-rolled this exact shape locally — `paragraph`'s
+// own header above names the class: a local copy is the defect, not a style
+// choice.
+export function betweenPhrases(text, from, to, what, { bound } = {}) {
+  const rest = text.slice(anchorAt(text, from, what));
+  let scope = rest;
+  if (bound) {
+    const boundEnd = rest.search(bound);
+    assert.notEqual(
+      boundEnd,
+      -1,
+      `${what}: end bound no longer matches after "${from}" — re-anchor this test, never widen it to the whole document`,
+    );
+    scope = rest.slice(0, boundEnd);
+  }
+  const hits = [...scope.matchAll(new RegExp(phrase(to).source, "g"))];
+  assert.notEqual(
+    hits.length,
+    0,
+    `${what}: slice end anchor "${to}" moved — re-anchor this test, never widen it to the whole file`,
+  );
+  assert.equal(
+    hits.length,
+    1,
+    bound
+      ? `${what}: slice end anchor "${to}" occurs ${hits.length} times inside the bound — a pin would bind the wrong copy; narrow the anchor`
+      : `${what}: slice end anchor "${to}" occurs ${hits.length} times — a pin would bind the wrong copy; narrow the anchor`,
+  );
+  return scope.slice(0, hits[0].index);
+}
+
 // Anchor matching only — never the compared text, so a caller that turns this
 // on still returns raw bytes with emphasis intact. Exported so a pin comparing
 // two files' copies of the same block (`**` moving on one side is real drift)
