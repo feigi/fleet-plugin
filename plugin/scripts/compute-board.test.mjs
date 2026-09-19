@@ -136,6 +136,40 @@ test("computeBoard: one ticket per column, POOL from an unrowed ready issue", ()
   assert.equal(col(341), "POOL");
 });
 
+// #1331: candidates.mjs's EXCLUDE negates all five wayfinder:* labels so a
+// wayfinder ticket never enters the DISPATCH scan regardless of triage role,
+// but the POOL loop below used to show one anyway — a ready-for-agent
+// wayfinder ticket (#1293's shape) rendered as an undispatchable POOL card,
+// inflating the operator's read of available work. Filtered by label prefix
+// here, in the POOL loop itself, not by narrowing gather()'s gh query —
+// narrowing the query also strips the ticket from `issues`, which titleFor()
+// below reads for ledger rows that have nothing to do with POOL (see the next
+// test).
+test("computeBoard: an unrowed wayfinder:* issue never becomes a POOL card", () => {
+  const b = computeBoard({
+    ...baseInputs(),
+    issues: [{ number: 341, title: "add a --json flag", labels: ["ready-for-agent", "wayfinder:task"] }],
+  });
+  assert.equal(b.tickets.find((t) => t.issue === 341), undefined);
+});
+
+// The fix for the regression above must not reach into gather()'s gh query:
+// doing so also drops the wayfinder-labelled issue from `issues`, which
+// titleFor() reads for every non-PR ledger row (e.g. #340, IMPLEMENTING, no
+// PR yet) whose issue happens to carry a wayfinder label for an unrelated
+// reason. Losing that lookup regresses #340's card to a bare `#340` even
+// though only the POOL column was ever supposed to change.
+test("computeBoard: a ledger-row ticket linked to a wayfinder-labelled issue keeps its real title", () => {
+  const b = computeBoard({
+    ...baseInputs(),
+    issues: [
+      { number: 341, title: "add a --json flag", labels: ["ready-for-agent"] },
+      { number: 340, title: "real ledger-row title", labels: ["wayfinder:task"] },
+    ],
+  });
+  assert.equal(b.tickets.find((t) => t.issue === 340).title, "real ledger-row title");
+});
+
 // #786 review: board.mjs used to default a PR row's missing `state` to
 // "UNKNOWN" before handing it here. That default was inert — `pr.state ===
 // "OPEN"` (below) is already false for `undefined`, same as for "UNKNOWN" —

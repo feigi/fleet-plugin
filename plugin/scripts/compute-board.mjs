@@ -136,8 +136,18 @@ export function computeBoard(inputs) {
     });
   }
 
+  // A wayfinder:* ticket is documentation-only regardless of its triage role
+  // (#1331): candidates.mjs's dispatch scan never surfaces one even carrying
+  // `ready-for-agent`, so this POOL column must not either, or an
+  // undispatchable ticket inflates the operator's read of available work.
+  // Filtered HERE rather than out of gather()'s gh query: `issues` also feeds
+  // titleFor() above, and a query-level exclusion silently strips a
+  // wayfinder-labelled issue's title lookup too, turning an unrelated ledger
+  // row's card into a bare `#<number>` even though only the POOL card was
+  // ever supposed to change.
   for (const iss of issues) {
     if (rowIssues.has(iss.number)) continue;
+    if ((iss.labels || []).some((l) => l.startsWith("wayfinder:"))) continue;
     const sinceEnteredStage = stageEntry(prevByIssue.get(iss.number), "POOL", now);
     tickets.push({
       issue: iss.number, title: iss.title, column: "POOL", agent: null,

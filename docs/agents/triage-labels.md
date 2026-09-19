@@ -47,16 +47,16 @@ dispatch trigger; do not strip the role off one to make it safe, because it alre
 is. Selection for these runs through the map's frontier query instead — see
 `docs/agents/issue-tracker.md` "Wayfinding operations".
 
-That exclusion is `candidates.mjs`'s alone. The cockpit's pool query
-(`plugin/scripts/board.mjs`, `gh issue list --label ready-for-agent`) carries no
-`wayfinder:*` exclusion, so such a ticket still shows as a pool card while never
-being dispatchable. Measured 2026-09-09, both directions:
-
-```
-node plugin/scripts/candidates.mjs --require-label ready-for-agent      # no wayfinder issue
-gh issue list --label ready-for-agent --state open --json number,labels \
-  --jq '.[] | select([.labels[].name] | any(startswith("wayfinder:")))'
-```
+That exclusion is `candidates.mjs`'s alone; the cockpit's pool query
+(`plugin/scripts/board.mjs`, `gh issue list --label ready-for-agent`) still
+fetches a wayfinder ticket like any other and does not filter it at the gh
+layer. Until #1331/PR #1644 that meant such a ticket showed as a pool card
+while never being dispatchable. It is now dropped one stage later instead:
+`plugin/scripts/compute-board.mjs`'s POOL loop skips any unrowed issue
+carrying a `wayfinder:*` label before it becomes a card, filtering by label
+prefix rather than by narrowing the gh query — narrowing the query would also
+strip the ticket from the title lookups `board.mjs`'s ledger rows use, which
+have nothing to do with the pool column.
 
 `onhold` is **not** a spare label. It marks a ticket that triage has fully specified
 but that cannot be actioned in this repo right now — usually because the fix lives
