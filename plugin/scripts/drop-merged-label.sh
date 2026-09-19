@@ -10,9 +10,14 @@
 # number and the fact of completion are known together, so only a PROVEN merge
 # triggers this — never reap (branches, not tickets), never a repo automation
 # (no attribution). Call this from run-merge-bot.md's step 4, after
-# prove-merge.sh, never before: `closingIssuesReferences` reflects `Closes #N`
-# syntax regardless of merge state, and the claim has not ended until the
-# merge lands.
+# prove-merge.sh, never before: the claim has not ended until the merge lands.
+#
+# #1617: `closingIssuesReferences` reflects `Closes #N` syntax in the PR's own
+# title/body, but NOT a commit-message-only reference — GitHub's real
+# merge-time closer honors the latter (confirmed via the issue's own
+# timeline), this field never does, even after the merge. This script unions
+# both signals (see the commit-message scan below) so a real close is never
+# missed just because the keyword only ever lived in a commit message.
 #
 # Dry-run by default; --apply mutates the tracker. Exit 0 done (or dry run),
 # 1 one or more removals failed — REPORT THIS, never swallow it: a merged
@@ -46,6 +51,62 @@ echo "\$ gh pr view $pr --json closingIssuesReferences --jq '.closingIssuesRefer
 if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); then
   die "gh pr view $pr failed — cannot read which issues it closes"
 fi
+
+# #1617: the query above misses a commit-message-only close. Scan every
+# commit's own headline+body for the same close/fix/resolve keyword forms
+# GitHub's real closer recognizes, and union the result into `$issues` — the
+# set of issues this PR is proven to close, so the check below acts on
+# either signal.
+echo "\$ gh pr view $pr --json commits --jq '[.commits[]|(.messageHeadline//\"\")+\"\\n\"+(.messageBody//\"\")]|join(\"\\n\")'" >&2
+if ! commit_text=$(gh pr view "$pr" --json commits --jq '[.commits[] | (.messageHeadline // "") + "\n" + (.messageBody // "")] | join("\n")'); then
+  die "gh pr view $pr failed — cannot scan its commit messages for issue closes"
+fi
+
+# Same three-outcome discipline as the label scan below (#1543): rc 1 (no
+# keyword anywhere in any commit) must read as zero commit-closed issues,
+# never conflated with rc 2+ (the scan itself broke), which must halt loudly
+# instead of silently behaving like "commits close nothing".
+# The leading `(^|[^[:alnum:]_])` requires a non-word character (or line
+# start) immediately before the keyword, so "bugfix #77" or "prefix #88"
+# never read as closing #77/#88 just because "fix" is a substring of a
+# larger word — only a real close/fix/resolve keyword counts.
+if matched=$(printf '%s\n' "$commit_text" | grep -Eio '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*#[0-9]+'); then
+  commit_grep_rc=0
+else
+  commit_grep_rc=$?
+fi
+case $commit_grep_rc in
+  0)
+    if commit_issues=$(printf '%s\n' "$matched" | grep -Eo '[0-9]+'); then
+      commit_num_rc=0
+    else
+      commit_num_rc=$?
+    fi
+    [ "$commit_num_rc" = 0 ] || die "could not extract issue numbers from PR #$pr's matched commit text (grep exited $commit_num_rc)"
+    ;;
+  1) commit_issues="" ;;
+  *) die "could not scan PR #$pr's commit messages for issue closes (grep exited $commit_grep_rc)" ;;
+esac
+
+# Union both signals through the SAME three-outcome discipline, never a bare
+# `grep | sort`: command substitution reports only the LAST pipe stage's
+# exit status, so `sort`'s own rc 0 would otherwise mask a grep 2+ break
+# entirely — the exact "commits close nothing" misreading #1543 already
+# guards against elsewhere in this file. `awk '{print $0+0}'` strips any
+# leading zeros (#121's defect class) before the final sort, so a
+# commit-message "#007" reaches the JSON payload below as the bare,
+# valid-JSON integer `7` — and correctly dedupes against a plain `7` named
+# by the other signal.
+if union=$(printf '%s\n%s\n' "$issues" "$commit_issues" | grep -Eo '[0-9]+'); then
+  union_rc=0
+else
+  union_rc=$?
+fi
+case $union_rc in
+  0) issues=$(printf '%s\n' "$union" | awk '{print $0+0}' | sort -n -u) ;;
+  1) issues="" ;;
+  *) die "could not union PR #$pr's closing issues (grep exited $union_rc)" ;;
+esac
 
 if [ -z "$issues" ]; then
   echo "$NAME: PR #$pr closes no issues — nothing to drop" >&2
