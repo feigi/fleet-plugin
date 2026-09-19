@@ -12,6 +12,7 @@
 // re-query at the moment of decision, which is what this script is for.
 
 import { execFileSync } from "node:child_process";
+import { gitEnv } from "./git-env.mjs";
 import { readdirSync, readFileSync, writeSync } from "node:fs";
 import { makeDie, makeArg, makeNumArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 
@@ -659,10 +660,24 @@ if (noCi) {
 // hard-exited the tool and discarded a fully computed CI verdict. Use a helper
 // that returns null instead, so the behind-count can be unknown without costing
 // the caller the answer it actually asked for.
+//
+// GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): this is the ONE spawn
+// primitive both of this file's git calls route through — `workflowsPath()`'s
+// `rev-parse --show-toplevel` above and `remote get-url origin` below — so
+// scrubbing it here protects both without a second copy. Harmless for the
+// `gh` calls also routed through it: neither name means anything to `gh`.
+// Measured: an ambient GIT_WORK_TREE alone answers `workflowsPath()`'s
+// `rev-parse --show-toplevel` with the AMBIENT path outright, silently, at
+// exit 0, regardless of the real cwd — sending workflow discovery to search
+// a directory that is not this repository at all. An ambient GIT_DIR alone
+// answers `remote get-url origin` for a DIFFERENT repository, silently, at
+// exit 0 — binding `gh api`'s `--hostname` to a repo the caller never named,
+// which behind-count's own comment above already treats as a 404 hazard for
+// an unrelated reason (GHE host inference) and this closes for a second.
 function tryRun(cmd, args) {
   vlog(`$ ${cmd} ${args.join(" ")}`);
   try {
-    return execFileSync(cmd, args, { encoding: "utf8" });
+    return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv() });
   } catch (e) {
     // Same discipline as run(), and it matters more here: --quiet suppresses
     // vlog entirely, so under the controller's Monitor this line is discarded

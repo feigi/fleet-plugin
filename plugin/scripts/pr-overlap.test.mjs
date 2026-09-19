@@ -616,6 +616,58 @@ test("prose: a uniquely-tracked data file is still matched by its bare basename"
   assert.deepEqual(payload.prose.map((h) => h.token), ["only-owner.json"]);
 });
 
+// #1599: trackedBasenameCounts() passed no env at all before this fix, and
+// #1020's own census could not see it — its scan is `.sh`-only. Measured
+// directly: an ambient GIT_DIR (a git hook, `rebase --exec`, `bisect run`)
+// makes `git ls-files -z` answer for a DIFFERENT repository regardless of
+// `cwd`, silently, at exit 0 — so the count this guard bases its verdict on
+// comes from whichever repository the ambient variable names, not the one
+// the caller is actually running the tool against.
+//
+// The fixture pairs a real repository where the data file's basename is
+// UNIQUE (`only-owner.json`, tracked once — the exact positive shape the
+// test above pins) with an ambient GIT_DIR naming an unrelated repository
+// where that basename is tracked TWICE. Unscrubbed, the guard reads the
+// ambient repository's count (2) instead of the real one (1), the bare
+// basename is wrongly judged ambiguous and dropped, and the citation below
+// goes unreported — `signal` stays "none" instead of "prose".
+test("prose: an inherited GIT_DIR must not substitute another repository's basename count for this repository's own", () => {
+  const UNIQUE = "data/only-owner.json";
+  const CITER = "docs/notes.md";
+
+  const otherRepo = mkdtempSync(join(tmpdir(), "pr-overlap-other-"));
+  execFileSync("git", ["init", "-q"], { cwd: otherRepo });
+  mkdirSync(join(otherRepo, "a"), { recursive: true });
+  mkdirSync(join(otherRepo, "b"), { recursive: true });
+  writeFileSync(join(otherRepo, "a", "only-owner.json"), "x\n");
+  writeFileSync(join(otherRepo, "b", "only-owner.json"), "x\n");
+  execFileSync("git", ["add", "-A"], { cwd: otherRepo });
+
+  const fx = fixture({
+    prs: {
+      1: { names: [UNIQUE], diff: hunk(UNIQUE, ['+{"x":1}']) },
+      2: { names: [CITER], diff: hunk(CITER, ["+see only-owner.json for the schema"]) },
+    },
+    tracked: [UNIQUE],
+  });
+  let r;
+  try {
+    r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
+      encoding: "utf8",
+      cwd: fx.repo,
+      env: { ...process.env, PATH: `${fx.bin}:${process.env.PATH}`, GIT_DIR: join(otherRepo, ".git") },
+    });
+  } finally {
+    rmSync(fx.root, { recursive: true, force: true });
+    rmSync(otherRepo, { recursive: true, force: true });
+  }
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.signal, "prose",
+    "an ambient GIT_DIR must not substitute the OTHER repository's (ambiguous) basename count for this repository's own (unique) one");
+  assert.deepEqual(payload.prose.map((h) => h.token), ["only-owner.json"]);
+});
+
 // The other ranking pair: `dirs` sits ABOVE `prose` in the ladder, and no
 // test drove a PR pair where both fire simultaneously. A swap of that
 // ordering (`prose` checked before `dirs`) would pass the whole suite

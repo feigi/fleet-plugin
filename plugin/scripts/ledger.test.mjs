@@ -1485,6 +1485,40 @@ test("an inherited GIT_DIR or GH_REPO cannot retarget the query away from the le
   assert.equal(r.json.verdict, "clean");
 });
 
+test("an inherited GIT_DIR cannot relocate defaultLedgerPath() into another repository (#1599)", () => {
+  // The three scrubs above protect the TRACKER query once ledger.mjs already
+  // knows which ledger to read. defaultLedgerPath() itself — the call that
+  // decides that in the first place, exercised only on this documented
+  // no-`--file` flow — passed no env at all until #1599: an ambient GIT_DIR
+  // answers `--git-common-dir` for a DIFFERENT repository, and ledger.mjs
+  // resolves `.fleet/ledger.md` underneath THAT answer instead of the
+  // caller's own. Measured directly against a checkout of this repo:
+  // `GIT_DIR=/tmp/other/.git node ledger.mjs row 357 "…"` wrote
+  // `/tmp/other/.fleet/ledger.md`, silently, at exit 0.
+  //
+  // The fixture: a row already sitting in the CALLER's own ledger. Relocated,
+  // `check` reads an empty (or wholly absent) ledger at the wrong path and
+  // reports the subject safe to file — #155's "confident, empty result"
+  // shape, one call earlier in this same file.
+  const otherRepo = mkdtempSync(join(tmpdir(), "ledger-other-repo-"));
+  try {
+    const initOther = spawnSync("git", ["init", "-q"], { cwd: otherRepo, stdio: "ignore" });
+    assert.equal(initOther.status, 0,
+      "test setup: the OTHER repository the ambient var points at must itself be real — an unresolvable GIT_DIR takes the pre-existing cwd-relative fallback instead, which is the different code path the test above this one pins");
+    const r = run("some distinctive subject words entirely", {
+      filed: ["#357 some distinctive subject words entirely"],
+      noFile: true,
+      spawnEnv: { GIT_DIR: join(otherRepo, ".git") },
+    });
+    assert.equal(r.json.found, true,
+      "the subject IS already filed in the caller's own ledger — an ambient GIT_DIR must not make defaultLedgerPath() read a different one");
+    assert.equal(r.json.verdict, "already-filed");
+    assert.equal(r.status, 1);
+  } finally {
+    rmSync(otherRepo, { recursive: true, force: true });
+  }
+});
+
 test("a working directory that is not a repository at all still degrades exactly as before (no --file)", () => {
   // defaultLedgerPath()'s own pre-existing fallback: --git-common-dir fails,
   // so it warns and returns a cwd-relative path — which #155 leaves alone

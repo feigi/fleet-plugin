@@ -109,6 +109,7 @@ async function selfContainedFixture(t) {
   const scriptsDir = join(dir, "scripts");
   mkdirSync(scriptsDir, { recursive: true });
   copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  copyFileSync(join(DIR, "git-env.mjs"), join(scriptsDir, "git-env.mjs"));
   ownManifestFixture(dir);
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
   assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
@@ -162,6 +163,7 @@ function installedCacheCopy(foreignRoot, { tracked }) {
   mkdirSync(scriptsDir, { recursive: true });
   mkdirSync(join(payloadDir, ".claude-plugin"), { recursive: true });
   copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  copyFileSync(join(DIR, "git-env.mjs"), join(scriptsDir, "git-env.mjs"));
   copyFileSync(join(DIR, "..", ".claude-plugin", "plugin.json"), join(payloadDir, ".claude-plugin", "plugin.json"));
   if (tracked) {
     execFileSync("git", ["add", "-A", "plugins"], { cwd: foreignRoot, env: ENV });
@@ -208,6 +210,83 @@ test("repoRoot answers the root where there IS one, and skipWithoutRepo then dec
   assert.equal(root, dir);
   assert.equal(skipWithoutRepo(root, "the tests"), false,
     "a working tree that answers must never skip — that is the condition the sweeps are for");
+});
+
+// #1599: repo-root.mjs's three git calls (isTrackedBy, repoRoot's own
+// rev-parse, trackedShellScripts) passed no env at all before this fix, and
+// #1020's own census could not see any of them — its scan is `.sh`-only.
+// Measured directly against this file: an ambient GIT_DIR or GIT_WORK_TREE
+// (a git hook, `rebase --exec`, `bisect run`) corrupts each call in its own
+// distinct way, silently, at exit 0. The four fixtures below isolate each
+// one; `noRepo(t)` doubles as "give me a disposable real repository" here,
+// since none of them needs a repo-LESS fixture.
+test("repoRoot()'s own rev-parse: an inherited GIT_WORK_TREE substitutes a foreign toplevel for the caller's own", async (t) => {
+  const { dir, scriptsDir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
+  const { dir: otherRepo } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", otherRepo], { env: ENV });
+
+  const saved = ["GIT_DIR", "GIT_WORK_TREE"].map((k) => [k, process.env[k]]);
+  t.after(() => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+  delete process.env.GIT_DIR;
+  process.env.GIT_WORK_TREE = otherRepo;
+
+  assert.equal(fixtureRepoRoot(scriptsDir), dir,
+    "an ambient GIT_WORK_TREE must not answer --show-toplevel with a DIFFERENT repository — measured: unscrubbed, this call returns the ambient path itself");
+});
+
+test("repoRoot()'s own rev-parse: an inherited GIT_DIR alone answers with cwd itself, not the tree's real root", async (t) => {
+  // GIT_DIR set with no GIT_WORK_TREE makes git assume the CURRENT directory
+  // is the top level — measured, called from a subdirectory (scriptsDir, the
+  // realistic shape: this function's caller is rarely sitting at the tree's
+  // own root) this answers with scriptsDir itself, not dir.
+  const { dir, scriptsDir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
+  const { dir: otherRepo } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", otherRepo], { env: ENV });
+
+  const saved = ["GIT_DIR", "GIT_WORK_TREE"].map((k) => [k, process.env[k]]);
+  t.after(() => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+  process.env.GIT_DIR = join(otherRepo, ".git");
+  delete process.env.GIT_WORK_TREE;
+
+  assert.equal(fixtureRepoRoot(scriptsDir), dir,
+    "an ambient GIT_DIR must not answer --show-toplevel with cwd unresolved to the tree's real root");
+});
+
+test("assertOwnRoot's tracked-ness check: an inherited GIT_DIR must not make isTrackedBy answer falsely for the caller's own tracked file", async (t) => {
+  // Called at the tree's OWN root (not a subdirectory), so the rev-parse
+  // half above answers correctly regardless of this fix — measured, an
+  // ambient GIT_DIR alone leaves --show-toplevel unaffected when cwd is
+  // already the toplevel. That isolates the SECOND git call repoRoot makes,
+  // isTrackedBy() inside assertOwnRoot, from the first: unscrubbed, `git
+  // ls-files --error-unmatch` under this ambient GIT_DIR answers for the
+  // OTHER repository's index, so a file this plugin's own git genuinely
+  // tracks comes back "did not match any files" — a false negative that
+  // makes repoRoot() throw on its own legitimate root.
+  const { dir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
+  const { dir: otherRepo } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", otherRepo], { env: ENV });
+
+  const saved = ["GIT_DIR", "GIT_WORK_TREE"].map((k) => [k, process.env[k]]);
+  t.after(() => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+  process.env.GIT_DIR = join(otherRepo, ".git");
+  delete process.env.GIT_WORK_TREE;
+
+  assert.equal(fixtureRepoRoot(dir), dir,
+    "an ambient GIT_DIR must not make the tracked-ness check refuse this plugin's own root");
+});
+
+test("trackedShellScripts: an inherited GIT_DIR must not substitute another repository's tracked *.sh list for this one", (t) => {
+  const { dir } = foreignRepoWithTrackedScripts(t);
+  const { dir: otherRepo } = noRepo(t);
+  execFileSync("git", ["init", "-q", "-b", "main", otherRepo], { env: ENV });
+
+  const saved = ["GIT_DIR", "GIT_WORK_TREE"].map((k) => [k, process.env[k]]);
+  t.after(() => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+  process.env.GIT_DIR = join(otherRepo, ".git");
+  delete process.env.GIT_WORK_TREE;
+
+  assert.deepEqual(trackedShellScripts(dir).sort(), ["hooks/x.sh", "y.sh"],
+    "an ambient GIT_DIR must not substitute the OTHER repository's tracked *.sh list for this one");
 });
 
 // The half a skip cannot pin from inside itself, and the exact conflation #1149
@@ -328,6 +407,7 @@ test("a plugin/-nested layout (#1336) is still accepted as this file's own tree"
   mkdirSync(scriptsDir, { recursive: true });
   mkdirSync(join(pluginDir, ".claude-plugin"), { recursive: true });
   copyFileSync(join(DIR, "repo-root.mjs"), join(scriptsDir, "repo-root.mjs"));
+  copyFileSync(join(DIR, "git-env.mjs"), join(scriptsDir, "git-env.mjs"));
   copyFileSync(join(DIR, "..", ".claude-plugin", "plugin.json"), join(pluginDir, ".claude-plugin", "plugin.json"));
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
   execFileSync("git", ["add", "-A"], { cwd: dir, env: ENV });

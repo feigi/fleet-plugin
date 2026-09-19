@@ -42,6 +42,7 @@
 // probe informs supply, and a human or a triage pass closes.
 
 import { execFileSync } from "node:child_process";
+import { gitEnv } from "./git-env.mjs";
 import { writeSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
@@ -161,8 +162,25 @@ const needle = gone ?? present;
 // The largest tracked file here is under 200 KB today, so this is headroom
 // rather than a fix for a live case — but the growing one is a metrics TSV
 // that only ever gets appended to.
+//
+// GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): the ONE spawn primitive
+// every git call in this file routes through, so scrubbing it here protects
+// all four call sites at once. Measured: an ambient GIT_WORK_TREE alone makes
+// the `rev-parse --show-toplevel` call below answer with the AMBIENT path
+// outright, silently, at exit 0 — root becomes a directory that is not this
+// repository, and every pathspec resolved against it names the wrong file. An
+// ambient GIT_DIR alone makes every `-C root ...` call below (still `-C` —
+// GIT_DIR outranks it) answer from a DIFFERENT repository's object database:
+// `ls-tree origin/main` on a path this repo genuinely tracks comes back
+// empty, exit 0 — the SAME shape this file's own comment above already
+// measures for a generated, genuinely-untracked file (`.agent-test.sh`), so a
+// tracked ticket-fix file would misreport as untracked and the probe would
+// answer `unknown` for a fix that is really sitting right there. Worse for
+// `log -S`: pointed at a coincidentally-real `origin/main` in the ambient
+// repository, it can name a REAL commit from a repository that has nothing to
+// do with this ticket — a `fixed` verdict citing the wrong commit, silently.
 function git(args) {
-  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: gitEnv() });
 }
 
 const MAX_EAGAIN_RETRIES = 200;
