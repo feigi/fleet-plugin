@@ -746,9 +746,9 @@ function runCheck() {
     // and "" behave alike), so this composes with cwd rather than fighting it.
     //
     // With all three off, the ledger and the queried tracker cannot disagree.
-    const gitEnv = { ...process.env, GH_REPO: "" };
-    delete gitEnv.GIT_DIR;
-    delete gitEnv.GIT_WORK_TREE;
+    const queryEnv = { ...process.env, GH_REPO: "" };
+    delete queryEnv.GIT_DIR;
+    delete queryEnv.GIT_WORK_TREE;
     let ledgerDir = dirname(resolve(file));
     // `check` runs before the run's FIRST ledger write, and `.fleet/` is
     // gitignored and created lazily by save()'s mkdirSync — so on a fresh
@@ -758,7 +758,7 @@ function runCheck() {
     // the missing directory instead reported every first `check` as not being
     // in a repository and dropped the tracker query outright.
     while (!existsSync(ledgerDir) && dirname(ledgerDir) !== ledgerDir) ledgerDir = dirname(ledgerDir);
-    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: gitEnv, timeout: GIT_TIMEOUT_MS });
+    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: queryEnv, timeout: GIT_TIMEOUT_MS });
     if (repoCheck.status !== 0) {
       // More than one cause lands here: a ledger path genuinely outside any
       // repository, but also git missing entirely (spawn ENOENT, so `status`
@@ -808,7 +808,7 @@ function runCheck() {
           "gh",
           ["issue", "list", "--search", query, "--state", "all", "--limit", String(TRACKER_SHOWN + 1),
             "--json", "number,title,state,url"],
-          { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"], cwd: ghCwd, env: gitEnv },
+          { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"], cwd: ghCwd, env: queryEnv },
         );
         // Parsing inside the try on purpose: gh can exit 0 and still print
         // something that is not the JSON asked for. A parse failure is a failed

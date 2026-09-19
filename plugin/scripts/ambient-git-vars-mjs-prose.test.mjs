@@ -89,10 +89,53 @@ const read = (f) => readFileSync(join(DIR, f), "utf8");
  */
 const GIT_CALL_MJS = /\b\w+\(\s*(?:"git"|'git')/;
 
-const codeLines = (src) =>
-  stripComments(src).split("\n").map((l, i) => ({ n: i + 1, l })).filter(({ l }) => l.trim() !== "");
+// Joined back into one string before testing, not tested one physical line
+// at a time: a git-invoking call formatted across physical lines (mirrors
+// ledger.mjs's own tracker-query `execFileSync("gh", [...], {...})` shape,
+// its first argument and its options object each on their own line) never
+// puts `(` and `"git"` on the same physical line, so a per-line test never
+// sees it (measured, #1599 review) — `GIT_CALL_MJS`'s `\s*` already matches
+// a newline; testing the whole joined string is what lets it use that.
+const codeLines = (src) => stripComments(src).split("\n").filter((l) => l.trim() !== "");
 
-const usesGit = (src) => codeLines(src).some(({ l }) => GIT_CALL_MJS.test(l));
+const usesGit = (src) => GIT_CALL_MJS.test(codeLines(src).join("\n"));
+
+/**
+ * Drop a trailing `//` comment from one line. Quote-aware: `stripComments()`
+ * only blanks a comment that is its own whole line (its own documented
+ * ceiling) and leaves `code; // note` untouched, so prose merely NAMING
+ * `gitEnv(` in a trailing comment would otherwise inflate the call count
+ * below — measured (#1599 review): deleting a real `gitEnv()` scrub call
+ * while leaving a trailing comment elsewhere in the file that mentions
+ * `gitEnv(` left the count below unchanged, silently. A `//` inside a
+ * string literal (a URL) is not a comment start and must not truncate real
+ * code at it.
+ */
+function stripTrailingSlashComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"' || c === "`") {
+      quote = c;
+    } else if (c === "/" && line[i + 1] === "/") {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+/**
+ * The number of real `gitEnv(` call EXPRESSIONS a file's own code carries —
+ * comments dropped at both granularities `stripComments()` covers
+ * (whole-line, block) and the one it does not (a trailing `// note`), so a
+ * comment that merely names `gitEnv(` cannot mask a deleted scrub call
+ * sitting elsewhere in the same file.
+ */
+const countGitEnvCalls = (src) =>
+  (codeLines(src).map(stripTrailingSlashComment).join("\n").match(/gitEnv\(/g) ?? []).length;
 
 // The files whose git-invoking primitive(s) route their env through
 // `gitEnv()` — this ticket's fix. Each value is the exact number of
@@ -143,8 +186,9 @@ const MJS_LEGACY_INLINE = {
     "statePath() — `{ ...process.env }` then two `delete`s, inline. Fixed and covered by PR #1598 " +
     "(fleet-heartbeat.test.mjs); out of #1599's scope by the ticket's own words.",
   "ledger.mjs":
-    "the tracker-query probe inside runCheck() — `const gitEnv = { ...process.env, GH_REPO: \"\" }` then two " +
-    "`delete`s, inline (predates and shares a name with, but does not call, this directory's `gitEnv()` helper). " +
+    "the tracker-query probe inside runCheck() — `const queryEnv = { ...process.env, GH_REPO: \"\" }` then two " +
+    "`delete`s, inline (predates this directory's `gitEnv()` helper; renamed from `gitEnv` to `queryEnv` so the " +
+    "local no longer shadows the module-level import). " +
     "Measured and covered in ledger.test.mjs, \"an inherited GIT_DIR or GH_REPO cannot retarget the query…\".",
 };
 
@@ -153,7 +197,7 @@ for (const [f, count] of Object.entries(COVERED_MJS)) {
     const src = read(f);
     assert.ok(usesGit(src),
       `${f} appears to invoke no git at all, so this assertion would hold vacuously — either the file stopped using git (move it out of COVERED_MJS) or GIT_CALL_MJS no longer recognises the spelling it uses`);
-    const actual = (stripComments(src).match(/gitEnv\(/g) ?? []).length;
+    const actual = countGitEnvCalls(src);
     assert.equal(actual, count,
       `${f} carries ${actual} \`gitEnv(\` call(s), expected ${count}. A lower count means a scrub was deleted from one of this ` +
       "file's git-invoking primitives — see this file's own header comment for which call sites exist and why each needs one. " +
@@ -168,6 +212,12 @@ for (const [f, reason] of Object.entries(MJS_LEGACY_INLINE)) {
   });
 }
 
+// The unaccounted computation the closing census test below needs, factored
+// out so a regression fixture can drive it with a synthetic `scripts`/`read`
+// pair instead of writing a throwaway file into this real directory.
+const unaccountedGitUsers = (scripts, readSrc, accounted) =>
+  scripts.filter((f) => usesGit(readSrc(f))).filter((f) => !accounted.has(f));
+
 // The census, and the reason it is a test rather than a paragraph — the same
 // reason `ambient-git-vars-prose.test.mjs`'s own closing test gives: a new
 // `.mjs` script that shells out to git now has to make a decision — call
@@ -177,9 +227,8 @@ test("every .mjs script that invokes git either routes through gitEnv() or is re
   const scripts = readdirSync(DIR).filter((n) => n.endsWith(".mjs") && !n.endsWith(".test.mjs")).sort();
   assert.ok(scripts.length > 0, "fixture: no .mjs files found, so this scan would pass over nothing");
 
-  const gitUsers = scripts.filter((f) => usesGit(read(f)));
   const accounted = new Set([...Object.keys(COVERED_MJS), ...Object.keys(MJS_LEGACY_INLINE)]);
-  const unaccounted = gitUsers.filter((f) => !accounted.has(f));
+  const unaccounted = unaccountedGitUsers(scripts, read, accounted);
 
   assert.deepEqual(unaccounted, [],
     "a .mjs file invokes git and is neither in COVERED_MJS nor MJS_LEGACY_INLINE: route its call(s) through " +
@@ -194,4 +243,58 @@ test("every .mjs script that invokes git either routes through gitEnv() or is re
   for (const f of accounted) {
     assert.ok(scripts.includes(f), `${f} is recorded above but is not a .mjs file in this directory`);
   }
+});
+
+// Regression (#1599 review, finding 1): the count above must not be fooled
+// by a comment that merely NAMES `gitEnv(` — measured live, deleting a real
+// scrub call from repo-root.mjs while leaving a trailing `// gitEnv(x)...`
+// comment elsewhere in the file left the whole census suite green.
+test("a trailing comment naming gitEnv( cannot mask a deleted scrub call", () => {
+  const withCall = 'import { gitEnv } from "./git-env.mjs";\n' +
+    'import { spawnSync } from "node:child_process";\n' +
+    "\n" +
+    "export function probe() {\n" +
+    '  return spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", env: gitEnv() });\n' +
+    "}\n";
+  const scrubDeleted = 'import { spawnSync } from "node:child_process";\n' +
+    "\n" +
+    "export function probe() {\n" +
+    '  return spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }); // gitEnv(x) trailing comment, should not count\n' +
+    "}\n";
+  assert.equal(countGitEnvCalls(withCall), 1,
+    "a real gitEnv() call must be counted once");
+  assert.equal(countGitEnvCalls(scrubDeleted), 0,
+    "deleting a real gitEnv() scrub call must drop the count to 0 even when a trailing comment elsewhere in the " +
+    "file still mentions gitEnv( — the count must not be fooled by prose naming the function");
+});
+
+// Regression (#1599 review, finding 2): the git-call detector must not go
+// blind on a call formatted across physical lines — measured live, a new
+// script with a multi-line git spawn and no gitEnv()/legacy-inline entry
+// passed the census (8/8) when it should have failed it.
+test("a new .mjs file with a MULTI-LINE git-spawning call and no gitEnv()/legacy-inline entry fails the census", () => {
+  // Mirrors ledger.mjs's own tracker-query `execFileSync("gh", [...], {...})`
+  // shape: the callee's first argument and its options object each sit on
+  // their own physical line, so `(` and `"git"` never share one.
+  const multiLineGitCall = 'import { execFileSync } from "node:child_process";\n' +
+    "\n" +
+    "export function probe(root) {\n" +
+    "  return execFileSync(\n" +
+    '    "git",\n' +
+    '    ["rev-parse", "--show-toplevel"],\n' +
+    '    { cwd: root, encoding: "utf8" },\n' +
+    "  );\n" +
+    "}\n";
+
+  assert.ok(usesGit(multiLineGitCall),
+    "a git call split across physical lines must still be detected");
+
+  const scripts = ["repo-root.mjs", "new-uncensused.mjs"];
+  const sources = { "repo-root.mjs": read("repo-root.mjs"), "new-uncensused.mjs": multiLineGitCall };
+  const accounted = new Set([...Object.keys(COVERED_MJS), ...Object.keys(MJS_LEGACY_INLINE)]);
+  const unaccounted = unaccountedGitUsers(scripts, (f) => sources[f], accounted);
+
+  assert.deepEqual(unaccounted, ["new-uncensused.mjs"],
+    "a new .mjs file with a multi-line git-spawning call and no gitEnv()/legacy-inline entry must fail the " +
+    "census, not pass over it invisibly");
 });
