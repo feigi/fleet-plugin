@@ -91,8 +91,23 @@ const PROSE_PIN = "prose-pin.mjs";
 // scoping all satisfy it identically. `const`, `let`, and `var` are all
 // accepted for the two inner declarations for the same reason: nothing
 // about the shape depends on which keyword binds `at` and `end`.
-// The exact offset (`AT + FROM.length`) and the bare slice return are what
-// the two near-misses above fail on, deliberately.
+// The exact offset (`AT + FROM.length`) in the second `indexOf` call used
+// to be mandatory. That meant an offset-less reintroduction — exactly
+// `fallbackSection()`'s own historical shape (a search from `AT` instead
+// of `AT + FROM.length`) — passed this detector completely undetected:
+// #1422 (item 2) measured this live, writing that exact historical shape
+// as a real scanned file and finding zero offenders reported, which is a
+// genuine detection gap, not a documented exclusion — the ticket's own
+// stated rationale is that this shape is exactly what the guard exists to
+// catch. Fixed here by making the offset argument optional rather than
+// mandatory: the second `indexOf` may now take no offset argument, a bare
+// `AT`, or the full `AT + FROM.length`, and all three still bind the same
+// two variable names. The dedicated `offsetOnly` positive control (see the
+// "fires" test below) isolates this on its own — everywhere else identical
+// to `between()` — and is now correctly flagged as a twin. The two
+// return-shape near-misses below (`strippedStart`, `flattenedReturn`)
+// remain excluded regardless, because their divergence is in the return
+// statement, not the offset.
 //
 // Comments are stripped before matching (`strip-comments.mjs`, the same
 // helper candidates.test.mjs and the review-pr-*.test.mjs pins already
@@ -100,6 +115,15 @@ const PROSE_PIN = "prose-pin.mjs";
 // the five statements (cross-repo-citation-prose.test.mjs), and the `\s*`
 // separators above do not span a real comment's text — measured directly,
 // an un-stripped scan misses a reintroduced twin written that way.
+// `strip-comments.mjs` only blanks WHOLE-LINE comments by design (its own
+// header's documented ceiling — candidates.test.mjs and the review-pr-*
+// pins depend on trailing comment text surviving); a TRAILING `stmt; //
+// note` therefore reaches TWIN_SHAPE unstripped. #1422: measured live, a
+// trailing-commented twin appended to a real scanned file passed the sweep
+// below undetected. Fixed here, not in the shared helper, with an optional
+// `(?:[ \t]*\/\/[^\n]*)?` after each of the five statements' own `;` —
+// scoped to this file's own separator so the shared helper's ceiling, and
+// everything measured against it, is untouched.
 //
 // SCOPE, and not reopened after this round: the shape above is matched
 // under function, const/let/var arrow, and method-shorthand declarations
@@ -108,7 +132,18 @@ const PROSE_PIN = "prose-pin.mjs";
 // regex-based structural guard cannot enumerate every JS declaration syntax
 // and only needs to outlast the spellings a reintroduction has actually
 // taken, not every one it could someday take.
-const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*=>|\b(?!function\b|if\b|for\b|while\b|switch\b|catch\b|do\b|with\b|else\b)\w+\s*\((?:[^)]*)\))\s*\{\s*(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);\s*(?:const|let|var)\s+(\w+)\s*=\s*\4\.indexOf\((\w+),\s*\3\s*\+\s*\5\.length\);\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);\s*return\s+\4\.slice\(\3,\s*\6\);\s*\}/g;
+//
+// KNOWN-OPEN, deliberately not chased this round (#1422's own boundary: a
+// test-only guard has diminishing returns from hunting every regex edge
+// case): a `//` comment on the declaration line right after the opening
+// `{`; a trailing `/* ... */` block comment in place of `//` after any of
+// the five statements; a `//` or `/* ... */` comment inside the second
+// `indexOf`'s own argument list, between `\5.length` and its closing `)`.
+// All three bypass this detector entirely — measured directly against the
+// regex below, not asserted. None occur in this repo's own style today
+// (see the `commented` and `trailingComment` fixtures above for the style
+// that does occur); revisit only if a real file is measured to use one.
+const TWIN_SHAPE = /(?:function\s+\w+\s*\(([^)]*)\)|(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*=>|\b(?!function\b|if\b|for\b|while\b|switch\b|catch\b|do\b|with\b|else\b)\w+\s*\((?:[^)]*)\))\s*\{\s*(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.indexOf\((\w+)\);(?:[ \t]*\/\/[^\n]*)?\s*assert\.notEqual\(\3,\s*-1,[\s\S]*?\);(?:[ \t]*\/\/[^\n]*)?\s*(?:const|let|var)\s+(\w+)\s*=\s*\4\.indexOf\((\w+)(?:,\s*\3(?:\s*\+\s*\5\.length)?)?\);(?:[ \t]*\/\/[^\n]*)?\s*assert\.notEqual\(\6,\s*-1,[\s\S]*?\);(?:[ \t]*\/\/[^\n]*)?\s*return\s+\4\.slice\(\3,\s*\6\);(?:[ \t]*\/\/[^\n]*)?\s*\}/g;
 
 /** Every `between()`-shaped definition in `text`, wherever it lives. */
 function twinDefinitions(text) {
@@ -180,6 +215,62 @@ function twin(text, from, to, what) {
 }`;
   assert.deepEqual(twinDefinitions(commented), [{ src: "text", from: "from", to: "to" }]);
 
+  // #1422: a TRAILING `//` comment on one of the five statement lines, not
+  // a comment on its own line — `strip-comments.mjs` only blanks whole-line
+  // comments (its own documented ceiling), so this reaches TWIN_SHAPE with
+  // the comment text still attached to the statement. Measured miss: an
+  // earlier revision of TWIN_SHAPE matched none of this. TWIN_SHAPE has a
+  // separate optional trailing-comment allowance after each of its five
+  // statements; each case below isolates one, so deleting any single
+  // allowance turns exactly that one case red without disturbing the
+  // other four — measured directly, one position at a time.
+  const trailingCommentExpected = [{ src: "text", from: "from", to: "to" }];
+  const trailingCommentCases = {
+    "first indexOf": `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from); // note
+  assert.notEqual(at, -1, what);
+  let end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+}`,
+    "first assert.notEqual": `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from);
+  assert.notEqual(at, -1, what); // note
+  let end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+}`,
+    "second indexOf": `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from);
+  assert.notEqual(at, -1, what);
+  let end = text.indexOf(to, at + from.length); // note
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+}`,
+    "second assert.notEqual": `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from);
+  assert.notEqual(at, -1, what);
+  let end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what); // note
+  return text.slice(at, end);
+}`,
+    return: `
+function twin(text, from, to, what) {
+  let at = text.indexOf(from);
+  assert.notEqual(at, -1, what);
+  let end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end); // note
+}`,
+  };
+  for (const [label, source] of Object.entries(trailingCommentCases)) {
+    assert.deepEqual(twinDefinitions(source), trailingCommentExpected, `trailing comment after ${label}`);
+  }
+
   // Positive control, method-shorthand form — no real removed twin took
   // this shape, but a bare `name(...) { ... }` inside an object literal or
   // class must fire exactly as readily as a `function` declaration or an
@@ -210,13 +301,32 @@ var twin = (text, from, to, what) => {
   return text.slice(at, end);
 };`;
   assert.deepEqual(twinDefinitions(varForm), [{ src: "text", from: "from", to: "to" }]);
+
+  // Positive control, offset-less form — #1422: TWIN_SHAPE's second
+  // `indexOf` used to require the `AT + FROM.length` offset exactly;
+  // `fallbackSection()`'s own historical shape searched from `AT` alone
+  // and reached this detector completely undetected (measured live: zero
+  // offenders reported for that exact shape as a real scanned file). The
+  // offset argument is now optional, so a bare `AT` (or no offset at all)
+  // must fire exactly as readily as the full `AT + FROM.length` form,
+  // while the return-shape near-misses below remain excluded.
+  const offsetOnly = `
+function offsetless(text, from, to, what) {
+  const at = text.indexOf(from);
+  assert.notEqual(at, -1, what);
+  const end = text.indexOf(to, at);
+  assert.notEqual(end, -1, what);
+  return text.slice(at, end);
+}`;
+  assert.deepEqual(twinDefinitions(offsetOnly), [{ src: "text", from: "from", to: "to" }]);
 });
 
-test("the shape detector does not fire on the two measured near-misses", () => {
+test("the shape detector does not fire on the measured near-misses", () => {
   // Each changes one thing between() does not: stripped start anchor, or a
   // flattened return. See the header for which file each is modeled on.
-  // (fallbackSection()'s once-claimed missing-offset divergence was found
-  // NOT genuine — see the header — so it is no longer modeled here.)
+  // Neither isolates the offset backreference on its own — that's the
+  // `offsetOnly` positive control in the "fires" test above, now that the
+  // offset argument is optional rather than mandatory.
   const strippedStart = `
 function region() {
   const at = RUN_TEAM.indexOf(START);
