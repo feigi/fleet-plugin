@@ -75,6 +75,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase } from "./prose-pin.mjs";
 import { stripComments } from "./strip-comments.mjs";
+import { promptRenderer } from "./prompt-renderer.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 
@@ -159,22 +160,20 @@ const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableD
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
 
+// prompt-renderer.mjs owns the bounded-slice extraction (and both failure
+// messages, via prose-pin.mjs's `between()`), the backtick trim, and the
+// compile. Compiling is half the assertion: an unescaped `${` in the
+// prescribed array expansion either throws here or silently interpolates
+// away the very spelling the rule exists to teach.
 function renderTemplate(dir, file) {
-  const code = stripComments(readFileSync(join(REPO, dir, file), "utf8"));
-  const start = code.indexOf(TEMPLATE_START);
-  assert.notEqual(
-    start,
-    -1,
-    `${dir}/${file} no longer builds a refuter prompt opening \`Try to REFUTE this finding from PR #\` — either it was renamed or the verify fan-out is commented out; update this test or restore the prompt`,
-  );
-  const end = code.indexOf(TEMPLATE_END, start);
-  assert.notEqual(end, -1, `${dir}/${file}'s refuter agent() call no longer carries a \`verify:\` label after its prompt — update this test`);
-  const slice = code.slice(start, end);
-  const template = slice.slice(1, slice.lastIndexOf("`"));
-  // Compiling is half the assertion: an unescaped `${` in the prescribed array
-  // expansion either throws here or silently interpolates away the very spelling
-  // the rule exists to teach.
-  return new Function(...SCOPE, "return `" + template + "`")(
+  const RENDER = promptRenderer({
+    file: `${dir}/${file}`,
+    start: TEMPLATE_START,
+    end: TEMPLATE_END,
+    scope: SCOPE,
+    what: `${dir}/${file}'s rendered refuter prompt (opening \`Try to REFUTE this finding from PR #\`, labelled \`verify:\`)`,
+  });
+  return RENDER(
     7,
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
     { path: "/scr/snapshot-abc1234", head: "abc1234", runRoot: "/scr" },
