@@ -149,7 +149,18 @@ function roleFromNamePatterns(hay) {
   // exactly the category `fix-pr-<n>`'s applier already occupies here. It is
   // NOT `merge-bot`: that bucket's number is a WAVE, never a PR, and merge-bot
   // orchestrates a wave's PRs rather than resolving one directly.
-  if (/review pr|review-pr-|fix pr|fix-pr-|resolve pr|resolve-pr-/.test(hay)) return "reviewer";
+  //
+  // Only the NAME form `resolve-pr-` joins the alternation, deliberately
+  // narrower than the `review pr`/`fix pr` prose forms beside it: the two
+  // real meta.json descriptions above ("Resolve conflict on PR 1232",
+  // "Rebase and resolve conflicts for PR #1310") never contain the bare
+  // words "resolve pr" adjacently, so a `resolve pr` prose alternative would
+  // be untested reach rather than a measured pattern — and "resolve" is
+  // common enough in unrelated prose (a finisher applying reviewer
+  // "resolve"-shaped findings against "pr" work) that adding it ahead of the
+  // finisher/merge-bot checks below risked hijacking their classification on
+  // words alone, with no real row to justify it.
+  if (/review pr|review-pr-|fix pr|fix-pr-|resolve-pr-/.test(hay)) return "reviewer";
   if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return null;

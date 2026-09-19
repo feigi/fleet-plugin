@@ -166,7 +166,7 @@ export function normalizeModel(raw) {
 // unmatched finisher spelling once did (#1072).
 export function parseMemberName(name) {
   const s = String(name ?? "").trim().replace(/-(?:[a-z]|v\d+)$/, "");
-  let m = /^(?:fix|review|finish|finisher|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
+  let m = /^(?:fix|review|finish(?:er)?|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^finish(?:er)?-(\d+)$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };

@@ -200,9 +200,14 @@ test("resolve-pr-<n> books review spend, off the real dispatched name (#1250)", 
   // above are held to.
   assert.equal(classifyRole({ memberName: "resolve-pr-1232", description: "Resolve conflict on PR 1232" }), "reviewer");
   assert.equal(classifyRole({ memberName: "resolve-pr-1310", description: "Rebase and resolve conflicts for PR #1310" }), "reviewer");
-  // The prose form (a description reading "resolve pr" without the dispatch
-  // name carrying the number) books the same way `review pr`/`fix pr` do.
-  assert.equal(classifyRole({ spawnDepth: 0, description: "Resolve PR 1232 conflicts" }), "reviewer");
+  // The bare prose form ("resolve pr" with no name carrying the PR number)
+  // is deliberately NOT matched: neither real cited description above
+  // contains it adjacently ("resolve conflict on pr", "resolve conflicts
+  // for pr" — never "resolve pr" together), so it would be untested reach.
+  // Matching it ahead of the finisher check below would let an unrelated
+  // finisher's description that happens to mention "resolve" near "pr"
+  // hijack its classification away from its own name.
+  assert.equal(classifyRole({ memberName: "finisher-pr-436", description: "Resolve PR conflicts left by review findings" }), "finisher");
   // It must not be swept into merge-bot: this member's number is a PR, never
   // a wave, and merge-bot orchestrates a wave's PRs rather than resolving one.
   assert.equal(classifyRole({ memberName: "merge-bot-8", description: "Merge wave 8" }), "merge-bot");
