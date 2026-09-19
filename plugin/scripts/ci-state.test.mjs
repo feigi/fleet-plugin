@@ -1137,7 +1137,7 @@ test("no CI + --declare-no-ci: `jobs`/`missing` stay absent — the flag changes
 });
 
 // #890: the same one-line/one-terminator contract the verdict payload is held to
-// below, at the other call site that writes a payload to stdout. emit() appends
+// below, at the other call site that writes a payload to stdout. writeAll() appends
 // no newline of its own, so each site supplies its own: supplying none runs this
 // payload together with whatever the caller polling a rate-limited PR prints
 // next, and supplying two ends the output early for a reader that treats a blank
@@ -1368,17 +1368,20 @@ test("a payload that never reaches the buffer is emitted byte for byte as before
   assert.equal(r.stdout, `${JSON.stringify(r.payload)}\n`);
 });
 
-// The guard emit() puts around its write is what the comment above emit() calls
-// not optional, and until here nothing in this repo EXECUTED it: deleting the
-// try/catch outright and running this file, and then the whole fleet suite, left
-// both green (measured). The two tests above prove a SUCCESSFUL oversized write
-// survives; neither makes the write fail, so the mechanism was pinned by prose
-// alone. arg.test.mjs pins die()'s structurally identical guard this same way.
+// The guard writeAll() puts around its write is what arg.mjs calls not
+// optional, and until here nothing in this repo EXECUTED it from this script:
+// deleting the try/catch outright and running this file, and then the whole
+// fleet suite, left both green (measured). The two tests above prove a
+// SUCCESSFUL oversized write survives; neither makes the write fail, so the
+// mechanism was pinned by prose alone. arg.test.mjs pins the same guard from
+// die()'s side — and since #1549 it is literally the same code, which is why
+// this test stays: it is the only one that executes it through THIS script's
+// exit-code contract.
 //
 // The failure is forced deterministically rather than by racing a reader: the
 // child's stdout is /dev/null opened READ-only, so the first writeSync raises
 // EBADF. A different errno from the EAGAIN in the field, and the same and only
-// thing emit() promises about either — the message may be lost, the exit code
+// thing writeAll() promises about either — the message may be lost, the exit code
 // may not.
 //
 // Green is the discriminating verdict, and the only one that discriminates: with
@@ -1388,16 +1391,16 @@ test("a payload that never reaches the buffer is emitted byte for byte as before
 // as failing CI. That is the #299/#328 inversion itself, reproduced without the
 // race, so this discriminates on a machine where EAGAIN never fires. Measured
 // both ways: guarded exit 0, guard removed exit 1.
-test("emit() keeps the green exit code when its own write throws — the guard executed, not lifted", () => {
+test("the verdict write keeps the green exit code when it throws — the guard executed, not lifted", () => {
   const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW }, readOnlyStdout: true });
-  assert.equal(r.status, 0, `exit ${r.status}: emit()'s write threw and took the green verdict with it`);
+  assert.equal(r.status, 0, `exit ${r.status}: the verdict write threw and took the green verdict with it`);
 });
 
 // The verdict SUMMARY goes to fd 2, and fd 2 is the fd vlog's console.error has
 // already initialised a stream for — which is what puts it in O_NONBLOCK. A
 // non-blocking write to a full pipe SHORT-WRITES: it returns the count it
 // managed and throws nothing, so the catch above never fires and nothing is
-// logged. Measured against this same fixture before emit() consumed that return
+// logged. Measured against this same fixture before the write loop consumed that
 // value: the line arrived cut at one buffer with its trailing newline gone, in
 // this quiet mode and in the verbose one, while stdout and the exit code came
 // through untouched — the one channel the tests above cannot speak for.
@@ -1426,12 +1429,12 @@ test("the verdict line on stderr survives past one pipe buffer, its reasons whol
   assert.equal(r.status, 1, "the exit code must survive the write it follows");
 });
 
-// #901: the verdict summary is the emit() call site on fd 2, and the terminator
-// contract already held at the payload sites on stdout was never pinned here.
-// emit() appends no newline of its own, so each call site supplies its own:
-// supplying none runs this line together with whatever the caller prints next,
-// and supplying an extra ends the output early for a reader that treats a blank
-// line as the end of it.
+// #901: the verdict summary is the writeAll() call site on fd 2, and the
+// terminator contract already held at the payload sites on stdout was never
+// pinned here. writeAll() appends no newline of its own, so each call site
+// supplies its own: supplying none runs this line together with whatever the
+// caller prints next, and supplying an extra ends the output early for a
+// reader that treats a blank line as the end of it.
 //
 // The completeness assertion covering this same line cannot stand in for that.
 // It locates the line by splitting stderr on "\n", and splitting on the
@@ -1485,35 +1488,49 @@ test("the verdict summary on stderr carries exactly one newline of its own on ea
   );
 });
 
-// The shape pin. The test above executes the catch, and this one pins the LOOP
-// the catch sits inside — the two are independent: a body that catches
-// faithfully and still calls writeSync once satisfies the behavioural test and
-// reintroduces the short write, because a short write never throws.
+// The shape pin. The test above executes the guard, and this one pins that the
+// write still goes through the SHARED loop — the two are independent: a body
+// that catches faithfully and still calls writeSync once satisfies the
+// behavioural test and reintroduces the short write, because a short write
+// never throws.
 //
-// Derived through stripComments() rather than matched against raw source, and
-// deliberately not with a cleverer anchor: a `/m` regex over raw source is
-// satisfied by the correct shape sitting in a block comment, and `^(?!\s*//)`
-// closes neither escape (both measured, and strip-comments.mjs's own header
-// records them). Each fragment is anchored at a line start and joined with
-// `\s*^\s*` so a comment line added inside emit() does not redden this, and no
-// fragment is terminated with `$`, which over-fires on a trailing comment.
+// #1549: this file used to pin its own copy of that loop, with a regex
+// differing from candidates.test.mjs's and staleness.test.mjs's only in head
+// line, Buffer.from argument and fd. Three near-copies pinning three
+// hand-mirrored loops is exactly what that ticket removed — the loop's shape,
+// its EAGAIN cap and its short-write resume are now pinned AND executed once,
+// in arg.test.mjs, against arg.mjs's writeAll().
 //
-// The count assertion is what names the FILE when emit() is renamed or deleted:
-// the regex alone would then fail as an opaque match-against-undefined, and this
-// says which source to go and look at. It is deliberately not defending against
-// a shadowing second declaration — measured, a duplicate `function emit` at this
-// file's top level is a SyntaxError ("Identifier 'emit' has already been
-// declared") and the module system refuses it before any test runs, so the
-// lift-takes-first/JS-runs-last hazard does not reach this shape.
-test("emit() still consumes writeSync's return value — the loop, not just the catch", () => {
+// What is left for this file to pin is the half arg.test.mjs cannot see: that
+// ci-state.mjs still ROUTES through it. emit() was this script's own copy and
+// the only one of the three that never grew #889's retry cap, so the copy
+// coming BACK is the specific regression here — and it is invisible to every
+// behavioural test in this file, because a freshly hand-rolled loop behaves
+// identically on the day it is written and drifts only afterwards.
+//
+// Derived through stripComments() rather than matched against raw source: a
+// /m regex over raw source is satisfied by the correct shape sitting in a
+// block comment, and `^(?!\s*//)` closes neither escape (both measured, and
+// strip-comments.mjs's own header records them).
+test("ci-state.mjs routes every outbound write through arg.mjs's writeAll(), with no re-inlined loop of its own", () => {
   const source = stripComments(readFileSync(SCRIPT, "utf8"));
-  assert.equal(
-    source.match(/^\s*function emit\(/gm)?.length,
-    1,
-    "ci-state.mjs declares emit() more than once, or not at all — the pin below reads the first and the script runs the last",
-  );
   assert.match(
     source,
-    /^\s*function emit\(fd, text\) \{\s*^\s*let buf = Buffer\.from\(text\);\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(fd, buf\)\);/m,
+    /^import \{[^}]*\bwriteAll\b[^}]*\} from "\.\/arg\.mjs";/m,
+    "ci-state.mjs must import writeAll from ./arg.mjs rather than hand-rolling its own write loop",
+  );
+  // Measured: re-inlining an emit()-shaped loop into this file reds exactly
+  // this assertion and nothing else in the suite.
+  assert.equal(
+    source.match(/\bwriteSync\(/g),
+    null,
+    "ci-state.mjs calls writeSync directly again — every write here must go through writeAll(), whose loop and EAGAIN cap are pinned once in arg.test.mjs",
+  );
+  // ...and the write is actually THERE: without this, deleting the verdict
+  // write outright would satisfy the assertion above.
+  assert.match(
+    source,
+    /^writeAll\(1, `\$\{JSON\.stringify\(payload\)\}\\n`\);/m,
+    "the verdict payload must go out through writeAll() on fd 1 — the write every pipe-buffer test above is about",
   );
 });
