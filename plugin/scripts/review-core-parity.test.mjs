@@ -188,6 +188,7 @@ test("selectDimensions agrees on both sides", () => {
     { profile: "production" },
     { profile: "production", hasTests: false },
     { profile: "production", hasSrc: false },
+    { profile: "production", hasSrc: false, hasTests: false, hasConfig: true },
     { profile: "single-file" },
     { profile: "single-file", hasTests: true },
     { profile: "small", hasTests: true },

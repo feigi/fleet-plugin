@@ -1637,10 +1637,12 @@ another.
 `diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
 config, but that strictness cuts both ways and the size tier trims again on top.
 Measured: a docs PR that also adds one test file is profile `tests-only` and runs
-**three** (correctness+tests+comments), not six; a docs+config diff too big for
-the size tier runs correctness+comments without being docs-only at all; and any
-`single-file` or `small` profile trims to correctness+silent-failure+comments,
-keeping tests only when a test file is in the diff. `comments` is on that floor
+**three** (correctness+tests+comments), not six; a no-src, no-test diff that
+carries a config file keeps silent-failure at **any** size, so a docs+config diff
+too big for the size tier now runs correctness+silent-failure+comments, not
+correctness+comments; and any `single-file` or `small` profile trims to
+correctness+silent-failure+comments, keeping tests only when a test file is in
+the diff. `comments` is on that floor
 unconditionally since #218 — it used to need a docs FILE, and `classify()` scores
 any code extension `src` before it checks docs, so five production PRs whose whole
 substance was prose inside a `.js`/`.mjs`/`.sh` comment scored `docs: 0` and ran
