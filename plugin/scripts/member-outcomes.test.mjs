@@ -46,6 +46,18 @@ test("every pr-shaped member name yields a PR and no ticket", () => {
   assert.deepEqual(parseMemberName("finish-567"), { ticket: "", pr: "567" });
 });
 
+test("resolve-pr-<n> names a PR and no ticket (#1250)", () => {
+  // `resolve-pr-<n>` is the controller's conflict/rebase-resolver dispatch
+  // against an already-open PR — real recorded names, unrecognised before
+  // this fix: `resolve-pr-1232`, `resolve-pr-1310`. Unmatched, it fell
+  // through to `{ticket:"", pr:""}`, losing the join key into
+  // tier-outcomes.tsv.
+  assert.deepEqual(parseMemberName("resolve-pr-1232"), { ticket: "", pr: "1232" });
+  // The re-dispatch suffixes (#1482) apply to this family too, the same as
+  // every other PR-shaped name.
+  assert.deepEqual(parseMemberName("resolve-pr-1440-2"), { ticket: "", pr: "1440" });
+});
+
 test("merge-bot's number is a WAVE, so it is neither ticket nor pr", () => {
   // merge-bot-12 is the twelfth wave, not PR 12. Booking it as a pr would join
   // this row to an unrelated PR's verdict row.

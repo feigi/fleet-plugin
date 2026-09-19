@@ -4223,7 +4223,7 @@
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	implementer	impl-797	claude-opus-5	high	797		82423	21557	1166	30	agent-aimpl-797-751a16b296e676be	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	merge-bot	merge-bot-1-2	claude-opus-5	high			48558	686	16	3	agent-amerge-bot-1-2-9e67e58b19c57d03	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	merge-bot	merge-bot-1	claude-haiku-4-5-20251001				55603	638	103	11	agent-amerge-bot-1-3f421e8e45cd5609	claude	
-28488458-cedc-4303-84c7-35d809e43896	2026-09-09	other	resolve-pr-1310	claude-opus-5	high			44471	5008	316	19	agent-aresolve-pr-1310-49ca2f33bc5874d0	claude	
+28488458-cedc-4303-84c7-35d809e43896	2026-09-09	reviewer	resolve-pr-1310	claude-opus-5	high		1310	44471	5008	316	19	agent-aresolve-pr-1310-49ca2f33bc5874d0	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	pr-review-toolkit:comment-analyzer	claude-sonnet-5	high			145524	23695	825	88	workflows/wf_13c6eaf8-239/agent-a31230f0607a48e0d	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	pr-review-toolkit:code-reviewer	claude-opus-5	high			144830	9247	979	33	workflows/wf_13c6eaf8-239/agent-a35d910dbdc1a7173	claude	
 28488458-cedc-4303-84c7-35d809e43896	2026-09-09	specialist	workflow-subagent	claude-haiku-4-5-20251001				33852	2953	38	5	workflows/wf_13c6eaf8-239/agent-aae3cc1424c9ca9d1	claude	
@@ -8825,7 +8825,7 @@ caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-5	claude-opu
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-6	claude-opus-5	high			60455	2497	265	18	agent-amerge-bot-6-6a31e49b1d935928	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-7	claude-opus-5	high			63867	6744	520	23	agent-amerge-bot-7-9f9d910a07463b4f	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	merge-bot	merge-bot-8	claude-opus-5	high			58014	5160	211	18	agent-amerge-bot-8-682f45d2f3604e8f	claude	
-caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	other	resolve-pr-1232	claude-opus-5	high			86784	13952	586	35	agent-aresolve-pr-1232-4d2d23d071167d1b	claude	
+caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	reviewer	resolve-pr-1232	claude-opus-5	high		1232	86784	13952	586	35	agent-aresolve-pr-1232-4d2d23d071167d1b	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-opus-5	low			22438	432	55	5	workflows/wf_52c394c9-057/agent-a010dbcbd109677df	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-opus-5	low			46025	1011	69	6	workflows/wf_52c394c9-057/agent-a1201ba132684e3a6	claude	
 caf66206-51cd-4b02-b26d-d07bedae5dc5	2026-09-03	specialist	workflow-subagent	claude-haiku-4-5-20251001				32721	192	54	14	workflows/wf_52c394c9-057/agent-a1e089fd2a2d48561	claude	

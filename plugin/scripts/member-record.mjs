@@ -142,19 +142,31 @@ export function normalizeModel(raw) {
 // not do.
 //
 // A PR-shaped name's numeric suffix is a DIFFERENT case: `fix-pr-<n>`,
-// `review-pr-<n>` and `finisher-pr-<n>` carry exactly ONE number, the PR
-// itself, so a second trailing `-\d+` cannot be a second ticket the way
-// `impl-<ticket>-<n>`'s can — there is only ever one PR per such name. A
-// trailing `-\d+` there (`finisher-pr-1440-2`, `fix-pr-1281-2`) is the same
-// re-dispatch retry the letter and `-v<n>` suffixes above already cover, and
-// is now stripped for PR-shaped names only (#1482, measured: 476,202
-// cache-create tokens across 7 real rows fell through to a blank pr column
-// this way — more than the 37,580 the `-v<n>` fix above addressed). The
-// ticket-shaped `impl-<ticket>-<n>` family above is untouched: its
-// second-ticket ambiguity is real, and a PR-shaped name's is not.
+// `review-pr-<n>`, `finisher-pr-<n>` and `resolve-pr-<n>` carry exactly ONE
+// number, the PR itself, so a second trailing `-\d+` cannot be a second
+// ticket the way `impl-<ticket>-<n>`'s can — there is only ever one PR per
+// such name. A trailing `-\d+` there (`finisher-pr-1440-2`, `fix-pr-1281-2`)
+// is the same re-dispatch retry the letter and `-v<n>` suffixes above
+// already cover, and is now stripped for PR-shaped names only (#1482,
+// measured: 476,202 cache-create tokens across 7 real rows fell through to a
+// blank pr column this way — more than the 37,580 the `-v<n>` fix above
+// addressed). The ticket-shaped `impl-<ticket>-<n>` family above is
+// untouched: its second-ticket ambiguity is real, and a PR-shaped name's is
+// not.
+//
+// `resolve` joins the `-pr-` alternation for #1250: `resolve-pr-<n>` is a
+// controller-dispatched conflict/rebase resolver against an already-open PR
+// (measured meta.json descriptions: "Resolve conflict on PR 1232", "Rebase
+// and resolve conflicts for PR #1310") — the same shape as `fix-pr-<n>`'s
+// applier and `review-pr-<n>`'s reviewer, just not a name run-team's own
+// naming convention fixes, so it stays out of the canonical list in
+// SKILL.md/member-lifecycle.md the same way `finish-<n>`/`finisher-<n>` do.
+// Unrecognised, a `resolve-pr-<n>` member fell through to `{ticket:"",
+// pr:""}`, losing its join key into tier-outcomes.tsv exactly the way an
+// unmatched finisher spelling once did (#1072).
 export function parseMemberName(name) {
   const s = String(name ?? "").trim().replace(/-(?:[a-z]|v\d+)$/, "");
-  let m = /^(?:fix|review|finish|finisher)-pr-(\d+)(?:-\d+)?$/.exec(s);
+  let m = /^(?:fix|review|finish|finisher|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^finish(?:er)?-(\d+)$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };

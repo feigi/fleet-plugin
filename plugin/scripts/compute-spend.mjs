@@ -138,7 +138,18 @@ function roleFromNamePatterns(hay) {
   // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
-  if (/review pr|review-pr-|fix pr|fix-pr-/.test(hay)) return "reviewer";
+  //
+  // `resolve-pr-<n>` joins the same bucket (#1250): it is a controller
+  // dispatch against an ALREADY-OPEN PR, not new ticket work — measured
+  // meta.json descriptions "Resolve conflict on PR 1232" and "Rebase and
+  // resolve conflicts for PR #1310", the same rebase/conflict-resolver shape
+  // `run-team/SKILL.md` calls "a rebase-resolver" sent into an open PR's
+  // worktree. It carries no ticket, no wave number and no new-work verb —
+  // only a PR number — so it is remediation on that PR's path to merge,
+  // exactly the category `fix-pr-<n>`'s applier already occupies here. It is
+  // NOT `merge-bot`: that bucket's number is a WAVE, never a PR, and merge-bot
+  // orchestrates a wave's PRs rather than resolving one directly.
+  if (/review pr|review-pr-|fix pr|fix-pr-|resolve pr|resolve-pr-/.test(hay)) return "reviewer";
   if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
   if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
   return null;
