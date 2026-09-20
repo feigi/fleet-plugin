@@ -3775,17 +3775,20 @@ fi`,
  * binary. Modeled on inflight.test.mjs's own `registryRaceShim` (#694) and
  * still shimmed rather than slept for the same reason: this is the same
  * window inflight.sh measured at ~10ms, and a test that tries to hit it with
- * a sleep is a flake generator. The two copies have since diverged, though:
- * PR #1516 taught inflight.test.mjs's copy a `<fired>.failed` sentinel that
- * stamps when `mutation` itself exits nonzero, so its callers can assert the
- * mutation actually succeeded rather than trusting an on-disk witness alone;
- * this copy was not updated to match, so its callers below still assert only
- * the on-disk effect.
+ * a sleep is a flake generator.
  *
  * The sentinel keeps it to one shot — release-ticket.sh's own delete calls
  * shell out to git too, and a mutation that kept firing would never let the
  * run converge. Returned so a case can assert it actually fired: a shim that
- * silently stopped matching would turn the case into a test of nothing.
+ * silently stopped matching would turn the case into a test of nothing. A
+ * second sentinel, `<fired>.failed`, is stamped if `mutation` itself exits
+ * nonzero — firing is necessary but not sufficient evidence a real race was
+ * exercised: a mutation that fails after its target path already exists (or
+ * after some other partial effect) can still leave that on-disk trace behind
+ * with the registry never actually touched, so a case must assert this
+ * sentinel's absence alongside any on-disk witness, never the witness alone.
+ * (PR #1516 taught inflight.test.mjs's copy this same sentinel; #1533 ported
+ * it here, since the two copies had diverged.)
  */
 function registryRaceShim(r, mutation) {
   const fired = join(r.w, "..", "bin", "race-fired");
@@ -3793,7 +3796,7 @@ function registryRaceShim(r, mutation) {
   "worktree list --porcelain -z")
     if [ ! -e '${fired}' ]; then
       : > '${fired}'
-      ${mutation}
+      ${mutation} || : > '${fired}.failed'
     fi ;;
 esac`);
   return fired;
@@ -3846,6 +3849,8 @@ test("a sibling worktree ADD between the registry count and git's listing is abs
 
   const { code, json, stderr } = release(r, c);
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(`${fired}.failed`), false,
+    "the shim's add actually exited zero, otherwise no real race was exercised");
   assert.equal(code, 0, `a concurrent add must not abort a releasable claim: ${stderr}`);
   assert.doesNotMatch(stderr, /registry entries/, "no mismatch is reported at all — the recount absorbed it");
   assert.equal(json.released, true);
@@ -3872,6 +3877,8 @@ test("a sibling worktree REMOVE between the registry count and git's listing is 
 
   const { code, json, stderr } = release(r, c);
   assert.ok(existsSync(fired), "the shim fired: the mutation really landed in the window");
+  assert.equal(existsSync(`${fired}.failed`), false,
+    "the shim's remove actually exited zero, otherwise no real race was exercised");
   assert.equal(existsSync(sibling.wt), false,
     "the shim's mutation actually removed the sibling -- otherwise no real race was exercised");
   assert.equal(code, 0, `a concurrent remove must not abort a releasable claim: ${stderr}`);
