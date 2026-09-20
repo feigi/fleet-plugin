@@ -907,7 +907,13 @@ async function main() {
   const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since"];
   sweep([...VALUE_FLAGS, "open"]);
   const cmd = process.argv[2];
-  const ledgerFile = arg("ledger") || ".fleet/ledger.md";
+  // #1656: no default applied here any more — `build` and `serve` now each
+  // apply their own. `build` has no workspace instance to default against
+  // (no state directory, no board), so it keeps today's cwd-relative literal
+  // below. `serve` defaults against `resolveCockpitInstance()`'s stateDir
+  // instead, so an absent --ledger still points at the SAME workspace the
+  // served state directory does, rather than the caller's raw cwd.
+  const ledgerFile = arg("ledger");
 
   // #468: argPort()/has("open") used to run only inside serve(), so `build
   // --port abc` and `build --open=1` were accepted and silently ignored — the
@@ -987,7 +993,7 @@ async function main() {
   if (cmd === "build") {
     stray(VALUE_FLAGS, ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
-    const model = computeBoard(gather({ ledgerFile, prevFile }));
+    const model = computeBoard(gather({ ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
@@ -1074,7 +1080,7 @@ function canonical(p) {
  * defaultLedgerPath() already resolves the run's single ledger with, so the
  * board and the ledger cannot disagree about which run they belong to.
  */
-export function resolveCockpitInstance({ cwd, gitCommonDir, port } = {}) {
+export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port } = {}) {
   // `port != null`, never truthiness: --port 0 is a real request (an
   // ephemeral bind, #366/#435) and reading it as "absent" would derive a port
   // straight over the top of one the caller explicitly asked for.
@@ -1150,6 +1156,16 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   port = instance.port;
   const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
+  // #1656: the ledger's own default (ledger.mjs's defaultLedgerPath()) is
+  // never reached here — board.mjs always passes an explicit --file — so an
+  // absent --ledger has to be defaulted against the SAME instance the state
+  // directory came from, not a cwd-relative literal. A worktree or a
+  // subdirectory cwd previously left this pointing at a ledger.md that does
+  // not exist there, while the state directory (above) had already moved to
+  // the workspace: the board and the ledger could disagree about which run
+  // they belonged to, exactly what resolveCockpitInstance() exists to rule
+  // out (#1656 review).
+  ledgerFile = ledgerFile || join(stateDir, "ledger.md");
   // stateDir may not exist yet (e.g. no ledger.md written, fresh repo) — the
   // "read"-only ledger path never creates it, so serve() must.
   mkdirSync(stateDir, { recursive: true });
@@ -1165,8 +1181,7 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
       renameSync(tmp, jsonPath);
     } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
   };
-  tick();
-  const timer = setInterval(tick, interval * 1000);
+  let timer;
 
   const server = createBoardServer(stateDir);
   server.listen(port, () => {
@@ -1178,6 +1193,16 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
     const bound = server.address().port;
     console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
     if (open) tryRun("open", [`http://localhost:${bound}/`]);
+    // #1656: tick() writes into stateDir, which is now SHARED across every
+    // cwd that resolves to this same workspace. Ticking before the bind
+    // above succeeds meant a second cockpit that loses the race below still
+    // got one full write in — overwriting the live cockpit's board.json and
+    // resetting every ticket's dwell clock — before dying on EADDRINUSE.
+    // Moving both calls in here, gated on the listen callback that only
+    // fires once this process actually holds the port, is what keeps a
+    // process that never binds from touching the shared state at all.
+    tick();
+    timer = setInterval(tick, interval * 1000);
   });
   server.on("error", (e) => die(e.code === "EADDRINUSE"
     ? `port ${port}${instance.derived ? " (default)" : ""} in use — pass --port <n>` : e.message));
