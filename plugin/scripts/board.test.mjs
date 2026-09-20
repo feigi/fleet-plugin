@@ -11,6 +11,7 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText, resolveCockpitInstance } from "./board.mjs";
 import { stripComments } from "./strip-comments.mjs";
+import { gitEnv } from "./git-env.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -1366,6 +1367,26 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
   } finally { blocker.close(() => {}); }
 });
 
+// #1656 critical (survived review): tick() used to run and write board.json
+// BEFORE listen() confirmed the bind, so a process that loses this exact
+// race against another cockpit on the same shared state directory still got
+// one full write in before dying on EADDRINUSE — overwriting whatever the
+// live cockpit had just written. Binding first (server.listen()'s success
+// callback now owns tick()/setInterval()) is what this test pins: the loser
+// must leave the state directory exactly as untouched as a process that
+// never ran at all.
+test("CLI: a port already in use must not write board.json before the process dies", async () => {
+  const blocker = createServer();
+  const port = await new Promise((res) => blocker.listen(0, () => res(blocker.address().port)));
+  const opts = serveOpts();
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--port", String(port)]), opts);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(!existsSync(join(opts.cwd, ".fleet", "board.json")),
+      "the bind loser ticked and wrote board.json before dying on EADDRINUSE");
+  } finally { blocker.close(() => {}); }
+});
+
 // #366: `Number(x) || default` treated a non-numeric --port/--interval exactly
 // like an absent one — silently substituting the default with no refusal.
 // These pin the refusal itself, before listen() is ever reached.
@@ -1525,7 +1546,15 @@ for (const [name, args, stateDir, workspace] of [
   // process.cwd() instead would put the board under the test runner.
   ["a relative --git-common-dir resolves against the passed cwd, not process.cwd()",
     { cwd: "/w/repo", gitCommonDir: ".git" }, "/w/repo/.fleet", "/w/repo"],
-  ["git's trailing newline is not part of the path",
+  // Not a `.trim()` pin, despite the name's old claim: `dirname()` discards
+  // the newline together with the rest of the final path segment it rides
+  // on, wholesale, whether or not `.trim()` ran first — mutation-verified
+  // (#1656 review: removing `.trim()` here leaves every row in this table
+  // green). `.trim()`'s one load-bearing case is a value that is WHOLLY
+  // whitespace, pinned by the degrade rows below instead. Kept as a
+  // realistic-shape check: git really does answer `--git-common-dir` with a
+  // trailing newline, and this is what that answer resolves to.
+  ["a real git answer's trailing newline still resolves to the parent directory",
     { cwd: "/w/repo", gitCommonDir: "/w/repo/.git\n" }, "/w/repo/.fleet", "/w/repo"],
   // `--git-common-dir` answers with the MAIN checkout's git dir from inside a
   // linked worktree — that is the whole reason the rule is this one and not
@@ -1534,8 +1563,6 @@ for (const [name, args, stateDir, workspace] of [
   // one-run-one-workspace model rather than giving every member its own board.
   ["a linked worktree resolves to the main checkout, never its own directory",
     { cwd: "/w/repo/.worktrees/t", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
-  ["a second worktree of that repo lands on the very same state directory",
-    { cwd: "/w/repo/.worktrees/u", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
 ]) {
   test(`resolveCockpitInstance: ${name}`, () => {
     const r = resolveCockpitInstance(args);
@@ -1564,10 +1591,14 @@ for (const dir of ["/w/one", "/w/two", "/srv/fleet-plugin", "/Users/x/dev/repo"]
   });
 }
 
-// The other half of "two workspaces, two boards": a hash that collapses —
-// a constant, or one whose multiply has left integer range — keeps every row
-// above green while putting every workspace on one port. Fixed paths, so
-// this is deterministic: it cannot flake, it can only be wrong.
+// The other half of "two workspaces, two boards": a hash that collapses to a
+// constant keeps every row above green while putting every workspace on one
+// port — this test catches that. It does NOT reliably catch a precision-
+// losing variant (Math.imul replaced by a plain `*`): for these six fixed
+// paths that variant still lands on six distinct ports, so this row would
+// pass vacuously against it (mutation-verified, #1656 review). The dedicated
+// pinned-value test below exists to catch that case. Fixed paths, so both
+// tests are deterministic: they cannot flake, they can only be wrong.
 test("resolveCockpitInstance: different workspaces derive different ports", () => {
   const seen = new Map();
   for (const dir of ["/w/one", "/w/two", "/w/three", "/w/four", "/w/five", "/w/six"]) {
@@ -1576,6 +1607,20 @@ test("resolveCockpitInstance: different workspaces derive different ports", () =
       `${dir} and ${seen.get(port)} both derived ${port} — a hash that cannot separate two workspaces cannot give them two boards`);
     seen.set(port, dir);
   }
+});
+
+// workspaceHash() is not exported, so this pins the algorithm indirectly
+// through resolveCockpitInstance()'s derived port. 8337 was hand-computed by
+// re-deriving FNV-1a-with-Math.imul for the key "/fixed/workspace" in two
+// independent scripts (JS and Python, the latter with explicit 32-bit
+// unsigned-multiply/wrap semantics) and cross-checked against the real
+// function — it is NOT copied from this file's own module under test. A
+// Math.imul -> `*` mutation changes this key's hash and port (8337 -> 8355),
+// so — unlike the uniqueness test above — this one does catch it.
+test("resolveCockpitInstance: a fixed workspace pins the FNV-1a-with-Math.imul port exactly", () => {
+  const { port } = resolveCockpitInstance({ cwd: "/fixed/workspace", gitCommonDir: join("/fixed/workspace", ".git") });
+  assert.equal(port, 8337,
+    "port drifted off the hand-computed FNV-1a value for this fixed key — the hash algorithm itself changed");
 });
 
 // Without the realpath, a route to the workspace through a symlink — a
@@ -1669,9 +1714,7 @@ function gitRepo(prefix) {
   // `git init` exits 0 having re-inited whichever directory the variable
   // names, leaving this one silently not a repository (ledger.test.mjs hit
   // exactly that) — and the status check alone cannot see it.
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
+  const env = gitEnv();
   const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env });
   assert.equal(init.status, 0, "test setup: git init must succeed");
   assert.ok(existsSync(join(dir, ".git")), "test setup: git init must have created a repository HERE");
@@ -1738,13 +1781,19 @@ function serveProcess(cwd, bin) {
 // is already pinned deterministically in the rows above, and binding the
 // derived ports here would make the test depend on whether this machine
 // happens to hold either of them.
+//
+// Unlike every other `gitOnlyPath()` consumer, this test also symlinks node
+// onto the shim PATH (gh stays unreachable): gather()'s ledger read shells
+// out to a `node ledger.mjs` subprocess, and with node unreachable that read
+// always fails and every board here would show `tickets: []` regardless of
+// which ledger.md — or none at all — actually got read, making the ledger
+// fixture below assert nothing (#1656 review).
 test("CLI: two workspaces serve two live boards at once, each writing only its own state directory", async () => {
   const bin = gitOnlyPath(), repoA = gitRepo("board-ws-a-"), repoB = gitRepo("board-ws-b-");
+  symlinkSync(process.execPath, join(bin, "node"));
   const procs = [];
   try {
-    const env = { ...process.env };
-    delete env.GIT_DIR;
-    delete env.GIT_WORK_TREE;
+    const env = gitEnv();
     const git = (cwd, args) => {
       const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, stdio: "ignore", env });
       assert.equal(r.status, 0, `test setup: git ${args.join(" ")} must succeed`);
@@ -1753,6 +1802,18 @@ test("CLI: two workspaces serve two live boards at once, each writing only its o
     git(repoA, ["commit", "-q", "--allow-empty", "-m", "init"]);
     const worktree = join(repoA, "wt");
     git(repoA, ["worktree", "add", "-q", worktree, "-b", "side"]);
+
+    // #1656 critical (survived review): the served state directory moved to
+    // the workspace, but an unfixed default ledger path stayed cwd-relative
+    // — so a cockpit started from this worktree found no ledger there and
+    // silently served an EMPTY board into repoA's shared board.json. A row
+    // written into repoA's OWN `.fleet/ledger.md` (never the worktree's) is
+    // the only way to tell "read the right ledger" apart from "read no
+    // ledger and get an empty board either way": both look like `tickets: []`
+    // without it.
+    mkdirSync(join(repoA, ".fleet"), { recursive: true });
+    writeFileSync(join(repoA, ".fleet", "ledger.md"),
+      "# Fleet run ledger\n\n## Rows\n\n- #42 impl-1 build the thing\n\n## Filed\n\n## Ruled\n\n");
 
     const a = serveProcess(worktree, bin), b = serveProcess(repoB, bin);
     procs.push(a.p, b.p);
@@ -1764,6 +1825,10 @@ test("CLI: two workspaces serve two live boards at once, each writing only its o
       assert.ok(Array.isArray((await res.json()).tickets), `${label} served something that is not a board`);
     }
     assert.notEqual(urlA, urlB, "two concurrent boards cannot share one URL");
+
+    const boardA = await (await fetch(`${urlA}/board.json`)).json();
+    assert.ok(boardA.tickets.some((t) => t.issue === 42),
+      "the worktree's cockpit must read the MAIN checkout's ledger, not a cwd-relative one that does not exist under the worktree");
 
     assert.ok(existsSync(join(repoA, ".fleet", "board.json")),
       "the worktree's cockpit must write its MAIN checkout's state directory");
