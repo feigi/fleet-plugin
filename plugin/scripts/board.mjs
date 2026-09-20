@@ -1094,12 +1094,14 @@ export function faultText(e) {
 // managed and throw nothing at all — or throw EAGAIN outright, the same
 // failure #889 gave die() (arg.mjs) a bounded retry loop for, and PR #1523
 // then gave staleness.mjs's verdict() too. board.mjs has exactly one
-// writeSync call site — this one, not four — but among the fleet's four
-// (arg.mjs's die(), this one, ci-state.mjs's emit(), and staleness.mjs's
-// verdict()) it carries the largest single payload: a full stack, not a
-// one-line refusal — so it is the one most likely to collide with a
-// saturated pipe and lose the diagnostic silently. The loop below mirrors
-// those two: resume a short write where writeSync left off, and retry
+// writeSync call site — this one — and #1549 moved arg.mjs's die() and
+// staleness.mjs's verdict() onto the shared writeAll() and deleted
+// ci-state.mjs's emit() outright, so fault() is now the only script-level
+// function left hand-rolling this loop directly: it carries the largest
+// single payload of any of them, a full stack, not a one-line refusal — so
+// it is the one most likely to collide with a saturated pipe and lose the
+// diagnostic silently. The loop below mirrors writeAll()'s shape: resume a
+// short write where writeSync left off, and retry
 // EAGAIN after a 1ms Atomics.wait, capped at MAX_EAGAIN_RETRIES so a reader
 // that never drains still reaches process.exit() below instead of hanging
 // forever. A sibling script that wants a fault path adopts this shape

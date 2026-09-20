@@ -133,7 +133,9 @@ export function writeAll(fd, text) {
   let retries = 0;
   while (buf.length) {
     try {
-      buf = buf.subarray(writeSync(fd, buf));
+      const written = writeSync(fd, buf);
+      if (written > 0) retries = 0;
+      buf = buf.subarray(written);
     } catch (e) {
       if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) return false;
       Atomics.wait(IDLE, 0, 0, 1);

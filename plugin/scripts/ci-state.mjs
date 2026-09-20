@@ -89,7 +89,7 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // reading the code sees a normal verdict and the caller parsing stdout gets
 // bytes it cannot parse. writeSync goes straight to the fd, which is what
 // survives process.exit(). It also takes no newline of its own, which is why
-// every call site below supplies the one console.log used to append.
+// every call site below embeds its own trailing newline in the string it passes to writeAll().
 //
 // #1549: this file used to carry its own copy of that write loop, called
 // emit(), and the copy had DRIFTED — of the three hand-mirrored copies it was

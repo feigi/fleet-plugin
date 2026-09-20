@@ -312,11 +312,11 @@ test("die() resumes from a genuine short write and delivers the full message, no
 // that could hang. The loop is arg.mjs's writeAll() now, pinned ONCE here at
 // its definition rather than as three near-identical regexes in three files.
 //
-// The shape pin and the two executed tests below are not redundant. The pin
+// The shape pin and the executed tests below are not redundant. The pin
 // cannot see what the loop DELIVERS. The executed tests cannot see a loop
 // rewritten behaviourally-identically but hand-copied back into a caller,
 // which is the regression this ticket exists to prevent.
-test("writeAll()'s loop consumes writeSync's return value and caps its EAGAIN retry — the single definition the three callers share", () => {
+test("writeAll()'s loop consumes writeSync's return value, resets its EAGAIN retry count on progress, and caps the retry — the single definition the three callers share", () => {
   const source = stripComments(readFileSync(ARG_MODULE, "utf8"));
   // Names the FILE when writeAll is renamed or deleted: the regex alone would
   // then fail as an opaque match-against-undefined. The same standard
@@ -328,7 +328,7 @@ test("writeAll()'s loop consumes writeSync's return value and caps its EAGAIN re
   );
   assert.match(
     source,
-    /^\s*export function writeAll\(fd, text\) \{\s*^\s*let buf = Buffer\.from\(text\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(fd, buf\)\);/m,
+    /^\s*export function writeAll\(fd, text\) \{\s*^\s*let buf = Buffer\.from\(text\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*const written = writeSync\(fd, buf\);\s*^\s*if \(written > 0\) retries = 0;\s*^\s*buf = buf\.subarray\(written\);/m,
   );
   // The cap and the wait, which the fragment above stops short of — #889's
   // whole content, and the clause emit() was missing before #1549 merged the
@@ -426,6 +426,79 @@ test("writeAll() returns false when the write is genuinely lost, not merely dela
     JSON.parse(r.stdout),
     { ok: false },
     "writeAll must report a lost write rather than swallow it — verdict()'s could-not-check downgrade is built on this return",
+  );
+});
+
+// #1549 regression: retries must reset on forward progress, or the cap bounds
+// CUMULATIVE EAGAINs across the whole transfer instead of a no-progress
+// stall. A reader that is merely slow — alive, busy, but still draining —
+// must get its full payload; only a reader that never drains at all should
+// ever hit the cap.
+//
+// Reproduced with a real O_NONBLOCK pipe, not a mock: the child inherits the
+// write end (via `pass_fds`, not fd 2, so writeAll's own fd argument is
+// exercised directly), and the parent drains it in a thousand small,
+// deliberately spaced reads. Each read frees only a little room, so
+// writeSync's own call very often lands short and throws EAGAIN again right
+// behind it — enough EAGAINs across the whole transfer to blow #889's 200-
+// retry cap five times over — but the reader never stops moving, so no
+// single stall is ever more than a handful of retries deep. Measured against
+// the pre-fix shape (retries never reset): this same harness returns
+// `ok:false` after roughly 200 cumulative EAGAINs and only a fraction of the
+// payload lands, even though the reader kept draining the whole time.
+test("writeAll() delivers the full payload to a reader that is slow but keeps draining — progress must reset the retry count, not just extend it", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-slowdrain-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
+  const payloadBytes = 256_000;
+  writeFileSync(join(dir, "run.mjs"), [
+    'import { writeAll } from "./arg.mjs";',
+    "const fd = Number(process.argv[2]);",
+    `const ok = writeAll(fd, "z".repeat(${payloadBytes}));`,
+    "process.stdout.write(JSON.stringify({ ok }));",
+    "",
+  ].join("\n"));
+
+  const harness = [
+    "import fcntl, os, subprocess, sys, time",
+    "r, w = os.pipe()",
+    "fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
+    "proc = subprocess.Popen(sys.argv[1:] + [str(w)], pass_fds=(w,), stdout=subprocess.PIPE)",
+    "os.close(w)",
+    "data = b''",
+    "while True:",
+    "    try:",
+    "        chunk = os.read(r, 256)",
+    "    except OSError:",
+    "        break",
+    "    if not chunk:",
+    "        break",
+    "    data += chunk",
+    "    time.sleep(0.001)",
+    "try:",
+    "    out, _ = proc.communicate(timeout=30)",
+    "except subprocess.TimeoutExpired:",
+    "    proc.kill()",
+    "    proc.communicate()",
+    "    print('TIMEOUT')",
+    "    sys.exit(1)",
+    "print(out.decode())",
+    "print(f'BYTES_RECEIVED={len(data)}')",
+  ].join("\n");
+
+  const r = spawnSync("python3", ["-c", harness, process.execPath, join(dir, "run.mjs")], { encoding: "utf8" });
+  assert.doesNotMatch(r.stdout, /TIMEOUT/, `writeAll hung against a reader that never stopped draining: ${r.stdout} ${r.stderr}`);
+  assert.match(
+    r.stdout,
+    /\{"ok":true\}/,
+    `writeAll reported a lost write against a reader that kept draining the whole time — an un-reset retry counter does this: ${r.stdout}`,
+  );
+  const received = Number(r.stdout.match(/BYTES_RECEIVED=(\d+)/)?.[1]);
+  assert.equal(
+    received,
+    payloadBytes,
+    `the reader received ${received} of ${payloadBytes} bytes — writeAll gave up before the slow reader finished draining`,
   );
 });
 
