@@ -932,7 +932,13 @@ test("a torn line and an unreadable read on the SAME transcript each get their o
   mkdirSync(file);
   const errs = withStderr(() => gatherSpend({ dir }));
   assert.equal(errs.length, 1, "tick 2: the unreadable transcript, got " + JSON.stringify(errs));
-  assert.match(errs[0], /skipping agent-x\.jsonl/, "the skip gate's line, not the torn-line gate's");
+  // #1191: the message must name the FULL PATH the key uses, not just the
+  // basename — otherwise two session dirs sharing "agent-x.jsonl" produce
+  // byte-identical stderr lines and the operator cannot tell which broken
+  // directory is which. Escaped for RegExp since a tmpdir path is not a
+  // literal we can safely embed unescaped.
+  const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(errs[0], new RegExp(`skipping ${escapedFile}: `), "the skip gate's line, not the torn-line gate's, and it must name the directory the file lives under, not just the basename");
 });
 
 // The mutant every shape above survives: `turnById.clear()` in the per-line
