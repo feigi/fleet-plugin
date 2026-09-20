@@ -81,6 +81,17 @@ Three units with clean boundaries:
    the browser once (`--open`). Plus **`board.html`**, self-contained (inline CSS
    + vanilla JS, no CDN, no build), polling `/board.json`.
 
+   Which `.fleet/` and which port are **derived from the workspace** (#1582),
+   not from the cwd: the workspace is the directory holding the shared git dir
+   (`git rev-parse --git-common-dir`), the rule `ledger.mjs` already resolves
+   the run's one ledger with, so a cockpit started from a linked worktree
+   serves its main checkout's state and the board can never disagree with the
+   ledger about which run it belongs to. The port is a stable hash of that
+   workspace inside a small window above the original default, which keeps the
+   URL bookmarkable across runs while letting two workspaces hold two live
+   boards at once. An unresolvable git dir degrades to a cwd-relative `.fleet/`
+   and warns, in `defaultLedgerPath()`'s wording; it never dies.
+
 ```
 ledger.md ─┐
 gh issues ─┼─▶ board.mjs build ─▶ computeBoard() ─▶ board.json ─▶ board.html
