@@ -81,16 +81,15 @@ for (const [body, kind] of KINDS) {
 // ── the accept side: what the shared predicate must NOT refuse ───────────────
 //
 // `isJsonObject` replaced three inline `typeof v === "object" && v !== null &&
-// !Array.isArray(v)` spellings. A predicate written any narrower — `v
-// .constructor === Object`, `v instanceof Object` — refuses payloads that work
-// today, and the sidecar rows below are the ones that would go first: a
-// prototype-less object is exactly what a `JSON.parse` reviver or another
-// producer can hand this read, and it carries a perfectly readable
-// `description`.
+// !Array.isArray(v)` spellings. These rows pin that a well-formed sidecar —
+// whether it carries a `description`, an unrelated key instead, or nothing at
+// all — passes through unrefused: the guard's job is rejecting the wrong
+// SHAPE, not demanding any particular key.
 const ACCEPTED = [
   ['{"description":"Review PR 1"}', "Review PR 1"],
   // No `description` at all is not a fault — it is the ordinary sidecar of an
-  // agent that never set one, and readAgent falls back to the filename stem.
+  // agent that never set one, and gatherSpend's per-agent loop (not readAgent
+  // itself) falls back to the filename stem when it builds the label.
   // The guard must stay silent on it rather than treating absent as wrong-shape.
   ['{"spawnDepth":0}', "x"],
   ['{}', "x"],
