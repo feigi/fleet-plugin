@@ -51,6 +51,31 @@ const stray = makeStray(die);
 // `prev` — `prev` was read on `build` alone, and serve() never read it at
 // all. Hoisted in main() below, next to argPort()/has("open").
 
+// #1546: the "is this a plain JSON object" predicate and its kind word, one
+// copy for the three reads in this file that reject a parsed-but-wrong payload
+// WHOLE — readAgent's sidecar-meta read, gather's `--prev` payload, and
+// gather's per-entry `tickets[i]` check. Each carried its own inline copy of
+// both halves before, which is three places for one policy to drift in.
+//
+// TWO functions and not one, because `typeof` alone cannot name the fault the
+// predicate rejects: it answers "object" for `null` and for `[]` alike, and
+// those are exactly two of the three shapes turned away here, so a
+// `typeof`-only diagnostic distinguishes neither from a real object. That is
+// the same three-arm naming review-core.js's resolveDimensions keeps, for the
+// same reason.
+//
+// Not every payload-shape check in this file is one of these, and the others
+// are not oversights: mapCi's and tryParse's are both null-only, neither
+// refusing a payload for being an array or a scalar. A settled, deliberately
+// different policy — not a fourth caller waiting to be converted.
+function isJsonObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function jsonKind(v) {
+  return v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+}
+
 // #366: `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
 // default with no refusal. Same silent-fallback class as arg()'s own comment
@@ -540,8 +565,7 @@ function readAgent(file, metaFile) {
       // catch instead, which drops this agent's real tokens, counts it
       // `skipped`, and names the TRANSCRIPT in a fault that is the sidecar's.
       const m = JSON.parse(readFileSync(metaFile, "utf8"));
-      if (typeof m !== "object" || m === null || Array.isArray(m))
-        throw new TypeError(`expected a JSON object, got ${m === null ? "null" : Array.isArray(m) ? "array" : typeof m}`);
+      if (!isJsonObject(m)) throw new TypeError(`expected a JSON object, got ${jsonKind(m)}`);
       meta = m;
     }
   }
@@ -739,10 +763,10 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
       // none of which is a board; `null` in particular is absent, not an
       // object, and `typeof null` alone would wave it through. Same check and
       // same wording as readAgent's sidecar-meta read, which is this repo's
-      // precedent for rejecting a parsed-but-wrong payload at its own read.
+      // precedent for rejecting a parsed-but-wrong payload at its own read —
+      // since #1546 literally the same, both calling the shared predicate.
       const p = JSON.parse(readFileSync(prevFile, "utf8"));
-      if (typeof p !== "object" || p === null || Array.isArray(p))
-        throw new TypeError(`expected a JSON object, got ${p === null ? "null" : Array.isArray(p) ? "array" : typeof p}`);
+      if (!isJsonObject(p)) throw new TypeError(`expected a JSON object, got ${jsonKind(p)}`);
       // Nullish `tickets` is ABSENT and stays usable: `|| []` reads it as the
       // empty carry-forward, which is what a board with no PRs on it says.
       // Only a present-and-wrong-typed one is a fault.
@@ -758,11 +782,9 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
         // one payload class in this file — mapCi's null-only guard and tryParse's
         // unguarded read are the other two — rather than the reject-whole-payload
         // policy this guard already shares with readAgent's sidecar-meta read.
-        const bad = p.tickets.findIndex((t) => typeof t !== "object" || t === null || Array.isArray(t));
-        if (bad !== -1) {
-          const t = p.tickets[bad];
-          throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${t === null ? "null" : Array.isArray(t) ? "array" : typeof t}`);
-        }
+        const bad = p.tickets.findIndex((t) => !isJsonObject(t));
+        if (bad !== -1)
+          throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${jsonKind(p.tickets[bad])}`);
       }
       prev = p;
     }
