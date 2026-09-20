@@ -10,13 +10,14 @@
 // whole model. It is telemetry, kept strictly to the side: it can only ever
 // populate or omit `spend`, never change a ticket's stage.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { gitEnv } from "./git-env.mjs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:http";
 import { inspect } from "node:util";
 
@@ -906,7 +907,13 @@ async function main() {
   const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since"];
   sweep([...VALUE_FLAGS, "open"]);
   const cmd = process.argv[2];
-  const ledgerFile = arg("ledger") || ".fleet/ledger.md";
+  // #1656: no default applied here any more — `build` and `serve` now each
+  // apply their own. `build` has no workspace instance to default against
+  // (no state directory, no board), so it keeps today's cwd-relative literal
+  // below. `serve` defaults against `resolveCockpitInstance()`'s stateDir
+  // instead, so an absent --ledger still points at the SAME workspace the
+  // served state directory does, rather than the caller's raw cwd.
+  const ledgerFile = arg("ledger");
 
   // #468: argPort()/has("open") used to run only inside serve(), so `build
   // --port abc` and `build --open=1` were accepted and silently ignored — the
@@ -986,7 +993,7 @@ async function main() {
   if (cmd === "build") {
     stray(VALUE_FLAGS, ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
-    const model = computeBoard(gather({ ledgerFile, prevFile }));
+    const model = computeBoard(gather({ ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
@@ -1012,25 +1019,153 @@ export function createBoardServer(dir) {
   });
 }
 
+// A cockpit instance is identified by its WORKSPACE — the directory holding
+// the shared git dir — not by the process's cwd and not by the machine. Two
+// workspaces therefore get two boards on two ports, both live and neither
+// aware of the other, and one workspace gets the SAME port on every run, so
+// the URL survives runs, reboots and node versions.
+//
+// BASE is the port this file hardcoded before any of this existed, so the
+// single-workspace case keeps the familiar URL. SPAN is deliberately narrow:
+// the range an operator has to scan is what widening it costs, and a
+// collision between two DIFFERENT workspaces is out of this seam's scope —
+// nothing here reuses, hands off or falls back off a port already held, and
+// serve()'s pre-existing EADDRINUSE refusal still owns that case.
+const PORT_BASE = 8123;
+const PORT_SPAN = 512;
+
+// FNV-1a, 32-bit, written out inline. Three properties this needs that no
+// crypto digest and no Math.random has together: stable across node versions
+// and across machines (nothing in here reads the engine, the host or the
+// clock), dependency-free, and cheap enough to run on every start. Math.imul
+// is the whole reason it is spelled this way — a plain `h * 0x01000193`
+// leaves exact integer range after two rounds and silently stops being FNV.
+// `>>> 0` is load-bearing, not decoration: without it `h` stays SIGNED, so
+// `h % PORT_SPAN` can come back negative and the derived port lands BELOW
+// base, outside the window this function's own contract promises.
+function workspaceHash(key) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+// realpath, except that a path which does not resolve is not a failure here:
+// the caller still gets a usable key, just an uncanonicalised one. A
+// workspace directory that has been removed out from under a running cockpit
+// must not turn instance resolution into a throw. Canonicalising at all is
+// what makes a symlinked route to one workspace derive that workspace's port
+// instead of a second, private one.
+function canonical(p) {
+  try { return realpathSync(p); } catch { return p; }
+}
+
+/**
+ * The cockpit's instance seam, and the only one. Given a cwd, the string
+ * `git rev-parse --git-common-dir` answered with — INJECTED, never read in
+ * here, which is what keeps the worktree case and the resolution-failed case
+ * both plain table rows — and an explicitly requested port if there was one,
+ * decide which state directory this cockpit serves and which port it binds.
+ *
+ * Pure: it listens to nothing, spawns nothing and writes nothing, so every
+ * branch below is reachable from a test with no git repo and no socket. The
+ * one thing it reads is realpath, which canonicalisation requires and which
+ * cannot fail the call.
+ *
+ * `--git-common-dir` answers with the MAIN checkout's git dir from inside a
+ * linked worktree, so every worktree of one repo resolves to ONE state
+ * directory — the same one-run-one-workspace model ledger.mjs's
+ * defaultLedgerPath() already resolves the run's single ledger with, so the
+ * board and the ledger cannot disagree about which run they belong to.
+ */
+export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port } = {}) {
+  // `port != null`, never truthiness: --port 0 is a real request (an
+  // ephemeral bind, #366/#435) and reading it as "absent" would derive a port
+  // straight over the top of one the caller explicitly asked for.
+  const forced = port != null;
+  const common = String(gitCommonDir ?? "").trim();
+  if (!common) {
+    // Degrade, never die: a non-git or otherwise unusual checkout still gets
+    // a board. The wording is defaultLedgerPath()'s rather than a second
+    // dialect for the same failure, trailing parenthetical included — that
+    // parenthetical names what is degraded HERE, which is not what is
+    // degraded there. No cause is interpolated where the ledger interpolates
+    // one: this function never ran the probe, so it has none to name, and the
+    // ledger's own template already emits exactly this arm when its cause is
+    // empty.
+    console.error(`${NAME}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet (a second cockpit in another workspace may collide on this port and this state directory)`);
+    // Absolute, like the resolved arm, but anchored on the cwd — which is
+    // what "cwd-relative" resolves to and what this script's fs calls did
+    // with the bare `.fleet` they used before. No workspace was established,
+    // so there is no key to hash and the port is BASE: today's default,
+    // unchanged, for the case that used to be the only case.
+    return { stateDir: join(cwd, ".fleet"), workspace: null, port: forced ? port : PORT_BASE, derived: !forced };
+  }
+  // `resolve(cwd, …)` rather than resolve()'s implicit process.cwd(): git
+  // answers this RELATIVE (a bare `.git`) when it runs from a checkout's top
+  // level, and the cwd that was relative to is an argument here, not ambient.
+  const workspace = canonical(dirname(resolve(cwd, common)));
+  return {
+    stateDir: join(workspace, ".fleet"),
+    workspace,
+    port: forced ? port : PORT_BASE + (workspaceHash(workspace) % PORT_SPAN),
+    derived: !forced,
+  };
+}
+
+// The impure half, deliberately outside the seam above. Bounded for the
+// reason #1199 bounded the ledger's identical probe: an unbounded git that
+// never returns hangs serve() before it binds anything, with nothing on
+// stderr to say why. Ambient GIT_DIR/GIT_WORK_TREE scrubbed (#1599) — either
+// one answers `--git-common-dir` for a DIFFERENT repository, which would
+// serve this cockpit out of someone else's workspace at exit 0, in silence.
+// A non-zero exit, a stall and git missing entirely all land on "" and take
+// the degrade arm above; the seam is total over whatever comes back.
+const GIT_TIMEOUT_MS = 10_000;
+function gitCommonDir() {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
+  return r.status === 0 ? r.stdout : "";
+}
+
 export async function serve({ ledgerFile, port, interval, open } = {}) {
-  // A --port we cannot use (absent) falls back to 8123. Keep which of the two
-  // it was: naming the substituted default bare in the bind error below reads
-  // as "the port you asked for is taken" and sends a caller who DID pass
-  // --port hunting a process on a port they never chose (#169 review). A
-  // GIVEN-but-invalid value is refused outright by argPort(), never reaches
-  // here. `??` over `||` is shape, not a guarantee: #366 is scoped to the argv
-  // path, where `port` is always undefined and the two operators are
-  // identical, and the one place that reads portGiven as a yes/no rather than
-  // for its value — the bind error below — truthiness-tests it, so a
-  // caller-passed 0 would read as the default there regardless. Nothing pins
-  // the difference; do not cite it as one.
+  // Both the served state directory and the port come from
+  // resolveCockpitInstance() now, rather than a cwd-relative `.fleet` and a
+  // constant 8123. That is what lets two workspaces run two boards at once
+  // without either writing into the other's state directory, and it ties the
+  // board to the same workspace the ledger resolves itself against.
+  //
+  // A GIVEN-but-invalid --port is refused outright by argPort() and never
+  // reaches here; an ABSENT one leaves `portGiven` nullish, which is how the
+  // seam is told to derive rather than obey. `??` and not `||`, for #366's
+  // reason: --port 0 is a legal ephemeral bind and `||` would discard it.
+  //
+  // The bind error distinguishes a port the caller chose from one this
+  // script did, because naming a derived port bare reads as "the port you
+  // asked for is taken" and sends a caller who DID pass --port hunting a
+  // process on a port they never chose (#169 review). It now reads
+  // `instance.derived` rather than truthiness-testing `portGiven`, which
+  // fixes the one case the old spelling got wrong and nothing pinned: an
+  // explicit `--port 0` is falsy, so it used to be announced as "(default)".
   const portGiven = port ?? argPort();
-  port = portGiven ?? 8123;
   interval = interval ?? argInterval() ?? 15;
   open = open ?? has("open");
   const { computeBoard } = await import("./compute-board.mjs");
-  const stateDir = ".fleet";
+  const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir(), port: portGiven });
+  port = instance.port;
+  const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
+  // #1656: the ledger's own default (ledger.mjs's defaultLedgerPath()) is
+  // never reached here — board.mjs always passes an explicit --file — so an
+  // absent --ledger has to be defaulted against the SAME instance the state
+  // directory came from, not a cwd-relative literal. A worktree or a
+  // subdirectory cwd previously left this pointing at a ledger.md that does
+  // not exist there, while the state directory (above) had already moved to
+  // the workspace: the board and the ledger could disagree about which run
+  // they belonged to, exactly what resolveCockpitInstance() exists to rule
+  // out (#1656 review).
+  ledgerFile = ledgerFile || join(stateDir, "ledger.md");
   // stateDir may not exist yet (e.g. no ledger.md written, fresh repo) — the
   // "read"-only ledger path never creates it, so serve() must.
   mkdirSync(stateDir, { recursive: true });
@@ -1046,8 +1181,7 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
       renameSync(tmp, jsonPath);
     } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
   };
-  tick();
-  const timer = setInterval(tick, interval * 1000);
+  let timer;
 
   const server = createBoardServer(stateDir);
   server.listen(port, () => {
@@ -1059,9 +1193,19 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
     const bound = server.address().port;
     console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
     if (open) tryRun("open", [`http://localhost:${bound}/`]);
+    // #1656: tick() writes into stateDir, which is now SHARED across every
+    // cwd that resolves to this same workspace. Ticking before the bind
+    // above succeeds meant a second cockpit that loses the race below still
+    // got one full write in — overwriting the live cockpit's board.json and
+    // resetting every ticket's dwell clock — before dying on EADDRINUSE.
+    // Moving both calls in here, gated on the listen callback that only
+    // fires once this process actually holds the port, is what keeps a
+    // process that never binds from touching the shared state at all.
+    tick();
+    timer = setInterval(tick, interval * 1000);
   });
   server.on("error", (e) => die(e.code === "EADDRINUSE"
-    ? `port ${port}${portGiven ? "" : " (default)"} in use — pass --port <n>` : e.message));
+    ? `port ${port}${instance.derived ? " (default)" : ""} in use — pass --port <n>` : e.message));
 
   const stop = () => {
     clearInterval(timer);

@@ -3,14 +3,15 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText } from "./board.mjs";
+import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText, resolveCockpitInstance } from "./board.mjs";
 import { stripComments } from "./strip-comments.mjs";
+import { gitEnv } from "./git-env.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -1366,6 +1367,26 @@ test("CLI: serve does NOT call a port the caller really passed a default", async
   } finally { blocker.close(() => {}); }
 });
 
+// #1656 critical (survived review): tick() used to run and write board.json
+// BEFORE listen() confirmed the bind, so a process that loses this exact
+// race against another cockpit on the same shared state directory still got
+// one full write in before dying on EADDRINUSE — overwriting whatever the
+// live cockpit had just written. Binding first (server.listen()'s success
+// callback now owns tick()/setInterval()) is what this test pins: the loser
+// must leave the state directory exactly as untouched as a process that
+// never ran at all.
+test("CLI: a port already in use must not write board.json before the process dies", async () => {
+  const blocker = createServer();
+  const port = await new Promise((res) => blocker.listen(0, () => res(blocker.address().port)));
+  const opts = serveOpts();
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--port", String(port)]), opts);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(!existsSync(join(opts.cwd, ".fleet", "board.json")),
+      "the bind loser ticked and wrote board.json before dying on EADDRINUSE");
+  } finally { blocker.close(() => {}); }
+});
+
 // #366: `Number(x) || default` treated a non-numeric --port/--interval exactly
 // like an absent one — silently substituting the default with no refusal.
 // These pin the refusal itself, before listen() is ever reached.
@@ -1494,6 +1515,331 @@ test("CLI: serve refuses a stray positional the same way build does", () => {
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "junk"]), serveOpts());
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument 'junk'/);
+});
+
+// ---------------------------------------------------------------------------
+// #1582: cockpit instance resolution. A cockpit instance is identified by its
+// WORKSPACE — the directory holding the shared git dir, the same
+// `--git-common-dir` rule ledger.mjs's defaultLedgerPath() already resolves
+// the run's one ledger with — so two workspaces get two boards on two ports
+// and one workspace gets the SAME port on every run, making the URL
+// bookmarkable across runs, reboots and node versions.
+//
+// resolveCockpitInstance() takes the git-common-dir string as an ARGUMENT
+// rather than reading it, which is what turns the worktree case and the
+// resolution-failed case into plain rows here instead of two fixture
+// repositories apiece.
+//
+// Why these rows and not only a live probe: every serve() spawn above runs
+// with PATH stripped to an empty dir, so git is unreachable and all of them
+// take the DEGRADE arm. A green CLI section above is evidence about that arm
+// and no other — the resolved arm is reached in the rows below, and
+// end-to-end by the two spawns at the bottom, which put a git shim back on
+// PATH on purpose.
+// ---------------------------------------------------------------------------
+
+for (const [name, args, stateDir, workspace] of [
+  ["an absolute --git-common-dir names the checkout holding it",
+    { cwd: "/w/repo", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
+  // git answers RELATIVE from a checkout's top level, and the cwd it is
+  // relative to is an argument here — a resolve() that reached for
+  // process.cwd() instead would put the board under the test runner.
+  ["a relative --git-common-dir resolves against the passed cwd, not process.cwd()",
+    { cwd: "/w/repo", gitCommonDir: ".git" }, "/w/repo/.fleet", "/w/repo"],
+  // Not a `.trim()` pin, despite the name's old claim: `dirname()` discards
+  // the newline together with the rest of the final path segment it rides
+  // on, wholesale, whether or not `.trim()` ran first — mutation-verified
+  // (#1656 review: removing `.trim()` here leaves every row in this table
+  // green). `.trim()`'s one load-bearing case is a value that is WHOLLY
+  // whitespace, pinned by the degrade rows below instead. Kept as a
+  // realistic-shape check: git really does answer `--git-common-dir` with a
+  // trailing newline, and this is what that answer resolves to.
+  ["a real git answer's trailing newline still resolves to the parent directory",
+    { cwd: "/w/repo", gitCommonDir: "/w/repo/.git\n" }, "/w/repo/.fleet", "/w/repo"],
+  // `--git-common-dir` answers with the MAIN checkout's git dir from inside a
+  // linked worktree — that is the whole reason the rule is this one and not
+  // `--git-dir`, which names the worktree's own admin directory. Two
+  // worktrees therefore share one state directory, matching the ledger's
+  // one-run-one-workspace model rather than giving every member its own board.
+  ["a linked worktree resolves to the main checkout, never its own directory",
+    { cwd: "/w/repo/.worktrees/t", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
+]) {
+  test(`resolveCockpitInstance: ${name}`, () => {
+    const r = resolveCockpitInstance(args);
+    assert.equal(r.stateDir, stateDir);
+    assert.equal(r.workspace, workspace);
+  });
+}
+
+// The window is written out literally rather than imported from board.mjs:
+// these two numbers ARE the contract. BASE is the port the cockpit served on
+// before any of this existed, so a silent change to it breaks every bookmark
+// the ticket exists to preserve, and a test that read both from the module
+// under test could not notice either one moving.
+const PORT_BASE = 8123, PORT_SPAN = 512;
+
+for (const dir of ["/w/one", "/w/two", "/srv/fleet-plugin", "/Users/x/dev/repo"]) {
+  test(`resolveCockpitInstance: ${dir} derives one stable port inside [${PORT_BASE}, ${PORT_BASE + PORT_SPAN})`, () => {
+    const first = resolveCockpitInstance({ cwd: dir, gitCommonDir: join(dir, ".git") });
+    // Same workspace, different cwd: the port follows the workspace, so a
+    // member running from elsewhere in the tree must land on the same board.
+    const again = resolveCockpitInstance({ cwd: "/somewhere/else", gitCommonDir: join(dir, ".git") });
+    assert.equal(first.port, again.port, "the port must follow the workspace, not the cwd");
+    assert.equal(first.derived, true, "nothing forced this port, so it is a derived one");
+    assert.ok(first.port >= PORT_BASE && first.port < PORT_BASE + PORT_SPAN,
+      `${dir} derived ${first.port}, outside [${PORT_BASE}, ${PORT_BASE + PORT_SPAN}) — the unsigned coercion on the hash is what keeps it in the window`);
+  });
+}
+
+// The other half of "two workspaces, two boards": a hash that collapses to a
+// constant keeps every row above green while putting every workspace on one
+// port — this test catches that. It does NOT reliably catch a precision-
+// losing variant (Math.imul replaced by a plain `*`): for these six fixed
+// paths that variant still lands on six distinct ports, so this row would
+// pass vacuously against it (mutation-verified, #1656 review). The dedicated
+// pinned-value test below exists to catch that case. Fixed paths, so both
+// tests are deterministic: they cannot flake, they can only be wrong.
+test("resolveCockpitInstance: different workspaces derive different ports", () => {
+  const seen = new Map();
+  for (const dir of ["/w/one", "/w/two", "/w/three", "/w/four", "/w/five", "/w/six"]) {
+    const { port } = resolveCockpitInstance({ cwd: dir, gitCommonDir: join(dir, ".git") });
+    assert.ok(!seen.has(port),
+      `${dir} and ${seen.get(port)} both derived ${port} — a hash that cannot separate two workspaces cannot give them two boards`);
+    seen.set(port, dir);
+  }
+});
+
+// workspaceHash() is not exported, so this pins the algorithm indirectly
+// through resolveCockpitInstance()'s derived port. 8337 was hand-computed by
+// re-deriving FNV-1a-with-Math.imul for the key "/fixed/workspace" in two
+// independent scripts (JS and Python, the latter with explicit 32-bit
+// unsigned-multiply/wrap semantics) and cross-checked against the real
+// function — it is NOT copied from this file's own module under test. A
+// Math.imul -> `*` mutation changes this key's hash and port (8337 -> 8355),
+// so — unlike the uniqueness test above — this one does catch it.
+test("resolveCockpitInstance: a fixed workspace pins the FNV-1a-with-Math.imul port exactly", () => {
+  const { port } = resolveCockpitInstance({ cwd: "/fixed/workspace", gitCommonDir: join("/fixed/workspace", ".git") });
+  assert.equal(port, 8337,
+    "port drifted off the hand-computed FNV-1a value for this fixed key — the hash algorithm itself changed");
+});
+
+// Without the realpath, a route to the workspace through a symlink — a
+// symlinked home, /var vs /private/var on this very platform — derives a
+// SECOND port and a second state directory for a workspace already being
+// served, which is the collision this ticket exists to prevent.
+test("resolveCockpitInstance: a symlinked route to one workspace derives the canonical form's port", () => {
+  const root = mkdtempSync(join(tmpdir(), "board-ws-link-"));
+  try {
+    const real = join(root, "repo");
+    mkdirSync(join(real, ".git"), { recursive: true });
+    const link = join(root, "link");
+    symlinkSync(real, link);
+    const direct = resolveCockpitInstance({ cwd: real, gitCommonDir: join(real, ".git") });
+    const viaLink = resolveCockpitInstance({ cwd: link, gitCommonDir: join(link, ".git") });
+    assert.equal(viaLink.workspace, direct.workspace, "the symlinked route must canonicalise onto the same workspace key");
+    assert.equal(viaLink.port, direct.port);
+    assert.equal(viaLink.stateDir, direct.stateDir);
+    // …and the key is the CANONICAL path, not merely the two sides agreeing
+    // because neither was canonicalised at all.
+    assert.equal(direct.workspace, realpathSync(real));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// The false-positive half of this ticket. Deriving is the new behaviour, and
+// the way to get it wrong is to derive over the top of a port the caller
+// chose. 0 is a row on purpose: it is a legal ephemeral bind (#366/#435) and
+// it is FALSY, so any truthiness test in place of `port != null` silently
+// replaces it with a derived port and `--port 0` stops meaning anything.
+// 8123 is a row for the opposite reason — it is the base, so only `derived`
+// can tell a forced one from a derived one there.
+for (const port of [0, 8123, 65535]) {
+  test(`resolveCockpitInstance: --port ${port} is returned verbatim and marked not derived`, () => {
+    const r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir: "/w/repo/.git", port });
+    assert.equal(r.port, port);
+    assert.equal(r.derived, false);
+    // Forcing the port forces the port — the state directory still follows
+    // the workspace.
+    assert.equal(r.stateDir, "/w/repo/.fleet");
+  });
+}
+
+// An unresolvable shared git dir degrades to a cwd-relative state directory
+// with a null workspace and says so; a non-git or otherwise unusual checkout
+// never dies for it. The wording is defaultLedgerPath()'s own — one dialect
+// for one failure, so an operator who has seen the ledger's line recognises
+// this one rather than learning a second phrasing of it.
+for (const [name, gitCommonDir] of [
+  ["git exited non-zero, so the probe handed back nothing", ""],
+  ["no probe ran at all", undefined],
+  ["whitespace is not a path", "  \n "],
+]) {
+  test(`resolveCockpitInstance: ${name} — degrades to cwd, warns, never throws`, () => {
+    let r;
+    const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir }); });
+    assert.equal(r.workspace, null, "no workspace was established, so none may be claimed");
+    assert.equal(r.stateDir, "/w/cwd/.fleet", "the fallback is cwd-relative — the behaviour this file had before #1582");
+    assert.equal(r.port, PORT_BASE, "with no workspace to hash there is nothing to derive from, so the port is the familiar default");
+    assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
+    assert.match(errs[0], /WARNING could not resolve --git-common-dir/,
+      "the ledger's existing fail-loud wording, not a second dialect for the same failure");
+    assert.match(errs[0], /using cwd-relative/);
+  });
+}
+
+// The degrade arm has its own copy of the forced/derived decision, so a
+// mutation that drops it there is invisible to the rows above: a caller who
+// passed --port outside a git checkout would silently get 8123 instead.
+test("resolveCockpitInstance: an explicit port survives the degrade path too", () => {
+  let r;
+  const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir: "", port: 4242 }); });
+  assert.equal(r.port, 4242);
+  assert.equal(r.derived, false);
+  assert.equal(errs.length, 1, "the state directory still degraded, so the warning still belongs");
+});
+
+// A PATH carrying git and nothing else. The resolved arm needs a real
+// `git rev-parse`, while gh and node must stay unreachable so these spawns
+// remain offline and fast — the same intent serveOpts()'s empty PATH has.
+function gitOnlyPath() {
+  const bin = mkdtempSync(join(tmpdir(), "board-gitbin-"));
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
+  assert.equal(real.status, 0, "test setup: no git on PATH to shim, so the resolved arm cannot be reached");
+  symlinkSync(real.stdout.trim(), join(bin, "git"));
+  return bin;
+}
+
+function gitRepo(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  // GIT_DIR/GIT_WORK_TREE scrubbed off the FIXTURE too: under an ambient one
+  // `git init` exits 0 having re-inited whichever directory the variable
+  // names, leaving this one silently not a repository (ledger.test.mjs hit
+  // exactly that) — and the status check alone cannot see it.
+  const env = gitEnv();
+  const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env });
+  assert.equal(init.status, 0, "test setup: git init must succeed");
+  assert.ok(existsSync(join(dir, ".git")), "test setup: git init must have created a repository HERE");
+  return dir;
+}
+
+// The behavioural fixture ambient-git-vars-mjs-prose.test.mjs's census
+// requires of every file it lists in COVERED_MJS, measured for board.mjs
+// rather than copied from another script's reason: GIT_DIR outranks the
+// child's cwd, so an ambient one makes `git rev-parse --git-common-dir`
+// answer for a DIFFERENT repository — and this cockpit would then serve, and
+// write board.json into, someone else's workspace, at exit 0 and in silence.
+// gitEnv() on the probe is what prevents it.
+test("CLI: an ambient GIT_DIR cannot move the cockpit into another repository's workspace", () => {
+  const bin = gitOnlyPath(), mine = gitRepo("board-ws-mine-"), other = gitRepo("board-ws-other-");
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), {
+      cwd: mine,
+      env: { ...process.env, PATH: bin, GIT_DIR: join(other, ".git") },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    // Without this the test passes vacuously: a probe that FAILED also keeps
+    // the board out of `other`, by degrading to the cwd rather than by
+    // scrubbing anything.
+    assert.doesNotMatch(r.stderr, /could not resolve --git-common-dir/,
+      `the probe had to succeed, or this proves nothing about which repo it answered for: ${r.stderr}`);
+    assert.match(r.stderr, /cockpit on http/, r.stderr);
+    assert.ok(existsSync(join(mine, ".fleet", "board.json")),
+      "the board belongs in the caller's own workspace");
+    assert.ok(!existsSync(join(other, ".fleet")),
+      "an ambient GIT_DIR relocated the whole cockpit into the repository it names");
+  } finally { for (const d of [bin, mine, other]) rmSync(d, { recursive: true, force: true }); }
+});
+
+const withTimeout = (pr, ms, what) => Promise.race([
+  pr,
+  new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
+]);
+
+function serveProcess(cwd, bin) {
+  const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]),
+    { cwd, env: { ...process.env, PATH: bin }, stdio: ["ignore", "ignore", "pipe"] });
+  p.stderr.setEncoding("utf8");
+  let buf = "";
+  const url = new Promise((res, rej) => {
+    p.stderr.on("data", (d) => {
+      buf += d;
+      const m = buf.match(/cockpit on (http:\/\/localhost:\d+)/);
+      if (m) res(m[1]);
+    });
+    p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
+  });
+  return { p, url };
+}
+
+// The end-to-end claim, and the one no pure row can make: two workspaces
+// served AT ONCE are two live boards, each writing only its own state
+// directory — and the one started from a linked worktree writes its MAIN
+// checkout's, not the worktree's.
+//
+// `--port 0` on both, deliberately. What needs two real processes is the
+// state-directory separation; that two workspaces derive two DIFFERENT ports
+// is already pinned deterministically in the rows above, and binding the
+// derived ports here would make the test depend on whether this machine
+// happens to hold either of them.
+//
+// Unlike every other `gitOnlyPath()` consumer, this test also symlinks node
+// onto the shim PATH (gh stays unreachable): gather()'s ledger read shells
+// out to a `node ledger.mjs` subprocess, and with node unreachable that read
+// always fails and every board here would show `tickets: []` regardless of
+// which ledger.md — or none at all — actually got read, making the ledger
+// fixture below assert nothing (#1656 review).
+test("CLI: two workspaces serve two live boards at once, each writing only its own state directory", async () => {
+  const bin = gitOnlyPath(), repoA = gitRepo("board-ws-a-"), repoB = gitRepo("board-ws-b-");
+  symlinkSync(process.execPath, join(bin, "node"));
+  const procs = [];
+  try {
+    const env = gitEnv();
+    const git = (cwd, args) => {
+      const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, stdio: "ignore", env });
+      assert.equal(r.status, 0, `test setup: git ${args.join(" ")} must succeed`);
+    };
+    // `worktree add` needs a commit to branch from.
+    git(repoA, ["commit", "-q", "--allow-empty", "-m", "init"]);
+    const worktree = join(repoA, "wt");
+    git(repoA, ["worktree", "add", "-q", worktree, "-b", "side"]);
+
+    // #1656 critical (survived review): the served state directory moved to
+    // the workspace, but an unfixed default ledger path stayed cwd-relative
+    // — so a cockpit started from this worktree found no ledger there and
+    // silently served an EMPTY board into repoA's shared board.json. A row
+    // written into repoA's OWN `.fleet/ledger.md` (never the worktree's) is
+    // the only way to tell "read the right ledger" apart from "read no
+    // ledger and get an empty board either way": both look like `tickets: []`
+    // without it.
+    mkdirSync(join(repoA, ".fleet"), { recursive: true });
+    writeFileSync(join(repoA, ".fleet", "ledger.md"),
+      "# Fleet run ledger\n\n## Rows\n\n- #42 impl-1 build the thing\n\n## Filed\n\n## Ruled\n\n");
+
+    const a = serveProcess(worktree, bin), b = serveProcess(repoB, bin);
+    procs.push(a.p, b.p);
+    const [urlA, urlB] = await withTimeout(Promise.all([a.url, b.url]), 20000, "both cockpits to announce");
+
+    for (const [label, url] of [["worktree-of-A", urlA], ["B", urlB]]) {
+      const res = await fetch(`${url}/board.json`);
+      assert.equal(res.status, 200, `${label}'s board is not live on ${url}`);
+      assert.ok(Array.isArray((await res.json()).tickets), `${label} served something that is not a board`);
+    }
+    assert.notEqual(urlA, urlB, "two concurrent boards cannot share one URL");
+
+    const boardA = await (await fetch(`${urlA}/board.json`)).json();
+    assert.ok(boardA.tickets.some((t) => t.issue === 42),
+      "the worktree's cockpit must read the MAIN checkout's ledger, not a cwd-relative one that does not exist under the worktree");
+
+    assert.ok(existsSync(join(repoA, ".fleet", "board.json")),
+      "the worktree's cockpit must write its MAIN checkout's state directory");
+    assert.ok(!existsSync(join(worktree, ".fleet")),
+      "the worktree got a state directory of its own — one repo, one board, one ledger");
+    assert.ok(existsSync(join(repoB, ".fleet", "board.json")),
+      "the second workspace must write its own state directory");
+  } finally {
+    for (const p of procs) p.kill("SIGKILL");
+    for (const d of [bin, repoA, repoB]) rmSync(d, { recursive: true, force: true });
+  }
 });
 
 // #1093: the CLI's top-level handler printed `e.message`, which is `undefined`

@@ -174,6 +174,17 @@ const COVERED_MJS = {
   // second `gitEnv(` call — it predates the helper and is already covered on
   // its own terms.
   "ledger.mjs": 1,
+  // ONE git-invoking primitive, `gitCommonDir()` — the probe behind #1582's
+  // cockpit instance resolution. Same hazard defaultLedgerPath() carries
+  // directly above, one seam further on: an ambient GIT_DIR answers
+  // `--git-common-dir` for a DIFFERENT repository, so the cockpit derives
+  // ITS workspace — state directory and port both — from someone else's
+  // checkout and writes board.json there, at exit 0 and in silence.
+  // Measured in board.test.mjs, "an ambient GIT_DIR cannot move the cockpit
+  // into another repository's workspace". The file's other children (gh,
+  // `node ci-state.mjs`, `open`) go through `tryRun`, which names no git and
+  // is not a git-invoking primitive.
+  "board.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers
