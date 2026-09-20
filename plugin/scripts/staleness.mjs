@@ -43,9 +43,8 @@
 
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
-import { writeSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep, makeStray, writeAll } from "./arg.mjs";
 
 const NAME = "staleness";
 
@@ -183,13 +182,6 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: gitEnv() });
 }
 
-const MAX_EAGAIN_RETRIES = 200;
-
-// Shared across every retry: Atomics.wait never writes or notifies it, so one
-// instance times out exactly as a fresh one would, without allocating a
-// SharedArrayBuffer on every EAGAIN.
-const IDLE = new Int32Array(new SharedArrayBuffer(4));
-
 function verdict(v, extra) {
   // writeSync, not console.log, for the reason arg.mjs gives for die(): a
   // failed write to stdout is invisible through console.log, so a reader that
@@ -207,27 +199,27 @@ function verdict(v, extra) {
   // it properly needs a seam that makes fd 1 fail on demand, which is the same
   // testability seam #822 turns on.
   //
-  // A single writeSync call can also short-write — return the count it
-  // managed and throw nothing at all — so the loop below mirrors
-  // ci-state.mjs's emit() (#885/#889): resume from where writeSync left off,
-  // and retry EAGAIN after a 1ms Atomics.wait rather than treat it as the
-  // pipe-closed failure this catch exists for — but only up to
-  // MAX_EAGAIN_RETRIES, so a reader that never drains still falls through to
-  // the could-not-check downgrade below instead of hanging forever.
+  // The short-write/EAGAIN loop itself is arg.mjs's writeAll() (#1549). A
+  // single writeSync can short-write — return the count it managed and throw
+  // nothing at all — and this function used to hand-roll the resume, one of
+  // three copies of the same loop held in step by a comment saying so.
+  // writeAll answers false once the bytes are lost, to a non-EAGAIN errno or
+  // to its own capped EAGAIN retry, so a reader that never drains still
+  // reaches the could-not-check downgrade below instead of hanging forever.
+  //
+  // The try still covers the PAYLOAD's construction and not merely the write:
+  // JSON.stringify throws on a circular `extra` or a throwing toJSON, and a
+  // verdict that could not be serialised is as much a verdict nobody received
+  // as one that could not be written. Both reach the same downgrade, which is
+  // why the result is read after the catch rather than die() being spelled
+  // out at two sites.
+  let ok = false;
   try {
-    let retries = 0;
-    let buf = Buffer.from(`${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
-    while (buf.length) {
-      try {
-        buf = buf.subarray(writeSync(1, buf));
-      } catch (e) {
-        if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) throw e;
-        Atomics.wait(IDLE, 0, 0, 1);
-      }
-    }
+    ok = writeAll(1, `${JSON.stringify({ verdict: v, path, mode, needle, ...extra })}\n`);
   } catch {
-    die("the verdict could not be written to stdout — could not check");
+    // Serialising the payload threw; ok stays false and the downgrade follows.
   }
+  if (!ok) die("the verdict could not be written to stdout — could not check");
   process.exitCode = { live: 0, fixed: 1, unknown: 2 }[v];
 }
 

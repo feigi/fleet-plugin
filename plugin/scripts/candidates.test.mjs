@@ -1274,18 +1274,25 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // adjacency form over-fired on exactly that). Do not terminate the lines
   // with `$` either; that over-fires on a trailing comment (measured).
   //
-  // #889: the guard also has to consume writeSync's return value in a loop,
-  // not just enter the try — a short write returns the count it managed and
-  // throws nothing at all, so a body that still calls writeSync once and
-  // discards the count satisfies a bare `try { writeSync(2,` pin while
-  // silently truncating the refusal. Mirrors ci-state.mjs's emit() (#885).
-  // The retry loop is itself capped and now sits inside an OUTER try that
-  // also covers `Buffer.from` — msg's own string coercion — so a mutant that
-  // moves the buffer construction back outside the guard (the #299/#328
-  // inversion this file's die() promises never to repeat) fails this pin too.
+  // #889/#1549: the loop that consumes writeSync's return value no longer
+  // lives in die() at all — it is arg.mjs's writeAll(), pinned ONCE at its
+  // own definition in arg.test.mjs. Three test files used to carry
+  // near-copies of that same loop regex, differing only in head line and fd,
+  // and keeping three hand-mirrored loops in step was what #1549 removed.
+  //
+  // What stays die()'s OWN, and is all this pins, is the wiring: the refusal
+  // goes through writeAll on fd 2, the template sits INSIDE the try, and
+  // process.exit(2) follows it unconditionally, outside the catch. That
+  // middle clause is load-bearing rather than decorative — hoisting the
+  // template out to writeAll's argument list puts msg's own string coercion
+  // back where a throwing msg escapes and skips the exit call, which is the
+  // #299/#328 inversion this file's die() promises never to repeat.
+  // Measured against that exact mutant: this pin reds, and the writeAll loop
+  // pin in arg.test.mjs stays green — the two discriminate different defects
+  // and neither substitutes for the other.
   assert.match(
     stripComments(readFileSync(ARG_MODULE, "utf8")),
-    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*let buf = Buffer\.from\(`[^`]*`\);\s*^\s*let retries = 0;\s*^\s*while \(buf\.length\) \{\s*^\s*try \{\s*^\s*buf = buf\.subarray\(writeSync\(2, buf\)\);/m,
+    /^\s*(?:return )?function die\(msg\) \{\s*^\s*try \{\s*^\s*writeAll\(2, `[^`]*`\);\s*^\s*\} catch \{\s*^\s*\}\s*^\s*process\.exit\(2\);/m,
   );
 });
 

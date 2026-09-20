@@ -13,8 +13,8 @@
 
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
-import { readdirSync, readFileSync, writeSync } from "node:fs";
-import { makeDie, makeArg, makeNumArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { makeDie, makeArg, makeNumArg, makeHas, makeSweep, makeStray, writeAll } from "./arg.mjs";
 
 const NAME = "ci-state";
 
@@ -80,52 +80,32 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // that reader — it takes exit 2 as a failed read whatever was printed on the
 // way out, and carries its previous CI value for the PR forward instead.
 //
-// Every write this script makes on its way out goes through here, for die()'s
-// reason in arg.mjs: on a pipe, console.log/console.error hand the bytes to an
-// ASYNC stream, and process.exit() discards whatever is still queued rather than
-// draining it. The kernel takes one pipe buffer synchronously and the rest is
-// dropped, so a payload past that size is cut mid-JSON while the exit code
-// arrives intact — the caller reading the code sees a normal verdict and the
-// caller parsing stdout gets bytes it cannot parse. writeSync goes straight to
-// the fd, which is what survives process.exit(). It also takes no newline of its
-// own, which is why every caller supplies the one console.log used to append.
+// Every write this script makes on its way out goes through arg.mjs's
+// writeAll(), for die()'s reason in that file: on a pipe, console.log and
+// console.error hand the bytes to an ASYNC stream, and process.exit()
+// discards whatever is still queued rather than draining it. The kernel takes
+// one pipe buffer synchronously and the rest is dropped, so a payload past
+// that size is cut mid-JSON while the exit code arrives intact — the caller
+// reading the code sees a normal verdict and the caller parsing stdout gets
+// bytes it cannot parse. writeSync goes straight to the fd, which is what
+// survives process.exit(). It also takes no newline of its own, which is why
+// every call site below embeds its own trailing newline in the string it passes to writeAll().
 //
-// One writeSync is not enough, which is why this loops on the count it returns.
-// Initialising a stream for an fd — what vlog's console.error does to fd 2 —
-// puts that fd in O_NONBLOCK, and a non-blocking write to a pipe whose reader
-// has left it full SHORT-WRITES: it returns the count it managed and throws
-// nothing at all. A single call therefore cut the verdict line at one buffer
-// with no throw for the catch to see and nothing logged — the failure the catch
-// cannot cover, because the write reported success. Measured on this platform:
-// asking for 200000 bytes on an fd a console.error had touched delivered 65536
-// and returned normally, where the same write on an untouched fd blocks until
-// the whole of it lands. Consuming the return value makes both fds behave the
-// way the untouched one does.
+// #1549: this file used to carry its own copy of that write loop, called
+// emit(), and the copy had DRIFTED — of the three hand-mirrored copies it was
+// the only one that never grew #889's retry cap, so a reader that stayed open
+// but never drained left it spinning forever. That is what a comment reading
+// "mirrors emit()" buys and what shared code buys instead. The loop, its cap
+// and its 1ms Atomics.wait are arg.mjs's now.
 //
-// The catch is what keeps the exit code honest, and it is not optional. Once a
-// reader is slow enough to leave this fd saturated and non-blocking, writeSync
-// throws EAGAIN where console.log swallowed the failure; uncaught, that throw
-// would skip the process.exit() the caller is about to make and drop the process
-// to exit 1 — the code this script reserves for not-green. EAGAIN says the
-// buffer is momentarily full, not that the write failed, so it waits for the
-// reader and retries; every other code returns and loses the bytes, which is the
-// behaviour that was already there. Losing a green verdict would be new, and
-// worse than the truncation being fixed here. The wait is what keeps that retry
-// from spinning: against a reader asleep three seconds, a bare `continue` burned
-// a full core for the whole stall where the 1ms wait burned almost none, both
-// delivering the same bytes.
-function emit(fd, text) {
-  let buf = Buffer.from(text);
-  while (buf.length) {
-    try {
-      buf = buf.subarray(writeSync(fd, buf));
-    } catch (e) {
-      // The message may be lost; the exit code that follows it must not be.
-      if (e.code !== "EAGAIN") return;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
-    }
-  }
-}
+// What stays this file's own is the exit-code contract those writes protect,
+// and it is why writeAll's false return is ignored at every call site here.
+// Once the bytes are lost they are lost; this script reserves exit 1 for
+// not-green and 2 for could-not-answer, so a verdict that failed to WRITE
+// must not also take the process down a different exit path and turn a
+// missing answer into a wrong one. Losing a green verdict's bytes is bad;
+// reporting green as not-green because the write failed is worse, and that is
+// the trade this file made before the extraction and keeps after it.
 
 function emitRateLimited(query) {
   const payload = {
@@ -133,7 +113,7 @@ function emitRateLimited(query) {
     verdict: "rate-limited",
     reasons: [`${query} was refused by the GitHub API rate limit — no CI state was read. A quota refusal clears on its own: re-probe rather than reading this as a CI verdict`],
   };
-  emit(1, `${JSON.stringify(payload)}\n`);
+  writeAll(1, `${JSON.stringify(payload)}\n`);
 }
 
 function run(cmd, args) {
@@ -596,7 +576,7 @@ if (noCi) {
         .filter((r) => r.databaseId !== chosen.databaseId)
         .map((r) => `#${r.databaseId} (${r.status}/${r.conclusion ?? "null"})`)
         .join(", ");
-      emit(
+      writeAll(
         2,
         `${NAME}: run selection tie-break — ${tiedAtCreatedAt.length} runs share head ${prHead} and createdAt ${bySecond(chosen.createdAt)}; chose #${chosen.databaseId} (${chosen.status}/${chosen.conclusion ?? "null"}) over ${others}\n`,
       );
@@ -737,7 +717,7 @@ if (behind === null) {
 // a pass or a red. reasons.length is never 0 here: the no-ci branch above
 // always pushes exactly one, whichever way --declare-no-ci went.
 const verdict = noCi ? "no-ci" : reasons.length === 0 ? "green" : "not-green";
-emit(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}\n`);
+writeAll(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}\n`);
 
 // Compact, single-line: the consumer is an agent/script parsing JSON, and the
 // pretty view already went to stderr. On the quiet hot path drop `jobs` and
@@ -756,7 +736,7 @@ emit(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join(";
 // convention for both places in this file that never bind a run.
 const payload = { pr, branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
 if (!quiet && !noCi) Object.assign(payload, { jobs, missing });
-emit(1, `${JSON.stringify(payload)}\n`);
+writeAll(1, `${JSON.stringify(payload)}\n`);
 
 // Exit vocabulary unchanged: 0 only when the gate is satisfied, 1 when it is
 // not, 2 (via die(), above) only when the question could not be answered at
