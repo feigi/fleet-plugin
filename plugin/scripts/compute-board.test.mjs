@@ -125,6 +125,8 @@ const baseInputs = () => ({
   now: 1000,
   repo: "owner/repo",
   repoUrl: "https://example.test/owner/repo",
+  workspace: "/w/one",
+  port: 8337,
 });
 
 test("computeBoard: one ticket per column, POOL from an unrowed ready issue", () => {
@@ -225,10 +227,31 @@ test("computeBoard: queue counts pool and review-backlog", () => {
   assert.equal(b.queue.reviewBacklog, 0);
 });
 
-test("computeBoard: repo and repoUrl are echoed to the model", () => {
+test("computeBoard: the instance identity — repo, repoUrl, workspace, port — is echoed, never derived", () => {
   const b = computeBoard(baseInputs());
   assert.equal(b.repo, "owner/repo");
   assert.equal(b.repoUrl, "https://example.test/owner/repo");
+  // #1584: gather() joins these from resolveCockpitInstance(); this module
+  // reads no cwd, no git and no socket, so an echo is the whole contract.
+  assert.equal(b.workspace, "/w/one");
+  assert.equal(b.port, 8337);
+});
+
+// A caller with no instance to name — every hand-built inputs object, and the
+// gather() drivers in board-prev-shape.test.mjs — must still produce a board
+// carrying both KEYS. `undefined` disappears from JSON.stringify, and the
+// launch handshake #1660 added reads `workspace` straight off the served
+// JSON: a board with the key missing is a board it can never match.
+test("computeBoard: absent workspace/port are null, not missing keys", () => {
+  const inp = baseInputs();
+  delete inp.workspace;
+  delete inp.port;
+  const b = computeBoard(inp);
+  assert.equal(b.workspace, null);
+  assert.equal(b.port, null);
+  const round = JSON.parse(JSON.stringify(b));
+  assert.ok("workspace" in round && "port" in round,
+    "both fields must survive a JSON round-trip — the served board.json is where the handshake reads them");
 });
 
 test("computeBoard: a PR with no CI entry is unknown, not null (null means no PR)", () => {
