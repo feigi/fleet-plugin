@@ -34,6 +34,13 @@ const TURN = [
   { type: "assistant", message: { id: "msg_1", usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50, output_tokens: 1 }, content: [{ type: "text" }] } },
 ];
 
+// The --spend-dir override test's fixture: twice TURN's numbers, so the
+// assertion below cannot pass on the heuristic's own transcript by
+// coincidence.
+const NAMED_TURN = [
+  { type: "assistant", message: { id: "msg_1", usage: { cache_creation_input_tokens: 2000, cache_read_input_tokens: 100, output_tokens: 2 }, content: [{ type: "text" }] } },
+];
+
 // The stub `gh` fails on every call: each gh read goes through tryRun, which
 // catches and degrades, so the board still builds and nothing here touches the
 // network or this repo's live issue list. Prepended to PATH rather than
@@ -142,16 +149,9 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
 // This rig is what makes "overrode" observable: runBoard()'s $HOME always holds
 // a resolvable session at the encoded cwd, so the heuristic has a real answer
 // of its own and a flag that did nothing would still produce a panel.
-function namedDir(lines) {
-  const dir = mkdtempSync(join(tmpdir(), "since-named-"));
-  writeFileSync(join(dir, "agent-named.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  return dir;
-}
-
 test("build: --spend-dir reads the named directory instead of the session the heuristic picks", () => {
-  // Twice the fixture turn's numbers, so the assertion cannot pass on the
-  // heuristic's own transcript by coincidence.
-  const dir = namedDir([{ type: "assistant", message: { id: "msg_1", usage: { cache_creation_input_tokens: 2000, cache_read_input_tokens: 100, output_tokens: 2 }, content: [{ type: "text" }] } }]);
+  const dir = mkdtempSync(join(tmpdir(), "since-named-"));
+  writeFileSync(join(dir, "agent-named.jsonl"), NAMED_TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const r = runBoard(["--spend-dir", dir]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;

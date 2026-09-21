@@ -271,6 +271,13 @@ At start, and whenever the pool empties.
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 
+   The spend panel is pinned to whichever session first writes a transcript
+   on this cockpit's own watch (#1583/#1679) — it will not follow a workspace
+   that already had another session's transcripts sitting there at launch.
+   If the panel is reading someone else's numbers, relaunch with
+   `--spend-dir <path>` naming this run's own `~/.claude/projects/.../subagents`
+   directory to override the heuristic outright.
+
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
    both are reviewable work no member otherwise picks up, because phase 0 scans

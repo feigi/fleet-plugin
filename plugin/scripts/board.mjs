@@ -16,12 +16,19 @@
 // spendDirPin() below — rather than re-picking the newest on every tick and
 // alternating between two live runs' numbers in silence.
 //
-// LIMITATION, stated rather than solved: the session it keeps is whichever was
-// newest AT LAUNCH. When two sessions share one project directory the board
-// cannot tell which of them is "the" run — it is scoped to a workspace, and a
-// workspace does not know that (#39) — so a previous run's session can win the
-// pin and keep winning until this server exits. `--spend-dir <path>` is how an
-// operator names the right one: it overrides the heuristic outright.
+// LIMITATION, stated rather than solved: the session it keeps is whichever
+// FIRST writes a transcript at or after the pin's own construction (#1679).
+// Before that, a session that was already active when the pin was built —
+// this run's own, mid-EACCES-fault, or a genuinely previous run's — is never
+// latched; the pin keeps re-asking findSubagentsDir() every tick instead,
+// which is what lets a transient fault or a stale session recover instead of
+// freezing the panel for the server's whole life. What is not solved: two
+// sessions that BOTH start writing after the pin exists, in the same project
+// directory, are still indistinguishable — the board is scoped to a
+// workspace and a workspace does not know that (#39) — so the first of them
+// to pass the newest-transcript check wins and keeps winning. `--spend-dir
+// <path>` is how an operator names the right one: it overrides the
+// heuristic outright.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
@@ -531,25 +538,41 @@ function newestTranscriptMs(dir) {
   return newest;
 }
 
-// #1583: the transcript directory a `serve` process is bound to, resolved ONCE
-// and reused by every tick after it. findSubagentsDir() above ranks sessions by
-// newest transcript mtime and gather() reached it through gatherSpend() on
-// EVERY tick (~15s by default), so two sessions live under one project
-// directory took turns winning: the panel alternated between two runs' numbers
-// with nothing on the page or on stderr to say it had switched.
+// #1583: the transcript directory a `serve` process is bound to, resolved
+// once it can be trusted and reused by every tick after it. findSubagentsDir()
+// above ranks sessions by newest transcript mtime and gather() reached it
+// through gatherSpend() on EVERY tick (~15s by default), so two sessions live
+// under one project directory took turns winning: the panel alternated
+// between two runs' numbers with nothing on the page or on stderr to say it
+// had switched.
 //
-// The pin holds the first ANSWER, not the first CALL, and that distinction is
-// the whole of the `??=` below. findSubagentsDir() has three returns and only
-// two of them are answers: a directory, and `{ error }` — unresolvable, "a bug
-// that never fixes itself", so pinning it costs nothing and gatherSpend's
-// warn-once gate still keeps it to one stderr line. `null` is the third and is
-// NOT an answer: it means the project directory is there and holds no
-// subagents directory YET, which is the normal state at launch, because the
-// cockpit starts in run-team phase 0 before the first agent spawns. Pinning
-// that would hide the spend panel for the whole run on the one launch path
-// this script has — the existing degradation is "hidden until agents land",
-// not "hidden for good". Re-asking while the answer is `null` also stays at
-// one scan per tick, not the two a caller-side retry would cost.
+// The pin holds the first answer that COULD BE THIS RUN'S, not the first
+// non-null answer and not the first call (#1679). findSubagentsDir() has
+// three returns and none of them is safe to latch on sight: a directory
+// resolved at pin-construction time can be a PREVIOUS run's session — newer
+// than nothing else that exists yet, so it wins the ranking, but not this
+// run's — and `{ error }` can be a transient fault (EACCES on a directory
+// mid-permission-change, EMFILE, EIO) recovering on the very next tick just
+// as easily as it can be the truly unresolvable "bug that never fixes
+// itself" the ticket originally reasoned about. Latching either one turns
+// the self-correcting degradation this file's header describes into a
+// permanent one: measured (#1679), a chmod'd-then-restored projects dir left
+// the OLD `??=` pin stuck on `{ error }` forever while the unpinned lookup
+// recovered on its very next tick, and a prior run's `subagents/` dir
+// present at launch left the old pin on yesterday's numbers for the whole of
+// today's run, even once today's first agent had written its own transcript.
+//
+// So `launchMs`, captured once at construction, is the boundary: `null` (no
+// session anywhere yet) and `{ error }` (unresolvable OR transiently
+// unreadable — indistinguishable from here, so neither is trusted) both keep
+// re-asking, same one scan per tick the `null` case always cost. A resolved
+// directory whose own newest transcript predates `launchMs` is treated the
+// same way — returned as this tick's best-effort answer, so the panel still
+// renders it, but not cached — because a transcript that stopped moving
+// before this pin existed cannot be evidence of THIS run's activity. Only a
+// directory whose newest transcript is at or after `launchMs` latches, which
+// is the one fact available here that says "something is writing to this
+// session on my watch", never a previous run's signature.
 //
 // An explicit directory skips the heuristic entirely — never resolved, never
 // re-picked, and findSubagentsDir() is never called at all, so a tree it could
@@ -558,13 +581,20 @@ function newestTranscriptMs(dir) {
 // reason the resolution is: a pin that could answer for a different workspace
 // later is not a pin.
 //
-// The limitation this leaves is stated at the top of this file: whichever
-// session was newest when the pin latched keeps the panel for this server's
-// life, and that can be a previous run's. --spend-dir is the way out.
+// The limitation this leaves is stated at the top of this file: two sessions
+// that both start writing after the pin exists are still indistinguishable.
+// --spend-dir is the way out.
 export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd()) {
   if (explicit != null) return () => explicit;
+  const launchMs = Date.now();
   let pinned = null;
-  return () => (pinned ??= findSubagentsDir(home, cwd));
+  return () => {
+    if (pinned !== null) return pinned;
+    const answer = findSubagentsDir(home, cwd);
+    if (typeof answer !== "string") return answer; // null or { error }: neither is a trustworthy answer to latch
+    if (newestTranscriptMs(answer) < launchMs) return answer; // predates this pin — could be a previous run's
+    return (pinned = answer);
+  };
 }
 
 // Read one agent transcript into the shape the pure module wants. Single pass —
@@ -724,16 +754,20 @@ function readAgent(file, metaFile) {
 // truthiness check returning, because nothing in the data says which field is
 // the tag. This follows `ledger.mjs`'s `tracker`: a boolean checked before any
 // success-only field is read.
-export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
+export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8, explicit = false } = {}) {
   try {
-    // #1583: `undefined` is "nobody resolved this for me" — every gatherSpend
-    // test driver, and `build`, which is one gather per process and so needs no
-    // pin. `null` is a RESOLUTION handed in by a caller that owns one
-    // (spendDirPin() above): the project directory is there and holds no
-    // session yet. `dir ?? findSubagentsDir()` collapsed those two, so a pinned
-    // "no session yet" re-ran the whole lookup a second time inside the same
-    // tick and answered from an unpinned source while doing it.
-    if (dir === undefined) dir = findSubagentsDir();
+    // #1583: a caller-supplied `null` is a RESOLUTION from one that owns a pin
+    // (spendDirPin() above) — the project directory is there and holds no
+    // session yet — and must not run the heuristic a second time; only an
+    // omitted `dir` (every gatherSpend test driver, and `build`, which is one
+    // gather per process and so needs no pin) defaults to it. A default
+    // parameter fires on `undefined` alone, never `null`, which is exactly
+    // that distinction — the hand-rolled `if (dir === undefined) dir =
+    // findSubagentsDir();` this used to spell out is redundant with it.
+    //
+    // `explicit` (#1679) is true only when `dir` came from the operator's
+    // own --spend-dir, never from the heuristic or an unresolved pin — see
+    // its one use below, at the empty-directory branch.
     const dirError = dir?.error;
     if (dirError) {
       warnOnce("no-spend-dir", dirError, dirError);
@@ -798,7 +832,18 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
         warnOnce("skips", file, `skipping ${file}: ${e.message}`);
       }
     }
-    if (!agents.length) return skipped ? { ok: false, error: `all ${skipped} transcripts unreadable` } : null;
+    if (!agents.length) {
+      if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
+      // #1679: only for an EXPLICIT override — never the heuristic's own
+      // "resolved, no session yet" `null` case two arms up, which is the
+      // normal state at launch and must stay silent. An operator who named
+      // this exact directory has a panel that just went quiet with nothing
+      // saying whether that is the normal "not written yet" wait or a typo'd
+      // / mis-levelled path (e.g. the session dir instead of its `subagents/`
+      // child) that will never resolve.
+      if (explicit) warnOnce("empty-spend-dir", dir, `--spend-dir ${dir} exists but holds no agent transcripts`);
+      return null;
+    }
     const spend = computeSpend({ agents, topN });
     const tools = mergeTools(toolTables);
     // What fraction of cache_creation the tool table actually explains. It is
@@ -819,7 +864,13 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
     // `e.message` is carried as-is, including the "" and `undefined` a
     // message-less throw would give it: the tag above is what routes this to the
     // error panel, so an unhelpful message costs wording, never the panel.
-    console.error(`${NAME}: spend read failed: ${e.message}`);
+    // #1679: an explicit --spend-dir naming a directory that does not exist
+    // YET (the legitimate, tested case) throws ENOENT here on every tick
+    // until it appears, and this catch used to print unconditionally — one
+    // line per ~15s tick, forever. Routed through warnOnce, keyed on the
+    // message the same way the `{ error }` arm above it already is, so a
+    // repeating fault costs one stderr line, not one per tick.
+    warnOnce("spend-read-failed", e.message, `spend read failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
 }
@@ -845,7 +896,14 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
 // caller that skips main() still validates its own argv. With neither the pin
 // nor the flag, gatherSpend() resolves for itself exactly as it did before
 // this ticket, which is what keeps `build`'s output unchanged by it.
-export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir() }) {
+//
+// `spendDirExplicit` (#1679) is read the same way, independently of
+// `spendDir` itself: serve() always passes a resolved `spendDir` (the pin's
+// answer), never leaving it to default, so `spendDir`'s own presence cannot
+// say whether an operator named it. Whether --spend-dir was given is a fact
+// about argv, unrelated to which of gatherSpend's three shapes the pin
+// currently holds.
+export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
@@ -985,7 +1043,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval,
   // alongside argPort()/argInterval() — this call is unchanged in when it
   // runs, only in where the check itself is written.
   const sinceMs = argSpendSince();
-  const spend = gatherSpend({ dir: spendDir, sinceMs });
+  const spend = gatherSpend({ dir: spendDir, sinceMs, explicit: spendDirExplicit });
   return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
@@ -1392,7 +1450,7 @@ export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
   });
 }
 
-export async function serve({ ledgerFile, port, interval, open } = {}) {
+export async function serve({ ledgerFile, port, interval, open, spendDir } = {}) {
   // Both the served state directory and the port come from
   // resolveCockpitInstance() now, rather than a cwd-relative `.fleet` and a
   // constant 8123. That is what lets two workspaces run two boards at once
@@ -1421,7 +1479,11 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   // per tick is a pin in name only — and above the port loop because it costs
   // nothing to carry: spendDirPin() touches no filesystem until its first call,
   // so the reuse and degrade arms that exit before ticking pay nothing for it.
-  const spendPin = spendDirPin(argSpendDir());
+  // `spendDir ?? argSpendDir()` (#1679), matching the `port ?? argPort()`
+  // shape above: every other argv-read option here takes an in-process
+  // override, and this one hadn't, so the only way to drive --spend-dir
+  // through `serve` at all was the real CLI — no test exercised it.
+  const spendPin = spendDirPin(spendDir ?? argSpendDir());
   const { computeBoard } = await import("./compute-board.mjs");
   const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir(), port: portGiven });
   const stateDir = instance.stateDir;
