@@ -223,11 +223,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
-// Every non-builtin fleet-tick.mjs imports, because runCli() below reruns the
-// script from a stub directory and an unlisted sibling is a module-not-found at
-// startup — exit 1, which is the code the candidates.mjs tests read as "queue
-// empty". Add a row here whenever the script gains an import.
-const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs"].map(
+// Every non-builtin module the copied script needs at startup, direct import
+// or transitive, because runCli() below reruns the script from a stub
+// directory and an unlisted sibling is a module-not-found at startup — exit 1,
+// which is the code the candidates.mjs tests read as "queue empty".
+// `git-env.mjs` is here transitively: fleet-state.mjs imports its
+// workspaceDirFromGitCommonDir() for the state path (#1658). Add a row here
+// whenever the script — or one of these — gains an import.
+const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 

@@ -19,7 +19,8 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 // There is ONE heartbeat per run and its state lives in the main checkout.
 // Members run from their own worktrees, where a cwd-relative `.fleet/` does not
@@ -29,9 +30,13 @@ import { dirname, join, resolve } from "node:path";
 //
 // This is ledger.mjs's defaultLedgerPath() resolution applied to a second file
 // for the same reason (there, a cwd-local ledger silently degraded the
-// duplicate-filing guard). If a third file ever needs it, the resolution itself
-// should move here and ledger.mjs should import it; two callers did not justify
-// reaching into a 982-line module and re-testing it.
+// duplicate-filing guard). The third file this comment used to predict arrived
+// with #1656 — board.mjs's resolveCockpitInstance() — so the resolution itself
+// moved, as promised, though into git-env.mjs beside gitEnv() rather than into
+// this module: board.mjs and ledger.mjs both already import that one, and a
+// cockpit reaching into the heartbeat's state module for a path rule would be
+// a stranger dependency than either has now (#1658). Only the filename and the
+// warning below are this caller's own.
 export function statePath(name) {
   // GIT_DIR and GIT_WORK_TREE scrubbed, never inherited: an ambient GIT_DIR
   // answers `--git-common-dir` for a DIFFERENT repository, which relocates the
@@ -42,17 +47,27 @@ export function statePath(name) {
   // run-merge-bot.md performs on the identical command in shell (`env -u
   // GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir`); spelled as an
   // env object here because there is no shell to spell it in.
+  // Migrating this inline scrub to gitEnv() — imported in this file since
+  // #1658 for the path rule above, not for the env — stays out of scope: it is
+  // recorded with its own measurement and its own behavioural fixture in
+  // ambient-git-vars-mjs-prose.test.mjs's MJS_LEGACY_INLINE list.
   const env = { ...process.env };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env });
-  if (r.status !== 0 || !r.stdout.trim()) {
+  // No separate `r.status === 0` gate: every failure mode reproducible here
+  // (no repository, an unresolvable GIT_DIR, a permission-denied `.git`, a
+  // corrupt worktree pointer, a missing `git` binary) leaves `r.stdout`
+  // empty, which workspaceDirFromGitCommonDir() already reads as `null` on
+  // its own — see its own docstring for that contract.
+  const workspace = workspaceDirFromGitCommonDir(r.stdout);
+  if (workspace === null) {
     // Announced, never silent: a cwd-relative fallback re-opens exactly the
     // per-worktree split this resolution exists to close.
     console.error(`${name}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet/heartbeat.json`);
     return join(".fleet", "heartbeat.json");
   }
-  return join(dirname(resolve(r.stdout.trim())), ".fleet", "heartbeat.json");
+  return join(workspace, ".fleet", "heartbeat.json");
 }
 
 // An unreadable or corrupt state file is NOT fatal, and the direction of the
