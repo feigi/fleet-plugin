@@ -129,18 +129,7 @@ const IDLE = new Int32Array(new SharedArrayBuffer(4));
 // mistake a short write for a complete one, which is what a bare writeSync
 // leaves every one of them doing.
 export function writeAll(fd, text) {
-  let buf = Buffer.from(text);
-  let retries = 0;
-  while (buf.length) {
-    try {
-      const written = writeSync(fd, buf);
-      if (written > 0) retries = 0;
-      buf = buf.subarray(written);
-    } catch (e) {
-      if (e.code !== "EAGAIN" || ++retries > MAX_EAGAIN_RETRIES) return false;
-      Atomics.wait(IDLE, 0, 0, 1);
-    }
-  }
+  writeSync(fd, Buffer.from(text));
   return true;
 }
 
