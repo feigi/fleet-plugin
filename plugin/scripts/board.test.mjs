@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
+import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
 import { stripComments } from "./strip-comments.mjs";
 import { gitEnv } from "./git-env.mjs";
 
@@ -627,6 +627,235 @@ test("one unreadable session directory loses the ranking instead of sinking the 
   writeFileSync(join(good, "agent-a.jsonl"), "");
 
   assert.equal(findSubagentsDir(home, "/x"), good);
+});
+
+// ── #1583/#1679: the pin ──────────────────────────────────────────────────────
+//
+// Two sessions under ONE project directory is the mode this whole ticket is
+// about, and no test above drives it across TIME: every findSubagentsDir() case
+// builds its fixture, asks once, and stops. The lookup ran inside gatherSpend()
+// on every tick (~15s), so the second session merely had to write to take the
+// panel over, with nothing on the page or on stderr saying it had.
+//
+// #1679 narrowed what counts as a trustworthy first answer: a directory whose
+// own newest transcript PREDATES the pin's construction can be a previous
+// run's session, so it is never latched, only followed — the tests below now
+// drive that distinction directly instead of assuming "the first non-null
+// answer" was always safe to cache.
+test("the pin does not latch a session that predates it — it keeps following the heuristic until one writes on its watch", () => {
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  const mine = join(proj, "sess-a", "subagents");
+  const theirs = join(proj, "sess-b", "subagents");
+  mkdirSync(mine, { recursive: true });
+  mkdirSync(theirs, { recursive: true });
+  writeFileSync(join(mine, "agent-a.jsonl"), "");
+  writeFileSync(join(theirs, "agent-b.jsonl"), "");
+  // Both predate the pin below — stamped well in the past, the same as a
+  // session that was already running before this server launched.
+  utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() - 100000), new Date(Date.now() - 100000));
+  utimesSync(join(theirs, "agent-b.jsonl"), new Date(Date.now() - 200000), new Date(Date.now() - 200000));
+
+  const pin = spendDirPin(undefined, home, "/x");
+  assert.equal(pin(), mine, "before anything writes on this pin's watch, it still answers from the heuristic's newest");
+
+  // `theirs` writes AFTER the pin exists — real activity "on my watch", the
+  // one signal the old `??=` pin had no way to ask for.
+  utimesSync(join(theirs, "agent-b.jsonl"), new Date(), new Date());
+  assert.equal(pin(), theirs, "and re-picks, because neither candidate was trustworthy to cache yet");
+
+  // Now it must hold — touching `mine` again, even to a later mtime than
+  // `theirs`, must not flip the pin back: `theirs` was the first to clear
+  // the bar and that is what latches, not "whichever is newest this tick".
+  utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
+  assert.equal(pin(), theirs, "and now holds, because theirs was first to write on this pin's watch");
+  assert.equal(findSubagentsDir(home, "/x"), mine, "the fixture really did flip — this test proves nothing otherwise");
+});
+
+test("no session at launch is not an answer to pin — the first one to write on this pin's watch wins, and then holds", () => {
+  // The launch path this script actually has: the cockpit starts in run-team
+  // phase 0, BEFORE the first agent spawns, so the project directory routinely
+  // holds no subagents directory at all. Pinning that `null` would hide the
+  // spend panel for the entire run — the existing degradation is "hidden until
+  // agents land", not "hidden for good", and this is the assertion that keeps
+  // the pin from being written as "whatever the first call returned".
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  mkdirSync(proj, { recursive: true });
+  const pin = spendDirPin(undefined, home, "/x");
+  assert.equal(pin(), null, "no session yet is the normal state at run start, not a fault");
+
+  const first = join(proj, "sess-first", "subagents");
+  mkdirSync(first, { recursive: true });
+  // Written after the pin already exists — this run's own first activity,
+  // not a stale fixture mtime from before launch.
+  writeFileSync(join(first, "agent-a.jsonl"), "");
+  assert.equal(pin(), first, "the first real answer, once it postdates launch, latches");
+
+  const second = join(proj, "sess-second", "subagents");
+  mkdirSync(second, { recursive: true });
+  writeFileSync(join(second, "agent-b.jsonl"), "");
+  utimesSync(join(second, "agent-b.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
+  assert.equal(pin(), first, "and holds against a newer session exactly as a launch-time pin does");
+});
+
+test("an unresolvable transcript tree is never pinned — one stderr line across ticks either way, panel hidden and never zeroed", () => {
+  // #1679: `{ error }` is no longer latched (see the recovery test below), so
+  // the one-line-per-fault promise can no longer come from caching upstream —
+  // it comes from gatherSpend's own warnOnce gate, keyed on the message,
+  // which needs nothing cached above it to hold.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const pin = spendDirPin(undefined, home, "/nonexistent");
+
+  let first, second;
+  const errs = withStderr(() => {
+    first = gatherSpend({ dir: pin() });
+    second = gatherSpend({ dir: pin() });
+  });
+  assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
+  for (const s of [first, second]) {
+    assert.equal(s.ok, false, "the tag the page hides on");
+    assert.ok(s.error, "and a reason, never a zeroed total");
+    assert.equal(s.totals, undefined, "an unresolvable directory must not report spend at all");
+  }
+});
+
+test("an unresolvable transcript tree recovers on its very next tick, because { error } is never latched", () => {
+  // The bug #1679 fixed: the old `pinned ??= findSubagentsDir(...)` treated
+  // `{ error }` as a permanent answer, so a TRANSIENT fault (EACCES on a
+  // directory mid permission-change, EMFILE, EIO — not just the "project dir
+  // absent" case the original comment reasoned about) hid the panel forever
+  // even once the tree became readable again.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  const sess = join(proj, "sess-a", "subagents");
+  mkdirSync(sess, { recursive: true });
+  writeFileSync(join(sess, "agent-a.jsonl"), "");
+  chmodSync(proj, 0o000);
+  try {
+    const pin = spendDirPin(undefined, home, "/x");
+    const faulted = pin();
+    assert.ok(faulted.error, "a scandir EACCES is exactly the 'unresolvable' shape the old pin latched forever");
+    chmodSync(proj, 0o755);
+    assert.equal(pin(), sess, "the very next tick recovers, because the fault was never cached");
+  } finally {
+    chmodSync(proj, 0o755);
+  }
+});
+
+test("--spend-dir's directory replaces the heuristic outright, including one the heuristic could resolve", () => {
+  // The override half of the flag: named explicitly, the session ranking is not
+  // a tie-breaker, a fallback, or a second opinion. The fixture gives the
+  // heuristic a perfectly resolvable session to pick so that "the explicit one
+  // wins" is a real preference and not the absence of an alternative.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const heuristic = join(home, ".claude", "projects", "-x", "sess-a", "subagents");
+  mkdirSync(heuristic, { recursive: true });
+  writeFileSync(join(heuristic, "agent-a.jsonl"), "");
+  const named = mkdtempSync(join(tmpdir(), "spend-named-"));
+
+  assert.equal(findSubagentsDir(home, "/x"), heuristic, "the heuristic has an answer of its own here");
+  const pin = spendDirPin(named, home, "/x");
+  assert.equal(pin(), named);
+  assert.equal(pin(), named, "and is not re-decided on a later tick either");
+});
+
+test("gatherSpend reads a handed-in null as a resolution, not as an absent argument", () => {
+  // `dir ?? findSubagentsDir()` could not tell "my caller resolved this and
+  // there is no session yet" from "nobody resolved it", so a pinned null ran
+  // the lookup a second time inside the same tick — and answered from it,
+  // which is the unpinned source this ticket exists to remove. The fixture
+  // makes that observable: $HOME here DOES hold a resolvable session, so a
+  // re-resolve would return a panel instead of nothing.
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const live = join(home, ".claude", "projects", encodeProjectDir(process.cwd()), "sess", "subagents");
+  mkdirSync(live, { recursive: true });
+  writeFileSync(join(live, "agent-x.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const realHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    assert.ok(gatherSpend({}).ok, "the control: with no dir argument at all, that session IS found");
+    assert.equal(gatherSpend({ dir: null }), null, "a resolved-to-nothing caller must not be re-resolved");
+  } finally { process.env.HOME = realHome; }
+});
+
+// The acceptance criterion end to end, and the only row here that can fail on
+// serve() dropping the pin between the resolution and the tick: every
+// assertion above is reachable with `spendDir:` never threaded into gather()
+// at all. A REAL server, two sessions under one project directory, and the
+// second one writing between two ticks — the exact shape the panel used to
+// alternate on, at the interval it used to alternate at.
+//
+// #1679: both fixture sessions predate the server's own launch (ancient
+// synthetic mtimes), the same shape as a workspace that already had
+// unrelated sessions sitting there when this `serve` started — neither is
+// trustworthy to latch on sight any more. So the session that WRITES first
+// ON THIS SERVER'S WATCH is what latches, not whichever the heuristic
+// happened to already prefer between two equally-untrusted candidates.
+test("CLI: a live serve keeps the panel on the session that wrote first on its watch, even as another writes later", async () => {
+  // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, a
+  // symlink to /private/var, and the child's process.cwd() reports the RESOLVED
+  // form — encoding the unresolved one puts the fixture where nothing looks.
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "spend-pin-cwd-")));
+  const home = mkdtempSync(join(tmpdir(), "spend-pin-home-"));
+  const bin = mkdtempSync(join(tmpdir(), "spend-pin-bin-"));
+  // gh fails on every call and the reads degrade, so this stays offline and off
+  // this repo's live issue list. Prepended rather than replacing PATH: gather()
+  // shells out to `node` for the ledger read.
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "gh"), 0o755);
+  const proj = join(home, ".claude", "projects", encodeProjectDir(cwd));
+  const mine = join(proj, "sess-a", "subagents");
+  const theirs = join(proj, "sess-b", "subagents");
+  mkdirSync(mine, { recursive: true });
+  mkdirSync(theirs, { recursive: true });
+  // With no sidecar the panel labels an agent by its filename stem, so the
+  // board itself names which session it read — no second fixture needed for it.
+  const turn = TURN.map((l) => JSON.stringify(l)).join("\n") + "\n";
+  writeFileSync(join(mine, "agent-session-a.jsonl"), turn);
+  utimesSync(join(mine, "agent-session-a.jsonl"), new Date(9000), new Date(9000));
+  writeFileSync(join(theirs, "agent-session-b.jsonl"), turn);
+  utimesSync(join(theirs, "agent-session-b.jsonl"), new Date(1000), new Date(1000));
+
+  const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "1"]), {
+    cwd, stdio: ["ignore", "ignore", "pipe"],
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+  });
+  try {
+    const jsonPath = join(cwd, ".fleet", "board.json");
+    const until = (pred, what) => withTimeout((async () => {
+      for (;;) {
+        let b = null;
+        try { b = JSON.parse(readFileSync(jsonPath, "utf8")); } catch { /* not written yet, or mid-rename */ }
+        if (b && pred(b)) return b;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    })(), 20000, what);
+
+    // Wait for the server to have ticked at least once before touching either
+    // fixture's mtime — this pins spendDirPin()'s launchMs strictly before the
+    // touch below, which is the only way the touch can land ON its watch.
+    await until((b) => b.spend?.ok, "the first tick that reads a transcript");
+
+    // `mine` writes on this server's watch: this is what latches it, per
+    // #1679's rule — not merely being the heuristic's current favorite.
+    utimesSync(join(mine, "agent-session-a.jsonl"), new Date(), new Date());
+    const minedAt = Date.now();
+    const first = await until((b) => b.spend?.ok && b.generatedAt > minedAt, "a tick generated after session-a writes on this server's watch");
+    assert.equal(first.spend.top[0].label, "session-a", "the session that wrote on this server's watch is read");
+
+    // The other session writes later: a second run starting, an agent landing.
+    utimesSync(join(theirs, "agent-session-b.jsonl"), new Date(), new Date());
+    const flippedAt = Date.now();
+    assert.equal(findSubagentsDir(home, cwd), theirs,
+      "the fixture no longer flips the heuristic — this test would prove nothing");
+
+    // Strictly a board GENERATED after the flip, not merely a different one: a
+    // tick that started before it could answer "session-a" for the old reason.
+    const later = await until((b) => b.spend?.ok && b.generatedAt > flippedAt, "a tick generated after the flip");
+    assert.equal(later.spend.top[0].label, "session-a",
+      "a later tick re-picked the newest session instead of answering from the pin");
+  } finally { p.kill("SIGKILL"); }
 });
 
 test("one unreadable transcript does not take the whole panel down", () => {
@@ -1324,6 +1553,26 @@ test("CLI: build refuses a trailing --spend-since ahead of a stray token, naming
   assert.match(r.stderr, /--spend-since needs a value/);
 });
 
+// #1583: the same four spellings for --spend-dir, and the same ordering. A
+// PATH has no range to check, so arg() IS this flag's whole refusal — which
+// makes the two things this ticket wrote the only things standing between an
+// operator and a silent wrong answer: the name in VALUE_FLAGS, and the read
+// hoisted into main(). Drop it from VALUE_FLAGS and sweep() calls the flag
+// unknown; drop the hoisted read and the stray case below blames `x`.
+test("CLI: every malformed --spend-dir spelling is refused under its own name", () => {
+  const cases = [
+    [["build", "--spend-dir"], /--spend-dir needs a value/],                                   // trailing
+    [["build", "--spend-dir="], /--spend-dir needs a space-separated value, not --spend-dir=/], // = form
+    [["build", "--spend-dir", ""], /--spend-dir needs a value/],                               // empty value
+    [["build", "--spend-dir", "--prev", "x"], /--spend-dir needs a value/],                    // eats the next flag, naming --spend-dir not the stray
+  ];
+  for (const [args, message] of cases) {
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+    assert.equal(r.status, 2, `expected exit 2 for ${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, message, `for ${args.join(" ")}`);
+  }
+});
+
 // The other two malformed spellings arg.mjs refuses, which the hoist closes on
 // build alongside the three above. Pinned because a NARROWED hoist keeps the
 // three green while dropping these: measured, `if (process.argv.includes(
@@ -1479,6 +1728,22 @@ test("CLI: serve accepts --port 0 (ephemeral bind), announces the port it actual
   // nothing may try to open. The --open test below carries the present half,
   // and explains why a failed tryRun("open", …) surfaces on stderr at all.
   assert.doesNotMatch(r.stderr, /open http:\/\/localhost:\d+\/ failed/, r.stderr);
+});
+
+// #1679: every other argv-read option `serve` takes has both an in-process
+// override AND a CLI test driving it end to end; --spend-dir had neither
+// until now — every existing --spend-dir test drove `build` (one gather per
+// process, no pin) or spendDirPin() directly, never `serve`'s own tick loop.
+test("CLI: serve --spend-dir reads the named directory's spend into every tick, not just build", () => {
+  const opts = serveOpts();
+  const dir = mkdtempSync(join(tmpdir(), "spend-named-"));
+  writeFileSync(join(dir, "agent-named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", dir]), { ...opts, timeout: 2000 });
+  assert.notEqual(r.status, 2, r.stderr);
+  const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));
+  assert.equal(body.spend.ok, true, r.stderr);
+  assert.equal(body.spend.totals.cacheWrite, 1000, "the served panel must come from the named directory, not the (absent) heuristic");
+  assert.equal(body.spend.top[0].label, "named");
 });
 
 test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {
