@@ -43,6 +43,44 @@ import { runReview } from "./review-core.js";
 // clean one, because review-core.js never reads a distinguishing field for
 // that case either — a schema violation the host already retried three times
 // and gave up correcting is not this shim's contract to relitigate.
+//
+// NO PER-CALL WORKING DIRECTORY HERE, AND WHY THE ISOLATION RULE LIVES IN THE
+// PROMPTS INSTEAD (#1433). Three PRs reviewed back-to-back from one eval cell
+// left FOUR files modified in the checkout that cell was standing in — a
+// specialist's mutation-test experiment reached through a RELATIVE path, in the
+// tree the controller reads instruments.sh, ci-state.mjs and every gate
+// decision out of. Review specialists have no assigned worktree to fall back
+// to, so the preferred fix was a scratch cwd per dispatch, passed through this
+// wrapper. The harness has no such option — measured against its own contract,
+// not assumed:
+//
+//   - eval's `agent()` takes `{ agent, label, schema, schemaMode, isolated,
+//     apply, merge, tools }` and nothing else (`omp://tools/eval.md`
+//     § `agent()`), and `task`'s item shape — `{ name, agent, task, effort,
+//     outputSchema, schemaMode, isolated }` — carries no cwd either
+//     (`omp://tools/task.md`). A non-isolated spawn "call[s] `runSubprocess(…)`
+//     directly with parent cwd", so the child's directory is decided one level
+//     above this file and is the controller's own.
+//   - `isolated: true` is not that option under another name. It names no
+//     directory, so it cannot BE the `<scratch>/pr<N>/<finding>/` the two-level
+//     scratch convention asks for; it exists only where
+//     `task.isolation.enabled` is on, and requesting it while isolation is
+//     `none` fails PREFLIGHT — synchronously, out of the `await agent(...)`
+//     below, which the `try` further down does not cover — so on any install
+//     with isolation off every dimension would come back null and the review
+//     would report itself wholly crashed. And it MERGES what the child changed
+//     back into the parent (patch apply, or a branch cherry-pick that stashes
+//     the parent repo first): a mutation-testing specialist's deliberately
+//     broken tree, applied to the checkout. That is the reported defect with a
+//     commit attached.
+//
+// So the rule lives where it can be stated at all: review-core.js's snapshot,
+// specialist and refuter prompts name the inherited cwd as a no-run zone, order
+// a `cd` into the run-root scratch path before any mutation, and require a
+// `CWD-AUDIT:` line back. This wrapper stays a pure handle adapter. Should
+// eval's `agent()` ever gain a cwd option, THIS is the one place that changes —
+// thread it through `opts` here, and the prompt rules become the second belt
+// rather than the only one.
 async function ompAgent(prompt, opts) {
   const handle = await agent(prompt, { agent: opts.agentType, schema: opts.schema, label: opts.label });
   try {
