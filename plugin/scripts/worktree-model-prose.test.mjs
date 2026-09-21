@@ -122,12 +122,14 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   );
 });
 
-// #1447. The third measurement this section carries, and the only one whose
-// hazard is invisible to the repo: `isolated` and the missing `cwd` field are
-// both about where BYTES land, so `git status` can catch them after the fact.
-// A shared kernel collides in memory and leaves nothing behind, which is why
-// the measurement is recorded here rather than left to the incident that
-// found it.
+// #1447. The third measurement this section carries, and the one whose
+// hazard is least visible to the repo: `isolated` and the missing `cwd`
+// field are both about where BYTES land, so `git status` can catch them
+// after the fact. A shared kernel's bare-name collision and its `reset`
+// collide and destroy in memory, leaving nothing behind; only its
+// relative-path case shows up, and only when the cell writes — which is
+// why the measurement is recorded here rather than left to the incident
+// that found it.
 test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-by-construction exception kept", () => {
   // The claim bound to its evidence, and to the fact that it was measured in a
   // LIVE run — every other measurement in this section came from a throwaway
@@ -135,7 +137,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // it as not reproducing the real dispatch path.
   assert.match(
     section(),
-    /`task`-dispatched\s+members\s+share\s+one\s+`eval`\s+kernel[\s\S]{0,80}live\s+run\s+rather\s+than\s+a\s+probe\s+clone[\s\S]{0,170}same\s+Python\s+kernel\s+pid[\s\S]{0,110}each\s+read\s+the\s+others'\s+top-level\s+bindings/,
+    /`task`-dispatched\s+members\s+share\s+one\s+`eval`\s+kernel[\s\S]{0,80}live\s+run\s+rather\s+than\s+a\s+probe\s+clone[\s\S]{0,170}same\s+Python\s+kernel\s+pid[\s\S]{0,90}each\s+read\s+the\s+others'\s+top-level\s+bindings/,
     "the shared-kernel claim, its live-run provenance, or the pid/cross-read evidence behind it is gone",
   );
   assert.match(
@@ -175,7 +177,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // "nobody checked".
   assert.match(
     section(),
-    /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,120}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
+    /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,50}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
     "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
   );
   // The measurement is only worth recording if it reaches members. Phase 2 is

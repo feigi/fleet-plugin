@@ -307,11 +307,14 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   );
 });
 
-// #1447. This block is the only one in the region whose hazard leaves NO trace
-// in the repo: a shared-kernel variable collision writes no file, so `git
-// status`, `worktree-audit.sh` and the instrument re-check all stay green
-// through it. That is why the rule has to reach the member as text — there is
-// no gate behind it to catch a member that never read it.
+// #1447. Two of this block's three hazards leave NO trace in the repo: a
+// shared-kernel variable collision and a kernel `reset` write no file, so
+// `git status`, `worktree-audit.sh` and the instrument re-check all stay
+// green through them. The third — a relative path resolving into the main
+// checkout — only shows up when the cell writes (the stray `work/` tree it
+// names is that case); a read leaves nothing either. That is why the rule
+// has to reach the member as text — there is no gate behind it to catch a
+// member that never read it.
 test("the eval-kernel block binds the sharing fact to all three of its rules, and to the citation that proves it", () => {
   const b = evalKernelBlock();
   // The imperative bound to BOTH exclusions it carries. Split into two
@@ -326,10 +329,17 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
   // The naming rule bound to the counter-example. `WT` is not decoration: it is
   // the exact bare name the reported collision happened on, so a member reading
   // this sees the shape it must not repeat, not an abstract "use good names".
+  // Keyed on the member's NAME, not its ticket number, so a recovery member
+  // sharing the same ticket does not also share the same prefix.
   assert.match(
     b,
-    phrase("prefix what you bind with your own member number (`WT_1447`, never `WT`)"),
-    "the member-prefixed binding rule no longer shows the bare name it excludes",
+    phrase("prefix what you bind with your own member NAME, not its bare ticket number"),
+    "the member-prefixed binding rule no longer keys the prefix on the member's name",
+  );
+  assert.match(
+    b,
+    phrase("`WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for the same ticket (`impl-1447-b`) would also produce"),
+    "the member-prefixed binding rule no longer shows the bare name it excludes, or the recovery-collision case the name-keyed prefix avoids",
   );
   // The cwd fact bound to WHY it cannot be fixed the way `bash` calls are. A
   // member that knows only "use absolute paths" reaches for eval's cwd
