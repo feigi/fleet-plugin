@@ -207,15 +207,64 @@ test("resolveDimensions agrees on both sides", () => {
     `${CODE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m)[0]}\nreturn DEFAULT_DIMENSIONS;`,
   )();
   const prFn = lift(CODE, "resolveDimensions", "override, all");
-  const overrides = [undefined, null, ["correctness", "comments"], [{ key: "x", prompt: "p", agentType: "a" }]];
-  for (const o of overrides) {
-    const coreResult = core.resolveDimensions(o, core.DEFAULT_DIMENSIONS)?.map((d) => d.key) ?? null;
-    const prResult = prFn(o, prAll)?.map((d) => d.key) ?? null;
-    assert.deepEqual(coreResult, prResult, JSON.stringify(o));
+  // Thrown-vs-returned, not returned alone (#1556). WHICH overrides the two
+  // copies REFUSE is as much of their shared contract as what they return for
+  // the rest, and a loop comparing return values only cannot see a
+  // disagreement there — the first side to throw aborts the test before the
+  // other is ever called. The message is compared too: the two copies are
+  // text-identical CODE by this file's whole premise, so a refusal that names
+  // a different reason on each host is itself a divergence.
+  const outcome = (fn) => {
+    try {
+      return { returned: fn()?.map((d) => d.key) ?? null };
+    } catch (e) {
+      return { threw: e.message };
+    }
+  };
+  // `JSON.stringify(NaN)` renders the string "null", which collides with the
+  // `null` fixture's label below. `JSON.stringify(undefined)` returns the
+  // bare `undefined` value (not a string) — that's what this helper's own
+  // `?? "undefined"` fallback arm covers; it has nothing to do with NaN.
+  const label = (v) => (Number.isNaN(v) ? "NaN" : JSON.stringify(v) ?? "undefined");
+  // The falsy-but-PRESENT class (#1125): `override == null` refuses these,
+  // where the `!override` guard it replaced returned `null` for them and
+  // silently handed the run back to the size tier. This fixture used to hold
+  // only `undefined`/`null` and valid arrays, so EITHER copy could carry that
+  // regression alone and this parity pin stayed green — measured on a scratch
+  // tree with review-core.js's guard reverted to `!override`: every test in
+  // this file passed, and so did every test in select-dimensions.test.mjs,
+  // which lifts its own falsy pin out of review-pr.js's SOURCE TEXT and so
+  // never runs review-core.js's copy at all.
+  const falsyPresent = ["", 0, false, NaN];
+  const modelOverride = [{ key: "x", prompt: "p", agentType: "a", model: "opus" }];
+  const overrides = [
+    undefined,
+    null,
+    ...falsyPresent,
+    ["correctness", "comments"],
+    [{ key: "x", prompt: "p", agentType: "a" }],
+    modelOverride,
+  ];
+  for (const o of overrides)
+    assert.deepEqual(
+      outcome(() => core.resolveDimensions(o, core.DEFAULT_DIMENSIONS)),
+      outcome(() => prFn(o, prAll)),
+      label(o),
+    );
+  // Agreement alone cannot see the two copies regressing TOGETHER, and
+  // review-core.js's copy has no other pin on this refusal. So assert the
+  // refusal itself, on each side, rather than only that the two agree.
+  for (const o of falsyPresent) {
+    assert.throws(
+      () => core.resolveDimensions(o, core.DEFAULT_DIMENSIONS),
+      /must be an array/,
+      `review-core.js accepted the falsy-but-present override ${label(o)}`,
+    );
+    assert.throws(() => prFn(o, prAll), /must be an array/, `review-pr.js accepted the falsy-but-present override ${label(o)}`);
   }
   // Both refuse a `model` field identically.
-  assert.throws(() => core.resolveDimensions([{ key: "x", prompt: "p", agentType: "a", model: "opus" }], core.DEFAULT_DIMENSIONS));
-  assert.throws(() => prFn([{ key: "x", prompt: "p", agentType: "a", model: "opus" }], prAll));
+  assert.throws(() => core.resolveDimensions(modelOverride, core.DEFAULT_DIMENSIONS));
+  assert.throws(() => prFn(modelOverride, prAll));
 });
 
 // The DEFAULT_DIMENSIONS arrays: same keys, same prompts, same length — and
