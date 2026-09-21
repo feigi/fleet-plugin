@@ -450,6 +450,33 @@ const audit = ({ w, branch }, env = ENV, cwd = w) => {
   return { ...r, json, jsonError };
 };
 
+/**
+ * Runs the audit with its own stderr piped to a reader that exits after one
+ * line — a genuine SIGPIPE (#1571), not the closed-fd-before-launch shape
+ * `2>&-` gives the tests above it: here the descriptor is live and writable
+ * right up until the reader goes away mid run.
+ *
+ * `spawnSync`'s own `status`/`signal` fields cannot carry this: node reads
+ * the child's stdio through its OWN pipes, and destroying node's end races
+ * the child's writes without ever reproducing a real reader closing a real
+ * pipe (measured — it left the unfixed script un-killed as often as not).
+ * A `head -1` in a real shell pipeline is what actually closes the
+ * descriptor, and what is left to report the audit's exit code is `sh`
+ * itself, the same way an unattended caller would read it — `$?` — not
+ * node's process object. `printf … >&3` carries that `$?` around the pipe
+ * that would otherwise discard it: `3>&1` on the outer group aliases fd 3 to
+ * the descriptor `spawnSync` is already reading as `r.stdout`, so the inner
+ * `sh -c` can hand the number back over a channel `head` never touches.
+ */
+function earlyClosingStderrReaderStatus({ w, branch }, cwd = w) {
+  const wrapper = '{ sh -c \'sh "$0" "$1" "$2" 2>&1 >/dev/null; '
+    + 'printf "RC=%s" "$?" >&3\' "$0" "$1" "$2" | head -1 >/dev/null; } 3>&1';
+  const r = spawnSync("sh", ["-c", wrapper, SCRIPT, w, branch], { cwd, env: ENV, encoding: "utf8" });
+  const m = /^RC=(\d+)$/.exec(r.stdout);
+  assert.ok(m, `wrapper must report the audit's own exit code; got ${JSON.stringify(r)}`);
+  return Number(m[1]);
+}
+
 /** `atRisk` with the abbreviated SHA stripped, so a test can pin the exact set. */
 const subjects = (r) => r.json.atRisk.map((l) => l.replace(/^\S+ /, ""));
 
@@ -2451,6 +2478,45 @@ test("an unanswerable question with stderr closed exits 2, never 1 (#1514)", (t)
   assert.equal(r.stdout.trim(), "", "exit 2 emits no payload — a payload is an answer");
 });
 
+// --- #1571: the same three outcomes, but the descriptor is not closed before
+// launch — a reader takes the first line and then genuinely leaves mid run,
+// a real SIGPIPE rather than a write against a dead fd. Every write above
+// this ticket guarded (`die`, `render`, `emit`) is a bare shell builtin, so
+// it runs in the script's own process rather than a forked child: unguarded,
+// the signal's default disposition killed that process on the spot, before
+// `|| :` was ever consulted, and the script exited 141 — outside its own
+// 0/1/2 contract and unreadable to a caller branching on which of the three
+// it got. Measured before the fix, on a tree the same run called safe one
+// line earlier: 141.
+//
+// All three outcomes below are the closed-fd trio's own fixtures rerun
+// through `earlyClosingStderrReaderStatus` instead of `2>&-` — the write
+// that fails is now a signal, but which outcome the run reaches and what its
+// payload says must be unchanged either way.
+test("with a genuine SIGPIPE on stderr, a clean tree still exits 0, never 141 (#1571)", (t) => {
+  const c = repo(t);
+
+  assert.equal(earlyClosingStderrReaderStatus(c), 0,
+    "a reader leaving mid run must not turn a safe tree into a signal death");
+});
+
+test("with a genuine SIGPIPE on stderr, a genuinely refused tree still exits 1, never 141 (#1571)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  assert.equal(earlyClosingStderrReaderStatus(c), 1,
+    "uncommitted work must still refuse — not 0 (the signal never reached), not 141 (it reached and killed the run)");
+});
+
+test("with a genuine SIGPIPE on stderr, an unanswerable question still exits 2, never 141 (#1571)", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-notarepo`;
+  mkdirSync(notARepo);
+
+  assert.equal(earlyClosingStderrReaderStatus({ w: notARepo, branch: c.branch }, c.w), 2,
+    "die's own write is a bare printf too — the same signal that killed the process before this fix must not reach it either");
+});
+
 test("a modified tracked file refuses, like an untracked one", (t) => {
   const c = repo(t);
   writeFileSync(join(c.w, "f.txt"), "edited in place, committed nowhere\n");
@@ -2762,13 +2828,14 @@ const SITES_PER_MESSAGE = new Map([["cannot create a temporary file", 2]]);
  */
 function dieSites() {
   const src = readFileSync(SCRIPT, "utf8");
-  // Re-derived for #1514, which added `|| :` to the write. The premise this
-  // anchor protects — that `die` reaches `exit 2` — is what the guard now
-  // makes true: before it, `set -e` took the printf's own status and an
-  // unwritable stderr turned every cause counted below into an exit 1.
+  // Re-derived for #1571, which confined the write's own `>&2` inside
+  // `( trap '' PIPE; … )` so a genuine SIGPIPE on stderr cannot kill the
+  // process before `|| :` is ever consulted (#1514 guards a status; a
+  // signal has none for `|| :` to read). The premise this anchor protects —
+  // that `die` reaches `exit 2` — is unchanged by either fix.
   assert.match(
     src,
-    /^die\(\) \{ printf '%s: %s\\n' "\$NAME" "\$1" >&2 \|\| :; exit 2; \}$/m,
+    /^die\(\) \{ \( trap '' PIPE; printf '%s: %s\\n' "\$NAME" "\$1" >&2 \) \|\| :; exit 2; \}$/m,
     "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
   );
   const sites = src
@@ -3250,10 +3317,24 @@ test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #
 // independent `>&2`-writing statements — `echo "a" >&2; echo "b" >&2 || :`
 // — would report the whole line compliant off the LAST write's guard alone,
 // leaving the first invisible.
+//
+// Paren-aware too, since #1571: each of the three writes now runs inside
+// `( trap '' PIPE; write )`, so the `;` between the trap and the write sits
+// INSIDE that subshell rather than between top-level statements. Splitting
+// on every unquoted `;` regardless of nesting would cut each site's one
+// segment into two, over-counting all three below and — worse — leaving one
+// half of each pair to be graded for a guard that was never its own to
+// carry. Depth only needs `(`/`)`, never `{`/`}`: no write in this script
+// sits inside a brace group that isn't also the enclosing function body,
+// which `splitTopLevelStatements` is never handed. The guard check's own
+// tail regex tolerates one optional `)` immediately after the write's
+// `>&2` for the same reason — the subshell's own close now sits between the
+// write and the `|| :` that guards it.
 function splitTopLevelStatements(line) {
   const segments = [];
   let cur = "";
   let quote = null;
+  let depth = 0;
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
     if (quote) {
@@ -3269,7 +3350,13 @@ function splitTopLevelStatements(line) {
     if (ch === "'" || ch === '"') {
       quote = ch;
       cur += ch;
-    } else if (ch === ";") {
+    } else if (ch === "(") {
+      depth += 1;
+      cur += ch;
+    } else if (ch === ")") {
+      depth -= 1;
+      cur += ch;
+    } else if (ch === ";" && depth === 0) {
       segments.push(cur);
       cur = "";
     } else {
@@ -3296,7 +3383,7 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
   assert.equal(writes.length, 3,
     `die, render, and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
 
-  const unguarded = writes.filter((s) => !/^\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
+  const unguarded = writes.filter((s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
   assert.deepEqual(unguarded.map((s) => s.trim()), [],
     "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :`");
 });
