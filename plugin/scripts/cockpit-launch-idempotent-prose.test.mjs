@@ -32,6 +32,17 @@
 // reds every test below; the docs/specs design note this bullet does not
 // cross-reference is untouched by either wording either way.
 //
+// PR #1664's own review amended the doctrine before merge: the idempotence
+// claim is conditioned on the running cockpit ANSWERING the handshake — one
+// blocked inside its own synchronous gather() reads as foreign and gets
+// duplicated, reproduced by two independent refuters; `--open` fires on the
+// reuse arm too, so a re-shortlist reopens the board tab, reproduced
+// directly; and the "own port" claim is softened — a derived-port collision
+// (#1657) lands the second workspace on the next free port in its scan
+// range, not its own derived one, though it still gets its own board. The
+// tests below that name PR #1664 pin these amendments; the two existing
+// tests they sit beside were tightened rather than replaced.
+//
 // Zero deps: `node --test plugin/scripts/cockpit-launch-idempotent-prose.test.mjs`.
 
 import { test } from "node:test";
@@ -56,12 +67,17 @@ test("phase 0 runs the cockpit launch on every pass, not just the first", () => 
   assert.match(step, phrase("On every phase-0 pass, not just the first"));
 });
 
-test("phase 0 states the cockpit launch is idempotent per workspace", () => {
+test("phase 0 states the cockpit launch is idempotent per workspace, conditioned on the handshake answering", () => {
   const step = LAUNCH_STEP();
   // The doctrine statement itself — not a symptom description ("a second
   // launch is harmless"), a stated design property ("idempotent"), scoped to
   // the unit #39's multi-instance cockpit cares about ("per workspace").
   assert.match(step, phrase("The launch is idempotent per workspace"));
+  // PR #1664 review (finding 1): unconditional idempotence is false — a
+  // cockpit blocked inside its own synchronous gather() does not answer the
+  // handshake in time, so the doctrine states the condition rather than
+  // leaving it implicit.
+  assert.match(step, phrase("when the running cockpit answers the identity"));
   // The mechanism the doctrine rests on, named rather than left implicit: an
   // already-served workspace's launch finds the running server and exits 0
   // instead of starting a second one.
@@ -69,7 +85,31 @@ test("phase 0 states the cockpit launch is idempotent per workspace", () => {
   assert.match(step, phrase("exits 0 without starting a second one"));
 });
 
-test("phase 0 states a second workspace's launch gets its own board on its own port", () => {
+test("phase 0 states a cockpit blocked in gather() reads as foreign and gets duplicated", () => {
+  const step = LAUNCH_STEP();
+  // PR #1664 review (finding 1), reproduced by two independent refuters:
+  // SIGSTOP-ing the holder mid-gather() makes a relaunch treat it as
+  // foreign and bind the next free port, starting a second server that
+  // shares this workspace's OWN `.fleet` state directory with the first —
+  // not a different workspace's, which would be the harmless #1585 case.
+  assert.match(step, phrase("does not answer inside the probe window and reads"));
+  assert.match(step, phrase("as foreign instead"));
+  assert.match(step, phrase("starts a second server sharing this workspace's"));
+  assert.match(step, phrase("`.fleet` state directory"));
+});
+
+test("phase 0 states --open fires on every relaunch, reopening the board tab each pass", () => {
+  const step = LAUNCH_STEP();
+  // PR #1664 review (finding 2), reproduced: `serve --open` run twice
+  // against the same workspace calls `open()` on BOTH runs, including the
+  // reuse arm — so moving the launch to every phase-0 pass means a
+  // re-shortlist reopens the browser tab, not just the first pass. The
+  // doctrine says so rather than leaving the operator to discover it.
+  assert.match(step, phrase("`--open` fires on every one of those launches too"));
+  assert.match(step, phrase("a re-shortlist reopens the board tab"));
+});
+
+test("phase 0 states a second workspace's launch derives its own port, falling back when it is held", () => {
   const step = LAUNCH_STEP();
   // The other half of #39's doctrine: idempotence is per WORKSPACE, not
   // global, so a second fleet on a different workspace is not merely
@@ -78,7 +118,13 @@ test("phase 0 states a second workspace's launch gets its own board on its own p
   // claim and left only the negative, so both are asserted.
   assert.match(step, phrase("A second fleet on another workspace collides with none of that"));
   assert.match(step, phrase("its own launch derives that"));
-  assert.match(step, phrase("workspace's own port and gets its own board there"));
+  assert.match(step, phrase("workspace's own port and binds it when free"));
+  // PR #1664 review (finding D): derived ports collide across workspaces at
+  // a real, non-negligible probability (#1657, filed and deferred
+  // separately) — the doctrine must not promise the derived port
+  // specifically, only that a board gets served either way.
+  assert.match(step, phrase("scans to the next free port in its range when the derived one is already held"));
+  assert.match(step, phrase("it gets its own board, just not always on the port its hash predicts"));
 });
 
 test("the old skip-on-re-shortlist framing is gone, not left beside its replacement", () => {

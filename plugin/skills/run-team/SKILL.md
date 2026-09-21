@@ -255,11 +255,21 @@ At start, and whenever the pool empties.
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
    feed or update it, and it survives your own compaction. The launch is
-   idempotent per workspace: an already-served workspace's launch finds the
-   running server over HTTP, prints its URL, opens it if asked, and exits 0
-   without starting a second one (#1585) — nothing to skip. A second fleet on
-   another workspace collides with none of that: its own launch derives that
-   workspace's own port and gets its own board there.
+   idempotent per workspace when the running cockpit answers the identity
+   handshake: an already-served workspace's launch finds the running server
+   over HTTP, prints its URL, opens it if asked, and exits 0 without starting
+   a second one (#1585) — nothing to skip. A cockpit blocked inside its own
+   synchronous `gather()` does not answer inside the probe window and reads
+   as foreign instead — the relaunch then binds the next free port and
+   starts a second server sharing this workspace's `.fleet` state directory,
+   so relaunching mid-gather is not the free no-op the happy path is.
+   `--open` fires on every one of those launches too, so a re-shortlist
+   reopens the board tab, not just the first pass. A second fleet on another
+   workspace collides with none of that: its own launch derives that
+   workspace's own port and binds it when free, or scans to the next free
+   port in its range when the derived one is already held by something
+   else — either way it gets its own board, just not always on the port its
+   hash predicts.
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
