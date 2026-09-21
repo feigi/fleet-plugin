@@ -28,6 +28,14 @@ import { join } from "node:path";
 // here; the alternative is each file growing a private pin that reads its own
 // source, which is the per-file creep this file exists to stop.
 //
+// #1555 widens the subject past line numbers. The select-dimensions.test.mjs
+// entry bans a reverted ARGUMENT spelling, not a citation: `lift(SOURCE)`
+// where the live code passes `lift(stripComments(SOURCE))`. It belongs here
+// because the rot is the same rot — a one-line spelling that still reads
+// plausibly, whose revert nothing reds on — and the alternative is the
+// private per-file pin the paragraph above rejects. The table's subject is
+// the stale FORM; a line number is one kind of stale form.
+//
 // Both halves here are CITING-side: the stale form must not return, and the
 // construct the citation names must still be named. Neither reads the cited
 // file, so nothing in this table notices the TARGET losing the construct — the
@@ -147,6 +155,40 @@ const FILES = [
     // after the citation was deleted outright.
     live: ['[ "$parents" -ge 2 ]'],
   },
+  {
+    // #1555. The one entry here that is not a citation. #1125 moved this
+    // file's `resolveDimensions` lift onto stripComments(SOURCE) because
+    // lift() matches with a non-global `.match`, so against raw source a
+    // block-commented dead copy of the function satisfies the pin while the
+    // live declaration ships the regression. Reverting that one line alone
+    // was measured green everywhere — this suite and select-dimensions.test.mjs
+    // both — so nothing but this entry stops it rotting back.
+    path: ["scripts", "select-dimensions.test.mjs"],
+    // Banned generally rather than at the one reverted spelling, the reason
+    // the run-merge-bot entry above gives: a ban on `lift(SOURCE,` alone lets
+    // `lift( SOURCE` straight back in. That claim is about the TARGET file:
+    // select-dimensions.test.mjs spells `lift(` on nothing starting SOURCE
+    // today. It is not a claim about this file — this comment block's own
+    // prose, describing the banned pattern, does spell it literally (as text
+    // above and in this sentence), which is fine and expected: `stale` below
+    // matches select-dimensions.test.mjs's source, never this file's.
+    stale: [/lift\(\s*SOURCE/, /const CODE = SOURCE\b/],
+    // The whole live call, not a bare `stripComments(SOURCE)`: that shorter
+    // needle is vacuous here. Deleting this lift outright still leaves five
+    // spellings of it in that file — the `verifiersFor` branch's stripped
+    // read, the header-dereference check, the specialistModel ban, and two
+    // comments, which count because the live half matches gutter-stripped
+    // prose. Measured both ways with the lift's line deleted: the needle
+    // below reds, a bare `stripComments(SOURCE)` stays green.
+    //
+    // Second pair: `verifiersFor`'s own stripped read (line 72), the repo's
+    // only guard on the live `verifiersBySeverity` map per that branch's own
+    // comment. Reverting just that one line to `const CODE = SOURCE;` was
+    // measured green across this suite AND select-dimensions.test.mjs's own
+    // 41 tests — the same silent-rot shape as the `resolveDimensions` pair
+    // above, so it gets the same two-sided pin.
+    live: ['lift(stripComments(SOURCE), "resolveDimensions"', "const CODE = stripComments(SOURCE);"],
+  },
   // #1349 retired this entry outright rather than leaving it to rot: the
   // vendored `code-reviewer.md` this citation pointed at (via its "Review
   // Scope" section) no longer exists anywhere in this port — the fork ruled
@@ -166,20 +208,20 @@ for (const { path, stale, live } of FILES) {
   const prose = normalize(source);
 
   for (const pattern of stale) {
-    test(`${label} does not regress to the stale citation ${pattern}`, () => {
+    test(`${label} does not regress to the stale form ${pattern}`, () => {
       assert.doesNotMatch(
         source,
         pattern,
-        `a stale line-numbered citation matching ${pattern} is back in ${label} — this form was converted away because the cited file rots out from under a line number silently, with nothing going red when it does`,
+        `a stale form matching ${pattern} is back in ${label} — this spelling was converted away because it rots silently: a line number the moment the cited file is next touched, a raw-source pin the moment a dead copy drifts above the live declaration — with nothing going red when it does`,
       );
     });
   }
 
   for (const needle of live) {
-    test(`${label} still names the construct its citation points to (${needle})`, () => {
+    test(`${label} still names the construct that replaced the stale form (${needle})`, () => {
       assert.ok(
         prose.includes(needle),
-        `${label} no longer mentions "${needle}" anywhere — the construct-named citation that replaced the stale form here appears to have been deleted outright rather than kept current`,
+        `${label} no longer mentions "${needle}" anywhere — the construct that replaced the stale form here appears to have been deleted outright rather than kept current`,
       );
     });
   }
