@@ -158,12 +158,16 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   //
   // This doc's own convention grounds the shape: a dated note states one
   // action on one date (comment above — "dated and attributed"), so a
-  // restoration smuggled inside it either introduces a further date (when the
-  // restoration happened) or names the state the binding is restored TO.
-  // Settled against a single edit to this note — appending "and is RESTORED
-  // on 2026-08-18, so routine members dispatch at `sonnet` again." — both
-  // checks below fire and name the note, not the scan; a reflow or a
-  // past-tense-only reword of the same note trips neither.
+  // restoration smuggled inside it surfaces as a further date (when the
+  // restoration happened), as the state the binding is restored TO, or as a
+  // second mention of the binding itself. Those are the three checks below,
+  // in that order. Settled against a single edit to this note — appending
+  // "and is RESTORED on 2026-08-18, so routine members dispatch at `sonnet`
+  // again." — each of the three matches it independently and names the
+  // note, not the scan. A pure whitespace reflow, or a past-tense reword
+  // that adds no further mention of the binding, trips none of them — but
+  // that is narrower than "any reword": the third check's own grid below
+  // measures which benign rewords DO trip it (3/7, corrected below).
   const revertNote = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/.exec(slice)?.[0];
   assert.ok(
     revertNote,
@@ -175,14 +179,84 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     "the revert note now names more than one date — a restoration is hiding inside the note whose span the rebindings scan exempts",
   );
   // ponytail: catches the measured restoration and any dated repeat of it,
-  // plus the specific verb this doc's own restorations are written with; a
-  // same-day, dateless restoration phrased without "restored" is a narrower
-  // gap in the same family the guard test's hedge-word list already accepts
-  // (#476) — widen only on a second measured miss.
+  // plus the specific verb this doc's own restorations are written with. The
+  // dateless restoration phrased without "restored" that this one lets past
+  // is the third check's job, below (#1226).
   assert.doesNotMatch(
     revertNote,
     /\bRESTORED\b/i,
     "the revert note now says the binding is RESTORED — a restoration is hiding inside the note whose span the rebindings scan exempts",
+  );
+  // THE TOKEN BUDGET (#1226). A restoration written inside the note that
+  // carries no second date and never spells "RESTORED" satisfies both checks
+  // above and then rides the scan's span exemption below, because that
+  // exemption drops every hit starting inside the note whatever the hit says.
+  // Measured from a copy of this tree under a scratch directory: the note
+  // re-ended "firing; that binding is back in force, so routine members
+  // dispatch at `sonnet`." left this file at 10/10.
+  //
+  // Pin what the note is ALLOWED TO SAY, not the vocabulary a restoration
+  // would say it in. The note's legitimate job is to state the reverted
+  // binding once; any further `class=routine` or `sonnet` inside it is a
+  // second statement of a binding the scan below is forbidden to look at.
+  // That invariant survives rewording. A word list does not.
+  //
+  // #1226 asked first whether #476's trigger was met, reading it as a count
+  // of misses. It is not a count: #476 closed with "re-open trigger: someone
+  // exhibits a regex that passes that grid", so the cross-review arithmetic
+  // the issue carried — is one review's two dimensions a second miss? — never
+  // gated anything; the grid did. Ten restoration mutants of this note and
+  // seven benign edits of it, each run as its own copy:
+  //
+  //   instrument                                      kills  over-fires
+  //   /\b(is|are) (now )?(back|restored|in force)\b/i   4/10     0/7
+  //   the note states its binding exactly once          6/10     3/7  <- this
+  //   tight one-clause template over the whole note     8/10     3/7
+  //
+  // Re-measured under independent review: an earlier pass of this comment
+  // claimed 0/7 for this row and claimed above that "a reflow or a
+  // past-tense-only reword trips none of them" — both wrong. This check
+  // counts mentions, not intent, so any benign edit that re-mentions
+  // `class=routine` or `sonnet` inside the note trips it exactly as a
+  // restoration would. The 3 over-fires on the 7-edit grid: pulling the
+  // guard paragraph's own adjacent "reverts `class=routine`" clause into the
+  // note, a reword naming the tier the class moved off to ("...instead of
+  // `sonnet`"), and a parenthetical gloss restating the binding for context.
+  // The other four — whitespace reflow, a past-tense-only reword that adds
+  // no mention, a comma fix, and a moved bold marker — leave the note's
+  // mention count at one and pass. Kept over the template row despite the
+  // now-tied 3/7: this row's over-fires are all edits that literally repeat
+  // the pinned tokens, the same shape a restoration takes, where the
+  // template's 3 over-fires (an em-dash reason, a semicolon expansion, a
+  // moved bold marker — #476's sentence-anchor column, reproduced) are
+  // structural and share nothing with a restoration. The suggested word list
+  // is rejected on its own mutant regardless of either row: drop "that
+  // binding is back in force" from the measured restoration and keep the
+  // restoration — "firing; routine members dispatch at `sonnet` again." —
+  // and it goes green where this check reds. Widening it is ruled out for
+  // the same instrument in the guard test below (#1111, #529, #476).
+  //
+  // RESIDUAL, measured and still open — TWO gaps, not one:
+  // (1) a restoration that never re-states the binding at all — "that
+  // binding is back in force.", "That revert no longer holds.", "(since
+  // undone)." — passes all three checks here, because none of them read for
+  // restoration MODALITY, only for a repeated token or a repeated date.
+  // (2) a restoration that DOES re-state the binding, but in the doc's own
+  // unbackticked prose rather than the backticked `class=routine` literal —
+  // "routine members dispatch at `sonnet` again", placed outside the note —
+  // clears this check (it never touches the note) and clears the rebindings
+  // scan below (that scan's own regex requires the backticked
+  // `` `class=routine` `` token, which this reword never spells): measured
+  // 10/10 green on a copy of this tree. Gap (2) is strictly larger than gap
+  // (1) — it needs no dateless, wordless restoration trick, just the doc's
+  // ordinary vocabulary — and is not fixed here. Catching either is a
+  // question about prose MODALITY, which is #1111's open call for the guard
+  // lead in this same file, and nothing on the grid answered it without
+  // over-firing. Do not close it with a longer word list.
+  assert.deepEqual(
+    (revertNote.match(/class=routine|sonnet/gi) ?? []).map((token) => token.toLowerCase()),
+    ["class=routine", "sonnet"],
+    "the revert note mentions `class=routine` or `sonnet` more than once — either a restoration is hiding inside the note whose span the rebindings scan exempts, or this is a benign reword that re-mentions the binding (see the grid above); read the note before assuming which",
   );
   // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
   // stated independently in both places, so restoring either one alone is
