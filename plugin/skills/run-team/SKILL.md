@@ -251,14 +251,15 @@ At start, and whenever the pool empties.
    codes mean. Pinning before that fast-forward would instead pin the
    superseded text and certify it for the rest of the run.
 
-   **Launch the cockpit.** On the first phase-0 pass only:
+   **Launch the cockpit.** On every phase-0 pass, not just the first:
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
-   feed or update it, and it survives your own compaction. Skip on later
-   re-shortlists: there is already a server, and re-launching buys nothing.
-   Doing it anyway is harmless rather than a collision — a second launch for
-   this workspace finds the first over HTTP, prints its URL, opens it if
-   asked and exits 0 without starting anything (#1585).
+   feed or update it, and it survives your own compaction. The launch is
+   idempotent per workspace: an already-served workspace's launch finds the
+   running server over HTTP, prints its URL, opens it if asked, and exits 0
+   without starting a second one (#1585) — nothing to skip. A second fleet on
+   another workspace collides with none of that: its own launch derives that
+   workspace's own port and gets its own board there.
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
