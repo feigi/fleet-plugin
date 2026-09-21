@@ -120,12 +120,34 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 // on the clean path gets ignored. Naming a path alone does not catch the
 // observed failure either, which was an agent BELIEVING it was already in
 // scratch and being wrong.
-test("the rendered specialist prompt requires a toplevel assertion around git init/commit", () => {
+//
+// The realpath tail is part of the pin, not decoration on it. PR #1567 added
+// that remedy to all four copies of this rule but the pin to only the
+// refuter's two, so the clause sat unpinned in both specialist prompts:
+// deleting it from both (measured, #1570) left this file and its review-core
+// sibling at 6/6 and the four refuter/prose pins at 41/41, all green. It is
+// also the half that makes the rule satisfiable in the OTHER direction —
+// `--show-toplevel` answers `/private/tmp/…` for a `/tmp` scratch dir on
+// macOS, so a raw string compare reports a mismatch on the clean path, and a
+// guard that cannot pass there gets ignored exactly as a lone `git init` half
+// would.
+//
+// The tail keeps this file's free-text gaps, matching its refuter sibling's
+// pin verbatim; whitespace is `\s+` throughout, so both directions were
+// measured — rewrapping the clause to one line and to a narrower column stays
+// green. The gaps are the known limit, the same one review-core-refuter
+// -scratch.test.mjs records against this family: an exception clause spliced
+// into the pre-`compare` gap ("…your scratch path, except in CI runners —
+// compare resolved forms…") passes this regex, where the typed-gap spelling
+// in review-core-specialist-scratch.test.mjs reds on it (both measured).
+test("the rendered specialist prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path/s,
-    "the workflow's specialist prompt carries no toplevel assertion around a fixture's own git init/commit — an agent " +
-      "that wrongly believes it is already in its scratch copy runs `git init`/`git commit` against the repository",
+    /`git\s+rev-parse\s+--show-toplevel`.{0,60}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,80}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,60}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path.{0,80}compare\s+resolved\s+forms.{0,60}realpath/s,
+    "the workflow's specialist prompt carries no toplevel assertion around a fixture's own git init/commit, or dropped " +
+      "the realpath remedy for macOS's /private vs /tmp symlink — an agent that wrongly believes it is already in its " +
+      "scratch copy runs `git init`/`git commit` against the repository, and a raw compare against `--show-toplevel` " +
+      "reads a `/private/tmp` answer for a `/tmp` scratch dir as a mismatch on the clean path",
   );
 });
 
