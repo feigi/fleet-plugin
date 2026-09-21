@@ -105,7 +105,7 @@ NAME=no-undo-audit
 # every unanswerable question blamed the worktree instead of saying it could
 # not be answered (#1514, measured: a path that is not a worktree, `2>&-`,
 # exit 1 where the contract says 2).
-die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
+die() { ( trap '' PIPE; printf '%s: %s\n' "$NAME" "$1" >&2 ) || :; exit 2; }
 
 # THE RULE FOR EVERY STDERR WRITE IN THIS SCRIPT, and why each one is
 # guarded. Exit 0 is safe, 1 is refused, 2 is unanswerable, and a caller
@@ -132,9 +132,34 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
 # The guard goes on the write itself, never on the surrounding statement:
 # most call sites sit in `if`/`elif` chains or in a function whose later
 # lines must still run. It covers a write that FAILS, which is what a closed
-# or full fd 2 produces. It does not cover a signal: a stderr that is a
-# broken pipe kills the process before any `||` is consulted, which is #1571
-# and needs a trap, not a guard.
+# or full fd 2 produces. A SIGNAL is a different failure class: `printf` is a
+# shell builtin, so its write to fd 2 runs IN THIS PROCESS rather than a
+# forked child, and the default disposition of SIGPIPE is to kill whatever
+# receives it — on the spot, mid-syscall, before the interpreter ever returns
+# to evaluate the `||` that follows. `|| :` cannot catch a kill; it can only
+# catch a status, and a killed process never produces one for this shell to
+# read (#1571, measured: a reader that exits before the script finishes
+# writing — not merely a closed fd — took the whole process out at 141,
+# outside the script's own 0/1/2 contract).
+#
+# The fix is `( trap '' PIPE; write )`, not a script-wide `trap '' PIPE`.
+# Ignoring the signal turns the write's own failure back into a status — the
+# write's fd 2 syscall returns EPIPE instead of delivering a kill — which is
+# exactly the shape `|| :` already exists to swallow, so the fix opens no new
+# failure path; it only makes the existing one reachable from a signal too.
+# Confined to a subshell rather than the whole process for two measured
+# reasons. First, it must leave every pipeline inside this script exactly as
+# exposed to SIGPIPE as it is today: `render`'s own pipe below already
+# tolerates it correctly, because `sed` there is exec'd rather than built in,
+# and a forked child's death by signal reaches `set -e` as an ordinary
+# nonzero status — ignoring PIPE for the whole process would reach past that
+# pipe into every subprocess this script forks, which this script has no way
+# to audit is equally inert under it. Second: macOS's `/bin/sh` (bash 3.2.57)
+# does not recover cleanly once a script-wide `trap '' PIPE` has absorbed one
+# EPIPE on a builtin write — measured, a LATER command substitution came back
+# holding an earlier diagnostic line instead of the command it actually ran.
+# A trap set inside a subshell never outlives it: it is gone the instant that
+# subshell exits, which is also the instant the write it guards finishes.
 
 # Every operator-facing render that pipes a captured value through an external
 # tool goes through here — bar the stash-diagnostic fold below, which folds
@@ -167,7 +192,7 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2 || :; exit 2; }
 # caller-derived prefix would have to be escaped first.
 render() { # render <line-prefix> <text> <what-the-text-is>
   printf '%s\n' "$2" | sed "s/^/$1/" >&2 \
-    || printf '%s: could not render %s to stderr; the payload and the exit status stand\n' "$NAME" "$3" >&2 \
+    || ( trap '' PIPE; printf '%s: could not render %s to stderr; the payload and the exit status stand\n' "$NAME" "$3" >&2 ) \
     || :
 }
 
@@ -177,7 +202,7 @@ render() { # render <line-prefix> <text> <what-the-text-is>
 # function rather than a `|| :` hand-appended at each call site, so a future
 # site cannot add an unguarded write without also adding a new function to
 # sidestep this one.
-emit() { printf '%s\n' "$1" >&2 || :; }
+emit() { ( trap '' PIPE; printf '%s\n' "$1" >&2 ) || :; }
 
 
 # The escaping helpers (#119). json.sh's header holds the sourcing contract and
