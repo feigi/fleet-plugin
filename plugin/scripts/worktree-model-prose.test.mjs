@@ -122,6 +122,73 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   );
 });
 
+// #1447. The third measurement this section carries, and the one whose
+// hazard is least visible to the repo: `isolated` and the missing `cwd`
+// field are both about where BYTES land, so `git status` can catch them
+// after the fact. A shared kernel's bare-name collision and its `reset`
+// collide and destroy in memory, leaving nothing behind; only its
+// relative-path case shows up, and only when the cell writes — which is
+// why the measurement is recorded here rather than left to the incident
+// that found it.
+test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-by-construction exception kept", () => {
+  // The claim bound to its evidence, and to the fact that it was measured in a
+  // LIVE run — every other measurement in this section came from a throwaway
+  // probe clone, and a reader who assumes the same of this one would discount
+  // it as not reproducing the real dispatch path.
+  assert.match(
+    section(),
+    /`task`-dispatched\s+members\s+share\s+one\s+`eval`\s+kernel[\s\S]{0,80}live\s+run\s+rather\s+than\s+a\s+probe\s+clone[\s\S]{0,170}same\s+Python\s+kernel\s+pid[\s\S]{0,90}each\s+read\s+the\s+others'\s+top-level\s+bindings/,
+    "the shared-kernel claim, its live-run provenance, or the pid/cross-read evidence behind it is gone",
+  );
+  assert.match(
+    section(),
+    phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
+    "the reproduced collision no longer names the bare variable the original report was filed on",
+  );
+  // WHY the sharing follows from the documented keying. Without this, the
+  // keying reads as a partition and the conclusion looks unsupported — the
+  // point is that both key components are constant across one run's members.
+  assert.match(
+    section(),
+    phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
+    "the section no longer explains why the documented kernel key fails to separate two members of one run",
+  );
+  // THE EXCEPTION, quoted from upstream. This is the boundary that stops the
+  // finding being generalised into "subagent state is never isolated": eval's
+  // own `agent()` children are isolated by construction, and a future editor
+  // deciding how to fix this needs to know which spawns already are.
+  assert.match(
+    section(),
+    phrase("children created by eval's own `agent()` explicitly do not"),
+    "the isolated-by-construction exception for eval's own agent() children is gone, so the finding reads as covering every spawn",
+  );
+  // The corollary bound to its blast radius — `reset` is the destructive half
+  // of the same mechanism, and it is the one a member reaches for innocently.
+  assert.match(
+    section(),
+    /corollary\s+is\s+`reset`[\s\S]{0,140}resetting\s+its\s+own\s+kernel\s+resets\s+every[\s\S]{0,20}concurrent\s+sibling's/,
+    "the reset corollary or the sibling damage it causes is gone from the section",
+  );
+  // THE ANSWER TO #1447's REMEDY 2, recorded rather than left open. A reader
+  // who knows only that the kernel is shared will go looking for the dispatch
+  // flag that turns it off; the point is that there isn't one, which is what
+  // makes the prose rules the remedy instead of a stopgap standing in for a
+  // field. Bound to the lever that does exist, so "no knob" cannot be read as
+  // "nobody checked".
+  assert.match(
+    section(),
+    /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,50}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
+    "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
+  );
+  // The measurement is only worth recording if it reaches members. Phase 2 is
+  // where the rules are carried verbatim, so the pointer is pinned with it.
+  assert.match(
+    section(),
+    phrase("**Phase 2** carries all three rules to every member"),
+    "the section no longer points at the phase that actually delivers these rules to a member",
+  );
+});
+
 test("run-team/SKILL.md: absolute-path addressing is stated as the shared contract, not a dialect card", () => {
   assert.match(
     section(),

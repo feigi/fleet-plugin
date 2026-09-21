@@ -1147,6 +1147,43 @@ number, worktree abs path, branch, and each of these verbatim:
 > worktree so a harness never dirties one — nothing partitions the scratch root
 > itself but this rule.
 
+> **The `eval` kernel is shared with every sibling member and with the
+> controller that dispatched you — namespace every binding you make in it, and
+> never hand it a relative path.** Measured on #1447, live, three ways in one
+> run: two sibling implementers dispatched in the same batch, and the
+> controller above them, reported the SAME Python kernel pid and the same
+> runner file, and each could read the others' top-level variables — a bare
+> `WT` bound by one member was read back out of another member's own kernel,
+> which is the exact collision an earlier member self-reported and could not
+> prove. `omp://tools/eval.md` is where the mechanism is written down:
+> retained kernels are keyed by `python:${sessionId}`, normalized cwd and
+> interpreter (`js:${sessionId}` for the JS VM), and "Parent and ordinary task
+> subagents may share an inherited eval executor id" — so no part of that key
+> separates two members of one run, because the session id is inherited from
+> the controller and the cwd is the same main checkout for all of you.
+>
+> Three consequences. The bare-name collision and a kernel `reset` leave nothing
+> `git status` can surface at all; the relative-path hazard does only when the
+> cell writes rather than reads. **A bare top-level name is a shared global** a
+> sibling can overwrite between two of your own cells, so prefix what you bind
+> with your own member NAME, not its bare ticket number —
+> `WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for
+> the same ticket (`impl-1447-b`) would also produce. **The kernel's cwd is
+> the MAIN CHECKOUT, not your worktree** — unlike `bash`, `eval` takes no
+> `cwd` parameter at all — so a relative path in a cell resolves into the tree
+> every member reads its instruments out of: measured, a bare `work/scripts`
+> in a member's cell resolved under the main checkout root, never under that
+> member's own worktree — the stray `work/` tree found there has exactly that
+> shape — so pass absolute paths rooted at `<scratch>/impl-<N>/` or at your
+> worktree, exactly as you already do for `write`/`edit`. And **never call
+> `eval` with `reset: true`**, which is destructive to every other member
+> sharing that backend session, not only to your own state.
+>
+> Using the kernel is not the defect, and this is not the `isolated` question
+> — the bare name, the relative path and the reset are. The harm is that the
+> collision fails in the looks-already-correct direction: you read a value
+> that is a sibling's rather than your own, and nothing anywhere reports it.
+
 > Your ticket names the cases it was written from. **Before implementing, enumerate
 > every member of that class — including any the ticket names only in passing — and
 > say which you cover and which you deliberately leave** — a guard on one path
@@ -2696,6 +2733,33 @@ running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
 appears anywhere in the item schema — and the probe above confirms it in
 practice: the recipe is the absolute-path discipline above, not a placeholder
 for a `cwd` field that does not exist.
+
+**The same gap reaches past the filesystem: `task`-dispatched members share one
+`eval` kernel.** Measured 2026-09-21 on #1447, in a live run rather than a
+probe clone: two sibling implementers dispatched in the same batch, and the
+controller that dispatched both, reported the same Python kernel pid and the
+same runner file under `$TMPDIR/omp-python-runner/`, and each read the others'
+top-level bindings out of its own `eval` cell — a bare `WT` bound by one member
+was read back by a sibling and by the controller, the collision #1447 was filed
+on as an unproven self-report. `omp://tools/eval.md` states the mechanism:
+retained kernels are keyed by `python:${sessionId}`, normalized cwd and
+interpreter — `js:${sessionId}` for the JS VM — and "Parent and ordinary task
+subagents may share an inherited eval executor id; children created by eval's
+own `agent()` explicitly do not." Neither key component separates two members
+of one run: the session id is inherited from the controller, and the cwd is the
+main checkout for all of them, because `eval`, unlike `bash`, takes no `cwd`
+parameter to set. So the absolute-path discipline above is load-bearing inside
+`eval` too, and it needs one rule `write`/`edit` do not — member-prefixed
+binding names, since a shared global has no path to be absolute about. The
+corollary is `reset`: it "is likewise destructive to concurrent work sharing
+that backend session", so a member resetting its own kernel resets every
+concurrent sibling's. No per-dispatch knob turns any of this off: `task`'s item
+shape carries no kernel, executor or cwd field, and `python.kernelMode` set to
+`"per-call"` — the one documented lever that would hand every call a fresh
+kernel — is a session setting a child inherits, not something one dispatch can
+set for one member. Isolating a member's kernel is an omp-side change, so
+discipline is the whole of the remedy here, exactly as it is for the missing
+`cwd` field above. **Phase 2** carries all three rules to every member.
 
 **`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
 unaffected by a running member.** Measured against a hand-built claim (a
