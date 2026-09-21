@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText, resolveCockpitInstance } from "./board.mjs";
+import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
 import { stripComments } from "./strip-comments.mjs";
 import { gitEnv } from "./git-env.mjs";
 
@@ -1354,12 +1354,12 @@ test("CLI: a malformed --port with no subcommand names the flag, not the usage l
   assert.match(r.stderr, /--port wants an integer 0-65535, got abc/);
 });
 
-// #169 review: a --port we cannot use falls back to 8123, and the bind error
-// used to name that substituted default as if the caller had chosen it — it
-// told someone who DID pass --port to "pass --port <n>", pointing them at a
-// port they never named. PATH is stripped to an empty dir so every gh/git/node
-// child fails fast into tryRun's catch; the tick degrades and serve() still
-// reaches listen(). Offline, ~50ms.
+// The offline rig every serve spawn below shares. PATH is stripped to an
+// empty dir so every gh/git/node child fails fast into tryRun's catch: the
+// tick degrades, `git rev-parse --git-common-dir` answers nothing, and the
+// instance degrades with it to a cwd-relative `.fleet` on PORT_BASE — which
+// is what makes 8123 the deterministic derived port for these spawns, and a
+// fresh mkdtemp cwd what keeps them from sharing a state directory.
 const serveArgs = (args) => [SCRIPT, "serve", ...args];
 const serveOpts = () => ({
   cwd: mkdtempSync(join(tmpdir(), "board-serve-")),
@@ -1368,30 +1368,52 @@ const serveOpts = () => ({
   timeout: 20000,
 });
 
-// #366 hardened argPort(): a garbage --port now dies before ever reaching
-// listen(), so it can no longer stand in for "--port not given at all" here.
-// This test now drives the true absent case; the garbage case moved to the
-// numeric-guard tests below.
-test("CLI: serve marks 8123 as the default in the bind error when --port was not given", async () => {
-  const blocker = createServer();
-  // 8123 just has to be held by SOMEONE — us, or whatever already had it.
-  await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
-  try {
-    const r = spawnSync(process.execPath, serveArgs([]), serveOpts());
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /port 8123 \(default\) in use/);
-  } finally { blocker.close(() => {}); }
-});
+// A net server that accepts a connection and then says nothing — the holder
+// no HTTP status describes, and the only one the probe's timer alone can
+// end. Its sockets are tracked because a socket nobody ever reads from
+// never notices the peer hanging up: plain `server.close()` would then wait
+// on it forever and keep this whole test process alive past the last test
+// (measured — the suite ran to the harness timeout with every test green).
+function muteHolder() {
+  const conns = [];
+  const server = createServer((s) => conns.push(s));
+  const close = () => {
+    for (const s of conns) s.destroy();
+    return new Promise((res) => server.close(res));
+  };
+  return { server, close };
+}
 
-test("CLI: serve does NOT call a port the caller really passed a default", async () => {
-  const blocker = createServer();
-  const port = await new Promise((res) => blocker.listen(0, () => res(blocker.address().port)));
+// #1585 replaced the row that stood here. It pinned the bind error's
+// "(default)" marker — a derived port in use printed `port 8123 (default) in
+// use` and exited 2 — and a derived port in use is no longer an error at
+// all, so that wording has no behaviour left to pin. What replaces it is the
+// behaviour that took its place on the same rig: this cwd is not a git
+// checkout, so its workspace is null and matches nothing, which makes the
+// holder on 8123 foreign by construction and the launch step over it.
+//
+// 8123 just has to be held by SOMEONE — us, or whatever already had it. The
+// blocker is a bare net server, so it accepts the probe's connection and
+// then says nothing forever: this row therefore also carries the end-to-end
+// half of "a holder that never answers cannot hang the launch", since an
+// unbounded probe would leave the spawn below waiting on that socket and
+// this test waiting on the spawn.
+test("CLI: a derived port held by a foreign holder is stepped over, not fatal", async () => {
+  const blocker = muteHolder();
+  await new Promise((res) => { blocker.server.once("error", res); blocker.server.listen(8123, res); });
+  const nobin = mkdtempSync(join(tmpdir(), "board-nobin-"));
+  const cwd = mkdtempSync(join(tmpdir(), "board-serve-"));
+  const launch = serveProcess(cwd, nobin, ["--interval", "3600"]);
   try {
-    const r = spawnSync(process.execPath, serveArgs(["--port", String(port)]), serveOpts());
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, new RegExp(`port ${port} in use`));
-    assert.doesNotMatch(r.stderr, /\(default\)/);
-  } finally { blocker.close(() => {}); }
+    const url = await withTimeout(launch.url, 20000, "the launch to step over 8123 and announce");
+    assert.notEqual(url, "http://localhost:8123", "the launch announced a port it could not bind");
+    const window = cockpitPorts({ port: 8123, derived: true });
+    assert.ok(window.includes(Number(url.split(":")[2])), `${url} is outside the bounded scan window ${window.join(", ")}`);
+  } finally {
+    launch.p.kill("SIGKILL");
+    await blocker.close();
+    for (const d of [nobin, cwd]) rmSync(d, { recursive: true, force: true });
+  }
 });
 
 // #1656 critical (survived review): tick() used to run and write board.json
@@ -1782,8 +1804,8 @@ const withTimeout = (pr, ms, what) => Promise.race([
   new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
 ]);
 
-function serveProcess(cwd, bin) {
-  const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]),
+function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"]) {
+  const p = spawn(process.execPath, serveArgs(args),
     { cwd, env: { ...process.env, PATH: bin }, stdio: ["ignore", "ignore", "pipe"] });
   p.stderr.setEncoding("utf8");
   let buf = "";
@@ -1867,6 +1889,252 @@ test("CLI: two workspaces serve two live boards at once, each writing only its o
     for (const p of procs) p.kill("SIGKILL");
     for (const d of [bin, repoA, repoB]) rmSync(d, { recursive: true, force: true });
   }
+});
+
+// ── #1585: the launch is idempotent ─────────────────────────────────────────
+
+// The pure half of the scan, reachable with no socket at all.
+test("cockpitPorts: an explicit port is a list of one — there is nothing to scan", () => {
+  assert.deepEqual(cockpitPorts({ port: 9000, derived: false }), [9000]);
+  // 0 is the row that catches a truthiness test in place of the `derived`
+  // flag: it is a legal ephemeral bind (#366) and it is falsy.
+  assert.deepEqual(cockpitPorts({ port: 0, derived: false }), [0]);
+});
+
+test("cockpitPorts: a derived port leads a bounded, contiguous window inside the range", () => {
+  const ports = cockpitPorts({ port: 8200, derived: true });
+  assert.equal(ports[0], 8200, "the scan must start at the stable, bookmarkable port, not one past it");
+  assert.ok(ports.length > 1, "a derived port with no fallback is the failure this ticket exists to remove");
+  // Every attempt can cost a bind plus a probe timeout, so the bound is what
+  // keeps an exhausted range a refusal an operator waits seconds for rather
+  // than minutes.
+  assert.ok(ports.length <= 16, `${ports.length} attempts is not a bounded scan`);
+  assert.deepEqual(ports, ports.map((_, i) => 8200 + i), "the window must be contiguous from the derived port");
+});
+
+// The top of the range is exactly where a naive `derived + i` walks out of
+// the window resolveCockpitInstance() promises — onto ports this scheme
+// never claimed, where no other workspace's cockpit could ever be found.
+test("cockpitPorts: the window wraps at the top of the range rather than leaving it", () => {
+  const top = PORT_BASE + PORT_SPAN - 1;
+  const ports = cockpitPorts({ port: top, derived: true });
+  assert.equal(ports[0], top);
+  assert.equal(ports[1], PORT_BASE, "the port after the last one in the range is the first one");
+  for (const p of ports) {
+    assert.ok(p >= PORT_BASE && p < PORT_BASE + PORT_SPAN, `${p} escaped [${PORT_BASE}, ${PORT_BASE + PORT_SPAN})`);
+  }
+});
+
+// A holder serving `dir` on a real ephemeral port, through the same
+// server-creation seam the cockpit itself uses — no second I/O surface, in
+// the tests either.
+async function holderOn(dir, port = 0) {
+  const server = createBoardServer(dir);
+  const bound = await new Promise((res) => { server.once("error", () => res(null)); server.listen(port, () => res(server.address().port)); });
+  return { server, port: bound };
+}
+
+const boardDir = (payload) => {
+  const dir = mkdtempSync(join(tmpdir(), "board-holder-"));
+  if (payload !== undefined) writeFileSync(join(dir, "board.json"), payload);
+  return dir;
+};
+
+// The half that must ACCEPT: a real board payload naming a workspace is the
+// one answer the probe has to believe, and everything below is a way of not
+// believing it. A probe that only ever returns null passes every negative
+// row and turns the reuse path off entirely.
+test("probeCockpitWorkspace: a live board's payload answers with its workspace", async () => {
+  const dir = boardDir(JSON.stringify({ tickets: [], workspace: "/w/mine" }));
+  const { server, port } = await holderOn(dir);
+  try {
+    assert.equal(await probeCockpitWorkspace(port), "/w/mine");
+  } finally { server.close(() => {}); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Every way of failing to prove "this is my cockpit" is one answer: foreign.
+// The 404 row is the live one — an empty state directory is what a cockpit
+// whose first tick failed actually serves — and the rest are what a holder
+// that is not a cockpit at all returns.
+for (const [name, payload] of [
+  ["no board.json at all (404)", undefined],
+  ["a body that is not JSON", "<html>not a board</html>"],
+  ["a payload with no workspace field", JSON.stringify({ tickets: [] })],
+  ["a workspace that is not a string", JSON.stringify({ tickets: [], workspace: 42 })],
+  ["an empty workspace", JSON.stringify({ tickets: [], workspace: "" })],
+  ["a bare null payload", "null"],
+]) {
+  test(`probeCockpitWorkspace: ${name} reads as foreign`, async () => {
+    const dir = boardDir(payload);
+    const { server, port } = await holderOn(dir);
+    try {
+      assert.equal(await probeCockpitWorkspace(port), null);
+    } finally { server.close(() => {}); rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+// The case no HTTP status covers: a holder that accepts the connection and
+// then says nothing. Only the probe's own timer ends this, and the injected
+// timeout is what proves the timer is the thing that ended it — a probe that
+// ignored its argument and used the ~1s default would sit here ten times
+// longer than the bound below.
+test("probeCockpitWorkspace: a holder that never answers is bounded, and a refused connection is immediate", async () => {
+  const mute = muteHolder();
+  const port = await new Promise((res) => mute.server.listen(0, () => res(mute.server.address().port)));
+  try {
+    const started = Date.now();
+    assert.equal(await probeCockpitWorkspace(port, 100), null);
+    const waited = Date.now() - started;
+    assert.ok(waited < 700, `the probe waited ${waited}ms past its 100ms budget — the launch's bound is this one`);
+  } finally { await mute.close(); }
+  // Same answer by the other road: nothing is listening there any more, so
+  // the connect is refused rather than hung.
+  assert.equal(await probeCockpitWorkspace(port, 100), null);
+});
+
+// The first candidate this machine can actually bind — the derived port
+// itself unless something outside this suite is sitting on it.
+async function firstFreePort(ports) {
+  for (const p of ports) {
+    const free = await new Promise((res) => {
+      const probe = createServer();
+      probe.once("error", () => res(false));
+      probe.listen(p, () => probe.close(() => res(true)));
+    });
+    if (free) return p;
+  }
+  throw new Error(`test setup: no free port among ${ports.join(", ")}`);
+}
+
+async function untilBoardJson(url, ms = 15000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    try { if ((await fetch(`${url}/board.json`)).ok) return; } catch { /* not up yet */ }
+    if (Date.now() > deadline) throw new Error(`no readable board at ${url} after ${ms}ms`);
+    await new Promise((res) => setTimeout(res, 50));
+  }
+}
+
+// The reuse path end to end, and the claim no unit row can make: a second
+// launch against a LIVE cockpit for the same workspace starts no server,
+// says where the board already is, and exits 0. The exit code is the whole
+// point — the documented launch is `serve --open &`, so a backgrounded
+// non-zero exit is read by nobody and the operator just waits for a tab.
+//
+// The first launch's own landing rides this spawn rather than paying for one
+// byte-identical to it: nothing is held, so it must take the port its
+// workspace DERIVES. Every other row here only asserts where a launch did
+// not land, so a scan that skipped the derived port entirely — or probed
+// before it tried to bind — would pass all of them and move every
+// bookmarked URL by one.
+test("CLI: a second launch for the same workspace reuses the live cockpit, opens it, and exits 0", async () => {
+  const bin = gitOnlyPath(), repo = gitRepo("board-ws-reuse-");
+  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const expected = await firstFreePort(cockpitPorts(instance));
+  const first = serveProcess(repo, bin, ["--interval", "3600"]);
+  try {
+    const url = await withTimeout(first.url, 20000, "the first cockpit to announce");
+    assert.equal(url, `http://localhost:${expected}`,
+      "a launch with nothing in its way must take the port its workspace derives — that URL is the bookmarkable one");
+    // The handshake reads the payload, so the first tick has to have landed.
+    await untilBoardJson(url);
+    assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo),
+      "the board payload is what the handshake reads — a cockpit that does not name its workspace cannot be recognised");
+
+    const second = spawnSync(process.execPath, serveArgs(["--interval", "3600", "--open"]),
+      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 20000 });
+    assert.equal(second.status, 0, `the reuse path must exit 0 — a backgrounded launch reports nothing else: ${second.stderr}`);
+    assert.match(second.stderr, new RegExp(`already running for this workspace on ${url}/`), second.stderr);
+    assert.doesNotMatch(second.stderr, /cockpit on http/, `a second server was started for one workspace: ${second.stderr}`);
+    // --open honoured on the reuse path: PATH carries git and nothing else,
+    // so the attempt fails ENOENT on stderr instead of opening a browser —
+    // the same control the bare --open row above uses. It must point at the
+    // EXISTING board, which is the only URL there is.
+    assert.match(second.stderr, new RegExp(`open ${url}/ failed`), second.stderr);
+  } finally { first.p.kill("SIGKILL"); for (const d of [bin, repo]) rmSync(d, { recursive: true, force: true }); }
+});
+
+// The false-match half. This holder answers, parses, and serves a real board
+// payload on the exact port this workspace derives — nothing but the
+// workspace field distinguishes it from the cockpit reused above. A
+// handshake that asks "did anyone answer" rather than "whose board is this"
+// adopts it, and this run gets no board of its own at all.
+test("CLI: a holder reporting a different workspace is not adopted — the launch serves elsewhere", async () => {
+  const bin = gitOnlyPath(), repo = gitRepo("board-ws-foreign-");
+  const { port: derived } = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const dir = boardDir(JSON.stringify({ tickets: [], workspace: "/some/other/workspace" }));
+  const { server } = await holderOn(dir, derived);
+  const launch = serveProcess(repo, bin, ["--interval", "3600"]);
+  try {
+    const url = await withTimeout(launch.url, 20000, "the launch to step over the foreign holder");
+    assert.notEqual(url, `http://localhost:${derived}`, "the launch adopted a board belonging to another workspace");
+    const window = cockpitPorts({ port: derived, derived: true });
+    assert.ok(window.includes(Number(url.split(":")[2])), `${url} is outside the bounded scan window ${window.join(", ")}`);
+    // …and it is really serving its OWN board there, not merely announcing a
+    // port it stepped onto.
+    await untilBoardJson(url);
+    assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo));
+  } finally {
+    launch.p.kill("SIGKILL");
+    server.close(() => {});
+    for (const d of [bin, repo, dir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The only hard failure left on a derived port, and the shape it has to
+// have. Non-zero, because an exhausted range is a real refusal where reuse
+// is not — and a message naming every port tried, because an operator told
+// only "no free port" cannot tell a crowded range from a broken derivation.
+//
+// The blockers serve an empty directory, so each one 404s /board.json — one
+// of the foreign shapes no launch may adopt. They cannot actually answer
+// during the spawn below, though: spawnSync blocks this runner's event loop,
+// so every probe runs out its full timeout and the row costs ~8s (measured).
+// That is the bound doing its job rather than a hang, and it is why this row
+// is the only slow one here — the rows that need a holder to really answer
+// use serveProcess(), which leaves the loop free.
+test("CLI: an exhausted derived range exits non-zero and names the ports it tried", async () => {
+  const bin = gitOnlyPath(), repo = gitRepo("board-ws-full-");
+  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const ports = cockpitPorts(instance);
+  const dir = boardDir(undefined);
+  const blockers = [];
+  try {
+    // A port already held by something else is held either way — what this
+    // row needs is the range full, not our own socket on every port in it.
+    for (const p of ports) blockers.push((await holderOn(dir, p)).server);
+    const r = spawnSync(process.execPath, serveArgs(["--interval", "3600"]),
+      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 30000 });
+    assert.equal(r.status, 2, `an exhausted range must refuse, not hang and not succeed: ${r.stderr}`);
+    for (const p of ports) assert.match(r.stderr, new RegExp(`\\b${p}\\b`), `the refusal does not name ${p}: ${r.stderr}`);
+    assert.match(r.stderr, /--port/, "the refusal has to point at the way out of it");
+    assert.doesNotMatch(r.stderr, /cockpit on http/, r.stderr);
+  } finally {
+    for (const s of blockers) s.close(() => {});
+    for (const d of [bin, repo, dir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// Neither half of the new behaviour may touch a port the operator named, and
+// this replaces the narrower row that pinned only the bind error's wording
+// there (its other assertion, the absence of the "(default)" marker, pins a
+// string no path can print any more). The holder here is not a stranger: it
+// serves a payload naming THIS workspace, the exact thing the derived path
+// reuses at exit 0 above. A handshake not gated on `instance.derived` adopts
+// it and exits 0, silently serving a board the operator did not ask for on
+// the port they did.
+test("CLI: an explicit port neither scans nor handshakes — a bind failure on it is fatal", async () => {
+  const bin = gitOnlyPath(), repo = gitRepo("board-ws-explicit-");
+  const dir = boardDir(JSON.stringify({ tickets: [], workspace: realpathSync(repo) }));
+  const { server, port } = await holderOn(dir);
+  try {
+    const r = spawnSync(process.execPath, serveArgs(["--interval", "3600", "--port", String(port)]),
+      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 20000 });
+    assert.equal(r.status, 2, `a bind failure on a chosen port is a hard error: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`port ${port} in use`), r.stderr);
+    assert.doesNotMatch(r.stderr, /already running/, "an explicit port was handshaked and reused");
+    assert.doesNotMatch(r.stderr, /trying the next port/, "an explicit port was scanned off");
+  } finally { server.close(() => {}); for (const d of [bin, repo, dir]) rmSync(d, { recursive: true, force: true }); }
 });
 
 // #1093: the CLI's top-level handler printed `e.message`, which is `undefined`
