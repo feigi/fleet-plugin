@@ -55,7 +55,7 @@
 </style>
 </head>
 <body>
-<header><h1>🛰 fleet cockpit</h1><span id="age"></span></header>
+<header><h1 id="heading">🛰 fleet cockpit</h1><span id="age"></span></header>
 <div id="stale-banner"></div>
 <div id="attention"></div>
 <div id="board"></div>
@@ -65,6 +65,25 @@
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
 let interval = 15;
 let repoUrl = null; // full repo URL from the model (carries the host) — PR links, GHE-safe
+
+// The instance's name, for the tab strip and the header (#1584). Two cockpits
+// are two WORKSPACES, and until this the pair rendered one constant twice —
+// the operator's only way to tell two open windows apart was to read the
+// tickets on them. `repo` has ridden the payload since the board existed and
+// nothing on the page ever read it.
+//
+// Truthiness, not a null check: `gh repo view` failing leaves gather()'s
+// `repo` null, a malformed answer can leave it "", and the identity stub
+// served before the first tick (#1660) carries no `repo` key at all. All
+// three mean "this board cannot name its repo", and all three must render
+// today's constant rather than `fleet cockpit — undefined`.
+//
+// Returned rather than assigned: this page is served as one self-contained
+// file with no build and no DOM harness, so a decision is testable only as a
+// pure function something can lift out of the source — the seam spendView and
+// ledgerBanner already use.
+const TITLE = "fleet cockpit";
+function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
@@ -231,6 +250,14 @@ function renderSpend(sp) {
 function render(m) {
   interval = m.interval || 15;
   repoUrl = m.repoUrl || null;
+  // Every render, never once at startup: a board whose repo read fails on a
+  // later tick goes BACK to the constant, and one whose repo arrives late
+  // (the pre-first-tick stub carries none) picks it up on the tick after.
+  // The emoji stays out of the tab title — a tab strip has no room for it,
+  // and the document's own <title> is the constant this falls back to.
+  const name = boardTitle(m.repo);
+  document.title = name;
+  document.getElementById("heading").textContent = "🛰 " + name;
   // attention strip
   const att = document.getElementById("attention");
   att.innerHTML = "";

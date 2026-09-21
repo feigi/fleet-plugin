@@ -739,7 +739,16 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   }
 }
 
-export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval }) {
+// `workspace`/`port` are the caller's answers, never read in here (#1584):
+// resolveCockpitInstance() already decided both, and a second derivation in
+// this function could disagree with the one the server actually bound. They
+// join the payload HERE, alongside the repo fields above, because this is the
+// boundary where every impure input meets the pure model — computeBoard() only
+// echoes them. Defaulted to null, which is also the degrade arm's workspace
+// and the value #1585's handshake refuses to match on, so a caller with no
+// instance to name (every gather() test driver) says so rather than omitting
+// the fields.
+export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
@@ -880,7 +889,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval 
   // runs, only in where the check itself is written.
   const sinceMs = argSpendSince();
   const spend = gatherSpend({ sinceMs });
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
 async function main() {
@@ -993,7 +1002,29 @@ async function main() {
   if (cmd === "build") {
     stray(VALUE_FLAGS, ["build", "serve"]);
     const { computeBoard } = await import("./compute-board.mjs");
-    const model = computeBoard(gather({ ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile }));
+    // #1584: a snapshot printed here outlives the process that printed it —
+    // redirected to a file, pasted into a ticket, read back by the next
+    // launch — so it says which workspace it describes and which port that
+    // workspace's cockpit answers on. The same seam serve() uses, so the two
+    // subcommands can never name different instances from one cwd.
+    //
+    // No `port:` argument, deliberately: --port is read and DISCARDED on this
+    // path (#468 above), and honouring it here would give the flag a meaning
+    // on `build` it has never had. The DERIVED port is the identity anyway —
+    // it is the port this workspace is reachable on, which is what a stray
+    // snapshot needs to name; the port some one-shot invocation happened to
+    // ask for is not.
+    //
+    // The default ledger stays the cwd-relative literal #1656 left here. That
+    // is not an oversight to fix in passing: `build` prints to stdout and
+    // writes no state directory, so the argument that moved serve()'s default
+    // onto the workspace does not reach it, and changing it would change what
+    // an existing `build` reads.
+    const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir() });
+    const model = computeBoard(gather({
+      ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
+      workspace: instance.workspace, port: instance.port,
+    }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
@@ -1302,9 +1333,16 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   // they belonged to, exactly what resolveCockpitInstance() exists to rule
   // out (#1656 review).
   ledgerFile = ledgerFile || join(stateDir, "ledger.md");
-  const tick = () => {
+  // `served` is the port this process actually BOUND, handed in rather than
+  // closed over: it is not knowable until listen() returns (--port 0 is an
+  // ephemeral bind, #366/#435, and the loop below may also land past a
+  // candidate it could not take), and a tick that reached for `portGiven`
+  // instead would stamp every board served on an ephemeral port with a
+  // `port: 0` no browser could ever reach. A parameter makes that
+  // unreachable rather than merely unlikely — there is no earlier value in
+  // scope for it to pick up.
+  const tick = (served) => {
     try {
-      const model = computeBoard(gather({ ledgerFile, prevFile: jsonPath, interval }));
       // #1585: the identity a second launch's handshake reads off this
       // cockpit. It rides the board payload deliberately, rather than a
       // lockfile or a second endpoint: a payload exists only while the
@@ -1312,7 +1350,15 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
       // cockpit and send the next launch at a port nobody holds. It is null
       // on the degrade arm — no workspace was established — which is exactly
       // the value no launch may ever match on.
-      model.workspace = instance.workspace;
+      //
+      // #1584: joined at gather(), not stamped onto the finished model. The
+      // assignment that used to sit below this line wrote a field the pure
+      // model did not declare, so `build` printed a board with no identity
+      // at all and only the served copy carried one.
+      const model = computeBoard(gather({
+        ledgerFile, prevFile: jsonPath, interval,
+        workspace: instance.workspace, port: served,
+      }));
       const tmp = `${jsonPath}.tmp`;
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
       renameSync(tmp, jsonPath);
@@ -1420,15 +1466,20 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   // this process's first gather() ever returns; the answer that probe needs
   // has to already be on disk, not waiting on a compute this process has
   // not started yet.
-  writeFileSync(`${jsonPath}.tmp`, JSON.stringify({ workspace: instance.workspace }));
+  // #1584: `port` rides along. This stub is a board payload like any other
+  // for as long as the first gather() takes, and a reader that finds it —
+  // the operator, a script, the page — gets the same two identity fields
+  // from it that every later tick writes. The handshake above still reads
+  // only `workspace`.
+  writeFileSync(`${jsonPath}.tmp`, JSON.stringify({ workspace: instance.workspace, port: bound }));
   renameSync(`${jsonPath}.tmp`, jsonPath);
   // Yield once so a connection already arriving — that same sibling's probe
   // — gets a chance to read the identity just written before this process
   // blocks inside gather() for however long that takes.
   await new Promise((resolve) => setImmediate(resolve));
 
-  tick();
-  const timer = setInterval(tick, interval * 1000);
+  tick(bound);
+  const timer = setInterval(() => tick(bound), interval * 1000);
 
   const stop = () => {
     clearInterval(timer);

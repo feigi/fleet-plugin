@@ -169,6 +169,16 @@ export function computeBoard(inputs) {
     interval: inputs.interval ?? 15,
     repo: inputs.repo ?? null,
     repoUrl: inputs.repoUrl ?? null,
+    // #1584: which workspace this board describes and which port served it.
+    // Pass-through, exactly like repo/repoUrl above and for the same reason —
+    // resolveCockpitInstance() answers both at the gather boundary, and this
+    // module reads no cwd, no git and no socket, so it cannot re-derive either
+    // and must not try. Defaulted to null rather than left undefined: a
+    // missing key and a null one are the same value to a reader in JS but not
+    // in the JSON on disk, and #1585's launch handshake reads `workspace` off
+    // that JSON — a dropped key would make every board anonymous to it.
+    workspace: inputs.workspace ?? null,
+    port: inputs.port ?? null,
     queue: { pool, supply: pool, reviewBacklog },
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),

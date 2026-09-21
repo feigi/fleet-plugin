@@ -164,6 +164,21 @@ source, and it can never move a ticket.
   "generatedAt": 1690000000000,      // epoch ms, for the page's staleness banner
   "interval": 15,
   "ledgerState": "read",             // read|unread|unparsed — see #816
+
+  // Instance identity (#1584). Pass-through inputs joined at gather()'s
+  // boundary, never derived inside computeBoard(): `repo`/`repoUrl` come from
+  // `gh repo view` (the url carries the host, so PR links resolve on GitHub
+  // Enterprise too), `workspace`/`port` from resolveCockpitInstance(). Both
+  // identity pairs are null when unknown — no gh answer, or no workspace
+  // resolved (the degrade arm) — and never absent: #1585's launch handshake
+  // reads `workspace` straight off this JSON. `port` is the port the board
+  // was SERVED on, so a `--port 0` board names its ephemeral port and not
+  // the 0 that was asked for; on a `build` snapshot, which serves nothing,
+  // it is the port this workspace's cockpit answers on.
+  "repo": "feigi/fleet-plugin",
+  "repoUrl": "https://github.com/feigi/fleet-plugin",
+  "workspace": "/Users/me/dev/fleet-plugin",   // absolute, realpath'd — the instance key
+  "port": 8337,
   "queue": { "pool": 3, "supply": 3, "reviewBacklog": 1 },  // footer line
   "tickets": [
     {
@@ -220,8 +235,11 @@ source, and it can never move a ticket.
 - Layout: **attention strip** on top (hidden when `attention` is empty) · **five
   kanban columns** · **footer** = the SKILL.md queue-depth line (pool / supply /
   review-backlog) + filed follow-ups.
-- Card: `#N` + truncated title, agent name, PR# (click → GitHub PR in a new tab),
-  CI dot, dwell time, flag badges.
+- Card: `#N` + truncated title, agent name, PR# (click → GitHub PR in a new tab,
+  resolved against this instance's own `repoUrl`), CI dot, dwell time, flag badges.
+- Tab title and header name the repo (`fleet cockpit — <owner>/<repo>`), so two
+  cockpits open side by side are tellable apart from the tab strip alone
+  (#1584). A payload with no `repo` falls back to the bare `fleet cockpit`.
 - Polls `/board.json` on its own interval; renders `generatedAt` age. If that age
   exceeds ~2× `interval`, shows a banner "data stale — server/controller
   stopped?" so a dead feed is visible, never a silently frozen board.
