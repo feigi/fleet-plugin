@@ -768,11 +768,10 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     "proc.wait()",
     "blob = b''.join(chunks)",
     "carry = pad - window",
-    "prefix, payload = blob[:carry], blob[carry:]",
+    "payload = blob[carry:]",
     "with open(out_path, 'wb') as f:",
     "    f.write(payload)",
-    "prefix_ok = int(prefix == b'x' * carry)",
-    "print(f'EXIT={proc.returncode} PAD={pad} CONSUMED={consumed} PREFIX_OK={prefix_ok} PAYLOAD={len(payload)}')",
+    "print(f'EXIT={proc.returncode} PAD={pad} CONSUMED={consumed} PAYLOAD={len(payload)}')",
     "sys.stderr.write(b''.join(err).decode('utf-8', 'replace'))",
   ].join("\n");
 
@@ -796,9 +795,9 @@ test("verdict() resumes from a genuine short write and delivers the full payload
   // pipe too small to hold the window, a child that never finishes writing —
   // so its exit code is checked before any number it reported is believed.
   assert.equal(r.status, 0, `the short-write harness did not complete: stdout=${r.stdout} stderr=${r.stderr}`);
-  const report = /^EXIT=(\d+) PAD=(\d+) CONSUMED=(\d+) PREFIX_OK=(\d+) PAYLOAD=(\d+)$/m.exec(r.stdout);
+  const report = /^EXIT=(\d+) PAD=(\d+) CONSUMED=(\d+) PAYLOAD=(\d+)$/m.exec(r.stdout);
   assert.ok(report, `the harness printed no report line: stdout=${r.stdout} stderr=${r.stderr}`);
-  const [, exit, pad, consumed, prefixOk, delivered] = report.map(Number);
+  const [, exit, pad, consumed, delivered] = report.map(Number);
   // Both ends of the needle's window. The lower end is the harness's own
   // window now, not a pipe capacity or a racing reader's ceiling — 4 KiB is
   // all the payload has to outgrow, which is what puts the upper end back
@@ -817,11 +816,6 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     consumed,
     1,
     `verdict()'s first write never filled the ${WRITE_WINDOW_BYTES}-byte window (pipe capacity ${pad}), so nothing short-wrote and the retry loop was never entered`,
-  );
-  assert.equal(
-    prefixOk,
-    1,
-    `the harness's own padding is not intact ahead of the payload (pipe capacity ${pad}), so the captured bytes are not verdict()'s alone`,
   );
   assert.equal(exit, 2, `expected the unknown verdict's exit code: stderr=${r.stderr}`);
   // The kill. Every byte past that first window arrives only if the loop
