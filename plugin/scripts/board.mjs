@@ -9,6 +9,19 @@
 // ~/.claude/projects — so the "f(ledger, gh)" property no longer covers the
 // whole model. It is telemetry, kept strictly to the side: it can only ever
 // populate or omit `spend`, never change a ticket's stage.
+//
+// That transcript tree is keyed by PROJECT DIRECTORY, not by session, and one
+// directory can hold several sessions at once. `serve` therefore resolves ONE
+// session's transcript directory and keeps it for its whole life (#1583) — see
+// spendDirPin() below — rather than re-picking the newest on every tick and
+// alternating between two live runs' numbers in silence.
+//
+// LIMITATION, stated rather than solved: the session it keeps is whichever was
+// newest AT LAUNCH. When two sessions share one project directory the board
+// cannot tell which of them is "the" run — it is scoped to a workspace, and a
+// workspace does not know that (#39) — so a previous run's session can win the
+// pin and keep winning until this server exits. `--spend-dir <path>` is how an
+// operator names the right one: it overrides the heuristic outright.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
@@ -140,6 +153,35 @@ function argSpendSince() {
     die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
   }
   return sinceMs;
+}
+
+// #1583: the operator's override for the session heuristic (findSubagentsDir()
+// below). A PATH, so there is no range or magnitude to check the way
+// --spend-since and --interval have one — every malformed SHAPE this flag can
+// take is already arg()'s: a trailing `--spend-dir`, an empty or whitespace
+// value, a following flag eaten as the value, and the `--spend-dir=` form.
+// What this read buys is that all four refuse under THIS flag's name instead
+// of stray()'s generic "unexpected argument", and they do so before gather()
+// shells out to anything — which is what declaring it in VALUE_FLAGS and
+// calling it from main() (both below) is for, exactly as #1076 did for
+// --spend-since. A named read rather than a bare arg() at each call site so
+// the flag is spelled in one place and this reasoning has a home.
+//
+// Existence is deliberately NOT checked, and refusing an absent directory
+// would refuse the one invocation this flag exists for: a session's
+// `subagents/` directory does not exist until that session's first agent
+// spawns, and the cockpit launches in run-team phase 0, BEFORE that. An
+// operator pinning THIS run's transcripts therefore names a directory that is
+// not there yet, and it appears seconds later. A directory that never appears
+// degrades per tick through gatherSpend's catch and hides the panel; it never
+// renders zeroes and never dies.
+//
+// `undefined` for an absent flag, not the `null` argPort()/argInterval()/
+// argSpendSince() return: `null` is a transcript-directory RESOLUTION in this
+// file ("resolved, no session yet" — findSubagentsDir() below), and the
+// absence of an override must not read as one.
+function argSpendDir() {
+  return arg("spend-dir") ?? undefined;
 }
 
 // Node's default stdout cap is 1 MiB and execFileSync THROWS (ENOBUFS) past it
@@ -489,6 +531,42 @@ function newestTranscriptMs(dir) {
   return newest;
 }
 
+// #1583: the transcript directory a `serve` process is bound to, resolved ONCE
+// and reused by every tick after it. findSubagentsDir() above ranks sessions by
+// newest transcript mtime and gather() reached it through gatherSpend() on
+// EVERY tick (~15s by default), so two sessions live under one project
+// directory took turns winning: the panel alternated between two runs' numbers
+// with nothing on the page or on stderr to say it had switched.
+//
+// The pin holds the first ANSWER, not the first CALL, and that distinction is
+// the whole of the `??=` below. findSubagentsDir() has three returns and only
+// two of them are answers: a directory, and `{ error }` — unresolvable, "a bug
+// that never fixes itself", so pinning it costs nothing and gatherSpend's
+// warn-once gate still keeps it to one stderr line. `null` is the third and is
+// NOT an answer: it means the project directory is there and holds no
+// subagents directory YET, which is the normal state at launch, because the
+// cockpit starts in run-team phase 0 before the first agent spawns. Pinning
+// that would hide the spend panel for the whole run on the one launch path
+// this script has — the existing degradation is "hidden until agents land",
+// not "hidden for good". Re-asking while the answer is `null` also stays at
+// one scan per tick, not the two a caller-side retry would cost.
+//
+// An explicit directory skips the heuristic entirely — never resolved, never
+// re-picked, and findSubagentsDir() is never called at all, so a tree it could
+// not read cannot degrade a panel the operator has already named the source
+// for. `home`/`cwd` are captured HERE rather than read per call for the same
+// reason the resolution is: a pin that could answer for a different workspace
+// later is not a pin.
+//
+// The limitation this leaves is stated at the top of this file: whichever
+// session was newest when the pin latched keeps the panel for this server's
+// life, and that can be a previous run's. --spend-dir is the way out.
+export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd()) {
+  if (explicit != null) return () => explicit;
+  let pinned = null;
+  return () => (pinned ??= findSubagentsDir(home, cwd));
+}
+
 // Read one agent transcript into the shape the pure module wants. Single pass —
 // a long review agent's transcript is megabytes and this runs every tick.
 // Malformed lines are skipped rather than fatal: a transcript being appended to
@@ -648,7 +726,14 @@ function readAgent(file, metaFile) {
 // success-only field is read.
 export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
   try {
-    dir = dir ?? findSubagentsDir();
+    // #1583: `undefined` is "nobody resolved this for me" — every gatherSpend
+    // test driver, and `build`, which is one gather per process and so needs no
+    // pin. `null` is a RESOLUTION handed in by a caller that owns one
+    // (spendDirPin() above): the project directory is there and holds no
+    // session yet. `dir ?? findSubagentsDir()` collapsed those two, so a pinned
+    // "no session yet" re-ran the whole lookup a second time inside the same
+    // tick and answered from an unpinned source while doing it.
+    if (dir === undefined) dir = findSubagentsDir();
     const dirError = dir?.error;
     if (dirError) {
       warnOnce("no-spend-dir", dirError, dirError);
@@ -748,7 +833,19 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
 // and the value #1585's handshake refuses to match on, so a caller with no
 // instance to name (every gather() test driver) says so rather than omitting
 // the fields.
-export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null }) {
+//
+// `spendDir` is the caller's PINNED transcript directory (#1583) and is the one
+// parameter here whose ABSENCE is not a default to fill in: serve() hands the
+// same pin's answer to every tick, and its three shapes — a directory, `null`
+// for "resolved, no session yet", `{ error }` for unresolvable — all have to
+// reach gatherSpend() as themselves. Only a caller that passed nothing at all
+// falls through to the default below, which reads the override flag directly:
+// `build` is one gather per process, so it needs the override but never a pin,
+// and that read sits here for the same reason argSpendSince()'s does — a
+// caller that skips main() still validates its own argv. With neither the pin
+// nor the flag, gatherSpend() resolves for itself exactly as it did before
+// this ticket, which is what keeps `build`'s output unchanged by it.
+export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir() }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
@@ -888,7 +985,7 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval,
   // alongside argPort()/argInterval() — this call is unchanged in when it
   // runs, only in where the check itself is written.
   const sinceMs = argSpendSince();
-  const spend = gatherSpend({ sinceMs });
+  const spend = gatherSpend({ dir: spendDir, sinceMs });
   return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
@@ -909,11 +1006,11 @@ async function main() {
   // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
   // printing the usage line for a missing subcommand. `build`/`serve` carry
   // no `--` and are never the sweep's business.
-  // One list rather than the same five names spelled out in the sweep and in
+  // One list rather than the same six names spelled out in the sweep and in
   // both stray() calls below. `open` is not in it: it is boolean (has()), so
   // it never has a value token for stray() to skip over, and the sweep needs
   // the name anyway.
-  const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since"];
+  const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since", "spend-dir"];
   sweep([...VALUE_FLAGS, "open"]);
   const cmd = process.argv[2];
   // #1656: no default applied here any more — `build` and `serve` now each
@@ -986,6 +1083,13 @@ async function main() {
   // that skips main(), same reasoning #468 gives for argPort()/has("open").
   argInterval();
   argSpendSince();
+  // #1583: `--spend-dir` joins them for the same two reasons, from the day it
+  // ships rather than one ticket later — it is read on both subcommands (in
+  // gather()'s default, and through serve()'s pin), and a trailing
+  // `--spend-dir` ahead of a stray positional has to name itself instead of
+  // the token behind it. build discards the value here exactly as it discards
+  // argPort()'s; gather() below does the read that reaches the panel.
+  argSpendDir();
 
   // #463: sweep() above only refuses a `--`-prefixed token; a bare or
   // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
@@ -1033,7 +1137,7 @@ async function main() {
     await serve({ ledgerFile });
     return;
   }
-  die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open] [--spend-since <epoch-ms>]");
+  die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open] [--spend-since <epoch-ms>] [--spend-dir <path>]");
 }
 
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -1312,6 +1416,12 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   const portGiven = port ?? argPort();
   interval = interval ?? argInterval() ?? 15;
   open = open ?? has("open");
+  // #1583: built HERE, once, and read by every tick below. Beside the other
+  // argv reads rather than inside tick() for the obvious reason — a pin rebuilt
+  // per tick is a pin in name only — and above the port loop because it costs
+  // nothing to carry: spendDirPin() touches no filesystem until its first call,
+  // so the reuse and degrade arms that exit before ticking pay nothing for it.
+  const spendPin = spendDirPin(argSpendDir());
   const { computeBoard } = await import("./compute-board.mjs");
   const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir(), port: portGiven });
   const stateDir = instance.stateDir;
@@ -1351,6 +1461,10 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
       const model = computeBoard(gather({
         ledgerFile, prevFile: jsonPath, interval,
         workspace: instance.workspace, port: served,
+        // The pinned transcript directory, not a fresh lookup: every tick after
+        // the first gets the SAME answer, which is what stops the panel
+        // alternating between two sessions under one project directory (#1583).
+        spendDir: spendPin(),
       }));
       const tmp = `${jsonPath}.tmp`;
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
