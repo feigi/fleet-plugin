@@ -447,6 +447,24 @@ export function unrunCrashed(reviewed, dimensions) {
   return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
 }
 
+// #1433 gap: the CWD-AUDIT line the Review dispatch below asks a specialist
+// to fold into `scope_searched` is a convention, not schema — FINDINGS_SCHEMA
+// accepts any string there, so a specialist that satisfies the schema while
+// never emitting the line, or misspelling it, produces a fully valid,
+// undetected payload, and one that DOES emit `CWD-AUDIT: dirty <path>` has
+// nothing downstream that reads for it either. This is the runtime backstop
+// for both halves: it extracts the line the prompt's own wording requires
+// (`CWD-AUDIT: clean|dirty|unrepo <path> …`), and reports the line's absence
+// exactly as loudly as its presence, so `runReview` can fold the result into
+// the payload below instead of the fact dead-ending inside a field nothing
+// reads.
+const CWD_AUDIT_LINE = /CWD-AUDIT:\s*(clean|dirty|unrepo)\b.*/;
+
+export function cwdAuditFrom(text) {
+  const m = typeof text === "string" ? text.match(CWD_AUDIT_LINE) : null;
+  return m ? { state: m[1], line: m[0].trim() } : { state: "missing", line: null };
+}
+
 export function verdictFor(dispatched, votes) {
   const live = votes.filter(Boolean);
   const refuted = live.filter((v) => v.refuted).length;
@@ -696,6 +714,14 @@ a false repoVerified.`,
   log(`agents dispatched ${dimensions.map((d) => `${d.key}=${d.agentType}`).join(" ")}`);
 
   const dimensionsUnrun = [];
+  // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see
+  // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
+  // "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched
+  // review that returned at all (a crashed dispatch has nothing to audit,
+  // and is already named in `dimensionsUnrun` via `unrunCrashed` below), so
+  // a dirty checkout, or an omitted audit, reaches the payload instead of
+  // dead-ending inside `scope_searched`.
+  const cwdAudit = [];
 
   // #1433. Both prompts below carry the inherited-cwd rule, and it is stated in
   // each rather than shared: review-eval.mjs's own header holds the measurement
@@ -707,6 +733,16 @@ a false repoVerified.`,
   // and the `CWD-AUDIT:` line is what makes a clean run say so — an audit
   // reported only when dirty is indistinguishable from one never run, the same
   // reading `unrunReason` applies to a `test_run` that reports nothing.
+  //
+  // The Claude-harness twin of these two dispatches — review-pr.js's own
+  // hardcoded Review/Verify `agent()` calls, not importable from here per
+  // this file's own header rationale — does NOT carry this rule. That is a
+  // deliberate scope cut for this ticket, not an oversight: mirroring the
+  // rule word-for-word into a substantially differently-structured 1804-line
+  // file, plus a prose-pin test file the size of
+  // review-core-cwd-isolation.test.mjs, is its own unit of work. Tracked in
+  // #1673 — read that before assuming review-pr.js's specialists already
+  // audit their inherited cwd, because right now they do not.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
@@ -772,6 +808,7 @@ to name.`,
 
     (review, d) => {
       dimensionsUnrun.push(...unrunEntries(review, d.key));
+      cwdAudit.push({ dimension: d.key, ...cwdAuditFrom(review && review.scope_searched) });
       phase("Verify");
       return parallel(
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
@@ -873,6 +910,10 @@ how three reviews from one cell left four files modified in that checkout
     testEnvironment: environmentNote(snap),
     dimensionsRun: dimensions.map((d) => d.key),
     dimensionsUnrun,
+    // #1433. `cwdAuditFrom`'s per-dimension read of the specialist's own
+    // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
+    // otherwise reported into `scope_searched` and read by nothing.
+    cwdAudit,
     survived: survived.sort(bySeverity),
     refuted,
     unverified: unverified.sort(bySeverity),

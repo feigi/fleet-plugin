@@ -51,7 +51,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { phrase } from "./prose-pin.mjs";
 import { promptRenderer } from "./prompt-renderer.mjs";
-import { FINDINGS_SCHEMA, VERDICT_SCHEMA } from "./review-core.js";
+import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "./review-core.js";
 
 const FILE = "scripts/review-core.js";
 const SNAP = { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" };
@@ -178,7 +178,11 @@ test("the rendered refuter prompt audits the directory it started in, with the e
 // the field, or the schema losing it. Gaps are `\s+`, never literal spaces —
 // this prose is hard-wrapped at ~78 columns, so every one of them may be a
 // newline (measured: a literal-space version of this regex matched nothing).
-const REPORT_FIELD = /Report\s+(?:the\s+result\s+)?(?:it\s+)?in\s+`(\w+)`\s+as\s+one\s+line\s+beginning\s+`CWD-AUDIT:`/;
+// The two prompts phrase this two different ways ("Report the result in" /
+// "Report it in") — one alternation between them, not two independent
+// optionals, which would also admit the dead combination neither prompt
+// writes ("Report the result it in").
+const REPORT_FIELD = /Report\s+(?:the\s+result|it)\s+in\s+`(\w+)`\s+as\s+one\s+line\s+beginning\s+`CWD-AUDIT:`/;
 
 for (const [name, prompt, schema, schemaName] of [
   ["specialist", specialist, FINDINGS_SCHEMA, "FINDINGS_SCHEMA"],
@@ -221,16 +225,24 @@ for (const [name, prompt, schema, schemaName] of [
 }
 
 // One marker, spelled once, or a controller grepping a review's payload for it
-// finds half the reports. Cross-checked between the two prompts rather than
-// asserted against a literal for the reason the field name above is extracted:
-// a third copy of the string here is one more thing to drift.
-test("both prompts use the same CWD-AUDIT marker spelling", () => {
-  const marker = /`(CWD-AUDIT:)`/;
-  const inSpecialist = specialist.match(marker);
-  const inRefuter = refuter.match(marker);
-  assert.ok(inSpecialist && inRefuter, "one of the two prompts no longer names the CWD-AUDIT marker as a code span — a reader cannot tell the literal from the prose around it");
-  assert.equal(inRefuter[1], inSpecialist[1], "the two prompts spell the audit marker differently — a controller reading the payload for one spelling silently misses every report using the other");
-});
+// finds half the reports. Checked against each prompt individually — a
+// capture group around a fixed literal with no alternation inside it can
+// only ever capture that same literal, so comparing `inSpecialist[1]` against
+// `inRefuter[1]` (the prior shape of this test) could never fail as long as
+// both prompts matched at all; the `assert.ok` above already covers that.
+const CWD_AUDIT_MARKER = /`CWD-AUDIT:`/;
+for (const [name, prompt] of [
+  ["specialist", specialist],
+  ["refuter", refuter],
+]) {
+  test(`the rendered ${name} prompt names the CWD-AUDIT marker as a code span`, () => {
+    assert.match(
+      prompt,
+      CWD_AUDIT_MARKER,
+      `review-core.js's ${name} prompt no longer names the CWD-AUDIT marker as a code span — a reader cannot tell the literal from the prose around it`,
+    );
+  });
+}
 
 // --- The snapshot dispatch, whose rule is different ------------------------
 // It is dispatched with the same inherited cwd, but it CREATES the scratch
@@ -274,4 +286,98 @@ test("every command line in the snapshot prompt is -C-anchored, cd-chained, or p
       );
     }
   }
+});
+
+// --- The specialist's audit reaching the payload (PR #1671 review, gap 1) --
+// Part 3 above pins that the audit is NAMED and has somewhere valid to land;
+// it does not pin that `runReview` ever reads it back out once it lands
+// there. Measured against the PR #1671 review's own reproduction: a
+// specialist that dutifully reported `CWD-AUDIT: dirty <checkout>` into
+// `scope_searched` had that fact dropped before `runReview`'s return —
+// `scope_searched` fed only `unrunReason`'s test-run check, which never reads
+// it, so the audit dead-ended inside a field nothing else looked at.
+// `cwdAuditFrom` extracts the line; the tests below pin that `runReview`
+// folds its result into the payload under `cwdAudit`, and that a missing or
+// misspelled line is flagged there rather than silently read as clean.
+test("cwdAuditFrom reads each of the audit line's states, and flags its own absence", () => {
+  assert.deepEqual(cwdAuditFrom("grepped src/**/*.js for auth checks. CWD-AUDIT: clean /repo/.worktrees/7-x"), {
+    state: "clean",
+    line: "CWD-AUDIT: clean /repo/.worktrees/7-x",
+  });
+  assert.deepEqual(cwdAuditFrom("CWD-AUDIT: dirty /repo/.worktrees/7-x — M src/foo.js"), {
+    state: "dirty",
+    line: "CWD-AUDIT: dirty /repo/.worktrees/7-x — M src/foo.js",
+  });
+  assert.deepEqual(cwdAuditFrom("CWD-AUDIT: unrepo /repo/.worktrees/7-x"), {
+    state: "unrepo",
+    line: "CWD-AUDIT: unrepo /repo/.worktrees/7-x",
+  });
+  // No line at all.
+  assert.deepEqual(cwdAuditFrom("grepped src/**/*.js for auth checks"), { state: "missing", line: null });
+  // Misspelled — the ticket's own failure mode: a schema-valid string that
+  // never actually reports, because FINDINGS_SCHEMA has no pattern over it.
+  assert.deepEqual(cwdAuditFrom("CWD AUDIT: clean /repo/.worktrees/7-x"), { state: "missing", line: null });
+  assert.deepEqual(cwdAuditFrom(undefined), { state: "missing", line: null });
+});
+
+// A minimal fake host: every fact `runReview` otherwise gets from `gh`/`git`
+// arrives inside the snapshot agent's own structured response — review-
+// core.js never shells out itself, every command lives in a dispatched
+// prompt (grep finds no `child_process` import in this file) — so a scripted
+// `agent()` stub returning one canned object per dispatch label is a
+// complete double for the whole pipeline, no real repository needed.
+function fakeReviewHost(scopeSearched) {
+  return {
+    agent: async (_prompt, opts) => {
+      if (opts.label === "snapshot")
+        return {
+          runRoot: "/scr/pr7/run-ab12",
+          path: "/scr/pr7/run-ab12/snapshot-abc123",
+          head: "abc123",
+          pathVerified: true,
+          repoVerified: true,
+          testCmd: "node --test",
+        };
+      if (opts.label === "review:correctness")
+        return {
+          dimension: "correctness",
+          scope_searched: scopeSearched,
+          findings: [],
+          test_run: { command: "node --test", tests: 5, pass: 5, fail: 0 },
+        };
+      throw new Error(`fakeReviewHost: unexpected dispatch ${opts.label}`);
+    },
+    phase: () => {},
+    log: () => {},
+  };
+}
+
+test("runReview carries a specialist's dirty CWD-AUDIT into the payload's cwdAudit field", async () => {
+  const host = fakeReviewHost("CWD-AUDIT: dirty /repo/.worktrees/7-x — M src/foo.js");
+  const result = await runReview(host, {
+    pr: 7,
+    worktree: "/repo/.worktrees/7-x",
+    scratch: "/scr",
+    dimensions: ["correctness"],
+  });
+  assert.deepEqual(
+    result.cwdAudit,
+    [{ dimension: "correctness", state: "dirty", line: "CWD-AUDIT: dirty /repo/.worktrees/7-x — M src/foo.js" }],
+    "a specialist that reported a dirty checkout must have that fact reach the payload — silently dropping it is the exact defect PR #1671's review found (#1433)",
+  );
+});
+
+test("runReview flags a specialist's missing CWD-AUDIT line rather than reading it as clean", async () => {
+  const host = fakeReviewHost("grepped the diff for auth checks — nothing else searched");
+  const result = await runReview(host, {
+    pr: 7,
+    worktree: "/repo/.worktrees/7-x",
+    scratch: "/scr",
+    dimensions: ["correctness"],
+  });
+  assert.deepEqual(
+    result.cwdAudit,
+    [{ dimension: "correctness", state: "missing", line: null }],
+    "a specialist that satisfied FINDINGS_SCHEMA without ever emitting a CWD-AUDIT line must be flagged, not read as an unreported-but-clean run",
+  );
 });
