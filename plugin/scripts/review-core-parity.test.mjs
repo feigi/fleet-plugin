@@ -223,9 +223,8 @@ test("resolveDimensions agrees on both sides", () => {
   };
   // `JSON.stringify(NaN)` renders the string "null", which collides with the
   // `null` fixture's label below. `JSON.stringify(undefined)` returns the
-  // bare `undefined` value (not a string) — that's what the `?? "undefined"`
-  // fallback arm two lines below actually covers; it has nothing to do with
-  // NaN.
+  // bare `undefined` value (not a string) — that's what this helper's own
+  // `?? "undefined"` fallback arm covers; it has nothing to do with NaN.
   const label = (v) => (Number.isNaN(v) ? "NaN" : JSON.stringify(v) ?? "undefined");
   // The falsy-but-PRESENT class (#1125): `override == null` refuses these,
   // where the `!override` guard it replaced returned `null` for them and
