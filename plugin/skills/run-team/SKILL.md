@@ -2750,7 +2750,13 @@ parameter to set. So the absolute-path discipline above is load-bearing inside
 binding names, since a shared global has no path to be absolute about. The
 corollary is `reset`: it "is likewise destructive to concurrent work sharing
 that backend session", so a member resetting its own kernel resets every
-concurrent sibling's. **Phase 2** carries all three to every member.
+concurrent sibling's. No per-dispatch knob turns any of this off: `task`'s item
+shape carries no kernel, executor or cwd field, and `python.kernelMode` set to
+`"per-call"` — the one documented lever that would hand every call a fresh
+kernel — is a session setting a child inherits, not something one dispatch can
+set for one member. Isolating a member's kernel is an omp-side change, so
+discipline is the whole of the remedy here, exactly as it is for the missing
+`cwd` field above. **Phase 2** carries all three rules to every member.
 
 **`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
 unaffected by a running member.** Measured against a hand-built claim (a

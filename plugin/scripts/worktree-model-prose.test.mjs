@@ -167,11 +167,22 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
     /corollary\s+is\s+`reset`[\s\S]{0,140}resetting\s+its\s+own\s+kernel\s+resets\s+every[\s\S]{0,20}concurrent\s+sibling's/,
     "the reset corollary or the sibling damage it causes is gone from the section",
   );
-  // The measurement is only worth recording if it reaches members. Phase 2 is
-  // where the rule is carried verbatim, so the pointer is pinned with it.
+  // THE ANSWER TO #1447's REMEDY 2, recorded rather than left open. A reader
+  // who knows only that the kernel is shared will go looking for the dispatch
+  // flag that turns it off; the point is that there isn't one, which is what
+  // makes the prose rules the remedy instead of a stopgap standing in for a
+  // field. Bound to the lever that does exist, so "no knob" cannot be read as
+  // "nobody checked".
   assert.match(
     section(),
-    phrase("**Phase 2** carries all three to every member"),
+    /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,120}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
+    "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
+  );
+  // The measurement is only worth recording if it reaches members. Phase 2 is
+  // where the rules are carried verbatim, so the pointer is pinned with it.
+  assert.match(
+    section(),
+    phrase("**Phase 2** carries all three rules to every member"),
     "the section no longer points at the phase that actually delivers these rules to a member",
   );
 });
