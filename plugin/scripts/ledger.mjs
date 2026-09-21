@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
-import { gitEnv } from "./git-env.mjs";
+import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 const NAME = "ledger";
 
@@ -105,7 +105,13 @@ const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
 // exist — `check` then warns and reports every subject as safe to file, which
 // is precisely the duplicate-filing guard failing open. Resolve against the
-// git COMMON dir (shared by every worktree) rather than the cwd.
+// git COMMON dir (shared by every worktree) rather than the cwd, via
+// git-env.mjs's workspaceDirFromGitCommonDir() — the resolution itself is
+// shared with fleet-state.mjs and board.mjs since #1658, and only the
+// filename and the warning below are this caller's own. No canonicalisation
+// is asked for: that is board.mjs's opt-in, and taking it here would change
+// the path this function RETURNS (and `check` prints) without changing which
+// file it names.
 function defaultLedgerPath() {
   // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): unlike the tracker-query
   // probe below in this same file, this call passed no env at all until now.
@@ -117,7 +123,12 @@ function defaultLedgerPath() {
   // exit 0, and `check` then reads whatever ledger (or absence of one) lives
   // there and reports every subject safe to file.
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
-  if (r.status !== 0 || !r.stdout.trim()) {
+  // A non-zero exit, a spawn that never ran and a timeout all leave `status`
+  // something other than 0, and an exit-0 answer carrying nothing leaves the
+  // resolution `null` — the same two-part degrade condition this function
+  // spelled inline before #1658.
+  const workspace = r.status === 0 ? workspaceDirFromGitCommonDir(r.stdout) : null;
+  if (workspace === null) {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
     // member reads a cwd-local ledger, not the run's), so say so rather than
@@ -130,7 +141,7 @@ function defaultLedgerPath() {
     console.error(`${NAME}: WARNING could not resolve --git-common-dir${why ? `: ${why}` : ""}; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
     return ".fleet/ledger.md";
   }
-  return join(dirname(resolve(r.stdout.trim())), ".fleet", "ledger.md");
+  return join(workspace, ".fleet", "ledger.md");
 }
 
 const argv = process.argv.slice(2);

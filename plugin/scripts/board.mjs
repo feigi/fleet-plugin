@@ -15,9 +15,9 @@ import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, read
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
-import { gitEnv } from "./git-env.mjs";
+import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
 import { inspect } from "node:util";
 
@@ -1083,16 +1083,6 @@ function workspaceHash(key) {
   return h >>> 0;
 }
 
-// realpath, except that a path which does not resolve is not a failure here:
-// the caller still gets a usable key, just an uncanonicalised one. A
-// workspace directory that has been removed out from under a running cockpit
-// must not turn instance resolution into a throw. Canonicalising at all is
-// what makes a symlinked route to one workspace derive that workspace's port
-// instead of a second, private one.
-function canonical(p) {
-  try { return realpathSync(p); } catch { return p; }
-}
-
 /**
  * The cockpit's instance seam, and the only one. Given a cwd, the string
  * `git rev-parse --git-common-dir` answered with — INJECTED, never read in
@@ -1102,22 +1092,29 @@ function canonical(p) {
  *
  * Pure: it listens to nothing, spawns nothing and writes nothing, so every
  * branch below is reachable from a test with no git repo and no socket. The
- * one thing it reads is realpath, which canonicalisation requires and which
- * cannot fail the call.
+ * one thing it reads is realpath — asked for by `canonicalise: true` below,
+ * and unable to fail the call either way.
  *
  * `--git-common-dir` answers with the MAIN checkout's git dir from inside a
  * linked worktree, so every worktree of one repo resolves to ONE state
- * directory — the same one-run-one-workspace model ledger.mjs's
- * defaultLedgerPath() already resolves the run's single ledger with, so the
- * board and the ledger cannot disagree about which run they belong to.
+ * directory. That resolution is not spelled here: since #1658 it is
+ * git-env.mjs's workspaceDirFromGitCommonDir(), the same function
+ * ledger.mjs's defaultLedgerPath() and fleet-state.mjs's statePath() resolve
+ * the run's single ledger and single heartbeat with — so the board, the
+ * ledger and the heartbeat cannot disagree about which run they belong to.
+ * The `canonicalise` opt-in is this caller's alone: it is what makes a
+ * symlinked route to one workspace derive that workspace's port instead of a
+ * second, private one, and neither of the other two takes it (canonicalising
+ * their answer would change the path each of them prints without changing
+ * which file it names).
  */
 export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port } = {}) {
   // `port != null`, never truthiness: --port 0 is a real request (an
   // ephemeral bind, #366/#435) and reading it as "absent" would derive a port
   // straight over the top of one the caller explicitly asked for.
   const forced = port != null;
-  const common = String(gitCommonDir ?? "").trim();
-  if (!common) {
+  const workspace = workspaceDirFromGitCommonDir(gitCommonDir, cwd, { canonicalise: true });
+  if (workspace === null) {
     // Degrade, never die: a non-git or otherwise unusual checkout still gets
     // a board. The wording is defaultLedgerPath()'s rather than a second
     // dialect for the same failure, trailing parenthetical included — that
@@ -1134,10 +1131,6 @@ export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port
     // unchanged, for the case that used to be the only case.
     return { stateDir: join(cwd, ".fleet"), workspace: null, port: forced ? port : PORT_BASE, derived: !forced };
   }
-  // `resolve(cwd, …)` rather than resolve()'s implicit process.cwd(): git
-  // answers this RELATIVE (a bare `.git`) when it runs from a checkout's top
-  // level, and the cwd that was relative to is an argument here, not ambient.
-  const workspace = canonical(dirname(resolve(cwd, common)));
   return {
     stateDir: join(workspace, ".fleet"),
     workspace,
