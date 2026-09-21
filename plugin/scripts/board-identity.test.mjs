@@ -4,7 +4,7 @@
 // Before this, two cockpits were two identical windows: `board.html` carried a
 // constant `<title>` and a constant header, the model's `repo` field was never
 // read by the page at all, and the only identity anywhere near the payload was
-// the `workspace` key #1660's launch handshake stamped onto the SERVED copy
+// the `workspace` key #1585's launch handshake stamped onto the SERVED copy
 // after computeBoard() had already returned — so `board.mjs build` printed a
 // snapshot that could not say which of two workspaces it came from.
 //
@@ -143,7 +143,7 @@ function serveProcess(cwd, bin) {
     { cwd, env: { ...process.env, PATH: bin, HOME: home }, stdio: ["ignore", "ignore", "pipe"] });
   p.stderr.setEncoding("utf8");
   let buf = "";
-  const url = new Promise((res, rej) => {
+  const port = new Promise((res, rej) => {
     p.stderr.on("data", (d) => {
       buf += d;
       const m = buf.match(/cockpit on http:\/\/localhost:(\d+)/);
@@ -151,7 +151,7 @@ function serveProcess(cwd, bin) {
     });
     p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
   });
-  return { p, url };
+  return { p, port };
 }
 
 // The announcement comes BEFORE the first tick (#1660 publishes identity at
@@ -185,7 +185,7 @@ test("CLI: two concurrent cockpits carry two identities, and their titles name t
   try {
     const a = serveProcess(repoA, binA), b = serveProcess(repoB, binB);
     procs.push(a.p, b.p);
-    const [portA, portB] = await withTimeout(Promise.all([a.url, b.url]), 20000, "both cockpits to announce");
+    const [portA, portB] = await withTimeout(Promise.all([a.port, b.port]), 20000, "both cockpits to announce");
     const [boardA, boardB] = await withTimeout(
       Promise.all([builtBoard(portA), builtBoard(portB)]), 20000, "both cockpits to build a board");
 
@@ -264,26 +264,71 @@ test("the page's own <title> and header are the constant boardTitle falls back t
   const title = HTML.match(/<title>([^<]*)<\/title>/);
   assert.ok(title, "board.html no longer carries a <title> — update this test");
   assert.equal(title[1], boardTitle(null));
-  const h1 = HTML.match(/<h1 id="heading">([^<]*)<\/h1>/);
+  const h1 = HTML.match(/<h1[^>]*\sid="heading"[^>]*>([^<]*)<\/h1>/);
   assert.ok(h1, "board.html no longer carries the heading element render writes to — update this test");
   assert.equal(h1[1], "🛰 " + boardTitle(null));
 });
 
-const RENDER_SRC = HTML.match(/^function\s+render\s*\((\w+)\)\s*\{[\s\S]*?^\}$/m);
+// A DOM this page's own script can write to, without a browser: render() is
+// lifted out of board.html's source (the same seam boardTitle above uses)
+// and run against a document stub just capable enough to hold the writes —
+// nothing here reads the stub back except title and the one element this
+// test cares about, so append/innerHTML/style are all swallowed no-ops.
+class FakeNode {
+  constructor() { this.children = []; this.style = {}; }
+  set innerHTML(_) { this.children = []; }
+  append(...nodes) { this.children.push(...nodes); }
+}
+function fakeDocument() {
+  const byId = new Map();
+  return {
+    title: "",
+    createElement: () => new FakeNode(),
+    createTextNode: (text) => ({ text }),
+    getElementById(id) {
+      if (!byId.has(id)) byId.set(id, new FakeNode());
+      return byId.get(id);
+    },
+  };
+}
 
-// A pure helper nothing calls is worth nothing: without these the whole
-// decision can be disconnected in one token and every row above still passes.
-test("render sets both the document title and the header from boardTitle, every tick", () => {
-  assert.ok(RENDER_SRC, "board.html no longer declares render as a top-level function — update this test");
-  const body = RENDER_SRC[0].split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-  assert.match(body, /boardTitle\(\w+\.repo\)/, "render must derive the name from the model's repo");
-  assert.match(body, /document\.title\s*=/, "render must set the tab title");
-  assert.match(body, /getElementById\("heading"\)\.textContent\s*=/, "render must set the header text");
-  // Unconditionally: a board whose repo read fails on a later tick has to go
-  // BACK to the constant, and one behind an `if (m.repo)` would keep showing
-  // the repo it no longer knows it is serving.
-  assert.doesNotMatch(body, /if\s*\([^)]*\.repo\s*\)/,
-    "the title must be rewritten on every render, not gated on the repo being present");
+// `poll()`'s call at the bottom is the one line this lift must never run —
+// it fetches immediately, which a test document has nothing to answer.
+const SCRIPT_SRC = HTML.match(/<script>([\s\S]*)<\/script>/)?.[1]
+  ?.replace(/\bpoll\(\);\s*$/, "");
+
+test("board.html's <script> still declares render in the shape this file lifts", () => {
+  assert.ok(SCRIPT_SRC, "board.html no longer has a lift-able <script> body — update this test");
+});
+
+function renderHarness() {
+  const document = fakeDocument();
+  const render = new Function("document", `${SCRIPT_SRC}\nreturn render;`)(document);
+  return { document, render };
+}
+
+const baseModel = () => ({
+  interval: 15, repoUrl: null, generatedAt: Date.now(),
+  attention: [], tickets: [], spend: null, queue: {}, filed: [],
+});
+
+// The regression this ticket exists to prevent, pinned on the OBSERVABLE
+// rewrite rather than the source text: a board whose repo read fails on a
+// later tick must go back to the bare constant. A gate on the repo being
+// present — however many tokens of indirection sit between the gate and the
+// literal `.repo` — leaves the title pinned from a tick that is no longer
+// current, and this catches that by calling render() twice and reading what
+// it actually wrote, not how it decided to write it.
+test("render rewrites the title and header on every tick, reverting when repo disappears", () => {
+  const { document, render } = renderHarness();
+  render({ ...baseModel(), repo: "acme/one" });
+  assert.equal(document.title, "fleet cockpit — acme/one");
+  assert.equal(document.getElementById("heading").textContent, "🛰 fleet cockpit — acme/one");
+
+  render({ ...baseModel(), repo: null });
+  assert.equal(document.title, "fleet cockpit",
+    "a repo that stops resolving must clear the tab title on the very next render, not leave the prior tick's name showing");
+  assert.equal(document.getElementById("heading").textContent, "🛰 fleet cockpit");
 });
 
 // #1584 adds a second reader of the model's repo IDENTITY (`acme/one`) beside
@@ -294,6 +339,6 @@ test("render sets both the document title and the header from boardTitle, every 
 test("card still builds its PR link from the model's repoUrl, not from the repo name", () => {
   const card = HTML.match(/^function\s+card\s*\(\w+\)\s*\{[\s\S]*?^\}$/m);
   assert.ok(card, "board.html no longer declares card as a top-level function — update this test");
-  assert.match(card[0], /a\.href\s*=\s*repoUrl\s*\?\s*repoUrl\s*\+/,
+  assert.match(card[0], /a\.href\s*=\s*\(?\s*repoUrl\s*\)?\s*\?\s*repoUrl\s*\+/,
     "the PR link must be built from repoUrl; the repo name is not a URL");
 });

@@ -745,7 +745,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8 } = {}) {
 // join the payload HERE, alongside the repo fields above, because this is the
 // boundary where every impure input meets the pure model — computeBoard() only
 // echoes them. Defaulted to null, which is also the degrade arm's workspace
-// and the value #1660's handshake refuses to match on, so a caller with no
+// and the value #1585's handshake refuses to match on, so a caller with no
 // instance to name (every gather() test driver) says so rather than omitting
 // the fields.
 export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null }) {

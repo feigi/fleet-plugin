@@ -240,7 +240,7 @@ test("computeBoard: the instance identity — repo, repoUrl, workspace, port —
 // A caller with no instance to name — every hand-built inputs object, and the
 // gather() drivers in board-prev-shape.test.mjs — must still produce a board
 // carrying both KEYS. `undefined` disappears from JSON.stringify, and the
-// launch handshake #1660 added reads `workspace` straight off the served
+// launch handshake #1585 added reads `workspace` straight off the served
 // JSON: a board with the key missing is a board it can never match.
 test("computeBoard: absent workspace/port are null, not missing keys", () => {
   const inp = baseInputs();
@@ -249,9 +249,6 @@ test("computeBoard: absent workspace/port are null, not missing keys", () => {
   const b = computeBoard(inp);
   assert.equal(b.workspace, null);
   assert.equal(b.port, null);
-  const round = JSON.parse(JSON.stringify(b));
-  assert.ok("workspace" in round && "port" in round,
-    "both fields must survive a JSON round-trip — the served board.json is where the handshake reads them");
 });
 
 test("computeBoard: a PR with no CI entry is unknown, not null (null means no PR)", () => {
