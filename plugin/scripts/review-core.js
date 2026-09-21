@@ -447,6 +447,24 @@ export function unrunCrashed(reviewed, dimensions) {
   return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
 }
 
+// #1433 gap: the CWD-AUDIT line the Review dispatch below asks a specialist
+// to fold into `scope_searched` is a convention, not schema — FINDINGS_SCHEMA
+// accepts any string there, so a specialist that satisfies the schema while
+// never emitting the line, or misspelling it, produces a fully valid,
+// undetected payload, and one that DOES emit `CWD-AUDIT: dirty <path>` has
+// nothing downstream that reads for it either. This is the runtime backstop
+// for both halves: it extracts the line the prompt's own wording requires
+// (`CWD-AUDIT: clean|dirty|unrepo <path> …`), and reports the line's absence
+// exactly as loudly as its presence, so `runReview` can fold the result into
+// the payload below instead of the fact dead-ending inside a field nothing
+// reads.
+const CWD_AUDIT_LINE = /CWD-AUDIT:\s*(clean|dirty|unrepo)\b.*/;
+
+export function cwdAuditFrom(text) {
+  const m = typeof text === "string" ? text.match(CWD_AUDIT_LINE) : null;
+  return m ? { state: m[1], line: m[0].trim() } : { state: "missing", line: null };
+}
+
 export function verdictFor(dispatched, votes) {
   const live = votes.filter(Boolean);
   const refuted = live.filter((v) => v.refuted).length;
@@ -608,6 +626,12 @@ destination path carries only the short form. The byte-identity spot check this
 step used to ask for is superseded by the tree-hash compare above, which settles
 every file in the tree rather than a couple of them. Do not modify ${worktree}.
 
+Every path in the block above is absolute or \`-C\`-anchored on purpose: this
+dispatch carries no working directory of its own either, so you start in the
+controller's own checkout, and a relative path — a \`tar -x\` with no \`-C\`, a
+bare \`git\` — reads or writes THERE (#1433). Add nothing relative to it, and
+chain a \`cd\` into "$RUN" or "$SNAP" for anything you run beyond it.
+
 Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable:
 
@@ -690,7 +714,35 @@ a false repoVerified.`,
   log(`agents dispatched ${dimensions.map((d) => `${d.key}=${d.agentType}`).join(" ")}`);
 
   const dimensionsUnrun = [];
+  // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see
+  // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
+  // "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched
+  // review that returned at all (a crashed dispatch has nothing to audit,
+  // and is already named in `dimensionsUnrun` via `unrunCrashed` below), so
+  // a dirty checkout, or an omitted audit, reaches the payload instead of
+  // dead-ending inside `scope_searched`.
+  const cwdAudit = [];
 
+  // #1433. Both prompts below carry the inherited-cwd rule, and it is stated in
+  // each rather than shared: review-eval.mjs's own header holds the measurement
+  // and the reason this is prompt prose at all (no dispatch primitive on either
+  // harness takes a per-call cwd), and #496's brief rules the shared-source
+  // route out for exactly these blocks. Three parts, in this order, because the
+  // last two are inert without the first: the cwd the specialist starts in is
+  // NAMED as a tree it must not write to, `pwd` fixes which directory that is,
+  // and the `CWD-AUDIT:` line is what makes a clean run say so — an audit
+  // reported only when dirty is indistinguishable from one never run, the same
+  // reading `unrunReason` applies to a `test_run` that reports nothing.
+  //
+  // The Claude-harness twin of these two dispatches — review-pr.js's own
+  // hardcoded Review/Verify `agent()` calls, not importable from here per
+  // this file's own header rationale — does NOT carry this rule. That is a
+  // deliberate scope cut for this ticket, not an oversight: mirroring the
+  // rule word-for-word into a substantially differently-structured 1804-line
+  // file, plus a prose-pin test file the size of
+  // review-core-cwd-isolation.test.mjs, is its own unit of work. Tracked in
+  // #1673 — read that before assuming review-pr.js's specialists already
+  // audit their inherited cwd, because right now they do not.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
@@ -702,6 +754,16 @@ READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
+
+Your shell starts in NEITHER of those directories, and what it does start in is
+a tree you must not write to: this dispatch carries no working directory of its
+own, so you begin wherever the controller's own review cell is standing — its
+checkout, the tree it reads instruments.sh, ci-state.mjs and every gate decision
+out of. A relative path in any command lands THERE, not in the snapshot and not
+in your scratch dir. Run \`pwd\` as your FIRST command and keep the path it
+prints; that directory is a no-run zone from then on, and every command after it
+chains its own \`cd\` into the snapshot or into your scratch dir, both named
+above as absolute paths.
 
 ${readRules(usableDiff(snap), stats, snap)}
 
@@ -727,12 +789,26 @@ resolved forms (\`realpath\`), since \`--show-toplevel\` can report
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs
 in 'suggestion', not 'critical'. State your search scope for every negative
-claim.`,
+claim.
+
+Then audit the directory that first \`pwd\` printed, before you return:
+\`git -C <that path> status --porcelain -uall\` — the explicit untracked mode,
+never bare \`--porcelain\`, which a \`status.showUntrackedFiles=no\` config
+silences into a false clean. Report the result in \`scope_searched\` as one line
+beginning \`CWD-AUDIT:\` — \`CWD-AUDIT: clean <path>\` when it printed nothing,
+\`CWD-AUDIT: dirty <path> — <what it printed>\` when it printed anything,
+\`CWD-AUDIT: unrepo <path>\` when git answered \`fatal: not a git repository\` —
+every run, clean or not: a clean tree is the result this check exists to
+produce, and an omitted line reads exactly like a check never run. Three PRs
+reviewed from one cell left four files modified in that checkout with nothing in
+any payload saying so (#1433), so a path you cannot account for is still yours
+to name.`,
         { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
       ),
 
     (review, d) => {
       dimensionsUnrun.push(...unrunEntries(review, d.key));
+      cwdAudit.push({ dimension: d.key, ...cwdAuditFrom(review && review.scope_searched) });
       phase("Verify");
       return parallel(
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
@@ -780,7 +856,24 @@ ${readRules(usableDiff(snap), stats, snap)}
 ${environmentNote(snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
-Scratch: ${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}/`,
+Scratch: ${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}/
+Everything you write — mutants, fixtures, scratch repos — goes there and nowhere
+else, and your shell does not start there: this dispatch carries no working
+directory of its own, so you begin wherever the controller's own review cell is
+standing — its checkout, the tree it reads every gate decision out of — and a
+relative path in any command lands THERE. Run \`pwd\` as your FIRST command and
+keep the path it prints; that directory is a no-run zone from then on, and the
+snapshot and your scratch dir are both named above as absolute paths.
+Then audit that directory before you return: \`git -C <that path> status
+--porcelain -uall\` — the explicit untracked mode, never bare \`--porcelain\`,
+which a \`status.showUntrackedFiles=no\` config silences into a false clean.
+Report it in \`reason\` as one line beginning \`CWD-AUDIT:\` —
+\`CWD-AUDIT: clean <path>\` when it printed nothing, \`CWD-AUDIT: dirty <path> —
+<what it printed>\` when it printed anything, \`CWD-AUDIT: unrepo <path>\` when
+git answered \`fatal: not a git repository\` — every run, clean or not: an
+omitted line reads exactly like a check never run, and applying a mutation is
+how three reviews from one cell left four files modified in that checkout
+(#1433).`,
                 { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-review-verifier", schema: VERDICT_SCHEMA },
               ),
             ),
@@ -817,6 +910,10 @@ Scratch: ${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}/`,
     testEnvironment: environmentNote(snap),
     dimensionsRun: dimensions.map((d) => d.key),
     dimensionsUnrun,
+    // #1433. `cwdAuditFrom`'s per-dimension read of the specialist's own
+    // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
+    // otherwise reported into `scope_searched` and read by nothing.
+    cwdAudit,
     survived: survived.sort(bySeverity),
     refuted,
     unverified: unverified.sort(bySeverity),
