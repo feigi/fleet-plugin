@@ -119,7 +119,8 @@ const worktreeBlock = () => block("You are ALREADY in worktree", "Read the issue
 const issueReadBlock = () => block("Read the issue with", "**Re-derive the ticket", "phase 2's issue-read block");
 const rederiveBlock = () => block("**Re-derive the ticket", "Commit incrementally", "phase 2's re-derive block");
 const commitBlock = () => block("Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
-const scratchBlock = () => block("**Every scratch file", "Your ticket names the cases", "phase 2's scratch-discipline block");
+const scratchBlock = () => block("**Every scratch file", "**The `eval` kernel is shared", "phase 2's scratch-discipline block");
+const evalKernelBlock = () => block("**The `eval` kernel is shared", "Your ticket names the cases", "phase 2's eval-kernel-discipline block");
 const enumerateBlock = () => block("Your ticket names the cases", "Run `sizing-a-ticket`", "phase 2's enumerate-the-class block");
 
 // The LAST block in the region has no following block to bound it, so it takes
@@ -303,6 +304,74 @@ test("the scratch-discipline block names the shared injected root, the per-membe
     b,
     phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
     "the scratch-discipline block no longer distinguishes itself from worktree isolation",
+  );
+});
+
+// #1447. This block is the only one in the region whose hazard leaves NO trace
+// in the repo: a shared-kernel variable collision writes no file, so `git
+// status`, `worktree-audit.sh` and the instrument re-check all stay green
+// through it. That is why the rule has to reach the member as text — there is
+// no gate behind it to catch a member that never read it.
+test("the eval-kernel block binds the sharing fact to all three of its rules, and to the citation that proves it", () => {
+  const b = evalKernelBlock();
+  // The imperative bound to BOTH exclusions it carries. Split into two
+  // independent presence checks ("namespace" somewhere, "relative path"
+  // somewhere), this passes with either rule deleted — the sharing premise and
+  // the two duties it implies are one span deliberately.
+  assert.match(
+    b,
+    phrase("The `eval` kernel is shared with every sibling member and with the controller that dispatched you — namespace every binding you make in it, and never hand it a relative path"),
+    "the shared-kernel premise is no longer bound to the namespacing duty and the no-relative-path duty it implies",
+  );
+  // The naming rule bound to the counter-example. `WT` is not decoration: it is
+  // the exact bare name the reported collision happened on, so a member reading
+  // this sees the shape it must not repeat, not an abstract "use good names".
+  assert.match(
+    b,
+    phrase("prefix what you bind with your own member number (`WT_1447`, never `WT`)"),
+    "the member-prefixed binding rule no longer shows the bare name it excludes",
+  );
+  // The cwd fact bound to WHY it cannot be fixed the way `bash` calls are. A
+  // member that knows only "use absolute paths" reaches for eval's cwd
+  // parameter, finds none, and improvises.
+  assert.match(
+    b,
+    /The kernel's cwd is the MAIN CHECKOUT, not your worktree.{0,60}?unlike `bash`, `eval` takes no `cwd` parameter at all/,
+    "the eval-cwd hazard is no longer bound to the absence of a cwd parameter that would otherwise fix it",
+  );
+  // The measured resolution, kept as a concrete path. This is the half of
+  // #1447 that WAS independently visible (the stray `work/` tree), so the
+  // evidence stays attached to the rule it justifies.
+  assert.match(
+    b,
+    phrase("`work/scripts` in a member's cell resolved to `/Users/chris/dev/fleet-plugin/work/scripts`"),
+    "the measured relative-path resolution into the main checkout is gone from the block",
+  );
+  // `reset` bound to its blast radius. A member reads `reset: true` as
+  // house-keeping on its OWN kernel; the prohibition only makes sense with the
+  // sibling damage stated beside it.
+  assert.match(
+    b,
+    phrase("never call `eval` with `reset: true`, which is destructive to every other member sharing that backend session"),
+    "the reset prohibition no longer names the sibling damage that is its whole reason",
+  );
+  // The citation, bound to the keying it is evidence for. Quoted from
+  // `omp://tools/eval.md` so the next editor can re-check the claim at its
+  // source rather than trusting this file.
+  assert.match(
+    b,
+    /keyed by `python:\$\{sessionId\}`, normalized cwd and interpreter.{0,80}?Parent and ordinary task subagents may share an inherited eval executor id/,
+    "the kernel-keying claim is no longer bound to the upstream sentence that establishes subagents inherit the executor id",
+  );
+  // THE ACCEPT CASE. Every assertion above pins something the block must
+  // FORBID; a rule this emphatic is one edit away from being read as "do not
+  // use the kernel", which would be wrong — eval's own `agent()` children are
+  // isolated by construction, and per-member use is fine once namespaced. This
+  // pin is what keeps the permission in the block alongside the prohibitions.
+  assert.match(
+    b,
+    phrase("Using the kernel is not the defect, and this is not the `isolated` question — the bare name, the relative path and the reset are"),
+    "the block no longer states what it permits, so its prohibitions read as a ban on using the eval kernel at all",
   );
 });
 
