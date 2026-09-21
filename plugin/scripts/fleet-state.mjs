@@ -55,7 +55,12 @@ export function statePath(name) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env });
-  const workspace = r.status === 0 ? workspaceDirFromGitCommonDir(r.stdout) : null;
+  // No separate `r.status === 0` gate: every failure mode reproducible here
+  // (no repository, an unresolvable GIT_DIR, a permission-denied `.git`, a
+  // corrupt worktree pointer, a missing `git` binary) leaves `r.stdout`
+  // empty, which workspaceDirFromGitCommonDir() already reads as `null` on
+  // its own — see its own docstring for that contract.
+  const workspace = workspaceDirFromGitCommonDir(r.stdout);
   if (workspace === null) {
     // Announced, never silent: a cwd-relative fallback re-opens exactly the
     // per-worktree split this resolution exists to close.

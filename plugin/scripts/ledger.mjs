@@ -123,11 +123,12 @@ function defaultLedgerPath() {
   // exit 0, and `check` then reads whatever ledger (or absence of one) lives
   // there and reports every subject safe to file.
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
-  // A non-zero exit, a spawn that never ran and a timeout all leave `status`
-  // something other than 0, and an exit-0 answer carrying nothing leaves the
-  // resolution `null` — the same two-part degrade condition this function
-  // spelled inline before #1658.
-  const workspace = r.status === 0 ? workspaceDirFromGitCommonDir(r.stdout) : null;
+  // No separate `r.status === 0` gate: every failure mode reproducible here
+  // (no repository, an unresolvable GIT_DIR, a permission-denied `.git`, a
+  // corrupt worktree pointer, a missing `git` binary, a timed-out probe)
+  // leaves `r.stdout` empty, which workspaceDirFromGitCommonDir() already
+  // reads as `null` on its own — see its own docstring for that contract.
+  const workspace = workspaceDirFromGitCommonDir(r.stdout);
   if (workspace === null) {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
