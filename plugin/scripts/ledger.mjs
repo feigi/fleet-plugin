@@ -258,6 +258,12 @@ function unescapeText(s) {
 // `check` rather than respelling three conventions SKILL.md carries, two
 // other tickets holding that file open.
 //
+// Stated here and nowhere else (#1557). This paragraph is the one copy of why
+// the rule is `check`'s alone; arg.mjs's makeSweep() comment and
+// ledger.test.mjs's two stray-tail blocks each used to carry their own, and
+// now point here instead. Anything that reads on the docs or the
+// measurement belongs in this paragraph, not beside a caller.
+//
 // Narrowing it does not keep #584's signature whole on those three: only the
 // ID-slot vector survives — a stray flag one token to the LEFT is still
 // refused by refuseStrayInId() below. The tail-slot vector does not: a
@@ -434,13 +440,10 @@ if (cmd === "read") {
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
-  // This slot is where #584's own signature reaches `filed`, and the only
-  // place on this subcommand a rule can meet it: a stray flag here shifts the
-  // issue number into the subject, and the row it writes no longer answers the
-  // subject a later `check` asks about — that check reports not-filed at exit
-  // 0 where the correctly-spelled filing makes it report already-filed at
-  // exit 1. The tail behind this slot is documented unquoted and so takes no
-  // length rule (#1161); the id is not, and takes this one.
+  // A stray flag here shifts the issue number into the subject, so the row it
+  // writes no longer answers the subject a later `check` asks about — that
+  // check reports not-filed at exit 0 where the correctly-spelled filing makes
+  // it report already-filed at exit 1.
   refuseStrayInId(issue, "an issue number");
   const subject = subjectParts.join(" ");
   data.filed.push(`#${issue.replace(/^#/, "")} ${subject}`);
@@ -451,9 +454,8 @@ if (cmd === "read") {
   if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
   // Nothing reads this section back — save() is its only consumer — so the
   // harm here is the narrowest of the three: a permanently wrong decision
-  // record in an append-only file, with no verdict riding on it. The id slot
-  // is guarded anyway because the shape is identical and the record is the
-  // point.
+  // record in an append-only file, with no verdict riding on it. Guarded
+  // anyway, because that record is what the subcommand exists to write.
   refuseStrayInId(pr, "a PR number");
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
