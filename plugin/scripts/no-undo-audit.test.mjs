@@ -465,12 +465,14 @@ const audit = ({ w, branch }, env = ENV, cwd = w) => {
  * itself, the same way an unattended caller would read it — `$?` — not
  * node's process object. `printf … >&3` carries that `$?` around the pipe
  * that would otherwise discard it: `3>&1` on the outer group aliases fd 3 to
- * the descriptor `spawnSync` is already reading as `r.stdout`, so the inner
- * `sh -c` can hand the number back over a channel `head` never touches.
+ * the descriptor `spawnSync` is already reading as `r.stdout`, and the
+ * pipeline's left-hand brace group inherits that alias directly — `$0`,
+ * `$1`, `$2` are already this `sh -c`'s own positionals, so nothing needs
+ * re-passing into a second shell.
  */
 function earlyClosingStderrReaderStatus({ w, branch }, cwd = w) {
-  const wrapper = '{ sh -c \'sh "$0" "$1" "$2" 2>&1 >/dev/null; '
-    + 'printf "RC=%s" "$?" >&3\' "$0" "$1" "$2" | head -1 >/dev/null; } 3>&1';
+  const wrapper = '{ { sh "$0" "$1" "$2" 2>&1 >/dev/null; printf "RC=%s" "$?" >&3; } '
+    + '| head -1 >/dev/null; } 3>&1';
   const r = spawnSync("sh", ["-c", wrapper, SCRIPT, w, branch], { cwd, env: ENV, encoding: "utf8" });
   const m = /^RC=(\d+)$/.exec(r.stdout);
   assert.ok(m, `wrapper must report the audit's own exit code; got ${JSON.stringify(r)}`);
@@ -2486,8 +2488,8 @@ test("an unanswerable question with stderr closed exits 2, never 1 (#1514)", (t)
 // the signal's default disposition killed that process on the spot, before
 // `|| :` was ever consulted, and the script exited 141 — outside its own
 // 0/1/2 contract and unreadable to a caller branching on which of the three
-// it got. Measured before the fix, on a tree the same run called safe one
-// line earlier: 141.
+// it got. Measured before the fix, the case asserting a clean tree exits 0,
+// never 141, itself returned 141.
 //
 // All three outcomes below are the closed-fd trio's own fixtures rerun
 // through `earlyClosingStderrReaderStatus` instead of `2>&-` — the write
@@ -3354,7 +3356,7 @@ function splitTopLevelStatements(line) {
       depth += 1;
       cur += ch;
     } else if (ch === ")") {
-      depth -= 1;
+      depth = Math.max(0, depth - 1);
       cur += ch;
     } else if (ch === ";" && depth === 0) {
       segments.push(cur);
@@ -3366,6 +3368,18 @@ function splitTopLevelStatements(line) {
   segments.push(cur);
   return segments;
 }
+
+// A `case pat)` arm's close paren has no opening `(` to match, so an
+// unclamped counter would carry depth negative for the rest of the line —
+// every `;` after it stops looking top-level, and the census below would
+// stop seeing statements it must see. Clamping at zero is what keeps a
+// `case` arm from swallowing its neighbors.
+test("an unmatched `)` from a case arm does not swallow the statements after it", () => {
+  assert.deepEqual(
+    splitTopLevelStatements("case x in x) a; b; esac; c"),
+    ["case x in x) a", " b", " esac", " c"],
+  );
+});
 
 test("no stderr write in the script can abort the run under errexit (#1514)", () => {
   const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
