@@ -109,24 +109,40 @@ const STRAY = "--zz-no-such-flag-1227";
 // What `sweep()` says, asked at run time rather than transcribed. A row whose
 // refusal is this string delegated to the shared sweep; a row whose refusal is
 // anything else did not.
-const sweepWording = (() => {
+const sweepWordingFor = (known) => {
   const saved = process.argv;
   process.argv = ["node", "probe", STRAY];
   try {
     makeSweep((m) => {
       throw new Error(m);
-    })(["known"]);
+    })(known);
   } catch (e) {
     return e.message;
   } finally {
     process.argv = saved;
   }
   assert.fail("sweep() accepted a flag nothing declares — arg.test.mjs owns that contract, and it just changed");
-})();
-// The wording minus the accepted-flag tail, which is per-script. Splitting on
-// the tail's own separator keeps this derived: the prefix is whatever
-// `sweep()` puts before the list it generates.
-const SWEEP_PREFIX = sweepWording.slice(0, sweepWording.indexOf(" — accepted:"));
+};
+
+// The wording minus the accepted-flag tail, which is per-script. The boundary
+// between them is DIFFED rather than cut at the literal " — accepted:" text:
+// two runs with accepted-lists that diverge at their first character share a
+// prefix exactly up to wherever `sweep()` starts writing the list, whatever
+// words carry it. Cutting at a hardcoded separator instead degrades silently
+// on a reword — `indexOf` returns -1, `slice(0, -1)` keeps nearly the whole
+// message, and a delegator answering in ITS OWN wording (which still shares
+// that near-whole prefix by coincidence of the run-time only) reads as
+// sweep()'s: a false accusation against an unrelated script, not a report
+// that the pin needs to move.
+const sweepA = sweepWordingFor(["aaa-boundary-probe"]);
+const sweepB = sweepWordingFor(["zzz-boundary-probe"]);
+let sharedLength = 0;
+while (sharedLength < sweepA.length && sharedLength < sweepB.length && sweepA[sharedLength] === sweepB[sharedLength]) sharedLength++;
+assert.ok(
+  sharedLength > 0 && sharedLength < sweepA.length,
+  "sweep()'s wording no longer varies with the accepted list the way this derivation needs — two different one-item lists produced identical (or entirely different) messages",
+);
+const SWEEP_PREFIX = sweepA.slice(0, sharedLength);
 
 // What `arg()` says for a valued flag given no value, asked the same way.
 const argWording = (() => {
@@ -168,11 +184,15 @@ const rows = (out) =>
 
 const scriptsOf = (out) => [...new Set(rows(out).map((r) => r.file))];
 
-// Runs a script the way a stray flag reaches it, and reports what it answered.
-const probeStray = (file) => {
-  const r = spawnSync("node", [file, STRAY], { cwd: ROOT, encoding: "utf8" });
+// Runs a script the way a stray flag reaches it, and reports what it
+// answered. `extra` supplies argv ahead of the stray flag — needed to clear a
+// delegator's own required-arg guard so a probe can reach sweep() for real,
+// rather than dying earlier for an unrelated reason.
+const probeArgv = (file, extra = []) => {
+  const r = spawnSync("node", [file, ...extra, STRAY], { cwd: ROOT, encoding: "utf8" });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 };
+const probeStray = (file) => probeArgv(file);
 
 test("arg.mjs's header is one leading comment run, so the slice above holds prose and no code", () => {
   const code = HEADER.split("\n").filter((l) => l.trim() && !l.startsWith("//"));
@@ -202,6 +222,26 @@ test("the die() grep the header quotes reports none, and reports arg.mjs without
     sh(loose).stdout,
     /scripts\/arg\.mjs/,
     "unanchored, the die() grep no longer reports arg.mjs — the header's reason for anchoring it has gone stale",
+  );
+});
+
+test("arg.mjs has no module-scope die() declaration under any spelling, not only the header's anchored grep", () => {
+  // Independent of DIE_GREP's exact anchor text: that command only proves
+  // TODAY's pinned `^function die(` finds nothing, and would miss a
+  // realistic reintroduction in a syntactically different form just as
+  // silently as it would miss one restated in prose. Reasoned separately —
+  // over ARG's own lines rather than a shell grep — so the two probes cannot
+  // share a blind spot: a module-scope `die` binding starts at column zero
+  // (an unindented top-level statement, optionally `export`/`async`), which
+  // is what distinguishes it from the many functions in this file that take
+  // or return something named `die` as a LOCAL — `makeDie`'s own returned
+  // `function die(msg)` is indented and does not match.
+  const dieDecl = /^(export\s+)?(default\s+)?(async\s+)?(function\*?\s+die\s*\(|const\s+die\s*=|let\s+die\s*=|var\s+die\s*=)/;
+  const found = ARG.split("\n").filter((line) => dieDecl.test(line));
+  assert.deepEqual(
+    found,
+    [],
+    "arg.mjs declares a module-scope die() under a spelling the header's anchored grep would not catch — a private die() is back in a different shape",
   );
 });
 
@@ -240,6 +280,21 @@ test("every script the roster grep returns refuses a stray flag in its own wordi
   }
 });
 
+// Delegators whose own required-arg guard runs BEFORE sweep(): a probe
+// carrying only the stray flag never reaches sweep() for these, so it never
+// learns whether they hold a refusal of their own. Each entry is the minimal
+// real argv (not a placeholder that would itself be refused — staleness.mjs
+// treats --gone and --present as mutually exclusive, so only one is given)
+// that clears exactly that script's OWN required-arg check, derived from
+// reading its guard, so the stray flag can reach sweep() and this test can
+// assert on what sweep() answers instead of silently skipping the script.
+const GUARD_FIRST_FIXTURE = {
+  "scripts/ci-state.mjs": ["--pr", "1"],
+  "scripts/diff-stats.mjs": ["--pr", "1"],
+  "scripts/pr-overlap.mjs": ["--a", "1", "--b", "1"],
+  "scripts/staleness.mjs": ["--path", "1", "--gone", "1"],
+};
+
 test("no script the roster grep removes holds an unknown-flag refusal of its own", () => {
   // The removed rows, derived the way the grep removes them: importers that
   // bind makeSweep.
@@ -251,18 +306,49 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
     ),
   ];
   assert.ok(delegators.length >= 3, `only ${delegators.length} importers bind makeSweep — the grep's -v makeSweep arm has nothing left to remove`);
+
+  // A guard above the sweep can answer first — a required flag the stray-only
+  // probe does not supply — and such a run never names the stray. Only a
+  // refusal that NAMES it is one this probe alone can credit to the script.
+  const guardFirst = [];
   for (const file of delegators) {
     const { status, out } = probeStray(file);
     assert.equal(status, 2, `${file} ${STRAY} exited ${status}, not 2 — a stray flag reached real work`);
-    // A guard above the sweep can answer first — a required flag this probe
-    // does not supply — and such a run never names the stray. Only a refusal
-    // that NAMES it is one this script chose to make itself.
     if (out.includes(STRAY)) {
       assert.ok(
         out.includes(SWEEP_PREFIX),
         `${file} binds makeSweep, so the roster grep removes it, yet it refuses ${STRAY} in wording of its own: it is a second edit site the header's grep hides`,
       );
+    } else {
+      guardFirst.push(file);
     }
+  }
+
+  // Pinned, not silently skipped: a delegator falling out of this set (its
+  // guard stopped intercepting) or a new one falling into it (a fresh guard
+  // grew ahead of sweep()) reds here instead of quietly changing which
+  // delegators the loop above actually checks — the gap #1227's review found.
+  assert.deepEqual(
+    [...guardFirst].sort(),
+    Object.keys(GUARD_FIRST_FIXTURE).sort(),
+    "the set of delegators whose required-arg guard intercepts a stray-only probe changed — update GUARD_FIRST_FIXTURE and this list together, never drop the difference",
+  );
+
+  // Clear each one's own guard for real and probe again: this is what makes a
+  // GENERIC-wording unknown-flag guard visible even though it never names the
+  // stray flag itself — the #365 second-edit-site shape this test guards
+  // against, invisible to the NAMES-the-flag check above.
+  for (const file of guardFirst) {
+    const { status, out } = probeArgv(file, GUARD_FIRST_FIXTURE[file]);
+    assert.equal(
+      status,
+      2,
+      `${file} ${GUARD_FIRST_FIXTURE[file].join(" ")} ${STRAY} exited ${status}, not 2 — its own required-arg guard was not actually cleared`,
+    );
+    assert.ok(
+      out.includes(SWEEP_PREFIX),
+      `${file} binds makeSweep, so the roster grep removes it, yet — once its own required-arg guard is satisfied — it refuses ${STRAY} outside sweep()'s wording: it is a second edit site the header's grep hides`,
+    );
   }
 });
 
